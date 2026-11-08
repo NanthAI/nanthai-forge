@@ -68,6 +68,8 @@ export async function submitHostedLand(
   startLandTiming(invokedAt);
   // The submitter shares the land command's budget, timed from when that command started.
   const deadline = (Number.isFinite(invokedAt) ? invokedAt : Date.now()) + landBudgetSeconds() * 1000;
+  // A save or check-only compose that waits for its own outcome inside finish stops at this deadline.
+  transport.waitUntil ??= deadline;
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
   announce(transport.root ?? root, command, response);

@@ -6,3 +6,6 @@ export function childEnv(options?: {
   source?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
 }): Record<string, string>;
+export const toolchainEnvNames: readonly string[];
+export const toolchainEnvPattern: RegExp;
+export function toolchainEnvAllow(source?: NodeJS.ProcessEnv): string[];

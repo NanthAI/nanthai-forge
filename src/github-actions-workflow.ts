@@ -1,8 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { RemoteCheckPlan } from './remote-check-plan.js';
+import { declaredSaveSteps, declaredSetupSteps, type ActionsDeclaration } from './actions-toolchains.js';
 
-/** Only generated in the run export; never changes the accepted candidate. */
-export function githubActionsWorkflow(runsOn: string | string[] = 'ubuntu-latest') {
+/** Only generated in the run export; never changes the accepted candidate. Declared
+ * toolchains and cache add pinned steps; without them the bytes are unchanged. */
+export function githubActionsWorkflow(
+  runsOn: string | string[] = 'ubuntu-latest',
+  declaration?: ActionsDeclaration,
+) {
+  const setup = declaredSetupSteps(declaration),
+    save = declaredSaveSteps(declaration);
   return `name: Forge check
 run-name: forge-check/\${{ inputs.runId }}
 on:
@@ -32,11 +39,11 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      - run: node scripts/forge-check.mjs
+${setup}      - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: \${{ matrix.shard }}
-  static:
+${save}  static:
     name: forge-static
     runs-on: ${JSON.stringify(runsOn)}
     steps:
@@ -46,13 +53,25 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      - run: node scripts/forge-check.mjs
+${setup}      - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: static
-`;
+${save}`;
 }
 export function githubActionsRecipe(plan: RemoteCheckPlan) {
-  const { retryFiles, pin, head, definition, selection, groups, standard, interaction, command } = plan;
-  return { retryFiles, pin, head, definition, selection, groups, standard, interaction, command };
+  const { retryFiles, pin, head, definition, selection, groups, standard, interaction, command, actions } =
+    plan;
+  return {
+    retryFiles,
+    pin,
+    head,
+    definition,
+    selection,
+    groups,
+    standard,
+    interaction,
+    command,
+    ...(actions ? { actions } : {}),
+  };
 }

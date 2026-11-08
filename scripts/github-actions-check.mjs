@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { childEnv } from './child-env.mjs';
+import { childEnv, toolchainEnvAllow } from './child-env.mjs';
 // Shared executor for exported Forge snapshots and benchmark Git checkouts.
 import { existsSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -44,6 +44,9 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         'XDG_CONFIG_HOME',
         'XDG_CACHE_HOME',
         'XDG_DATA_HOME',
+        // A configured command keeps where the runner image and declared setup steps put its
+        // toolchains (JAVA_HOME, GOROOT, ...). Forge's own suite keeps its exact environment.
+        ...(plan.standard ? [] : toolchainEnvAllow()),
       ],
     }),
     [CHECK_CONTRACT_ENV]: String(CHECK_CONTRACT_PROVIDED),

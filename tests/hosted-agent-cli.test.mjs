@@ -170,12 +170,17 @@ async function checkOnlyWait(t, forget = false) {
   const submitted = await transport.dispatch('finish', { laneId: s.lane.laneId, accept: false });
   assert.equal(submitted.result.phase, 'check');
   if (forget) {
-    // A check-only whose finish never produced a run: only the request was retained.
+    // A check-only whose run reply was lost (only the request was retained), or, with 'failed',
+    // one whose source failed before any run.
     const { hostedAgentDirectory } = await import('../dist/hosted-agent-journal.js');
     const { readFileSync, writeFileSync } = await import('node:fs');
     const file = join(hostedAgentDirectory(s.root), `${submitted.operationId}.json`);
     const journal = JSON.parse(readFileSync(file, 'utf8'));
     delete journal.values['finish-check-run'];
+    if (forget === 'failed') {
+      delete journal.values['finish-request'];
+      journal.values['finish-source-failed'] = true;
+    }
     writeFileSync(file, JSON.stringify(journal));
   }
   const query = transport.query.bind(transport),
@@ -223,8 +228,20 @@ test('wait on a check-only operation id follows its run instead of failing NOT_F
   assert.equal(result.result.run.status, 'passed');
 });
 
-test('wait on a check-only operation that produced no run ends in a clear terminal state', async t => {
-  const { wait } = await checkOnlyWait(t, true);
+test('wait on a check-only operation whose run reply was lost reserves the same run by replay (17cce1b3)', async t => {
+  const { s, submitted, wait } = await checkOnlyWait(t, true);
+  const result = await wait();
+  assert.equal(result.result.status, 'terminal');
+  assert.equal(result.result.run.id, submitted.result.run.id, 'the replay returns the original reservation');
+  assert.equal(result.result.run.status, 'passed');
+  assert.equal(
+    new Set(s.calls.filter(c => c.name === 'projectHostedChecks:enqueue').map(c => c.args.request)).size,
+    1,
+  );
+});
+
+test('wait on a check-only operation that ended before any run ends in a clear terminal state', async t => {
+  const { wait } = await checkOnlyWait(t, 'failed');
   const result = await wait();
   assert.equal(result.result.status, 'terminal');
   assert.equal(result.result.successful, false);

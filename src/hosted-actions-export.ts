@@ -13,6 +13,7 @@ import { checkPin } from './hosted-check.js';
 import { digest } from './hash.js';
 import type { HostedCheckDispatch } from './hosted-check-controller.js';
 import { githubActionsWorkflow } from './github-actions-workflow.js';
+import { actionsDeclaration } from './actions-toolchains.js';
 import { hostedActionsGit } from './hosted-actions-git.js';
 import { invariant } from './errors.js';
 import { isStandardForgeCheck, STANDARD_CHECK_ENTRY } from './standard-check.js';
@@ -63,6 +64,7 @@ export async function exportHostedActions(
         checkPin(selection) === checkPin(recipe.selection) &&
         recipe.standard === standard &&
         checkPin(recipe.command) === checkPin(expectedCommand) &&
+        checkPin(recipe.actions ?? null) === checkPin(actionsDeclaration(input.check) ?? null) &&
         input.plan.head === recipe.head &&
         input.plan.definition === recipe.definition &&
         input.plan.runtime === input.configuration.runtime &&
@@ -81,7 +83,10 @@ export async function exportHostedActions(
       'Actions shard membership differs from the selected tests.',
     );
     const generated = new Map([
-      ['.github/workflows/forge-check.yml', githubActionsWorkflow(input.configuration.runsOn)],
+      [
+        '.github/workflows/forge-check.yml',
+        githubActionsWorkflow(input.configuration.runsOn, recipe.actions),
+      ],
       ['.github/forge-check-plan.json', JSON.stringify(recipe)],
     ]);
     const semanticCommand = semanticCheckCommand(

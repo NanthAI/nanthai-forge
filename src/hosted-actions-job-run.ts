@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { childEnv } from '../scripts/child-env.mjs';
+import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
@@ -108,7 +108,7 @@ async function executeActiveActionsJob(
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: {
-        ...childEnv({ allow: ['CI', 'PATH'] }),
+        ...childEnv({ allow: ['CI', 'PATH', ...toolchainEnvAllow()] }),
         ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
         FORGE_ACTIONS_PLAN: planPath,
         FORGE_ACTIONS_SHARD: shard,

@@ -57,6 +57,7 @@ export {
   type PlanningWrite,
 } from './work-planning-types.js';
 import { safeRelative } from './safe-relative.js';
+import { actionsCacheSchema, actionsToolchainsSchema } from './actions-toolchains.js';
 
 const id = z.string().uuid();
 const oid = z.string().regex(/^[0-9a-f]{40,64}$/);
@@ -354,6 +355,12 @@ const checkActions = z
     setup: z.object({ executable: z.string().trim().min(1), args: z.array(z.string()).default([]) }).strict(),
   })
   .strict();
+/** Pinned Actions workflow steps (src/actions-toolchains.ts). Sibling fields, not under `actions`,
+ * so released CLIs that require `actions.setup` keep parsing every check reply. */
+const actionsDeclarationFields = {
+  actionsToolchains: actionsToolchainsSchema.optional(),
+  actionsCache: actionsCacheSchema.optional(),
+};
 /** A configured command's selection contract (docs/workflows.md#check-command-scope).
  * `scope`: the command reads the changed-paths file and may run less than everything; Forge
  * counts its reduced run as scoped evidence, never as full. `shards`: the command runs one
@@ -382,6 +389,7 @@ export const checkSchema = z.object({
   docsPaths: docsPathsSchema.optional(),
   /** false: checks keep submodule pointers instead of fetching their pinned trees. */
   submodules: z.boolean().optional(),
+  ...actionsDeclarationFields,
   definition: oid,
   at: z.string(),
 });
@@ -1225,6 +1233,7 @@ export const defineCheckCommandSchema = z.object({
   selection: checkSelectionDeclaration.optional(),
   docsPaths: docsPathsSchema.optional(),
   submodules: z.boolean().optional(),
+  ...actionsDeclarationFields,
 });
 export const commandSchema = z.discriminatedUnion('action', [
   z.object({

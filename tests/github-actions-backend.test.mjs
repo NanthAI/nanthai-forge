@@ -12,7 +12,7 @@ import { checkEnvironment, recoverRuns, adoptRemoteRun } from '../dist/work-run.
 import { launchGithubActionsRun } from '../dist/work-github-actions-run.js';
 import { controlActions } from '../dist/github-actions-controller.js';
 import { exportActionsSnapshot, deleteActionsRef } from '../dist/github-actions-export.js';
-import { remoteCheckPlan } from '../dist/remote-check-plan.js';
+import { remoteCheckPlan, validateRemoteCheckPlan } from '../dist/remote-check-plan.js';
 import { composedNativeMain } from '../dist/native-composition-candidate.js';
 import { NativeSource } from '../dist/native-source.js';
 import { standardSelection } from '../scripts/test-impact.mjs';
@@ -23,7 +23,7 @@ import { checkRoute } from '../dist/check-backend.js';
 import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
 
 const read = path => JSON.parse(readFileSync(path, 'utf8'));
-function fixture(t, files = {}) {
+function fixture(t, files = {}, declared = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-actions-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   for (const [path, text] of Object.entries({ 'fixture.txt': 'synthetic source', ...files })) {
@@ -55,6 +55,7 @@ function fixture(t, files = {}) {
     name: 'Tiny check',
     executable: process.execPath,
     args: ['-e', 'console.log("synthetic smoke passed")'],
+    ...declared,
   });
   const run = {
     id: randomUUID(),
@@ -439,6 +440,51 @@ test('export and cleanup use only run-owned CAS refs and generated workflow', as
   await deleteActionsRef(plan, journal, () => {}, git);
   assert.equal(journal.deleted, true);
   assert.ok(calls.some(args => args.at(-1) === `:refs/heads/forge-check/${plan.runId}`));
+});
+test('declared toolchains and cache are pinned in the plan and recipe and become exported workflow steps', async t => {
+  const actions = { toolchains: [{ tool: 'go', versionFile: 'go.mod' }], cache: { presets: ['go'] } };
+  const { work, run, path } = fixture(
+    t,
+    { 'go.mod': 'module synthetic\n', 'go.sum': '' },
+    { actionsToolchains: actions.toolchains, actionsCache: actions.cache },
+  );
+  mkdirSync(path, { recursive: true });
+  const plan = await remoteCheckPlan(work.store, run, path);
+  assert.deepEqual(plan.actions, actions);
+  assert.deepEqual(githubActionsRecipe(plan).actions, actions);
+  run.backend.pin = plan.pin;
+  validateRemoteCheckPlan(plan, run);
+  // The pin covers the declaration: a retained plan with other actions is refused.
+  assert.throws(
+    () => validateRemoteCheckPlan({ ...plan, actions: { cache: { presets: ['go'] } } }, run),
+    /digest changed/,
+  );
+  assert.throws(() => validateRemoteCheckPlan({ ...plan, actions: undefined }, run), /digest changed/);
+  const journal = { pin: plan.pin, repo: 'synthetic/checks', runsOn: 'ubuntu-latest', retrying: [] };
+  let remote = '';
+  const git = async (_, args) => {
+    if (args.includes('rev-parse')) return 'a'.repeat(40);
+    if (args.includes('ls-remote')) return remote;
+    if (args.includes('push') && args.at(-1).startsWith('a'))
+      remote = `${'a'.repeat(40)}\trefs/heads/forge-check/${plan.runId}`;
+    return '';
+  };
+  await exportActionsSnapshot(
+    plan,
+    journal,
+    () => {},
+    git,
+    () => 'a'.repeat(40),
+  );
+  const workflow = readFileSync(join(plan.source, '.github/workflows/forge-check.yml'), 'utf8');
+  assert.equal(workflow, githubActionsWorkflow('ubuntu-latest', actions));
+  assert.match(workflow, /actions\/setup-go@[0-9a-f]{40} # v7/);
+  // An undeclared check pins no actions and exports today's workflow.
+  const plain = fixture(t);
+  mkdirSync(plain.path, { recursive: true });
+  const undeclared = await remoteCheckPlan(plain.work.store, plain.run, plain.path);
+  assert.equal('actions' in undeclared, false);
+  assert.equal('actions' in githubActionsRecipe(undeclared), false);
 });
 test('colliding refs cannot be overwritten or deleted', async t => {
   const { plan, journal } = controllerFixture(t);

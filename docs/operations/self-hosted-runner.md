@@ -154,3 +154,5 @@ verified afterwards; a setup command that changes source fails the exact check.
 The native `self-hosted`/legacy `mac` provider does not execute Actions-specific
 setup. See [the Actions setup contract](github-actions-checks.md#warm-hosted-actions-jobs-and-optional-setup)
 for the definition example, shard budget and cold/warm measurement procedure.
+Declared `actionsToolchains` and `actionsCache` add pinned workflow steps on any
+Actions runner, including this one ([toolchains and dependency cache](github-actions-checks.md#toolchains-and-dependency-cache)).

@@ -78,7 +78,7 @@ export async function exportActionsSnapshot(
       mkdirSync(path, { recursive: true });
     }
     const generated = new Map([
-      ['.github/workflows/forge-check.yml', githubActionsWorkflow(journal.runsOn)],
+      ['.github/workflows/forge-check.yml', githubActionsWorkflow(journal.runsOn, plan.actions)],
       ['.github/forge-check-plan.json', JSON.stringify(githubActionsRecipe(plan))],
     ]);
     for (const [name, text] of generated) {

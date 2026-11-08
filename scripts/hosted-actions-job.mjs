@@ -27,6 +27,8 @@ try {
       directory,
       resolve(process.env.RUNNER_TEMP, 'forge-objects'),
       capacity,
+      // This control checkout's workflow: a declared check needs its toolchain and cache steps.
+      installedWorkflow(),
     );
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-state.json'), result.stateBytes);
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'), JSON.stringify(result.recipe));
@@ -42,7 +44,9 @@ try {
     );
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n`,
+      `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n` +
+        // Declared toolchains and dependency cache for the workflow's setup steps (single-line JSON).
+        `toolchains=${JSON.stringify(result.toolchains)}\ndeps_cache=${JSON.stringify(result.depsCache)}\n`,
     );
     // Keep source refresh out of the plan/artifact dependency path.
     writeFileSync(
@@ -83,6 +87,15 @@ try {
   console.log('Forge check cancelled.');
   if (process.argv[2] === 'plan')
     appendFileSync(process.env.GITHUB_OUTPUT, 'matrix=[]\nsingle_shard=\npack_refresh=false\n');
+}
+
+/** Unreadable counts as no declared-setup steps, so only declared checks are refused. */
+function installedWorkflow() {
+  try {
+    return readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 function restoreRun() {

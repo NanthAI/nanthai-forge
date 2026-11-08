@@ -10,8 +10,19 @@ import { digest } from './hash.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
+import { actionsDeclaration } from './actions-toolchains.js';
+import {
+  ACTIONS_WORKFLOW_OUTDATED,
+  declaredStepsInstalled,
+  hostedDepsCache,
+  hostedToolchains,
+} from './actions-toolchains-hosted.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
-import { actionsJobCalls, actionsPoolCapability } from './hosted-actions-capabilities.js';
+import {
+  actionsJobCalls,
+  actionsPoolCapability,
+  actionsToolchainsCapability,
+} from './hosted-actions-capabilities.js';
 import { planPool, poolArm, poolUnits } from '../scripts/shard-pool.mjs';
 import { poolClaimsSchema, type PoolClaim } from './hosted-actions-pool.js';
 import { invariant } from './errors.js';
@@ -74,6 +85,8 @@ export async function prepareActionsJob(
   directory: string,
   cache: string,
   capacity?: { activeChecks: number; jobCap: number },
+  /** The runner repository's installed forge-check.yml; undefined skips the step check. */
+  workflow?: string,
 ) {
   console.log('Actions source: preparing pinned Candidate');
   const run = await client.session(true);
@@ -185,6 +198,13 @@ export async function prepareActionsJob(
         ? `Shard pool: on${poolMode === 'ab' ? ' (ab arm B)' : ''}; ${poolUnits(groups, pool).length} units`
         : `Shard pool: off${poolMode === 'ab' && client.capabilities.includes(actionsPoolCapability) ? ' (ab arm A)' : ''}`,
     );
+  const declaration = actionsDeclaration(run.check);
+  // A server that cannot pin the declaration would plan the check without its toolchains.
+  invariant(
+    !declaration || client.capabilities.includes(actionsToolchainsCapability),
+    'RUNNER_UNAVAILABLE',
+    'This check declares toolchains or cache; the server does not advertise checks.toolchains yet.',
+  );
   const pins = {
     head: run.request.expectedHead,
     definition: run.check.definition,
@@ -194,8 +214,15 @@ export async function prepareActionsJob(
     standard,
     interaction: false,
     command: [standard ? 'node' : run.check.executable, ...run.check.args],
+    // Declared toolchains and cache: the workflow's setup steps read them from this pinned recipe.
+    ...(declaration ? { actions: declaration } : {}),
   };
   const recipe = hostedActionsRecipeSchema.parse({ pin: checkPin(pins), ...pins });
+  invariant(
+    !recipe.actions || declaredStepsInstalled(workflow),
+    'ACTIONS_WORKFLOW_OUTDATED',
+    ACTIONS_WORKFLOW_OUTDATED,
+  );
   const lock = inventory.get('package-lock.json');
   const planned = (await client.call({
     kind: 'plan',
@@ -237,6 +264,15 @@ export async function prepareActionsJob(
     // The static job is always an execution, including opaque commands and docs.
     // With no test shards it can use the planning runner and its verified source.
     singleShard: groups.length === 0 ? 'static' : '',
+    // Workflow outputs (`toolchains`, `deps_cache`); `{}` when nothing is declared.
+    toolchains: hostedToolchains(recipe.actions),
+    depsCache: hostedDepsCache(recipe.actions, {
+      projectId: run.projectId,
+      files: state.files,
+      save: run.gate?.mode === 'audit',
+      os: process.env.RUNNER_OS,
+      arch: process.env.RUNNER_ARCH,
+    }),
     matrix: groups.length === 0 ? [] : [...groups.map((_, index) => String(index)), 'static'],
   };
 }

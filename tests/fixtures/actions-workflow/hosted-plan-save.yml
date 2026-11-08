@@ -1,0 +1,5 @@
+      - if: steps.plan.outputs.single_shard != '' && steps.forge-deps.outcome == 'success' && steps.forge-deps.outputs.cache-hit != 'true' && fromJSON(steps.plan.outputs.deps_cache || '{}').save
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').paths }}
+          key: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').key }}

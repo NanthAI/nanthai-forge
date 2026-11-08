@@ -36,6 +36,8 @@ export function hostedCheckDefinition(command: unknown, id: string, at: string) 
     ...(c.selection ? { selection: c.selection } : {}),
     ...(c.docsPaths?.length ? { docsPaths: [...new Set(c.docsPaths)] } : {}),
     ...(c.submodules === false ? { submodules: false } : {}),
+    ...(c.actionsToolchains ? { actionsToolchains: c.actionsToolchains } : {}),
+    ...(c.actionsCache ? { actionsCache: c.actionsCache } : {}),
   };
   return checkSchema.parse({ ...fields, id, at, definition: digest(JSON.stringify(fields)) });
 }

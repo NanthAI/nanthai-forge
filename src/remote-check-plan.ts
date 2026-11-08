@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { semanticCheckCommand } from './semantic-check-command.js';
+import { actionsDeclaration } from './actions-toolchains.js';
 import { resolveTestRunner } from './project-test-runner.js';
 import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -79,6 +80,7 @@ export async function remoteCheckPlan(
     impact && impact.scope !== 'full'
       ? selection.tests.filter(file => !comparison.paths!.includes(file) && !impact.tests.includes(file))
       : [];
+  const declaration = actionsDeclaration(run.check);
   const pins = {
     retryFiles,
     runId: run.id,
@@ -112,6 +114,8 @@ export async function remoteCheckPlan(
             forgeJson: files.get('forge.json'),
           }),
     ),
+    // Declared toolchains and cache become workflow steps, so the pin names them (absent: unchanged pin).
+    ...(declaration ? { actions: declaration } : {}),
   };
   const plan = {
     ...pins,
@@ -147,6 +151,7 @@ export function validateRemoteCheckPlan(plan: RemoteCheckPlan, run: CheckRun) {
     artifacts,
     interaction,
     command,
+    actions,
   } = plan;
   if (
     runId !== run.id ||
@@ -170,8 +175,10 @@ export function validateRemoteCheckPlan(plan: RemoteCheckPlan, run: CheckRun) {
         artifacts,
         interaction,
         command,
+        ...(actions !== undefined ? { actions } : {}),
       }),
-    ) !== plan.pin
+    ) !== plan.pin ||
+    JSON.stringify(actions ?? null) !== JSON.stringify(actionsDeclaration(run.check) ?? null)
   )
     throw new Error('Retained remote source, Candidate or plan digest changed.');
 }

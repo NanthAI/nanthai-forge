@@ -224,7 +224,11 @@ Any other configured check command receives the same runner-pinned changed-paths
 may scope itself under a reduced-evidence gate and counts as scoped evidence, never full;
 one that declares `selection.shards` runs as that many hosted Actions test jobs plus a
 static job ([check command scope](workflows.md#check-command-scope)). Undeclared commands
-run in full in one job.
+run in full in one job. On GitHub Actions a check may declare `actionsToolchains` (Go, Python,
+Java, .NET, Rust; a version or a version file) and `actionsCache` (dependency presets keyed on
+lockfile hashes, saved only by main) as pinned workflow steps, and configured commands keep the
+runner's toolchain-location variables ([toolchains](operations/github-actions-checks.md#toolchains-and-dependency-cache)).
+App/OIDC runner repositories need the reinstalled `forge-check.yml` before a declared check plans.
 
 Native finish/accept supports an explicit disjoint fast-path autonomy option:
 exact composed-main provenance, current passing evidence, manifest-path

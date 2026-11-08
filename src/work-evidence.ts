@@ -71,6 +71,8 @@ export function recordEvidence(
     ...(command.selection ? { selection: command.selection } : {}),
     ...(command.docsPaths?.length ? { docsPaths: [...new Set(command.docsPaths)] } : {}),
     ...(command.submodules === false ? { submodules: false } : {}),
+    ...(command.actionsToolchains ? { actionsToolchains: command.actionsToolchains } : {}),
+    ...(command.actionsCache ? { actionsCache: command.actionsCache } : {}),
   };
   const check = {
     ...definition,

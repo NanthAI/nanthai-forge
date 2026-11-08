@@ -135,7 +135,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
     return reserved;
   };
   const input = (overrides = {}) => ({ ...id, claims: JSON.stringify(claims()), ...overrides });
-  const prepare = async (selection = null) => {
+  const prepare = async (selection = null, actions = undefined) => {
     const r = await s.status(run.id),
       groups = opaque ? [] : Array.from({ length: shards - 1 }, (_, i) => [`tests/synthetic-${i}.test.mjs`]);
     const pins = {
@@ -146,6 +146,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
       standard: !opaque,
       interaction: false,
       command: opaque ? [opaque.executable, ...opaque.args] : ['node', 'scripts/forge-check.mjs'],
+      ...(actions ? { actions } : {}),
     };
     const recipe = { ...pins, pin: checkPin(pins) };
     const selectionStorage = 'selection-storage',
@@ -341,6 +342,32 @@ test('a docs-scoped plan for an opaque command needs the check to declare docs p
   assert.equal(plan.shardCount, 1);
   assert.deepEqual(plan.skipped, { part: 'tests', status: 'not-affected', reason: docsOnly.reason });
 });
+test('a check that declares toolchains or cache plans only with that declaration pinned in its recipe', async t => {
+  const actions = {
+    toolchains: [{ tool: 'go', versionFile: 'go.mod' }],
+    cache: { presets: ['go'] },
+  };
+  const declared = await fixture(t, 2, 'ubuntu-latest', {
+    ...ciCommand,
+    actionsToolchains: actions.toolchains,
+    actionsCache: actions.cache,
+  });
+  await declared.bind();
+  // An older runner that cannot set them up never runs the check without them.
+  await assert.rejects(declared.prepare(), code('EVIDENCE_CHANGED'));
+  await assert.rejects(
+    declared.prepare(null, { ...actions, cache: { presets: ['cargo'] } }),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.equal((await declared.status(declared.run.id)).plan, null);
+  await declared.prepare(null, actions);
+  assert.equal((await declared.status(declared.run.id)).plan.shardCount, 1);
+  // Undeclared checks refuse a recipe that claims a declaration.
+  const undeclared = await fixture(t, 2, 'ubuntu-latest', ciCommand);
+  await undeclared.bind();
+  await assert.rejects(undeclared.prepare(null, actions), code('EVIDENCE_CHANGED'));
+});
+
 test('duplicate results are immutable and complete shard evidence is needed to pass', async t => {
   const s = await fixture(t);
   await s.bind();

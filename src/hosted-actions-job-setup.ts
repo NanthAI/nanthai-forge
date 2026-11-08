@@ -2,7 +2,7 @@
 import { spawn } from 'node:child_process';
 import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
-import { childEnv } from '../scripts/child-env.mjs';
+import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import { digest } from './hash.js';
 import { parseNativeState } from './native-state-format.js';
 import { verifySourceTree } from './hosted-actions-job-source.js';
@@ -48,7 +48,7 @@ export async function setupActionsJob(run: HostedCheckRun, directory: string, pl
       cwd: cache,
       shell: false,
       stdio: 'ignore',
-      env: { ...childEnv({ allow: ['CI', 'PATH'] }), FORGE_SOURCE_CACHE_DIR: cache },
+      env: { ...childEnv({ allow: ['CI', 'PATH', ...toolchainEnvAllow()] }), FORGE_SOURCE_CACHE_DIR: cache },
     });
     child.once('error', () => resolve(127));
     child.once('close', code => resolve(code ?? 128));

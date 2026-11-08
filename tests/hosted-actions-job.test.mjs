@@ -2233,3 +2233,74 @@ test('secret scan R-01: the same entry already on main allows the token; a new e
     [['config/other.env', 'added', false, 'Second fixture.']],
   );
 });
+
+test('a declared check pins toolchains and cache in its recipe and needs the installed workflow steps', async t => {
+  const { hostedWorkflowBlocks } = await import('../dist/actions-toolchains-hosted.js');
+  const actions = { toolchains: [{ tool: 'go', versionFile: 'go.mod' }], cache: { presets: ['go'] } };
+  const declared = s => {
+    s.run.check = {
+      executable: 'go',
+      args: ['test', './...'],
+      definition: 'c'.repeat(64),
+      actionsToolchains: actions.toolchains,
+      actionsCache: actions.cache,
+    };
+    return s;
+  };
+  // A server that cannot pin the declaration (no checks.toolchains) is refused before planning.
+  const old = declared(
+    fixture(t, { capabilities: hostedActionsCapabilities.filter(c => c !== 'checks.toolchains') }),
+  );
+  await assert.rejects(
+    prepareActionsJob(
+      old.client,
+      join(old.directory, 'candidate'),
+      join(old.directory, 'cache'),
+      undefined,
+      '',
+    ),
+    error => error.code === 'RUNNER_UNAVAILABLE' && /checks.toolchains/.test(error.message),
+  );
+  assert.equal(old.calls.filter(call => call.kind === 'plan').length, 0);
+  // A runner repository whose forge-check.yml lacks the steps refuses before planning.
+  const stale = declared(fixture(t));
+  await assert.rejects(
+    prepareActionsJob(
+      stale.client,
+      join(stale.directory, 'candidate'),
+      join(stale.directory, 'cache'),
+      undefined,
+      '',
+    ),
+    error => error.code === 'ACTIONS_WORKFLOW_OUTDATED' && /Reinstall forge-check.yml/.test(error.message),
+  );
+  assert.equal(stale.calls.filter(call => call.kind === 'plan').length, 0);
+  const s = declared(fixture(t));
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+    undefined,
+    `jobs:\n${hostedWorkflowBlocks().join('')}`,
+  );
+  assert.deepEqual(prepared.recipe.actions, actions);
+  assert.deepEqual(prepared.toolchains, { go: { version: '', versionFile: 'go.mod' } });
+  assert.match(prepared.depsCache.key, /^forge-deps-v1-go-/);
+  // Only a main audit may save; this check restores read-only.
+  assert.equal(prepared.depsCache.save, false);
+  // The declaration adds no Convex call: one session pair and one plan, as before.
+  assert.equal(s.calls.filter(call => call.kind === 'session').length, 2);
+  assert.equal(s.calls.filter(call => call.kind === 'plan').length, 1);
+  // Undeclared checks plan as before, whatever the installed workflow holds.
+  const plain = fixture(t);
+  const unchanged = await prepareActionsJob(
+    plain.client,
+    join(plain.directory, 'candidate'),
+    join(plain.directory, 'cache'),
+    undefined,
+    '',
+  );
+  assert.equal('actions' in unchanged.recipe, false);
+  assert.deepEqual(unchanged.toolchains, {});
+  assert.deepEqual(unchanged.depsCache, {});
+});

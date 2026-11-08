@@ -9,6 +9,8 @@ export const actionsInlineLogCapability = 'results.inlineLog';
 /** The plan call returns one create-only claim PUT and one HEAD per shard pool unit, and results
  * carry the files a home shard yielded to the pool (scripts/shard-pool.mjs). */
 export const actionsPoolCapability = 'checks.pool';
+/** The plan's recipe may pin declared toolchains and dependency cache (src/actions-toolchains.ts). */
+export const actionsToolchainsCapability = 'checks.toolchains';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
@@ -19,6 +21,7 @@ export const hostedActionsCapabilities = [
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,
+  actionsToolchainsCapability,
 ] as const;
 /** Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
@@ -33,6 +36,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'result.logBytes': actionsInlineLogCapability,
   'plan.plan.recipe.pool': actionsPoolCapability,
   'result.result.pool': actionsPoolCapability,
+  'plan.plan.recipe.actions': actionsToolchainsCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = { sourcePack: 'sourcePack' };

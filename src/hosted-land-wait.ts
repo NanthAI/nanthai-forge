@@ -3,7 +3,7 @@ import { shellQuote } from './agent-brief-render.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';
-import { retryableFinishSource } from './hosted-agent-finish-result.js';
+import { preparingFinishSource, retryableFinishSource } from './hosted-agent-finish-result.js';
 
 const runDone = new Set(['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted']);
 
@@ -25,8 +25,7 @@ export function landWaitContinuation(root: string, response: HostedAgentResponse
           !retryableFinishSource(result) &&
           (result.phase === 'finish' ||
             // Source preparation outlived the budget: wait replays it by id (never a second landing).
-            (['save', 'compose', 'sync'].includes(String(result.phase)) &&
-              (result as { status?: unknown }).status === 'submitted'))
+            preparingFinishSource(result as Record<string, unknown>))
         ? { operationIds: [response.operationId], until: 'acceptance' }
         : null;
   return wait ? operationWait(root, wait) : undefined;

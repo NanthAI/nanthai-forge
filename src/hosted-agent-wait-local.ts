@@ -12,6 +12,8 @@ import {
 } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { hostedActionError } from './hosted-action-error.js';
+import { finishRefusedKey } from './hosted-agent-finish-identity.js';
+import { preparingFinishSource } from './hosted-agent-finish-result.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import {
   observeHostedRun,
@@ -37,10 +39,16 @@ export function localOperation(root: string, operationId: string): LocalOperatio
     if (typeof run?.id === 'string') return { kind: 'check-run', runId: run.id };
     const request = values['finish-request'] as { channel?: unknown } | undefined;
     const context = values['finish-context'] as { command?: { accept?: unknown } } | undefined;
-    if ((request && !request.channel) || context?.command?.accept === false) return { kind: 'check-only' };
-    // A landing whose source preparation has not reached submission yet.
+    const checkOnly = (request && !request.channel) || context?.command?.accept === false;
+    // Only a check-only finish that ended before its run (source failed, or refused before anything
+    // was submitted) produced no run. One still preparing or reserving its run, or whose enqueue
+    // reply was lost, is in progress: it continues by replay like a landing (Issue 17cce1b3).
+    if (checkOnly && (values['finish-source-failed'] || values[finishRefusedKey]))
+      return { kind: 'check-only' };
+    // A landing or check-only finish whose source preparation has not reached submission yet.
     const retained = retainedHostedOperation(base, operationId);
     if (retained?.action === 'finish') return { kind: 'finish', command: retained.command };
+    if (checkOnly) return { kind: 'check-only' };
   }
   if (existsSync(join(clientCacheRoot(base), 'saves', operationId))) return { kind: 'save' };
   return undefined;
@@ -170,17 +178,21 @@ async function continueFinish(
   transport.waitUntil = deadline;
   const replayed = await transport.dispatch('finish', { ...command, operationId }, signal);
   const result = (replayed.result ?? {}) as Record<string, unknown>;
+  const remaining = Math.max(0, (deadline - Date.now()) / 1000);
   if (result.phase === 'finish' && result.submission)
     return observeHostedSubmissions(
       transport,
-      { ...input, timeoutSeconds: Math.max(0, (deadline - Date.now()) / 1000) },
+      { ...input, timeoutSeconds: remaining },
       signal,
       emit,
       subscribe,
     );
+  // A check-only finish that reserved its run: wait on that run, as land does.
+  const run = result.run as { id?: unknown } | undefined;
+  if (result.phase === 'check' && typeof run?.id === 'string')
+    return observeHostedRun(transport, { runId: run.id, timeoutSeconds: remaining }, signal, emit, subscribe);
   // Source still running (not retryable or failed, which carry their own recovery): the same wait resumes it.
-  const preparing =
-    ['save', 'compose', 'sync'].includes(String(result.phase)) && result.status === 'submitted';
+  const preparing = preparingFinishSource(result);
   return response({
     ...result,
     status: preparing ? 'timeout' : 'terminal',

@@ -7,6 +7,7 @@ import { writeHostedCheck } from './projectHostedCheckStore';
 import { hostedCheckPlanSchema, checkPin, hostedCheckTerminal, testsNotAffected } from '../src/hosted-check';
 import { isStandardForgeCheck } from '../src/standard-check';
 import { hostedActionsRecipeSchema, hostedActionsRuntime } from '../src/hosted-actions';
+import { actionsDeclaration } from '../src/actions-toolchains';
 import { savePin } from '../src/hosted-save';
 import { semanticTests } from '../src/intent-semantic-conflict';
 import { checkGateSchema } from '../src/bet2-gate';
@@ -36,9 +37,12 @@ export const prepare = internalMutation({
         recipe.head === run.request.expectedHead &&
         recipe.definition === run.check.definition &&
         recipe.standard === standard &&
-        checkPin(recipe.command) === checkPin([standard ? 'node' : run.check.executable, ...run.check.args]),
+        checkPin(recipe.command) ===
+          checkPin([standard ? 'node' : run.check.executable, ...run.check.args]) &&
+        // A runner that cannot set up the declared toolchains or cache never runs the check without them.
+        checkPin(recipe.actions ?? null) === checkPin(actionsDeclaration(run.check) ?? null),
       'EVIDENCE_CHANGED',
-      'Actions plan differs from its source or configured command.',
+      'Actions plan differs from its source, configured command or declared toolchains.',
     );
     // An opaque command is never docs-scoped unless its check declared the docs paths.
     invariant(

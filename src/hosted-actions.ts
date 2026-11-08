@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } from './hosted-check.js';
 import { invariant } from './errors.js';
 import { validPool } from '../scripts/shard-pool.mjs';
+import { actionsCacheSchema, actionsToolchainsSchema } from './actions-toolchains.js';
 
 export const hostedActionsRuntime = checkPin(
   'github-actions;node:24.22.1;checkout:v4;setup-node:v4;forge-check:v1',
@@ -35,6 +36,11 @@ export const hostedActionsRecipeSchema = z
     standard: z.boolean(),
     interaction: z.boolean(),
     command: z.array(z.string()).min(1),
+    // Present only when the check declares toolchains or cache (src/actions-toolchains.ts).
+    actions: z
+      .object({ toolchains: actionsToolchainsSchema.optional(), cache: actionsCacheSchema.optional() })
+      .strict()
+      .optional(),
   })
   .strict()
   .refine(recipe => recipe.pool === undefined || validPool(recipe.groups, recipe.pool), {

@@ -11,6 +11,7 @@ import { saveContract, saveHostedLane } from './hosted-save-client.js';
 import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
+import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
 import { agentSourceOutcome, checkSelection } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -340,7 +341,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   await session.journal.retain('finish-compose-operation', () => composeOperationId);
   let candidateId = command.candidateId;
   if (!candidateId) {
-    const progress = await composeAgentSource(
+    let progress = await composeAgentSource(
       session,
       hostedAgentCommandSchemas.compose.parse({
         ...(command.laneId ? { laneId: command.laneId } : {}),
@@ -351,6 +352,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
       }),
       composeOperationId,
     );
+    if (command.accept === false)
+      progress = await settleCheckOnlyCompose(session, composeOperationId, progress);
     markLandStep('composed');
     const completed = agentSourceOutcome(progress);
     if (completed?.status !== 'completed') {

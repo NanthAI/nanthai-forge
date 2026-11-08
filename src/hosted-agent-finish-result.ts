@@ -12,6 +12,16 @@ export function retryableFinishSource(result: Reply) {
   return submission?.phase === 'composing' && progress?.status === 'retryable';
 }
 
+/** Source preparation (save, compose or sync) that outlived the caller's budget: the receipt's own
+ * `status` says `submitted`, or, for a receipt that names no recovery command of its own, its job's
+ * progress does (Issue 17cce1b3: finish's save and compose receipts carry it only in `progress`).
+ * Retryable and failed sources, and a named source continuation, keep their own recovery. */
+export function preparingFinishSource(result: Reply) {
+  if (!['save', 'compose', 'sync'].includes(String(result.phase))) return false;
+  const progress = result.progress as { status?: unknown } | undefined;
+  return (result.status ?? (result.command ? undefined : progress?.status)) === 'submitted';
+}
+
 /** A new attempt retains the complete selection, never the failed operation identity. */
 export function finishRetryContinuation(root: string, selection: Reply) {
   const retry = {
