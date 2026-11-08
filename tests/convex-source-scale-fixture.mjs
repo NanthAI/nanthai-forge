@@ -101,7 +101,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     chain = result.catch(() => {});
     return result;
   };
-  async function putSpec(spec, pin, stateGeneration) {
+  /** `graph.parents` records a seeded State's parents on its row, as the trusted worker does. */
+  async function putSpec(spec, pin, stateGeneration, graph = {}) {
     if (!pin) {
       const b = Buffer.isBuffer(spec) ? spec : generated(spec);
       pin = { sha256: digest(b), size: b.length };
@@ -113,6 +114,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
         digest: pin.sha256,
         size: pin.size,
         ...(stateGeneration === undefined ? {} : { stateGeneration }),
+        ...(graph.parents ? { stateParents: graph.parents } : {}),
         removed: false,
         nonce: 'synthetic',
         location: 'r2',
@@ -312,7 +314,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       active--;
     }
   }
-  async function drain({ idle = true } = {}) {
+  /** `memoryBound: false` (measurement scripts only) reports per-action RSS instead of asserting it. */
+  async function drain({ idle = true, memoryBound = true } = {}) {
     const started = performance.now(),
       running = new Set(),
       countsStart = f.counts.length,
@@ -338,7 +341,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     await chain;
     const jobMetrics = metrics.slice(metricsStart);
     assert(
-      jobMetrics.every(m => m.maxRssBytes < 400 * 1024 * 1024 && m.elapsedMs < 60000),
+      jobMetrics.every(m => (!memoryBound || m.maxRssBytes < 400 * 1024 * 1024) && m.elapsedMs < 60000),
       JSON.stringify(metrics),
     );
     if (idle)

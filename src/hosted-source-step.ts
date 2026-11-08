@@ -46,6 +46,9 @@ export interface StepTransport extends SourceWorkerTransport {
   ): Promise<{ refs: WorkerObject[]; unavailable: string[] }>;
   fanout?(plan: SourceFanout): void;
   ancestry?(roots: string[], known: string[], windows?: number): Promise<WorkerObject[]>;
+  /** Parents the trusted worker recorded on a State's object row from its hash-verified manifest
+   * (Git commit-graph parity). Ancestry uses them instead of downloading the manifest. */
+  stateParents?(id: string): readonly string[] | undefined;
 }
 export type SourceStepCursor = {
   input: WorkerPin;
@@ -350,7 +353,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     m = meter(),
     original = io;
   io.rememberStateGenerations?.(c.generations ?? {});
-  const mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
+  let mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
   io = {
     ...original,
     upload: async (pin, bytes) => {
@@ -378,7 +381,10 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       })();
     },
   };
-  while (c.phase !== 'done' && !full(m)) {
+  // Set after this action ran a small calculation set itself: the merge re-enters once on the
+  // same, already parsed States (no new reads) instead of yielding to a fresh action.
+  let recompute = false;
+  while (c.phase !== 'done' && (!full(m) || (recompute && !m.yielded))) {
     if (c.phase === 'input') {
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
       const kind = (c.plan as { kind: string }).kind;
@@ -407,7 +413,17 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       else {
         // Large manifests read for ancestry in this action stay live until it
         // returns; whole-State merge computation starts with a fresh heap.
-        if (m.bytes > 2 * 1024 * 1024) {
+        const again = recompute;
+        recompute = false;
+        if (again) {
+          // An interrupted merge leaves partial results in its source; recompute as a fresh action
+          // would, keeping only the hash-verified input bytes already read (never generated ones).
+          const prior = mergeSource;
+          mergeSource = new MemoryMergeSource(c.parents, c.ancestryBoundary, c.ancestryCuts);
+          for (const [id, bytes] of prior.objects)
+            if (!prior.generated.has(id)) mergeSource.objects.set(id, bytes);
+        }
+        if (m.bytes > 2 * 1024 * 1024 && !again) {
           m.yielded = true;
           break;
         }
@@ -438,7 +454,10 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
         }
         if (pending.size) {
           const tasks = await calculationWindows([...pending.values()], io);
-          if (io.fanout) io.fanout({ kind: 'calculate', end: 0, tasks });
+          // A fan-out round (fork, task actions, join, then a fresh step that re-reads every
+          // State) costs seconds; a few small text merges cost milliseconds here.
+          const inline = !io.fanout || inlineCalculations(tasks);
+          if (!inline) io.fanout!({ kind: 'calculate', end: 0, tasks });
           else
             for (const task of tasks) {
               let previous: import('./hosted-source-fanout.js').SourceTaskProgress | null = null,
@@ -450,7 +469,10 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
               for (const value of result.progress.calculations ?? [])
                 (c.calculations ??= {})[value.key] = value;
             }
-          m.yielded = true;
+          // The same heap re-enters only when this action read at most one step of bytes; bigger
+          // trees still skip the fan-out round but recompute in a fresh action.
+          if (inline && io.fanout && m.bytes + m.outputBytes <= sourceStepBytes) recompute = true;
+          else m.yielded = true;
         }
       }
     }
@@ -465,4 +487,15 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
       maxRssBytes: process.resourceUsage().maxRSS * 1024,
     },
   };
+}
+/** Calculation sets this step runs itself instead of fanning out: at most 16 merge windows,
+ * any number of single-blob marker scans, all input blobs totalling at most 1 MiB. Larger
+ * sets keep the parallel, separately metered tasks. */
+export const inlineCalculationBytes = 1024 * 1024;
+function inlineCalculations(tasks: { kind: string; refs: WorkerObject[] }[]) {
+  return (
+    tasks.filter(task => task.kind !== 'markers').length <= 16 &&
+    tasks.reduce((sum, task) => sum + task.refs.reduce((n, ref) => n + ref.object.size, 0), 0) <=
+      inlineCalculationBytes
+  );
 }

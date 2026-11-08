@@ -27,6 +27,7 @@ import { composeConflictPageSchema } from './hosted-compose.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
+import { syncTiming } from './sync-timing.js';
 import { overlapEvidenceLevel, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
@@ -267,6 +268,8 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       { ...command, operationId: session.journal.operationId },
       true,
     );
+  // Phase split in this process (clock reads only), as on sync receipts.
+  const timing = syncTiming();
   const saveOperationId = await session.journal.id('resolution-save');
   const save = () =>
     saveHostedLane(
@@ -301,10 +304,13 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     });
   });
   const handoff = await retainSyncHandoff(session, 'resolve', command);
+  timing.mark('save');
   let progress;
   try {
     progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
+    timing.mark('submit');
     progress = await session.waitSource(session.journal.operationId, progress);
+    timing.mark('hostedWait');
   } catch (error) {
     const safe = hostedActionError(error, 'resolution');
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
@@ -335,8 +341,11 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   );
   clearSyncHandoff(session.root, session.journal.operationId);
   completeConflictRecovery(session.root);
+  timing.mark('apply');
   const selection = await resolutionFinishSelection(session, source);
-  if ('pending' in selection) return { source: progress, applied, ...selection.pending, ...continuation };
+  timing.mark('select');
+  if ('pending' in selection)
+    return { source: progress, applied, ...selection.pending, ...continuation, timing: timing.value() };
   const options = resolutionFinishOptions(session.root, source.lane.laneId);
   const next = {
     ...options,
@@ -351,6 +360,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     applied,
     next: { action: 'finish', ...next },
     command: hostedRecoveryCommand(session.root, 'finish', next),
+    timing: timing.value(),
   };
 }
 /** Called only by finish, never by a status/observe read. Original selections and

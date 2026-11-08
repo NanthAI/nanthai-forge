@@ -9,6 +9,9 @@ export const objectFields = {
   size: v.number(),
   /** Authenticated State topological level; absent on old rows and non-States. */
   stateGeneration: v.optional(v.number()),
+  /** Exact parents of a hash-verified State (Git commit-graph parity), written once beside its
+   * generation so ancestry walks read this row instead of the manifest. Absent on old rows. */
+  stateParents: v.optional(v.array(v.string())),
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,

@@ -12,7 +12,7 @@ import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key } from './r2';
 import { ForgeError, invariant } from '../src/errors';
 import { parseNativeState } from '../src/native-state-format';
-import { nextStateGeneration, validStateGeneration } from '../src/state-generation';
+import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state-generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
@@ -21,6 +21,7 @@ const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
+  stateParents?: string[];
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
@@ -36,12 +37,14 @@ export function convexSourceTransport(
     outputs: SourceOutput[] = [],
     reads = { objects: 0, bytes: 0 };
   const durable = sourceStorage(ctx, projectId);
-  const generations = new Map<string, number>();
+  const generations = new Map<string, number>(),
+    parents = new Map<string, string[]>();
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
       locations.set(row.descriptor.object.sha256, row);
       if (validStateGeneration(row.stateGeneration))
         generations.set(row.descriptor.object.sha256, row.stateGeneration);
+      if (validStateParents(row.stateParents)) parents.set(row.descriptor.object.sha256, row.stateParents);
     }
   };
   remember(initial);
@@ -79,6 +82,7 @@ export function convexSourceTransport(
   };
   const io: StepTransport = {
     stateGeneration: id => generations.get(id),
+    stateParents: id => parents.get(id),
     rememberStateGenerations: values => {
       for (const [id, value] of Object.entries(values))
         if (validStateGeneration(value)) generations.set(id, value);
@@ -221,13 +225,14 @@ export function convexSourceTransport(
     );
     // These are hash-verified worker outputs. Only the exact State parent
     // list can select a generation; plans, display hints and uploads cannot.
-    let stateGeneration: number | undefined;
+    let stateGeneration: number | undefined, stateParents: string[] | undefined;
     const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
     if (prefix.includes('"kind":"forge-source-state"')) {
       try {
         const state = parseNativeState(bytes);
         stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
         if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
+        if (validStateParents(state.parents)) stateParents = [...state.parents];
       } catch (error) {
         // An ordinary source blob may begin with State-looking JSON.
         if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
@@ -240,6 +245,7 @@ export function convexSourceTransport(
         return {
           ...pin,
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
+          ...(stateParents === undefined ? {} : { stateParents }),
           ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
         };
       },

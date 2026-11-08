@@ -64,9 +64,10 @@ export const resolve = sourceMutation({
           ? await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size))
           : null;
       selected.push({ row, url });
-      if (args.ancestry && generation) {
+      if (args.ancestry && row.stateParents) pending.push(...row.stateParents);
+      else if (args.ancestry && generation) {
         // Hints batch a linear ancestry chain, but never establish closure.
-        // Actual verified manifest parents drive every subsequent frontier.
+        // Verified parents (the row's own, or the manifest's) drive every subsequent frontier.
         const hint = await record(ctx, recordPartition(generation), 'sourceStateParents', id);
         const parents = hint ? JSON.parse(hint.value).parents : undefined;
         if (Array.isArray(parents)) pending.push(...parents.filter((p: unknown) => typeof p === 'string'));
@@ -82,6 +83,7 @@ export const resolve = sourceMutation({
     const result = selected.map(({ row, url }, i) => ({
       descriptor: descriptors[i]!,
       ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
+      ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
       storageId: url ? null : (row.storageId ?? null),
       url,
       ...(row.pack ? { range: packRange(row)! } : {}),

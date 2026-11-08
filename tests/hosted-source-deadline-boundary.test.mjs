@@ -21,20 +21,27 @@ async function fixture(t, shape = 'terminal') {
     process.env[key] = value;
     t.after(() => (prior === undefined ? delete process.env[key] : (process.env[key] = prior)));
   }
-  const middle = shape === 'children' ? 'unchanged '.repeat(14000) + '\n' : 'same\n';
+  // Distinct per-file bodies keep a later calculation round above the inline bound, so it
+  // still forks real children ('fork'); identical bodies would share three small blobs.
+  const middle = i =>
+    shape === 'fork'
+      ? `unchanged ${i} `.repeat(10000) + '\n'
+      : shape === 'children'
+        ? 'unchanged '.repeat(14000) + '\n'
+        : 'same\n';
   const files = text =>
     Array.from({ length: shape === 'serial' ? 12000 : 120 }, (_, i) => [
       `file-${String(i).padStart(5, '0')}.txt`,
-      text,
+      text(middle(i)),
     ]);
   let boundary = () => {};
   const f = await finishFixture(t, {
     ...(shape === 'terminal'
       ? {}
       : {
-          baselineFiles: files('start\n' + middle + 'end\n'),
-          selectedFiles: files('ours\n' + middle + 'end\n'),
-          mainFiles: files('start\n' + middle + 'theirs\n'),
+          baselineFiles: files(middle => 'start\n' + middle + 'end\n'),
+          selectedFiles: files(middle => 'ours\n' + middle + 'end\n'),
+          mainFiles: files(middle => 'start\n' + middle + 'theirs\n'),
         }),
     beforeSourceMutation: (name, args) => boundary(name, args),
   });
@@ -43,7 +50,8 @@ async function fixture(t, shape = 'terminal') {
   await f.drain();
   f.moveMain();
   await f.passChecks();
-  const target = shape === 'children' ? 'projectConvexSourceTask:run' : 'projectConvexSource:step';
+  const target =
+    shape === 'children' || shape === 'fork' ? 'projectConvexSourceTask:run' : 'projectConvexSource:step';
   for (let i = 0; !f.pending().some(x => x.name === target); i++) {
     assert(i < 30);
     await f.execute();
@@ -118,10 +126,7 @@ for (const watchdogFirst of [false, true])
 
 for (const shape of ['serial', 'fork', 'child-continue', 'child-join'])
   test(`post-deadline ${shape} success settles without scheduling new work`, async t => {
-    const x = await fixture(
-        t,
-        shape.startsWith('child') ? 'children' : shape === 'fork' ? 'children' : 'serial',
-      ),
+    const x = await fixture(t, shape.startsWith('child') ? 'children' : shape),
       { f, state, row, load } = x;
     let action, runningSibling;
     if (shape === 'fork') {

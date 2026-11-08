@@ -4,12 +4,13 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
-import { validStateGeneration } from '../src/state-generation';
+import { validStateGeneration, validStateParents } from '../src/state-generation';
 import { findObject, objectRow } from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;
   size: number;
   stateGeneration?: number;
+  stateParents?: string[];
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -69,13 +70,30 @@ export async function storeSourceOutputs(
       'SOURCE_HASH_MISMATCH',
       'Immutable State generation changed.',
     );
+    invariant(
+      pin.stateParents === undefined || validStateParents(pin.stateParents),
+      'SOURCE_JOB_INVALID',
+      'State parents must be exact distinct digests.',
+    );
+    invariant(
+      old?.stateParents === undefined ||
+        pin.stateParents === undefined ||
+        old.stateParents.join() === pin.stateParents.join(),
+      'SOURCE_HASH_MISMATCH',
+      'Immutable State parents changed.',
+    );
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
+    // Written once from the hash-verified manifest, like the generation; never cleared.
+    const graph = {
+      ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+      ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
+    };
     if (!old)
       await ctx.db.insert('projectObjects', {
         projectId: projectId,
         digest: pin.sha256,
         size: pin.size,
-        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+        ...graph,
         ...encoding,
         nonce: executionId,
         removed: false,
@@ -88,19 +106,17 @@ export async function storeSourceOutputs(
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, {
         ...encoding,
-        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
+        ...graph,
         ...(!pin.r2Key ? { location: undefined, r2Key: undefined, r2Committed: undefined } : {}),
         removed: false,
         sourceReferenced: true,
       });
     else if (
       !old.sourceReferenced ||
-      (old.stateGeneration === undefined && pin.stateGeneration !== undefined)
+      (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
+      (old.stateParents === undefined && pin.stateParents !== undefined)
     )
-      await ctx.db.patch((await objectRow(ctx, old))._id, {
-        sourceReferenced: true,
-        ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
-      });
+      await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
     if (!old?.sourceReferenced)
       await ctx.db.insert('projectCheckLogSourcePins', { projectId: projectId, digest: pin.sha256 });
   }

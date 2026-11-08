@@ -219,7 +219,9 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
   if (io.probeStates) {
     const probes = await io.probeStates(
       frontier,
-      Object.keys(c.parents).length >= 32
+      // Recorded parents let one bounded descriptor page follow a linear chain
+      // instead of one call per level; older rows wait for a 32-State walk.
+      Object.keys(c.parents).length >= 32 || Object.keys(c.parents).some(id => io.stateParents?.(id))
         ? {
             known: Object.keys(c.parents).filter(id => !frontier.includes(id)),
             windows: io.fanout && frontier.length > 4 ? 4 : 1,
@@ -257,6 +259,22 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
         refs = refs.filter(ref => selected.has(ref.object.sha256));
       }
     }
+  }
+  // Recorded parents settle these States without a manifest download; only the rest are read.
+  const recorded = io.stateParents ? refs.filter(ref => io.stateParents!(ref.object.sha256)) : [];
+  if (recorded.length) {
+    for (const ref of recorded) {
+      const id = ref.object.sha256,
+        edges = io.stateParents!(id)!,
+        generation = io.stateGeneration?.(id);
+      c.parents[id] = [...edges];
+      if (generation !== undefined) (c.generations ??= {})[id] = generation;
+      else c.generationFallback = true;
+      c.states.push(...edges);
+    }
+    c.states = [...new Set(c.states)].filter(id => !c.parents[id]);
+    // Re-enter the proof with the new edges before reading any remaining manifest.
+    return;
   }
   const windows = sourceWindows(refs);
   if (io.fanout && windows.length > 1) {

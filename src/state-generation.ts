@@ -16,3 +16,15 @@ export function nextStateGeneration(
   }
   return maximum < Number.MAX_SAFE_INTEGER ? maximum + 1 : undefined;
 }
+/** Most parents a State's object row records (Git's commit-graph keeps the same edges). A wider
+ * merge keeps only its manifest; ancestry then reads that one State's bytes as before. */
+export const stateParentsLimit = 16;
+/** Exact parent digests of a hash-verified State, as its manifest lists them. */
+export function validStateParents(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= stateParentsLimit &&
+    value.every(id => typeof id === 'string' && /^[0-9a-f]{64}$/.test(id)) &&
+    new Set(value).size === value.length
+  );
+}

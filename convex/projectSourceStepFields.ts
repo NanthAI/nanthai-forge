@@ -9,6 +9,7 @@ import {
 } from '../src/hosted-source-retry';
 export const sourceOutput = v.object({
   stateGeneration: v.optional(v.number()),
+  stateParents: v.optional(v.array(v.string())),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),

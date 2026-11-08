@@ -18,6 +18,11 @@ test('completed resolve hands exact pins to an ordinary land on the resolution r
   const fixed = await s.transport(conflict.root).dispatch(action, resolve);
   const selection = readHostedLaneCheckout(conflict.root).selection;
   assert.deepEqual(selection, fixed.result.source.outcome.result.lane);
+  // The receipt splits its own wall time (save, submit, hosted wait, local apply, next landing).
+  const { totalMs, stepsMs } = fixed.result.timing;
+  assert.deepEqual(Object.keys(stepsMs), ['save', 'submit', 'hostedWait', 'apply', 'select']);
+  const summed = Object.values(stepsMs).reduce((sum, ms) => sum + ms, 0);
+  assert(Math.abs(totalMs - summed) <= 5, `steps cover the total within rounding: ${totalMs} vs ${summed}`);
   const remote = await f.readLane(conflict.laneId);
   for (const key of ['head', 'version', 'sourceVersion', 'lifecycleVersion'])
     assert.equal(selection[key], remote[key], key);
