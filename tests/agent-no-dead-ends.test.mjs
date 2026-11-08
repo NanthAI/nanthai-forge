@@ -47,10 +47,21 @@ test('a passed check queued to land says so, stays unfinished and names its wait
     [`CHECK PASSED; not landed yet: waiting for older submission ${older} to take main first`],
   );
   assert.match(landWaitCommand('/repo', queued), new RegExp(`wait .*${operationId}.*acceptance`));
+  // A held entry (review or dependency, 5c59940b) also names its reason and next step.
+  const dependency = landSummary({
+    result: {
+      phase: 'finish',
+      submission: {
+        phase: 'checking',
+        observation: { state: 'pending', pendingReason: 'waiting-for-dependency' },
+      },
+    },
+  });
+  assert.equal(dependency[0], 'WAITING FOR DEPENDENCY; not landed yet: Waiting for a dependency to land');
+  assert.match(dependency[1], /no action needed/);
   for (const [reason, label] of [
     ['queued', 'QUEUED'],
     ['checking', 'CHECKING'],
-    ['waiting-for-dependency', 'WAITING FOR DEPENDENCY'],
   ])
     assert.deepEqual(
       landSummary({

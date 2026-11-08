@@ -96,6 +96,8 @@ export const hostedLandingTables = {
     status: v.optional(
       v.object({
         total: v.number(),
+        /** Pending entries held for a person or a dependency, listed after `total`. */
+        held: v.optional(v.number()),
         groups: v.number(),
         runningGroups: v.optional(v.number()),
         horizon: v.array(v.string()),

@@ -106,7 +106,11 @@ const pageRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, p
     .withIndex('by_project_and_page', q => q.eq('projectId', projectId).eq('page', page))
     .unique();
 const sameOrder = (a: QueueStatusKey | undefined, b: QueueStatusKey | null) =>
-  a?.id === b?.id && a?.phase === b?.phase && a?.batchId === b?.batchId && a?.priority === b?.priority;
+  a?.id === b?.id &&
+  a?.phase === b?.phase &&
+  a?.batchId === b?.batchId &&
+  a?.priority === b?.priority &&
+  a?.held === b?.held;
 
 /** Maintained by existing committed observation events. Re-ordering costs O(pages)
  * compact metadata reads/writes, never a per-entry RPC or submission-body fan-out.
@@ -138,7 +142,7 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
         : 0;
     if (service > 0) serviceMs = Math.round(((serviceMs ?? service) * 3 + service) / 4);
     // A directory fitting this exact page needs no second range read.
-    if (queue.status && keys.length === queue.status.total && !memo.pages && saved)
+    if (queue.status && keys.length === queue.status.total + (queue.status.held ?? 0) && !memo.pages && saved)
       memo.pages = new Map([[page, saved]]);
   }
   clock ??= hostedLandingProgressAt(states[0]!);
@@ -176,7 +180,7 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
     }
   }
   const changed = new Set(states.map(state => state.id));
-  const { order, groups, runningGroups } = rankQueueStatus([
+  const { order, active, held, groups, runningGroups } = rankQueueStatus([
     ...all.filter(key => !changed.has(key.id)),
     ...changes.flatMap(change => (change.next ? [change.next] : [])),
   ]);
@@ -204,10 +208,11 @@ async function updateQueueStatus(ctx: MutationCtx, states: HostedLandingState[],
     memo.pages!.set(bucket, { _id: id, page: bucket, value });
   }
   const status = {
-    total: order.length,
+    total: active,
+    ...(held ? { held } : {}),
     groups,
     runningGroups,
-    horizon: order.slice(0, 8).map(key => key.id),
+    horizon: order.slice(0, Math.min(8, active)).map(key => key.id),
     lastProgressAt: clock,
     ...(serviceMs ? { serviceMs } : {}),
   };

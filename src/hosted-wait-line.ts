@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingHold } from './hosted-landing-hold.js';
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json => (value && typeof value === 'object' ? (value as Json) : {});
 const scalar = (value: unknown) => value === null || ['string', 'number', 'boolean'].includes(typeof value);
@@ -34,6 +35,8 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       waitingFor: obj(e.orderWait).submissionId ?? undefined,
       recovery: e.recovery ?? e.conflict ?? undefined,
       error: error.code,
+      // Held for a person or a dependency (5c59940b): the reason (protected paths) and next step.
+      hold: landingHold(submission as Parameters<typeof landingHold>[0]) ?? undefined,
       terminal: e.terminal,
       ok: e.ok,
     });

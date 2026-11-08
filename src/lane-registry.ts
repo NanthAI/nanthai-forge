@@ -25,6 +25,19 @@ export const laneRegistryEntrySchema = z.object({
   agent: z.string().max(64).nullable().optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
+  /** The landing hold (review or dependency) a wait or land on this machine last observed (5c59940b);
+   * null once that landing was seen unheld or terminal. Advisory: the server state decides. */
+  hold: z
+    .object({
+      operationId: z.string(),
+      kind: z.enum(['review', 'dependency']),
+      reason: z.string(),
+      paths: z.array(z.string()).nullable(),
+      next: z.string(),
+      observedAt: z.number(),
+    })
+    .nullable()
+    .optional(),
 });
 export type LaneRegistryEntry = z.infer<typeof laneRegistryEntrySchema>;
 
@@ -124,6 +137,28 @@ export async function withLaneCommand<T>(laneId: string | undefined, action: str
     endLaneCommand(laneId);
   }
 }
+/** Remember (or clear, with null) the hold last observed on this Lane's landing: one local write, only on change. */
+export function recordLaneHold(
+  laneId: string | undefined,
+  operationId: string,
+  hold: Omit<NonNullable<LaneRegistryEntry['hold']>, 'operationId' | 'observedAt'> | null,
+  now = Date.now(),
+) {
+  if (!laneId) return;
+  const previous = readLaneEntry(laneId)?.hold;
+  if (!hold && (!previous || previous.operationId !== operationId)) return;
+  if (hold && previous?.operationId === operationId && previous.reason === hold.reason) return;
+  const { kind, reason, paths, next } = hold ?? {};
+  recordLane(
+    {
+      laneId,
+      hold: hold
+        ? { operationId, kind: kind!, reason: reason!, paths: paths!, next: next!, observedAt: now }
+        : null,
+    },
+    now,
+  );
+}
 /** Liveness from this machine's registry: last command touching the Lane and whether one runs now. */
 export function laneLiveness(laneId: string) {
   const entry = readLaneEntry(laneId);
@@ -134,5 +169,14 @@ export function laneLiveness(laneId: string) {
     running: running
       ? { action: running.action, pid: running.pid, since: new Date(running.since).toISOString() }
       : null,
+    ...(entry.hold
+      ? {
+          landingHold: {
+            ...entry.hold,
+            observedAt: new Date(entry.hold.observedAt).toISOString(),
+            note: 'As this machine last observed it; status {operationId} reads the current state.',
+          },
+        }
+      : {}),
   };
 }

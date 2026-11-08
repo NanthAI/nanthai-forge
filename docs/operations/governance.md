@@ -56,7 +56,10 @@ cannot substitute for this evidence.
 A contributor Candidate touching one of these paths stays pending with
 `needs owner approval: protected paths X, Y`, even after checks pass. Missing
 legacy-worker path evidence also waits for owner approval. Review waits schedule
-no finish polling, queue work or stall alarm. Status remains a finite read.
+no finish polling, queue work or stall alarm. Status remains a finite read. The
+held landing stays listed in `queue` without a position, and `land`, `wait`, `queue`
+and `status` name the hold, its paths and the next step (see
+[held landings](../agents/workflow.md)).
 
 The owner can call `projectHostedAcceptance:approve` with the exact `projectId`,
 `submissionId` and `attemptId`. This is explicit person acceptance; device/agent

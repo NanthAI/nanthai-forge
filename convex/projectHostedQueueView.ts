@@ -11,6 +11,7 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { hostedFinishSchema } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { landingSuspect } from '../src/hosted-landing-suspect';
+import { landingHold } from '../src/hosted-landing-hold';
 import { invariant } from '../src/errors';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
@@ -19,7 +20,8 @@ import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
  * in dispatch order, with Lane, Intent title, phase, last failing test files
  * and how many generations each entry went through. Reads the maintained queue
  * directory (at most QUEUE_VIEW_PAGES pages) plus about six indexed rows per
- * listed entry; no queue scan, history, source bytes, scheduler or idle work. */
+ * listed entry; no queue scan, history, source bytes, scheduler or idle work. Entries held
+ * for a person or a dependency follow the dispatch order with no position and a `hold`. */
 export const read = query({
   args: { projectId: v.id('hostedProjects'), limit: v.optional(v.number()) },
   returns: v.string(),
@@ -70,6 +72,7 @@ export const read = query({
               )
               .take(2)
           : [];
+        const hold = landingHold(state, lanes[0]?.key);
         const failed = state.testFiles?.failed.length
           ? state.testFiles.failed.map(file => file.file)
           : (state.batchDiagnostic?.failedTests ?? []);
@@ -92,12 +95,17 @@ export const read = query({
           submittedAt: state.at,
           lastProgressAt: state.timing?.ciProgressAt ?? state.timing?.selectedAt ?? state.at,
           ...(state.error ? { error: state.error.code } : {}),
+          // Held entries stay listed, after dispatch order, naming what releases them (5c59940b).
+          ...(hold ? { hold } : {}),
         });
       }
+      const held = queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length;
+      const total = queue?.status?.total ?? keys.length - held;
       return JSON.stringify({
-        total: queue?.status?.total ?? keys.length,
+        total,
+        ...(held ? { held } : {}),
         listed: entries.length,
-        more: (queue?.status?.total ?? keys.length) > entries.length,
+        more: total + held > entries.length,
         train: queue?.train?.length ?? 0,
         entries,
       });

@@ -1464,6 +1464,18 @@ runs retain run/log pins before the final receipt. Operations settle independent
 batch cumulative/diagnostic prefix runs remain observable while diagnosis decides
 which submissions land or fail.
 
+A pending landing held by `waiting-for-review` (a person must accept it, for example
+for protected paths) or `waiting-for-dependency` is not lost and not queued to land.
+Every read names it, derived from the state already returned with no extra call:
+`land` and `wait` print `WAITING FOR REVIEW; not landed yet: REASON` and the next
+step, and their JSON carries `hold {kind,reason,paths,next}` (`paths` lists the
+protected paths the reason names, or null); `status`/`observe` on the operation and
+the wait line carry the same `hold`. `queue` keeps held entries after the dispatch
+order with `position:null` and `hold`, counts them in `held`, and never makes one a
+predecessor; `yourLane` shows the hold. `status {laneId}` shows `local.landingHold`,
+the hold this machine's last `land` or `wait` saw (one local file, no call). A review
+hold does not time out and an agent cannot release it: tell the owner, or withdraw.
+
 Every JSON event/summary has a `cursor`. Reconnect with the last cursor and same
 owner/targets to suppress unchanged observations; terminal states remain in the
 summary. `any-change` detects disconnected changes too. Cursors deduplicate

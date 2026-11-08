@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { shellQuote } from './agent-brief-render.js';
 import { operationWait } from './agent-operation-wait.js';
+import { landingHold } from './hosted-landing-hold.js';
 
 type Reply = Record<string, unknown>;
 const failedRuns = new Set(['failed', 'cancelled', 'runner-unavailable', 'interrupted']);
@@ -54,8 +55,11 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
     operationId ?? (typeof replayOperation === 'string' ? replayOperation : submission?.operationId);
   if (!pending || !original) return result;
   const continuation = operationWait(root, { operationIds: [original], until: 'acceptance' });
+  // A held landing names who releases it beside the wait (5c59940b); derived, no read.
+  const hold = landingHold(submission as Parameters<typeof landingHold>[0]);
   return {
     ...result,
+    ...(hold ? { hold } : {}),
     ...continuation,
     ...(result.nextCommand ? { nextCommand: continuation.command } : {}),
   };

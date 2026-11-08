@@ -17,7 +17,8 @@ import { followLocalOperation } from './hosted-agent-wait-local.js';
 import { observeHostedRun } from './hosted-agent-observe.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { readClientSettings } from './client-settings.js';
-import { withLaneCommand } from './lane-registry.js';
+import { recordLaneHold, withLaneCommand } from './lane-registry.js';
+import { landingHold } from './hosted-landing-hold.js';
 import { markerIdentity } from './lane-prune.js';
 import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
 import { learnFromLanding } from './preflight-learned.js';
@@ -391,6 +392,14 @@ export async function hostedLandCli(
   };
   const lines = landSummary(final);
   for (const line of lines) process.stderr.write(`${line}\n`);
+  if (typeof submitted.operationId === 'string')
+    recordLaneHold(
+      (typeof command.laneId === 'string' ? command.laneId : undefined) ??
+        markerIdentity(root)?.laneId ??
+        undefined,
+      submitted.operationId,
+      landTerminal(final) ? null : landingHold(resultOf(final).submission),
+    );
   learnFromLanding(hostedAgentRoot(transport.root ?? root), resultOf(final), command.laneId);
   const resumeWith = landWaitContinuation(transport.root ?? root, final)?.next;
   if (resumeWith) recordTurnWait(transport.root ?? root, resumeWith, null);

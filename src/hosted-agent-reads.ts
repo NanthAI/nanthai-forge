@@ -88,12 +88,17 @@ export async function queueHostedSource(transport: HostedAgentTransport, input: 
 export function markQueueLane(view: unknown, laneId: string | undefined) {
   if (!laneId || !view || typeof view !== 'object' || !Array.isArray((view as { entries?: unknown }).entries))
     return view;
-  const page = view as { entries: { laneId?: string | null; position?: number | null }[]; more?: boolean };
+  const page = view as {
+    entries: { laneId?: string | null; position?: number | null; submissionId?: string; hold?: unknown }[];
+    more?: boolean;
+  };
   const yours = page.entries
     .filter(entry => entry.laneId === laneId)
     .map(entry => ({
       position: entry.position ?? null,
-      submissionId: (entry as { submissionId?: string }).submissionId,
+      submissionId: entry.submissionId,
+      // A held entry has no position: say what holds it and the next step (5c59940b).
+      ...(entry.hold ? { hold: entry.hold } : {}),
     }));
   return {
     ...page,

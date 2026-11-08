@@ -19,9 +19,10 @@ import { durableReplace } from './native-durability.js';
 import { observeHostedRun, hostedWaitSchema } from './hosted-agent-observe.js';
 import { observeOperations } from './hosted-agent-wait-local.js';
 import { invariant } from './errors.js';
-import { withLaneCommand } from './lane-registry.js';
+import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landSummary } from './hosted-land-summary.js';
+import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
@@ -237,13 +238,19 @@ export async function hostedAgentCli(
       });
       const { submissions, status, run } = response.result as {
         submissions?: {
-          submission: { phase?: string };
+          submission: { phase?: string } & Parameters<typeof landingHold>[0];
           recovery?: unknown;
           conflict?: unknown;
         }[];
         status: string;
         run?: { status?: string } | null;
       };
+      // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
+      const hold = submissions?.length === 1 ? landingHold(submissions[0]!.submission, laneId) : null;
+      const held = hold ? { hold } : {};
+      if (hold && status !== 'terminal') process.stderr.write(`${holdLines(hold).join('\n')}\n`);
+      if (selectedWait.operationIds?.length === 1)
+        recordLaneHold(laneId, selectedWait.operationIds[0]!, status === 'terminal' ? null : hold);
       if (status === 'message' && board) {
         // A note reached this Lane: same exit code and resume command as a budget return, so every
         // "repeat on IN PROGRESS" loop keeps working; the Stop hook still sees the unfinished wait.
@@ -258,6 +265,7 @@ export async function hostedAgentCli(
             budgetSeconds,
             operationIds: selectedWait.operationIds,
             phase: submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
+            ...held,
             board: boardWakeEnvelope(root, board.laneId, delivered),
             ...resume,
           },
@@ -278,6 +286,7 @@ export async function hostedAgentCli(
                   operationIds: selectedWait.operationIds,
                   phase:
                     submissions?.length === 1 ? (submissions[0]!.submission.phase ?? 'unknown') : 'pending',
+                  ...held,
                 }),
             ...resume,
           },

@@ -3,6 +3,7 @@ import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { scrubText } from './client-error-text.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
+import { holdLines, landingHold } from './hosted-landing-hold.js';
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
 type Result = {
@@ -10,6 +11,7 @@ type Result = {
   saveOperationId?: string;
   progress?: { status?: string } & Record<string, unknown>;
   submission?: {
+    id?: string;
     phase?: string;
     observation?: { state: string; pendingReason?: string | null };
     error?: { code: string; message: string } | null;
@@ -65,6 +67,10 @@ function outcomeLines(response: HostedAgentResponse): string[] {
     return [
       'SUPERSEDED; this operation does not land the newer saved head. Use its current Lane status before continuing.',
     ];
+  // A held landing is neither queued nor stranded (5c59940b): name the hold and who releases it.
+  const replay = (result as { replayParameters?: { laneId?: unknown } }).replayParameters;
+  const hold = landingHold(submission, typeof replay?.laneId === 'string' ? replay.laneId : undefined);
+  if (hold) return holdLines(hold);
   // A passed check is not a landing, and a queued landing is not a failure: say which.
   if (phase === 'ready' && submission?.observation?.state !== 'terminal-failed')
     return [
