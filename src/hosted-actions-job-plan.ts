@@ -39,6 +39,7 @@ import { resolveTestRunner } from './project-test-runner.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
+import { projectLockfile } from './project-lockfile.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -233,7 +234,7 @@ export async function prepareActionsJob(
     'ACTIONS_WORKFLOW_OUTDATED',
     ACTIONS_WORKFLOW_OUTDATED,
   );
-  const lock = inventory.get('package-lock.json');
+  const lock = inventory.get(projectLockfile(path => inventory.has(path)) ?? '');
   lap('selectMs');
   const planned = (await client.call({
     kind: 'plan',

@@ -40,13 +40,18 @@ test('run accepts explicit file lists for either selector and validates file pat
     );
     assert.deepEqual(parseAgentAction({ action: 'run', ...selector, tests: [] }).tests, []);
     assert.equal(parseAgentAction({ action: 'run', ...selector }).tests, undefined);
+    // Which files are tests is decided against the check and its project runner at the head.
+    assert.deepEqual(
+      parseAgentAction({ action: 'run', ...selector, tests: ['packages/a/src/sum.test.ts'] }).tests,
+      ['packages/a/src/sum.test.ts'],
+    );
   }
   for (const tests of [
     'tests/a.test.mjs',
     [null],
     ['/tests/a.test.mjs'],
     ['tests/../a.test.mjs'],
-    ['src/a.ts'],
+    ['packages/a/src/{a,b}.test.ts'],
     ['tests/a.test.mjs\n'],
     ['tests/*.test.mjs'],
   ])
@@ -180,6 +185,83 @@ for (const tests of [[], ['tests/a.test.mjs']])
       /absent from the pinned source/,
     );
   });
+
+// Issue 63d241db: explicit lists accept the project runner's test files, for any check command.
+test('an explicit run of a custom check runs exactly those files with the project test runner', async t => {
+  const { root, write } = fixture(t);
+  const runner = join(root, '..', `runner-${randomUUID()}.mjs`);
+  writeFileSync(runner, 'console.log(JSON.stringify({ files: process.argv.slice(2) }));\n');
+  t.after(() => rmSync(runner, { force: true }));
+  write(
+    'package.json',
+    JSON.stringify({
+      name: 'pnpm-style',
+      packageManager: 'pnpm@9.0.0',
+      forge: {
+        preflight: {
+          tests: { glob: 'packages/*/src/**/*.test.ts', command: [process.execPath, runner, '{files}'] },
+        },
+      },
+    }),
+  );
+  write('pnpm-workspace.yaml', 'packages:\n  - packages/*\n');
+  write('ci/check.sh', 'echo full check; exit 7\n');
+  write('packages/a/src/sum.ts', 'export const sum = (a: number, b: number) => a + b;\n');
+  write('packages/a/src/sum.test.ts', '// synthetic test\n');
+  write('packages/a/src/other.test.ts', '// unselected test\n');
+  write('tests/a.test.mjs', '// not a test of this runner\n');
+  initNative(root);
+  const work = new WorkService(root),
+    agent = new AgentWorkflow(root);
+  const act = command => work.execute(command, work.store.revision()).result;
+  await agent.dispatch({ action: 'set-policy', operationId: randomUUID(), preset: 'trusted' });
+  const intent = act({ action: 'intent', outcome: 'Explicit runner tests fixture' });
+  const lane = act({ action: 'lane', intentId: intent.id, name: 'Fixture' });
+  act({ action: 'compose', intentId: intent.id, inputs: [{ laneId: lane.id, head: lane.head }] });
+  act({ action: 'define-check', name: 'verify', executable: 'bash', args: ['ci/check.sh'] });
+  const tests = ['packages/a/src/sum.test.ts'];
+  const receipt = (await agent.dispatch({ action: 'run', laneId: lane.id, operationId: randomUUID(), tests }))
+    .result;
+  assert.equal(receipt.status, 'passed', 'the runner ran, not the failing full command');
+  assert.equal(receipt.checkSelection.scope, 'partial');
+  const output = readFileSync(join(work.store.directory, `check-${receipt.runId}/stdout.log`), 'utf8');
+  assert.deepEqual(JSON.parse(output.trim()), { files: tests });
+  assert.equal(successfulCheck(runDetails(work.store, work.store.select('runs', receipt.runId))), false);
+  for (const [wrong, message] of [
+    [['tests/a.test.mjs'], /not a test file of the project runner/],
+    [['packages/a/src/sum.ts'], /not a test file of the project runner/],
+    [['packages/a/src/missing.test.ts'], /not a test file of the project runner/],
+  ])
+    await assert.rejects(
+      agent.dispatch({ action: 'run', laneId: lane.id, operationId: randomUUID(), tests: wrong }),
+      error => error.code === 'BAD_ARGUMENT' && message.test(error.message),
+      wrong[0],
+    );
+});
+
+test('an explicit run of Forge standard check still takes only tests/*.test.mjs files', async t => {
+  const { root, write } = fixture(t);
+  write('scripts/forge-check.mjs', 'console.log(process.env.FORGE_SELECTED_TESTS);');
+  write('src/a.ts', 'export {};\n');
+  initNative(root);
+  const work = new WorkService(root),
+    agent = new AgentWorkflow(root);
+  const act = command => work.execute(command, work.store.revision()).result;
+  await agent.dispatch({ action: 'set-policy', operationId: randomUUID(), preset: 'trusted' });
+  const intent = act({ action: 'intent', outcome: 'Standard explicit fixture' });
+  const lane = act({ action: 'lane', intentId: intent.id, name: 'Fixture' });
+  act({ action: 'compose', intentId: intent.id, inputs: [{ laneId: lane.id, head: lane.head }] });
+  act({
+    action: 'define-check',
+    name: 'verify',
+    executable: process.execPath,
+    args: ['scripts/forge-check.mjs'],
+  });
+  await assert.rejects(
+    agent.dispatch({ action: 'run', laneId: lane.id, operationId: randomUUID(), tests: ['src/a.ts'] }),
+    error => error.code === 'BAD_ARGUMENT' && /tests\/\*\.test\.mjs/.test(error.message),
+  );
+});
 
 test('generated workflow starts static verification and test shards independently', () => {
   const workflow = githubActionsWorkflow('ubuntu-latest');

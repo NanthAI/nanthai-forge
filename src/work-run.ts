@@ -2,6 +2,7 @@
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { workspaceTestRunner } from './workspace-test-runner.js';
+import { explicitTestsCommand } from './explicit-test-runner.js';
 import { nativeQuarantine } from './check-native-quarantine.js';
 import { runDetails } from './work-detail-store.js';
 import { cleanLocalCheckLogs } from './check-log-cleanup.js';
@@ -631,8 +632,15 @@ async function launchLocal(
             // Serialize the last cancellation check with spawn and its running journal.
             const semanticPlan = store.select('views', run.viewId)?.semanticPlan;
             const unionTests = semanticTests(semanticPlan);
+            const explicit =
+              run.checkSelection?.scope === 'partial'
+                ? explicitTestsCommand(run.check, workspace, run.checkSelection.tests)
+                : undefined;
             const command = semanticCheckCommand(
-              [measured?.executable ?? run.check.executable, ...(measured?.args ?? run.check.args)],
+              explicit ?? [
+                measured?.executable ?? run.check.executable,
+                ...(measured?.args ?? run.check.args),
+              ],
               semanticPlan,
               process.execPath,
               [],

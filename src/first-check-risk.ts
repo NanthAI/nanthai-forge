@@ -149,6 +149,20 @@ export function checkEntryPaths(check: { executable: string; args: readonly stri
   return [...paths];
 }
 
+/** Entry files of a check run: its command's entries (above, same order), then those of the
+ * Actions setup command it runs first, which can change every result just as the check script can.
+ * The same files governance protects (src/public-governance.ts definedCheckEntryPaths). */
+export function checkRunEntryPaths(check: {
+  executable: string;
+  args: readonly string[];
+  actions?: { setup?: { executable: string; args: readonly string[] } | undefined } | undefined;
+}) {
+  const paths = checkEntryPaths(check);
+  const setup = check.actions?.setup;
+  for (const path of setup ? checkEntryPaths(setup) : []) if (!paths.includes(path)) paths.push(path);
+  return paths;
+}
+
 export function firstCheckRiskPaths(
   paths: readonly string[],
   checkEntries: readonly string[] = [],

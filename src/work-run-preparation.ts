@@ -13,7 +13,7 @@ import { interactionEvidence } from './work-interaction.js';
 import { runCandidateFamily } from './work-run-cancellation.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, EvidenceCommand } from './work-types.js';
-import { isStandardForgeCheck } from './standard-check.js';
+import { explicitTestsRunner } from './explicit-test-runner.js';
 
 type RunCommand = Extract<EvidenceCommand, { action: 'run-check' }>;
 /** Prepare exact source/input evidence and immutable run pages before the owner
@@ -33,12 +33,10 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         view.mainCheck || view.recovery
           ? undefined
           : landingRunBatch(store, tx, command.operationId, command.viewId, command.expectedHead);
-      if (command.tests !== undefined)
-        invariant(
-          isStandardForgeCheck(check, process.execPath),
-          'BAD_ARGUMENT',
-          'Explicit test files require the standard Forge check.',
-        );
+      const projectRunner =
+        command.tests !== undefined
+          ? explicitTestsRunner(store, check, command.expectedHead, command.tests)
+          : undefined;
       const environment = batch?.environment ?? checkEnvironment();
       if (environment.fingerprint !== command.expectedEnvironment)
         throw new ForgeError(
@@ -49,6 +47,12 @@ export function prepareRunRegistration(store: WorkStore, command: RunCommand, se
         inputObservations = observeCheckInputs(store, check, command.expectedHead, environment),
         policy = readPolicy(store).checks,
         route = checkRoute(policy?.runner ?? 'local', check, store.native);
+      // A project runner's explicit files run here; a remote runner runs the configured command.
+      invariant(
+        !projectRunner || route.actual === 'local',
+        'BAD_ARGUMENT',
+        'Explicit test files of a project test runner run on the local runner; this project checks remotely.',
+      );
       const run: CheckRun = {
         backend: {
           ...route,

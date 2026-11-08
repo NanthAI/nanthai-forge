@@ -6,6 +6,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { moduleUrl } from './convex-module.mjs';
 import {
   checkEntryPaths,
+  checkRunEntryPaths,
   FIRST_CHECK_RISK_RULE,
   firstCheckRisk,
   globalRiskBetween,
@@ -260,6 +261,29 @@ test('own check command: the file the command names is global-risk and rechecks'
   assert.equal(runCount(f), 3);
 });
 
+// Governance protects setup-action entries (8eccbea9); they can change every result too.
+test('own check command: the file its Actions setup command names is global-risk and rechecks', async t => {
+  const withSetup = {
+    ...ownCheck,
+    checkCommand: {
+      ...ownCheck.checkCommand,
+      actions: { setup: { executable: 'bash', args: ['ci/setup.sh'] } },
+    },
+  };
+  const f = await wave(t, { ...withSetup, memberPaths: ['ci/setup.sh', 'src/b.ts'], fileCount: 2 });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  assert.deepEqual(f.reuseDecisions, ['global-risk']);
+  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
+  assert.equal(runCount(f), 3);
+  // A disjoint overtake still lands on its admission run, and the proof names both entries.
+  const clean = await wave(t, { ...disjoint, ...withSetup });
+  assert.deepEqual(clean.reuseDecisions, ['proof']);
+  assert.deepEqual(receipts(clean)[1].crossHeadProof.checkEntries, ['ci/check.sh', 'ci/setup.sh']);
+});
+
 test('own check command: a path both changes touch still rechecks', async t => {
   const f = await wave(t, { ...ownCheck, memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3 });
   assert.deepEqual(
@@ -298,6 +322,16 @@ test('check entries are the repository files a command names, in any form', () =
     checkEntryPaths({ executable: 'bash', args: ['-c', './tools/a.sh && node tools/b.mjs | tee out'] }),
     ['tools/a.sh', 'tools/b.mjs'],
   );
+  // A setup action's entries follow the command's, in order and without repeats.
+  assert.deepEqual(
+    checkRunEntryPaths({
+      executable: 'bash',
+      args: ['ci/check.sh'],
+      actions: { setup: { executable: 'bash', args: ['ci/setup.sh', 'ci/check.sh'] } },
+    }),
+    ['ci/check.sh', 'ci/setup.sh'],
+  );
+  assert.deepEqual(checkRunEntryPaths({ executable: 'bash', args: ['.bench/ci.sh'] }), ['.bench/ci.sh']);
   for (const check of [
     { executable: '/usr/local/bin/node', args: ['--test'] },
     { executable: 'npm', args: ['test'] },

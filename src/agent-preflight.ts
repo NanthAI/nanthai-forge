@@ -58,6 +58,7 @@ import {
   type TestRunner,
   type TestRunnerResolution,
 } from './project-test-runner.js';
+import { CODE_FILE, importGraphTests, jsImportGraph } from './js-import-graph.js';
 import { FORGE_CONFIG_FILE } from './project-config.js';
 import {
   packageGraphFor,
@@ -483,7 +484,7 @@ function runnerPlan(
   const only = options.only ? new Set(options.only) : null;
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
   if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep);
-  const selection = runnerSelection(runner, allPaths, paths);
+  const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
   // Tests that failed in a landing check or preflight while these paths changed run again, as for
   // Forge's own layout: the runner's globs decide which learned names are still test files here.
   const present = new Set(selection.available);
@@ -533,7 +534,7 @@ function runnerPlan(
   const trim = options.trim !== false;
   const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
   const label = runnerLabel(runner);
-  const rule = `${label}: changed test files, learned failures, then tests named for a changed module (closest folder first), then tests in affected packages`;
+  const rule = `${label}: changed test files, learned failures, then tests named for a changed module (closest folder first) or reaching it through imports, then tests in affected packages`;
   const reason = learned.length
     ? `${selection.reason}; ${learned.length} re-run because they failed while these paths changed before`
     : selection.reason;
@@ -630,6 +631,20 @@ function packagePlan(
   };
   plannedPaths.set(plan, paths);
   return plan;
+}
+
+/** Tests reaching the change through a static JS/TS import graph of the Lane (any repository; Forge's
+ * own layout has its own selector). Reads the Lane's code files, runs none; a docs-only change, a
+ * repository without code or one over the graph bounds keeps path-only selection. */
+function preflightImports(root: string, runner: TestRunner, allPaths: string[], paths: string[]) {
+  if (paths.every(documentation) || !paths.some(path => CODE_FILE.test(path))) return undefined;
+  const graph = jsImportGraph(allPaths, path => laneText(root, path));
+  if ('error' in graph) return undefined;
+  return importGraphTests(
+    graph,
+    allPaths.filter(path => runnerTestPath(runner, path)),
+    paths,
+  );
 }
 
 /** Seconds the package units should take: each unit this machine already ran at its smoothed time;

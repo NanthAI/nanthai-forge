@@ -97,9 +97,10 @@ or a main delta touching any of these always rechecks:
   `Dockerfile`);
 - CI configuration on any provider (`.github/`, GitLab, CircleCI, Buildkite,
   Forgejo, Woodpecker, Jenkins, Azure Pipelines, Bitbucket Pipelines);
-- every repository file the project's check command names: its executable, its
-  arguments and any path inside a shell string such as `bash -c "./ci/run.sh"`
-  (the check contract's own entry points). Forge's own standard check
+- every repository file the project's check command or its Actions setup command
+  (`actions.setup`) names: its executable, its arguments and any path inside a shell
+  string such as `bash -c "./ci/run.sh"` (the check contract's own entry points;
+  `checkRunEntryPaths`). Forge's own standard check
   (`node scripts/forge-check.mjs`, `isStandardForgeCheck` in `src/standard-check.ts`)
   also declares its extra inputs there: its check scripts, check contract and
   shared test runtime (`scripts/verify`, `check-contract`, `check-path-scopes`,

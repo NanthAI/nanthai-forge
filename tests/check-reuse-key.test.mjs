@@ -168,3 +168,64 @@ test('Git receipts use exact tree and lockfile bytes in the same key contract', 
     }),
   );
 });
+
+test('a pnpm, Yarn or Cargo project pins its own lockfile bytes, not the empty digest', async t => {
+  const { mkdtempSync, writeFileSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { execFileSync } = await import('node:child_process');
+  const { WorkService } = await import('../dist/work.js');
+  const { selfMetricReuseKey } = await import('../dist/self-metrics-reuse-key.js');
+  const { digest } = await import('../dist/hash.js');
+  const { projectLockfile } = await import('../dist/project-lockfile.js');
+  // npm keeps precedence, so a project that pinned package-lock.json pins the same bytes as before.
+  assert.equal(
+    projectLockfile(path => ['yarn.lock', 'package-lock.json'].includes(path)),
+    'package-lock.json',
+  );
+  assert.equal(
+    projectLockfile(() => false),
+    undefined,
+  );
+  for (const lockfile of ['pnpm-lock.yaml', 'yarn.lock', 'Cargo.lock']) {
+    const root = mkdtempSync(join(tmpdir(), 'forge-key-lock-'));
+    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    const git = args =>
+      execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    git(['init']);
+    writeFileSync(join(root, lockfile), `synthetic ${lockfile}\n`);
+    writeFileSync(join(root, 'README.md'), 'synthetic\n');
+    git(['add', '.']);
+    git([
+      '-c',
+      'user.name=Synthetic',
+      '-c',
+      'user.email=synthetic@example.invalid',
+      'commit',
+      '-m',
+      'Synthetic',
+    ]);
+    const environment = checkEnvironment();
+    const run = {
+      head: git(['rev-parse', 'HEAD']),
+      check: { definition: 'a'.repeat(64) },
+      environment,
+      backend: { actual: 'local' },
+    };
+    assert.equal(
+      checkReuseKey(new WorkService(root).store, run),
+      selfMetricReuseKey({
+        tree: git(['rev-parse', 'HEAD^{tree}']),
+        definition: run.check.definition,
+        lockfile: digest(`synthetic ${lockfile}\n`),
+        node: environment.node,
+        declaredInputs: { inputs: [], environment: [] },
+      }),
+      lockfile,
+    );
+  }
+});

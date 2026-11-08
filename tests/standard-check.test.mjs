@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 // Forge's own check is one predicate; its settings and extra inputs never reach other projects.
+// The literal guard for the whole product is tests/forge-only-rules.test.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, sep } from 'node:path';
 import { isStandardForgeCheck } from '../dist/standard-check.js';
 import {
   checkEntryPaths,
@@ -174,26 +174,4 @@ test('a non-Forge repository keeps its own scripts/test-*.ts reusable', () => {
   assert.equal(firstCheckRisk('.bench/ci.sh', entries), 'check script or check contract');
   // Forge's Actions executor reads this file from every Candidate, so it stays global.
   assert.equal(firstCheckRisk('scripts/check-contract.mjs', entries), 'check script or check contract');
-});
-
-// Guard: a Forge-only branch keyed on its check command uses isStandardForgeCheck. The
-// entry path appears elsewhere in product code only where it is intended Forge data.
-const entryLiteralAllowed = new Map([
-  ['src/standard-check.ts', 'defines the predicate and the entry'],
-  ['src/public-governance.ts', 'default owner-approval path for check definitions'],
-  ['src/github-actions-workflow.ts', 'the workflow Forge generates for its own check'],
-  ['src/hosted-actions-export.ts', 'marker inside that generated workflow'],
-]);
-test('product code never compares a check to Forge entry by string', () => {
-  const repo = fileURLToPath(new URL('..', import.meta.url));
-  const offenders = [];
-  for (const directory of ['src', 'convex'])
-    for (const entry of readdirSync(join(repo, directory), { recursive: true, withFileTypes: true })) {
-      if (!entry.isFile() || !/\.[cm]?[jt]s$/.test(entry.name)) continue;
-      const file = join(entry.parentPath ?? entry.path, entry.name);
-      const path = relative(repo, file).split('\\').join('/');
-      if (entryLiteralAllowed.has(path) || path.includes('/_generated/')) continue;
-      if (readFileSync(file, 'utf8').includes('scripts/forge-check.mjs')) offenders.push(path);
-    }
-  assert.deepEqual(offenders, [], 'use isStandardForgeCheck from src/standard-check.ts');
 });

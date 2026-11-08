@@ -180,11 +180,19 @@ test('preflight on a pnpm vitest workspace plans its own tests and runner comman
   const f = lane(t, pnpmVitest);
   const plan = f.plan(['packages/core/src/sum.ts']);
   assert.equal(plan.status, 'planned');
-  assert.deepEqual(plan.tests, ['packages/core/src/sum.test.ts']);
-  assert.equal(plan.command, 'pnpm exec vitest run packages/core/src/sum.test.ts');
+  // The import graph (src/js-import-graph.ts) adds index.test.ts, which imports sum through ./index,
+  // and the app test: '@fixture/core' is declared by no manifest here, so its importer is open.
+  // Tier ranking orders them (closest folder first); the set is what the graph decides.
+  const expected = [
+    'apps/web/src/__tests__/index.test.ts',
+    'packages/core/src/index.test.ts',
+    'packages/core/src/sum.test.ts',
+  ];
+  assert.deepEqual([...plan.tests].sort(), expected);
+  assert.equal(plan.command, `pnpm exec vitest run ${plan.tests.join(' ')}`);
   assert.equal(plan.runner.label, 'vitest (test-script)');
   assert.doesNotMatch(plan.command, /--test/);
-  assert.match(plan.local.summary, /no import graph for this layout/);
+  assert.match(plan.local.summary, /1 named for a changed module and 2 more reached through imports/);
 });
 
 test('preflight runs a project runner, records its pass or failure, and never runs node --test', t => {

@@ -238,8 +238,12 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   reason (`unavailable` when no static check applies), and the `tests` read returns scope
   `unavailable`. Node's runner over top-level `tests/*.test.mjs` keeps the import-graph tiers below.
   Any other declared or inferred runner selects by path: changed test files, then the tests named
-  for a changed module (`sum.test.ts` for `sum.ts`, closest folder first), then its test files
-  inside the packages the change affects; the landing check runs the rest. A runner declared or
+  for a changed module (`sum.test.ts` for `sum.ts`, closest folder first) and, in local preflight,
+  every test that reaches a changed file through a static JS/TS import graph (relative imports,
+  workspace package names and their `exports`, and tsconfig `paths`; `src/js-import-graph.ts`, no
+  repository code runs; a computed import or an undeclared bare specifier selects its importer's
+  tests for every code change), then its test files inside the packages the change affects; the
+  landing check runs the rest; hosted `tests` reads stay path-named. A runner declared or
   inferred this way also runs the triggered guards first. Contract tests may live at any test path
   in any language (`*.test.*`, `*.spec.*`, `__tests__/`, `x_test.go`, `test_x.py`, `XTest.java`,
   `XTests.cs`, `x_spec.rb`, or a file under a `test/`, `tests/` or `spec/` folder such as Rust

@@ -17,6 +17,7 @@ import { actionsDeclaration } from './actions-toolchains.js';
 import { hostedActionsGit } from './hosted-actions-git.js';
 import { invariant } from './errors.js';
 import { isStandardForgeCheck, STANDARD_CHECK_ENTRY } from './standard-check.js';
+import { projectLockfile } from './project-lockfile.js';
 
 /** Fixed source-worker export. Hash-verified R2 bytes go straight to bare Git
  * objects; source is never checked out and no project code runs here. */
@@ -132,11 +133,12 @@ export async function exportHostedActions(
     await hostedActionsGit(root, ['init', '--bare', '--template=', '--initial-branch=forge-export']);
     const entries: string[] = [];
     let lockfile = digest('');
+    const lockName = projectLockfile(path => state.files.some(file => file.path === path));
     // Deduplicate before describing; consume grants and stream bytes in bounded windows.
     await reader.resolveMany(state.files.map(file => file.blob));
     for (const file of state.files) {
       const path = join(cache, file.blob);
-      if (file.path === 'package-lock.json') lockfile = file.blob;
+      if (file.path === lockName) lockfile = file.blob;
       if (generated.has(file.path)) continue;
       const hash =
         file.mode === 'gitlink'

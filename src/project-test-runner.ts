@@ -31,8 +31,8 @@ import { declaredPreflight } from './project-config.js';
  *    the workspace package manager), when that command is unambiguous.
  * An unrecognized `test` script (a task runner, make, another language) is not guessed: tests are
  * `unavailable` with a reason, never Forge's layout. `layout: 'forge-node'` (Node's runner over
- * `tests/*.test.mjs`) keeps the import-graph selector; `packages` runs package commands; any other
- * runner selects by path. */
+ * `tests/*.test.mjs`) keeps Forge's import-graph selector; `packages` runs package commands; any other
+ * runner selects by path and, in local preflight, by a generic JS/TS import graph (src/js-import-graph.ts). */
 export type TestRunner = {
   source: 'declared' | 'test-script' | 'dependency' | 'files' | 'package-graph';
   program: 'node' | 'tsx' | 'vitest' | 'jest' | 'declared' | 'packages' | 'chained';
@@ -297,11 +297,20 @@ export function orderRunnerTests(tests: string[], changedPaths: string[]): strin
 }
 const documentation = (path: string) => /\.(?:md|mdx|txt)$/i.test(path);
 
-/** Path-only selection for a generic runner: changed test files, then the tests named for a changed
- * module (`sum.test.ts` for `sum.ts`), the closest by folder when several share the name. There is no
- * import graph for these layouts, so every other test is the landing check's; this is advisory
- * local evidence, never an independence proof. Reads no source bytes. */
-export function runnerSelection(runner: TestRunner, allPaths: Iterable<string>, changedPaths: string[]) {
+/** Tests an import graph reached for the change (src/js-import-graph.ts importGraphTests). */
+export type ImportedTests = { tests: string[]; openTests: number; untraced: string[] };
+
+/** Selection for a generic runner: changed test files, then the tests named for a changed module
+ * (`sum.test.ts` for `sum.ts`, the closest by folder when several share the name) and, when the
+ * caller built a JS/TS import graph, every test that reaches a changed file through imports. Every
+ * other test is the landing check's; this is advisory local evidence, never an independence proof.
+ * Reads no source bytes itself. */
+export function runnerSelection(
+  runner: TestRunner,
+  allPaths: Iterable<string>,
+  changedPaths: string[],
+  imported?: ImportedTests,
+) {
   const isTest = matcher(runner.globs);
   const tests = [...new Set(allPaths)].filter(isTest).sort();
   const present = new Set(tests);
@@ -314,14 +323,20 @@ export function runnerSelection(runner: TestRunner, allPaths: Iterable<string>, 
     const closest = Math.max(-1, ...same.map(test => commonDirs(path, test)));
     for (const test of same) if (commonDirs(path, test) === closest) named.add(test);
   }
+  const byName = named.size;
+  for (const test of imported?.tests ?? [])
+    if (present.has(test) && !changedTests.includes(test)) named.add(test);
   const namedTests = [...named].sort();
   const docsOnly = changedPaths.length > 0 && changedPaths.every(documentation);
   const run = runnerLabel(runner);
   return {
     scope: docsOnly ? 'docs' : changedTests.length || namedTests.length ? 'scoped' : 'none',
-    reason:
-      `project test runner ${run}: ${changedTests.length} changed test file(s) and ${namedTests.length} named for a changed module; ` +
-      'no import graph for this layout, so the other tests run in the landing check',
+    reason: imported
+      ? `project test runner ${run}: ${changedTests.length} changed test file(s), ${byName} named for a changed module and ` +
+        `${namedTests.length - byName} more reached through imports (${imported.openTests} through computed imports); ` +
+        `${imported.untraced.length} changed code file(s) no import reaches; the other tests run in the landing check`
+      : `project test runner ${run}: ${changedTests.length} changed test file(s) and ${namedTests.length} named for a changed module; ` +
+        'no import graph for this layout, so the other tests run in the landing check',
     changedTests,
     namedTests,
     tests: [...changedTests, ...namedTests],

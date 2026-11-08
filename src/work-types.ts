@@ -435,16 +435,12 @@ export const interactionEvidenceSchema = interactionRequestSchema.extend({
 });
 export const explicitTestsSchema = z
   .array(
-    z
-      .string()
-      .refine(
-        path =>
-          safeRelative(path) &&
-          path.startsWith('tests/') &&
-          path.endsWith('.test.mjs') &&
-          !/[\x00-\x1f\x7f*?\[\]{}!]/.test(path),
-        'Use a relative tests/*.test.mjs file path.',
-      ),
+    z.string().refine(
+      // Which files are tests is the check's: Forge's standard check takes tests/*.test.mjs, any
+      // other check its project test runner's files (src/explicit-test-runner.ts, at the head).
+      path => safeRelative(path) && path.length <= 1024 && !/[\x00-\x1f\x7f*?\[\]{}!]/.test(path),
+      'Use a relative test file path (no globs).',
+    ),
   )
   .transform(tests => [...new Set(tests)].sort());
 export const checkRunSchema = z

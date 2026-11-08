@@ -19,7 +19,7 @@ import { crossHeadProofSchema } from '../src/hosted-cross-head-proof';
 import { ForgeError, invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { fullGate, docsGate } from '../src/main-audit';
-import { checkEntryPaths } from '../src/first-check-risk';
+import { checkRunEntryPaths } from '../src/first-check-risk';
 import { reducedEvidenceActor } from '../src/contract-gate-policy';
 import { trustGateReader } from './projectHostedTrust';
 import { scheduleFinish } from './projectHostedFinishWake';
@@ -187,8 +187,8 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     actor: previous.actor.id,
     pendingId: value.pending.id,
     selection: run.plan.selection.sha256,
-    // The project's own check entry files are global-risk (any runner).
-    checkEntries: checkEntryPaths(run.check),
+    // The project's own check and setup-action entry files are global-risk (any runner).
+    checkEntries: checkRunEntryPaths(run.check),
     basis: {
       checked,
       checkedBase,

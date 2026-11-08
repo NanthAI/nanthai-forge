@@ -33,6 +33,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './hash.js';
 import { HostedMacProvider } from './hosted-mac-worker.js';
 import { invariant } from './errors.js';
+import { projectLockfile } from './project-lockfile.js';
 import { declaredTestedDocs } from './docs-paths.js';
 import {
   changedStatePaths,
@@ -124,7 +125,8 @@ export async function executeHostedMacCheck(
     await cache.ensure([run.request.expectedHead]);
     signal.throwIfAborted();
     const state = parseNativeState(await readFile(join(cache.objects, run.request.expectedHead)));
-    const lockfile = state.files.find(file => file.path === 'package-lock.json')?.blob ?? digest('');
+    const lockName = projectLockfile(path => state.files.some(file => file.path === path));
+    const lockfile = state.files.find(file => file.path === lockName)?.blob ?? digest('');
     const publish = async (value: unknown) => {
       const bytes = Buffer.from(canonicalPayload(value)),
         pin = { sha256: digest(bytes), size: bytes.length };
