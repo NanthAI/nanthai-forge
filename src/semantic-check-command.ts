@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { semanticTests, type SemanticPlan } from './intent-semantic-conflict.js';
-import { FILES_PLACEHOLDER, type TestRunnerResolution } from './project-test-runner.js';
+import { FILES_PLACEHOLDER, runnerCommand, type TestRunnerResolution } from './project-test-runner.js';
 
 /** Fixed runner code, not a repository hook. Complete reports from the configured
  * check satisfy the union; only uncovered files run afterwards in the same exact
@@ -45,7 +45,7 @@ await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => 
       ? await execute([process.execPath, '--test', '--test-concurrency=2', '--test-timeout=90000', file])
       : runner === null
         ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': ' + unavailable + '\\n'), 2)
-        : await execute(runnerArgs(file));
+        : await execute(Array.isArray(runner) ? runnerArgs(file) : runner[file]);
     const durationMs = performance.now() - start;
     process.stdout.write('__FORGE_TESTS__' + JSON.stringify({file, complete:status === 0 || status === 1, durationMs, results:[{name:file, passed:status === 0}]}) + '\\n');
     if (status !== 0) code = code || status;
@@ -71,7 +71,12 @@ export function semanticCheckCommand(
     runner?.status === 'unavailable'
       ? { runner: null, unavailable: runner.reason }
       : runner && runner.runner.layout !== 'forge-node'
-        ? { runner: runner.runner.command }
+        ? {
+            // A chained script's runner: each file's own argv, from the part whose globs own it.
+            runner: runner.runner.parts
+              ? Object.fromEntries(tests.map(test => [test, runnerCommand(runner.runner, [test])]))
+              : runner.runner.command,
+          }
         : {};
   return [node, '--input-type=module', '--eval', program, JSON.stringify({ command, tests, ...project })];
 }

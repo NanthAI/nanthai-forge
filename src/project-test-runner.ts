@@ -3,6 +3,14 @@ import { changeSalt, stableKey } from '../scripts/test-tiebreak.mjs';
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
 import type { PackageGraph } from './package-graph.js';
+import {
+  FILES_PLACEHOLDER,
+  NODE_GLOBS,
+  commandRunner,
+  scriptRunners,
+  type RunnerPart,
+} from './test-script-runner.js';
+export { FILES_PLACEHOLDER, SCRIPT_DEPTH, type RunnerPart } from './test-script-runner.js';
 import { declaredPreflight } from './project-config.js';
 
 /** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
@@ -12,7 +20,9 @@ import { declaredPreflight } from './project-config.js';
  * Resolution, first match wins, and never runs repository code:
  * 1. declared: `preflight.tests` `{ glob: string | string[], command: string[] }` in a root
  *    `forge.json` (any language) or under `forge` in package.json (declaring it in both is an error);
- * 2. inferred from the package.json `test` script: `node --test [globs]`, `vitest`, `jest`;
+ * 2. inferred from the package.json `test` script: `node --test [globs]`, `tsx --test [globs]`,
+ *    `vitest`, `jest`, through named scripts (`npm run NAME`, `npm test`, `pnpm NAME`, `yarn NAME`,
+ *    `run-s`; src/test-script-runner.ts), every runner of a chained script kept (`parts`);
  * 3. no `test` script: a `vitest` or `jest` dependency, else, in a project with a package.json, files
  *    that match Node's own test file patterns (the only runner that needs no dependency; without a
  *    package.json, `.js` fixtures under `test/` do not make a Go or Python repository a Node one);
@@ -25,9 +35,13 @@ import { declaredPreflight } from './project-config.js';
  * runner selects by path. */
 export type TestRunner = {
   source: 'declared' | 'test-script' | 'dependency' | 'files' | 'package-graph';
-  program: 'node' | 'vitest' | 'jest' | 'declared' | 'packages';
+  program: 'node' | 'tsx' | 'vitest' | 'jest' | 'declared' | 'packages' | 'chained';
+  /** Every runner's globs (the union for a chained script). */
   globs: string[];
+  /** The argv (for a chained script, its first runner's; `runnerCommand` routes files by `parts`). */
   command: string[];
+  /** A chained script's runners (`npm run a && npm run b`), each with its own globs and command. */
+  parts?: RunnerPart[];
   layout: 'forge-node' | 'generic' | 'packages';
   /** Where a declared runner was found. */
   declaredIn?: 'forge.json' | 'package.json';
@@ -44,37 +58,9 @@ export type TestRunnerResolution =
   | { status: 'available'; runner: TestRunner }
   | { status: 'unavailable'; reason: string };
 
-export const FILES_PLACEHOLDER = '{files}';
 export const FORGE_TEST_GLOB = 'tests/*.test.mjs';
-const CODE = '{js,mjs,cjs,ts,mts,cts,jsx,tsx}';
-const NODE_GLOBS = [
-  '**/*.test.{js,mjs,cjs}',
-  '**/*-test.{js,mjs,cjs}',
-  '**/*_test.{js,mjs,cjs}',
-  '**/test-*.{js,mjs,cjs}',
-  '**/test.{js,mjs,cjs}',
-  '**/test/**/*.{js,mjs,cjs}',
-];
-const VITEST_GLOBS = [`**/*.{test,spec}.${CODE}`];
-const JEST_GLOBS = [`**/__tests__/**/*.${CODE}`, `**/*.{test,spec}.${CODE}`];
 const DECLARE =
   'declare preflight.tests {"glob":[…],"command":[…,"{files}"]} in a root forge.json (any language), or forge.preflight.tests in package.json';
-/** Flags of `node` whose value is the next word. */
-const NODE_VALUE_FLAGS = new Set([
-  '--import',
-  '--require',
-  '-r',
-  '--loader',
-  '--experimental-loader',
-  '--test-reporter',
-  '--test-reporter-destination',
-  '--test-name-pattern',
-  '--test-skip-pattern',
-  '--env-file',
-  '--conditions',
-  '-C',
-]);
-
 const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const strings = (value: unknown): string[] | null =>
@@ -96,15 +82,36 @@ export function runnerTestPath(runner: TestRunner, path: string) {
   return matcher(runner.globs)(path);
 }
 
-/** The argv that runs exactly `files` with this runner. */
-export function runnerCommand(runner: Pick<TestRunner, 'command'>, files: string[]) {
+const expand = (command: string[], files: string[]) => {
+  const at = command.indexOf(FILES_PLACEHOLDER);
+  return at < 0 ? [...command, ...files] : [...command.slice(0, at), ...files, ...command.slice(at + 1)];
+};
+const shellWord = (word: string) =>
+  /^[A-Za-z0-9_./=@:,+-]+$/.test(word) ? word : `'${word.replaceAll("'", "'\\''")}'`;
+
+/** The argv that runs exactly `files` with this runner. A chained script's runner sends each file to
+ * the first of its `parts` whose globs match; files of several parts run as one `sh -c` line. */
+export function runnerCommand(runner: Pick<TestRunner, 'command' | 'parts'>, files: string[]) {
   if (!files.length) throw new Error('No test files selected; refusing to run the default suite.');
-  const at = runner.command.indexOf(FILES_PLACEHOLDER);
-  return at < 0
-    ? [...runner.command, ...files]
-    : [...runner.command.slice(0, at), ...files, ...runner.command.slice(at + 1)];
+  if (!runner.parts?.length) return expand(runner.command, files);
+  const matchers = runner.parts.map(part => matcher(part.globs));
+  const groups = runner.parts.map(() => [] as string[]);
+  for (const file of files)
+    groups[
+      Math.max(
+        0,
+        matchers.findIndex(test => test(file)),
+      )
+    ]!.push(file);
+  const argvs = runner.parts.flatMap((part, i) =>
+    groups[i]!.length ? [expand(part.command, groups[i]!)] : [],
+  );
+  return argvs.length === 1
+    ? argvs[0]!
+    : ['sh', '-c', argvs.map(argv => argv.map(shellWord).join(' ')).join(' && ')];
 }
 
+// Forge's own Node layout is `node --test` itself: another program (tsx) keeps its own command.
 const layout = (program: TestRunner['program'], globs: string[]): TestRunner['layout'] =>
   program === 'node' && globs.length === 1 && globs[0] === FORGE_TEST_GLOB ? 'forge-node' : 'generic';
 
@@ -117,64 +124,22 @@ function execPrefix(manifest: Record<string, unknown>, paths: Set<string>) {
   return ['npx', '--no-install'];
 }
 
-const unquote = (word: string) => word.replace(/^(['"])(.*)\1$/, '$2');
-/** The program words of one shell command, after env assignments and package-manager launchers. */
-function programWords(segment: string) {
-  const words = segment.trim().split(/\s+/).filter(Boolean).map(unquote);
-  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!)) words.shift();
-  const launchers = [['pnpm', 'exec'], ['npm', 'exec'], ['bun', 'x'], ['npx'], ['pnpm'], ['yarn'], ['bunx']];
-  for (const launcher of launchers)
-    if (launcher.every((word, i) => words[i] === word)) {
-      words.splice(0, launcher.length);
-      while (words[0]?.startsWith('-')) words.shift();
-      break;
-    }
-  return words;
-}
-
-/** `node … --test [paths]` from a test script: its flags stay, its paths become the globs. */
-function nodeRunner(words: string[]): Omit<TestRunner, 'source' | 'layout'> | null {
-  if (words[0] !== 'node' || !words.includes('--test')) return null;
-  const flags: string[] = [];
-  const paths: string[] = [];
-  for (let i = 1; i < words.length; i++) {
-    const word = words[i]!;
-    if (word.startsWith('-')) {
-      flags.push(word);
-      if (NODE_VALUE_FLAGS.has(word) && i + 1 < words.length) flags.push(words[++i]!);
-    } else paths.push(word.replace(/^\.\//, '').replace(/\/$/, ''));
-  }
-  // A folder runs Node's own patterns below it; a path or glob is used as written.
-  const globs = paths.length
-    ? paths.flatMap(path =>
-        /[*?{]/.test(path) || /\.[cm]?[jt]sx?$/.test(path)
-          ? [path]
-          : NODE_GLOBS.map(glob => `${path}/${glob}`),
-      )
-    : NODE_GLOBS;
-  if (!globs.every(glob => safeRelative(glob))) return null;
-  return { program: 'node', globs, command: ['node', ...flags, FILES_PLACEHOLDER] };
-}
-
-function scriptRunner(script: string, prefix: () => string[]): Omit<TestRunner, 'source' | 'layout'> | null {
-  for (const segment of script.split(/&&|\|\||;/)) {
-    const words = programWords(segment);
-    const node = nodeRunner(words);
-    if (node) return node;
-    if (words[0] === 'vitest')
-      return {
-        program: 'vitest',
-        globs: VITEST_GLOBS,
-        command: [...prefix(), 'vitest', 'run', FILES_PLACEHOLDER],
-      };
-    if (words[0] === 'jest')
-      return {
-        program: 'jest',
-        globs: JEST_GLOBS,
-        command: [...prefix(), 'jest', '--runTestsByPath', FILES_PLACEHOLDER],
-      };
-  }
-  return null;
+/** Rule 2: every runner the `test` script runs, as one runner (with `parts` when there are several). */
+function scriptRunner(
+  scripts: Record<string, unknown>,
+  prefix: () => string[],
+): Omit<TestRunner, 'source' | 'layout'> | { refusal: string } | null {
+  const found = scriptRunners(scripts, 'test', prefix);
+  if ('refusal' in found) return found;
+  const [first, ...more] = found.parts;
+  if (!first) return null;
+  if (!more.length) return { ...first };
+  return {
+    program: 'chained',
+    globs: [...new Set(found.parts.flatMap(part => part.globs))],
+    command: first.command,
+    parts: found.parts,
+  };
 }
 
 /** Rule 4: the package graph's per-ecosystem commands, or why there is none. */
@@ -240,11 +205,18 @@ export function projectTestRunner(
   let known: Set<string> | undefined;
   const all = () => (known ??= new Set(paths()));
   if (typeof scripts.test === 'string') {
-    const found = scriptRunner(scripts.test, () => execPrefix(manifest, all()));
+    const found = scriptRunner(scripts, () => execPrefix(manifest, all()));
     // `node --test` with no path runs Node's own patterns; top-level `tests/*.test.mjs` files keep
     // the import-graph selector that reads that layout, as with rule 3.
-    if (found?.globs === NODE_GLOBS && [...all()].some(matcher([FORGE_TEST_GLOB])))
+    if (
+      found &&
+      'globs' in found &&
+      found.globs === NODE_GLOBS &&
+      [...all()].some(matcher([FORGE_TEST_GLOB]))
+    )
       found.globs = [FORGE_TEST_GLOB];
+    if (found && 'refusal' in found)
+      return graphRunner(options, `no test runner declared, and ${found.refusal}; ${DECLARE}`);
     return found
       ? {
           status: 'available',
@@ -252,7 +224,7 @@ export function projectTestRunner(
         }
       : graphRunner(
           options,
-          `no test runner declared, and the package.json test script names none Forge can run per file (node --test, vitest, jest); ${DECLARE}`,
+          `no test runner declared, and the package.json test script names none Forge can run per file (node --test, tsx --test, vitest, jest); ${DECLARE}`,
         );
   }
   const dependencies = {
@@ -261,7 +233,7 @@ export function projectTestRunner(
   };
   const files = all();
   if ('vitest' in dependencies || 'jest' in dependencies) {
-    const found = scriptRunner('vitest' in dependencies ? 'vitest' : 'jest', () =>
+    const found = commandRunner(['vitest' in dependencies ? 'vitest' : 'jest'], () =>
       execPrefix(manifest, files),
     )!;
     return { status: 'available', runner: { ...found, source: 'dependency', layout: 'generic' } };
@@ -361,4 +333,4 @@ export function runnerSelection(runner: TestRunner, allPaths: Iterable<string>, 
 export const runnerLabel = (runner: TestRunner) =>
   runner.layout === 'packages'
     ? `package commands (${runner.ecosystems?.join(', ')})`
-    : `${runner.program} (${runner.declaredIn ? `declared in ${runner.declaredIn}` : runner.source})`;
+    : `${runner.parts ? runner.parts.map(part => part.program).join(' + ') : runner.program} (${runner.declaredIn ? `declared in ${runner.declaredIn}` : runner.source})`;

@@ -7,6 +7,7 @@ import {
   runnerCommand,
   runnerLabel,
   runnerSelection,
+  type TestRunner,
   type TestRunnerResolution,
 } from './project-test-runner.js';
 import {
@@ -20,7 +21,7 @@ import { packageRunnerTests, packageTestSelection } from './package-test-selecti
 const shellWord = (value: string) =>
   /^[A-Za-z0-9_./=@:{}-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 /** One shell line that runs `tests` with the project's runner (null when there are none). */
-export const runnerShellCommand = (runner: { command: string[] }, tests: string[]) =>
+export const runnerShellCommand = (runner: Pick<TestRunner, 'command' | 'parts'>, tests: string[]) =>
   tests.length ? runnerCommand(runner, tests).map(shellWord).join(' ') : null;
 
 /** The project's runner from the selector inventory (`files` holds package.json, forge.json and,

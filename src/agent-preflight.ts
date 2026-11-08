@@ -53,6 +53,7 @@ import {
   runnerCommand,
   runnerLabel,
   runnerSelection,
+  type RunnerPart,
   type TestRunner,
   type TestRunnerResolution,
 } from './project-test-runner.js';
@@ -221,7 +222,7 @@ export type PreflightPlan =
       /** Set when the server projection lacked this head's paths and the pinned State manifests supplied them. */
       changedPathsFrom?: 'manifests';
       /** A project runner other than Forge's Node layout (src/project-test-runner.ts) runs the tests. */
-      runner?: { label: string; command: string[] };
+      runner?: { label: string; command: string[]; parts?: RunnerPart[] };
       /** No test runner is declared or inferred: only static checks run, and this says why. */
       testsUnavailable?: string;
       /** Package-graph runner: each queued unit's command (cwd relative to the Lane root). */
@@ -569,7 +570,7 @@ function runnerPlan(
       ) / 60,
     ),
     totalEstimateMinutes: estimatePreflightMinutes(root, tests.length),
-    runner: { label, command: runner.command },
+    runner: { label, command: runner.command, ...(runner.parts ? { parts: runner.parts } : {}) },
     ...(runner.source === 'dependency' ? { advisory: INFERRED_RUNNER_ADVISORY } : {}),
     command: tests.length
       ? runnerCommand(runner, tests)

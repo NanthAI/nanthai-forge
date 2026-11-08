@@ -33,8 +33,13 @@ export type EcosystemGraph = {
   commands: (selected: GraphPackage[], changed: string[]) => PackageCommand[] | { refusal: string };
 };
 
-/** What one ecosystem reader returns: nothing found, a graph, or why the layout is not readable. */
-export type EcosystemResult = null | EcosystemGraph | { ecosystem: Ecosystem; refusal: string };
+/** What one ecosystem reader returns: nothing found, a graph, why the layout is not readable, or
+ * (`unplaced`) why its manifests place no package (named in the graph's reason when nothing reads). */
+export type EcosystemResult =
+  | null
+  | EcosystemGraph
+  | { ecosystem: Ecosystem; refusal: string }
+  | { ecosystem: Ecosystem; unplaced: string };
 
 export type ManifestReader = (path: string) => string | undefined;
 

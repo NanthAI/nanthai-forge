@@ -223,8 +223,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   a JS project can instead put the same object under `forge` in `package.json`
   (`forge.preflight.tests`, for example `{"glob":"**/*.test.ts","command":["pnpm","exec","vitest","run","{files}"]}`).
   Declaring it in both is an error. Without a declaration Forge infers it, running no repository
-  code: from the `test` script (`node --test [paths]`, `vitest`, `jest`, launched through the
-  package manager its `packageManager` field or lockfile names), else a `vitest` or `jest`
+  code: from the `test` script (`node --test [paths]`, `tsx --test [paths]`, `vitest`, `jest`,
+  launched through the package manager its `packageManager` field or lockfile names), following
+  named scripts up to four deep (`npm run NAME`, `npm test`, `pnpm NAME`, `yarn NAME`,
+  `bun run NAME`, `run-s`/`run-p`/`npm-run-all` names and `name:*` patterns). A chained script
+  (`npm run a && npm run b`) keeps every runner, each file running with the one whose paths own
+  it; a cycle, deeper indirection, a `cd`, another package's scripts (`--prefix`, `--workspace`) or a
+  runner Forge cannot run per file (mocha, playwright, `go test`, …) makes the script unreadable,
+  with the reason, never a dropped runner. Otherwise a `vitest` or `jest`
   dependency, else, when the repository has a `package.json`, files matching Node's own test
   patterns (`.js` fixtures in a Go or Python repository are not Node tests), else the **package
   graph** below. When
@@ -246,18 +252,28 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `setup.cfg`, src layouts, requirement names and `[tool.uv.sources]` paths; `setup.py` is code and is
   never read), Gradle projects (`settings.gradle(.kts)` `include`, `project(":x")` and `projects.x`
   edges), Maven modules (`<modules>`, dependency and parent coordinates), .NET projects
-  (`<ProjectReference>`) and JS/TS workspaces (`workspaces` or `pnpm-workspace.yaml`). With no other
+  (`<ProjectReference>`) and JS/TS packages (`workspaces` or `pnpm-workspace.yaml` members, and any
+  other `package.json` with its own lockfile, such as `web/` and `server/` packages that are not a
+  workspace). Every `settings.gradle(.kts)` outside `build/`, `src/` and `buildSrc/` roots its own
+  Gradle build (an `android/` build included): its projects live below that folder, the folder's
+  own build files select every project of the build, and a project also depends on builds its
+  settings `includeBuild`. Likewise every `pom.xml` no other pom lists as a module roots a Maven
+  build. With no other
   runner, each ecosystem's own command runs the selection when it is unambiguous: `go test ./...`
   (or `go test ./pkg`) in the module, `cargo test -p NAME`, pytest through the lockfile's tool (uv,
-  Poetry, PDM) or `python -m pytest`, `./gradlew :mod:test`, `mvn -pl mods -am test`,
-  `dotnet test PROJECT` for test projects, `pnpm --filter ./DIR run test` /
-  `npm run test --workspace=DIR` / `yarn workspace NAME run test` for packages with a `test` script.
+  Poetry, PDM) or `python -m pytest`, `./gradlew :mod:test` (in the build's folder; `test` for a
+  single-project build), `mvn -pl mods -am test` (in the build's folder), `dotnet test PROJECT` for
+  test projects, `pnpm --filter ./DIR run test` / `npm run test --workspace=DIR` /
+  `yarn workspace NAME run test` for workspace packages and `npm run test` (its own package
+  manager) in a standalone package's folder, for packages with a `test` script.
   The selection is full, with the reason, when a changed path is outside every package (a root
   file, a lockfile, CI config), the root package is affected, a manifest cannot be read, the layout
   is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
   no unambiguous command exists (Python without pytest declared, Bun workspaces). Repository docs
   outside every package change nothing. A package found only by its manifest inside another
-  package's folder also selects the enclosing package. Edges between ecosystems (a JS package that
+  package's folder also selects the enclosing package, unless that package has no tests and nothing
+  depends on it. When the manifests place no package, the reason names them and why (a Gradle build
+  file with no settings file, a `package.json` with neither workspaces nor its own lockfile). Edges between ecosystems (a JS package that
   builds a Rust crate by path) are not seen. The graph is cached per head; the `tests` read reads
   manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
   A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`

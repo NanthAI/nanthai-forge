@@ -72,12 +72,14 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
     return texts.get(path);
   };
   const ecosystems: EcosystemGraph[] = [];
+  const unplaced: string[] = [];
   try {
     for (const reader of READERS) {
       const result = reader(paths, bounded);
       if (!result) continue;
       if ('refusal' in result) return { status: 'unknown', reason: `${result.ecosystem}: ${result.refusal}` };
-      if (result.packages.length) ecosystems.push(result);
+      if ('unplaced' in result) unplaced.push(`${result.ecosystem}: ${result.unplaced}`);
+      else if (result.packages.length) ecosystems.push(result);
     }
   } catch (error) {
     return { status: 'unknown', reason: (error as Error).message.slice(0, 200) };
@@ -85,8 +87,12 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
   if (!ecosystems.length)
     return {
       status: 'unknown',
-      reason:
-        'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, workspaces)',
+      reason: manifests.length
+        ? `no package in the manifests Forge read (${manifests.slice(0, 4).join(', ')}${manifests.length > 4 ? ', …' : ''})${unplaced.length ? `: ${unplaced.join('; ')}` : ''}`.slice(
+            0,
+            400,
+          )
+        : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json)',
     };
   return { status: 'available', ecosystems, packages: ecosystems.flatMap(item => item.packages) };
 }
@@ -124,14 +130,17 @@ const label = (pkg: GraphPackage) => `${pkg.ecosystem}:${pkg.dir || '.'}`;
 const within = (dir: string, path: string) => !dir || path.startsWith(`${dir}/`);
 
 /** The packages that own `path`: its deepest enclosing package(s) and, for a package found only by its
- * manifest inside another one, the enclosing packages too (they may read it). Empty: outside every package. */
+ * manifest inside another one, the enclosing packages too (their tests, or packages that depend on
+ * them, may read it; one with neither has nothing that could). Empty: outside every package. */
 export function enclosingPackages(graph: Extract<PackageGraph, { status: 'available' }>, path: string) {
   const enclosing = graph.packages.filter(pkg => within(pkg.dir, path));
   const deepest = Math.max(-1, ...enclosing.map(pkg => pkg.dir.length));
   const owning = enclosing.filter(pkg => pkg.dir.length === deepest);
+  if (!owning.some(pkg => !pkg.declared)) return owning;
+  const depended = new Set(graph.packages.flatMap(pkg => pkg.dependsOn));
   return [
     ...owning,
-    ...(owning.some(pkg => !pkg.declared) ? enclosing.filter(pkg => pkg.dir.length < deepest) : []),
+    ...enclosing.filter(pkg => pkg.dir.length < deepest && (pkg.testable || depended.has(packageKey(pkg)))),
   ];
 }
 
