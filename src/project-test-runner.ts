@@ -1,0 +1,296 @@
+// SPDX-License-Identifier: Apache-2.0
+import { globRegExp } from './path-glob.js';
+import { safeRelative } from './safe-relative.js';
+
+/** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
+ * them (`command`; an element `{files}` expands to the files, else they are appended). Preflight, the
+ * `tests` read, Intent contract tests and semantic union tests all use it, for every project.
+ *
+ * Resolution, first match wins, and never runs repository code:
+ * 1. declared: package.json `forge.preflight.tests` `{ glob: string | string[], command: string[] }`;
+ * 2. inferred from the package.json `test` script: `node --test [globs]`, `vitest`, `jest`;
+ * 3. no `test` script: a `vitest` or `jest` dependency, else files that match Node's own test
+ *    file patterns (the only runner that needs no dependency).
+ * An unrecognized `test` script (a task runner, make, another language) is not guessed: tests are
+ * `unavailable` with a reason, never Forge's layout. `layout: 'forge-node'` (Node's runner over
+ * `tests/*.test.mjs`) keeps the import-graph selector; any other runner selects by path. */
+export type TestRunner = {
+  source: 'declared' | 'test-script' | 'dependency' | 'files';
+  program: 'node' | 'vitest' | 'jest' | 'declared';
+  globs: string[];
+  command: string[];
+  layout: 'forge-node' | 'generic';
+};
+export type TestRunnerResolution =
+  | { status: 'available'; runner: TestRunner }
+  | { status: 'unavailable'; reason: string };
+
+export const FILES_PLACEHOLDER = '{files}';
+export const FORGE_TEST_GLOB = 'tests/*.test.mjs';
+const CODE = '{js,mjs,cjs,ts,mts,cts,jsx,tsx}';
+const NODE_GLOBS = [
+  '**/*.test.{js,mjs,cjs}',
+  '**/*-test.{js,mjs,cjs}',
+  '**/*_test.{js,mjs,cjs}',
+  '**/test-*.{js,mjs,cjs}',
+  '**/test.{js,mjs,cjs}',
+  '**/test/**/*.{js,mjs,cjs}',
+];
+const VITEST_GLOBS = [`**/*.{test,spec}.${CODE}`];
+const JEST_GLOBS = [`**/__tests__/**/*.${CODE}`, `**/*.{test,spec}.${CODE}`];
+const DECLARE = 'declare forge.preflight.tests {"glob":[…],"command":[…,"{files}"]} in package.json';
+/** Flags of `node` whose value is the next word. */
+const NODE_VALUE_FLAGS = new Set([
+  '--import',
+  '--require',
+  '-r',
+  '--loader',
+  '--experimental-loader',
+  '--test-reporter',
+  '--test-reporter-destination',
+  '--test-name-pattern',
+  '--test-skip-pattern',
+  '--env-file',
+  '--conditions',
+  '-C',
+]);
+
+const record = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === 'object' && !Array.isArray(value);
+const strings = (value: unknown): string[] | null =>
+  Array.isArray(value) && value.length && value.every(item => typeof item === 'string' && item)
+    ? (value as string[])
+    : null;
+
+/** Paths a runner never reads as tests: installed packages and hidden folders. */
+const ignored = (path: string) =>
+  path.split('/').some(part => part === 'node_modules' || part.startsWith('.'));
+const matcher = (globs: string[]) => {
+  const patterns = globs.map(globRegExp);
+  return (path: string) =>
+    safeRelative(path) && !ignored(path) && patterns.some(pattern => pattern.test(path));
+};
+
+/** Whether `path` is one of this runner's test files. */
+export function runnerTestPath(runner: TestRunner, path: string) {
+  return matcher(runner.globs)(path);
+}
+
+/** The argv that runs exactly `files` with this runner. */
+export function runnerCommand(runner: Pick<TestRunner, 'command'>, files: string[]) {
+  if (!files.length) throw new Error('No test files selected; refusing to run the default suite.');
+  const at = runner.command.indexOf(FILES_PLACEHOLDER);
+  return at < 0
+    ? [...runner.command, ...files]
+    : [...runner.command.slice(0, at), ...files, ...runner.command.slice(at + 1)];
+}
+
+const layout = (program: TestRunner['program'], globs: string[]): TestRunner['layout'] =>
+  program === 'node' && globs.length === 1 && globs[0] === FORGE_TEST_GLOB ? 'forge-node' : 'generic';
+
+/** The package manager's way to run an installed binary, from `packageManager` or the lockfile. */
+function execPrefix(manifest: Record<string, unknown>, paths: Set<string>) {
+  const declared = typeof manifest.packageManager === 'string' ? manifest.packageManager : '';
+  if (declared.startsWith('pnpm@') || paths.has('pnpm-lock.yaml')) return ['pnpm', 'exec'];
+  if (declared.startsWith('yarn@') || paths.has('yarn.lock')) return ['yarn'];
+  if (declared.startsWith('bun@') || paths.has('bun.lock') || paths.has('bun.lockb')) return ['bun', 'x'];
+  return ['npx', '--no-install'];
+}
+
+const unquote = (word: string) => word.replace(/^(['"])(.*)\1$/, '$2');
+/** The program words of one shell command, after env assignments and package-manager launchers. */
+function programWords(segment: string) {
+  const words = segment.trim().split(/\s+/).filter(Boolean).map(unquote);
+  while (words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0]!)) words.shift();
+  const launchers = [['pnpm', 'exec'], ['npm', 'exec'], ['bun', 'x'], ['npx'], ['pnpm'], ['yarn'], ['bunx']];
+  for (const launcher of launchers)
+    if (launcher.every((word, i) => words[i] === word)) {
+      words.splice(0, launcher.length);
+      while (words[0]?.startsWith('-')) words.shift();
+      break;
+    }
+  return words;
+}
+
+/** `node … --test [paths]` from a test script: its flags stay, its paths become the globs. */
+function nodeRunner(words: string[]): Omit<TestRunner, 'source' | 'layout'> | null {
+  if (words[0] !== 'node' || !words.includes('--test')) return null;
+  const flags: string[] = [];
+  const paths: string[] = [];
+  for (let i = 1; i < words.length; i++) {
+    const word = words[i]!;
+    if (word.startsWith('-')) {
+      flags.push(word);
+      if (NODE_VALUE_FLAGS.has(word) && i + 1 < words.length) flags.push(words[++i]!);
+    } else paths.push(word.replace(/^\.\//, '').replace(/\/$/, ''));
+  }
+  // A folder runs Node's own patterns below it; a path or glob is used as written.
+  const globs = paths.length
+    ? paths.flatMap(path =>
+        /[*?{]/.test(path) || /\.[cm]?[jt]sx?$/.test(path)
+          ? [path]
+          : NODE_GLOBS.map(glob => `${path}/${glob}`),
+      )
+    : NODE_GLOBS;
+  if (!globs.every(glob => safeRelative(glob))) return null;
+  return { program: 'node', globs, command: ['node', ...flags, FILES_PLACEHOLDER] };
+}
+
+function scriptRunner(script: string, prefix: () => string[]): Omit<TestRunner, 'source' | 'layout'> | null {
+  for (const segment of script.split(/&&|\|\||;/)) {
+    const words = programWords(segment);
+    const node = nodeRunner(words);
+    if (node) return node;
+    if (words[0] === 'vitest')
+      return {
+        program: 'vitest',
+        globs: VITEST_GLOBS,
+        command: [...prefix(), 'vitest', 'run', FILES_PLACEHOLDER],
+      };
+    if (words[0] === 'jest')
+      return {
+        program: 'jest',
+        globs: JEST_GLOBS,
+        command: [...prefix(), 'jest', '--runTestsByPath', FILES_PLACEHOLDER],
+      };
+  }
+  return null;
+}
+
+/** The project's test runner from its package.json text and its file paths (read only for rule 3).
+ * A malformed declaration throws: a typo must not silently fall back to a guess. */
+export function projectTestRunner(
+  packageJson: string | undefined,
+  paths: () => Iterable<string>,
+): TestRunnerResolution {
+  let manifest: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(packageJson ?? '');
+    if (record(parsed)) manifest = parsed;
+  } catch {
+    /* No manifest: only the file rule can apply. */
+  }
+  const forge = record(manifest.forge) ? manifest.forge : {};
+  const declared = record(forge.preflight) ? forge.preflight.tests : undefined;
+  if (declared !== undefined) {
+    const entry = record(declared) ? declared : {};
+    const globs = typeof entry.glob === 'string' && entry.glob ? [entry.glob] : strings(entry.glob);
+    const command = strings(entry.command);
+    if (!globs?.every(glob => safeRelative(glob)) || !command)
+      throw new Error(
+        `forge.preflight.tests needs {"glob": string | string[], "command": string[]}: ${JSON.stringify(declared).slice(0, 120)}`,
+      );
+    const program = command[0] === 'node' && command.includes('--test') ? 'node' : 'declared';
+    return {
+      status: 'available',
+      runner: { source: 'declared', program, globs, command, layout: layout(program, globs) },
+    };
+  }
+  const scripts = record(manifest.scripts) ? manifest.scripts : {};
+  let known: Set<string> | undefined;
+  const all = () => (known ??= new Set(paths()));
+  if (typeof scripts.test === 'string') {
+    const found = scriptRunner(scripts.test, () => execPrefix(manifest, all()));
+    // `node --test` with no path runs Node's own patterns; top-level `tests/*.test.mjs` files keep
+    // the import-graph selector that reads that layout, as with rule 3.
+    if (found?.globs === NODE_GLOBS && [...all()].some(matcher([FORGE_TEST_GLOB])))
+      found.globs = [FORGE_TEST_GLOB];
+    return found
+      ? {
+          status: 'available',
+          runner: { ...found, source: 'test-script', layout: layout(found.program, found.globs) },
+        }
+      : {
+          status: 'unavailable',
+          reason: `no test runner declared, and the package.json test script names none Forge can run per file (node --test, vitest, jest); ${DECLARE}`,
+        };
+  }
+  const dependencies = {
+    ...(record(manifest.dependencies) ? manifest.dependencies : {}),
+    ...(record(manifest.devDependencies) ? manifest.devDependencies : {}),
+  };
+  const files = all();
+  if ('vitest' in dependencies || 'jest' in dependencies) {
+    const found = scriptRunner('vitest' in dependencies ? 'vitest' : 'jest', () =>
+      execPrefix(manifest, files),
+    )!;
+    return { status: 'available', runner: { ...found, source: 'dependency', layout: 'generic' } };
+  }
+  const node = [...files].filter(matcher(NODE_GLOBS));
+  if (node.length) {
+    // Top-level `tests/*.test.mjs` files keep the import-graph selector that reads that layout.
+    const globs = node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
+    return {
+      status: 'available',
+      runner: {
+        source: 'files',
+        program: 'node',
+        globs,
+        command: ['node', '--test', FILES_PLACEHOLDER],
+        layout: layout('node', globs),
+      },
+    };
+  }
+  return {
+    status: 'unavailable',
+    reason: `no test runner declared or inferred (no package.json test script, test framework dependency or Node test file); ${DECLARE}`,
+  };
+}
+
+/** `projectTestRunner` that reports a malformed declaration as unavailable instead of throwing. */
+export function resolveTestRunner(
+  packageJson: string | undefined,
+  paths: () => Iterable<string>,
+): TestRunnerResolution {
+  try {
+    return projectTestRunner(packageJson, paths);
+  } catch (error) {
+    return { status: 'unavailable', reason: (error as Error).message.slice(0, 300) };
+  }
+}
+
+const testSuffix = /(?:[.\-_](?:test|spec))?\.[cm]?[jt]sx?$/;
+const stem = (path: string) => (path.split('/').pop() ?? '').replace(testSuffix, '').replace(/^test-/, '');
+const commonDirs = (a: string, b: string) => {
+  const left = a.split('/').slice(0, -1);
+  const right = b.split('/').slice(0, -1);
+  let n = 0;
+  while (n < left.length && n < right.length && left[n] === right[n]) n++;
+  return n;
+};
+const documentation = (path: string) => /\.(?:md|mdx|txt)$/i.test(path);
+
+/** Path-only selection for a generic runner: changed test files, then the tests named for a changed
+ * module (`sum.test.ts` for `sum.ts`), the closest by folder when several share the name. There is no
+ * import graph for these layouts, so every other test is the landing check's; this is advisory
+ * local evidence, never an independence proof. Reads no source bytes. */
+export function runnerSelection(runner: TestRunner, allPaths: Iterable<string>, changedPaths: string[]) {
+  const isTest = matcher(runner.globs);
+  const tests = [...new Set(allPaths)].filter(isTest).sort();
+  const present = new Set(tests);
+  const changedTests = changedPaths.filter(path => present.has(path)).sort();
+  const named = new Set<string>();
+  for (const path of changedPaths) {
+    if (present.has(path) || documentation(path) || !/\.[cm]?[jt]sx?$/.test(path)) continue;
+    const name = stem(path);
+    const same = tests.filter(test => !changedTests.includes(test) && stem(test) === name);
+    const closest = Math.max(-1, ...same.map(test => commonDirs(path, test)));
+    for (const test of same) if (commonDirs(path, test) === closest) named.add(test);
+  }
+  const namedTests = [...named].sort();
+  const docsOnly = changedPaths.length > 0 && changedPaths.every(documentation);
+  const run = runnerLabel(runner);
+  return {
+    scope: docsOnly ? 'docs' : changedTests.length || namedTests.length ? 'scoped' : 'none',
+    reason:
+      `project test runner ${run}: ${changedTests.length} changed test file(s) and ${namedTests.length} named for a changed module; ` +
+      'no import graph for this layout, so the other tests run in the landing check',
+    changedTests,
+    namedTests,
+    tests: [...changedTests, ...namedTests],
+    available: tests,
+  };
+}
+
+/** `vitest (test-script)`: the program and where Forge found it. */
+export const runnerLabel = (runner: TestRunner) => `${runner.program} (${runner.source})`;

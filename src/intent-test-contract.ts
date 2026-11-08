@@ -2,9 +2,22 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { safeRelative } from './safe-relative.js';
+/** Forge's own Node test layout: the standard check's selector and shards read only these. */
+export const standardTestPath = (path: string) =>
+  safeRelative(path) && /^tests\/.+\.test\.[cm]?[jt]s$/.test(path);
+/** A test file at any safe relative path, for any project runner: `name.test.ts`, `name.spec.tsx`,
+ * a file under `__tests__/`, or Forge's `tests/*.test.mjs`. Which files a project actually runs is
+ * its runner's glob (src/project-test-runner.ts); this bounds what a stored contract may name. */
 export const contractTestPath = z
   .string()
-  .refine(path => safeRelative(path) && /^tests\/.+\.test\.[cm]?[jt]s$/.test(path));
+  .refine(
+    path =>
+      standardTestPath(path) ||
+      (safeRelative(path) &&
+        !/[\x00-\x1f\x7f]/.test(path) &&
+        !path.split('/').includes('node_modules') &&
+        /(?:^|\/)(?:__tests__\/.+\.[cm]?[jt]sx?|[^/]+[.\-_](?:test|spec)\.[cm]?[jt]sx?)$/.test(path)),
+  );
 export const contractTestsInput = z.object({
   laneId: z.uuid().optional(),
   candidateId: z.uuid().optional(),

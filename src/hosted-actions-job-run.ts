@@ -6,6 +6,8 @@ import { childEnv } from '../scripts/child-env.mjs';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
+import { semanticTests } from './intent-semantic-conflict.js';
+import { workspaceTestRunner } from './workspace-test-runner.js';
 import { digest } from './hash.js';
 import { directLogBytes } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
@@ -51,8 +53,6 @@ async function executeActiveActionsJob(
     process.execPath,
     join(import.meta.dirname, '../scripts/hosted-actions-execute.mjs'),
   ];
-  if (!recipe.standard && !commandOverride)
-    command = semanticCheckCommand(command, run.semanticPlan, process.execPath);
   let sourceCache: string | undefined,
     setupFailed = false;
   try {
@@ -62,6 +62,18 @@ async function executeActiveActionsJob(
       'EVIDENCE_CHANGED',
       'Actions setup changed the plan.',
     );
+    // A configured command's Intent contract union runs once: in its static job, beside its shards,
+    // with the project's own test runner, read from the verified workspace.
+    if (!recipe.standard && !commandOverride && shard === 'static') {
+      const unionTests = semanticTests(run.semanticPlan);
+      command = semanticCheckCommand(
+        command,
+        run.semanticPlan,
+        process.execPath,
+        [],
+        unionTests.length ? workspaceTestRunner(directory, unionTests) : undefined,
+      );
+    }
   } catch {
     // Record a failed exact check through the ordinary result callback. Never run
     // tests against changed bytes or treat a setup exit as passing evidence.

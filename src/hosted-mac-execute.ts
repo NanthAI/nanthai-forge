@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
+import { resolveTestRunner } from './project-test-runner.js';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { localMacLogFiles } from './check-local-log-files.js';
@@ -128,10 +129,25 @@ export async function executeHostedMacCheck(
       return pin;
     };
     const secretScan = await machineSecretScan(cache, run.candidate.base.head, state.files, signal);
+    // Union tests run with the project's own runner; its package.json is fetched only when there are any.
+    const unionTests = semanticTests(run.semanticPlan);
+    const packageFile = unionTests.length
+      ? state.files.find(file => file.path === 'package.json')
+      : undefined;
+    if (packageFile) await cache.ensure([packageFile.blob]);
     const command = semanticCheckCommand(
       [run.check.executable, ...run.check.args],
       run.semanticPlan,
       process.execPath,
+      [],
+      unionTests.length
+        ? resolveTestRunner(
+            packageFile
+              ? (await readFile(join(cache.objects, packageFile.blob))).toString('utf8')
+              : undefined,
+            () => state.files.map(file => file.path),
+          )
+        : undefined,
     );
     const selection = await publish({
       scope: 'full',

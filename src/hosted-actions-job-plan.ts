@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HostedCheckRun } from './hosted-check.js';
-import { contractTestPath } from './intent-test-contract.js';
+import { standardTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { digest } from './hash.js';
@@ -260,7 +260,7 @@ function gateSelection(
   if (gate?.mode === 'probe') {
     const tests = [...new Set(gate.tests ?? [])].sort();
     invariant(
-      tests.every(test => contractTestPath.safeParse(test).success && files.has(test)),
+      tests.every(test => standardTestPath(test) && files.has(test)),
       'EVIDENCE_CHANGED',
       'A probe test is absent from the exact Candidate.',
     );
@@ -284,11 +284,11 @@ function gateSelection(
     ...new Set([
       ...(gate.tests ?? []),
       ...union,
-      ...paths.filter(path => contractTestPath.safeParse(path).success && files.has(path)),
+      ...paths.filter(path => standardTestPath(path) && files.has(path)),
     ]),
   ].sort();
   invariant(
-    tests.every(test => contractTestPath.safeParse(test).success && files.has(test)),
+    tests.every(test => standardTestPath(test) && files.has(test)),
     'EVIDENCE_CHANGED',
     'A gate test is absent from the exact Candidate.',
   );

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { semanticCheckCommand } from './semantic-check-command.js';
+import { resolveTestRunner } from './project-test-runner.js';
 import { runDetails } from './work-detail-store.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -104,6 +105,9 @@ export async function remoteCheckPlan(
         ...run.check.args,
       ],
       standard ? undefined : store.select('views', run.viewId)?.semanticPlan,
+      'node',
+      [],
+      standard ? undefined : resolveTestRunner(files.get('package.json'), () => files.keys()),
     ),
   };
   const plan = {

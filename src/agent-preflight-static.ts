@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
+import { globRegExp } from './path-glob.js';
+
+export { globRegExp };
 
 /** A cheap, repository-wide check the landing check also runs. Declared in the project's
  * package.json as `forge.preflight.static`; each entry is a script name or an object:
@@ -108,36 +111,6 @@ export function selectGuards(guards: PreflightGuard[], changedPaths: string[]) {
     else untouched.push(guard.name);
   }
   return { selected, untouched };
-}
-
-/** Glob with `**`, `*`, `?` and `{a,b}`; `/` separates segments. Enough for path scoping. */
-export function globRegExp(glob: string): RegExp {
-  let source = '';
-  for (let i = 0; i < glob.length; i++) {
-    const char = glob[i]!;
-    if (char === '*') {
-      if (glob[i + 1] === '*') {
-        i++;
-        if (glob[i + 1] === '/') {
-          i++;
-          source += '(?:.*/)?';
-        } else source += '.*';
-      } else source += '[^/]*';
-    } else if (char === '?') source += '[^/]';
-    else if (char === '{') {
-      const end = glob.indexOf('}', i);
-      if (end < 0) source += '\\{';
-      else {
-        source += `(?:${glob
-          .slice(i + 1, end)
-          .split(',')
-          .map(part => globRegExp(part).source.slice(1, -1))
-          .join('|')})`;
-        i = end;
-      }
-    } else source += /[\\^$.|+()[\]]/.test(char) ? `\\${char}` : char;
-  }
-  return new RegExp(`^${source}$`);
 }
 
 /** Checks whose inputs the saved change touches, and the ones it does not (named, never silent). */

@@ -30,20 +30,24 @@ function fixture(t) {
         }),
       ),
     );
-  // A sync head: it carries main's change to b.ts and a new c.ts, drops d.ts, keeps a.ts.
+  // A sync head: it carries main's change to b.ts and a new c.ts, drops d.ts, keeps a.ts and its
+  // Node test (which names the project's test runner).
   const base = state([
     ['src/a.ts', 'a'],
+    ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b1'],
     ['src/d.ts', 'd'],
   ]);
   const head = state([
     ['src/a.ts', 'a'],
+    ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b2'],
     ['src/c.ts', 'c'],
   ]);
   // Current main carries b2 too: that path is main's change merged into the Lane, not the Lane's.
   const main = state([
     ['src/a.ts', 'a'],
+    ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b2'],
     ['src/d.ts', 'd'],
   ]);

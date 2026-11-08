@@ -17,6 +17,7 @@ import { join, posix } from 'node:path';
 import { safeRelative } from './files.js';
 import { z } from 'zod';
 import {
+  documentation,
   fitPreflightBudget,
   preflightTierRule,
   protectedTiers,
@@ -46,6 +47,14 @@ import {
   type PreflightEvidence,
 } from './agent-preflight-evidence.js';
 import { shellQuote } from './agent-brief-render.js';
+import {
+  projectTestRunner,
+  runnerCommand,
+  runnerLabel,
+  runnerSelection,
+  type TestRunner,
+  type TestRunnerResolution,
+} from './project-test-runner.js';
 import {
   filesystemEventHealth,
   filesystemEnvironment,
@@ -188,6 +197,10 @@ export type PreflightPlan =
       totalEstimateMinutes?: number;
       /** Set when the server projection lacked this head's paths and the pinned State manifests supplied them. */
       changedPathsFrom?: 'manifests';
+      /** A project runner other than Forge's Node layout (src/project-test-runner.ts) runs the tests. */
+      runner?: { label: string; command: string[] };
+      /** No test runner is declared or inferred: only static checks run, and this says why. */
+      testsUnavailable?: string;
     };
 
 const preparedEvidence = new WeakMap<PreflightPlan, PreflightEvidence>();
@@ -357,6 +370,131 @@ function laneFiles(root: string, saved?: Set<string>) {
   return files;
 }
 
+/** Every file path of the Lane checkout, without installed packages or hidden folders (used only
+ * when no saved manifest is at hand, to resolve and select a project test runner by path). */
+function lanePaths(root: string) {
+  const paths: string[] = [];
+  const walk = (dir: string) => {
+    if (!existsSync(join(root, dir))) return;
+    for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+      const path = dir ? posix.join(dir, entry.name) : entry.name;
+      if (entry.isDirectory()) walk(path);
+      else if (entry.isFile()) paths.push(path);
+    }
+  };
+  walk('');
+  return paths;
+}
+
+/** A plan for a project runner other than Forge's Node layout: changed tests, then tests named for a
+ * changed module, each protected (the wall-time budget still stops later groups). Without a runner,
+ * the static checks alone, and the reason; with no static check either, `unavailable`. */
+function runnerPlan(
+  root: string,
+  resolved: TestRunnerResolution,
+  paths: string[],
+  allPaths: string[],
+  packageJson: string | undefined,
+  options: {
+    budgetSeconds?: number | undefined;
+    trim?: boolean | undefined;
+    only?: string[] | undefined;
+  } = {},
+): PreflightPlan {
+  const checks = planStatic(packageJson, paths);
+  if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
+  const statics =
+    checks.selected.length || checks.untouched.length
+      ? {
+          static: {
+            selected: checks.selected.map(({ name, command }) => ({ name, command })),
+            untouched: checks.untouched,
+          },
+        }
+      : {};
+  if (resolved.status === 'unavailable') {
+    // A docs-only change has nothing for a test runner to run: plan it, never report it unavailable.
+    const docsOnly = paths.every(documentation);
+    const reason = docsOnly
+      ? `docs-only change; no test runner declared or inferred, so no test reads it here`
+      : `tests unavailable: ${resolved.reason}`;
+    if (!checks.selected.length && !docsOnly) return { status: 'unavailable', reason };
+    const plan: PreflightPlan = {
+      status: 'planned',
+      scope: docsOnly ? 'docs' : 'none',
+      reason: checks.selected.length ? `${reason}; static checks only` : reason,
+      tests: [],
+      deferredTests: [],
+      ...statics,
+      ...(docsOnly ? {} : { testsUnavailable: resolved.reason }),
+      estimateMinutes: 0,
+      command: null,
+    };
+    return plan;
+  }
+  const runner: TestRunner = resolved.runner;
+  const selection = runnerSelection(runner, allPaths, paths);
+  const only = options.only ? new Set(options.only) : null;
+  const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
+  const tiers = [
+    { tier: 'mandatory', tests: keep(selection.changedTests) },
+    { tier: 'direct', tests: keep(selection.namedTests) },
+  ].filter(item => item.tests.length);
+  const tests = tiers.flatMap(item => item.tests);
+  const timing = preflightSecondsPerFile(root);
+  const stats = preflightFileStats(root);
+  const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
+  const budgetSeconds = options.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
+  const trim = options.trim !== false;
+  const seconds = tests.reduce((sum, test) => sum + secondsFor(test), 0);
+  const label = runnerLabel(runner);
+  const rule = `${label}: changed test files, then tests named for a changed module (closest folder first)`;
+  const local: LocalSelection = {
+    rule,
+    budgetSeconds,
+    secondsPerFile: timing.secondsPerFile,
+    basis: timing.basis,
+    estimateSeconds: seconds,
+    tiers: tiers.map(item => ({ tier: item.tier, total: item.tests.length, local: item.tests.length })),
+    tierTests: Object.fromEntries(tiers.map(item => [item.tier, item.tests])),
+    trimmed: [],
+    mandatoryOverBudget: false,
+    mandatory: tiers[0]?.tier === 'mandatory' ? tiers[0].tests.length : 0,
+    protected: tests.length,
+    deferred: 0,
+    ...(trim ? {} : { trim: false as const }),
+    ...(only ? { only: 'stopped' as const } : {}),
+    deferredTo: 'pre-queue',
+    summary: `Local rule: ${rule}. ${selection.reason}.`,
+  };
+  const plan: PreflightPlan = {
+    status: 'planned',
+    scope: selection.scope,
+    reason: selection.reason,
+    tests,
+    deferredTests: [],
+    ...statics,
+    local,
+    reusedTests: [],
+    estimateMinutes: Math.ceil(
+      Math.min(
+        seconds,
+        trim ? budgetSeconds + tests.reduce((most, test) => Math.max(most, secondsFor(test)), 0) : Infinity,
+      ) / 60,
+    ),
+    totalEstimateMinutes: estimatePreflightMinutes(root, tests.length),
+    runner: { label, command: runner.command },
+    command: tests.length
+      ? runnerCommand(runner, tests)
+          .map(arg => (/^[\w./=-]+$/.test(arg) ? arg : shellQuote(arg)))
+          .join(' ')
+      : null,
+  };
+  plannedPaths.set(plan, paths);
+  return plan;
+}
+
 /** One saved text file outside the selector inventory (a shell script, a workflow), for comparison. */
 function laneText(root: string, path: string) {
   if (!safeRelative(path)) return undefined;
@@ -407,6 +545,20 @@ export function preflightPlan(
     };
   try {
     const files = laneFiles(root, context && new Set(context.files.map(file => file.path)));
+    // Forge's Node layout (tests/*.test.mjs) keeps the import-graph selector below; any other runner
+    // selects by path, and a project with no runner gets static checks only, never Forge's layout.
+    const allPaths = () => (context ? context.files.map(file => file.path) : lanePaths(root));
+    let resolved: TestRunnerResolution;
+    try {
+      resolved = projectTestRunner(files.get('package.json'), allPaths);
+    } catch (error) {
+      return { status: 'unavailable', reason: (error as Error).message.slice(0, 300) };
+    }
+    if (resolved.status === 'unavailable' || resolved.runner.layout !== 'forge-node') {
+      const plan = runnerPlan(root, resolved, changed.paths, allPaths(), files.get('package.json'), options);
+      if (plan.status === 'planned' && changed.source === 'manifests') plan.changedPathsFrom = 'manifests';
+      return plan;
+    }
     const timing = preflightSecondsPerFile(root);
     const stats = preflightFileStats(root);
     const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
@@ -627,6 +779,7 @@ export function planLine(plan: PreflightPlan & { status: 'planned' }) {
     `preflight plan: scope ${plan.scope}, ${plan.tests.length} test file(s) here` +
     (reused ? `, ${reused} passed before (reused)` : '') +
     `, ${deferred} deferred to the pre-queue check; ${budget}, about ${plan.estimateMinutes} min.` +
+    (plan.runner ? ` Runner: ${plan.runner.label}.` : '') +
     checks +
     (why ? ` Why: ${why}` : '')
   );
@@ -839,26 +992,35 @@ export function runPreflight(
       const runGroup = (group: string[]) => {
         const report = join(directory, `passed-${index++}.json`);
         const groupStarted = Date.now();
-        const run = spawnMeasured(
-          process.execPath,
-          [
-            // dot: one character per passing test and the full detail of failures only (TAP printed every
-            // subtest, about 150 KB of an agent's context per preflight).
-            '--test-reporter=dot',
-            '--test-reporter-destination=stderr',
-            `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
-            '--test-reporter-destination=stdout',
-            ...testArgs(root, group),
-          ],
-          {
-            cwd: root,
-            env: { ...env, FORGE_PREFLIGHT_REPORT: report },
-            stdio: ['ignore', 2, 2],
-          },
-        );
+        // A project runner reports one exit status per group: a pass covers every file in it, a
+        // failure is pinned to a file only when the group held one.
+        const argv = plan.runner
+          ? runnerCommand(plan.runner, group)
+          : [
+              process.execPath,
+              // dot: one character per passing test and the full detail of failures only (TAP printed every
+              // subtest, about 150 KB of an agent's context per preflight).
+              '--test-reporter=dot',
+              '--test-reporter-destination=stderr',
+              `--test-reporter=${new URL('./agent-preflight-reporter.js', import.meta.url).href}`,
+              '--test-reporter-destination=stdout',
+              ...testArgs(root, group),
+            ];
+        const run = spawnMeasured(argv[0]!, argv.slice(1), {
+          cwd: root,
+          env: { ...env, FORGE_PREFLIGHT_REPORT: report },
+          stdio: ['ignore', 2, 2],
+        });
         ran += group.length;
         if (run.status !== 0 && exitCode === 0) exitCode = run.status;
         if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
+        if (plan.runner) {
+          if (run.status === 0) passedTests.push(...group);
+          else if (group.length === 1) failedFiles.push(...group);
+          const each = (Date.now() - groupStarted) / group.length;
+          for (const test of group) fileMs[test] = each;
+          return Date.now() - groupStarted;
+        }
         try {
           const observed = observationSchema.parse(JSON.parse(readFileSync(report, 'utf8')));
           passedTests.push(...group.filter(test => observed.passed.includes(test)));

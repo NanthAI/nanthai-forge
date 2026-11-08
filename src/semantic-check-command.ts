@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { semanticTests, type SemanticPlan } from './intent-semantic-conflict.js';
+import { FILES_PLACEHOLDER, type TestRunnerResolution } from './project-test-runner.js';
 
 /** Fixed runner code, not a repository hook. Complete reports from the configured
  * check satisfy the union; only uncovered files run afterwards in the same exact
@@ -7,7 +8,8 @@ import { semanticTests, type SemanticPlan } from './intent-semantic-conflict.js'
 const program = `
 const { spawn } = await import('node:child_process');
 const { performance } = await import('node:perf_hooks');
-const { command, tests } = JSON.parse(process.argv[1]);
+const { command, tests, runner, unavailable } = JSON.parse(process.argv[1]);
+const runnerArgs = file => { const at = runner.indexOf(${JSON.stringify(FILES_PLACEHOLDER)}); return at < 0 ? [...runner, file] : [...runner.slice(0, at), file, ...runner.slice(at + 1)]; };
 const covered = new Set(), failedReports = new Set();
 const execute = (args, observe = false) => new Promise(resolve => {
   const child = spawn(args[0], args.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
@@ -39,7 +41,11 @@ let next = 0;
 await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => {
   while (next < missing.length) {
     const file = missing[next++], start = performance.now();
-    const status = await execute([process.execPath, '--test', '--test-concurrency=2', '--test-timeout=90000', file]);
+    const status = runner === undefined
+      ? await execute([process.execPath, '--test', '--test-concurrency=2', '--test-timeout=90000', file])
+      : runner === null
+        ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': ' + unavailable + '\\n'), 2)
+        : await execute(runnerArgs(file));
     const durationMs = performance.now() - start;
     process.stdout.write('__FORGE_TESTS__' + JSON.stringify({file, complete:status === 0 || status === 1, durationMs, results:[{name:file, passed:status === 0}]}) + '\\n');
     if (status !== 0) code = code || status;
@@ -47,14 +53,25 @@ await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => 
 }));
 process.exitCode = code;
 `;
+/** `runner`: the project's test runner at the checked source (src/project-test-runner.ts). Forge's
+ * Node layout, or none given, runs uncovered union tests with Node's runner as before; any other
+ * runner runs them with its own command; without a runner they fail as unavailable, never with a
+ * guessed runner. */
 export function semanticCheckCommand(
   command: string[],
   plan?: SemanticPlan,
   node = 'node',
   coveredTests: string[] = [],
+  runner?: TestRunnerResolution,
 ): string[] {
   const covered = new Set(coveredTests);
   const tests = semanticTests(plan).filter(test => !covered.has(test));
   if (!tests.length) return command;
-  return [node, '--input-type=module', '--eval', program, JSON.stringify({ command, tests })];
+  const project =
+    runner?.status === 'unavailable'
+      ? { runner: null, unavailable: runner.reason }
+      : runner && runner.runner.layout !== 'forge-node'
+        ? { runner: runner.runner.command }
+        : {};
+  return [node, '--input-type=module', '--eval', program, JSON.stringify({ command, tests, ...project })];
 }

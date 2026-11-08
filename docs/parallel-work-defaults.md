@@ -166,6 +166,21 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   formatter script (`format:check`, `check:format`, `fmt:check`) runs; an unknown `check` script is
   never guessed, because it may be a full verification. A check over its 120 s timeout is reported
   `timed-out`, not passed: the landing check still runs it.
+- **Test runner, per project.** Preflight, the `tests` read, Intent contract tests and semantic
+  union tests use the project's own runner. Declare it in `package.json` as
+  `forge.preflight.tests`: `{glob: string | [glob, ...], command: [program, ...args]}`, where an
+  argument `{files}` becomes the selected files (otherwise they are appended), for example
+  `{"glob":"**/*.test.ts","command":["pnpm","exec","vitest","run","{files}"]}`. Without a
+  declaration Forge infers it, running no repository code: from the `test` script (`node --test
+  [paths]`, `vitest`, `jest`, launched through the package manager its `packageManager` field or
+  lockfile names), else a `vitest` or `jest` dependency, else files matching Node's own test
+  patterns. Anything else (a task runner, `make`, another language) is not guessed: preflight runs
+  the static checks alone and says `tests unavailable` with the reason (`unavailable` when no
+  static check applies), and the `tests` read returns scope `unavailable`. Node's runner over
+  top-level `tests/*.test.mjs` keeps the import-graph tiers below. Any other runner selects by path:
+  changed test files, then the tests named for a changed module (`sum.test.ts` for `sum.ts`,
+  closest folder first); the landing check runs the rest. Contract tests may live at any test path
+  (`*.test.*`, `*.spec.*`, `__tests__/`).
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
   smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see

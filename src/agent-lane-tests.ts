@@ -9,6 +9,7 @@ import { checkEnvironment } from './check-environment.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
 import { candidateTimings } from './agent-contract-timings.js';
+import { contractRunner, intentContractSelection } from './intent-contract-selection.js';
 import {
   contractProposal,
   confirmTestContract,
@@ -127,16 +128,20 @@ async function readLaneTests(store: WorkStore, command: Command) {
   );
   const { advisorySelection, selectionSourcePath } = await import('../scripts/test-impact.mjs');
   const files = new Map<string, string>();
+  const allPaths: string[] = [];
   if (store.native) {
     const source = new NativeSource(store.root);
-    for (const file of source.state(head).files)
+    for (const file of source.state(head).files) {
+      allPaths.push(file.path);
       if (selectionSourcePath(file.path)) files.set(file.path, source.object(file.blob).toString('utf8'));
+    }
   } else {
     const tree = workGit(store.root, ['ls-tree', '-r', '-z', head]);
     for (const row of tree.split('\0').filter(Boolean)) {
       const split = row.indexOf('\t'),
         [, kind, blob] = row.slice(0, split).split(' '),
         path = row.slice(split + 1);
+      if (kind === 'blob') allPaths.push(path);
       if (kind === 'blob' && selectionSourcePath(path))
         files.set(
           path,
@@ -145,19 +150,36 @@ async function readLaneTests(store: WorkStore, command: Command) {
     }
   }
   const paths = checkChangedPaths(store, main, head);
-  const {
-    scope,
-    reason,
-    tests: selected,
-    coverage,
-  } = advisorySelection({
-    coverage: latestCheckCoverage(store, main),
-    files,
-    paths,
-    env: { ...checkEnvironment().env, FORGE_CHECK_SCOPED: '1' },
-  });
-  const available = [...files.keys()].filter(path => /^tests\/.+\.test\.mjs$/.test(path));
-  const tests = [...new Set([...selected, ...paths.filter(path => available.includes(path))])].sort();
+  // Forge's Node layout keeps the import-graph selector; any other runner selects by path, and a
+  // project with no runner gets `unavailable` and its reason, never Forge's layout.
+  const resolved = contractRunner(files, allPaths);
+  const generic =
+    resolved.status === 'unavailable'
+      ? null
+      : resolved.runner.layout === 'forge-node'
+        ? undefined
+        : intentContractSelection(files, paths, allPaths);
+  const forge =
+    resolved.status === 'available' && !generic
+      ? advisorySelection({
+          coverage: latestCheckCoverage(store, main),
+          files,
+          paths,
+          env: { ...checkEnvironment().env, FORGE_CHECK_SCOPED: '1' },
+        })
+      : undefined;
+  const scope = forge?.scope ?? generic?.scope ?? 'unavailable';
+  const reason =
+    forge?.reason ??
+    generic?.reason ??
+    `tests unavailable: ${resolved.status === 'unavailable' ? resolved.reason : ''}`;
+  const coverage = forge?.coverage;
+  const available = forge
+    ? [...files.keys()].filter(path => /^tests\/.+\.test\.mjs$/.test(path))
+    : (generic?.available ?? []);
+  const tests = forge
+    ? [...new Set([...forge.tests, ...paths.filter(path => available.includes(path))])].sort()
+    : (generic?.tests ?? []);
   const history = readTimingHistory(join(store.directory, 'test-timings.json'));
   const exact =
     command.runId && candidate ? await candidateTimings(store, command.runId, candidate.id, head) : undefined;
@@ -172,9 +194,16 @@ async function readLaneTests(store: WorkStore, command: Command) {
       tests,
       coverage,
       available,
-      command: tests.length
-        ? `node --import ./tests/check-runtime.mjs --test ${tests.map(quote).join(' ')}`
-        : null,
+      command: generic
+        ? (generic.command ?? null)
+        : forge && tests.length
+          ? `node --import ./tests/check-runtime.mjs --test ${tests.map(quote).join(' ')}`
+          : null,
+      ...(resolved.status === 'unavailable'
+        ? { runner: resolved }
+        : generic
+          ? { runner: generic.runner }
+          : {}),
       ...(lane ? { laneId: lane.id } : {}),
       head,
       main,

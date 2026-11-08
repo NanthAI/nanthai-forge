@@ -96,7 +96,11 @@ export async function executeIntentTests(
       bytes = await read(batch.map(file => file.blob));
     batch.forEach((file, index) => files.set(file.path, bytes[index]!.toString('utf8')));
   }
-  const selection = intentContractSelection(files, paths);
+  const selection = intentContractSelection(
+    files,
+    paths,
+    after.files.map(file => file.path),
+  );
   const historical =
     command.timingBasis === 'history'
       ? z
