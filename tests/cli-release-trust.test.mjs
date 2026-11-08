@@ -151,7 +151,7 @@ function release(f, { signatures = [], trust, fail = false, head = b } = {}) {
   };
 }
 
-test('transition: an unsigned release still installs, with one signature read and a local verdict', async t => {
+test('transition: an unsigned release still installs while not required; the compiled default holds it', async t => {
   const f = fixture(t);
   for (const options of [{}, { fail: true }]) {
     rmSync(join(f.installation, 'builds', b), { recursive: true, force: true });
@@ -171,12 +171,26 @@ test('transition: an unsigned release still installs, with one signature read an
     assert.equal(verdict.status, 'unsigned');
     assert.equal(verdict.required, false);
   }
-  // The compiled default (no test trust) is the transition: same result without a key.
+  // The compiled default (no test trust) requires signatures: an unsigned main holds on the
+  // current build with one status line and no alert; nothing is downloaded or built.
   selectCliBuild(f.installation, join(f.installation, 'builds', a));
-  const { dependencies } = release(f);
+  const { seen, dependencies } = release(f);
   delete dependencies.releaseCheck.trust;
-  assert.equal(CLI_RELEASE_SIGNATURES_REQUIRED, false);
-  assert.equal((await updateCli(f.installation, address, undefined, dependencies)).status, 'updated');
+  assert.equal(CLI_RELEASE_SIGNATURES_REQUIRED, true);
+  await assert.rejects(updateCli(f.installation, address, undefined, dependencies), {
+    code: 'CLI_CANARY_FAILED',
+    message: /Waiting for the release signature of build bbbbbbbb/,
+  });
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
+  assert.equal(seen.checkouts, 0);
+  assert.deepEqual(seen.alerts, []);
+  const verdict = JSON.parse(readFileSync(releaseVerdictPath(f.installation), 'utf8'));
+  assert.equal(verdict.status, 'unsigned');
+  assert.equal(verdict.required, true);
+  assert.match(
+    cliCanaryNotice(f.installation, readCliCanaryRefusal(f.installation), a),
+    /held until its release signature is published/,
+  );
 });
 
 test('a good signature installs when signatures are required', async t => {

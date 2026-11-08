@@ -198,9 +198,8 @@ cannot be checked for a downgrade. Builds from before release numbers cannot rea
 and treat them as unsigned, which installs during the transition. A machine records its first
 release number at the first numbered release its own (new) updater installs.
 
-The first release key is listed (key id `f3b8ac47a969d73d`). Signing is still optional:
-`CLI_RELEASE_SIGNATURES_REQUIRED` stays `false` until `release-verify` passes on recent signed
-States (see "Turning the switch on" below).
+The first release key is listed (key id `f3b8ac47a969d73d`), and signatures are required
+(`CLI_RELEASE_SIGNATURES_REQUIRED = true`).
 
 ### Automated signer
 
@@ -253,14 +252,14 @@ The signer skips a commit when a newer main commit has already reached GitHub, s
 landings only the newest one is signed. Updaters install main's head: one that read a skipped
 State finds the newer head at its next attempt a minute later.
 
-Turning the switch on: confirm the stored signatures of the last five signed States verify with
+Turning the switch on (it is on; this is the order for a fork, or after it was turned off):
+confirm the stored signatures of the last five signed States verify with
 `nforge cli release-verify --state ...`, then land `CLI_RELEASE_SIGNATURES_REQUIRED = true`; the
-signer signs that landing too. Do not wait for
-`release-signature.json` to say `verified` first: while signing is optional the updater writes
-that verdict when it installs, which is usually a minute or two before the signer has stored the
-signature, so it says `unsigned` even when signing works. Once signatures are required the
-updater waits for the signature, so the verdict reads `verified` with a `release` number. A test
-refuses `true` with an empty key list.
+signer signs that landing too. Do not wait for `release-signature.json` to say `verified` first:
+while signing is optional the updater writes that verdict when it installs, which is usually a
+minute or two before the signer has stored the signature, so it says `unsigned` even when signing
+works. Once signatures are required the updater waits for the signature, so the verdict reads
+`verified` with a `release` number. A test refuses `true` with an empty key list.
 
 Rotation: land the new public key in a release signed with an old key, sign with every listed key
 until each machine runs that build, then remove the old key in a release signed with the new key.
