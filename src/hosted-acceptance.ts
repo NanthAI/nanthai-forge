@@ -42,6 +42,16 @@ export const hostedAcceptanceSchema = z
           })
           .strict(),
         z.object({ landedOn: z.literal('recheck'), reason: z.string().min(1).max(64) }).strict(),
+        /** Rechecked on the tests that can see both changes (Issue fc215574): `reason` is why the
+         * first check did not carry, `selection` the planner's reason for the shared-impact set. */
+        z
+          .object({
+            landedOn: z.literal('scoped-intersection'),
+            reason: z.string().min(1).max(64),
+            selection: z.string().min(1).max(300),
+            tests: count,
+          })
+          .strict(),
       ])
       .optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
@@ -102,7 +112,14 @@ export const completionPageRoot = (previous: string, kind: string, index: number
 /** Receipt `firstCheck` from the server-only admission fields of the landing row. */
 export function firstCheckReceipt(
   admission: { runId: string; status: string; full?: true; recheck?: string } | undefined,
-  input: { runId: string | undefined; reused: boolean; batch: boolean; rule?: string },
+  input: {
+    runId: string | undefined;
+    reused: boolean;
+    batch: boolean;
+    rule?: string;
+    /** The accepted run's scoped-recheck plan record, when it ran the shared-impact selection. */
+    scoped?: { reason: string; tests: number } | undefined;
+  },
 ): HostedAcceptance['firstCheck'] {
   if (!admission?.full || admission.status !== 'passed') return undefined;
   if (!input.batch && input.runId === admission.runId)
@@ -111,7 +128,10 @@ export function firstCheckReceipt(
       mainMoved: input.reused,
       ...(input.rule ? { rule: input.rule } : {}),
     };
-  return { landedOn: 'recheck', reason: admission.recheck ?? (input.batch ? 'cohort' : 'not-tried') };
+  const reason = admission.recheck ?? (input.batch ? 'cohort' : 'not-tried');
+  return input.scoped && !input.batch
+    ? { landedOn: 'scoped-intersection', reason, selection: input.scoped.reason, tests: input.scoped.tests }
+    : { landedOn: 'recheck', reason };
 }
 export const firstCheckField = (value: HostedAcceptance['firstCheck']) =>
   value ? { firstCheck: value } : {};

@@ -43,7 +43,8 @@ const run = (check, gate) => ({
 });
 
 // One synthetic repository per ecosystem: four leaf packages (two in Python) beside one shared package
-// every leaf depends on. A leaf change selects a minority; the shared package selects everyone.
+// every leaf depends on. A leaf change selects a minority; the shared package selects everyone. Leaf
+// tests use their package, so the module graph (src/module-graph.ts) narrows the runner to them.
 const repos = {
   go: new Map([
     ['go.work', 'go 1.22\nuse (\n  ./core\n  ./a\n  ./b\n  ./c\n)\n'],
@@ -80,7 +81,7 @@ const repos = {
         `[project]\nname = "${name}"\ndependencies = ["core"]\n[tool.uv.sources]\ncore = { path = "../core" }\n`,
       ],
       [`packages/${name}/src/${name}/__init__.py`, ''],
-      [`packages/${name}/tests/test_${name}.py`, ''],
+      [`packages/${name}/tests/test_${name}.py`, `import ${name}\n`],
     ]),
   ]),
   gradle: new Map([
@@ -90,7 +91,11 @@ const repos = {
     ['core/src/main/java/Core.java', ''],
     ...['a', 'b', 'c'].flatMap(name => [
       [`${name}/build.gradle`, "plugins { id 'java' }\ndependencies { implementation project(':core') }\n"],
-      [`${name}/src/main/java/${name.toUpperCase()}.java`, ''],
+      [`${name}/src/main/java/${name.toUpperCase()}.java`, `class ${name.toUpperCase()} {}\n`],
+      [
+        `${name}/src/test/java/${name.toUpperCase()}Test.java`,
+        `class ${name.toUpperCase()}Test { @Test void t() { new ${name.toUpperCase()}(); } }\n`,
+      ],
     ]),
   ]),
   js: new Map([
@@ -108,10 +113,10 @@ const repos = {
   ]),
 };
 const leaf = {
-  go: ['a/a.go', ['go', 'test', './...']],
+  go: ['a/a.go', ['go', 'test', '.']],
   cargo: ['crates/a/src/lib.rs', ['cargo', 'test', '-p', 'a']],
   python: ['packages/a/src/a/__init__.py', null],
-  gradle: ['a/src/main/java/A.java', ['./gradlew', ':a:test']],
+  gradle: ['a/src/main/java/A.java', ['./gradlew', ':a:test', '--tests', 'ATest']],
   js: ['packages/a/index.js', ['npm', 'run', 'test', '--workspace=packages/a']],
 };
 const shared = {

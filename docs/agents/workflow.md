@@ -1004,8 +1004,13 @@ checked head, without constructing a chain of inherited passes. Batches retain
 one shared exact recheck: their multiple same-head receipt snapshots do not yet
 provide the single-transition recovery proof required for this optimization.
 
-When the proof is refused, a contract-gated project's retry runs a scoped recheck
-instead of the full suite: see [hosted acceptance gate](../workflows.md#hosted-acceptance-gate).
+From risk rule v3 a manifest or lockfile inside a package is risk only for that package
+and its dependents, using the package graph the checked run pinned
+([placed manifests](../pre-queue-checks.md#global-risk-files)).
+
+When the proof is refused, an automatic-acceptance project's retry runs a scoped
+recheck instead of the full suite, under the contract gate, the full gate or no gate
+(receipt `landedOn: "scoped-intersection"`): see [hosted acceptance gate](../workflows.md#hosted-acceptance-gate).
 
 Proof analysis holds one renewable owner lease on the existing finish watchdog.
 Duplicate delivery starts no second analysis, cancellation fences late callbacks,

@@ -168,7 +168,7 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
   return {
     ecosystem: 'python',
     packages: found.map(item => item.pkg),
-    commands(selected) {
+    commands(selected, _changed, narrowed) {
       if (!pytest)
         return {
           refusal:
@@ -177,10 +177,20 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
       // A package with its own lockfile runs in its own folder; the rest run from the root.
       const own: PackageCommand[] = [];
       const shared: GraphPackage[] = [];
+      // A narrowed package (src/module-selection.ts) runs only its test files that reach the change.
+      const targets = (pkg: GraphPackage, from: string) =>
+        narrowed?.get(packageKey(pkg))?.map(path => (from ? path.slice(from.length + 1) : path)) ?? [
+          pkg.dir || '.',
+        ];
       for (const pkg of selected) {
         const local = tool(pkg.dir);
         if (pkg.dir && local)
-          own.push({ ecosystem: 'python', cwd: pkg.dir, argv: local, packages: [packageKey(pkg)] });
+          own.push({
+            ecosystem: 'python',
+            cwd: pkg.dir,
+            argv: [...local, ...(narrowed?.has(packageKey(pkg)) ? targets(pkg, pkg.dir) : [])],
+            packages: [packageKey(pkg)],
+          });
         else shared.push(pkg);
       }
       const prefix = tool('') ?? ['python', '-m', 'pytest'];
@@ -190,7 +200,7 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
               {
                 ecosystem: 'python' as const,
                 cwd: '',
-                argv: [...prefix, ...shared.map(pkg => pkg.dir).sort()],
+                argv: [...prefix, ...[...new Set(shared.flatMap(pkg => targets(pkg, '')))].sort()],
                 packages: shared.map(packageKey),
               },
             ]

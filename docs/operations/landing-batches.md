@@ -610,6 +610,17 @@ without a landing setting. `acceptance.landing: "serial"` opts out; the explicit
 its hosted serial behavior. Eligibility and current governance are unchanged.
 A group checks the full union without requiring separate solo checks first.
 
+A group's receipts say LANDED only for members its shared State carries. The
+compose worker accounts for every member as merged or as a retained conflict and
+refuses a clean result that skips one; a step that must wait for merge
+calculations re-runs the same member instead of moving past it. Acceptance then
+compares each member's own changed paths with the shared State's changed paths,
+from Candidate records it already reads. A member with a path missing there
+publishes only when recorded State parents prove it was merged (a bounded walk of
+at most two rows per member, and only for that member). An unproven member never
+publishes: the group falls back to exact single landings
+(`BATCH_MEMBER_UNPUBLISHED`).
+
 The queue pipelines six groups by default. The observed GitHub merge queue used
 six simultaneous groups; matching that execution width bounds speculative waste
 while allowing ten to fifty concurrent finishes to progress. `checks.concurrency`

@@ -93,14 +93,23 @@ invalidates its dependent stack. See [hosted grouping](operations/landing-batche
 
 When main moves under a passing full check and the clean recomposition cannot
 reuse it, the retry may run a scoped recheck (`acceptance.scopedRecheck`, absent
-means on; only with `gate: contract`). Eligibility is the contract gate's, apart
+means on; with `mode: auto-on-pass` under `gate: contract`, `gate: full` or no gate,
+Issue fc215574). Eligibility is the contract gate's, apart
 from the Intent contract: an eligible agent (see [actor eligibility](parallel-work-defaults.md#reduced-evidence-actors)), automatic acceptance, unprotected paths,
 green main without audit debt. The planner runs the tests affected by both the main
 delta since the checked base and this change, the change's own test files, the
-composed Intent union and fixed smoke. Unclassified or deleted paths, package or
-lockfile, root configuration and the selector itself select the full suite. The
-skipped tests become main-audit debt; a failed scoped recheck fails the landing as
-usual. Set `scopedRecheck: false` to keep full rechecks.
+composed Intent union and fixed smoke. Only this change's side can widen the run:
+its unclassified or deleted paths, package or lockfile, root configuration or the
+selector itself select the full suite. Such a path on main's side reaches every test,
+so the intersection is this change's own affected set (the reason names main's
+path). A docs-only side affects the tests that read its documents (`docsReaders`),
+so a tested-doc overlap reruns those readers (Issue debe08fa). The skipped tests
+become main-audit debt; a failed scoped recheck fails the landing as usual. The
+receipt records `firstCheck: {"landedOn":"scoped-intersection","reason",
+"selection","tests"}`. A configured check command gets the package intersection in
+`FORGE_CHECK_PACKAGES` (packages this change touches, plus its dependents that
+main's delta also reaches). Batches still recheck the full union. Set
+`scopedRecheck: false` to keep full rechecks.
 
 For a combined Candidate, every member must be eligible for the contract gate;
 its check covers the union of their declared tests. One full-gated member makes
@@ -320,7 +329,9 @@ its check declares more. Either way it receives the changed paths:
   (the changed packages and every package that depends on them, with each ecosystem's own test
   command; see [package graph](parallel-work-defaults.md#preflight)). `scope: "full"` gives the reason
   the graph could not place the change; the command then runs everything. A command may run
-  `commands` as given or use `packages` with its own tool.
+  `commands` as given or use `packages` with its own tool. On a scoped main-race recheck the file holds the
+  package intersection: the packages this change touches, plus those of its dependents that
+  main's delta since the checked base also reaches (`src/package-intersection.ts`).
 - `FORGE_CHECK_PACKAGES_RUN` (same runs, only when the graph selected packages with tests): an
   executable that runs those `commands` in the checkout, in order, without a shell, with the calling
   script's environment, and exits with the first failure's code (Forge's

@@ -67,6 +67,7 @@ import {
   type SelectedPackage,
 } from './package-graph.js';
 import { packageRunnerTests, packageTestSelection } from './package-test-selection.js';
+import { moduleGraphFor, moduleGraphKey, type ModuleGraph } from './module-graph.js';
 import {
   filesystemEventHealth,
   filesystemEnvironment,
@@ -448,6 +449,7 @@ function runnerPlan(
   } = {},
   graph?: () => PackageGraph,
   forgeJson?: string,
+  modules?: () => ModuleGraph,
 ): PreflightPlan {
   const checks = planStatic(packageJson, paths, forgeJson);
   if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
@@ -483,7 +485,7 @@ function runnerPlan(
   const runner: TestRunner = resolved.runner;
   const only = options.only ? new Set(options.only) : null;
   const keep = (tests: string[]) => (only ? tests.filter(test => only.has(test)) : tests);
-  if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep);
+  if (runner.layout === 'packages') return packagePlan(root, runner, paths, graph!(), statics, keep, modules);
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
   // Tests that failed in a landing check or preflight while these paths changed run again, as for
   // Forge's own layout: the runner's globs decide which learned names are still test files here.
@@ -601,8 +603,9 @@ function packagePlan(
   graph: PackageGraph,
   statics: Partial<Pick<PreflightPlan & { status: 'planned' }, 'static'>>,
   keep: (tests: string[]) => string[],
+  modules?: () => ModuleGraph,
 ): PreflightPlan {
-  const selection = packageTestSelection(graph, paths);
+  const selection = packageTestSelection(graph, paths, modules);
   const units = keep(selection.units);
   const commands = Object.fromEntries(
     selection.commands.map(command => [
@@ -721,6 +724,14 @@ export function preflightPlan(
       (built ??= packageGraphFor(context && packageGraphKey(context.files), allPaths(), path =>
         laneText(root, path),
       ));
+    // The module graph (imports) of the same head, for package-graph runners only; facts are cached
+    // per blob, so a later save re-reads only changed sources (src/module-graph.ts).
+    const modules = () =>
+      moduleGraphFor(context && moduleGraphKey(context.files), {
+        paths: allPaths(),
+        read: path => laneText(root, path),
+        blobs: context && new Map(context.files.map(file => [file.path, file.blob])),
+      });
     // The language-neutral project file, read once per plan (src/project-config.ts).
     const forgeJson = laneText(root, FORGE_CONFIG_FILE);
     let resolved: TestRunnerResolution;
@@ -742,6 +753,7 @@ export function preflightPlan(
         options,
         graph,
         forgeJson,
+        modules,
       );
       if (plan.status === 'planned' && changed.source === 'manifests') plan.changedPathsFrom = 'manifests';
       return plan;

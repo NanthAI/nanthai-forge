@@ -75,8 +75,10 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
         leaf: true,
       };
     },
-    commands(selected) {
-      const whole = new Set(selected.filter(pkg => !pkg.leaf).map(pkg => pkg.dir));
+    commands(selected, _changed, narrowed) {
+      const whole = new Set(
+        selected.filter(pkg => !pkg.leaf && !narrowed?.has(packageKey(pkg))).map(pkg => pkg.dir),
+      );
       const commands: PackageCommand[] = [...whole].sort().map(dir => ({
         ecosystem: 'go',
         cwd: dir,
@@ -84,8 +86,10 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
         packages: [`go:${dir}`],
       }));
       const leaves = new Map<string, GraphPackage[]>();
-      for (const pkg of selected.filter(pkg => pkg.leaf)) {
-        const module = moduleOf(`${pkg.dir}/x_test.go`)!;
+      // Test-only folders, and the package folders a narrowed module's change reaches.
+      const units = (pkg: GraphPackage) => (pkg.leaf ? [pkg.dir] : (narrowed?.get(packageKey(pkg)) ?? []));
+      for (const pkg of selected.filter(pkg => pkg.leaf || narrowed?.has(packageKey(pkg)))) {
+        const module = pkg.leaf ? moduleOf(`${pkg.dir}/x_test.go`)! : pkg;
         if (whole.has(module.dir)) continue;
         leaves.set(module.dir, [...(leaves.get(module.dir) ?? []), pkg]);
       }
@@ -96,7 +100,13 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
           argv: [
             'go',
             'test',
-            ...pkgs.map(pkg => `./${pkg.dir.slice(dir ? dir.length + 1 : 0)}`.replace(/\/$/, '')).sort(),
+            ...[
+              ...new Set(
+                pkgs
+                  .flatMap(units)
+                  .map(unit => `./${unit.slice(dir ? dir.length + 1 : 0)}`.replace(/\/$/, '')),
+              ),
+            ].sort(),
           ],
           packages: pkgs.map(packageKey),
         });
@@ -195,11 +205,28 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
   return {
     ecosystem: 'cargo',
     packages: crates.map(crate => crate.pkg),
-    commands(selected) {
+    commands(selected, _changed, narrowed) {
       const groups = new Map<string, GraphPackage[]>();
       const standalone: PackageCommand[] = [];
+      const targeted: PackageCommand[] = [];
       for (const pkg of selected) {
         const root = rootOf.get(packageKey(pkg));
+        // A narrowed crate (src/module-selection.ts) runs only the test targets that reach the change.
+        const tests = narrowed?.get(packageKey(pkg));
+        if (tests) {
+          targeted.push({
+            ecosystem: 'cargo',
+            cwd: root ?? pkg.dir,
+            argv: [
+              'cargo',
+              'test',
+              ...(root === null || root === undefined ? [] : ['-p', pkg.name]),
+              ...tests.map(name => `--test=${name}`),
+            ],
+            packages: [packageKey(pkg)],
+          });
+          continue;
+        }
         if (root === null || root === undefined)
           standalone.push({
             ecosystem: 'cargo',
@@ -221,6 +248,7 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
           packages: pkgs.map(packageKey),
         })),
         ...standalone,
+        ...targeted,
       ];
     },
   };

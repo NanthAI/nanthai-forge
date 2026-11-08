@@ -238,7 +238,10 @@ export const page = query({
               reused: Boolean(move.crossHeadProof),
               revision: move.snapshot?.revision ?? null,
               // Why an admitted landing did not land on its first check (7c2e69e1); null: it did or was not admitted.
-              firstCheckRecheck: move.firstCheck?.landedOn === 'recheck' ? move.firstCheck.reason : null,
+              firstCheckRecheck:
+                move.firstCheck && move.firstCheck.landedOn !== 'admission-run'
+                  ? move.firstCheck.reason
+                  : null,
             };
           }
           if (input.stream === 'runs') {

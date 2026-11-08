@@ -313,8 +313,10 @@ test('preflight on a Go repository with no package.json plans and runs package c
   assert.equal(plan.status, 'planned');
   assert.equal(plan.scope, 'scoped');
   assert.equal(plan.runner.label, 'package commands (go)');
-  assert.deepEqual(plan.tests, ['package:lib:go test ./...', 'package:svc:go test ./...']);
-  assert.equal(plan.command, '(cd lib && go test ./...) && (cd svc && go test ./...)');
+  // The module graph narrows the changed module to the package folders whose tests reach the change
+  // (lib's only test folder is ./sum); svc, which requires lib, still runs whole.
+  assert.deepEqual(plan.tests, ['package:svc:go test ./...', 'package:lib:go test ./sum']);
+  assert.equal(plan.command, '(cd svc && go test ./...) && (cd lib && go test ./sum)');
   assert.deepEqual(
     plan.packages.map(pkg => pkg.name),
     ['example.com/lib', 'example.com/svc'],
@@ -325,15 +327,15 @@ test('preflight on a Go repository with no package.json plans and runs package c
   const ok = [process.execPath, '-e', 'process.exit(require("fs").existsSync("go.mod") ? 0 : 3)'];
   const pass = repo.run({
     ...plan,
-    packageCommands: { [plan.tests[0]]: { cwd: 'lib', argv: ok }, [plan.tests[1]]: { cwd: 'svc', argv: ok } },
+    packageCommands: { [plan.tests[0]]: { cwd: 'svc', argv: ok }, [plan.tests[1]]: { cwd: 'lib', argv: ok } },
   });
   assert.equal(pass.passed, true);
   assert.equal(pass.tests, 2);
   const fail = repo.run({
     ...plan,
     packageCommands: {
-      [plan.tests[0]]: { cwd: 'lib', argv: [process.execPath, '-e', 'process.exit(4)'] },
-      [plan.tests[1]]: { cwd: 'svc', argv: ok },
+      [plan.tests[0]]: { cwd: 'svc', argv: [process.execPath, '-e', 'process.exit(4)'] },
+      [plan.tests[1]]: { cwd: 'lib', argv: ok },
     },
   });
   assert.equal(fail.passed, false);

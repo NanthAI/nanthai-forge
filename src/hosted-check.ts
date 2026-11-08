@@ -138,6 +138,9 @@ export function testsNotAffected(
 /** Prepared by fixed provider code after reading exact source/lockfile/selection.
  * Shard membership and command bytes live in the immutable plan object. Indexes
  * cover [0, shardCount), including the static job where applicable. */
+export const scopedRecheckPlanSchema = z
+  .object({ reason: z.string().min(1).max(300), tests: checkNumber })
+  .strict();
 export const hostedCheckPlanSchema = z
   .object({
     head: checkHash,
@@ -152,6 +155,9 @@ export const hostedCheckPlanSchema = z
     /** Allow entries the change adds or edits against main (Issue 93e14bb0); only when the
      * allow file changed. Value-free; the receipt copies it as `secretAllowAdded`. */
     secretAllow: secretAllowEvidenceSchema.optional(),
+    /** A main-race recheck that ran the shared-impact selection (Issue fc215574): the planner's
+     * reason and test count, for the receipt's `firstCheck`. */
+    scoped: scopedRecheckPlanSchema.optional(),
   })
   .strict()
   .refine(plan => !plan.skipped || plan.shardCount === 1, {

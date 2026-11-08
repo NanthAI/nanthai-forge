@@ -69,6 +69,9 @@ configured check (no `configure-check`) skips it and queues as before.
      the change re-enters the queue as a new entry and joins a cohort for one
      combined check.
    The receipt's `firstCheck` says which path it took: `{"landedOn":"admission-run","mainMoved":…}`
+   , `{"landedOn":"scoped-intersection","reason":…,"selection":…,"tests":…}` for a
+   [scoped recheck](workflows.md#hosted-acceptance-gate) (the tests that can see both
+   changes, own tests and smoke)
    or `{"landedOn":"recheck","reason":…}` with the recheck reason (`path-overlap`,
    `tested-doc`, `global-risk`, `unsupported-mode`, `text-conflict`, `checked-not-full`, `main-red`, `audit-debt`,
    `cohort`, `reuse-policy`, …); `metrics` counts every code and flags the limitations
@@ -85,9 +88,9 @@ configured check (no `configure-check`) skips it and queues as before.
 
 ### Global-risk files
 
-One list, in `src/first-check-risk.ts` (rule `first-check-risk-v2`; a proof pins the
-rule it was decided under, so older receipts keep their v1 decisions). A change
-or a main delta touching any of these always rechecks:
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v3`; a proof pins the
+rule it was decided under, so older receipts keep their v1 and v2 decisions). A change
+or a main delta touching any of these always rechecks, except a placed manifest (below):
 
 - package manifests and lockfiles (npm, pnpm, Yarn, Bun, Cargo, Go, Python,
   Ruby, Composer, Maven, Gradle) and `.npmrc`/`.yarnrc`;
@@ -123,6 +126,18 @@ or a main delta touching any of these always rechecks:
   though the paths are disjoint (`0005_a.py` and `0005_b.py` would leave two leaf
   migrations on main). Reads paths only; folders in different places do not interact;
 - any other root-level file that is not `.md` or `.txt`.
+
+From v3 (Issue 5cfcca4b), a package manifest or lockfile inside a package is
+**placed**: the checked run pins its manifest package graph in the selection
+(`packagePlacement`, rule `package-placement-v1`: each package's ecosystem, folder
+and dependencies, at most 128 KiB; `src/package-placement.ts`). Its reach is that
+package plus every package that depends on it. The change lands on its first check
+when the other side's paths all lie outside that reach (a path outside every package
+counts only when it is Markdown or under `docs/`); the proof records `placedRisk`
+(each placed path and its reach). Root and workspace files (`pnpm-workspace.yaml`,
+`.npmrc`, `.yarnrc`, `go.work`, `settings.gradle`, `gradle.properties`), every other
+risk file, a missing pin, and placed manifests on both sides keep the recheck. Works
+for every ecosystem the [package graph](workflows.md#check-command-scope) reads (npm, Cargo, Go, Gradle, …).
 
 The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the

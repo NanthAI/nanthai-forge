@@ -33,6 +33,7 @@ import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';
+import { checkedPackagePlacement } from './package-placement-pin.js';
 import { declaredTestedDocs, docsOnlyChange } from './docs-paths.js';
 import { selectionFallback } from './fallback-reasons.js';
 import { resolveTestRunner } from './project-test-runner.js';
@@ -148,6 +149,8 @@ export async function prepareActionsJob(
     tests: selected.tests,
     ...('fallback' in selected && selected.fallback ? { fallback: selected.fallback } : {}),
     ...(docs ? { testedDocs: docs } : {}),
+    // The checked head's manifest package graph: the first-check proof places in-package manifests by it.
+    ...checkedPackagePlacement(files.keys(), path => files.get(path)),
     // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
     ...('changes' in selected ? { changes: selected.changes } : {}),
     // A package-graph first check's minority share, recorded on the run (src/graph-first-check.ts).

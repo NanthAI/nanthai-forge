@@ -14,6 +14,7 @@ import {
 } from '../dist/first-check-risk.js';
 import { crossHeadProofSchema, validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import { STANDARD_CHECK_INPUTS } from '../dist/standard-check.js';
+import { checkedPackagePlacement } from '../dist/package-placement-pin.js';
 const { revertMessage } = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
 const env = {
@@ -165,6 +166,41 @@ for (const [name, memberPaths] of [
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
     assert.equal(runCount(f), 3);
   });
+
+// Issue 5cfcca4b (5 of 17 dogfood rechecks were global-risk): the checked run pins its manifest package
+// graph; a manifest or lockfile inside a package is risk only for that package and its dependents.
+const workspace = {
+  'package.json': JSON.stringify({ private: true, workspaces: ['packages/*'] }),
+  'packages/a/package.json': JSON.stringify({ name: 'a', scripts: { test: 'x' } }),
+  'packages/b/package.json': JSON.stringify({ name: 'b', dependencies: { a: '*' }, scripts: { test: 'x' } }),
+  'packages/c/package.json': JSON.stringify({ name: 'c', scripts: { test: 'x' } }),
+};
+const placedSelection = JSON.stringify({
+  scope: 'full',
+  tests: [],
+  ...checkedPackagePlacement(Object.keys(workspace), path => workspace[path]),
+});
+test('replay: an in-package manifest change lands on its first check beside an independent package', async t => {
+  const f = await wave(t, {
+    memberPaths: ['packages/a/src/x.ts', 'packages/c/package.json'],
+    fileCount: 2,
+    selection: placedSelection,
+  });
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  const proof = receipts(f)[1].crossHeadProof;
+  assert.equal(proof.riskRule, 'first-check-risk-v3');
+  assert.deepEqual(proof.placedRisk, [{ path: 'packages/c/package.json', reach: ['js:packages/c'] }]);
+  assert.equal(runCount(f), 2, 'no recheck (before: global-risk and a third run)');
+  // A dependent package on the other side, or no pinned graph, keeps the recheck.
+  for (const [memberPaths, selection] of [
+    [['packages/b/src/y.ts', 'packages/a/package.json'], placedSelection],
+    [['packages/a/src/x.ts', 'packages/c/package.json'], full],
+  ]) {
+    const g = await wave(t, { memberPaths, fileCount: 2, selection });
+    assert.deepEqual(g.reuseDecisions, ['global-risk'], `${memberPaths}`);
+    assert.equal(runCount(g), 3);
+  }
+});
 
 test('migrations in different folders still land on the first check', async t => {
   const f = await wave(t, {

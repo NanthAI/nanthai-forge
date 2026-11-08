@@ -168,7 +168,8 @@ test('a Gradle estimate uses the hosted check timing, then this machine, never t
   const { root } = repo(t, gradle);
   const advice = changed(['core/src/main/java/Core.java']);
   const fresh = preflightPlan(root, advice.changedPaths);
-  assert.deepEqual(fresh.tests, ['package:.:./gradlew :app:test :core:test']);
+  // core has no test class, so the module graph runs nothing there; app, which depends on it, runs whole.
+  assert.deepEqual(fresh.tests, ['package:.:./gradlew :app:test']);
   assert.equal(fresh.estimateBasis, 'default');
   assert.equal(fresh.estimateMinutes, Math.ceil(PREFLIGHT_SECONDS_PER_PACKAGE_COMMAND / 60));
   // A hosted check of 7.5 min, seen by land or wait in the landing timing it already holds.

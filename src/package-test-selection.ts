@@ -7,6 +7,7 @@ import {
   type PackageGraph,
   type SelectedPackage,
 } from './package-graph.js';
+import type { ModuleGraph } from './module-graph-types.js';
 import { runnerTestPath, type TestRunner } from './project-test-runner.js';
 
 const shellWord = (value: string) =>
@@ -27,8 +28,13 @@ const DOCS = /\.(?:md|mdx|txt|rst|adoc)$/i;
 
 /** The package-command selection for `layout: 'packages'` runners (src/project-test-runner.ts rule
  * 4): owning packages of the changed paths plus their dependents, each run with its ecosystem's
- * command. A full selection runs nothing here: the landing check runs everything. */
-export function packageTestSelection(graph: PackageGraph, changed: string[]): PackageTestSelection {
+ * command; with the head's module graph, a changed package runs only the test units that reach the
+ * change. A full selection runs nothing here: the landing check runs everything. */
+export function packageTestSelection(
+  graph: PackageGraph,
+  changed: string[],
+  modules?: () => ModuleGraph | undefined,
+): PackageTestSelection {
   if (changed.length && changed.every(path => DOCS.test(path)))
     return {
       scope: 'docs',
@@ -38,7 +44,7 @@ export function packageTestSelection(graph: PackageGraph, changed: string[]): Pa
       units: [],
       command: null,
     };
-  const selection = packageSelection(graph, changed);
+  const selection = packageSelection(graph, changed, modules);
   if (selection.scope === 'full')
     return {
       scope: 'full',

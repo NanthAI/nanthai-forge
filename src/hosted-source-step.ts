@@ -91,6 +91,9 @@ export type SourceStepCursor = {
   /** Compose base entries of changed paths. Absent on cursors from older code:
    * their changed paths are unknown and the Candidate waits for the owner. */
   batchDropped?: import('./hosted-landing-batch.js').BatchDropped;
+  /** Batch members merged so far; with batchDropped it accounts for every member. Absent on
+   * cursors from older code, which publish unaccounted. */
+  batchMerged?: string[];
   composeBases?: [string, Pick<NativeFile, 'blob' | 'mode'> | null][];
   /** A finished sync's result as changes from the client's Lane head (never saved: set only in
    * the step that finishes; the submitting action passes it to its caller). */

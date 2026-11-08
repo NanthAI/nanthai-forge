@@ -17,7 +17,7 @@ import { trustGateReader } from './projectHostedTrust';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { gateFor, gateForCandidates, acceptGate, type GateInput } from '../src/contract-gate-policy';
 import type { HostedCheckRun } from '../src/hosted-check';
-import { acceptScopedRecheck, scopedRecheckBase } from '../src/scoped-recheck-policy';
+import { acceptScopedRecheck, scopedRecheckBase, scopedRecheckPolicy } from '../src/scoped-recheck-policy';
 import { GRAPH_FIRST_CONTRACT, acceptGraphFirst, isGraphFirstGate } from '../src/graph-first-check';
 import type { HostedRecord } from '../src/hosted-records';
 
@@ -36,9 +36,12 @@ export async function hostedGateInput(
   candidate: Candidate,
   actor: AcceptanceActor,
   member: GateInput['contract'],
+  /** A main-race scoped recheck reads main's audit state under either gate. */
+  options: { scopedRecheck?: boolean } = {},
 ): Promise<GateInput> {
   const policy = effectivePolicy(project);
   const enabled = policy.acceptance.gate === 'contract';
+  const readMain = enabled || (options.scopedRecheck === true && scopedRecheckPolicy(policy.acceptance));
   const paths = candidate.governance?.paths ?? null;
   return {
     project,
@@ -50,7 +53,7 @@ export async function hostedGateInput(
       ? { trust: await trustGateReader(ctx, project)(actor.id, paths) }
       : {}),
     contract: enabled && !fixGate({ needsFix: project.needsFix?.[candidate.intentId] }) ? member : null,
-    main: enabled
+    main: readMain
       ? await mainGate(ctx, project._id)
       : {
           status: 'unknown',
@@ -115,7 +118,9 @@ export async function hostedAcceptGate(
     );
   // A scoped main-race recheck is accepted on the contract gate's terms.
   if (scopedRecheckBase(run.gate))
-    return acceptScopedRecheck(await hostedGateInput(ctx, project, candidate, actor, null));
+    return acceptScopedRecheck(
+      await hostedGateInput(ctx, project, candidate, actor, null, { scopedRecheck: true }),
+    );
   // A package-graph first check too, without the Intent contract it does not have.
   if (isGraphFirstGate(run.gate))
     return acceptGraphFirst(await hostedGateInput(ctx, project, candidate, actor, GRAPH_FIRST_CONTRACT));

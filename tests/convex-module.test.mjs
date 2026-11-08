@@ -75,3 +75,27 @@ test('the actual extension selects TypeScript generic arrows versus TSX elements
   assert.equal(element.type, 'span');
   assert.equal(element.props.children, '42');
 });
+
+test('replay: a module reached through a type-only cycle is rekeyed when its value import changes', async t => {
+  // Seen 2026-11-08: keys follow source imports, type-only ones too, while compiled output keeps only
+  // value imports. Entering such a cycle from its far side keyed a module by its value import's
+  // href, not its bytes, so after an edit the cached module still loaded the older compiled import.
+  const { cache, src, top } = workspace(t);
+  const gate = value =>
+    writeFileSync(
+      join(src, 'gate.ts'),
+      `import type { Reader } from './reader';\nexport const value = (): number => ${value};\nexport type Gate = Reader;\n`,
+    );
+  writeFileSync(
+    join(src, 'reader.ts'),
+    "import { value } from './gate';\nexport type Reader = number;\nexport const viaGate = () => value();\n",
+  );
+  writeFileSync(
+    join(src, 'top.ts'),
+    "import { value } from './gate';\nimport { viaGate } from './reader';\nexport const top = [value(), viaGate()];\n",
+  );
+  gate(1);
+  assert.deepEqual((await load(cache, top)).top, [1, 1]);
+  gate(2);
+  assert.deepEqual((await load(cache, top)).top, [2, 2], 'before: [2, 1] from the cached reader');
+});

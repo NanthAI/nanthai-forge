@@ -7,6 +7,7 @@ import {
   type EcosystemResult,
   type GraphPackage,
   type ManifestReader,
+  type PackageCommand,
 } from './package-graph-types.js';
 
 const GRADLE_SETTINGS = ['settings.gradle', 'settings.gradle.kts'];
@@ -160,21 +161,36 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
   return {
     ecosystem: 'gradle',
     packages: builds.flatMap(all),
-    commands(selected) {
+    commands(selected, _changed, narrowed) {
       const groups = new Map<GradleBuild, GraphPackage[]>();
-      for (const pkg of selected)
-        groups.set(owner.get(pkg.dir)!, [...(groups.get(owner.get(pkg.dir)!) ?? []), pkg]);
-      return [...groups]
-        .sort(([a], [b]) => a.dir.localeCompare(b.dir))
-        .map(([build, pkgs]) => ({
-          ecosystem: 'gradle' as const,
-          cwd: build.dir,
-          argv: [
-            present.has(join(build.dir, 'gradlew')) ? './gradlew' : 'gradle',
-            ...pkgs.map(pkg => (pkg.dir === build.root?.dir ? 'test' : `${pkg.name}:test`)).sort(),
-          ],
-          packages: pkgs.map(packageKey),
-        }));
+      const tool = (build: GradleBuild) => (present.has(join(build.dir, 'gradlew')) ? './gradlew' : 'gradle');
+      const task = (build: GradleBuild, pkg: GraphPackage) =>
+        pkg.dir === build.root?.dir ? 'test' : `${pkg.name}:test`;
+      // A narrowed project (src/module-selection.ts) runs only the test classes that reach the change.
+      const targeted: PackageCommand[] = [];
+      for (const pkg of selected) {
+        const build = owner.get(pkg.dir)!;
+        const classes = narrowed?.get(packageKey(pkg));
+        if (classes)
+          targeted.push({
+            ecosystem: 'gradle',
+            cwd: build.dir,
+            argv: [tool(build), task(build, pkg), ...classes.flatMap(name => ['--tests', name])],
+            packages: [packageKey(pkg)],
+          });
+        else groups.set(build, [...(groups.get(build) ?? []), pkg]);
+      }
+      return [
+        ...[...groups]
+          .sort(([a], [b]) => a.dir.localeCompare(b.dir))
+          .map(([build, pkgs]) => ({
+            ecosystem: 'gradle' as const,
+            cwd: build.dir,
+            argv: [tool(build), ...pkgs.map(pkg => task(build, pkg)).sort()],
+            packages: pkgs.map(packageKey),
+          })),
+        ...targeted,
+      ];
     },
   };
 }
@@ -281,31 +297,52 @@ export function mavenGraph(paths: string[], read: ManifestReader): EcosystemResu
   return {
     ecosystem: 'maven',
     packages: [...modules.values()].map(item => item.pkg),
-    commands(selected) {
+    commands(selected, _changed, narrowed) {
       const groups = new Map<string, GraphPackage[]>();
+      const targeted: PackageCommand[] = [];
+      const mvn = (build: string) => (present.has(build ? `${build}/mvnw` : 'mvnw') ? './mvnw' : 'mvn');
       for (const pkg of selected) {
         const build = modules.get(pkg.dir)!.build;
-        groups.set(build, [...(groups.get(build) ?? []), pkg]);
+        // A narrowed module (src/module-selection.ts) runs only the test classes that reach the change;
+        // modules built with it (-am) have none of them, which Surefire must not treat as a failure.
+        const classes = narrowed?.get(packageKey(pkg));
+        if (classes)
+          targeted.push({
+            ecosystem: 'maven',
+            cwd: build,
+            argv: [
+              mvn(build),
+              ...(pkg.dir === build ? [] : ['-pl', relative(build, pkg.dir), '-am']),
+              'test',
+              `-Dtest=${classes.join(',')}`,
+              '-Dsurefire.failIfNoSpecifiedTests=false',
+            ],
+            packages: [packageKey(pkg)],
+          });
+        else groups.set(build, [...(groups.get(build) ?? []), pkg]);
       }
-      return [...groups].sort().map(([build, pkgs]) => ({
-        ecosystem: 'maven' as const,
-        cwd: build,
-        argv: [
-          present.has(build ? `${build}/mvnw` : 'mvnw') ? './mvnw' : 'mvn',
-          ...(pkgs.some(pkg => pkg.dir === build)
-            ? ['test']
-            : [
-                '-pl',
-                pkgs
-                  .map(pkg => relative(build, pkg.dir))
-                  .sort()
-                  .join(','),
-                '-am',
-                'test',
-              ]),
-        ],
-        packages: pkgs.map(packageKey),
-      }));
+      return [
+        ...[...groups].sort().map(([build, pkgs]) => ({
+          ecosystem: 'maven' as const,
+          cwd: build,
+          argv: [
+            mvn(build),
+            ...(pkgs.some(pkg => pkg.dir === build)
+              ? ['test']
+              : [
+                  '-pl',
+                  pkgs
+                    .map(pkg => relative(build, pkg.dir))
+                    .sort()
+                    .join(','),
+                  '-am',
+                  'test',
+                ]),
+          ],
+          packages: pkgs.map(packageKey),
+        })),
+        ...targeted,
+      ];
     },
   };
 }

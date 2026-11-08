@@ -43,6 +43,8 @@ import { invariant } from '../src/errors';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark } from '../src/secret-allow';
+import { batchCoverageFailure } from './projectHostedBatchCoverage';
+import type { BatchMemberPaths } from '../src/hosted-batch-coverage';
 
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
@@ -144,6 +146,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   );
   const mainChanged = candidate.base.head !== main.head || candidate.base.receiptId !== main.receipt.id;
   let retry = false;
+  const memberPaths: BatchMemberPaths[] = [];
   for (const member of members) {
     await hostedWriteProject(ctx, claim.projectId, member.attempt.actor.id, member.attempt.authorityEpoch);
     const own = await readHostedRecord(ctx, {
@@ -158,6 +161,11 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       'A batch member Candidate changed.',
     );
     const originalCandidate = hostedRecordSchema.options[3].parse(JSON.parse(own.value));
+    memberPaths.push({
+      submissionId: member.state.id,
+      head: member.original.candidate.head ?? '',
+      paths: originalCandidate.governance?.paths,
+    });
     retry ||=
       !policyDigestCurrent(policy, member.attempt.policyDigest) ||
       !batchEligible(project, policy, member.attempt.actor, originalCandidate);
@@ -186,6 +194,33 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     return {
       status: 'pending' as const,
       reason: 'Main or governance changed; exact single checks are queued.',
+    };
+  }
+  // Every receipt below says its member landed. A member the shared State does not provably
+  // carry never publishes; the members land one by one with exact single checks instead.
+  const gap = await batchCoverageFailure(ctx, {
+    projectId: claim.projectId,
+    head: candidate.result.head,
+    base: candidate.base.head,
+    shared: candidate.governance?.paths,
+    members: memberPaths,
+  });
+  if (gap) {
+    await writeBatch(ctx, key, {
+      ...batch,
+      phase: 'fallback',
+      transition: {
+        code: 'BATCH_MEMBER_UNPUBLISHED',
+        message: gap.missing.length
+          ? `The shared State lacks changed paths of member ${gap.submissionId}: ${gap.missing.join(', ')}${gap.more ? ` and ${gap.more} more` : ''}.`
+          : `Changed paths of member ${gap.submissionId} or of the shared State are unknown.`,
+      },
+    });
+    await releaseLandingQueue(ctx, queue, now);
+    await wakeBatch(ctx, key);
+    return {
+      status: 'pending' as const,
+      reason: 'The shared State does not carry every member; exact single checks are queued.',
     };
   }
   // Resolve retained rejected merges before moving their now-matching base.

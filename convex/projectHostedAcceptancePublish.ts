@@ -305,6 +305,7 @@ export async function publishAcceptance(
         reused: Boolean(reuse),
         batch: false,
         ...(reuse ? { rule: reuse.algorithm } : {}),
+        scoped: reuse ? undefined : run?.plan?.scoped,
       }),
     ),
     snapshot: { id: identity.receiptId, previousId: main.snapshotId, revision: main.sourceRevision + 1 },

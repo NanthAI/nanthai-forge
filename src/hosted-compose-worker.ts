@@ -18,6 +18,7 @@ import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 import { syntaxGatedMerge } from './hosted-compose-syntax.js';
+import { assertBatchAccounted } from './hosted-batch-coverage.js';
 
 export type ComposeBases = Map<string, Pick<NativeFile, 'blob' | 'mode'> | null>;
 const sameFile = (a: Pick<NativeFile, 'blob' | 'mode'> | null | undefined, b: typeof a) =>
@@ -55,6 +56,7 @@ export async function buildHostedComposeState(
     pageCount = 0,
     selected = 0;
   const dropped: BatchDropped = [];
+  const mergedMembers: string[] = [];
   let result: ReturnType<typeof composeResultSchema.parse>['result'] | undefined;
   const publishGenerated = async () => {
     await reader.publishGenerated(source, source.generated);
@@ -109,8 +111,11 @@ export async function buildHostedComposeState(
             ? composeStack(source, right, left, restoreBase.object.sha256, plan.message, plan.at)
             : source.compose(left, right, plan.message, plan.at);
         });
-        if (merged.head) head = merged.head;
-        else {
+        if (merged.head) {
+          head = merged.head;
+          if ('candidateId' in entry && plan.batch?.members.includes(entry.candidateId))
+            mergedMembers.push(entry.candidateId);
+        } else {
           // A cohort prefix is unaccepted. Probe this member against the outer
           // base in the same worker; retain prompt main conflicts with their
           // actual base root, and mark prefix-only conflicts as advisory.
@@ -210,6 +215,7 @@ export async function buildHostedComposeState(
     );
   }
   await publishGenerated();
+  if (!result && plan.batch) assertBatchAccounted(plan.batch.members, mergedMembers, dropped);
   if (!result) {
     // These exact State manifests are already resident for composition. No blob reads,
     // source scans, graph queries or provider calls are needed for changed paths.

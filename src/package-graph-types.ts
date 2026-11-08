@@ -29,8 +29,14 @@ export type EcosystemGraph = {
   /** A finer owner for one changed path than its enclosing package (Go test-only folders). */
   leafOwner?: (path: string) => GraphPackage | undefined;
   /** The commands that test `selected` (non-empty, testable, all of this ecosystem), or why there is
-   * no unambiguous default command. `changed` are the changed paths, for test-only narrowing. */
-  commands: (selected: GraphPackage[], changed: string[]) => PackageCommand[] | { refusal: string };
+   * no unambiguous default command. `changed` are the changed paths, for test-only narrowing.
+   * `narrowed` maps a package key to the only test units to run for it (src/module-selection.ts):
+   * pytest files, Go package folders, Cargo test targets or JVM test classes; never empty. */
+  commands: (
+    selected: GraphPackage[],
+    changed: string[],
+    narrowed?: ReadonlyMap<string, string[]>,
+  ) => PackageCommand[] | { refusal: string };
 };
 
 /** What one ecosystem reader returns: nothing found, a graph, why the layout is not readable, or

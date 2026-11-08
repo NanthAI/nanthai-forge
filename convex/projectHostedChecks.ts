@@ -208,8 +208,9 @@ export async function enqueueHostedCheck(
   // No contract, a configured command that reads the changed paths: the contract gate's other
   // guards decide a package-graph-scoped first check (src/graph-first-check.ts). Same reads.
   const graphFirst = !member && !input.recheck && graphFirstCheck(check);
+  const direct = runner.provider === 'github-actions' && !runner.credential;
   let gate =
-    runner.provider === 'github-actions' && !runner.credential && project.autonomyPolicy?.acceptance.gate
+    direct && project.autonomyPolicy?.acceptance.gate
       ? (recoveryGate ??
         (await hostedGateForCandidates(ctx, project, [
           {
@@ -220,11 +221,18 @@ export async function enqueueHostedCheck(
         ])))
       : undefined;
   if (gate && graphFirst && !recoveryGate) gate = fromGraphFirstContract(gate);
+  // A main-race recheck may be scoped under either gate (Issue fc215574); with no configured gate
+  // the run carries a gate only when it is that scoped recheck.
   if (
-    gate?.mode === 'full' &&
+    direct &&
+    (gate?.mode === 'full' || (!gate && !project.autonomyPolicy?.acceptance.gate)) &&
     !recoveryGate &&
     input.recheck &&
-    scopedRecheckEligible(await hostedGateInput(ctx, project, candidate, { kind: 'agent', id: actor }, null))
+    scopedRecheckEligible(
+      await hostedGateInput(ctx, project, candidate, { kind: 'agent', id: actor }, null, {
+        scopedRecheck: true,
+      }),
+    )
   )
     gate = scopedRecheckGate(input.recheck);
   const run = hostedCheckRunSchema.parse({

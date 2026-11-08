@@ -9,11 +9,16 @@
  */
 import { isStandardForgeCheck, STANDARD_CHECK_INPUTS } from './standard-check.js';
 
-/** Proofs pin the rule they were decided under: v1 receipts keep v1 decisions, new ones use v2
- * (nested non-JS build inputs, database schema files and sequence folders). */
-export const FIRST_CHECK_RISK_RULES = ['first-check-risk-v1', 'first-check-risk-v2'] as const;
+/** Proofs pin the rule they were decided under: v1 receipts keep v1 decisions, v2 added nested
+ * non-JS build inputs, database schema files and sequence folders; v3 keeps v2's list and places a
+ * manifest or lockfile inside a package of the pinned package graph (src/package-placement.ts). */
+export const FIRST_CHECK_RISK_RULES = [
+  'first-check-risk-v1',
+  'first-check-risk-v2',
+  'first-check-risk-v3',
+] as const;
 export type FirstCheckRiskRule = (typeof FIRST_CHECK_RISK_RULES)[number];
-export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v2';
+export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v3';
 const since = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
   FIRST_CHECK_RISK_RULES.indexOf(rule) >= FIRST_CHECK_RISK_RULES.indexOf(from);
 const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] = [

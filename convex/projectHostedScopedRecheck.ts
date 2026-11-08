@@ -2,7 +2,7 @@
 import type { MutationCtx } from './_generated/server';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
-import type { ScopedRecheckBasis } from '../src/scoped-recheck-policy';
+import { scopedRecheckPolicy, type ScopedRecheckBasis } from '../src/scoped-recheck-policy';
 import { ForgeError } from '../src/errors';
 
 /** The basis is the latest exact full pass of this finish's own (non-batch)
@@ -12,8 +12,8 @@ export async function scopedRecheckBasis(
   ctx: MutationCtx,
   previous: HostedLandingAttempt,
 ): Promise<ScopedRecheckBasis | undefined> {
-  const policy = previous.policy.acceptance;
-  if (policy.gate !== 'contract' || policy.scopedRecheck === false) return undefined;
+  // Either gate (Issue fc215574); the actor and main rules apply when the recheck is enqueued.
+  if (!scopedRecheckPolicy(previous.policy.acceptance)) return undefined;
   const proof = previous.crossHeadProof;
   const own = proof
     ? { checked: proof.checked, checkedBase: proof.checkedBase, runId: proof.runId }
@@ -38,21 +38,20 @@ export async function scopedRecheckBasis(
         authorityEpoch: previous.authorityEpoch,
         ...previous.check,
       });
-      if (run.gate?.effective === 'full' && run.candidate.digest === own.checked.digest) return own;
+      // A run with no gate (a project with no configured gate) ran the whole check, or its docs
+      // selection for a docs-only change; a gated run says so in its echoed effective gate.
+      const whole = run.gate === undefined || run.gate.effective === 'full';
+      if (whole && run.candidate.digest === own.checked.digest) return own;
     } catch (error) {
       if (!(error instanceof ForgeError)) throw error;
     }
   }
   return previous.recheck;
 }
-/** Why a main-race recheck under the contract gate could not be scoped (attempt
+/** Why a main-race recheck could not be scoped (attempt
  * `scopedFallback`, src/fallback-reasons.ts): its own full pass is not exact evidence. */
 export const scopedRecheckFallback = (
   previous: HostedLandingAttempt,
   basis: ScopedRecheckBasis | undefined,
 ) =>
-  !basis &&
-  previous.policy.acceptance.gate === 'contract' &&
-  previous.policy.acceptance.scopedRecheck !== false
-    ? ('scoped-no-evidence' as const)
-    : undefined;
+  !basis && scopedRecheckPolicy(previous.policy.acceptance) ? ('scoped-no-evidence' as const) : undefined;

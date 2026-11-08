@@ -21,6 +21,7 @@ import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
 import { ForgeError, invariant } from './errors.js';
+import { assertBatchAccounted } from './hosted-batch-coverage.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ancestry-cut.js';
 import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
@@ -373,8 +374,11 @@ export async function computeMergeStep(
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
+  // Member accounting starts with the first quantum; an older in-flight cursor has none.
+  if (plan.batch && c.index === 0) c.batchMerged ??= [];
   if (c.index >= c.selections.length) {
     invariant(c.head, 'SOURCE_JOB_INVALID', 'Compose has no selected head.');
+    if (plan.batch && c.batchMerged) assertBatchAccounted(plan.batch.members, c.batchMerged, c.batchDropped);
     let state = c.inventory[c.head]?.object;
     if (!state) {
       invariant(io.describeBatch, 'SOURCE_WORKER_UNAVAILABLE', 'Resolve final State.');
@@ -441,32 +445,35 @@ export async function computeMergeStep(
     async () => {},
     bases,
   );
-  if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
   let manifest = composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8')));
-  c.index++;
-  if (
+  const member =
     manifest.result.status === 'conflict' &&
-    plan.batch &&
+    !!plan.batch &&
     'candidateId' in value &&
-    plan.batch.members.includes(value.candidateId)
-  ) {
-    let againstMain = c.head === plan.base.head;
-    if (!againstMain) {
-      const onMain = await buildHostedComposeState(
-        c.input,
-        { ...plan, batch: undefined, inputs: inputs.manifest, dependencies: dependencies.manifest },
-        reader,
-        source,
-        async () => {},
-      );
-      const checked = composeResultSchema.parse(
-        JSON.parse(source.object(onMain.output.sha256).toString('utf8')),
-      );
-      if (checked.result.status === 'conflict') {
-        manifest = checked;
-        againstMain = true;
-      }
+    plan.batch.members.includes(value.candidateId);
+  let againstMain = c.head === plan.base.head;
+  if (member && !againstMain) {
+    const onMain = await buildHostedComposeState(
+      c.input,
+      { ...plan, batch: undefined, inputs: inputs.manifest, dependencies: dependencies.manifest },
+      reader,
+      source,
+      async () => {},
+    );
+    const checked = composeResultSchema.parse(
+      JSON.parse(source.object(onMain.output.sha256).toString('utf8')),
+    );
+    if (checked.result.status === 'conflict') {
+      manifest = checked;
+      againstMain = true;
     }
+  }
+  // The quantum commits below, after its last await. Any await above can throw
+  // SourceCalculationsPending, and the step re-runs this same index; moving the
+  // cursor first skipped a batch member without merging or dropping it (Issue 55bcad06).
+  if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
+  c.index++;
+  if (member && 'candidateId' in value) {
     invariant(manifest.result.status === 'conflict', 'SOURCE_JOB_INVALID', 'Retain the rejected merge.');
     (c.batchDropped ??= []).push({
       candidateId: value.candidateId,
@@ -482,6 +489,13 @@ export async function computeMergeStep(
   } else {
     c.head = manifest.result.state.sha256;
     c.inventory[c.head] = { object: manifest.result.state, recipe: null };
+    if (
+      plan.batch &&
+      c.batchMerged &&
+      'candidateId' in value &&
+      plan.batch.members.includes(value.candidateId)
+    )
+      c.batchMerged.push(value.candidateId);
     if (c.index === c.selections.length && !plan.batch) {
       c.output = result.output;
       c.phase = 'done';

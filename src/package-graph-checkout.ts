@@ -3,7 +3,9 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { buildPackageGraph } from './package-graph.js';
+import { buildModuleGraph } from './module-graph.js';
 import { packageTestSelection } from './package-test-selection.js';
+import { packageIntersectionTestSelection } from './package-intersection.js';
 
 /** Paths walked at most: past this the graph is unknown (full), never a partial view. */
 const MAX_PATHS = 500_000;
@@ -24,20 +26,22 @@ function checkoutPaths(directory: string) {
   return walk('') ? paths : null;
 }
 
-/** The package-graph selection for `changed` in a checked-out Candidate: manifests read from disk,
- * no repository code run, no Forge call. */
+/** The package-graph selection for `changed` in a checked-out Candidate: manifests and (for the
+ * module graph, src/module-graph.ts) Python, Go, Rust, Java and Kotlin sources read from disk, no
+ * repository code run, no Forge call. */
 export function checkoutPackageSelection(directory: string, changed: string[]) {
   const paths = checkoutPaths(directory);
-  const graph = paths
-    ? buildPackageGraph(paths, path => {
-        try {
-          return readFileSync(join(directory, path), 'utf8');
-        } catch {
-          return undefined;
-        }
-      })
-    : ({ status: 'unknown', reason: `more than ${MAX_PATHS} files` } as const);
-  return packageTestSelection(graph, changed);
+  const read = (path: string) => {
+    try {
+      return readFileSync(join(directory, path), 'utf8');
+    } catch {
+      return undefined;
+    }
+  };
+  if (!paths)
+    return packageTestSelection({ status: 'unknown', reason: `more than ${MAX_PATHS} files` }, changed);
+  const graph = buildPackageGraph(paths, read);
+  return packageTestSelection(graph, changed, () => buildModuleGraph({ paths, read }));
 }
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -50,12 +54,16 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
  * checkout, so a repository's own CI script opts in with one line. */
 export function writeCheckPackages(
   directory: string,
-  changes: { mode?: unknown; paths?: unknown } | undefined,
+  changes: { mode?: unknown; paths?: unknown; mainPaths?: unknown } | undefined,
   runner?: { node: string; script: string },
 ): { path: string; run: string | null; remove: () => void } | null {
   if (changes?.mode !== 'scoped' || !Array.isArray(changes.paths)) return null;
-  const changed = changes.paths.filter((path): path is string => typeof path === 'string');
-  const selection = checkoutPackageSelection(directory, changed);
+  const strings = (list: unknown[]) => list.filter((path): path is string => typeof path === 'string');
+  const changed = strings(changes.paths);
+  // A scoped main-race recheck names main's delta: the packages that can see both changes.
+  const selection = Array.isArray(changes.mainPaths)
+    ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths))
+    : checkoutPackageSelection(directory, changed);
   const folder = mkdtempSync(join(tmpdir(), 'forge-packages-'));
   const path = join(folder, 'packages.json');
   writeFileSync(
@@ -79,4 +87,19 @@ export function writeCheckPackages(
     );
   }
   return { path, run, remove: () => rmSync(folder, { recursive: true, force: true }) };
+}
+
+/** A scoped main-race recheck's package selection (src/package-intersection.ts) in a checkout. */
+export function checkoutPackageIntersection(directory: string, changed: string[], mainPaths: string[]) {
+  const paths = checkoutPaths(directory);
+  const graph = paths
+    ? buildPackageGraph(paths, path => {
+        try {
+          return readFileSync(join(directory, path), 'utf8');
+        } catch {
+          return undefined;
+        }
+      })
+    : ({ status: 'unknown', reason: `more than ${MAX_PATHS} files` } as const);
+  return packageIntersectionTestSelection(graph, changed, mainPaths);
 }

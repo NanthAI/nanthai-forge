@@ -280,7 +280,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `yarn workspace NAME run test` for workspace packages and `npm run test` (its own package
   manager) in a standalone package's folder, for packages with a `test` script.
   The selection is full, with the reason, when a changed path is outside every package (a root
-  file, a lockfile, CI config), the root package is affected, a manifest cannot be read, the layout
+  file, a lockfile, CI config), the root package is affected and the module graph below cannot
+  narrow it, a manifest cannot be read, the layout
   is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
   no unambiguous command exists (Python without pytest declared, Bun workspaces). Repository docs
   outside every package change nothing. A package found only by its manifest inside another
@@ -293,6 +294,26 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   runner for it in `FORGE_CHECK_PACKAGES_RUN`, and an Intent without a contract can get a scoped
   first check when the graph selects a minority ([check command scope](workflows.md#check-command-scope)).
   It is a selector, never an independence proof.
+- **Module graph narrows a changed package to the tests that reach the change.** For Python, Go,
+  Rust, Java and Kotlin, Forge reads each source file's imports and top-level names lexically (no
+  repository code runs) into a module graph per head (`src/module-graph.ts`; facts cached per
+  blob, so a save re-reads only changed files; at most 5,000 source files, 1 MiB each, 16 MiB in
+  all, the code graph's bounds, else package level as above). A changed package, the root package
+  included, then runs only the test units whose imports reach the change: pytest files
+  (`python -m pytest tests/test_a.py`, conftest.py and `__init__.py` chains included), Go package
+  folders (`go test ./a ./b`), Cargo test targets (`cargo test -p NAME --test=T`), and JVM test
+  classes under `src/test/` (`./gradlew :p:test --tests C`, `mvn test -Dtest=C`). Packages that
+  depend on it still run whole. It stays at package level when a changed path is not module code
+  (data, C, a manifest, a deleted file), when the package depends on another changed package,
+  when pytest is not declared or its `python_files`, `pythonpath` or `import-mode` is set, and when a reached file's
+  users are invisible: Rust library, binary, bench and example code (Cargo builds it into every
+  test target), JVM tests in another source set (`src/jvmTest`), Kotlin top-level `operator fun`
+  and `package-info.java`. Dynamic loading (`importlib`, `__import__`, `subprocess`, `sys.path`,
+  `os/exec`, `plugin`, `Class.forName`, `ServiceLoader`, `include!`, `#[path]`) or a local import
+  Forge cannot resolve makes that file depend on its whole package, never on nothing. Java and
+  Kotlin edges come from package visibility plus word matches on top-level names, so common names
+  over-select. `node scripts/measure-module-graph.mjs DIR PATH…` prints the reach and the selection
+  with and without the module graph for any checkout.
 - **Inferred commands advise; declared ones can be required.** A runner Forge inferred (these
   package commands, or `vitest`/`jest` guessed from a dependency with no `test` script) can need
   setup only the project's CI does: test data it fetches, services, a toolchain. Its plan carries

@@ -27,15 +27,24 @@ export function scopedRecheckBase(gate: CheckGate | undefined) {
   return hash.safeParse(base).success ? base : null;
 }
 
-/** The contract gate's eligibility, without its Intent contract: the same
- * owner-agent, auto-on-pass, unprotected path, trust and green, debt-free main audit. */
+/** The contract gate's eligibility, without its Intent contract and under either gate (Issue
+ * fc215574): the same owner-agent, auto-on-pass, unprotected path, trust and green, debt-free main
+ * audit. A full-gated project's main-race recheck runs the tests that can see both changes; the
+ * skipped tests are main-audit debt, as under the contract gate. */
 export function scopedRecheckEligible(input: GateInput) {
+  const acceptance = input.policy.acceptance;
   return (
-    input.policy.acceptance.gate === 'contract' &&
-    input.policy.acceptance.scopedRecheck !== false &&
-    gateFor({ ...input, contract: { version: 0, tests: [] } }).mode === 'contract'
+    acceptance.scopedRecheck !== false &&
+    gateFor({
+      ...input,
+      policy: { ...input.policy, acceptance: { ...acceptance, gate: 'contract' } },
+      contract: { version: 0, tests: [] },
+    }).mode === 'contract'
   );
 }
+/** Whether a project's policy can run main-race rechecks scoped (the per-actor rules apply later). */
+export const scopedRecheckPolicy = (acceptance: { mode: string; scopedRecheck?: boolean | undefined }) =>
+  acceptance.mode === 'auto-on-pass' && acceptance.scopedRecheck !== false;
 export function acceptScopedRecheck(input: GateInput): 'pass' | 'full-required' | 'main-red' {
   if (!scopedRecheckEligible({ ...input, main: { ...input.main, status: 'green', debt: false } }))
     return 'full-required';

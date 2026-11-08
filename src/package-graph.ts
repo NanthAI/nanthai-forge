@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digestChunks } from './portable-hash.js';
+import { moduleEcosystem, moduleNarrowing } from './module-selection.js';
+import type { ModuleGraph } from './module-graph-types.js';
 import { cargoGraph, goGraph } from './package-graph-go-rust.js';
 import { pythonGraph, pythonManifest } from './package-graph-python.js';
 import { gradleGraph, jvmManifest, mavenGraph } from './package-graph-jvm.js';
@@ -164,8 +166,15 @@ export function withDependents(
 }
 
 /** Changed paths → owning packages → those plus every package that depends on them, and the
- * per-ecosystem commands that test them. Repository docs outside every package change nothing. */
-export function packageSelection(graph: PackageGraph, changed: string[]): PackageSelection {
+ * per-ecosystem commands that test them. Repository docs outside every package change nothing.
+ * With the head's module graph (src/module-graph.ts), a changed package whose changes it fully reads
+ * runs only the test units that reach them (src/module-selection.ts), the root package included;
+ * dependent packages still run whole. */
+export function packageSelection(
+  graph: PackageGraph,
+  changed: string[],
+  modules?: () => ModuleGraph | undefined,
+): PackageSelection {
   if (graph.status === 'unknown') return { scope: 'full', reason: `package graph unknown: ${graph.reason}` };
   const full = (reason: string): PackageSelection => ({ scope: 'full', reason: `package graph: ${reason}` });
   const byKey = new Map(graph.packages.map(pkg => [packageKey(pkg), pkg]));
@@ -193,13 +202,35 @@ export function packageSelection(graph: PackageGraph, changed: string[]): Packag
   const selected = new Map(owners);
   for (const key of withDependents(graph, owners.keys()))
     if (!selected.has(key)) selected.set(key, byKey.get(key)!);
-  const root = [...selected.values()].find(pkg => !pkg.dir);
-  if (root) return full(`root package ${root.name} (${root.ecosystem}) is affected`);
+  // Built only when a changed package could be narrowed: reading sources costs more than manifests.
+  const narrowable = [...owners.values()].some(pkg => !pkg.leaf && moduleEcosystem(pkg.ecosystem));
+  const narrowing =
+    modules && narrowable
+      ? moduleNarrowing(
+          modules(),
+          changed,
+          owners,
+          path => enclosingPackages(graph, path),
+          key => [...owners.keys()].some(other => other !== key && withDependents(graph, [other]).has(key)),
+        )
+      : undefined;
+  const narrowed = narrowing?.units ?? new Map<string, string[]>();
+  const root = [...selected.values()].find(pkg => !pkg.dir && !narrowed.has(packageKey(pkg)));
+  if (root)
+    return full(
+      `root package ${root.name} (${root.ecosystem}) is affected` +
+        (narrowing?.whole.has(packageKey(root))
+          ? ` (module graph: ${narrowing.whole.get(packageKey(root))})`
+          : ''),
+    );
   const commands: PackageCommand[] = [];
   for (const ecosystem of graph.ecosystems) {
-    const mine = [...selected.values()].filter(pkg => pkg.ecosystem === ecosystem.ecosystem && pkg.testable);
+    const mine = [...selected.values()].filter(
+      pkg =>
+        pkg.ecosystem === ecosystem.ecosystem && pkg.testable && narrowed.get(packageKey(pkg))?.length !== 0,
+    );
     if (!mine.length) continue;
-    const result = ecosystem.commands(mine, changed);
+    const result = ecosystem.commands(mine, changed, narrowed);
     if ('refusal' in result) return full(`${ecosystem.ecosystem}: ${result.refusal}`);
     commands.push(...result);
   }
@@ -216,6 +247,9 @@ export function packageSelection(graph: PackageGraph, changed: string[]): Packag
   const reason =
     `package graph (${graph.ecosystems.map(item => item.ecosystem).join(', ')}): ${owners.size} changed and ` +
     `${selected.size - owners.size} dependent package(s) of ${graph.packages.length} (${shown})` +
+    (narrowed.size
+      ? `; module graph: ${[...narrowed].map(([key, units]) => `${key.replace(/:$/, ':.')} runs ${units.length} test unit(s) that reach the change`).join(', ')}`
+      : '') +
     (commands.length ? '' : '; none has tests to run');
   return { scope: commands.length ? 'scoped' : 'none', reason, packages, commands };
 }

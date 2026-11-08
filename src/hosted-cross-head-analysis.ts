@@ -10,6 +10,7 @@ import {
 } from './hosted-cross-head-proof.js';
 import { FIRST_CHECK_RISK_RULE, globalRiskBetween } from './first-check-risk.js';
 import { markdownPath, pinnedTestedDocs, TESTED_DOCS_RULE } from './tested-docs.js';
+import { pinnedPackagePlacement, placeableRisk, placedRiskBetween } from './package-placement.js';
 
 type Basis = Pick<
   CrossHeadProof,
@@ -47,8 +48,9 @@ const json = (bytes: Uint8Array | undefined, pin: string): Record<string, unknow
  * four verified manifests and two selection pins: no source text, no import graph
  * and no repository code. Paths both sides changed are allowed only when every one
  * is a Markdown file that no test or script reads (the checked selection's pinned
- * list) and the server composed it as a clean text merge. Any doubt returns a
- * recheck reason. */
+ * list) and the server composed it as a clean text merge. A manifest or lockfile
+ * inside a package is risk only for the packages the checked selection's pinned
+ * package graph says it reaches. Any doubt returns a recheck reason. */
 export async function analyzeCrossHeadReuse(
   basis: Basis,
   selectionPin: string,
@@ -71,7 +73,10 @@ export async function analyzeCrossHeadReuse(
   if (pathsOverlap(rest(candidatePaths), mainPaths) || pathsOverlap(candidatePaths, rest(mainPaths)))
     return { reason: 'path-overlap' };
   if (!docsOverlap.every(markdownPath)) return { reason: 'path-overlap' };
-  if (globalRiskBetween(candidatePaths, mainPaths, checkEntries)) return { reason: 'global-risk' };
+  // A manifest or lockfile inside a package may still be placed by the checked run's package graph
+  // (rule v3, Issue 5cfcca4b); every other risk path decides here, on paths alone.
+  const risky = globalRiskBetween(candidatePaths, mainPaths, checkEntries);
+  if (risky && !placeableRisk(candidatePaths, mainPaths, checkEntries)) return { reason: 'global-risk' };
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
   // An overlapping Markdown file is the server's clean text merge: it exists on all four
   // sides as a plain file (no add, delete or mode change) and takes the composed bytes.
@@ -120,6 +125,10 @@ export async function analyzeCrossHeadReuse(
   const checkedScope = selection.scope;
   if (checkedScope !== 'full' && checkedScope !== 'docs') return { reason: 'checked-not-full' };
   if (audit.scope !== 'full') return { reason: 'audit-not-full' };
+  const placed = risky
+    ? placedRiskBetween(candidatePaths, mainPaths, checkEntries, pinnedPackagePlacement(selection))
+    : [];
+  if (!placed) return { reason: 'global-risk' };
   if (docsOverlap.length) {
     // Tested on the checked source, or on the audited main (when its run pinned a list).
     const checkedDocs = pinnedTestedDocs(selection),
@@ -139,6 +148,7 @@ export async function analyzeCrossHeadReuse(
     riskRule: FIRST_CHECK_RISK_RULE,
     checkEntries: [...checkEntries],
     checkedScope,
+    ...(placed.length ? { placedRisk: placed } : {}),
   }) as CleanDisjointProof;
   return Buffer.byteLength(canonicalPayload(proof)) <= 128 * 1024
     ? { proof }

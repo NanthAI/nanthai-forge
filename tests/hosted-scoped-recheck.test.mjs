@@ -11,6 +11,7 @@ import {
 } from '../dist/scoped-recheck-policy.js';
 import { actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { firstCheckReceipt, hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { smokeTests } from '../scripts/test-impact.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
@@ -45,23 +46,91 @@ test('overlapping Convex impact selects only the shared tests, own tests and smo
   assert.match(selected.reason, /3 of 10 full-suite tests are main-audit debt/);
 });
 
-test('replay (c): package, lockfile, selector, root configuration and deletions keep the full suite', () => {
+test("replay (c): this change's package, lockfile, selector, root configuration and deletions keep the full suite", () => {
   const extra = [
     ['scripts/test-impact.mjs', 'export const selector = 1;'],
     ['scripts/forge-check.mjs', "import './test-impact.mjs';"],
     ['tsconfig.json', '{}'],
   ];
   for (const [lane, main] of [
-    [['convex/lane.ts'], ['package.json']],
+    [['package.json'], ['convex/main.ts']],
     [['package-lock.json'], ['convex/main.ts']],
-    [['convex/lane.ts'], ['scripts/test-impact.mjs']],
+    [['scripts/test-impact.mjs'], ['convex/main.ts']],
     [['tsconfig.json'], ['convex/main.ts']],
-    [['convex/lane.ts'], ['convex/deleted.ts']],
+    [['convex/deleted.ts'], ['convex/main.ts']],
   ]) {
     const selected = scopedRecheckSelection({ lanePaths: lane, mainPaths: main, files: files(extra) });
     assert.equal(selected.scope, 'full', `${lane} × ${main}`);
     assert.equal(selected.tests.length, 9);
   }
+});
+
+// Issue fc215574 (dogfood 2026-11-08: 18 of 18 refused proofs rechecked in full, most because main's
+// delta held a root file, a check-pipeline script or a deleted path). Main's delta passed main's own
+// checks; a main path the selector cannot place reaches every test, so the shared set is this
+// change's own affected set, never the whole suite. Before: each case below selected all 9 tests.
+test("replay: a main path the selector cannot place reruns only this change's affected tests", () => {
+  const extra = [
+    ['scripts/test-impact.mjs', 'export const selector = 1;'],
+    ['scripts/forge-check.mjs', "import './test-impact.mjs';"],
+    ['tsconfig.json', '{}'],
+  ];
+  for (const main of [
+    ['package.json'],
+    ['package-lock.json', 'convex/main.ts'],
+    ['scripts/test-impact.mjs'],
+    ['tsconfig.json'],
+    ['convex/deleted.ts'],
+  ]) {
+    const selected = scopedRecheckSelection({
+      lanePaths: ['convex/lane.ts'],
+      mainPaths: main,
+      files: files(extra),
+    });
+    assert.equal(selected.scope, 'scoped', `${main}: ${selected.reason}`);
+    assert.deepEqual(
+      selected.tests,
+      ['tests/both.test.mjs', 'tests/lane.test.mjs', ...smokeTests].sort(),
+      `${main}`,
+    );
+    assert.match(selected.reason, /main reaches every test/);
+  }
+});
+
+// Issue debe08fa: both sides changed one Markdown file that a test reads (proof refusal `tested-doc`).
+// The recheck reruns that document's readers (plus smoke), not the suite. Before: a Markdown-only side
+// had no affected tests, so the readers of the merged document were silently skipped.
+test('replay: a tested-document overlap reruns only the tests that read the document', () => {
+  const docs = [
+    ['docs/guide.md', '# Guide\n'],
+    ['docs/other.md', '# Other\n'],
+    ['tests/guide.test.mjs', "readFileSync('docs/guide.md', 'utf8');"],
+  ];
+  const only = scopedRecheckSelection({
+    lanePaths: ['docs/guide.md'],
+    mainPaths: ['docs/guide.md', 'convex/main.ts'],
+    files: files(docs),
+  });
+  assert.equal(only.scope, 'scoped', only.reason);
+  assert.deepEqual(only.tests, ['tests/guide.test.mjs', ...smokeTests].sort());
+  assert.match(
+    only.reason,
+    /1 tests affected by main and this change \(through the tests that read a changed document\)/,
+  );
+  // Code on both sides plus the shared document: the shared import set and the document's readers.
+  const mixed = scopedRecheckSelection({
+    lanePaths: ['convex/lane.ts', 'docs/guide.md'],
+    mainPaths: ['convex/main.ts', 'docs/guide.md'],
+    files: files(docs),
+  });
+  assert.deepEqual(mixed.tests, ['tests/both.test.mjs', 'tests/guide.test.mjs', ...smokeTests].sort());
+  // A document no test reads adds no test; code-only overlaps are unchanged.
+  const untested = scopedRecheckSelection({
+    lanePaths: ['docs/other.md'],
+    mainPaths: ['docs/other.md'],
+    files: files(docs),
+  });
+  assert.deepEqual(untested.tests, [...smokeTests].sort());
 });
 
 test('incident e4aee4fe: a shell script beside the bench harness keeps the main-race recheck scoped', () => {
@@ -104,7 +173,7 @@ test('the planner runs the scoped selection only for a server-stamped recheck wi
   assert.match(missing.reason, /^Scoped recheck base unavailable/);
 });
 
-test('scoped recheck eligibility mirrors the contract gate and pauses on red main', () => {
+test('scoped recheck eligibility mirrors the contract gate under either gate and pauses on red main', () => {
   const input = (patch = {}) => {
     const policy = policyPreset('trusted');
     Object.assign(policy.acceptance, patch.acceptance ?? {});
@@ -125,9 +194,13 @@ test('scoped recheck eligibility mirrors the contract gate and pauses on red mai
   };
   assert.equal(scopedRecheckEligible(input()), true);
   assert.equal(acceptScopedRecheck(input()), 'pass');
+  // Either gate (Issue fc215574): the full gate and an absent gate run scoped main-race rechecks too.
+  assert.equal(scopedRecheckEligible(input({ acceptance: { gate: 'full' } })), true);
+  assert.equal(acceptScopedRecheck(input({ acceptance: { gate: 'full' } })), 'pass');
+  assert.equal(scopedRecheckEligible(input({ acceptance: { gate: undefined } })), true);
   for (const patch of [
     { acceptance: { scopedRecheck: false } },
-    { acceptance: { gate: 'full' } },
+    { acceptance: { gate: 'full', scopedRecheck: false } },
     { acceptance: { mode: 'review' } },
     { actor: { kind: 'agent', id: 'contributor' } },
     { paths: null },
@@ -184,6 +257,8 @@ const overlapping = [
 const effective = (f, runId, value) => {
   const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === runId);
   const run = JSON.parse(row.value);
+  // A project with no configured gate stamps none on its ordinary runs.
+  if (!run.gate) return;
   run.gate = { ...run.gate, effective: value };
   f.patch('projectHostedCheckRuns', row._id, { gate: run.gate, value: JSON.stringify(run) });
 };
@@ -288,6 +363,34 @@ test('replay (b): an overlapping Convex race runs one scoped recheck that lands 
   assert.equal(audit.unaudited.count, 1, 'the skipped tests are main-audit debt');
 });
 
+// Issue fc215574: the full gate (and no configured gate) ran every main-race recheck in full.
+for (const [name, gate] of [
+  ['the full gate', 'full'],
+  ['no configured gate', undefined],
+])
+  test(`replay: under ${name} an overlapping race runs one scoped recheck that lands with audit debt`, async t => {
+    const { f, state, before, selection } = await race(t, { policy: { gate } });
+    const { attempt } = await f.status(state.id);
+    assert.equal(attempt.recheck?.checked.head, before.candidate.head, 'the first full pass is the basis');
+    const run = await f.rawChecks.status(attempt.check.runId);
+    // Before: no basis and a full (or gateless) run.
+    assert.deepEqual(run.gate, { mode: 'scoped', reason: `scoped-recheck:${before.main.head}` });
+    await passWithSelection(f, run.id, selection);
+    effective(f, run.id, 'contract');
+    for (let n = 0; n < 40 && (await f.current(state.id)).submission.phase !== 'landed'; n++)
+      await f.execute();
+    assert.equal((await f.current(state.id)).submission.phase, 'landed');
+    const audit = [...f.tables.projectHostedMainAudits.values()][0];
+    assert.equal(audit.unaudited.count, 1, 'the skipped tests are main-audit debt');
+  });
+
+test("under the full gate a contributor's race keeps the full recheck", async t => {
+  const { f, state } = await race(t, { policy: { gate: 'full', autoActors: ['someone-else'] } });
+  const { attempt } = await f.status(state.id);
+  const run = await f.rawChecks.status(attempt.check.runId);
+  assert.equal(run.gate?.mode ?? 'full', 'full');
+});
+
 test('scopedRecheck:false keeps the full recheck; on costs no extra Convex calls or writes', async t => {
   const off = await race(t, { policy: { scopedRecheck: false } });
   const on = await race(t);
@@ -323,4 +426,38 @@ test('replay (d): a failing scoped recheck follows the normal failure path and n
     await f.execute();
   assert.equal((await f.current(state.id)).submission.phase, 'terminal-failed');
   assert(![...f.tables.projectHostedAcceptances.values()].some(row => row.submissionId === state.id));
+});
+
+test('the receipt records landedOn scoped-intersection with the selection reason', () => {
+  const admission = { runId: 'a', status: 'passed', full: true, recheck: 'tested-doc' };
+  const scoped = { reason: 'Scoped recheck: 1 tests affected by main and this change', tests: 7 };
+  assert.deepEqual(firstCheckReceipt(admission, { runId: 'b', reused: false, batch: false, scoped }), {
+    landedOn: 'scoped-intersection',
+    reason: 'tested-doc',
+    selection: scoped.reason,
+    tests: 7,
+  });
+  // A full recheck, a cohort and the admission run itself keep their records.
+  assert.deepEqual(firstCheckReceipt(admission, { runId: 'b', reused: false, batch: false }), {
+    landedOn: 'recheck',
+    reason: 'tested-doc',
+  });
+  assert.equal(
+    firstCheckReceipt(admission, { runId: 'b', reused: false, batch: true, scoped }).landedOn,
+    'recheck',
+  );
+  assert.equal(
+    firstCheckReceipt(admission, { runId: 'a', reused: false, batch: false, scoped }).landedOn,
+    'admission-run',
+  );
+  const shape = hostedAcceptanceSchema.shape.firstCheck;
+  assert.equal(
+    shape.safeParse({
+      landedOn: 'scoped-intersection',
+      reason: 'tested-doc',
+      selection: scoped.reason,
+      tests: 7,
+    }).success,
+    true,
+  );
 });
