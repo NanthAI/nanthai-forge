@@ -5,7 +5,7 @@ import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js
 import { gitlinkCommit } from './gitlink.js';
 import { isMissingObject, treeBlobPattern } from './hosted-github-retry.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
-import { sourceExclusion } from './files.js';
+import { publicationExclusion, sourceExclusion } from './files.js';
 import { invariant } from './errors.js';
 export const mirrorWindow = 100;
 export const mirrorBytes = 8 * 1024 * 1024;
@@ -38,8 +38,33 @@ export type MirrorPlan = {
     sha: string | null;
   }[];
   pending: NativeFile[];
+  /** Bootstrap only, when the baseline tracks credential-looking names: the diff against a
+   * GitHub tree that an older mirror wrote without them, used if GitHub's tree is that one. */
+  legacy?: { changes: MirrorPlan['changes']; pending: NativeFile[] };
   entry: GithubSyncCommit | null;
 };
+/** Paths a mirror commit's tree holds: every tracked path except Forge metadata
+ * (`tracked`), or, for a commit an older mirror wrote, also without credential-looking
+ * names (`legacy`, `sourceExclusion`). Gitlinks are always published. */
+const published = (rule: 'tracked' | 'legacy') => (file: NativeFile) =>
+  file.mode === 'gitlink' || !(rule === 'tracked' ? publicationExclusion : sourceExclusion)(file.path);
+function diff(files: NativeFile[], next: NativeFile[]) {
+  const old = new Map(files.map(file => [file.path, file]));
+  const after = new Map(next.map(file => [file.path, file]));
+  const changes: MirrorPlan['changes'] = files
+    .filter(file => !after.has(file.path))
+    .map(file => ({
+      path: file.path,
+      mode: gitMode(file.mode),
+      type: file.mode === 'gitlink' ? 'commit' : 'blob',
+      sha: null,
+    }));
+  const pending = next.filter(file => {
+    const before = old.get(file.path);
+    return !before || before.blob !== file.blob || before.mode !== file.mode;
+  });
+  return { changes, pending };
+}
 export type MirrorIO = {
   api: GithubRequest;
   states(ids: string[]): Promise<NativeState[]>;
@@ -76,22 +101,14 @@ function diffPlan(
   target: NativeState,
   bootstrap: boolean,
 ): MirrorPlan {
-  const files = baseline.files.filter(file => file.mode === 'gitlink' || !sourceExclusion(file.path));
-  const next = target.files.filter(file => file.mode === 'gitlink' || !sourceExclusion(file.path));
-  const old = new Map(files.map(file => [file.path, file]));
-  const after = new Map(next.map(file => [file.path, file]));
-  const changes: MirrorPlan['changes'] = files
-    .filter(file => !after.has(file.path))
-    .map(file => ({
-      path: file.path,
-      mode: gitMode(file.mode),
-      type: file.mode === 'gitlink' ? 'commit' : 'blob',
-      sha: null,
-    }));
-  const pending = next.filter(file => {
-    const before = old.get(file.path);
-    return !before || before.blob !== file.blob || before.mode !== file.mode;
-  });
+  const next = target.files.filter(published('tracked'));
+  const files = baseline.files.filter(published('tracked')),
+    legacyFiles = baseline.files.filter(published('legacy'));
+  // A verified mapping says which rule wrote GitHub's tree; an older one dropped tracked
+  // credential-looking names, so this commit adds them back. Bootstrap checks both below.
+  const legacy = !bootstrap && seed.binding?.publication !== 'tracked';
+  const { changes, pending } = diff(legacy ? legacyFiles : files, next);
+  const fallback = bootstrap && legacyFiles.length !== files.length ? diff(legacyFiles, next) : undefined;
   return {
     seed,
     parent,
@@ -102,6 +119,7 @@ function diffPlan(
     hashes: [],
     changes,
     pending,
+    ...(fallback ? { legacy: fallback } : {}),
     entry: null,
   };
 }
@@ -225,11 +243,17 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       if (plan.index < files.length) return plan;
     }
     if (plan.phase === 'bootstrap') {
-      invariant(
-        gitTree(plan.hashes) === plan.baseTree,
-        'GITHUB_SYNC_BOOTSTRAP_TREE',
-        'GitHub main tree differs from its matching Forge State. No mapping was trusted and no ref was changed.',
-      );
+      if (gitTree(plan.hashes) !== plan.baseTree) {
+        invariant(
+          plan.legacy && gitTree(plan.hashes.filter(published('legacy'))) === plan.baseTree,
+          'GITHUB_SYNC_BOOTSTRAP_TREE',
+          'GitHub main tree differs from its matching Forge State. No mapping was trusted and no ref was changed.',
+        );
+        // An older mirror left tracked credential-looking names out: publish them now.
+        plan.changes = plan.legacy.changes;
+        plan.pending = plan.legacy.pending;
+      }
+      delete plan.legacy;
       plan.baseline = [];
       plan.hashes = [];
       plan.phase = 'blobs';
@@ -241,6 +265,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
     if (plan.changes.length) tree = await createTree(plan, io, prefix);
     const seed = plan.seed;
     const entry = {
+      publication: 'tracked' as const,
       operationId: seed.operationId,
       state: seed.state,
       acceptanceId: seed.acceptanceId,

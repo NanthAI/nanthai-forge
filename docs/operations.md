@@ -119,18 +119,33 @@ Native capture and hosted checkout saves read nested `.gitignore` and
 `.forgeignore` files without Git. In each directory, `.forgeignore` follows
 `.gitignore`, with the same patterns, anchored paths, directory rules and `!`
 negation. A Forge negation can re-include a Git-ignored path; excluded parent
-directories must first be re-included. Built-in rules take precedence for new
-files, and they are the same for every language: VCS and Forge metadata (`.git`,
-`.forge`, Forge's `private-artifacts`), dependency installs (`node_modules`), credential stores (`.ssh`, `.aws`,
-`.azure`, `.gnupg`) and credential names (`.env*` except exact templates, `.npmrc`,
-`.netrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, and `credentials*`/`secrets*`
-files that are not code). Code modules named `credentials.*` or `secrets.*` in any
-common language (`internal/auth/credentials.go`, `src/Secrets.cs`) are source, and a
-`secrets/` or `credentials/` folder keeps its code files. Build folders such as
-`build/`, `dist/` or `coverage/` are excluded only when `.gitignore` or `.forgeignore`
-names them, so a Go `cmd/build/` package is saved. A save receipt's `notSaved`
-lists up to 20 new paths that a built-in rule left out although no ignore rule
-names them, with the total `count`. `.forgeignore` itself is an ordinary source file. Local Git-worktree and GitHub source analysis
+directories must first be re-included.
+
+A tracked file is source and is published, like on GitHub, whatever its name:
+saves keep it and the GitHub mirror pushes it byte-identical. Publication leaves
+out only VCS and Forge metadata (`.git`, `.forge`) and Forge's `private-artifacts`.
+
+Built-in rules apply to new, untracked files, the same for every language: VCS
+and Forge metadata, dependency installs (`node_modules`) and credential stores
+(`.ssh`, `.aws`, `.azure`, `.gnupg`) are never saved. A credential-looking name
+(`.env*` except exact templates, `.npmrc`, `.netrc`, `*.pem`, `*.key`, `*.p12`,
+`*.pfx`, `*.keystore`, and `credentials*`/`secrets*` files that are not code) only
+prompts a content check: the file's bytes go through the landing secret scan's
+patterns, and a file without a credential (a test or public certificate, a
+token-free `.npmrc`, `.env.development` defaults) is saved. A file with a private
+key or a known token format is held (`secret-content`). Local credential files
+(`.env`, `.env.local`, `.env.*.local`, `.netrc`) and files that cannot be checked
+as text (binary keystores, over 1 MiB) are held by name (`sensitive-name`). To
+save another held file on purpose, add an exact `.forgeignore` negation
+(`!fixtures/key.pem`; a wildcard negation never re-includes it); the landing
+secret scan still checks it. Local credential files are never re-included. Code modules named `credentials.*` or
+`secrets.*` in any common language (`internal/auth/credentials.go`,
+`src/Secrets.cs`) are source, and a `secrets/` or `credentials/` folder keeps its
+code files. Build folders such as `build/`, `dist/` or `coverage/` are excluded
+only when `.gitignore` or `.forgeignore` names them, so a Go `cmd/build/` package
+is saved. A save receipt's `notSaved` lists up to 20 new paths that a built-in
+rule left out although no ignore rule names them, with the total `count` and the
+one-line `include` hint. `.forgeignore` itself is an ordinary source file. Local Git-worktree and GitHub source analysis
 use the same nested rules; Git-worktree analysis also preserves local Git
 info/exclude settings.
 

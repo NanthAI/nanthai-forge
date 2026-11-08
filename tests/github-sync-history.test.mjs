@@ -206,7 +206,7 @@ test('matching checkpoints dated before the recorded base cannot satisfy the fal
 });
 
 test('automatic history matching uses the same private-path projection as the export', t => {
-  const f = historyFixture(t, { path: '.env.local', historical: 'synthetic fixture only\n' });
+  const f = historyFixture(t, { path: 'private-artifacts/run.json', historical: 'synthetic fixture only\n' });
   assert.equal(f.run().length, 1);
   assert.deepEqual(f.run(undefined, { excludePrivate: true }), []);
 });

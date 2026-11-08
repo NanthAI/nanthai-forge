@@ -6,7 +6,7 @@ import { waitPushAudit } from './push-audit-wait.js';
 import { workProgress } from './work-progress.js';
 import { requestPushAudit } from './pre-push-audit.js';
 import { drainPostAccept } from './post-accept-main.js';
-import { sourceExclusion } from './files.js';
+import { publicationExclusion } from './files.js';
 import { isGreenMain } from './github-auto-push-state.js';
 import { publishGithubStatus } from './github-sync-status.js';
 import { isDeepStrictEqual } from 'node:util';
@@ -203,7 +203,9 @@ export async function githubSync(
         entries.every(entry =>
           source
             .state(entry.state)
-            .files.every(file => !sourceExclusion(file.path) || entry.excludedPaths?.includes(file.path)),
+            .files.every(
+              file => !publicationExclusion(file.path) || entry.excludedPaths?.includes(file.path),
+            ),
         ),
         'GITHUB_SYNC_PRIVATE_PENDING',
         'A retained manual batch includes private paths. Its mapping is preserved; automatic publication did not send it.',

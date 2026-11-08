@@ -44,11 +44,12 @@ export type SecretScanOptions = {
 
 // Known credential shapes. Prefixes are fixed by each provider; bodies are random.
 const patterns: { kind: string; pattern: RegExp }[] = [
-  // A header alone is a fixture or a parser; a key has a base64 body after it (raw or `\n` escaped).
+  // A header alone is a fixture or a parser; a key has a base64 body after it (raw, or `\n`/`\r\n`
+  // escaped as in a JSON service-account file).
   {
     kind: 'private-key',
     pattern:
-      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----(?:\r?\n|\\r?\\n)(?:[A-Za-z-]+: [^\n\\]*(?:\r?\n|\\r?\\n))*(?:\r?\n|\\r?\\n)?[A-Za-z0-9+/=]{40,}/g,
+      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----(?:\r?\n|(?:\\r)?\\n)(?:[A-Za-z-]+: [^\n\\]*(?:\r?\n|(?:\\r)?\\n))*(?:\r?\n|(?:\\r)?\\n)?[A-Za-z0-9+/=]{40,}/g,
   },
   { kind: 'aws-access-key-id', pattern: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
   { kind: 'github-token', pattern: /\bgh[pousr]_[A-Za-z0-9]{36,255}\b/g },

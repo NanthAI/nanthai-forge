@@ -15,6 +15,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { workGit } from '../dist/work-git.js';
 import { NativeSource, nativePaths } from '../dist/native-source.js';
@@ -27,6 +28,9 @@ import { readIgnoredStatus } from '../dist/ignored-status.js';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { exportNativeGit, importNativeGit } from '../dist/native-git.js';
 
+// Generated per run, so no key is ever committed.
+const privateKey = () =>
+  generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-ignore-')));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -75,13 +79,17 @@ test('nested rules, negation and built-in precedence are shared by capture', t =
   ])
     put(root, path);
   put(root, '.gitignore', '*.tmp\n');
-  put(root, '.forgeignore', '!keep.tmp\n!.env\n!nested/private.key\n');
+  // Wildcard negations never re-include a held credential name; an exact one is the deliberate include.
+  put(root, 'nested/private.key', privateKey());
+  put(root, 'nested/fixture.key', privateKey());
+  put(root, '.forgeignore', '!keep.tmp\n!.env*\n!nested/*.key\n!nested/fixture.key\n');
   put(root, 'nested/.forgeignore', '*.txt\n!keep.tmp\n');
   put(root, 'nested/deep/.forgeignore', '!keep.txt\n');
   const paths = nativePaths(root);
   assert(paths.includes('keep.tmp'));
   assert(paths.includes('nested/keep.tmp'));
   assert(paths.includes('nested/deep/keep.txt'));
+  assert(paths.includes('nested/fixture.key'));
   for (const path of ['a.tmp', 'nested/drop.txt', 'nested/deep/drop.txt', '.env', 'nested/private.key'])
     assert(!paths.includes(path), path);
   const status = readIgnoredStatus(root, true);

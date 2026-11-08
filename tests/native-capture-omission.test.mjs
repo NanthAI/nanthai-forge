@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -17,6 +17,8 @@ const archivedSource = [
   'web/src/Secrets.tsx',
 ];
 const content = 'export const synthetic = 1;\n';
+const privateKey = () =>
+  generateKeyPairSync('ec', { namedCurve: 'P-256' }).privateKey.export({ type: 'pkcs8', format: 'pem' });
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'forge-capture-omission-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -32,7 +34,8 @@ test('native init captures secret-named source and reports excluded config on re
   for (const path of archivedSource) put(root, path);
   put(root, '.env.example', 'SYNTHETIC=example\n');
   put(root, '.env', 'SYNTHETIC=local\n');
-  put(root, 'credentials.json', '{"synthetic":true}');
+  // A service-account-shaped file with a generated key: held by its content.
+  put(root, 'credentials.json', JSON.stringify({ synthetic: true, private_key: privateKey() }));
   put(root, '.gitignore', 'src/secret-ignored.ts\n');
   put(root, 'src/secret-ignored.ts');
   const initial = initNative(root),
@@ -44,7 +47,7 @@ test('native init captures secret-named source and reports excluded config on re
   assert.equal(initial.captureCoverage.included, 6);
   assert.deepEqual(initial.captureCoverage.excluded, [
     { path: '.env', reason: 'sensitive-name' },
-    { path: 'credentials.json', reason: 'sensitive-name' },
+    { path: 'credentials.json', reason: 'secret-content' },
     { path: 'src/secret-ignored.ts', reason: 'gitignored' },
   ]);
   assert.deepEqual(initNative(root), initial);
@@ -116,7 +119,7 @@ test('new secret-named Lane modules survive checkpoint, acceptance and materiali
   for (const name of names) assert.equal(readFileSync(join(root, 'materialized', name), 'utf8'), content);
 });
 
-test('native capture includes only exact env template suffixes and respects explicit ignores', t => {
+test('native capture saves env files without credentials, holds local env files and respects explicit ignores', t => {
   const root = fixture(t),
     included = [
       '.env.example',
@@ -125,15 +128,12 @@ test('native capture includes only exact env template suffixes and respects expl
       'app.env.example',
       'nested/app.env.sample',
       'nested/.env.template',
-    ],
-    excluded = [
-      '.env',
-      '.env.local',
+      // A credential-looking name with placeholder bytes is saved (Issue 9fac9a0e).
       '.env.production',
-      '.env.example.local',
       '.env.examples',
       '.env.sample.bak',
-    ];
+    ],
+    excluded = ['.env', '.env.local', '.env.example.local'];
   for (const name of [...included, ...excluded, 'ignored/.env.example'])
     put(root, name, 'SYNTHETIC=placeholder\n');
   put(root, '.gitignore', 'ignored/\n');

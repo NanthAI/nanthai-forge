@@ -71,6 +71,22 @@ export function sourceExclusion(path: string): string | null {
   return 'sensitive-name';
 }
 
+/** Publication (GitHub mirror and sync) of tracked source: a tracked file is published, like
+ * on GitHub, whatever its name (`key1.pem`, `.npmrc`, `.env.development`). Only VCS/Forge
+ * metadata and Forge's `private-artifacts` stay out. Credentials are caught by content (the
+ * landing secret scan, and the capture check for new files), never by name. O(path). */
+export function publicationExclusion(path: string): string | null {
+  return path
+    .toLowerCase()
+    .split('/')
+    .some(p => metadataDirectories.includes(p))
+    ? 'protected-directory'
+    : null;
+}
+
+/** New files whose purpose is local credentials: never saved by a content guess. */
+export const localCredentialName = (name: string) => /^(\.env(\.local|\..+\.local)?|\.netrc)$/i.test(name);
+
 /** What a new, untracked path's own name excludes from capture before ignore rules apply.
  * Adds to `sourceExclusion`: `node_modules` (dependency installs; Forge links one into
  * every Lane), `.env*` directories (virtualenvs and env stores), and non-code files inside a

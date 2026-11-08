@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { captureExclusion, safeRelative } from './files.js';
+import { captureExclusion, localCredentialName, safeRelative } from './files.js';
 import { invariant } from './errors.js';
-import { ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
+import { forgeIncludes, ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
+import { credentialNameHold } from './capture-credential-check.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 
 export type NativeExcludedPath = {
@@ -75,12 +76,20 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
         invariant(stat.isDirectory(), 'UNSAFE_PATH', 'Scoped source parent is not a real directory.');
       // Only metadata, dependency installs and real credential names are excluded by name, in
       // every language; build folders follow ignore rules (cmd/build/main.go is source).
-      const reason = captureExclusion(path, stat.isDirectory());
+      let reason = captureExclusion(path, stat.isDirectory());
       if (reason && !selected && !descendant) {
-        excluded?.push({ path, reason });
         // Say whether ignore rules would drop it anyway; only the rest is worth a save notice.
-        onExcluded?.({ path, reason, ignoredToo: !!ignoredBy(next, path, stat.isDirectory()) });
-        continue;
+        const ignoredToo = !!ignoredBy(next, path, stat.isDirectory());
+        // A new file's credential-looking name is only a prompt: its bytes decide, unless an
+        // exact `.forgeignore` negation includes it on purpose. Local credential files
+        // (`.env`, `.netrc`) are never re-included. Ignored files are never read.
+        if (reason === 'sensitive-name' && stat.isFile() && !ignoredToo && !localCredentialName(name))
+          reason = forgeIncludes(next, path) ? null : credentialNameHold(root, path, stat.size);
+        if (reason) {
+          excluded?.push({ path, reason });
+          onExcluded?.({ path, reason, ignoredToo });
+          continue;
+        }
       }
       const match = ignoredBy(next, path, stat.isDirectory());
       // Preserve imported/tracked Git paths, while explicit Forge exclusions

@@ -31,6 +31,7 @@ import { reconcileHostedSync } from '../dist/hosted-sync-handoff.js';
 import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { digest } from '../dist/hash.js';
+import { notSavedInclude } from '../dist/save-not-saved.js';
 
 const address = { url: 'https://fixture.invalid', projectId: 'unused' };
 
@@ -187,11 +188,17 @@ test('a save receipt names new paths left out by credential name, bounded, and i
   writeFileSync(join(s.root, 'a.txt'), 'first edit');
   mkdirSync(join(s.root, 'cmd/build'), { recursive: true });
   writeFileSync(join(s.root, 'cmd/build/main.go'), 'package main\n');
-  writeFileSync(join(s.root, 'server.pem'), 'synthetic\n');
+  writeFileSync(join(s.root, 'server.pem'), 'synthetic certificate fixture\n');
+  writeFileSync(join(s.root, '.env.local'), 'A=1\n');
   const saving = s.session('save', { message: 'first' });
   const result = await executeHostedAgent(saving, 'save', { message: 'first' });
   assert.equal(result.outcome.status, 'completed');
-  assert.deepEqual(result.notSaved, { count: 1, paths: [{ path: 'server.pem', reason: 'sensitive-name' }] });
+  // A credential-looking name with no credential inside is saved; a local env file is held.
+  assert.deepEqual(result.notSaved, {
+    count: 1,
+    paths: [{ path: '.env.local', reason: 'sensitive-name' }],
+    include: notSavedInclude,
+  });
   const replay = await executeHostedAgent(
     s.session('save', { message: 'first' }, { operationId: saving.journal.operationId }),
     'save',

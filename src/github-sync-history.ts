@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './hash.js';
-import { sourceExclusion } from './files.js';
+import { publicationExclusion } from './files.js';
 import type { NativeSource, NativeFile } from './native-source.js';
 import type { WorkData, Lane, ChannelMove } from './work-types.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
@@ -84,7 +84,7 @@ export function githubHistoryContainment(
     const files = states.get(state)?.files;
     if (!files) return;
     for (const [path, target] of pending) {
-      const file = excludePrivate && sourceExclusion(path) ? undefined : files.get(path),
+      const file = excludePrivate && publicationExclusion(path) ? undefined : files.get(path),
         mode = file?.mode === 'symlink' ? '120000' : file?.mode === 'executable' ? '100755' : '100644';
       if (target ? !file || target.blob !== file.blob || target.mode !== mode : !!file) continue;
       proofs.push({ ...evidence, path, state });

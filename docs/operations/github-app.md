@@ -154,9 +154,12 @@ All of these must hold:
 - **Contents:** blobs, trees and one deterministic commit per accepted State
   (`src/hosted-github-mirror.ts`). It carries the landing message and a
   `Forge-State` trailer.
-- **Not pushed:** paths excluded by `sourceExclusion` (`src/files.ts`): `.git`,
-  `.forge`, `node_modules`, build output, key and credential files, `.env` files
-  except exact templates.
+- **Published like GitHub:** every tracked path, whatever its name (test
+  `*.pem`/`*.key` fixtures, `.envrc`, `.npmrc`, `.env.development`). Only Forge
+  metadata (`.git`, `.forge`) and Forge's `private-artifacts` stay out
+  (`publicationExclusion`, `src/files.ts`). Credentials are caught by content: the
+  landing secret scan, and the save check for new files. A mirror commit written
+  before this rule dropped such names; the next mirror commit adds them back.
 - **Refusals:** the push stops, changes no ref and retains the job when GitHub
   `main` is not the mirror's recorded parent (`GITHUB_SYNC_CHANGED`) or its tree
   differs from the matching State (`GITHUB_SYNC_BOOTSTRAP_TREE`). GitHub's own

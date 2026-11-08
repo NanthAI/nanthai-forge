@@ -690,7 +690,7 @@ test('transient auto-push failures back off and reconcile their retained operati
   assert.ok(delays.length > 1);
 });
 
-test('automatic projection exports secret-named source and templates, omits credentials and never publishes Lane refs', async t => {
+test('automatic projection exports every tracked path whatever its name, omits private-artifacts and never publishes Lane refs', async t => {
   const f = fixture(t),
     source = new NativeSource(f.owner);
   const data = f.work.store.load(),
@@ -704,8 +704,7 @@ test('automatic projection exports secret-named source and templates, omits cred
     '.env.example',
     '.env.sample',
     '.env.template',
-  ];
-  const excluded = [
+    // Tracked files are published like on GitHub, whatever their name (Issue 9fac9a0e).
     '.env.local',
     '.env.production',
     '.env.example.local',
@@ -721,8 +720,8 @@ test('automatic projection exports secret-named source and templates, omits cred
     'tls/client.keystore',
     '.ssh/id_rsa',
     '.aws/credentials',
-    'private-artifacts/secrets.ts',
   ];
+  const excluded = ['private-artifacts/secrets.ts'];
   const files = [
     ...source.state(view.head).files,
     ...[...included, ...excluded].map(path => ({

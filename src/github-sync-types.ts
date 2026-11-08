@@ -6,6 +6,10 @@ const optionalGitId = z.string().regex(/^([0-9a-f]{40})?$/);
 const identity = z.object({ name: z.string().min(1), email: z.string().min(1) });
 export const githubSyncCommitSchema = z.object({
   excludedPaths: z.array(z.string()).optional(),
+  /** `tracked`: this commit's tree holds every tracked path except Forge metadata
+   * (`publicationExclusion`). Absent: an older mirror that also dropped credential-looking
+   * names (`sourceExclusion`); the next mirror commit adds those tracked files back. */
+  publication: z.literal('tracked').optional(),
   operationId: z.uuid(),
   state: z.string().regex(/^[0-9a-f]{64}$/),
   acceptanceId: z.uuid(),

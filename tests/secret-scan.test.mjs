@@ -62,6 +62,17 @@ test('known token shapes are found by path, line and kind, never by value', () =
   assert.match(notice, /^SecretScanError: committed credential found in config\/app\.env:2 /m);
 });
 
+test('a private key escaped inside JSON is found, with LF or CRLF escapes', () => {
+  for (const newline of ['\n', '\r\n']) {
+    const json = JSON.stringify({ type: 'service_account', private_key: fake.key.replaceAll('\n', newline) });
+    assert.deepEqual(
+      scanSecretText('credentials.json', json).map(item => item.kind),
+      ['private-key'],
+      JSON.stringify(newline),
+    );
+  }
+});
+
 test('placeholders, documented examples, hashes and bare headers are not findings', () => {
   const text = [
     join('gh', 'p_', 'x'.repeat(36)),

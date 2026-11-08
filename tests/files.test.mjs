@@ -10,6 +10,7 @@ import {
   captureExclusion,
   exclusion,
   sourceExclusion,
+  publicationExclusion,
   fingerprintPrivateFile,
   readSource,
 } from '../dist/files.js';
@@ -58,6 +59,21 @@ test('source exclusions keep secret-named modules and env templates while protec
     assert.notEqual(sourceExclusion(path), null, path);
     assert.equal(sourceExclusion(path), exclusion(path), path);
   }
+});
+
+test('publication keeps every tracked name and leaves out only Forge metadata', () => {
+  for (const path of [
+    'key1.pem',
+    'tls/root-ca.pem',
+    '.envrc',
+    '.npmrc',
+    '.env.development',
+    '.env',
+    'a/.aws/config',
+  ])
+    assert.equal(publicationExclusion(path), null, path);
+  for (const path of ['private-artifacts/run.json', 'x/.forge/hosted-lane.json', '.git/config'])
+    assert.equal(publicationExclusion(path), 'protected-directory', path);
 });
 
 test('capture and publication never drop source by folder or language name', () => {
