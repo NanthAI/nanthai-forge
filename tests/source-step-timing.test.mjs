@@ -117,12 +117,13 @@ test('the receipt splits hostedWait into dispatch, steps, publication and the cl
   assert.equal(timing.value().server.watchMs, 750);
 });
 
-test('only a small save or sync result that matches the signed output skips the complete action', () => {
+test('only a small save, sync or compose result that matches the signed output skips the complete action', () => {
   const result = JSON.stringify({ files: ['a'] }),
     output = { sha256: digest(result), size: new TextEncoder().encode(result).length };
   assert.equal(inlineSourceResult('sync', output, result), true);
   assert.equal(inlineSourceResult('save', output, result), true);
-  assert.equal(inlineSourceResult('compose', output, result), false, 'compose keeps its action');
+  assert.equal(inlineSourceResult('compose', output, result), true, 'a small compose result too');
+  assert.equal(inlineSourceResult('register-state', output, result), false, 'no publish mutation');
   assert.equal(inlineSourceResult('sync', output, undefined), false, 'no text: read it back');
   assert.equal(inlineSourceResult('sync', null, result), false, 'a failure has no output');
   assert.equal(inlineSourceResult('sync', { ...output, sha256: digest('other') }, result), false);

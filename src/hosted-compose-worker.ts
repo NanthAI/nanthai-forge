@@ -91,9 +91,12 @@ export async function buildHostedComposeState(
           'SOURCE_JOB_INVALID',
           'Compose input State differs.',
         );
-        await reader.file(entry.state);
         const restoreBase = 'laneId' in entry ? plan.restoreBases?.[entry.laneId] : undefined;
-        if (restoreBase) await reader.file(restoreBase);
+        // The input, its restore base and the merge bases with the current head in one wave.
+        await reader.prefetch(
+          [entry.state, ...(restoreBase ? [restoreBase] : [])],
+          result || restoreBase ? [] : source.mergeBases(head, entry.head),
+        );
         selected++;
         // Retain every input even after the first conflict; do not reinterpret a suffix.
         if (result) continue;

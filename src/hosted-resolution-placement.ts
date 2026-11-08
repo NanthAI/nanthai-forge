@@ -7,12 +7,18 @@ import { forgetLane, readLaneEntry } from './lane-registry.js';
 import { pendingConflictPaths } from './hosted-conflict-precheck.js';
 import type { syncResultSchema } from './hosted-sync.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
+import type { HostedLaneSelection } from './hosted-lane.js';
 
 /** Where the agent resolves. The conflict was made from this folder's own saved Lane head:
  * the folder itself becomes the resolution Lane (its marker and conflict record name it and
  * the origin), keeping unsaved edits and every path, wait and handoff the agent already has.
  * Otherwise the whole tree opens as a sibling folder, never nested. One line says which. */
-export async function placeResolution(session: HostedAgentSession, source: z.infer<typeof syncResultSchema>) {
+export async function placeResolution(
+  session: HostedAgentSession,
+  source: z.infer<typeof syncResultSchema>,
+  /** The caller's fresh read of the resolution Lane, reused by an in-place rebase. */
+  selection?: HostedLaneSelection,
+) {
   const laneId = source.lane.laneId,
     origin = source.resolution?.origin,
     marker = markerAt(session.root);
@@ -30,7 +36,7 @@ export async function placeResolution(session: HostedAgentSession, source: z.inf
     marker.selection.head === origin.head &&
     marker.selection.sourceVersion === origin.sourceVersion
   ) {
-    const rebased = await rebaseHostedCheckout(session.root, session.exchange, { laneId, origin });
+    const rebased = await rebaseHostedCheckout(session.root, session.exchange, { laneId, origin }, selection);
     // The folder now belongs to the resolution; the original Lane keeps no local root of its own.
     if (readLaneEntry(origin.laneId)?.root === session.root) forgetLane(origin.laneId);
     const kept = rebased?.kept?.length ? { paths: rebased.kept, at: rebased.keptAt! } : undefined;

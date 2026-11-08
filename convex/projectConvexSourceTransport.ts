@@ -143,7 +143,17 @@ export function convexSourceTransport(
         unavailable,
       };
     },
-    describeBatch: ids => resolve(ids),
+    // A row this step already resolved (or was handed) is marked and fenced for this step, as
+    // `read` and `prepareRead` already rely on; only the rest costs a resolve call.
+    describeBatch: async ids => {
+      const missing = [...new Set(ids.filter(id => !locations.has(id)))];
+      if (missing.length) await resolve(missing);
+      return ids.map(id => {
+        const row = locations.get(id);
+        invariant(row, 'SOURCE_UNAVAILABLE', 'Exact source object is absent.');
+        return row.descriptor;
+      });
+    },
     ancestry: (ids, known, windows = 1) => resolve(ids, true, known, windows),
     prepareRead: async pins => {
       const missing = [

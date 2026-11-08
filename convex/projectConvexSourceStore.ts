@@ -49,7 +49,7 @@ export function inlineSourceResult(
   result: string | undefined,
 ): boolean {
   return (
-    (kind === 'save' || kind === 'sync') &&
+    (kind === 'save' || kind === 'sync' || kind === 'compose') &&
     output != null &&
     result !== undefined &&
     output.size <= sourceResultInlineBytes &&
@@ -309,10 +309,10 @@ export const commit = sourceMutation({
           : kind === 'compose'
             ? 'projectHostedComposeJobs'
             : 'projectHostedSyncJobs';
-      // A small save or sync result the step produced itself goes straight to the publish mutation,
-      // which checks it against the job's signed output digest exactly as after an R2 read. Anything
-      // else (a failure, a larger or missing result) takes the complete action, which reads it back.
-      // Compose keeps the action for now: its results reach 512 KiB and its landing path is separate.
+      // A small save, sync or compose result the step produced itself goes straight to the publish
+      // mutation, which checks it against the job's signed output digest exactly as after an R2 read
+      // (and marks the output object). Anything else (a failure, a larger or missing result, such as
+      // a compose result with wide changed-path coverage) takes the complete action, which reads it back.
       const inline = inlineSourceResult(kind, args.output, args.result);
       if (kind !== 'register-state')
         await ctx.scheduler.runAfter(

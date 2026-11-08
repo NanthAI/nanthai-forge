@@ -67,11 +67,44 @@ export class MemoryMergeSource extends LazyMergeSource {
     return value;
   }
   override async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
-    if (this.parents[error.id]) {
-      await reader.resolveMany([error.id]);
-      return;
-    }
     await reader.resolveMany([error.id]);
+  }
+  /** Parents this source already knows, as `state` would return them; undefined needs a read. */
+  private knownParents(id: string): string[] | undefined {
+    if (this.cutList !== this.ancestryCuts) {
+      this.cutList = this.ancestryCuts;
+      this.cutIds = new Set(this.ancestryCuts);
+    }
+    if (id === this.ancestryBoundary || this.cutIds.has(id)) return [];
+    return this.parents[id] ?? this.parsed.get(id)?.parents;
+  }
+  /** The merge bases the native merge selects (the common ancestors that are no other common
+   * ancestor's parent), found from known parents only, so their manifests can be read in the same
+   * wave as the heads instead of one miss round each. Empty when one head contains the other (no
+   * base is read) or an edge is unknown (the merge then reads lazily as before). */
+  override mergeBases(left: string, right: string, limit = 8): string[] {
+    const ancestors = (head: string) => {
+      const seen = new Set<string>(),
+        pending = [head];
+      while (pending.length) {
+        const id = pending.pop()!;
+        if (seen.has(id)) continue;
+        const parents = this.knownParents(id);
+        if (!parents) return null;
+        seen.add(id);
+        pending.push(...parents);
+      }
+      return seen;
+    };
+    const a = ancestors(left),
+      b = a && ancestors(right);
+    if (!a || !b || a.has(right) || b.has(left)) return [];
+    const common = [...a].filter(id => b.has(id)),
+      parents = new Set(common.flatMap(id => this.knownParents(id)!));
+    return common
+      .filter(id => !parents.has(id))
+      .sort()
+      .slice(0, limit);
   }
 }
 

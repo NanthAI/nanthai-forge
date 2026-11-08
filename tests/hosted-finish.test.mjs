@@ -535,7 +535,8 @@ for (const crash of ['before-source', 'after-source-callback', 'after-source-pub
     const pending = (await f.current(state.id)).pendingAttempt;
     const sourceCount = f.tables.projectHostedComposes.size;
     if (crash === 'after-source-publish') {
-      while (f.pending()[0]?.name !== 'projectHostedComposeJobs:complete') await f.execute();
+      // A small compose result publishes from the step commit; a larger one through complete.
+      while (!/^projectHostedComposeJobs:(complete|publish)$/.test(f.pending()[0]?.name)) await f.execute();
     }
     await assert.rejects(f.execute(f.pending()[0], crash), /synthetic crash/);
     await f.tx('finishRepair', api.resume, { projectId: f.projectId, submissionId: state.id });

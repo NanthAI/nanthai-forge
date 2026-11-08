@@ -22,9 +22,15 @@ test('mid-work sync conflict resolves in the same folder, keeps unsaved edits, t
   // Unsaved work: a new file the resolution does not touch, and an edit to the conflicting file.
   writeFileSync(join(root, 'notes.txt'), 'unsaved notes\n');
   writeFileSync(join(root, 'a.txt'), 'mine\nb\nc\n');
+  const before = s.calls.length;
   const synced = await s.transport(root).dispatch('sync', { laneId: f.lane.laneId });
   const conflict = synced.result.conflict;
   assert.equal(conflict.root, canonicalRoot(root), 'the same folder');
+  // One read of the resolution Lane: the in-place rebase reuses the access recheck's selection.
+  const selects = s.calls
+    .slice(before)
+    .filter(call => call.name === 'projectHostedLanes:select' && call.args.laneId === conflict.laneId);
+  assert.equal(selects.length, 1);
   assert.equal(
     readHostedLaneCheckout(root).selection.laneId,
     conflict.laneId,

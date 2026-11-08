@@ -37,7 +37,12 @@ export async function buildHostedSyncState(
     );
     result = { status: 'merged', state: { sha256: head, size: source.object(head).length } };
   } else if (work.mode === 'resolve') {
-    await reader.file(work.left);
+    // The draft manifest and the first conflict page are read next; fetch them in the same wave.
+    const first = work.resolution.conflicts;
+    await reader.prefetch(
+      [work.left, ...(first.size <= 2 * 1024 * 1024 ? [{ object: first, recipe: null }] : [])],
+      [work.resolution.draftHead],
+    );
     // Resolution follows only the saved draft lineage and selected conflict
     // files. Merge frontier prefetch would hydrate unrelated historical States.
     const resolveCalculate = <T>(action: () => T) => lazyMerge(reader, progress, action);
@@ -116,10 +121,16 @@ export async function buildHostedSyncState(
       );
       left = page.left;
       right = page.right;
+      // Both tips and their merge bases in one wave, not one miss round each.
+      await reader.prefetch([], [left, right, ...source.mergeBases(left, right)]);
     } else {
-      await reader.files([work.left, work.right]);
       left = work.left.object.sha256;
       right = work.right.object.sha256;
+      // The merge base manifests are read with the tips (a stack sync's base is its stack parent).
+      await reader.prefetch(
+        [work.left, work.right, ...(work.stackBase ? [work.stackBase] : [])],
+        work.stackBase ? [] : source.mergeBases(left, right),
+      );
     }
     const merged = await calculate(() => {
       source.state(left);

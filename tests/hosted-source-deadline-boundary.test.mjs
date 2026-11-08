@@ -110,7 +110,7 @@ for (const watchdogFirst of [false, true])
     } else {
       assert.equal((await load()).status, 'completed');
       // Publish the winning terminal result before delivering the delayed watch.
-      await f.execute(f.pending().find(x => x.name === 'projectHostedComposeJobs:complete'));
+      await f.execute(f.pending().find(x => /^projectHostedComposeJobs:(complete|publish)$/.test(x.name)));
       await f.execute(watch);
     }
     await f.drain();

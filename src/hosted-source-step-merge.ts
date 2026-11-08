@@ -25,7 +25,13 @@ import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ances
 import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
 
-export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m: StepMeter) {
+export async function prepareMergeStep(
+  c: SourceStepCursor,
+  io: StepTransport,
+  m: StepMeter,
+  /** The action's merge source: tip manifests read here stay for its compute phase. */
+  source = new MemoryMergeSource({}),
+) {
   if (!c.generations && Object.keys(c.parents).length) c.generationFallback = true;
   io.rememberStateGenerations?.(c.generations ?? {});
   const kind = (c.plan as { kind: string }).kind;
@@ -136,7 +142,7 @@ export async function prepareMergeStep(c: SourceStepCursor, io: StepTransport, m
     await io.prepareRead?.(tips.map(id => c.inventory[id]!.object));
     const files = new Map<string, NativeFile[]>();
     const tipStates = await mapSourceOrdered(tips, async id =>
-      parseNativeState(await new MemorySourceReader(new MemoryMergeSource({}), io).bytes(c.inventory[id]!)),
+      parseNativeState(await new MemorySourceReader(source, io).bytes(c.inventory[id]!)),
     );
     for (const [index, id] of tips.entries()) {
       const state = tipStates[index]!;

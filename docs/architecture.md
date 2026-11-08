@@ -1054,7 +1054,12 @@ round holds at most 100 requests) runs inside the step that found it instead of 
 fan-out round, which would otherwise cost a fork, a join and a fresh step. The step
 then re-runs the merge, once per round of a recursive merge. A round that needs a
 blob this step created (a virtual-base merge result used as the next base) yields to
-a fresh step, since that blob's object row exists only after the step commits. Native text calculations are journaled per path, while
+a fresh step, since that blob's object row exists only after the step commits. Inline
+rounds of one step reuse the merge inputs an earlier round read (at most 4 MiB), and
+a step reuses descriptors it already resolved instead of asking Convex again. Merges
+read the merge base manifests (found from parents already verified) in the same wave
+as the tips; a resolve reads its draft and first conflict page with the saved head;
+compose merges from the tip manifests its graph step read. Native text calculations are journaled per path, while
 final State assembly and source publication remain serial. Raw/recipe verification proceeds in windows of at most 100
 objects or about 8 MiB. Recipe traversal and SHA-256 progress survive action
 boundaries. Ancestry retains verified parent links; full file trees are read only
@@ -1139,7 +1144,7 @@ execution's step row keeps them (at most 16 entries) and a sync's state carries
 them to the receipt's `timing.server` split (dispatch, steps, publish, watch).
 
 A trusted source-job completion schedules the save finalizer independently of the
-editing client. A save or sync step whose result manifest is at most 64 KiB passes
+editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes
 it on its terminal commit straight to the publish mutation, which checks it against
 the job's signed output digest; any other result goes through the finalizing action,
 which reads it back from storage. One publication transaction verifies the original job/input/output and

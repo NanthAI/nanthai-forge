@@ -46,6 +46,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     ready = [],
     metrics = [],
     calls = [],
+    /** Ordered Convex function calls and R2 GETs ({ call } / { fetch }), for round-trip shape checks. */
+    events = [],
     failOnce = [],
     failRequestOnce = [];
   await f.ctx.db.patch(projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
@@ -91,6 +93,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
   const invoke = (name, args) => {
     const result = chain.then(() => {
       calls.push(name);
+      events.push({ call: name });
       const [n, m] = name.split(':');
       // Real Convex rejects fields the args validator does not name.
       const spec = JSON.parse(modules[n][m].exportArgs());
@@ -274,6 +277,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
                 spec = objects.get(id);
               assert(spec, `source ${id}`);
               readCounts.set(id, (readCounts.get(id) ?? 0) + 1);
+              events.push({ fetch: id });
               readObjects++;
               readBytes += Buffer.isBuffer(spec) ? spec.length : spec.size;
               value = Buffer.isBuffer(spec) ? spec : spec.generate ? generated(spec) : { ...spec, delay };
@@ -386,6 +390,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     ready,
     scheduled,
     calls,
+    events,
     metrics,
     failOnce,
     failRequestOnce,

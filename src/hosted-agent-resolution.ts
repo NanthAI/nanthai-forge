@@ -74,29 +74,9 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
     join(clientCacheRoot(session.root), 'conflict-objects'),
     session.exchange,
   );
-  const paths: string[] = [],
-    reasons: { path: string; reason: string }[] = [],
-    seen = new Set<string>();
-  let pin: { sha256: string; size: number } | null = source.resolution.conflicts;
-  while (pin) {
-    invariant(!seen.has(pin.sha256), 'SOURCE_HASH_MISMATCH', 'Conflict pages must advance.');
-    seen.add(pin.sha256);
-    const bytes = await objects.get(pin.sha256);
-    invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Conflict page size changed.');
-    const page = composeConflictPageSchema.parse(JSON.parse(bytes.toString('utf8')));
-    invariant(
-      page.left === source.resolution.left && page.right === source.resolution.right,
-      'SOURCE_HASH_MISMATCH',
-      'Conflict pages select different source.',
-    );
-    for (const file of page.paths) {
-      invariant(safeRelative(file.path), 'UNSAFE_PATH', 'Conflict paths must be relative source files.');
-      paths.push(file.path);
-      reasons.push(...conflictReasons([file]));
-    }
-    pin = page.next;
-  }
+  const selection = current.success ? current.data : undefined;
   if (!apply) {
+    const { paths, reasons } = await conflictPages(objects, source);
     const root = hostedRootLanePath(session.root, session.address, source.lane.laneId);
     // The open step creates the folder; its client record must exist before then.
     mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
@@ -115,7 +95,12 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       },
     };
   }
-  const placed = await placeResolution(session, source);
+  // The conflict pages download while the resolution is placed; the placement reuses the Lane
+  // read above instead of selecting the same Lane again.
+  const listed = conflictPages(objects, source);
+  listed.catch(() => {});
+  const placed = await placeResolution(session, source, selection);
+  const { paths, reasons } = await listed;
   const { root } = placed;
   // The run that resolves owns the resolution Lane's idle listing (d730121f).
   recordLane({ laneId: source.lane.laneId, root, ...session.address, agent: sessionAgentSlug() ?? null });
@@ -176,6 +161,33 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
       },
     },
   };
+}
+/** Every conflict path of the exact resolution, page by page; reads only the immutable pages. */
+async function conflictPages(objects: HostedObjectStore, source: z.infer<typeof syncResultSchema>) {
+  const resolution = source.resolution!,
+    paths: string[] = [],
+    reasons: { path: string; reason: string }[] = [],
+    seen = new Set<string>();
+  let pin: { sha256: string; size: number } | null = resolution.conflicts;
+  while (pin) {
+    invariant(!seen.has(pin.sha256), 'SOURCE_HASH_MISMATCH', 'Conflict pages must advance.');
+    seen.add(pin.sha256);
+    const bytes = await objects.get(pin.sha256);
+    invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Conflict page size changed.');
+    const page = composeConflictPageSchema.parse(JSON.parse(bytes.toString('utf8')));
+    invariant(
+      page.left === resolution.left && page.right === resolution.right,
+      'SOURCE_HASH_MISMATCH',
+      'Conflict pages select different source.',
+    );
+    for (const file of page.paths) {
+      invariant(safeRelative(file.path), 'UNSAFE_PATH', 'Conflict paths must be relative source files.');
+      paths.push(file.path);
+      reasons.push(...conflictReasons([file]));
+    }
+    pin = page.next;
+  }
+  return { paths, reasons };
 }
 const parseValue = (value: unknown) => (typeof value === 'string' ? JSON.parse(value) : value);
 /** A replayed recovery whose resolution Lane is no longer active. Completed: its landing

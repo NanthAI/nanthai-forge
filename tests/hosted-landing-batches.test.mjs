@@ -398,14 +398,20 @@ test('a stacked changed-path manifest larger than 4 KiB passes the real source f
   const f = await batchesFixture(t, { count: 4, fileCount: 500 });
   let task;
   for (let i = 0; i < 100; i++) {
-    task = f.pending().find(task => task.name === 'projectHostedComposeJobs:complete');
+    task = f.pending().find(task => /^projectHostedComposeJobs:(complete|publish)$/.test(task.name));
     if (task) break;
     await f.execute(f.pending()[0]);
   }
   assert(task, 'source completion is event driven');
-  const { jobApi } = await import('./hosted-compose-fixture.mjs');
-  const grant = await f.transaction('batch-result-download', jobApi.resultDownload, task.args[0]);
-  assert(grant.size > 4096 && grant.size <= 512 * 1024);
+  if (task.name.endsWith(':publish')) {
+    // Up to 64 KiB, the step's own result text goes straight to publication.
+    const size = Buffer.byteLength(task.args[0].result);
+    assert(size > 4096 && size <= 64 * 1024);
+  } else {
+    const { jobApi } = await import('./hosted-compose-fixture.mjs');
+    const grant = await f.transaction('batch-result-download', jobApi.resultDownload, task.args[0]);
+    assert(grant.size > 4096 && grant.size <= 512 * 1024);
+  }
   await f.drain();
   await f.passChecks();
   await f.drain();

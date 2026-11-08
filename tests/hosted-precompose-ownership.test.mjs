@@ -241,7 +241,8 @@ for (const outcome of ['clean', 'conflict'])
     assert(state.batchId);
     await f.transaction('late-old-plan', finishDriver.resume, oldIO);
     const isSource = task =>
-      task.name.startsWith('projectConvexSource') || task.name === 'projectHostedComposeJobs:complete';
+      task.name.startsWith('projectConvexSource') ||
+      /^projectHostedComposeJobs:(complete|publish)$/.test(task.name);
     let ticks = 0;
     while (f.pending().some(isSource)) {
       assert(++ticks < 100);

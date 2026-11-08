@@ -447,6 +447,10 @@ export async function finishFixture(
           });
         }
         if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
+      } else if (task.name === 'projectHostedComposeJobs:publish') {
+        // A small result the source step produced itself: published from the step commit, no read.
+        await tx('finishSourcePublish', composeJobs.publish, input);
+        if (stop === 'after-source-publish') throw new Error('synthetic crash after source publication');
       } else assert.fail(`Unexpected task ${task.name}`);
       f.patch('_scheduled_functions', task._id, { state: { kind: 'success' } });
     } catch (error) {

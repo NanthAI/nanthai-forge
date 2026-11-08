@@ -37,6 +37,7 @@ import {
 } from './hosted-source-merge-journal.js';
 import { prepareMergeStep, computeMergeStep } from './hosted-source-step-merge.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
+import { cachedReads } from './hosted-source-read-cache.js';
 export interface StepTransport extends SourceWorkerTransport {
   /** One descriptor page; unavailable graph probes stay pending until the cut
    * or the exact merge proves whether their bytes are needed. */
@@ -390,6 +391,9 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   // commits, so a later round that reads one (a virtual-base merge result used as the next base)
   // must run in a fresh action.
   const created = new Set<string>();
+  // Merge inputs inline rounds already read in this action (a text merge, then its conflict
+  // markers, read the same blobs); bounded, so a later round reads none of them from R2 again.
+  const inlineReads = { bytes: new Map<string, Buffer>(), held: 0 };
   while (c.phase !== 'done' && (!full(m) || (recompute && !m.yielded))) {
     if (c.phase === 'input') {
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
@@ -408,7 +412,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
     } else if (c.phase === 'save') await saveStep(c, io, m);
     else if (c.phase === 'inventory') await inventoryStep(c, io, m);
     else if (c.phase === 'closure') await closureStep(c, io, m);
-    else if (c.phase === 'selection' || c.phase === 'graph') await prepareMergeStep(c, io, m);
+    else if (c.phase === 'selection' || c.phase === 'graph') await prepareMergeStep(c, io, m, mergeSource);
     else if (c.phase === 'compute') {
       // The graph can establish its cut earlier in this same quantum.
       mergeSource.ancestryBoundary = c.ancestryBoundary;
@@ -465,12 +469,13 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
           // State) costs seconds; a few small text merges cost milliseconds here.
           const inline = !io.fanout || inlineCalculations(tasks);
           if (!inline) io.fanout!({ kind: 'calculate', end: 0, tasks });
-          else
+          else {
+            const taskIo = cachedReads(io, inlineReads, 4 * inlineCalculationBytes);
             for (const task of tasks) {
               let previous: import('./hosted-source-fanout.js').SourceTaskProgress | null = null,
                 result;
               do {
-                result = await runSourceTask(task, previous, io);
+                result = await runSourceTask(task, previous, taskIo);
                 previous = result.progress;
               } while (!result.done);
               for (const value of result.progress.calculations ?? []) {
@@ -478,6 +483,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
                 if (value.blob) created.add(value.blob);
               }
             }
+          }
           // The same heap re-enters only when this action read at most one step of bytes; bigger
           // trees still skip the fan-out round but recompute in a fresh action.
           if (inline && io.fanout && m.bytes + m.outputBytes <= sourceStepBytes) recompute = true;

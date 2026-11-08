@@ -34,6 +34,11 @@ export class LazyMergeSource extends NativeSource {
     this.generated.add(id);
     return id;
   }
+  /** States a merge of these heads will read, known without reading a manifest. The disk source
+   * learns parents only from manifests, so it predicts none and reads lazily. */
+  mergeBases(_left: string, _right: string): string[] {
+    return [];
+  }
   async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
     if (error.state) {
       let frontier = [...this.states, error.id].filter(id => !this.expanded.has(id));

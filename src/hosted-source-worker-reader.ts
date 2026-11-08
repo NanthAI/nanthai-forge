@@ -48,6 +48,13 @@ export class SourceWorkerReader {
   }
   /** Actions export authorizes each deduplicated window afresh, even when byte
    * files exist. Other jobs describe only digests this job has not yet verified. */
+  /** One overlapped wave: reads the known refs while the digests' descriptors are resolved and
+   * read, instead of a read round followed by a descriptor round. Bytes are verified as in
+   * `files` and `resolveMany`; nothing is read that those calls would not read. */
+  async prefetch(refs: WorkerObject[], digests: readonly string[]) {
+    const named = new Set(refs.map(ref => ref.object.sha256));
+    await Promise.all([this.files(refs), this.resolveMany(digests.filter(id => !named.has(id)))]);
+  }
   async resolveMany(digests: readonly string[]) {
     const unique = [...new Set(digests)];
     if (this.transport.describeAndRead) {

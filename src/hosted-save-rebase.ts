@@ -11,6 +11,7 @@ import {
   type HostedLaneCheckoutMarker,
 } from './hosted-lane-checkout-marker.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
+import type { HostedLaneSelection } from './hosted-lane.js';
 import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
@@ -67,6 +68,8 @@ export async function rebaseHostedCheckout(
   root: string,
   exchange: Exchange,
   onto?: { laneId: string; origin: { laneId: string; head: string; sourceVersion: number } },
+  /** A Lane read the caller just made of the same Lane; saves this function's own read. */
+  selected?: HostedLaneSelection,
 ) {
   finishPendingCheckoutDelta(root);
   const stale = readHostedLaneCheckout(root);
@@ -80,7 +83,8 @@ export async function rebaseHostedCheckout(
       'This checkout no longer holds the exact saved source the resolution was made from.',
     );
   const transport = new ConvexLaneTransport(exchange),
-    lane = await transport.select(onto?.laneId ?? stale.selection.laneId);
+    laneId = onto?.laneId ?? stale.selection.laneId,
+    lane = selected?.laneId === laneId ? selected : await transport.select(laneId);
   const repair = keepPatchCommand(root, lane.laneId);
   invariant(
     lane.state === 'active',

@@ -447,7 +447,8 @@ for (const notified of [false, true])
     );
     await f.execute(f.pending().find(task => task.name === 'projectHostedFinishDriver:drive'));
     const isSource = task =>
-      task.name.startsWith('projectConvexSource') || task.name === 'projectHostedComposeJobs:complete';
+      task.name.startsWith('projectConvexSource') ||
+      /^projectHostedComposeJobs:(complete|publish)$/.test(task.name);
     let ticks = 0;
     while (f.pending().some(isSource)) {
       assert(++ticks < 100);
