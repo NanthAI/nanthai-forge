@@ -3,12 +3,19 @@
 // score.mjs path run-cell uses live (no waiting: the cell is over).
 // Usage: node scripts/bench-t3code/rescore.mjs CELL_ID "why"
 // Keeps the original as result.before-rescore.json.
+//        node scripts/bench-t3code/rescore.mjs --contamination CELL_ID... [--out FILE]
+// re-runs only the contamination audit with the current rules, read-only on BENCH_ROOT
+// (rescan-contamination.mjs).
 import { readFileSync, writeFileSync, existsSync, copyFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { benchRootOrExit } from './bench-root.mjs';
 import { forgeArm } from './forge-arm.mjs';
 import { landingFields, cellSummary } from './score.mjs';
 
+if (process.argv[2] === '--contamination') {
+  (await import('./rescan-contamination.mjs')).main(process.argv.slice(3));
+  process.exit(0);
+}
 const [cellId, reason] = process.argv.slice(2);
 if (!cellId || !reason) throw Error('usage: rescore.mjs CELL_ID "why"');
 const B = benchRootOrExit();

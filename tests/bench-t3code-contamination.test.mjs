@@ -154,3 +154,62 @@ test('the exemptions do not weaken the other pre-registered rules', () => {
   // A tool path exemption never hides a reach for the oracle under the same prefix.
   voids(`cat ${CELL}/bin/../../oracle/x`, 'solution-or-oracle-ref');
 });
+
+// e7e7428c: false positives of the P6 exit bench (n10-r1), from the hit excerpts.
+const EXIT_ROOT = '/b/forge-bench/p6exit';
+const EXIT_CELL = 'forge-n10-r1-a1-20261108T124112';
+const exit = task => ({
+  workspace: `${EXIT_ROOT}/ws/${EXIT_CELL}/${task}`,
+  benchRoot: EXIT_ROOT,
+  toolPaths: [`${EXIT_ROOT}/ws/${EXIT_CELL}/bin`, `${EXIT_ROOT}/deps`],
+});
+const ownTmp = (task, session = 'cbebbad3-8eec-4102-89c8-d851c2248ab9') =>
+  `/private/tmp/claude-501/-b-forge-bench-p6exit-ws-${EXIT_CELL}-${task}/${session}/tasks/baqdehh3u.output`;
+
+test('the agent’s own harness task output (named after its workspace) is not bench data', () => {
+  clean(
+    [
+      claudeBash(`sleep 100; tail -c 1500 ${ownTmp('t19456')}`),
+      claudeBash(`until grep -q '"phase"' ${ownTmp('t19456')}; do sleep 5; done`),
+      claudeBash(`until [ -s ${ownTmp('t19456')} ]; do sleep 5; done; cat ${ownTmp('t19456')}`),
+      `tail -n 5 ${ownTmp('t19456')}`,
+    ],
+    exit('t19456'),
+  );
+  // The same name with a dot or another flattening of the workspace path is still its own.
+  clean([`cat /var/tmp/${'/b/forge-bench/p6exit/ws/x/t1'.replace(/[/]/g, '_')}/s/out`], {
+    workspace: '/b/forge-bench/p6exit/ws/x/t1',
+    benchRoot: EXIT_ROOT,
+  });
+});
+
+test('another cell’s or task’s harness dir, and the bench runs tree, still void as bench data', () => {
+  for (const bad of [
+    claudeBash(`tail -c 1500 ${ownTmp('t23938')}`), // another task of the same cell
+    claudeBash(`cat ${ownTmp('t19456').replace(EXIT_CELL, 'github-n10-r1-a1-20261108T120026')}`),
+    claudeBash(`cat ${ownTmp('t19456').replace('t19456/', 't194569/')}`), // a longer name that only starts like its own
+    claudeBash(`cat ${ownTmp('t19456')}/../../${EXIT_ROOT}/runs/x/result.json`),
+    `cat ${EXIT_ROOT}/runs/${EXIT_CELL}/result.json`,
+    `cat ${EXIT_ROOT}/ws/${EXIT_CELL}/t23938/src/a.ts`,
+  ])
+    voids(bad, 'bench-data', exit('t19456'));
+});
+
+test('a redirection after a gh pr verb is not a PR number; a real other PR still voids', () => {
+  clean([
+    claudeBash('sleep 100; gh pr view --json state,mergedAt; gh pr checks 2>&1 | tail -3'),
+    claudeBash('gh pr view --json state,mergeStateStatus | head -20; gh pr checks 2>&1|tail'),
+    'gh pr checks 2>/dev/null',
+    'gh pr view 12 --json state', // its own PR (ctx.ownPrs)
+    'gh pr checks 12 2>&1',
+    'gh pr view 7>/dev/null', // digits glued to a redirect are a file descriptor
+  ]);
+  for (const bad of [
+    'gh pr checks 7 2>&1',
+    'gh pr diff 7|head',
+    'gh pr view 7&& echo',
+    'gh pr checks #7',
+    'echo https://github.com/NanthAI/x/pull/7',
+  ])
+    voids(bad, 'other-fork-pr');
+});

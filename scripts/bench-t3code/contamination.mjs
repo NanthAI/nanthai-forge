@@ -21,6 +21,33 @@ function maskPaths(input, paths, placeholder) {
   return out;
 }
 
+/** The directory names a harness gives its own scratch space for a working directory (Claude
+ * Code: /private/tmp/claude-UID/-Users-me-bench-ws-cell-t1/SESSION/tasks/ID.output). The name
+ * is the workspace path with its separators flattened, so it carries the bench root's name
+ * while being the agent's own tool output, not bench data. Only the agent's own workspace is
+ * derived: another cell's name stays a reach for bench data. */
+export function harnessDirNames(workspace) {
+  if (!workspace) return [];
+  const w = workspace.replace(/\/+$/, '');
+  return [
+    ...new Set([
+      w.replace(/[^A-Za-z0-9]/g, '-'), // every other character flattened
+      w.replace(/[/\\]/g, '-'), // separators only
+      w.replace(/[/\\]/g, '_'),
+      w.replace(/\//g, '%2F'),
+      encodeURIComponent(w),
+    ]),
+  ].filter(name => name !== w);
+}
+
+/** Replace the agent's own harness directory names, matched as whole path segments. */
+function maskHarnessDirs(input, workspace) {
+  let out = input;
+  for (const name of harnessDirNames(workspace))
+    out = out.replace(new RegExp(`(?<![\\w.%-])${escapeRe(name)}(?![\\w.%-])`, 'g'), '__harness-workspace__');
+  return out;
+}
+
 const OWN_PLACEHOLDER = /^\{owner\}\/\{repo\}$/;
 const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -216,7 +243,10 @@ export function actionRules(prNumbers, ownPrs = [], mergeShas = [], ctx = {}) {
   const { ownRepo = null, ownBranches = [], benchRoot = null } = ctx;
   const shas = mergeShas.filter(Boolean).map(s => s.toLowerCase());
   const hexRuns = s => s.toLowerCase().match(/\b[0-9a-f]{7,40}\b/g) ?? [];
-  const prRef = /\bgh\s+pr\s+(?:view|diff|checkout|checks|comment|merge)\s+#?(\d+)|\bpull\/(\d+)/g;
+  // A PR number is a whole word: digits glued to a redirection (`2>&1`, `1>file`) are a file
+  // descriptor, not a PR.
+  const prRef =
+    /\bgh\s+pr\s+(?:view|diff|checkout|checks|comment|merge)\s+#?(\d+)(?![\w<>])|\bpull\/(\d+)(?![\w<>])/g;
   const prs = new RegExp(`\\b(${prNumbers.join('|')})\\b`);
   return [
     { id: 'upstream', test: (raw, decoded, { tool }) => upstreamHit(raw, tool) },
@@ -309,7 +339,11 @@ export function scanTask({
   // tools the harness gave this agent: its cell's bin/ (nforge), vp/ and hub/, and the shared
   // deps toolchain cache (`toolPaths`).
   const own = input =>
-    maskPaths(workspace ? input.split(workspace).join('__workspace__') : input, toolPaths, '__bench-tool__');
+    maskPaths(
+      workspace ? maskHarnessDirs(input.split(workspace).join('__workspace__'), workspace) : input,
+      toolPaths,
+      '__bench-tool__',
+    );
   for (const action of session.actions) {
     const raw = own(String(action.input));
     const decoded = commandText(raw, action.tool);
