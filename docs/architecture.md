@@ -1159,6 +1159,27 @@ parallel and the changed blobs' descriptors resolve during the baseline read. A 
 this one-commit round that retries a save the current CLI left between its PUTs and that commit
 does not re-send the bytes, and its stages fail `SOURCE_UNAVAILABLE` until a current CLI retries.
 
+When the server advertises `source-submit-run`, a save with no separate `stage` call, a sync and a
+compose submit through one `projectSourceRun:submit` action. It runs the same HEAD-verifying
+commit round on the caller's deferred uploads (at most 100; a larger save commits the rest first),
+then the submit mutation, which also dispatches in the same transaction, then step 0 in the
+action itself. Neither the dispatch nor the first step waits for the scheduler, and step budgets
+are unchanged: a job that step 0 does not finish continues on scheduled steps. The dispatch
+schedules a fallback step 30 s out, inside the 60 s worker lease. The step's commit cancels it
+when it is still pending. A transient failure of the inline step moves the retry to the normal
+backoff, and an action that dies before its step leaves the fallback to run it. A save acknowledges
+its delta only after the action returns, so a lost reply re-sends the same request and converges.
+
+When the server advertises `save-then-resolve`, a resolve's save request names the sync that
+follows it (`then`: its operation id, authority epoch, lifecycle version and message). The
+save's publication schedules `projectHostedResolveChain:run`, one hop. That action builds the resolve request
+from the save's own result with the same function the CLI uses, prepares it as the save's actor,
+writes its input to R2 (checksum-bound PUT, then HEAD), submits with the dispatch inline and runs
+the first step. `projectHostedSaves:progress` reports that sync as `chain`, so the CLI's one save
+subscription receives the resolve receipt without a second round of calls. The CLI resolves
+itself, replaying the identical idempotent request, when the chain records a failure before its
+submit (`chainFailure`), or when 10 s pass after the save completed with no chained receipt.
+
 A trusted source-job completion schedules the save finalizer independently of the
 editing client. A save, sync or compose step whose result manifest is at most 64 KiB passes
 it on its terminal commit straight to the publish mutation, which checks it against

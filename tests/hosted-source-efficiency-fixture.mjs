@@ -25,6 +25,8 @@ const names = [
   'projectConvexSourceNode',
   'projectConvexSourceStore',
   'projectConvexSourceObjects',
+  'projectSourceRun',
+  'projectSourceRunStore',
 ];
 export const modules = Object.fromEntries(
   await Promise.all(names.map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))])),
@@ -102,7 +104,7 @@ export function controls(t, s) {
   s.decorateContext(ctx => {
     ctx.storage = storage;
     ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
-    ctx.scheduler = { runAfter: async () => 'synthetic-task' };
+    ctx.scheduler = { runAfter: async () => 'synthetic-task', cancel: async () => {} };
   });
   const client = {
     query: (ref, args) => invoke(getFunctionName(ref), args),

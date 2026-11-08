@@ -5,7 +5,9 @@ import { v } from 'convex/values';
 import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
-import { saveObject } from './projectHostedSaveStore';
+import { saveObject, type SaveIdentity } from './projectHostedSaveStore';
+import { startSubmittedSource } from './projectSourceSubmitStart';
+import type { MutationCtx } from './server';
 import { loadSync, writeSyncState, hostedSyncInput, syncForJob } from './projectHostedSyncStore';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishHostedSync } from './projectHostedSyncPublish';
@@ -29,65 +31,74 @@ export const submit = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to sync hosted source.');
-      const auth = { ...input, actor: user.subject },
-        { row, state, operation } = await loadSync(ctx, auth, false);
-      if (operation.terminal) return canonicalPayload(operation.terminal);
-      await loadSync(ctx, auth);
-      invariant(
-        state.status === 'ready' || state.status === 'submitted',
-        'SOURCE_JOB_INVALID',
-        'Prepare the original sync before submitting.',
-      );
-      if (state.status === 'ready') {
-        const inputPin = savePin(hostedSyncInput(state, operation.firstAttempt.at));
-        await saveObject(ctx, input.projectId, inputPin);
-        const expected = operation.expected,
-          operationId = state.jobOperationId,
-          payload = {
-            jobKind: 'sync',
-            input: inputPin,
-            inputDigest: inputPin.sha256,
-            ...sourceWorkerPlan(process.env),
-          };
-        await enqueueSourceJob(ctx, {
-          ...auth,
-          request: {
-            schema: 1,
-            projectId: input.projectId,
-            actor: auth.actor,
-            operationId,
-            expected,
-            payloadHash: hostedPayloadHash(payload, expected),
-          },
-          payload,
-          firstAttempt: {
-            projectId: input.projectId,
-            operationId,
-            id: row.jobId,
-            parentAttemptId: null,
-            at: operation.firstAttempt.at,
-            expected,
-            ids: { job: row.jobId },
-          },
-        });
-        await writeSyncState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
-      }
-      const job = await loadSourceJob(ctx, input.projectId, row.jobId);
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action' | 'mutation'>(
-          job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
-            ? 'projectHostedSyncJobs:complete'
-            : 'projectConvexSource:dispatch',
-        ),
-        { projectId: input.projectId, jobId: row.jobId },
-      );
-      return canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, job));
+      return (await submitHostedSync(ctx, { ...input, actor: user.subject })).payload;
     } catch (error) {
       return report(error);
     }
   },
 });
+/** Submit, as the public mutation, inside the submitting action's transaction (`inline`), or for a
+ * resolve the server chained after its save. */
+export async function submitHostedSync(
+  ctx: MutationCtx,
+  auth: SaveIdentity,
+  inline = false,
+): Promise<{ payload: string; run: string | null }> {
+  const input = auth,
+    { row, state, operation } = await loadSync(ctx, auth, false);
+  if (operation.terminal) return { payload: canonicalPayload(operation.terminal), run: null };
+  await loadSync(ctx, auth);
+  invariant(
+    state.status === 'ready' || state.status === 'submitted',
+    'SOURCE_JOB_INVALID',
+    'Prepare the original sync before submitting.',
+  );
+  if (state.status === 'ready') {
+    const inputPin = savePin(hostedSyncInput(state, operation.firstAttempt.at));
+    await saveObject(ctx, input.projectId, inputPin);
+    const expected = operation.expected,
+      operationId = state.jobOperationId,
+      payload = {
+        jobKind: 'sync',
+        input: inputPin,
+        inputDigest: inputPin.sha256,
+        ...sourceWorkerPlan(process.env),
+      };
+    await enqueueSourceJob(ctx, {
+      ...auth,
+      request: {
+        schema: 1,
+        projectId: input.projectId,
+        actor: auth.actor,
+        operationId,
+        expected,
+        payloadHash: hostedPayloadHash(payload, expected),
+      },
+      payload,
+      firstAttempt: {
+        projectId: input.projectId,
+        operationId,
+        id: row.jobId,
+        parentAttemptId: null,
+        at: operation.firstAttempt.at,
+        expected,
+        ids: { job: row.jobId },
+      },
+    });
+    await writeSyncState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
+  }
+  const started = await startSubmittedSource(
+    ctx,
+    input.projectId,
+    row.jobId,
+    'projectHostedSyncJobs',
+    inline,
+  );
+  return {
+    payload: canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, started.job)),
+    run: started.run ? row.jobId : null,
+  };
+}
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.string() },
   returns: v.union(v.string(), v.null()),

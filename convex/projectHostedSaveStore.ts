@@ -28,6 +28,8 @@ export const saveStateSchema = z
     /** Server clock at submit and the execution's step split at publication (friction f15db544). */
     submittedAt: z.number().optional(),
     serverTiming: sourceServerTimingSchema.optional(),
+    /** The save-then-resolve chain stopped before its submit (its error code). */
+    chainFailure: z.string().optional(),
   })
   .strict();
 export type SaveIdentity = { projectId: Id<'hostedProjects'>; actor: string; operationId: string };

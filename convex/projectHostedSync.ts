@@ -41,204 +41,207 @@ export const prepare = receiptMutation({
     try {
       const request = syncRequestSchema.parse(JSON.parse(input.request)),
         auth = await caller(ctx, { projectId: input.projectId, operationId: request.operationId });
-      const expected = {
-        authorityEpoch: request.authorityEpoch,
-        ...('expected' in request
-          ? {
-              head: request.expected.head,
-              resourceId: request.laneId,
-              resourceVersion: request.expected.version,
-            }
-          : request.kind === 'revert'
-            ? {
-                resourceId:
-                  request.target.kind === 'receipt' ? request.target.receiptId : request.target.submissionId,
-              }
-            : { resourceId: request.candidateId }),
-      };
-      const prepared = await beginHostedOperation(ctx, {
-        ...auth,
-        ...(request.kind === 'revert' ? { metricAction: 'revert' as const } : {}),
-        payload: request,
-        request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
-        firstAttempt: {
-          projectId: auth.projectId,
-          operationId: auth.operationId,
-          id: crypto.randomUUID(),
-          parentAttemptId: null,
-          at: new Date().toISOString(),
-          expected,
-          ids: {
-            intent: crypto.randomUUID(),
-            lane: crypto.randomUUID(),
-            job: crypto.randomUUID(),
-            jobOperation: crypto.randomUUID(),
-          },
-        },
-      });
-      if (prepared.replayed) {
-        const old = await syncRow(ctx, auth);
-        invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
-        const state = JSON.parse(old.value) as SyncState;
-        // The same receipt as the first prepare, so a retried prepare also skips the progress read.
-        return canonicalPayload({
-          state,
-          terminal: prepared.operation.terminal,
-          input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
-        });
-      }
-      const project = await activeProject(ctx, auth.projectId, auth.actor);
-      let ownerInputs = false;
-      let work: SyncState['work'],
-        lane: SyncState['lane'] = null,
-        origin: SyncState['origin'],
-        intentId: string,
-        base: SyncState['base'];
-      const candidate = async (id: string) => {
-        const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: id });
-        invariant(row, 'NOT_FOUND', 'Select a Candidate on this project.');
-        const record = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
-        return { record, ownerInputs: candidateOwnerInputs(project, row, record, request.authorityEpoch) };
-      };
-      if (request.kind === 'revert') {
-        const selected = await prepareHostedRevert(ctx, auth, request, prepared.operation.firstAttempt);
-        intentId = selected.intentId;
-        base = selected.base;
-        work = selected.work;
-      } else if (request.kind === 'resolution') {
-        const selectedProof = await candidate(request.candidateId);
-        const selected = selectedProof.record;
-        ownerInputs = selectedProof.ownerInputs;
-        invariant(
-          selected.result.status === 'conflict' &&
-            canonicalPayload(selected.result.conflicts) === canonicalPayload(request.conflicts),
-          'WORK_STALE',
-          'Resolve the exact original Candidate conflict root.',
-        );
-        await saveObject(ctx, auth.projectId, request.conflicts);
-        intentId = selected.intentId;
-        base = selected.base;
-        work = { mode: 'resolution', candidateId: selected.id, conflicts: request.conflicts };
-        if (request.originLaneId) {
-          // Only the caller's own active Lane on the same Intent; anything else is not recorded.
-          const conflicted = (await saveLaneRecord(ctx, { ...auth, laneId: request.originLaneId })).lane;
-          if (
-            conflicted.intentId === selected.intentId &&
-            conflicted.actor === auth.actor &&
-            conflicted.state === 'active'
-          )
-            origin = laneOrigin(conflicted);
-        }
-      } else {
-        const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
-        lane = original.lane;
-        // A clean sync or resolve rewrites this Lane: only its author or the project owner.
-        requireMemberAuthority(project, lane.actor, auth.actor, 'Lane');
-        ownerInputs = original.ownerOnly && lane.actor === project.owner;
-        invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
-        intentId = lane.intentId;
-        base = lane.base;
-        if (request.kind === 'sync' && lane.actor === auth.actor) origin = laneOrigin(lane);
-        const left = await saveObject(ctx, auth.projectId, { sha256: lane.head });
-        if (request.kind === 'resolve') {
-          invariant(
-            lane.resolution?.status === 'pending',
-            'WORK_STALE',
-            'Select the pending resolution Lane.',
-          );
-          work = { mode: 'resolve', left, resolution: lane.resolution };
-        } else {
-          const target = request.target;
-          if (target.kind === 'main') {
-            const main = await hostedStartMain(ctx, auth.projectId);
-            invariant(
-              main.head === target.head &&
-                main.receipt.id === target.receiptId &&
-                main.authority.epoch === request.authorityEpoch,
-              'CHANNEL_CHANGED',
-              'Sync against the exact observed main head and receipt.',
-            );
-          } else {
-            const selectedProof = await candidate(target.candidateId);
-            const selected = selectedProof.record;
-            ownerInputs = ownerInputs && selectedProof.ownerInputs;
-            invariant(
-              selected.result.status === 'clean' && selected.result.head === target.head,
-              'WORK_STALE',
-              'Select the exact clean target Candidate.',
-            );
-          }
-          let right = target.head;
-          let stackBase, stackAfter;
-          if (lane.restoreBase)
-            stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase });
-          if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
-            const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
-            invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');
-            const parent = hostedRecordSchema.options[1].parse(JSON.parse(parentRow.value));
-            const entry = lane.stack.entryId
-              ? (await loadLanding(ctx, { projectId: auth.projectId, submissionId: lane.stack.entryId }))
-                  .state
-              : null;
-            const detached =
-              request.ontoMain ||
-              parent.state === 'abandoned' ||
-              entry?.phase === 'landed' ||
-              entry?.phase === 'terminal-failed';
-            // An automatic restack only follows a live parent; a landed or abandoned one has its own notice.
-            invariant(
-              !request.cleanOnly || !detached,
-              'STACK_PARENT_CHANGED',
-              'The stack parent landed or was abandoned: follow its board notice instead of an automatic restack.',
-            );
-            right = detached ? target.head : parent.head;
-            ownerInputs =
-              ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
-            stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
-            stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
-          }
-          invariant(
-            !request.cleanOnly || stackAfter,
-            'BAD_ARGUMENT',
-            'cleanOnly restacks a stacked Lane onto its parent; this Lane is not stacked.',
-          );
-          work = {
-            mode: 'sync',
-            left,
-            right: await saveObject(ctx, auth.projectId, { sha256: right }),
-            ...(stackBase ? { stackBase, stackAfter } : {}),
-          };
-        }
-      }
-      const state: SyncState = {
-        ownerInputs,
-        ownerProvenance: 1,
-        request,
-        work,
-        lane,
-        intentId,
-        base,
-        resolutionLaneId: prepared.operation.firstAttempt.ids.lane!,
-        ...(origin ? { origin } : {}),
-        jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
-        status: 'ready',
-      };
-      await ctx.db.insert('projectHostedSyncs', {
-        ...auth,
-        jobId: prepared.operation.firstAttempt.ids.job!,
-        value: canonicalPayload(state),
-      });
-      // The exact input the client uploads before submit, so it needs no progress read for it.
-      return canonicalPayload({
-        state,
-        terminal: null,
-        input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
-      });
+      return await prepareHostedSync(ctx, auth, request);
     } catch (error) {
       return report(error);
     }
   },
 });
+/** The prepare transaction for an already-authenticated actor: the public prepare, and the server's
+ * save-then-resolve chain (which acts as the save's own actor). */
+export async function prepareHostedSync(
+  ctx: MutationCtx,
+  auth: { projectId: Id<'hostedProjects'>; operationId: string; actor: string },
+  request: ReturnType<typeof syncRequestSchema.parse>,
+): Promise<string> {
+  const expected = {
+    authorityEpoch: request.authorityEpoch,
+    ...('expected' in request
+      ? {
+          head: request.expected.head,
+          resourceId: request.laneId,
+          resourceVersion: request.expected.version,
+        }
+      : request.kind === 'revert'
+        ? {
+            resourceId:
+              request.target.kind === 'receipt' ? request.target.receiptId : request.target.submissionId,
+          }
+        : { resourceId: request.candidateId }),
+  };
+  const prepared = await beginHostedOperation(ctx, {
+    ...auth,
+    ...(request.kind === 'revert' ? { metricAction: 'revert' as const } : {}),
+    payload: request,
+    request: { schema: 1, ...auth, expected, payloadHash: hostedPayloadHash(request, expected) },
+    firstAttempt: {
+      projectId: auth.projectId,
+      operationId: auth.operationId,
+      id: crypto.randomUUID(),
+      parentAttemptId: null,
+      at: new Date().toISOString(),
+      expected,
+      ids: {
+        intent: crypto.randomUUID(),
+        lane: crypto.randomUUID(),
+        job: crypto.randomUUID(),
+        jobOperation: crypto.randomUUID(),
+      },
+    },
+  });
+  if (prepared.replayed) {
+    const old = await syncRow(ctx, auth);
+    invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
+    const state = JSON.parse(old.value) as SyncState;
+    // The same receipt as the first prepare, so a retried prepare also skips the progress read.
+    return canonicalPayload({
+      state,
+      terminal: prepared.operation.terminal,
+      input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+    });
+  }
+  const project = await activeProject(ctx, auth.projectId, auth.actor);
+  let ownerInputs = false;
+  let work: SyncState['work'],
+    lane: SyncState['lane'] = null,
+    origin: SyncState['origin'],
+    intentId: string,
+    base: SyncState['base'];
+  const candidate = async (id: string) => {
+    const row = await readHostedRecord(ctx, { ...auth, kind: 'candidate', key: id });
+    invariant(row, 'NOT_FOUND', 'Select a Candidate on this project.');
+    const record = hostedRecordSchema.options[3].parse(JSON.parse(row.value));
+    return { record, ownerInputs: candidateOwnerInputs(project, row, record, request.authorityEpoch) };
+  };
+  if (request.kind === 'revert') {
+    const selected = await prepareHostedRevert(ctx, auth, request, prepared.operation.firstAttempt);
+    intentId = selected.intentId;
+    base = selected.base;
+    work = selected.work;
+  } else if (request.kind === 'resolution') {
+    const selectedProof = await candidate(request.candidateId);
+    const selected = selectedProof.record;
+    ownerInputs = selectedProof.ownerInputs;
+    invariant(
+      selected.result.status === 'conflict' &&
+        canonicalPayload(selected.result.conflicts) === canonicalPayload(request.conflicts),
+      'WORK_STALE',
+      'Resolve the exact original Candidate conflict root.',
+    );
+    await saveObject(ctx, auth.projectId, request.conflicts);
+    intentId = selected.intentId;
+    base = selected.base;
+    work = { mode: 'resolution', candidateId: selected.id, conflicts: request.conflicts };
+    if (request.originLaneId) {
+      // Only the caller's own active Lane on the same Intent; anything else is not recorded.
+      const conflicted = (await saveLaneRecord(ctx, { ...auth, laneId: request.originLaneId })).lane;
+      if (
+        conflicted.intentId === selected.intentId &&
+        conflicted.actor === auth.actor &&
+        conflicted.state === 'active'
+      )
+        origin = laneOrigin(conflicted);
+    }
+  } else {
+    const original = await saveLaneRecord(ctx, { ...auth, laneId: request.laneId });
+    lane = original.lane;
+    // A clean sync or resolve rewrites this Lane: only its author or the project owner.
+    requireMemberAuthority(project, lane.actor, auth.actor, 'Lane');
+    ownerInputs = original.ownerOnly && lane.actor === project.owner;
+    invariant(sameSaveLane(lane, request.expected), 'WORK_STALE', 'Select the exact saved Lane pins.');
+    intentId = lane.intentId;
+    base = lane.base;
+    if (request.kind === 'sync' && lane.actor === auth.actor) origin = laneOrigin(lane);
+    const left = await saveObject(ctx, auth.projectId, { sha256: lane.head });
+    if (request.kind === 'resolve') {
+      invariant(lane.resolution?.status === 'pending', 'WORK_STALE', 'Select the pending resolution Lane.');
+      work = { mode: 'resolve', left, resolution: lane.resolution };
+    } else {
+      const target = request.target;
+      if (target.kind === 'main') {
+        const main = await hostedStartMain(ctx, auth.projectId);
+        invariant(
+          main.head === target.head &&
+            main.receipt.id === target.receiptId &&
+            main.authority.epoch === request.authorityEpoch,
+          'CHANNEL_CHANGED',
+          'Sync against the exact observed main head and receipt.',
+        );
+      } else {
+        const selectedProof = await candidate(target.candidateId);
+        const selected = selectedProof.record;
+        ownerInputs = ownerInputs && selectedProof.ownerInputs;
+        invariant(
+          selected.result.status === 'clean' && selected.result.head === target.head,
+          'WORK_STALE',
+          'Select the exact clean target Candidate.',
+        );
+      }
+      let right = target.head;
+      let stackBase, stackAfter;
+      if (lane.restoreBase) stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase });
+      if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
+        const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
+        invariant(parentRow, 'NOT_FOUND', 'Stack parent Lane not found.');
+        const parent = hostedRecordSchema.options[1].parse(JSON.parse(parentRow.value));
+        const entry = lane.stack.entryId
+          ? (await loadLanding(ctx, { projectId: auth.projectId, submissionId: lane.stack.entryId })).state
+          : null;
+        const detached =
+          request.ontoMain ||
+          parent.state === 'abandoned' ||
+          entry?.phase === 'landed' ||
+          entry?.phase === 'terminal-failed';
+        // An automatic restack only follows a live parent; a landed or abandoned one has its own notice.
+        invariant(
+          !request.cleanOnly || !detached,
+          'STACK_PARENT_CHANGED',
+          'The stack parent landed or was abandoned: follow its board notice instead of an automatic restack.',
+        );
+        right = detached ? target.head : parent.head;
+        ownerInputs =
+          ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
+        stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
+        stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
+      }
+      invariant(
+        !request.cleanOnly || stackAfter,
+        'BAD_ARGUMENT',
+        'cleanOnly restacks a stacked Lane onto its parent; this Lane is not stacked.',
+      );
+      work = {
+        mode: 'sync',
+        left,
+        right: await saveObject(ctx, auth.projectId, { sha256: right }),
+        ...(stackBase ? { stackBase, stackAfter } : {}),
+      };
+    }
+  }
+  const state: SyncState = {
+    ownerInputs,
+    ownerProvenance: 1,
+    request,
+    work,
+    lane,
+    intentId,
+    base,
+    resolutionLaneId: prepared.operation.firstAttempt.ids.lane!,
+    ...(origin ? { origin } : {}),
+    jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
+    status: 'ready',
+  };
+  await ctx.db.insert('projectHostedSyncs', {
+    ...auth,
+    jobId: prepared.operation.firstAttempt.ids.job!,
+    value: canonicalPayload(state),
+  });
+  // The exact input the client uploads before submit, so it needs no progress read for it.
+  return canonicalPayload({
+    state,
+    terminal: null,
+    input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+  });
+}
 export const progress = query({
   args: identity,
   returns: v.string(),

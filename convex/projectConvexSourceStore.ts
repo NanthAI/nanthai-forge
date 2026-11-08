@@ -59,9 +59,14 @@ export const start = internalMutation({
   returns: v.string(),
   handler: startConvexSource,
 });
+/** A first step the submitting action runs itself has this delayed fallback: it runs only when that
+ * action died (or outran the 20 s step budget), well inside the 60 s worker lease. */
+export const inlineFallbackMs = 30_000;
 export async function startConvexSource(
   ctx: MutationCtx,
   args: { projectId: Id<'hostedProjects'>; jobId: string; input: string },
+  /** The caller runs step 0 itself (`runConvexSourceStep`); set when this call created the row. */
+  inline?: { started: boolean },
 ) {
   const input = JSON.parse(args.input),
     job = await loadSourceJob(ctx, args.projectId, args.jobId);
@@ -98,11 +103,12 @@ export async function startConvexSource(
     timing: { queuedAt: Date.now(), scheduledAt: Date.now(), steps: [] },
   });
   const scheduledId = await ctx.scheduler.runAfter(
-    0,
+    inline ? inlineFallbackMs : 0,
     makeFunctionReference<'action'>('projectConvexSource:step'),
     { projectId: args.projectId, jobId: args.jobId, step: 0 },
   );
-  await ctx.db.patch(rowId, { scheduledId });
+  await ctx.db.patch(rowId, { scheduledId, ...(inline ? { inlineFallback: true } : {}) });
+  if (inline) inline.started = true;
   return canonicalPayload({ status: 'accepted', executionId });
 }
 
@@ -264,6 +270,12 @@ export const commit = sourceMutation({
     }
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
+    // The submitting action ran this step itself: its delayed fallback is no longer needed. One that
+    // already started (it is running this commit, or raced it) is left alone.
+    if (active.row.inlineFallback && active.row.scheduledId) {
+      const fallback = await ctx.db.system.get(active.row.scheduledId);
+      if (fallback?.state.kind === 'pending') await ctx.scheduler.cancel(active.row.scheduledId);
+    }
     const callback = {
       ...JSON.parse(active.row.dispatch),
       executionId: active.row.executionId,
@@ -281,6 +293,7 @@ export const commit = sourceMutation({
     await ctx.db.patch(active.row._id, {
       step: args.step + 1,
       cursor: args.cursor,
+      inlineFallback: undefined,
       batchId: undefined,
       generation: undefined,
       failedAttempts: undefined,
@@ -330,43 +343,57 @@ export const commit = sourceMutation({
 export const dispatch = internalMutation({
   args: identity,
   returns: v.union(v.literal('idle'), v.literal('observed'), v.literal('unknown')),
-  handler: async (ctx, args) => {
-    const owner = crypto.randomUUID();
-    let failure: unknown;
-    const result = await driveSourceJob(
-      args.projectId,
-      {
-        claim: () => claimSourceJob(ctx, { ...args, owner, leaseMs: 60000 }),
-        advance: (token, command) => advanceSourceJob(ctx, { ...args, owner, token, command }),
-      },
-      new ConvexSourceProvider(
-        async input => {
-          try {
-            return JSON.parse(await startConvexSource(ctx, { ...args, input: canonicalPayload(input) }));
-          } catch (error) {
-            failure = error;
-            throw error;
-          }
-        },
-        input => lookupConvexSource(ctx, { ...args, input }),
-      ),
-      () => crypto.randomUUID(),
-    );
-    if (failure) throw failure;
-    // The controller has no IO outside this transaction. Release only its
-    // coordination lease so a failed action can reconcile before worker expiry.
-    const job = await loadSourceJob(ctx, args.projectId, args.jobId);
-    if (job.control.lease?.owner === owner && !sourceJobTerminal(job))
-      await saveSourceJob(
-        ctx,
-        args.projectId,
-        job,
-        { ...job, control: { ...job.control, lease: null } },
-        Date.now(),
-      );
-    return result;
-  },
+  handler: async (ctx, args) => (await dispatchConvexSource(ctx, args)).result,
 });
+/** The dispatch transaction, also run inside a submit. With `inline`, a first step this call starts
+ * is left to the caller (`started` says so) behind a delayed fallback. */
+export async function dispatchConvexSource(
+  ctx: MutationCtx,
+  args: { projectId: Id<'hostedProjects'>; jobId: string },
+  inline = false,
+) {
+  const started = { started: false };
+  const owner = crypto.randomUUID();
+  let failure: unknown;
+  const result = await driveSourceJob(
+    args.projectId,
+    {
+      claim: () => claimSourceJob(ctx, { ...args, owner, leaseMs: 60000 }),
+      advance: (token, command) => advanceSourceJob(ctx, { ...args, owner, token, command }),
+    },
+    new ConvexSourceProvider(
+      async input => {
+        try {
+          return JSON.parse(
+            await startConvexSource(
+              ctx,
+              { ...args, input: canonicalPayload(input) },
+              inline ? started : undefined,
+            ),
+          );
+        } catch (error) {
+          failure = error;
+          throw error;
+        }
+      },
+      input => lookupConvexSource(ctx, { ...args, input }),
+    ),
+    () => crypto.randomUUID(),
+  );
+  if (failure) throw failure;
+  // The controller has no IO outside this transaction. Release only its
+  // coordination lease so a failed action can reconcile before worker expiry.
+  const job = await loadSourceJob(ctx, args.projectId, args.jobId);
+  if (job.control.lease?.owner === owner && !sourceJobTerminal(job))
+    await saveSourceJob(
+      ctx,
+      args.projectId,
+      job,
+      { ...job, control: { ...job.control, lease: null } },
+      Date.now(),
+    );
+  return { result, inline: started.started };
+}
 
 export const stage = sourceMutation({
   args: {
@@ -408,6 +435,21 @@ export const failed = sourceMutation({
         const live = await activeStep(ctx, batch);
         return !!live && live.row.batchId === batch._id;
       });
+    } else if (active.row.inlineFallback && active.row.scheduledId) {
+      // The submitting action's inline step failed: retry on the normal schedule, not the fallback's.
+      const fallback = await ctx.db.system.get(active.row.scheduledId);
+      if (fallback?.state.kind === 'pending') {
+        await ctx.scheduler.cancel(active.row.scheduledId);
+        const generation = args.generation + 1;
+        const scheduledId = await ctx.scheduler.runAfter(
+          Math.max(0, (update.retryAt ?? 0) - Date.now()),
+          makeFunctionReference<'action'>(
+            args.step === 0 ? 'projectConvexSource:step' : 'projectConvexSourceNode:step',
+          ),
+          { projectId: args.projectId, jobId: args.jobId, step: args.step, generation },
+        );
+        await ctx.db.patch(active.row._id, { generation, scheduledId, inlineFallback: undefined });
+      }
     }
     return null;
   },

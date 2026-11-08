@@ -90,7 +90,20 @@ export async function driveAgentSource(
       : await session.query<SourceProgress>(`projectHosted${kind}:progress`, { operationId });
   if (progress.terminal) return progress.terminal;
   invariant(progress.input, 'SOURCE_UNAVAILABLE', 'The prepared source input is unavailable.');
-  await session.exchange.upload(savePin(progress.input), Buffer.from(saveBytes(progress.input)));
+  const input = Buffer.from(saveBytes(progress.input));
+  if (session.capabilities.features?.includes('source-submit-run') && session.exchange.uploadLazyBatch) {
+    // One action commits the input, submits and runs the first step (no scheduler hop).
+    const deferred: { id: string }[] = [];
+    await session.exchange.uploadLazyBatch([{ pin: savePin(progress.input), read: () => input }], {
+      deferCommit: deferred,
+    });
+    return session.action('projectSourceRun:submit', {
+      operationId,
+      kind: kind === 'Sync' ? 'sync' : 'compose',
+      ...(deferred.length ? { objects: deferred } : {}),
+    });
+  }
+  await session.exchange.upload(savePin(progress.input), input);
   return session.mutation(`projectHosted${kind}Jobs:submit`, { operationId });
 }
 export async function composeAgentSource(

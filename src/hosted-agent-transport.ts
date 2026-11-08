@@ -36,7 +36,7 @@ import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
-import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
+import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import { observedConflictRecovery, terminalConflict } from './hosted-observed-conflict.js';
 import type { HostedRunSubscription } from './hosted-agent-observe.js';
@@ -172,6 +172,7 @@ export type HostedAgentExchange = Pick<
   | 'downloadToFile'
   | 'downloadBatch'
   | 'prepareDownloads'
+  | 'uploadLazyBatch'
 >;
 export type HostedAgentResponse = {
   cliCommit?: string;
@@ -868,6 +869,7 @@ export class HostedAgentTransport {
           : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
+        action: this.action.bind(this),
         main: async () => {
           const main = parseHostedResponse(
             hostedMainV2Schema,
@@ -880,7 +882,7 @@ export class HostedAgentTransport {
           );
           return main;
         },
-        waitSource: (operationId, initial, kind, timeoutSeconds, observe) =>
+        waitSource: (operationId, initial, kind, timeoutSeconds, observe, settle) =>
           waitHostedAgentSource(
             this.address,
             operationId,
@@ -890,6 +892,7 @@ export class HostedAgentTransport {
             kind,
             timeoutSeconds,
             observe,
+            settle,
           ),
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
@@ -1527,6 +1530,19 @@ export class HostedAgentTransport {
     );
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
+  /** One attempt: an action is not retried here, its caller replays the same operation id. */
+  async action<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
+    let value: unknown;
+    try {
+      value = await this.exchange.client.action(makeFunctionReference<'action'>(name), {
+        ...args,
+        projectId: this.address.projectId,
+      });
+    } catch (error) {
+      throw retryableExchangeError(hostedActionError(error, name), this.callerOperationId) ?? error;
+    }
+    return (typeof value === 'string' ? JSON.parse(value) : value) as T;
+  }
   private async observe(command: z.infer<typeof hostedAgentCommandSchemas.status>) {
     const { laneId, operationId, submissionId, runId, kind, version, summary } = command;
     invariant(!summary || runId, 'BAD_ARGUMENT', 'summary:true reads one check run: pass runId.');
@@ -1574,11 +1590,14 @@ export type HostedAgentSession = {
     kind?: 'Sync' | 'Saves' | 'Compose',
     timeoutSeconds?: number,
     observe?: (progress: unknown) => void,
+    settle?: SourceWaitSettle,
   ) => Promise<unknown>;
   /** Epoch ms by which an action that waits for its own outcome (save) returns IN_PROGRESS. */
   waitUntil: number;
   query: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   mutation: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
+  /** A project action (the project id is added), for calls that run work as well as write. */
+  action: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
   /** Agent-default finish gates (overlap, preflight); refusals throw, advisories return. */

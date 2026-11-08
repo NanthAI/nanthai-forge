@@ -58,6 +58,18 @@ export const saveExpectedSchema = hostedLaneSelectionSchema.pick({
   sourceVersion: true,
   lifecycleVersion: true,
 });
+/** The resolve that follows this save (feature save-then-resolve, 1eef1b43): once the save
+ * completes the server prepares, submits and runs this sync itself, from the save's own result. */
+export const saveThenSchema = z
+  .object({
+    kind: z.literal('resolve'),
+    operationId: z.uuid(),
+    authorityEpoch: number,
+    lifecycleVersion: saveExpectedSchema.shape.lifecycleVersion,
+    message: z.string(),
+  })
+  .strict();
+export type SaveThen = z.infer<typeof saveThenSchema>;
 export const saveRequestSchema = z
   .object({
     operationId: z.uuid(),
@@ -70,6 +82,7 @@ export const saveRequestSchema = z
     pages: saveObjectSchema.nullable(),
     pageCount: number,
     changeCount: number,
+    then: saveThenSchema.optional(),
   })
   .strict()
   .superRefine((value, ctx) => {

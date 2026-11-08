@@ -78,9 +78,9 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     },
   };
   ctx.scheduler = {
-    runAfter: async (_delay, ref, args) => {
+    runAfter: async (delayMs, ref, args) => {
       const id = `scheduled-${++serial}`,
-        item = { id, name: getFunctionName(ref), args, state: { kind: 'pending' } };
+        item = { id, name: getFunctionName(ref), args, delayMs, state: { kind: 'pending' } };
       scheduled.set(id, item);
       ready.push(item);
       return id;

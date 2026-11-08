@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { makeFunctionReference } from 'convex/server';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -180,6 +181,13 @@ export async function publishHostedSave(ctx: MutationCtx, input: SaveIdentity & 
     ...(serverTiming ? { serverTiming } : {}),
   });
   await wakeLifecycleSave(ctx, input);
+  // save-then-resolve: one scheduled hop starts the resolve this save was made for.
+  if (state.request.then)
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedResolveChain:run'), {
+      projectId: input.projectId,
+      actor: input.actor,
+      operationId: input.operationId,
+    });
   return terminal;
 }
 export async function saveForJob(ctx: MutationCtx, projectId: Id<'hostedProjects'>, jobId: string) {

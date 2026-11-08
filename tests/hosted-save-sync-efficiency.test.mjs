@@ -162,8 +162,11 @@ async function changedSave(
   const pending = await saveHostedLane(root, command, transport, contract);
   const args = { projectId: s.projectId, jobId: pending.jobId };
   if (provider === 'convex') {
-    await c.call('projectConvexSource:dispatch', args);
-    await c.call('projectConvexSource:step', { ...args, step: 0 });
+    // With source-submit-run the submitting action already dispatched and ran step 0.
+    if (!contract?.submitRun) {
+      await c.call('projectConvexSource:dispatch', args);
+      await c.call('projectConvexSource:step', { ...args, step: 0 });
+    }
     await c.call('projectHostedSaveJobs:complete', args);
     const terminal = await saveHostedLane(root, command, exchange, contract);
     const output = terminal.outcome.result;
@@ -521,6 +524,44 @@ test('a 10-file save commits its objects once, stages its page in submit and rea
   assert.equal(progress.state.serverTiming.steps[0].phase, 'input>done');
   assert.equal(progress.state.serverTiming.steps[0].stop, 'done');
   assert.equal(typeof progress.state.serverTiming.publishedAt, 'number');
+  t.diagnostic(
+    JSON.stringify({
+      convex: run.stats,
+      functions: Object.fromEntries([...new Set(run.calls)].map(name => [name, count(name)])),
+    }),
+  );
+});
+
+test('a small save commits, submits and runs its first step in one action (source-submit-run, 1eef1b43)', async t => {
+  const run = await changedSave(t, false, true, 'convex', {
+    overlapEvidence: false,
+    submitPage: true,
+    submitRun: true,
+  });
+  const count = name => run.calls.filter(value => value === name).length;
+  assert.equal(count('projectSourceRun:submit'), 1);
+  for (const name of [
+    'projectObjectCommit:commitBatch',
+    'projectHostedSaveJobs:submit',
+    'projectHostedSaves:stage',
+    'projectConvexSource:dispatch',
+    'projectConvexSource:step',
+  ])
+    assert.equal(count(name), 0, name);
+  // The commit round still verifies every deferred upload (HEAD) before the submit stages them.
+  assert.equal(count('projectObjectCommit:pendingRows'), 1);
+  assert.equal(count('projectObjectCommit:markCommitted'), 1);
+  // 16 -> 14: one action replaces the commit action, the submit mutation, the dispatch and the step.
+  assert(run.stats.totalCalls <= 14, JSON.stringify({ stats: run.stats, functions: run.calls }));
+  assert(run.stats.writes - run.stats.overlapWrites <= 100, JSON.stringify(run.stats));
+  const progress = JSON.parse(
+    await run.c.call('projectHostedSaves:progress', {
+      projectId: run.s.projectId,
+      operationId: run.command.operationId,
+    }),
+  );
+  assert.equal(progress.state.serverTiming.steps.length, 1);
+  assert.equal(progress.state.serverTiming.steps[0].stop, 'done');
   t.diagnostic(
     JSON.stringify({
       convex: run.stats,

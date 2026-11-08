@@ -46,6 +46,9 @@ export const sourceStepTables = {
     dispatch: v.string(),
     executionId: v.string(),
     scheduledId: v.optional(v.id('_scheduled_functions')),
+    /** `scheduledId` is a delayed fallback for a first step the submitting action runs itself;
+     * the step's commit cancels it while it is still pending. */
+    inlineFallback: v.optional(v.boolean()),
     step: v.number(),
     cursor: v.union(v.string(), v.null()),
     batchId: v.optional(v.id('projectSourceBatches')),

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { action, internalQuery, internalMutation } from './cliServer';
+import { action, internalQuery, internalMutation, type ActionCtx } from './cliServer';
+import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { activeProject } from './projectAuthority';
 import { r2Config, headObject, checksumOf, type HeadResult } from './r2';
@@ -95,25 +96,35 @@ export const commitBatch = action({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
-      const rows: { id: (typeof objects)[number]['id']; digest: string; size: number; key: string }[] =
-        await ctx.runQuery(internal.projectObjectCommit.pendingRows, {
-          actor: user.subject,
-          ids: objects.map(object => object.id),
-        });
-      if (!rows.length) return null;
-      const config = r2Config();
-      const results = await Promise.all(
-        rows.map(async row => ({ row, failure: mismatch(row, await headObject(config, row.key)) })),
-      );
-      const verified = results.filter(r => !r.failure).map(r => r.row);
-      if (verified.length)
-        await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
-      const failed = results.find(r => r.failure);
-      invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
+      await commitObjects(ctx, user.subject, objects);
       return null;
     } catch (error) {
       return report(error);
     }
   },
 });
+/** The commit round of `commitBatch`, also run by `projectSourceRun:submit` before its submit. */
+export async function commitObjects(
+  ctx: ActionCtx,
+  actor: string,
+  objects: readonly { id: Id<'projectObjects'> }[],
+) {
+  invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
+  if (!objects.length) return;
+  const rows: { id: Id<'projectObjects'>; digest: string; size: number; key: string }[] = await ctx.runQuery(
+    internal.projectObjectCommit.pendingRows,
+    {
+      actor,
+      ids: objects.map(object => object.id),
+    },
+  );
+  if (!rows.length) return;
+  const config = r2Config();
+  const results = await Promise.all(
+    rows.map(async row => ({ row, failure: mismatch(row, await headObject(config, row.key)) })),
+  );
+  const verified = results.filter(r => !r.failure).map(r => r.row);
+  if (verified.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
+  const failed = results.find(r => r.failure);
+  invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
+}

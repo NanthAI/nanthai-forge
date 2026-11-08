@@ -33,6 +33,9 @@ const convexSourceModules = Object.fromEntries(
       'projectConvexSourceFanout',
       'projectConvexSourceStore',
       'projectConvexSourceObjects',
+      // save-then-resolve: the real chain action, with this fixture's R2 and source steps.
+      'projectHostedResolveChain',
+      'projectHostedResolveChainStore',
     ].map(async name => [name, await import(moduleUrl(`../convex/${name}.ts`))]),
   ),
 );
@@ -388,7 +391,8 @@ export async function finishFixture(
         task.name.startsWith('projectConvexSource:') ||
         task.name.startsWith('projectConvexSourceNode:') ||
         task.name.startsWith('projectConvexSourceTask:') ||
-        task.name.startsWith('projectConvexSourceFanout:')
+        task.name.startsWith('projectConvexSourceFanout:') ||
+        task.name === 'projectHostedResolveChain:run'
       ) {
         if (stop === 'before-source' && task.name.endsWith(':dispatch'))
           throw new Error('synthetic crash before source job');

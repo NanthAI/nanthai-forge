@@ -38,6 +38,10 @@ const stopped = (value: unknown) =>
   !!value &&
   typeof value === 'object' &&
   ('outcome' in value || ('status' in value && ['retryable', 'failed'].includes(String(value.status))));
+/** A caller's own end condition on the raw progress: `value` resolves with it, `waitMs` keeps
+ * waiting but resolves with the default snapshot once that long passes (armed once); undefined
+ * keeps the default rule. */
+export type SourceWaitSettle = (progress: unknown) => { value: unknown } | { waitMs: number } | undefined;
 /** Only an active recovery call subscribes to its exact source operation. The
  * durable worker continues after a deadline/disconnect; no polling or redispatch. */
 export async function waitHostedAgentSource(
@@ -51,6 +55,7 @@ export async function waitHostedAgentSource(
   timeoutSeconds = 60,
   /** Sees each raw progress value (the receipt reads its server timing); never changes the result. */
   observe?: (progress: unknown) => void,
+  settle?: SourceWaitSettle,
 ) {
   let latest = initial;
   return retryHostedObservation({
@@ -70,6 +75,7 @@ export async function waitHostedAgentSource(
           latest = value;
         },
         observe,
+        settle,
       ),
   });
 }
@@ -82,6 +88,7 @@ async function waitHostedAgentSourceOnce(
   kind: 'Sync' | 'Saves' | 'Compose',
   remember: (value: unknown) => void,
   observe?: (progress: unknown) => void,
+  settle?: SourceWaitSettle,
 ) {
   initial = sourceWaitSnapshot(initial);
   if (stopped(initial)) return initial;
@@ -90,6 +97,7 @@ async function waitHostedAgentSourceOnce(
   const client = subscribe();
   let unsubscribe: (() => void) | undefined;
   let stop: (() => void) | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await new Promise<unknown>((resolve, reject) => {
       stop = () => resolve(sourceWaitSnapshot(latest));
@@ -102,6 +110,12 @@ async function waitHostedAgentSourceOnce(
           try {
             const progress = typeof value === 'string' ? JSON.parse(value) : value;
             observe?.(progress);
+            const settled = settle?.(progress);
+            if (settled && 'value' in settled) return resolve(settled.value);
+            if (settled) {
+              timer ??= setTimeout(() => resolve(sourceWaitSnapshot(progress)), settled.waitMs);
+              return;
+            }
             const observed = sourceWaitSnapshot(progress);
             if (stopped(observed)) resolve(observed);
             else if (progress?.jobId) {
@@ -116,6 +130,7 @@ async function waitHostedAgentSourceOnce(
       );
     });
   } finally {
+    if (timer) clearTimeout(timer);
     if (stop) signal?.removeEventListener('abort', stop);
     try {
       unsubscribe?.();

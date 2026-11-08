@@ -24,7 +24,7 @@ import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted
 import { stateSchema } from './native-state-format.js';
 import { workLocked } from './work-lock.js';
 import { settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
-import { saveResultSchema } from './hosted-save.js';
+import { saveResultSchema, type SaveThen } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
 import { ForgeError, invariant } from './errors.js';
@@ -56,13 +56,20 @@ export const overlapEvidenceLevel = (capabilities: {
       ? 'symbol-links'
       : true;
 /** What the server's save calls accept, from the capability read the session already made. */
-export type SaveContract = { overlapEvidence: OverlapEvidenceLevel; submitPage: boolean };
+export type SaveContract = {
+  overlapEvidence: OverlapEvidenceLevel;
+  submitPage: boolean;
+  submitRun?: boolean;
+  /** The resolve the server chains after this save (save-then-resolve); only a new request takes it. */
+  then?: SaveThen;
+};
 export const saveContract = (capabilities: {
   overlapEvidenceVersion?: 1 | undefined;
   features?: readonly string[] | undefined;
 }): SaveContract => ({
   overlapEvidence: overlapEvidenceLevel(capabilities),
   submitPage: capabilities.features?.includes('save-submit-page') ?? false,
+  submitRun: capabilities.features?.includes('source-submit-run') ?? false,
 });
 const saveCommandSchema = z
   .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
@@ -142,7 +149,7 @@ async function saveOnce(
   command: { operationId: string; message: string; supersedeFinish?: boolean },
   exchange: SaveExchange,
   repair: boolean,
-  { overlapEvidence, submitPage }: SaveContract,
+  { overlapEvidence, submitPage, submitRun, then }: SaveContract,
   preserveConflicts: boolean,
   continuation: ConflictContinuation,
   waitPrior?: (operationId: string, pending: unknown) => Promise<unknown>,
@@ -253,6 +260,7 @@ async function saveOnce(
       pages: built.root,
       pageCount: built.pages.length,
       changeCount: changes.length,
+      ...(then ? { then } : {}),
     });
     request = workLocked(join(clientCacheRoot(root), 'lock'), () => {
       if (checkoutPathExists(requestPath))
@@ -326,14 +334,37 @@ async function saveOnce(
       { batchSize: 100, ...(deferred ? { deferCommit: deferred } : {}) },
     );
   }
-  if (deferred?.length) await exchange.commitObjects!(deferred);
-  // The server holds the request and every staged blob it names.
-  writeFileSync(acknowledged, '', { mode: 0o600 });
-  dropStagedBlobs(directory);
-  timing?.mark('upload');
   // A server with save-submit-page stages the last page inside submit: one call fewer per save.
   const lazy = !!exchange.uploadLazyBatch && !!prepared.input,
-    last = lazy && submitPage && pages.length ? pages.length - 1 : null;
+    last = lazy && submitPage && pages.length ? pages.length - 1 : null,
+    // With source-submit-run one action commits, submits and runs the first step. Staging a page
+    // first needs committed objects, so only a save with no separate stage call takes it.
+    run = lazy && !!submitRun && submitPage && pages.length <= 1 && !!exchange.client.action,
+    // The action commits one page of uploads; a larger save commits the rest first, as before.
+    committedInRun = run && deferred && deferred.length <= 100 ? deferred : [];
+  if (deferred?.length && committedInRun !== deferred) await exchange.commitObjects!(deferred);
+  if (!run) {
+    // The server holds the request and every staged blob it names.
+    writeFileSync(acknowledged, '', { mode: 0o600 });
+    dropStagedBlobs(directory);
+  }
+  timing?.mark('upload');
+  if (run) {
+    const result = JSON.parse(
+      await exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
+        ...args,
+        kind: 'save',
+        ...(committedInRun.length ? { objects: committedInRun } : {}),
+        ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+      }),
+    );
+    writeFileSync(acknowledged, '', { mode: 0o600 });
+    dropStagedBlobs(directory);
+    markLandStep('saveSubmitted');
+    timing?.mark('submit');
+    if (result.outcome) applyHostedSaveReceipt(root, capture, request, result);
+    return result;
+  }
   for (const [index, page] of pages.entries()) {
     if (!lazy) await objects.put(Buffer.from(saveBytes(page.value)));
     if (index === last) break;

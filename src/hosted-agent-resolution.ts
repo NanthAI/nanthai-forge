@@ -25,8 +25,8 @@ import { z } from 'zod';
 import { HostedObjectStore } from './hosted-object-store.js';
 import { composeConflictPageSchema } from './hosted-compose.js';
 import { hostedRecordSchema } from './hosted-records.js';
-import { saveExpectedSchema, saveResultSchema } from './hosted-save.js';
-import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
+import { syncResultSchema } from './hosted-sync.js';
+import { chainSettle, resolveSyncRequest } from './hosted-resolve-chain.js';
 import { syncTiming } from './sync-timing.js';
 import { applyObservedSaveOutcome, saveContract, saveHostedLane } from './hosted-save-client.js';
 import { driveAgentSource, syncAgentSource } from './hosted-agent-source.js';
@@ -284,23 +284,45 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   const timing = syncTiming(),
     saveTiming = syncTiming();
   const saveOperationId = await session.journal.id('resolution-save');
+  // The resolve's sync, from the save's result. With save-then-resolve the save carries it and the
+  // server starts it when the save completes; the CLI builds the identical request either way.
+  const then = {
+    kind: 'resolve' as const,
+    operationId: session.journal.operationId,
+    authorityEpoch: session.capabilities.authority.epoch,
+    lifecycleVersion: marker.selection.lifecycleVersion,
+    message: command.message,
+  };
+  const chain = session.capabilities.features?.includes('save-then-resolve') ?? false;
   const save = () =>
     saveHostedLane(
       session.root,
       { operationId: saveOperationId, message: command.message },
       session.exchange,
-      saveContract(session.capabilities),
+      { ...saveContract(session.capabilities), ...(chain ? { then } : {}) },
       false,
       { action: 'resolve', parameters: { ...command, operationId: session.journal.operationId } },
       undefined,
       saveTiming,
     );
   let saved = await save();
+  let chained: { terminal: unknown; state: unknown } | undefined;
   if (!completed(saved)) {
     let observed: unknown;
-    saved = await session.waitSource(saveOperationId, saved, 'Saves', undefined, value => {
-      observed = value;
-    });
+    saved = await session.waitSource(
+      saveOperationId,
+      saved,
+      'Saves',
+      undefined,
+      value => {
+        observed = value;
+      },
+      chain ? chainSettle : undefined,
+    );
+    if (saved && typeof saved === 'object' && 'chained' in saved) {
+      chained = (saved as { chained: typeof chained }).chained;
+      saved = (saved as { save: unknown }).save;
+    }
     saveTiming.mark('hostedWait');
     saveTiming.server(observed);
     if (!completed(saved)) return { phase: 'save', saveOperationId, progress: saved, ...continuation };
@@ -310,34 +332,28 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     saveTiming.mark('apply');
   }
   timing.nest(saveTiming.value());
-  const request = await session.journal.retain('resolve-request', async () => {
-    const lane = saveResultSchema.parse(completed(saved));
-    return syncRequestSchema.parse({
-      kind: 'resolve',
-      operationId: session.journal.operationId,
-      authorityEpoch: session.capabilities.authority.epoch,
-      laneId: marker.selection.laneId,
-      expected: saveExpectedSchema.parse({
-        head: lane.head,
-        version: lane.version,
-        sourceVersion: lane.sourceVersion,
-        lifecycleVersion: marker.selection.lifecycleVersion,
-      }),
-      message: command.message,
-    });
-  });
+  const request = await session.journal.retain('resolve-request', async () =>
+    resolveSyncRequest(then, marker.selection.laneId, completed(saved)),
+  );
   const handoff = await retainSyncHandoff(session, 'resolve', command);
   timing.mark('save');
   let progress;
   try {
-    progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
-    timing.mark('submit');
-    let observed: unknown;
-    progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
-      observed = value;
-    });
-    timing.mark('hostedWait');
-    timing.server(observed);
+    if (chained) {
+      // The server ran the resolve from the save: its receipt arrived on the save's subscription.
+      progress = chained.terminal;
+      timing.mark('hostedWait');
+      timing.server({ state: chained.state });
+    } else {
+      progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
+      timing.mark('submit');
+      let observed: unknown;
+      progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
+        observed = value;
+      });
+      timing.mark('hostedWait');
+      timing.server(observed);
+    }
   } catch (error) {
     const safe = hostedActionError(error, 'resolution');
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;

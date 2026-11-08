@@ -21,6 +21,7 @@ import { refuseLiveLaneFinish } from './projectHostedLaneFinish';
 import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { chainProgress } from './projectHostedResolveChainProgress';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 
@@ -236,6 +237,10 @@ export const progress = query({
           state.request.pages && state.status !== 'staging'
             ? hostedSaveInput(state, operation.firstAttempt.at)
             : null,
+        // save-then-resolve: the chained sync, so the CLI's one subscription sees it finish.
+        ...(state.request.then && operation.terminal?.outcome.status === 'completed'
+          ? { chain: await chainProgress(ctx, auth, state) }
+          : {}),
       });
     } catch (error) {
       return report(error);

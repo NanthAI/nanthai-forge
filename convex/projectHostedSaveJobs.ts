@@ -6,7 +6,9 @@ import { sourceWorkerPlan } from '../src/convex-source-provider';
 import { wakeLifecycleSave } from './projectHostedLifecycleCascade';
 import { makeFunctionReference } from 'convex/server';
 import { mutation, internalMutation, internalAction } from './cliServer';
-import { loadSave, saveObject, writeSaveState } from './projectHostedSaveStore';
+import { loadSave, saveObject, writeSaveState, type SaveIdentity } from './projectHostedSaveStore';
+import { startSubmittedSource } from './projectSourceSubmitStart';
+import type { MutationCtx } from './server';
 import { hostedSaveInput, stageSavePage } from './projectHostedSaves';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
 import { publishHostedSave, saveForJob } from './projectHostedSavePublish';
@@ -35,75 +37,85 @@ export const submit = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to save hosted source.');
-      const { index, page, ...identified } = input,
-        auth = { ...identified, actor: user.subject };
-      const prior = await loadSave(ctx, auth, false);
-      if (prior.operation.terminal) return canonicalPayload(prior.operation.terminal);
-      invariant(
-        (index === undefined) === (page === undefined),
-        'BAD_ARGUMENT',
-        'Submit a delta page with its index.',
-      );
-      if (page !== undefined) await stageSavePage(ctx, auth, { index: index!, page });
-      const { row, state, operation } = page === undefined ? prior : await loadSave(ctx, auth, false);
-      await loadSave(ctx, auth);
-      if (!state.request.pages)
-        return canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null }));
-      invariant(
-        state.status === 'ready' || state.status === 'submitted',
-        'SOURCE_JOB_INVALID',
-        'Stage every original delta page before submitting.',
-      );
-      if (state.status === 'ready') {
-        const inputPin = savePin(hostedSaveInput(state, operation.firstAttempt.at));
-        await saveObject(ctx, input.projectId, inputPin);
-        const expected = operation.expected,
-          operationId = state.jobOperationId,
-          payload = {
-            jobKind: 'save',
-            input: inputPin,
-            inputDigest: inputPin.sha256,
-            ...sourceWorkerPlan(process.env),
-          };
-        await enqueueSourceJob(ctx, {
-          ...auth,
-          request: {
-            schema: 1,
-            projectId: input.projectId,
-            actor: auth.actor,
-            operationId,
-            expected,
-            payloadHash: hostedPayloadHash(payload, expected),
-          },
-          payload,
-          firstAttempt: {
-            projectId: input.projectId,
-            operationId,
-            id: row.jobId,
-            parentAttemptId: null,
-            at: operation.firstAttempt.at,
-            expected,
-            ids: { job: row.jobId },
-          },
-        });
-        await writeSaveState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
-      }
-      const job = await loadSourceJob(ctx, input.projectId, row.jobId);
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action' | 'mutation'>(
-          job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
-            ? 'projectHostedSaveJobs:complete'
-            : 'projectConvexSource:dispatch',
-        ),
-        { projectId: input.projectId, jobId: row.jobId },
-      );
-      return canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, job));
+      return (await submitHostedSave(ctx, { ...input, actor: user.subject })).payload;
     } catch (error) {
       return report(error);
     }
   },
 });
+/** Submit, as the public mutation or (`inline`) inside the submitting action's transaction. */
+export async function submitHostedSave(
+  ctx: MutationCtx,
+  input: SaveIdentity & { index?: number | undefined; page?: string | undefined },
+  inline = false,
+): Promise<{ payload: string; run: string | null }> {
+  const { index, page, ...auth } = input;
+  const prior = await loadSave(ctx, auth, false);
+  if (prior.operation.terminal) return { payload: canonicalPayload(prior.operation.terminal), run: null };
+  invariant(
+    (index === undefined) === (page === undefined),
+    'BAD_ARGUMENT',
+    'Submit a delta page with its index.',
+  );
+  if (page !== undefined) await stageSavePage(ctx, auth, { index: index!, page });
+  const { row, state, operation } = page === undefined ? prior : await loadSave(ctx, auth, false);
+  await loadSave(ctx, auth);
+  if (!state.request.pages)
+    return {
+      payload: canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null })),
+      run: null,
+    };
+  invariant(
+    state.status === 'ready' || state.status === 'submitted',
+    'SOURCE_JOB_INVALID',
+    'Stage every original delta page before submitting.',
+  );
+  if (state.status === 'ready') {
+    const inputPin = savePin(hostedSaveInput(state, operation.firstAttempt.at));
+    await saveObject(ctx, input.projectId, inputPin);
+    const expected = operation.expected,
+      operationId = state.jobOperationId,
+      payload = {
+        jobKind: 'save',
+        input: inputPin,
+        inputDigest: inputPin.sha256,
+        ...sourceWorkerPlan(process.env),
+      };
+    await enqueueSourceJob(ctx, {
+      ...auth,
+      request: {
+        schema: 1,
+        projectId: input.projectId,
+        actor: auth.actor,
+        operationId,
+        expected,
+        payloadHash: hostedPayloadHash(payload, expected),
+      },
+      payload,
+      firstAttempt: {
+        projectId: input.projectId,
+        operationId,
+        id: row.jobId,
+        parentAttemptId: null,
+        at: operation.firstAttempt.at,
+        expected,
+        ids: { job: row.jobId },
+      },
+    });
+    await writeSaveState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
+  }
+  const started = await startSubmittedSource(
+    ctx,
+    input.projectId,
+    row.jobId,
+    'projectHostedSaveJobs',
+    inline,
+  );
+  return {
+    payload: canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, started.job)),
+    run: started.run ? row.jobId : null,
+  };
+}
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.union(v.string(), v.null()) },
   returns: v.union(v.string(), v.null()),

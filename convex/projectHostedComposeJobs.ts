@@ -13,6 +13,7 @@ import {
   composeForJob,
 } from './projectHostedComposeStore';
 import { enqueueSourceJob, loadSourceJob } from './projectSourceJobs';
+import { startSubmittedSource } from './projectSourceSubmitStart';
 import { publishHostedCompose } from './projectHostedComposePublish';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
@@ -34,7 +35,7 @@ export const submit = mutation({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to compose hosted source.');
-      return await submitHostedCompose(ctx, { ...input, actor: user.subject });
+      return (await submitHostedCompose(ctx, { ...input, actor: user.subject })).payload;
     } catch (error) {
       return report(error);
     }
@@ -44,10 +45,11 @@ export const submit = mutation({
 export async function submitHostedCompose(
   ctx: import('./_generated/server').MutationCtx,
   input: import('./projectHostedSaveStore').SaveIdentity,
-) {
+  inline = false,
+): Promise<{ payload: string; run: string | null }> {
   const auth = input,
     { row, state, operation } = await loadCompose(ctx, auth, false);
-  if (operation.terminal) return canonicalPayload(operation.terminal);
+  if (operation.terminal) return { payload: canonicalPayload(operation.terminal), run: null };
   await loadCompose(ctx, auth);
   invariant(
     state.status === 'ready' || state.status === 'submitted',
@@ -89,17 +91,17 @@ export async function submitHostedCompose(
     });
     await writeComposeState(ctx, row._id, { ...state, status: 'submitted' });
   }
-  const job = await loadSourceJob(ctx, input.projectId, row.jobId);
-  await ctx.scheduler.runAfter(
-    0,
-    makeFunctionReference<'action' | 'mutation'>(
-      job.status === 'completed' || job.status === 'failed' || job.status === 'cancelled'
-        ? 'projectHostedComposeJobs:complete'
-        : 'projectConvexSource:dispatch',
-    ),
-    { projectId: input.projectId, jobId: row.jobId },
+  const started = await startSubmittedSource(
+    ctx,
+    input.projectId,
+    row.jobId,
+    'projectHostedComposeJobs',
+    inline,
   );
-  return canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, job));
+  return {
+    payload: canonicalPayload(await sourceProgress(ctx, input.projectId, row.jobId, started.job)),
+    run: started.run ? row.jobId : null,
+  };
 }
 export const publish = internalMutation({
   args: { ...jobIdentity, result: v.string() },

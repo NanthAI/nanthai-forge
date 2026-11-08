@@ -60,6 +60,14 @@ export const hostedContractFeatures = [
    * same transaction (friction f15db544). Without it the CLI stages every page with
    * projectHostedSaves:stage before submitting. */
   'save-submit-page',
+  /** projectSourceRun:submit exists (1eef1b43): one action commits a save's, sync's or compose's
+   * deferred uploads (at most 100), submits, and runs the first step without the scheduler hop.
+   * Without it the CLI commits with projectObjectCommit:commitBatch and submits with the mutation. */
+  'source-submit-run',
+  /** A save request may name the resolve that follows it (`then`, 1eef1b43): its completion
+   * schedules projectHostedResolveChain:run, and projectHostedSaves:progress reports that sync as
+   * `chain`. Without it the CLI sends no `then` and prepares the resolve itself. */
+  'save-then-resolve',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 
