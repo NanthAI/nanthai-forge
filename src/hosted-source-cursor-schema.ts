@@ -5,7 +5,7 @@ import { workerObjectSchema, workerInputSchema } from './hosted-source-worker-fo
 import { stateSchema } from './native-state-format.js';
 import { saveChangeSchema, saveInputSchema } from './hosted-save.js';
 import { composeEntrySchema, composeInputSchema } from './hosted-compose.js';
-import { batchDroppedSchema } from './hosted-landing-batch.js';
+import { batchDroppedSchema, HOSTED_BATCH_MEMBERS } from './hosted-landing-batch.js';
 import { syncInputSchema } from './hosted-sync.js';
 import { sourceCalculationResultSchema, sourceVerifyCursorSchema } from './hosted-source-task-schema.js';
 import { sourceValidation } from './hosted-source-validation.js';
@@ -65,6 +65,7 @@ const cursorSchema = z
     changed: z.boolean(),
     calculations: z.record(z.string(), sourceCalculationResultSchema).optional(),
     batchDropped: batchDroppedSchema.optional(),
+    batchMerged: z.array(z.uuid()).max(HOSTED_BATCH_MEMBERS).optional(),
     composeBases: z
       .array(
         z.tuple([z.string(), stateSchema.shape.files.element.pick({ blob: true, mode: true }).nullable()]),
@@ -72,6 +73,11 @@ const cursorSchema = z
       .optional(),
   })
   .strict();
+/** Every durable cursor field must parse back: a field missing here fails the next step of any
+ * job that set it with SOURCE_JOB_INVALID (Issue 3439ae76: `batchMerged` made every batch compose
+ * that spanned two steps fail). Only the reply-only `syncDelta` is never saved. */
+type UnparsedCursorField = Exclude<keyof SourceStepCursor, keyof z.infer<typeof cursorSchema> | 'syncDelta'>;
+export const cursorFieldsParsed: [UnparsedCursorField] extends [never] ? true : UnparsedCursorField = true;
 export function parseSourceCursor(value: unknown): SourceStepCursor {
   const cursor = sourceValidation('SOURCE_JOB_INVALID', () => cursorSchema.parse(value));
   invariant(

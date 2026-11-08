@@ -210,3 +210,42 @@ test('parity: a combined failure names the member whose module the failing test 
   const run = { id: 'r1', testFiles: { failed: [{ file: 'packages/a/src/billing.test.ts' }] } };
   assert.deepEqual(diagnoseBatchFailure(members, run, semantic).suspects, ['s1']);
 });
+
+// Issue 3439ae76 (batch 2d82c075): a shared check that passes late, after main moved, recomposes its
+// cohort on the new main and checks it once more, with either check. Incident-sized State manifests
+// make that compose span several source steps; the cohort never splits and no member rechecks alone.
+test('parity: a late pass after main moved rechecks the cohort once, even when its compose spans steps', async t => {
+  const big = Array.from({ length: 4500 }, (_, i) => [
+    `packages/area-${i % 40}/src/module-${String(i).padStart(5, '0')}-with-a-long-name.ts`,
+    'export {};\n',
+  ]);
+  const outcomes = {};
+  for (const [arm, check] of Object.entries(arms)) {
+    const f = await batchesFixture(t, { count: 4, checkCommand: check, baselineFiles: [...tree, ...big] });
+    await f.drain();
+    f.moveMain();
+    await f.passChecks();
+    await f.drain();
+    for (let i = 0; i < 4 && !states(f).every(s => s.phase === 'landed'); i++) {
+      await f.passChecks();
+      await f.drain();
+    }
+    const stops = [...f.tables.projectSourceSteps.values()].flatMap(row =>
+      (row.timing?.steps ?? []).map(step => step.stop),
+    );
+    assert(stops.includes('compute-bytes'), `${arm}: a compose yielded mid-merge like the incident`);
+    outcomes[arm] = {
+      phases: states(f).map(s => [s.phase, s.error?.code ?? null]),
+      runs: f.runs().length,
+      alone: states(f).filter(s => s.batchSolo || s.batchOriginId).length,
+      ranCommand: f.runs().every(run => run.check.executable === check.executable),
+    };
+  }
+  assert.deepEqual(outcomes.standard, {
+    phases: Array.from({ length: 4 }, () => ['landed', null]),
+    runs: 2,
+    alone: 0,
+    ranCommand: true,
+  });
+  assert.deepEqual(outcomes.project, { ...outcomes.standard });
+});

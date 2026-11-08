@@ -157,7 +157,9 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 `tests/byoci-parity.test.mjs` runs each landing fast path twice on the same pnpm-style tree
 (`packages/*/src`, a linked folder and a submodule, the shape of the repository behind 05df5aed):
 once with Forge's standard check and once with a project command (`bash ci/check.sh`). Each pair
-must reach the same outcome. Listed differences:
+must reach the same outcome. That includes a shared check that passes late, after main moved: the
+cohort recomposes on the new main (over several source steps for large States) and checks once more
+as one cohort; no member rechecks alone. Listed differences:
 
 | Fast path | Standard check | Project command |
 | --- | --- | --- |
