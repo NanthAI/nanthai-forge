@@ -695,7 +695,9 @@ test('forge-check: an unconnected runner repository names the owner step, with t
   f.ctx.sh = (c, a, o) => {
     if (a[3] === 'configure-runner') {
       const e = Error('exit 1');
-      e.stdout = JSON.stringify({ error: { code: 'GITHUB_REPOSITORY_UNBOUND' } });
+      // As the real CLI does: the error JSON on stderr, nothing on stdout.
+      e.stdout = '';
+      e.stderr = JSON.stringify({ error: { code: 'GITHUB_REPOSITORY_UNBOUND', message: 'x' } });
       throw e;
     }
     return base(c, a, o);

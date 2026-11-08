@@ -938,7 +938,8 @@ export function buildSteps(ctx) {
         try {
           x('configure-runner', { provider: 'github-actions', ...FORGE_RUNNER });
         } catch (error) {
-          const code = jsonLast(error.stdout)?.error?.code;
+          // The CLI prints its error JSON on stderr (stdout on some paths): read both.
+          const code = (jsonLast(error.stderr) ?? jsonLast(error.stdout))?.error?.code;
           if (code !== 'GITHUB_REPOSITORY_UNBOUND') throw error;
           // The runner's repository runs the check through the Forge GitHub App, which the
           // owner authorises in a browser once per project: setup cannot do it for them.
