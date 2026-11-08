@@ -228,3 +228,84 @@ test('recovery advice carries the retained reasons next to the conflicting paths
   );
   assert.deepEqual(conflictReasons([{ path: 'b.txt' }]), []);
 });
+
+// Any-ecosystem gate (Issue 60ff8adb): Python, Java, Rust and JSON follow the JS rule.
+test('a Python merge that breaks indentation is a syntax conflict', async () => {
+  const s = await composeFixture();
+  const original =
+    'def check(value):\n    if value:\n        first = 1\n        second = 2\n    return value\n';
+  // Each side deletes a different line of the `if` body; together they leave it empty.
+  const { result } = await compose(
+    s,
+    'pkg/check.py',
+    original,
+    original.replace('        first = 1\n', ''),
+    original.replace('        second = 2\n', ''),
+  );
+  assert.equal(result.status, 'conflict');
+  assert.match(
+    pages(s, result)[0].reason,
+    /^composed pkg\/check\.py:3:\d+ does not parse although each side does: /,
+  );
+  // The same disjoint edits that keep the body parse stay clean.
+  const clean = await compose(
+    s,
+    'pkg/check.py',
+    original,
+    original.replace('        first = 1\n', '        first = 10\n'),
+    original.replace('        second = 2\n', '        second = 20\n'),
+  );
+  assert.equal(clean.result.status, 'clean');
+});
+
+test('Python statements at an indentation no open block uses are reported', async () => {
+  const ok = Buffer.from('def f():\n    x = 1\n    return x\n');
+  for (const broken of [
+    'def f():\n    x = 1\n  y = 2\n    return x\n',
+    'def f():\n    x = 1\n      y = 2\n    return x\n',
+    'x = 1\n    y = 2\n',
+  ])
+    assert.match(
+      (await syntaxConflictReason('a.py', Buffer.from(broken), ok, ok)) ?? '',
+      /^composed a\.py:\d+:\d+ does not parse/,
+      broken,
+    );
+  // Valid layouts: continuation lines, inline bodies, comments, decorators and match.
+  const valid = [
+    'x = (1,\n        2)\nif x: y = 1; z = 2\nelse:\n    pass\n  # comment\n',
+    '@decorator\ndef f(\n    a,\n):\n    return a\n',
+    'match x:\n    case 1:\n        pass\n    case _:\n        pass\n',
+    'class A:\n\tdef f(self):\n\t\treturn """\n  text\n"""\n',
+  ];
+  for (const text of valid) assert.equal(await firstSyntaxProblem('a.py', Buffer.from(text)), null, text);
+});
+
+test('Java, Rust and JSON merges that no longer parse are conflicts; a side that already fails never blocks', async () => {
+  const cases = [
+    ['A.java', 'class A {\n  void f() {\n  }\n', 'class A {\n  void f() {}\n}\n'],
+    ['src/lib.rs', 'fn a() {\n    let x = 1;\n', 'fn a() {\n    let x = 1;\n}\n'],
+    ['package.json', '{\n  "a": 1\n  "b": 2\n}\n', '{\n  "a": 1\n}\n'],
+  ];
+  for (const [path, broken, ok] of cases) {
+    const merged = Buffer.from(broken),
+      side = Buffer.from(ok);
+    assert.match(
+      (await syntaxConflictReason(path, merged, side, side)) ?? '',
+      /does not parse although each side does/,
+      path,
+    );
+    assert.equal(await syntaxConflictReason(path, merged, merged, side), null, `${path}: left already fails`);
+    assert.equal(
+      await syntaxConflictReason(path, merged, side, merged),
+      null,
+      `${path}: right already fails`,
+    );
+  }
+  // Go, YAML and TOML have no parser in the dependencies and are never blocked.
+  for (const path of ['main.go', 'a.yaml', 'Cargo.toml'])
+    assert.equal(
+      await syntaxConflictReason(path, Buffer.from('{{{'), Buffer.from('x'), Buffer.from('x')),
+      null,
+      path,
+    );
+});

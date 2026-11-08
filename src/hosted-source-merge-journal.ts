@@ -28,7 +28,7 @@ export type SourceCalculation = {
   item: NativeMergeConflict;
   order: NativeInsertionOrder;
   channel: string;
-  /** Compose only: a merged JS/TS file that fails to parse although both sides do is a conflict. */
+  /** Compose only: a merged file the syntax gate covers that fails to parse although both sides do is a conflict. */
   syntax?: true;
 };
 export type SourceCalculationResult = {

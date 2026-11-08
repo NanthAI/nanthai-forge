@@ -1,20 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import type ts from 'typescript';
+import { firstOtherSyntaxProblem, otherSyntaxLanguage } from './native-merge-syntax-other.js';
 
 /** A text merge can combine two edits that each compile alone into a file that
  * does not (two `const root` declarations, an unbalanced brace). The merge is
  * line-based and cannot see that. Before a composition is accepted, every
- * JS/TS file that was text-merged is parsed here, source only: nothing in the
- * project is imported, evaluated or run. Parsing uses the TypeScript parser and
- * binder already in the dependencies, plus a module-scope import/declaration
- * clash check the binder leaves to its type checker.
+ * JS/TS, Python, Java, Rust and JSON file that was text-merged is parsed here,
+ * source only: nothing in the project is imported, evaluated or run. JS/TS uses
+ * the TypeScript parser and binder already in the dependencies, plus a
+ * module-scope import/declaration clash check the binder leaves to its type
+ * checker; the other languages use native-merge-syntax-other.
  *
  * Only a merged file that fails while BOTH side versions parse cleanly is a
  * conflict. A side that already fails is left to the check; it is not blocked.
  * Files over the size bound, other languages, and any parser failure never block. */
 export const SYNTAX_GATE_MAX_BYTES = 256 * 1024;
 const CHECKED = /\.(?:[cm]?[jt]s|[jt]sx)$/;
-export const syntaxCheckedPath = (path: string) => CHECKED.test(path);
+export const syntaxCheckedPath = (path: string) => CHECKED.test(path) || !!otherSyntaxLanguage(path);
 
 export type SyntaxProblem = { line: number; column: number; message: string };
 
@@ -70,8 +72,15 @@ function importClash(api: typeof ts, file: ts.SourceFile): ts.Node | null {
 /** The first syntax or binder-level early error, or null when the file parses.
  * Type errors and unresolved modules are not syntax and are not reported. */
 export async function firstSyntaxProblem(path: string, bytes: Buffer): Promise<SyntaxProblem | null> {
-  const api = await compiler();
   const text = bytes.toString('utf8');
+  if (!CHECKED.test(path)) {
+    const other = await firstOtherSyntaxProblem(path, text);
+    if (!other) return null;
+    const before = text.slice(0, other.offset),
+      line = before.split('\n').length;
+    return { line, column: other.offset - (before.lastIndexOf('\n') + 1) + 1, message: other.message };
+  }
+  const api = await compiler();
   const file = api.createSourceFile(path, text, api.ScriptTarget.Latest, true);
   const host: ts.CompilerHost = {
     getSourceFile: name => (name === path ? file : undefined),

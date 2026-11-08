@@ -1236,21 +1236,26 @@ and blobs actually read by the native reducer. Ancestry comes from verified Stat
 bytes, never client display flags. Native merge still holds manifests and the
 blobs needed for text merging in memory; this is not a constant-memory guarantee.
 
-Composition also parses every JS/TS file (`.js .mjs .cjs .ts .mts .cts .tsx .jsx`)
+Composition also parses every JS/TS (`.js .mjs .cjs .ts .mts .cts .tsx .jsx`),
+Python (`.py .pyi`), Java, Rust and JSON file
 that two inputs both changed and the line merge combined. A line merge cannot see
 that two clean edits declare `root` twice or unbalance a brace, and the composed
-file would only fail later in a check. The parser is the TypeScript parser and
-binder already in the dependencies, source only (nothing is imported, evaluated or
-run), plus an import/declaration redeclaration test the binder leaves to its type
-checker. Type errors and unresolved modules are not syntax and are not reported.
+file would only fail later in a check. JS/TS uses the TypeScript parser and
+binder already in the dependencies, plus an import/declaration redeclaration test
+the binder leaves to its type checker. Python, Java and Rust use the Lezer parsers
+already in the dependencies (the first error node), and Python also requires the
+statements of one block to share one indentation, deeper than the line that opens
+it. JSON uses `JSON.parse`. All of it is source only: nothing is imported,
+evaluated or run. Type errors and unresolved modules are not syntax and are not
+reported.
 If the composed file fails while the left and right versions each parse, that path
 is a normal composition conflict whose retained page entry has the exact side
 variants and a reason `composed FILE:LINE:COL does not parse although each side
 does: MESSAGE`; the receipt's recovery advice shows `reasons`. It stops merging at
 that pair like a text conflict, before any check is dispatched. A file that
-already fails on one side, a file over 256 KiB, any other language and any parser
-fault are never blocked; the check still sees them. The compiler loads on first
-use only. Both the journaled hosted path (inside the byte calculation) and the
+already fails on one side, a file over 256 KiB, any other language (Go, YAML and
+TOML have no parser in the dependencies) and any parser fault are never blocked;
+the check still sees them. Each parser loads on first use for its language only. Both the journaled hosted path (inside the byte calculation) and the
 fixed worker (after the synchronous merge, by rerunning with the file blocked)
 return identical pages. Sync and local composition do not run this check.
 

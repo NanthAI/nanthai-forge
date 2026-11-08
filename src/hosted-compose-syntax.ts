@@ -7,7 +7,7 @@ import type { LazyMergeSource } from './hosted-merge-reader.js';
 type Merged = { path: string; key: string; left: NativeFile; right: NativeFile; blob: string };
 
 /** Fixed-worker composition. Native text merging is synchronous, so each text
- * merge is recorded, the merged JS/TS files are parsed afterwards, and a merge
+ * merge is recorded, the merged files the gate covers are parsed afterwards, and a merge
  * whose result fails to parse although both sides parse is run again with that
  * file reported as a conflict. The journaled hosted path decides the same thing
  * inside its byte calculation (hosted-source-merge-journal), so both paths

@@ -2,15 +2,15 @@
 import { parser } from '@lezer/javascript';
 import { SourceIoError } from './hosted-source-io-error.js';
 import type { SyntaxNode } from '@lezer/common';
+import { importLanguage, statementKey, type ImportLanguage } from './native-import-languages.js';
 
 const importsParser = parser.configure({ dialect: 'ts jsx' });
-const statementKey = (text: string) => text.replace(/\r?\n$/, '');
 
 /** Only top-level declarations are candidates. Matching text inside functions,
  * comments or template literals is never deduplicated. */
-function declarations(text: string) {
+function declarations(language: ImportLanguage, text: string) {
   try {
-    return parseDeclarations(text);
+    return language.declarations(text);
   } catch (error) {
     throw new SourceIoError(error, 'task', null, null, {
       call: 'import-declarations',
@@ -55,8 +55,18 @@ function parseDeclarations(text: string) {
   return result;
 }
 
+const javascript: ImportLanguage = {
+  hint: /\b(?:import|require)\b/,
+  declarations: parseDeclarations,
+  duplicateBreaks: true,
+};
+const languageFor = (path: string) =>
+  /\.(?:[cm]?[jt]s|[jt]sx)$/.test(path) ? javascript : importLanguage(path);
+
 /** Coalesce only a new, byte-identical single-line import added once on each
- * side. Existing duplicates and distinct statements remain source truth. */
+ * side. Existing duplicates and distinct statements remain source truth. JS/TS,
+ * Python, Java, Rust, Go and C# imports are read (native-import-languages); an
+ * ambiguous duplicate is a conflict where a duplicate import fails the build. */
 export function reconcileNativeImports(
   base: string[],
   left: string[],
@@ -64,7 +74,8 @@ export function reconcileNativeImports(
   merged: string[],
   path?: string,
 ): string[] | null {
-  if (!path || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(path)) return merged;
+  const language = path ? languageFor(path) : undefined;
+  if (!language) return merged;
   const counts = (rows: string[]) => {
     const result = new Map<string, number>();
     for (const line of rows) {
@@ -81,17 +92,18 @@ export function reconcileNativeImports(
       ([line, count]) =>
         count > (before.get(line) ?? 0) &&
         (bLines.get(line) ?? 0) > (before.get(line) ?? 0) &&
-        /\b(?:import|require)\b/.test(line),
+        language.hint.test(line),
     )
   )
     return merged;
-  // The diff uses LF-delimited lines; other JS line separators have ambiguous offsets.
+  // The diff uses LF-delimited lines; other line separators have ambiguous
+  // offsets. JS keeps them a conflict; elsewhere the merge stays as it was.
   if ([base, left, right, merged].some(rows => rows.some(line => /\r(?!\n)|[\u2028\u2029]/.test(line))))
-    return null;
-  const original = declarations(base.join('')),
-    a = declarations(left.join('')),
-    b = declarations(right.join('')),
-    combined = declarations(merged.join('')),
+    return language === javascript ? null : merged;
+  const original = declarations(language, base.join('')),
+    a = declarations(language, left.join('')),
+    b = declarations(language, right.join('')),
+    combined = declarations(language, merged.join('')),
     remove = new Set<number>();
   for (const [declaration, x] of a) {
     const y = b.get(declaration),
@@ -114,7 +126,7 @@ export function reconcileNativeImports(
       !y.safe ||
       !output.safe
     )
-      return null;
+      return language.duplicateBreaks ? null : merged;
     remove.add(output.lines[1]!);
   }
   return merged.filter((_, index) => !remove.has(index));
