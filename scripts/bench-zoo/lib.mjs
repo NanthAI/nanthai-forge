@@ -151,6 +151,10 @@ export const errorCode = receipt =>
 
 /** What a land/check receipt says about its check: run ids, plan scope and reason, reuse, and
  * check timing. Tolerant of receipt shape: it reads named fields wherever they sit. */
+/** A land that has not settled: IN PROGRESS (exit 3), or the asynchronous SUBMITTED receipt (exit 0,
+ * `inProgress: true`), both followed with the blocking wait on the original operation id. */
+export const landPending = res => res.code === 3 || findAll(res.json, 'inProgress').some(v => v === true);
+
 export function checkFacts(receipt) {
   const strings = key => [...new Set(findAll(receipt, key).filter(v => typeof v === 'string'))];
   const timing = findAll(receipt, 'timing').filter(t => t && typeof t === 'object');

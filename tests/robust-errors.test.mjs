@@ -24,6 +24,7 @@ import { trustAgents } from './autonomy-fixture.mjs';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
+import { cleanHostedCheckout } from '../dist/hosted-checkout-files.js';
 import {
   DIAGNOSTICS_FILES,
   DIAGNOSTICS_MAX_BYTES,
@@ -237,16 +238,16 @@ test('a worker leaves a half-deleted owner untouched (Linux rm -r timing)', asyn
   assert.equal(existsSync(root), false);
 });
 
-test('diagnostics for an owner never create a missing owner directory', t => {
+test('diagnostics never land in an owner or checkout root', t => {
   const base = temp(t, 'diagnostics-parent');
-  const missing = join(base, 'owner', '.forge', 'logs');
-  assert.equal(writeDiagnostics(missing, 'entry', true), undefined);
-  assert.equal(existsSync(join(base, 'owner')), false);
-  mkdirSync(join(base, 'owner', '.forge'), { recursive: true });
-  assert.equal(writeDiagnostics(missing, 'entry', true), join(missing, 'diagnostics.log'));
-  rmSync(join(base, 'owner'), { recursive: true });
-  assert.equal(recordFailure(new Error('x'), join(base, 'owner')).diagnostics?.startsWith(base), false);
-  assert.equal(existsSync(join(base, 'owner')), false);
+  const forge = join(base, 'owner', '.forge');
+  mkdirSync(forge, { recursive: true });
+  writeFileSync(join(forge, 'hosted-lane.json'), '{}');
+  const failure = recordFailure(new Error('x'), join(base, 'owner'));
+  assert.equal(failure.diagnostics?.startsWith(base), false);
+  assert.deepEqual(readdirSync(forge), ['hosted-lane.json']);
+  // The CLI's own log is not local work: pull's clean check must not refuse on it (friction 6f1880c6).
+  assert.deepEqual(cleanHostedCheckout(join(base, 'owner'), [], 'hosted-lane.json', true), []);
 });
 
 test('queues and locks under a deleted owner fail instead of recreating it', async t => {
@@ -338,10 +339,11 @@ test('system errors map to a code, syscall, path and hint', () => {
 test('unexpected errors stay INTERNAL_ERROR but name a diagnostics log with the stack', t => {
   const root = temp(t, 'diagnostics');
   mkdirSync(join(root, '.forge'));
-  const failure = recordFailure(new Error('boom-secretless'), root);
+  const failure = recordFailure(new Error('boom-secretless'));
   assert.equal(failure.code, 'INTERNAL_ERROR');
   assert.equal(failure.message, 'Unexpected failure; no successful result is claimed.');
-  assert.equal(failure.diagnostics, join(root, '.forge', 'logs', 'diagnostics.log'));
+  assert.equal(failure.diagnostics, join(process.env.HOME, '.forge', 'logs', 'diagnostics.log'));
+  assert.equal(existsSync(join(root, '.forge', 'logs')), false);
   assert.match(readFileSync(failure.diagnostics, 'utf8'), /INTERNAL_ERROR[\s\S]*boom-secretless[\s\S]*at /);
 });
 

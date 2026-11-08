@@ -526,8 +526,7 @@ try {
 } catch (error) {
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
   const known = error instanceof ForgeError;
-  const root = process.argv[2] === 'agent' || process.argv[2] === 'x' ? process.argv[3] : undefined;
-  const failure = known ? describeFailure(error) : recordFailure(error, root ? resolve(root) : undefined);
+  const failure = known ? describeFailure(error) : recordFailure(error);
   if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);

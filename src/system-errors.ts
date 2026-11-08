@@ -66,21 +66,10 @@ export function describeFailure(error: unknown): Failure {
 }
 
 /** Bounded, rotating log: `diagnostics.log` is renamed to `.1`, `.2` and the oldest dropped. */
-export function writeDiagnostics(
-  directory: string,
-  entry: string,
-  /** Owner logs: create only the leaf, never its missing parents (a deleted owner stays deleted). */
-  existingParentOnly = false,
-): string | undefined {
+export function writeDiagnostics(directory: string, entry: string): string | undefined {
   try {
     refuseRealUserState(directory, 'diagnostics');
-    if (existingParentOnly) {
-      try {
-        mkdirSync(directory, { mode: 0o700 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-    } else mkdirSync(directory, { recursive: true, mode: 0o700 });
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
     const file = join(directory, 'diagnostics.log');
     if (existsSync(file) && statSync(file).size >= DIAGNOSTICS_MAX_BYTES) {
       rmSync(`${file}.${DIAGNOSTICS_FILES - 1}`, { force: true });
@@ -95,17 +84,16 @@ export function writeDiagnostics(
   }
 }
 
-/** Log the full stack and command words (never arguments: they can carry payloads). Prefer the owner's `.forge/logs`, then `~/.forge/logs`, then the temp directory. */
-export function recordFailure(error: unknown, root?: string): Failure {
+/** Log the full stack and command words (never arguments: they can carry payloads). The log lives in the per-user `~/.forge/logs`, else the temp directory, never inside an owner or checkout root: a checkout treats unknown files in its `.forge` as local work and refuses to pull over them. */
+export function recordFailure(error: unknown): Failure {
   const failure = describeFailure(error);
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
   const entry = `${new Date().toISOString()} ${failure.code} pid=${process.pid} command=${process.argv
     .slice(2, 4)
     .filter(arg => /^[a-z][a-z-]*$/.test(arg))
     .join(' ')}\n${detail}\n`;
-  const ownerForge = root && existsSync(join(root, '.forge')) ? join(root, '.forge', 'logs') : undefined;
-  for (const directory of [ownerForge, join(homedir(), '.forge', 'logs'), join(tmpdir(), 'forge-logs')]) {
-    const diagnostics = directory && writeDiagnostics(directory, entry, directory === ownerForge);
+  for (const directory of [join(homedir(), '.forge', 'logs'), join(tmpdir(), 'forge-logs')]) {
+    const diagnostics = writeDiagnostics(directory, entry);
     if (diagnostics) return { ...failure, diagnostics };
   }
   return failure;

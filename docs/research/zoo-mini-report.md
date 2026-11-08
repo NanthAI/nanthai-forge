@@ -158,6 +158,26 @@ declare none, so they run in full. First checks stay full by design (the contrac
 only with a contract, a probe or a recheck). So on these five repositories hosted check minutes
 are the same as before the package graph.
 
+## Run 4 (mixed only, scoped first checks, 22:54Z)
+
+One run on the mixed project after the opt-in line in its `.forge-zoo/ci.sh` (`uv sync`, then
+`[ -z "${FORGE_CHECK_PACKAGES_RUN:-}" ] || exec "$FORGE_CHECK_PACKAGES_RUN"`, before the full
+steps) and `configure-check` with `selection: {scope: "changed-paths"}`. N = 1. Preflight was clean
+(main audit passed, no debt, runner set).
+
+- Lanes A and B (`crates/jiter/build.rs`): the package graph selects 3 of 5 testable packages, so the
+  first check stays full (`graph-full`, over 50%), as expected.
+- Lane C (`crates/fuzz/...`): the gate was `graph-first` scoped, but the planner kept it full
+  (`graph-full`): the graph also selects the virtual Python root `jiter-workspace` (`package = false`,
+  dependency groups only), because `fuzz` is not a Cargo workspace member and the fallback widens to
+  every enclosing testable package. Without that root package the same graph selects 1 of 4 and
+  scopes (checked offline on the project's manifests). Effective scope: full on every run.
+- Hosted check minutes were not lower than a full run: C 77 s, A 88 s plus a 75 s full recheck
+  (`global-risk`), all full.
+- The runner followed the asynchronous `land` receipt (`SUBMITTED`, exit 0) as if it had settled, so
+  land timings in this run are submit times and the conflict recovery did not start. Fixed in
+  `scripts/bench-zoo/run.mjs` (`landPending`); not re-run live.
+
 ## Limitations found (filed under Phase 6)
 
 | Issue | What the zoo hit | State |

@@ -8,6 +8,7 @@ import {
   checkFacts,
   cliHead,
   githubEquivalent,
+  landPending,
   pickProbeFiles,
   probeLine,
   resolveKeepBoth,
@@ -164,4 +165,11 @@ test('cliHead reads the installed CLI build id and ignores anything else', () =>
   assert.equal(cliHead('{"release":7}'), null);
   assert.equal(cliHead(JSON.stringify({ head: 'not hex!' })), null);
   assert.equal(cliHead('not json'), null);
+});
+
+test('an asynchronous SUBMITTED land (exit 0, inProgress) is followed by the wait; a settled one is not', () => {
+  assert.equal(landPending({ code: 3, json: null }), true);
+  assert.equal(landPending({ code: 0, json: { result: { phase: 'finish', inProgress: true } } }), true);
+  assert.equal(landPending({ code: 0, json: { result: { status: 'terminal', successful: false } } }), false);
+  assert.equal(landPending({ code: 1, json: null }), false);
 });

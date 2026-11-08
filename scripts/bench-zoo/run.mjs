@@ -30,6 +30,7 @@ import {
   tagLastLine,
   errorCode,
   findAll,
+  landPending,
   githubEquivalent,
   pickProbeFiles,
   probeLine,
@@ -69,8 +70,10 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     if (verb === 'land') body = { operationId: randomUUID(), overlapAnswer: 'accept-order', ...body };
     let res = await io.cli(['agent', root, verb, ...flags, JSON.stringify(body)]);
     io.receipt(repo.id, { verb, flags, body, code: res.code, seconds: res.seconds, receipt: res.json });
-    // IN PROGRESS (exit 3): follow the landing with its blocking wait, bounded (8 x 540 s).
-    for (let i = 0; verb === 'land' && res.code === 3 && i < 8; i++) {
+    // IN PROGRESS (exit 3), or an asynchronous land that printed SUBMITTED and exited 0 with
+    // `inProgress: true`: follow the landing with its blocking wait, bounded (8 x 540 s). Without
+    // this the land timing is the submit time and a conflict never reaches the recovery step.
+    for (let i = 0; verb === 'land' && landPending(res) && i < 8; i++) {
       const runId = flags.includes('--check-only')
         ? findAll(res.json, 'runId').find(v => typeof v === 'string')
         : null;
