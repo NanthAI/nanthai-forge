@@ -77,6 +77,28 @@ temp directory; `FORGE_LOCAL_CHECK_LOG_DIR` can select a persistent private moun
 The historical directory name and seven-day local log behavior are unchanged.
 A container is an execution environment, not an additional Forge sandbox.
 
+## Toolchains and caches in checks
+
+Checks run with a private HOME, so tools that keep state under HOME would start
+cold or fail. The runner sets these per run, for every repository:
+
+- Dedicated, credential-free content caches next to the npm cache
+  (`~/.cache/nanthai-forge/check-*`, shared by all checks on the machine, created on
+  demand, outside the private HOME): `GOMODCACHE`, `GOCACHE`, `CARGO_HOME` (registry
+  and crates only), `GRADLE_USER_HOME`, `PIP_CACHE_DIR`, `UV_CACHE_DIR`,
+  `NUGET_PACKAGES`, and `MAVEN_ARGS=-Dmaven.repo.local=…` (omitted if that path has
+  whitespace). They are separate from your own caches, so your Cargo, Gradle or pip
+  credentials and settings are not read.
+- Installed toolchain homes, passed only when they exist at the default location:
+  `RUSTUP_HOME` (`~/.rustup`), `PYENV_ROOT` (`~/.pyenv`), `MISE_DATA_DIR`
+  (`~/.local/share/mise`), `ASDF_DATA_DIR` (`~/.asdf`). Nothing is created for a
+  missing one. A toolchain at another location is passed by declaring its variable
+  in the check's `env`, which also overrides the default.
+
+These are transient run settings, so the recorded environment and its fingerprint are
+unchanged. To reclaim disk, delete `~/.cache/nanthai-forge/check-*-*`; the next check
+repopulates them.
+
 ## Health, idle and stop
 
 Startup reports `Self-hosted runner registered: ...`; registration failure exits

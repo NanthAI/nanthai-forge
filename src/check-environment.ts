@@ -3,6 +3,7 @@ import { localeEnvNames } from '../scripts/child-env.mjs';
 import { mkdirSync } from 'node:fs';
 import { homedir, release } from 'node:os';
 import { join } from 'node:path';
+import { ecosystemCheckEnvironment } from './check-ecosystem-env.js';
 import { digest } from './hash.js';
 import type { Check, CheckEnvironment } from './work-types.js';
 
@@ -69,6 +70,11 @@ export function checkProcessEnvironment(check: Check, environment: CheckEnvironm
   // Prevent machine-level npmrc credentials from entering a clean check too.
   env.npm_config_userconfig = join(runtime, 'npmrc');
   env.npm_config_globalconfig = join(runtime, 'global-npmrc');
+  // Other ecosystems: dedicated content caches and installed toolchain homes. Transient,
+  // so they are not part of the recorded environment or its fingerprint. Declared
+  // passthrough below still wins.
+  const ecosystem = ecosystemCheckEnvironment(environment.env.npm_config_cache);
+  Object.assign(env, ecosystem.env);
   for (const name of checkPassthrough(check)) {
     // Runtime settings already belong to the recorded run, including when an
     // adopter explicitly lists PATH or a FORGE setting as passthrough.
@@ -84,6 +90,7 @@ export function checkProcessEnvironment(check: Check, environment: CheckEnvironm
       for (const leaf of new Set(Object.values(dirs)))
         mkdirSync(join(runtime, leaf), { recursive: true, mode: 0o700 });
       mkdirSync(environment.env.npm_config_cache!, { recursive: true, mode: 0o700 });
+      for (const directory of ecosystem.directories) mkdirSync(directory, { recursive: true, mode: 0o700 });
     },
   };
 }

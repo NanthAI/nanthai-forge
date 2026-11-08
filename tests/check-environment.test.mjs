@@ -485,3 +485,119 @@ test('runtime passthrough retains batch pins when the adopting process differs',
   assert.equal(actual.env.PATH, '/recorded-runtime');
   assert.equal(actual.env.FORGE_CHECK_FULL, '1');
 });
+
+const cacheNames = [
+  'GOMODCACHE',
+  'GOCACHE',
+  'CARGO_HOME',
+  'GRADLE_USER_HOME',
+  'PIP_CACHE_DIR',
+  'UV_CACHE_DIR',
+  'NUGET_PACKAGES',
+];
+
+test('every ecosystem gets a dedicated content cache outside the private HOME; npm is unchanged', t => {
+  const f = setup(t);
+  const home = join(f.directory, 'real-home');
+  mkdirSync(home);
+  environment(t, { HOME: home, GOMODCACHE: '/ambient/go', CARGO_HOME: join(home, '.cargo') });
+  const recorded = checkEnvironment();
+  const run = join(f.directory, 'run');
+  const clean = checkProcessEnvironment({ env: [], credentials: [] }, recorded, run);
+  const root = dirname(recorded.env.npm_config_cache);
+  assert.equal(clean.env.npm_config_cache, join(home, '.cache', 'nanthai-forge', 'check-npm-cache'));
+  for (const name of cacheNames) {
+    assert.ok(clean.env[name], `${name} is set`);
+    assert.ok(clean.env[name].startsWith(root + '/'), `${name} is under the shared check cache root`);
+    assert.ok(!clean.env[name].startsWith(clean.env.HOME), `${name} is outside the private HOME`);
+  }
+  assert.notEqual(clean.env.GOMODCACHE, '/ambient/go');
+  assert.match(clean.env.MAVEN_ARGS, /^-Dmaven\.repo\.local=.+check-maven-repository$/);
+  assert.ok(!clean.env.MAVEN_ARGS.includes(clean.env.HOME));
+  clean.prepare();
+  for (const name of cacheNames) assert.equal(existsSync(clean.env[name]), true);
+  assert.equal(existsSync(clean.env.MAVEN_ARGS.split('=')[1]), true);
+  // No credentials from the real HOME's cargo/gradle/pip configuration are reachable by path.
+  assert.ok(!Object.values(clean.env).some(value => value === join(home, '.cargo')));
+});
+
+test('toolchain homes pass only when installed at their default location', t => {
+  const f = setup(t);
+  const home = join(f.directory, 'real-home');
+  mkdirSync(join(home, '.rustup'), { recursive: true });
+  mkdirSync(join(home, '.local/share/mise'), { recursive: true });
+  environment(t, { HOME: home, RUSTUP_HOME: '/ambient/rustup' });
+  const clean = checkProcessEnvironment(
+    { env: [], credentials: [] },
+    checkEnvironment(),
+    join(f.directory, 'r'),
+  );
+  assert.equal(clean.env.RUSTUP_HOME, join(home, '.rustup'));
+  assert.equal(clean.env.MISE_DATA_DIR, join(home, '.local/share/mise'));
+  assert.equal(clean.env.PYENV_ROOT, undefined);
+  assert.equal(clean.env.ASDF_DATA_DIR, undefined);
+  clean.prepare();
+  assert.equal(existsSync(join(home, '.pyenv')), false);
+  // A declared passthrough still wins.
+  const declared = checkProcessEnvironment(
+    { env: ['RUSTUP_HOME'], credentials: [] },
+    checkEnvironment(),
+    join(f.directory, 'r2'),
+  );
+  assert.equal(declared.env.RUSTUP_HOME, '/ambient/rustup');
+});
+
+test('a fake rustup-style cargo needs RUSTUP_HOME and succeeds in a clean check', async t => {
+  if (process.platform === 'win32') return t.skip('POSIX shell fixture');
+  const f = setup(t);
+  const home = join(f.directory, 'real-home');
+  mkdirSync(join(home, '.rustup/toolchains/stable'), { recursive: true });
+  const bin = join(f.directory, 'bin');
+  mkdirSync(bin);
+  // Like the rustup proxy: no toolchain unless RUSTUP_HOME (default $HOME/.rustup) has one.
+  writeFileSync(
+    join(bin, 'cargo'),
+    '#!/bin/sh\n[ -d "${RUSTUP_HOME:-$HOME/.rustup}/toolchains/stable" ] || { echo "no default toolchain" >&2; exit 1; }\n',
+    { mode: 0o755 },
+  );
+  environment(t, { HOME: home, PATH: `${bin}:${process.env.PATH}` });
+  const result = await f.run(
+    f.define(`require('node:child_process').execFileSync('cargo',['--version'],{stdio:'inherit'})`),
+  );
+  assert.equal(result.status, 'passed', await f.output(result));
+  // Without the toolchain home the same proxy fails, so the pass above is the fix.
+  rmSync(join(home, '.rustup'), { recursive: true });
+  const missing = await f.run(
+    f.define(`require('node:child_process').execFileSync('cargo',['--version'],{stdio:'ignore'})`, {
+      name: 'No toolchain',
+    }),
+  );
+  assert.equal(missing.status, 'failed');
+});
+
+test('ecosystem variables are transient: the recorded environment and fingerprint are unchanged', t => {
+  const home = mkdtempSync(join(tmpdir(), 'forge-fp-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  mkdirSync(join(home, '.rustup'));
+  environment(t, { HOME: home });
+  const before = checkEnvironment();
+  mkdirSync(join(home, '.pyenv'));
+  process.env.GOMODCACHE = '/ambient/go';
+  process.env.RUSTUP_HOME = '/ambient/rustup';
+  t.after(() => {
+    delete process.env.GOMODCACHE;
+    delete process.env.RUSTUP_HOME;
+  });
+  const after = checkEnvironment();
+  assert.equal(after.fingerprint, before.fingerprint);
+  assert.deepEqual(after.env, before.env);
+  for (const name of [
+    ...cacheNames,
+    'MAVEN_ARGS',
+    'RUSTUP_HOME',
+    'PYENV_ROOT',
+    'MISE_DATA_DIR',
+    'ASDF_DATA_DIR',
+  ])
+    assert.equal(name in after.env, false, `${name} is not recorded`);
+});
