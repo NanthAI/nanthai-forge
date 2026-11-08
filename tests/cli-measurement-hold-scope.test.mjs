@@ -133,6 +133,25 @@ test('CLI updates stay refused for everyone under a scoped hold', async t => {
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
 });
 
+test('planning writes, friction and pull pass any hold on the held build; other writes stay refused', async t => {
+  const f = fixture(t),
+    calls = await release(t, f, b);
+  for (const hold of [`bench cell n1-r1 pid 1\nproject ${BENCH}\n`, 'bench cell n1-r1 pid 1\n']) {
+    writeFileSync(f.hold, hold);
+    const run = (...args) => cliStartup(args, f.old, cliVersionCheck(), { validated: true });
+    const body = JSON.stringify({ url: source.url, projectId: DOGFOOD });
+    for (const action of ['put-planning-item', 'comment-planning-item', 'friction'])
+      assert.equal(await settled(run('agent', f.root, action, body)), true, `${action} under ${hold}`);
+    assert.equal(await settled(run('pull', f.root)), true, 'pull');
+    assert.equal(await settled(run('x', f.root, 'planning', body)), true, 'planning read');
+    for (const action of ['save', 'complete', 'start'])
+      await assert.rejects(run('agent', f.root, action, body), { code: 'CLI_UPDATE_FROZEN' }, action);
+    await assert.rejects(run('agent', f.root, 'put-planning-item-x', body), { code: 'CLI_UPDATE_FROZEN' });
+  }
+  assert.ok(Atomics.load(calls, 0) > 0);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), a, 'no install ran under the hold');
+});
+
 test('a hold without a scope holds every project, the measured one included', async t => {
   const f = fixture(t),
     calls = await release(t, f, a);

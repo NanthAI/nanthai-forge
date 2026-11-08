@@ -107,7 +107,9 @@ background collector, and a no-op update performs no cleanup.
 
 A measurement hold at `DIR/.freeze` prevents changes to current. Landing commands
 explain the wait and watch local hold removal before reading the released version,
-with no timers or server polling. Other stale processes
+with no timers or server polling. Planning writes (`put-planning-item`,
+`comment-planning-item`, `friction`) and `pull` affect no measurement: like reads, they run on
+the held build for every project, with one stderr line. Other stale processes
 under that hold refuse with `CLI_UPDATE_FROZEN`, naming the hold and recovery
 command. The updater never removes a measurement hold itself.
 

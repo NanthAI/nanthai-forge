@@ -65,6 +65,15 @@ export function cliReadOnlyCommand(args: string[]) {
   if (['agent', 'x'].includes(args[0]!)) return READ_ACTIONS.has(args[2]?.toLowerCase() ?? '');
   return ['status', 'wait', 'docs', 'heavy', 'doctor'].includes(args[0]!);
 }
+/** Writes that touch no measured code or landing: planning records and friction, and `pull` of
+ * accepted main into a clone. Under a measurement hold they run on the held build, like reads
+ * (0150d302: planning writes and `pull` were refused CLI_UPDATE_FROZEN). Updates, rollback and
+ * every other write stay held. Not used outside a hold, so unheld behaviour is unchanged. */
+const HOLD_PASS_ACTIONS = new Set(['put-planning-item', 'comment-planning-item', 'friction']);
+export function cliHoldPassCommand(args: string[]) {
+  if (['agent', 'x'].includes(args[0]!)) return HOLD_PASS_ACTIONS.has(args[2]?.toLowerCase() ?? '');
+  return args[0] === 'pull';
+}
 /** A parent CLI that just installed and verified main hands that fact to the child it re-runs the
  * command in, so the child does not repeat the release read. Bound to the parent pid. */
 const VERIFIED = 'FORGE_CLI_VERIFIED_RELEASE';
@@ -243,7 +252,8 @@ export async function cliStartup(
     // A hold naming this command's project measures it: like a read, it runs on the held build.
     const frozen = existsSync(join(installation, '.freeze'));
     const measured = frozen && (await cliMeasuredCommand(installation, commandProject));
-    const reading = cliReadOnlyCommand(args) || measured;
+    const passing = frozen && cliHoldPassCommand(args);
+    const reading = cliReadOnlyCommand(args) || measured || passing;
     if (expectedCurrent !== null && (reading || (!restoreMain && !frozen))) {
       const state = frozen
         ? 'held by a measurement hold'
@@ -258,7 +268,7 @@ export async function cliStartup(
           );
       if (reading || !state.startsWith('last install failed')) {
         process.stderr.write(
-          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${measured ? 'measured write' : reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
+          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${measured ? 'measured write' : passing ? 'planning/pull write' : reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
         );
         return true;
       }
