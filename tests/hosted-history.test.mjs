@@ -20,6 +20,7 @@ import {
   pktLine,
 } from '../dist/git-upload-pack.js';
 import { hostedHistory } from '../dist/hosted-history-cli.js';
+import { hostedHistoryCli } from '../dist/hosted-history-output.js';
 import { cachedPacks, ensureHistoryRepository, indexPack } from '../dist/history-git.js';
 
 const modules = {};
@@ -403,6 +404,16 @@ test('over the limit no pack is recorded; owner raises the limit and retries', a
   const io = transport(s, projectId);
   const read = command => hostedHistory(address(projectId), command, io, f.previousFetch);
   assert.equal((await read({ op: 'status' })).status, 'over-limit');
+  // CLI form: explicit url/projectId addressing is accepted; a bad op is BAD_ARGUMENT.
+  const cli = command => hostedHistoryCli('/unused', command, address(projectId), io);
+  assert.equal(
+    (await cli({ ...address(projectId), action: 'history', op: 'status' })).result.status,
+    'over-limit',
+  );
+  await assert.rejects(
+    cli({ op: 'nope' }),
+    e => e.code === 'BAD_ARGUMENT' && /history takes/.test(e.message),
+  );
   await assert.rejects(read({ op: 'log' }), e => e.code === 'HISTORY_OVER_LIMIT');
   s.caller('stranger');
   await assert.rejects(read({ op: 'limit', bytes: 1 << 30 }), e => e.data?.code === 'PROJECT_UNAVAILABLE');

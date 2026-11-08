@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { invariant } from './errors.js';
+import { z } from 'zod';
+import { ForgeError, invariant } from './errors.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import type { HostedAgentAddress } from './hosted-address.js';
 import { hostedHistory, hostedHistorySchema } from './hosted-history-cli.js';
@@ -13,8 +14,24 @@ export async function hostedHistoryCli(
   transport = new HostedAgentTransport(root, address),
   write: (bytes: Buffer) => void = bytes => void process.stdout.write(bytes),
 ) {
-  const parsed = hostedHistorySchema.parse(command);
-  const result = await hostedHistory(address, command, transport);
+  // url/projectId only address the project (already resolved into `address`).
+  const input = { ...command };
+  delete input.url;
+  delete input.projectId;
+  let parsed;
+  try {
+    parsed = hostedHistorySchema.parse(input);
+  } catch (error) {
+    if (error instanceof z.ZodError)
+      throw new ForgeError(
+        'BAD_ARGUMENT',
+        `history takes {"op":"status"|"log"|"blame"|"show"|"limit"|"retry"} with commit?, path (blame/show), limit?, skip?, start?, end?, force?, bytes (limit). ${error.issues
+          .map(issue => issue.message)
+          .join('; ')}`,
+      );
+    throw error;
+  }
+  const result = await hostedHistory(address, input, transport);
   if (parsed.op !== 'show') return { action: 'history', result };
   const file = result as { bytes: Buffer };
   invariant(
