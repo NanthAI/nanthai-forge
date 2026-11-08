@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   copyFileSync,
@@ -16,16 +15,40 @@ import {
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { readInstallScriptAllowlist } from './install-script-allowlist.js';
+import { linkInstall } from './dependency-link.js';
+import { allowedRebuilds, npmInstaller, scriptedPackages } from './npm-install.js';
+import {
+  detectPackageManager,
+  installConfigFiles,
+  managerWorkspaceFolders,
+  unsharableReason,
+  type PackageManager,
+} from './package-manager.js';
+import {
+  managerInstall,
+  managerRebuilds,
+  managerSkippedScripts,
+  resolveRunner,
+  type ManagerRunner,
+  type SkippedScriptsHint,
+} from './package-manager-install.js';
 import { acquireHeavySlot, heavySlotDirectory } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 
+export { npmInstaller };
 export type DependencyInstaller = (
   directory: string,
   /** `rebuild`: packages the repository allowlists; their scripts run after a script-less install. */
-  options?: { runScripts?: boolean; rebuild?: string[] },
+  options?: {
+    runScripts?: boolean;
+    rebuild?: string[];
+    /** Set for pnpm, yarn and bun: the declared manager and how to run it. */
+    manager?: PackageManager;
+    runner?: ManagerRunner | undefined;
+  },
 ) => Promise<void>;
 /** Install scripts a default (script-less) install skipped, and the command that runs them. */
-export type SkippedScripts = { packages: number; command: string };
+export type SkippedScripts = SkippedScriptsHint;
 export type SharedDependencies =
   | { status: 'off' | 'present' }
   | { status: 'none'; reason?: string }
@@ -53,20 +76,36 @@ export function workspaceDirectories(lock: Buffer): string[] | null {
 }
 /** npm installs are keyed by the exact lockfile, package.json (and every workspace package.json),
  * platform and Node major version, so a Lane with a different lockfile never shares another Lane's install. */
-export function dependencyKey(root: string): string | null {
+export function dependencyKey(root: string, managerVersion?: string): string | null {
+  const detected = detectPackageManager(root);
+  if (!detected || 'reason' in detected) return null;
+  const pm = detected.manager;
   let lock: Buffer, manifest: Buffer;
   try {
-    lock = readFileSync(join(root, 'package-lock.json'));
+    lock = readFileSync(join(root, pm.lockfile));
     manifest = readFileSync(join(root, 'package.json'));
   } catch {
     return null;
   }
   const hash = createHash('sha256').update(lock).update('\0').update(manifest);
-  for (const folder of workspaceDirectories(lock) ?? []) {
+  const other = pm.name !== 'npm';
+  const found = other ? managerWorkspaceFolders(root, pm) : workspaceDirectories(lock);
+  for (const folder of Array.isArray(found) ? found : []) {
     try {
       hash.update(`\0${folder}\0`).update(readFileSync(join(root, folder, 'package.json')));
     } catch {
       /* A missing workspace manifest is reported when the stage is built. */
+    }
+  }
+  if (other) {
+    // The manager and its version decide the layout; settings and patches decide the contents.
+    hash.update(`\0pm:${pm.name}@${managerVersion ?? pm.declared ?? 'unresolved'}`);
+    for (const file of installConfigFiles(root)) {
+      try {
+        hash.update(`\0${file}\0`).update(readFileSync(join(root, file)));
+      } catch {
+        /* A vanished file changes the next key. */
+      }
     }
   }
   const allow = readInstallScriptAllowlist(root);
@@ -91,60 +130,15 @@ const complete = (entry: string, key: string) => {
     return false;
   }
 };
-const npm = (directory: string, args: string[]) =>
-  new Promise<void>((resolve, reject) => {
-    const child = spawn('npm', args, {
-      cwd: directory,
-      // npm output goes to stderr; stdout stays the command's JSON receipt.
-      stdio: ['ignore', 2, 2],
-    });
-    child.once('error', reject);
-    child.once('exit', code => (code === 0 ? resolve() : reject(new Error(`npm ${args[0]} exited ${code}`))));
-  });
-/** Install scripts never run by default (the Actions executor and AGENTS.md do the same).
- * `runScripts` is the explicit opt-in; `rebuild` runs only the scripts a repository allowlists. */
-export const npmInstaller: DependencyInstaller = async (directory, options) => {
-  await npm(directory, [
-    'ci',
-    ...(options?.runScripts ? [] : ['--ignore-scripts']),
-    '--no-audit',
-    '--no-fund',
-    '--loglevel=error',
-  ]);
-  if (!options?.runScripts && options?.rebuild?.length)
-    await npm(directory, ['rebuild', '--no-audit', '--no-fund', '--loglevel=error', ...options.rebuild]);
-};
-/** Lockfile packages (by name) that declare an install script. */
-function scriptedPackages(lock: Buffer): string[] {
-  try {
-    const packages =
-      (JSON.parse(lock.toString('utf8')) as { packages?: Record<string, { hasInstallScript?: boolean }> })
-        .packages ?? {};
-    return Object.entries(packages)
-      .filter(([key, entry]) => key !== '' && entry?.hasInstallScript === true)
-      .map(([key]) =>
-        key.includes('node_modules/') ? key.slice(key.lastIndexOf('node_modules/') + 13) : key,
-      );
-  } catch {
-    return [];
-  }
-}
-/** Allowlisted packages that are in the lockfile and declare a script: what to rebuild. */
-function allowedRebuilds(root: string): string[] {
-  const allow = readInstallScriptAllowlist(root);
-  if (!allow || allow.all) return [];
-  try {
-    const scripted = new Set(scriptedPackages(readFileSync(join(root, 'package-lock.json'))));
-    return allow.packages.filter(name => scripted.has(name));
-  } catch {
-    return [];
-  }
-}
-
 const ROOT_INSTALL_SCRIPTS = ['preinstall', 'install', 'postinstall', 'prepare'];
 /** What an install without scripts skipped: lockfile packages that declare an install script
  * (`hasInstallScript`) plus the root package's own install lifecycle. */
 export function skippedInstallScripts(root: string): SkippedScripts | undefined {
+  const detected = detectPackageManager(root);
+  if (detected && 'manager' in detected && detected.manager.name !== 'npm') {
+    const hint = managerSkippedScripts(root, detected.manager);
+    return hint.packages === 0 ? undefined : hint;
+  }
   let packages = 0;
   try {
     const allowed = new Set(allowedRebuilds(root));
@@ -162,27 +156,30 @@ export function skippedInstallScripts(root: string): SkippedScripts | undefined 
 export function skippedScriptsNotice(result: object): string | null {
   const skipped = (result as { skippedScripts?: SkippedScripts }).skippedScripts;
   return skipped
-    ? `Skipped install scripts of ${skipped.packages} package${skipped.packages === 1 ? '' : 's'}. Run them with: ${skipped.command} (in the Lane), or start with {"installScripts":true}.`
+    ? `Skipped install scripts of ${skipped.packages === null ? 'dependencies' : `${skipped.packages} package${skipped.packages === 1 ? '' : 's'}`}. Run them with: ${skipped.command} (in the Lane), or start with {"installScripts":true}.`
     : null;
 }
-/** Build the install stage: root manifest and lockfile plus every workspace package.json.
- * Returns a reason when the lockfile names a workspace the stage cannot copy faithfully. */
-function writeStage(root: string, stage: string): string | null {
-  const lock = readFileSync(join(root, 'package-lock.json')),
-    folders = workspaceDirectories(lock);
-  if (!folders) return 'package-lock.json names a workspace folder outside the repository.';
+/** Build the install stage: root manifest and lockfile plus every workspace package.json (and, for
+ * pnpm, yarn and bun, the manager settings and patches the install reads).
+ * Returns a reason when the repository names a workspace the stage cannot copy faithfully. */
+function writeStage(root: string, stage: string, pm: PackageManager, folders: string[]): string | null {
+  const copy = (file: string) => {
+    mkdirSync(dirname(join(stage, file)), { recursive: true });
+    copyFileSync(join(root, file), join(stage, file));
+  };
   for (const folder of folders) {
-    const source = join(root, folder, 'package.json');
-    if (!exists(source)) return `Workspace ${folder} has no package.json; npm ci would fail.`;
-    mkdirSync(join(stage, dirname(join(folder, 'package.json'))), { recursive: true });
-    copyFileSync(source, join(stage, folder, 'package.json'));
+    if (!exists(join(root, folder, 'package.json')))
+      return `Workspace ${folder} has no package.json; ${pm.name === 'npm' ? 'npm ci' : `${pm.name} install`} would fail.`;
+    copy(join(folder, 'package.json'));
   }
-  copyFileSync(join(root, 'package.json'), join(stage, 'package.json'));
-  copyFileSync(join(root, 'package-lock.json'), join(stage, 'package-lock.json'));
+  copy('package.json');
+  copy(pm.lockfile);
+  if (pm.name !== 'npm') for (const file of installConfigFiles(root)) copy(file);
   return null;
 }
 
-/** Link ROOT/node_modules to the machine's install for this exact lockfile, installing it once.
+/** Link ROOT/node_modules to the machine's install for this exact lockfile and manager version,
+ * installing it once with the manager the repository declares (npm, pnpm, yarn or bun).
  * Leaves an existing node_modules alone. Concurrent opens of the same lockfile install once. */
 export async function shareDependencies(
   root: string,
@@ -193,15 +190,35 @@ export async function shareDependencies(
     heavy?: boolean;
     /** Opt in to all dependency install scripts (default: skipped, unless the repository allowlists some). */
     runScripts?: boolean;
+    /** How to run a non-npm manager (default: corepack at the declared version, else PATH). */
+    resolve?: (pm: PackageManager) => Promise<ManagerRunner | { reason: string }>;
   } = {},
 ): Promise<SharedDependencies> {
   if (!(options.enabled ?? readClientSettings().shareDependencies)) return { status: 'off' };
-  const key = dependencyKey(root);
+  const detected = detectPackageManager(root);
+  if (!detected) return { status: 'none' };
+  if ('reason' in detected) return { status: 'none', reason: detected.reason };
+  const pm = detected.manager,
+    other = pm.name !== 'npm';
+  if (exists(join(root, 'node_modules')))
+    return dependencyKey(root) ? { status: 'present' } : { status: 'none' };
+  let runner: ManagerRunner | undefined,
+    folders: string[] = [];
+  if (other) {
+    const blocked = unsharableReason(root, pm);
+    if (blocked) return { status: 'none', reason: blocked };
+    const found = managerWorkspaceFolders(root, pm);
+    if (!Array.isArray(found)) return { status: 'none', reason: found.reason };
+    folders = found;
+    const resolved = await (options.resolve ?? resolveRunner)(pm);
+    if ('reason' in resolved) return { status: 'none', reason: resolved.reason };
+    runner = resolved;
+  }
+  const key = dependencyKey(root, runner?.version);
   if (!key) return { status: 'none' };
-  if (exists(join(root, 'node_modules'))) return { status: 'present' };
   const cache = options.cache ?? dependencyCacheDirectory(),
     runScripts = options.runScripts === true || readInstallScriptAllowlist(root)?.all === true,
-    prefix = runScripts ? 'npm-scripts' : 'npm',
+    prefix = `${pm.name}${runScripts ? '-scripts' : ''}`,
     entry = join(cache, `${prefix}-${key}`);
   let installed = false;
   if (!complete(entry, key)) {
@@ -215,8 +232,14 @@ export async function shareDependencies(
           if (name.startsWith(`${prefix}-${key}.tmp-`))
             rmSync(join(cache, name), { recursive: true, force: true });
         rmSync(entry, { recursive: true, force: true });
-        const stage = mkdtempSync(join(cache, `${prefix}-${key}.tmp-`));
-        const unusable = writeStage(root, stage);
+        // npm installs in a temporary stage renamed into place; other managers install in place
+        // (their shims and links record absolute paths) and the completion marker makes it atomic.
+        const stage = other ? entry : mkdtempSync(join(cache, `${prefix}-${key}.tmp-`));
+        mkdirSync(stage, { recursive: true });
+        const stageFolders = other ? folders : workspaceDirectories(readFileSync(join(root, pm.lockfile)));
+        const unusable = stageFolders
+          ? writeStage(root, stage, pm, stageFolders)
+          : 'package-lock.json names a workspace folder outside the repository.';
         if (unusable) {
           rmSync(stage, { recursive: true, force: true });
           return { status: 'none', reason: unusable };
@@ -225,7 +248,13 @@ export async function shareDependencies(
           slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
         const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
         try {
-          await (options.install ?? npmInstaller)(stage, { runScripts, rebuild: allowedRebuilds(root) });
+          const rebuild = other ? managerRebuilds(root, pm) : allowedRebuilds(root);
+          await (
+            options.install ??
+            (other
+              ? (directory, installOptions) => managerInstall(directory, pm, runner!, installOptions)
+              : npmInstaller)
+          )(stage, { runScripts, rebuild, manager: pm, runner });
         } catch (error) {
           rmSync(stage, { recursive: true, force: true });
           return { status: 'failed', key, message: error instanceof Error ? error.message : String(error) };
@@ -233,7 +262,7 @@ export async function shareDependencies(
           if (slot) rmSync(slot, { recursive: true, force: true });
         }
         writeFileSync(join(stage, '.forge-complete'), key);
-        renameSync(stage, entry);
+        if (!other) renameSync(stage, entry);
         installed = true;
       }
     } finally {
@@ -241,8 +270,12 @@ export async function shareDependencies(
     }
   }
   const path = join(entry, 'node_modules');
-  if (!exists(path)) return { status: 'none' };
-  symlinkSync(path, join(root, 'node_modules'), 'dir');
+  if (!exists(path))
+    return other
+      ? { status: 'none', reason: `${pm.name} install produced no node_modules.` }
+      : { status: 'none' };
+  if (other) linkInstall(entry, root, folders);
+  else symlinkSync(path, join(root, 'node_modules'), 'dir');
   const skippedScripts = runScripts ? undefined : skippedInstallScripts(root);
   return {
     status: installed ? 'installed' : 'linked',

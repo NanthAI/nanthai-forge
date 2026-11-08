@@ -21,6 +21,7 @@ import { describePoolOutcome, poolClaimsSchema, runShardPool } from './hosted-ac
 import { secretScanFailureCommand, type SecretScanResult } from './secret-scan.js';
 import { junitDirEnv } from './junit-report.js';
 import { junitDirectory, mergeJunitReports, readJunitReports } from './junit-report-files.js';
+import { writeCheckPackages } from './package-graph-checkout.js';
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
@@ -56,7 +57,8 @@ async function executeActiveActionsJob(
     join(import.meta.dirname, '../scripts/hosted-actions-execute.mjs'),
   ];
   let sourceCache: string | undefined,
-    setupFailed = false;
+    setupFailed = false,
+    packages: ReturnType<typeof writeCheckPackages> = null;
   try {
     sourceCache = await setupActionsJob(run, directory, planPath);
     invariant(
@@ -64,6 +66,15 @@ async function executeActiveActionsJob(
       'EVIDENCE_CHANGED',
       'Actions setup changed the plan.',
     );
+    // A scoped configured command also gets the manifest package graph's affected packages
+    // (FORGE_CHECK_PACKAGES), read from the verified workspace: no repository code, no Forge call.
+    // Advisory input: an unreadable tree leaves the command without it, never fails the check.
+    if (!recipe.standard && !commandOverride)
+      try {
+        packages = writeCheckPackages(directory, recipe.selection?.changes);
+      } catch {
+        packages = null;
+      }
     // A configured command's Intent contract union runs once: in its static job, beside its shards,
     // with the project's own test runner, read from the verified workspace.
     if (!recipe.standard && !commandOverride && shard === 'static') {
@@ -113,6 +124,7 @@ async function executeActiveActionsJob(
         FORGE_ACTIONS_PLAN: planPath,
         FORGE_ACTIONS_SHARD: shard,
         ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
+        ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
         [junitDirEnv]: junit.directory,
       },
     });
@@ -173,6 +185,7 @@ async function executeActiveActionsJob(
     if (added) note(`JUnit: read ${added} test file report${added === 1 ? '' : 's'}.`);
   } finally {
     junit.remove();
+    packages?.remove();
   }
   tail = Buffer.concat([tail, redactor.write(Buffer.alloc(0), true)]).subarray(-directLogBytes);
   const log = tail.length

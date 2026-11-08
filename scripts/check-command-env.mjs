@@ -33,6 +33,10 @@ export function commandCheckInputs(plan, shard) {
     FORGE_CHECK_HEAD: changes.head,
     FORGE_CHECK_SELECTION: join(directory, 'selection.json'),
     ...(changes.mode === 'full' ? { FORGE_CHECK_FULL: '1' } : { FORGE_CHECK_SCOPED: '1' }),
+    // A scoped run's affected packages and their commands, from the manifest package graph.
+    ...(changes.mode === 'scoped' && process.env.FORGE_CHECK_PACKAGES
+      ? { FORGE_CHECK_PACKAGES: process.env.FORGE_CHECK_PACKAGES }
+      : {}),
   });
   const finish = passed => {
     try {

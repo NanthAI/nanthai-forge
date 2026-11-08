@@ -15,7 +15,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 | `activeLanePruneHours` | `168` | A builder waiting on a long landing or review must keep its Lane folder; a 3-hour limit removed idle open Lanes. An open (`active`) Lane's root is removed only after this long with no Forge action and no unsaved edits. | `nforge settings activeLanePruneHours 0` never removes an open Lane's root. |
 | `idleLaneHours` | `1` | Agents forgot open Lanes, which kept counting as active work and kept their disk. `start` lists the open Lanes this agent run started on this machine that have had no Forge action for this long. | `nforge settings idleLaneHours 0` stops the list. |
 | `localHeavySlots` | `auto` | About 20 agents shared a 16 GB laptop. Unlimited parallel builds and test runs swapped the machine; 3 at a time kept it responsive. `auto` allows one heavy command per 5 GB of RAM, capped at half the cores and never below 1 (16 GB with 8 cores gives 3). | A number sets the slots; `0` turns the limit off. |
-| `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran `npm ci`. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile. | `nforge settings shareDependencies false`. |
+| `shareDependencies` | `true` | Each Lane needs `node_modules` (261 MB for Forge itself), and every agent ran the install. When a Lane opens, its `node_modules` becomes a link to one install per exact lockfile and package manager (npm, pnpm, yarn or bun). | `nforge settings shareDependencies false`. |
 | `clientCacheMaxGB` | `2` | `ROOT.forge-client/lanes` collected full ~100 MB copies of other Lanes that nothing removed (262 copies, 5.8 GB in one client directory). They are a cache now: past this size, the least recently used copies are removed. | `nforge settings clientCacheMaxGB 0` removes the size cap. |
 | `clientCacheMaxAgeHours` | `24` | The same cache: a copy nobody used for this long is removed. | `nforge settings clientCacheMaxAgeHours 0` removes the age limit. |
 | `landWait` | `true` | Agents wrapped `land --save` in a polling loop to learn the outcome. `land --save` now waits by default and prints a compact summary. | `--no-wait` on one command, or `nforge settings landWait false`. |
@@ -101,31 +101,53 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 
 ### shareDependencies
 
-- The install key is a hash of `package-lock.json`, `package.json`, the platform and the Node major
-  version. A Lane with a different lockfile never shares another Lane's install.
-- The first Lane with a new lockfile runs `npm ci --ignore-scripts` once, in the shared cache, under a
-  heavy slot (the same as the Actions executor). Concurrent opens of the same lockfile wait for that
-  one install.
+- Forge runs only the package manager the repository declares: the `packageManager` field in
+  `package.json`, then the lockfile (`package-lock.json` npm, `pnpm-lock.yaml`, `yarn.lock`,
+  `bun.lock`/`bun.lockb`). Several lockfiles with no `packageManager`, a declared manager without its
+  lockfile, or a manager that is not installed report `dependencies.status` `none` with a `reason`;
+  Forge never installs a package manager for you. pnpm and Yarn run through corepack at the declared
+  version when corepack is available (it may fetch that version into its own cache); otherwise the
+  manager on `PATH` runs. Bun always runs from `PATH`.
+- The install key is a hash of the lockfile, `package.json`, every workspace `package.json`, the platform,
+  the Node major version and, for pnpm, yarn and bun, the manager and its version plus the install
+  settings (`.npmrc`, `pnpm-workspace.yaml`, `.yarnrc.yml`, `bunfig.toml`, `patches/`). A Lane with a different
+  lockfile or manager version never shares another Lane's install.
+- The first Lane with a new key runs the frozen-lockfile install once, in the shared cache, under a heavy
+  slot (the same as the Actions executor): `npm ci`, `pnpm install --frozen-lockfile`,
+  `yarn install --immutable` (Yarn classic: `--frozen-lockfile`) or `bun install --frozen-lockfile`, with
+  install scripts off. Concurrent opens of the same key wait for that one install. A later Lane links
+  without running anything.
 - A build-script allowlist the repository declares is followed instead of blocking everything: pnpm
   `onlyBuiltDependencies` or `allowBuilds` (`pnpm-workspace.yaml`, or `pnpm.*` in `package.json`), bun
-  `trustedDependencies`, and yarn `dependenciesMeta.<name>.built` run only those packages' scripts
-  (`npm rebuild NAME…` after the script-less install). Yarn `enableScripts: true` in `.yarnrc.yml` runs
-  them all. The allowlist is part of the install key. `--ignore-scripts` for everything applies only
-  when nothing is declared.
+  `trustedDependencies`, and yarn `dependenciesMeta.<name>.built` run only those packages' scripts after
+  the script-less install (`npm rebuild`, `pnpm rebuild`, `bun pm trust` or `yarn rebuild NAME…`). Yarn
+  `enableScripts: true` in `.yarnrc.yml` runs them all. The allowlist is part of the install key.
+  `--ignore-scripts` for everything applies only when nothing is declared.
 - Other dependency install scripts do not run. When a skipped package (or the root `preinstall`, `install`,
   `postinstall` or `prepare`) declared one, `start` prints one line on stderr naming the command:
-  `npm rebuild` in the Lane. To run them at install instead, add `"installScripts":true` to `start`
-  (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`); that install is cached
-  apart from the script-less one. Nothing is printed when no skipped package declared a script.
-- npm workspaces: the lockfile's workspace folders are copied to the install stage with their
-  `package.json`, and their manifests are part of the key. If the lockfile names a workspace that has
-  no `package.json` or lies outside the repository, `dependencies.status` is `none` with a `reason`,
-  and the Lane opens without `node_modules`.
+  `npm rebuild`, `pnpm rebuild`, `bun pm trust --all` or `yarn rebuild` in the Lane. The pnpm lockfile
+  records which packages need a build and gives a count; the yarn and bun lockfiles do not, so their line
+  says only that dependency scripts were skipped. To run them at install instead, add `"installScripts":true`
+  to `start` (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`); that install is
+  cached apart from the script-less one. Nothing is printed when no skipped package declared a script.
+- Workspaces: the workspace folders the lockfile records (npm `packages`, pnpm `importers`, Yarn Berry
+  `@workspace:` entries, `bun.lock` `workspaces`; Yarn classic and `bun.lockb` use the `workspaces`
+  field of `package.json`) are copied to the install stage with their `package.json`, and their manifests
+  are part of the key. If one has no `package.json` or lies outside the repository, `dependencies.status`
+  is `none` with a `reason`, and the Lane opens without `node_modules`.
+- pnpm, yarn and bun keep a `node_modules` in each workspace package. Those folders become real
+  directories of links into the shared install, and a link to a sibling workspace package points at that
+  package's source in your Lane, not at the cached manifest. The root `node_modules` is one link when the
+  repository has no workspaces.
+- Not shared, with a `reason` and no install: a repository whose install runs repository code (a pnpm
+  `.pnpmfile.cjs`, Yarn plugins in `.yarnrc.yml`) and Yarn Berry Plug'n'Play, which has no `node_modules`
+  (set `nodeLinker: node-modules` to share). Forge never runs the `yarnPath` release a repository commits.
 - A failed install leaves no partial cache, and the Lane opens without `node_modules`.
 - An existing `node_modules` is never replaced.
 - The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete.
-- If your Lane changes `package-lock.json`, replace the link before installing:
-  `rm node_modules && npm ci`. Removing the link does not touch the shared install.
+- If your Lane changes the lockfile, replace the link before installing:
+  `rm node_modules && npm ci` (or the same with your manager's frozen install). Removing the link does not
+  touch the shared install; for a workspace repository remove each workspace `node_modules` the same way.
 
 ### landWait
 
@@ -222,7 +244,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   package's folder also selects the enclosing package. Edges between ecosystems (a JS package that
   builds a Rust crate by path) are not seen. The graph is cached per head; the `tests` read reads
   manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
-  It is a selector, never an independence proof.
+  A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`
+  ([check command scope](workflows.md#check-command-scope)). It is a selector, never an
+  independence proof.
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
   smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see

@@ -18,6 +18,9 @@ import {
 import { parseToml } from '../dist/toml-lite.js';
 import { projectTestRunner } from '../dist/project-test-runner.js';
 import { contractManifestPaths, intentContractSelection } from '../dist/intent-contract-selection.js';
+import { writeCheckPackages } from '../dist/package-graph-checkout.js';
+import { commandCheckInputs } from '../scripts/check-command-env.mjs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const laneId = '44444444-4444-4444-8444-444444444444';
 const healthy = {
@@ -396,4 +399,47 @@ test('the tests read selects packages for a Rust repository with no package.json
     ['package.json', JSON.stringify({ scripts: { test: 'node --test tests/*.test.mjs' } })],
   ]);
   assert.deepEqual(contractManifestPaths(forge, ['package.json', 'tests/a.test.mjs', 'x/go.mod']), []);
+});
+
+test('a scoped configured command gets FORGE_CHECK_PACKAGES from the checkout manifests; a full run does not', t => {
+  const repo = lane(t, { ...cargo, 'node_modules/x/Cargo.toml': '[package\n', '.git/Cargo.toml': '[' });
+  const scoped = writeCheckPackages(repo.root, { mode: 'scoped', paths: ['crates/api/src/lib.rs'] });
+  t.after(() => scoped?.remove());
+  assert.ok(scoped && !scoped.path.startsWith(repo.root), 'the file lives outside the checkout');
+  const file = JSON.parse(readFileSync(scoped.path, 'utf8'));
+  assert.equal(file.version, 1);
+  assert.equal(file.scope, 'scoped');
+  assert.deepEqual(file.commands, [
+    { ecosystem: 'cargo', cwd: '', argv: ['cargo', 'test', '-p', 'fx-api', '-p', 'fx-cli'] },
+  ]);
+  assert.deepEqual(
+    file.packages.map(pkg => pkg.name),
+    ['fx-api', 'fx-cli'],
+  );
+  const root = writeCheckPackages(repo.root, { mode: 'scoped', paths: ['Cargo.lock'] });
+  t.after(() => root?.remove());
+  assert.equal(JSON.parse(readFileSync(root.path, 'utf8')).scope, 'full');
+  assert.equal(writeCheckPackages(repo.root, { mode: 'full', paths: ['crates/api/src/lib.rs'] }), null);
+  assert.equal(writeCheckPackages(repo.root, { mode: 'scoped' }), null);
+  scoped.remove();
+  assert.equal(existsSync(scoped.path), false);
+
+  // The executor passes it to the command only on a scoped run.
+  const previous = process.env.FORGE_CHECK_PACKAGES;
+  t.after(() =>
+    previous === undefined
+      ? delete process.env.FORGE_CHECK_PACKAGES
+      : (process.env.FORGE_CHECK_PACKAGES = previous),
+  );
+  process.env.FORGE_CHECK_PACKAGES = '/tmp/packages.json';
+  const changes = mode => ({
+    groups: [],
+    selection: { changes: { version: 1, mode, base: 'a', head: 'b', paths: [] } },
+  });
+  const asked = commandCheckInputs(changes('scoped'), 'static');
+  asked.finish(false);
+  assert.equal(asked.env.FORGE_CHECK_PACKAGES, '/tmp/packages.json');
+  const full = commandCheckInputs(changes('full'), 'static');
+  full.finish(false);
+  assert.equal(full.env.FORGE_CHECK_PACKAGES, undefined);
 });

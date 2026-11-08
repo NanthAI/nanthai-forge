@@ -314,6 +314,13 @@ its check declares more. Either way it receives the changed paths:
   the list is over 128 KiB; `mode` is then `full`.
 - `mode: "full"` (also `FORGE_CHECK_FULL=1`) means run everything. `mode: "scoped"`
   (`FORGE_CHECK_SCOPED=1`) means the command may run only what the change affects.
+- `FORGE_CHECK_PACKAGES` (hosted Actions, scoped runs only): path of a JSON file outside the checkout
+  with the manifest package graph's view of the change, read from the Candidate's manifests without
+  running its code: `{"version":1,"scope":"scoped"|"none"|"full"|"docs","reason":…,"packages":[{ecosystem,dir,name,why}],"commands":[{ecosystem,cwd,argv}]}`
+  (the changed packages and every package that depends on them, with each ecosystem's own test
+  command; see [package graph](parallel-work-defaults.md#preflight)). `scope: "full"` gives the reason
+  the graph could not place the change; the command then runs everything. A command may run
+  `commands` as given or use `packages` with its own tool.
 
 Declare the contract with `selection` in the check definition; it changes the definition digest:
 
