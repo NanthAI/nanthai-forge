@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
-import { landingStateForReader } from './projectHostedLandingOrder';
+import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
@@ -60,12 +60,14 @@ export const status = query({
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
       const queue = await readQueueStatus(ctx, state);
       const stallAlert = await latestStallAlert(ctx, input, queueAwareLandingState(state, queue));
+      const orderWait = landingOrderWaitForReader(row, state);
       return canonicalPayload({
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
         queuePosition: queue?.position ?? null,
         queue,
+        ...(orderWait ? { orderWait } : {}),
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         pendingAttempt: finishPendingForReader(value.pending),
         selection: { inputs: value.source.inputs, dependencies: value.source.dependencies },

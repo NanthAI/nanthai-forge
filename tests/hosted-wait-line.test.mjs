@@ -105,3 +105,14 @@ test('run snapshots and retry notes keep scalars only', () => {
   assert.deepEqual(line, { type: 'run', id: 'run', status: 'running' });
   assert.equal(waitEventLine({ type: 'observation-retry' }).line.type, 'observation-retry');
 });
+
+// Incident 19328518: a passed entry parked behind an older submission names it on its line.
+test('wait line: a parked READY entry names the older submission it waits for', () => {
+  const older = randomUUID();
+  const parked = event({ queue: null, orderWait: { submissionId: older, message: 'Check passed; waiting' } });
+  parked.submission.phase = 'ready';
+  const { line } = waitEventLine(parked);
+  assert.equal(line.waitingFor, older);
+  assert.equal(line.phase, 'ready');
+  assert.equal('waitingFor' in waitEventLine(event()).line, false, 'no wait, no field');
+});

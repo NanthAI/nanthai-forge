@@ -119,6 +119,21 @@ export async function olderLandingAhead(
   }
   return null;
 }
+/** A passed entry parked behind an older live submission (claimReadyLanding sets the
+ * server-only `orderWait`). Readers name it so the wait has a visible reason (19328518:
+ * a READY entry waited 7.6 min with no reason in status). It uses the row the reader
+ * already loaded: no extra document read, call or subscription dependency. */
+export function landingOrderWaitForReader(
+  row: Pick<LandingRow, 'orderWait' | 'phase'> | null | undefined,
+  state: HostedLandingState,
+) {
+  if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
+  if (state.observation.state !== 'pending') return null;
+  return {
+    submissionId: row.orderWait,
+    message: `Check passed; waiting for older submission ${row.orderWait} to take main first (submission order). When it lands or leaves the order this landing continues; observe {"submissionId":"${row.orderWait}"} follows it.`,
+  };
+}
 /** A passed proof ages with every main move, so a READY entry accepts before any
  * new check starts, urgent ones included: urgent leads the train, it never moves
  * main under a passed proof. One indexed window; acceptance is a single slot, so

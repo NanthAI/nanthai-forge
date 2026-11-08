@@ -577,6 +577,26 @@ test('speculative conflict advice is delivered by wait without a terminal outcom
   );
 });
 
+// Incident 19328518: a passed entry parked behind an older submission had no visible reason.
+test('wait carries the order wait of a parked READY entry and drops it once released', async () => {
+  const s = await fixture(),
+    a = await s.start();
+  const older = randomUUID();
+  const ready = { observation: { state: 'pending', pendingReason: null, cause: null } };
+  await s.update(a.state.id, 'ready', ready);
+  const row = () =>
+    [...s.f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === a.state.id);
+  await s.f.run('parkBehindOlder', ctx => ctx.db.patch(row()._id, { orderWait: older }), {});
+  const selection = { operationIds: [a.request.operationId], timeoutSeconds: 0 };
+  const pending = await s.wait(selection);
+  assert.equal(pending.result.status, 'timeout');
+  assert.equal(pending.result.submissions[0].orderWait?.submissionId, older);
+  assert.match(pending.result.submissions[0].orderWait.message, /waiting for older submission/);
+  await s.f.run('releaseWaiter', ctx => ctx.db.patch(row()._id, { orderWait: undefined }), {});
+  const released = await s.wait({ ...selection, cursor: pending.result.cursor });
+  assert.equal(released.result.submissions[0].orderWait, undefined, 'a released entry shows no wait');
+});
+
 test('a retained preparing submission resnapshots the same older version on reconnect', async () => {
   const s = await fixture(),
     a = await s.start();

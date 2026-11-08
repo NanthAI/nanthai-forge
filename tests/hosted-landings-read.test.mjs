@@ -86,7 +86,7 @@ function fixture() {
     const raw = await api.read._handler(ctx, args);
     return { raw, ...JSON.parse(raw) };
   };
-  /** One landed submission: attempts[i] = [number, mainReceipt, runId|null]. */
+  /** One landed submission: attempts[i] = [number, mainReceipt, runId|null, {candidate, progress}?]. */
   const landing = (
     n,
     {
@@ -128,16 +128,18 @@ function fixture() {
       },
       minute(at - 30),
     );
-    for (const [number, receipt, runId] of attempts)
+    for (const [number, receipt, runId, extra = {}] of attempts)
       put('projectHostedLandingAttempts', {
         projectId: 'project',
         submissionId: sub,
         attemptId: `${sub}-a${number}`,
         number,
+        ...(extra.progress ? { progress: JSON.stringify(extra.progress) } : {}),
         value: JSON.stringify({
           number,
           main: { head: `h-${receipt}`, receiptId: receipt },
           check: runId ? { runId } : null,
+          ...(extra.candidate ? { candidate: { id: extra.candidate } } : {}),
         }),
       });
     put('projectHostedFinishes', {
@@ -295,4 +297,82 @@ test('landings: refuses a bad window, a foreign cursor and an over-limit page wi
   await assert.rejects(f.read({ cursor: String(minute(900)) }), /does not belong to this window/);
   const capped = await f.read({ limit: 1000 });
   assert(capped.landings.length <= 30);
+});
+
+/** Incident 19328518 counter-example (2026-11-07, receipt 68cc9092, operation 23938f96): the
+ * stored attempt rows of that landing and of #752 ahead of it, with synthetic ids. The revert
+ * composed at 22:58:27 and its check passed at 23:06:32, then it waited behind #752 until
+ * 23:14:09. Its timing.composeStartedAt (23:14:09, latest attempt) read as a 15 min 38 s compose
+ * delay and recomposeCount read 0; #752's check bindings read as 2 recomposes, not 1. */
+test('replay 19328518: the receipt read shows the first compose, the hold after the passed check and true recomposes', async () => {
+  const f = fixture();
+  const t = time => `2026-11-07T${time}Z`;
+  const moved =
+    'Main moved from abab9e70 to 8dc13627; #749 (761d5ad8), #751 (73345a5a), #752 (2e7c1f92) landed, submitted before this one; a named child recomposes the original selection.';
+  f.landing(1, {
+    at: 500,
+    admitted: false,
+    attempts: [
+      [
+        0,
+        'R0',
+        'run-first',
+        {
+          candidate: 'cand-a',
+          progress: {
+            timing: {
+              composeStartedAt: t('22:58:27.127'),
+              ciEndedAt: t('23:06:32.202'),
+              settledAt: t('23:14:09.392'),
+            },
+            error: { code: 'CHANNEL_CHANGED', message: moved },
+          },
+        },
+      ],
+      [
+        1,
+        'R1',
+        'run-recheck',
+        {
+          candidate: 'cand-b',
+          progress: {
+            timing: {
+              composeStartedAt: t('23:14:09.392'),
+              ciEndedAt: t('23:21:24.433'),
+              settledAt: t('23:21:27.003'),
+            },
+            error: null,
+          },
+        },
+      ],
+    ],
+  });
+  f.landing(2, {
+    at: 490,
+    admitted: false,
+    attempts: [
+      [0, 'R0', null, { candidate: 'cand-c' }],
+      [1, 'R0', 'run-c', { candidate: 'cand-c' }],
+      [2, 'R1', null, { candidate: 'cand-d' }],
+      [3, 'R1', 'run-d', { candidate: 'cand-d' }],
+    ],
+  });
+  const rows = (await f.read()).landings;
+  const revert = rows.find(row => row.receiptId === id('receipt', 1));
+  assert.equal(revert.firstComposeStartedAt, t('22:58:27.127'));
+  assert.equal(revert.recomposeCount, 1);
+  assert.deepEqual(revert.heldAfterCheck, [
+    {
+      attempt: 0,
+      from: t('23:06:32.202'),
+      to: t('23:14:09.392'),
+      seconds: 457,
+      outcome: 'CHANNEL_CHANGED',
+      reason: moved,
+    },
+  ]);
+  const older = rows.find(row => row.receiptId === id('receipt', 2));
+  assert.equal(older.recomposeCount, 1, 'check bindings are not recomposes');
+  assert.deepEqual(older.heldAfterCheck, []);
+  assert.equal(older.firstComposeStartedAt, null, 'no stored compose start is never invented');
 });

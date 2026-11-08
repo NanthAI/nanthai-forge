@@ -6,6 +6,7 @@ import {
   nextLandingRow,
   landingPriorityState,
   landingStateForReader,
+  landingOrderWaitForReader,
 } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
@@ -119,10 +120,12 @@ export const status = query({
         attemptId: state.attemptId,
       });
       const queue = await readQueueStatus(ctx, state);
+      const orderWait = landingOrderWaitForReader(row, state);
       return canonicalPayload({
         request: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
         queuePosition: queue?.position ?? null,
         queue,
+        ...(orderWait ? { orderWait } : {}),
         attempt,
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         ...(wouldConflict ? { wouldConflict } : {}),

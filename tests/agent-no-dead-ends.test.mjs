@@ -40,6 +40,12 @@ test('a passed check queued to land says so, stays unfinished and names its wait
     'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
   ]);
   assert.equal(landTerminal(queued), false, 'ready is terminal only when nothing is pending');
+  // Incident 19328518: a passed entry parked behind an older submission names it.
+  const older = randomUUID();
+  assert.deepEqual(
+    landSummary({ ...queued, result: { ...queued.result, orderWait: { submissionId: older } } }),
+    [`CHECK PASSED; not landed yet: waiting for older submission ${older} to take main first`],
+  );
   assert.match(landWaitCommand('/repo', queued), new RegExp(`wait .*${operationId}.*acceptance`));
   for (const [reason, label] of [
     ['queued', 'QUEUED'],

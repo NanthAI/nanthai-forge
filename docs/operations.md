@@ -210,7 +210,13 @@ moved), `mainMoved` (they differ), the receipt's `firstCheck` and `check.skipped
 `checkSkipped`, null when every selected part ran), `landedHead`,
 `checkRunIds` (the admission Lane run, each attempt's run, the accepting run; at most 8),
 `followingAudit` (`{runId,verdict,sequence}` of the first stored main-audit event at or after
-the landing: `passed`, `failed` or `stalled`; null when none is stored yet), `recomposeCount` and `conflictPaths`. Text-conflict paths of an earlier generation live only
+the landing: `passed`, `failed` or `stalled`; null when none is stored yet),
+`recomposeCount` (distinct Candidates composed, minus one; a check binding is not a
+recompose), `firstComposeStartedAt` (the first attempt's compose start; the submission's own
+`timing.composeStartedAt` is the latest attempt's), `heldAfterCheck` (each attempt whose passed
+check waited at least a minute before it settled: `attempt`, `from`, `to`, `seconds`,
+`outcome` and the stored `reason`, such as an older submission taking main first) and
+`conflictPaths`. Text-conflict paths of an earlier generation live only
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
 

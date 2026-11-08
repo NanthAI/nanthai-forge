@@ -21,6 +21,8 @@ export const finishReadFields = {
     'priorityVersion',
     'wouldConflict',
     'runId',
+    // A passed entry parked behind an older submission: the observe page names it (19328518).
+    'orderWait',
   ],
   projectHostedFinishes: ['projectId', 'submissionId', 'value', 'composeOperationId', 'wake'],
   projectHostedLandingQueues: ['projectId', 'channel', 'status', 'lease', 'wake'],

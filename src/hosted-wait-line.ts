@@ -30,6 +30,8 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       total: queue.total,
       // Advice and recovery are what an agent acts on: kept whole when present, absent otherwise.
       wouldConflict: e.wouldConflict ?? undefined,
+      // A passed entry parked behind an older submission names it (19328518).
+      waitingFor: obj(e.orderWait).submissionId ?? undefined,
       recovery: e.recovery ?? e.conflict ?? undefined,
       error: error.code,
       terminal: e.terminal,

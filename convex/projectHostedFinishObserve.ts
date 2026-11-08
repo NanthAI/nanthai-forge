@@ -2,7 +2,7 @@
 import { finishReadReader } from './projectFinishReadReader';
 import { readWouldConflict } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
-import { landingStateForReader } from './projectHostedLandingOrder';
+import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { desiredLanding } from './projectHostedLandingDesiredWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -140,6 +140,7 @@ async function observePage(
     stage = 'queue';
     const queue = await readQueueStatus(finishReadReader(rawCtx, 'owner'), state);
     const wouldConflict = state.phase === 'queued' ? readWouldConflict(selectedRow) : undefined;
+    const orderWait = landingOrderWaitForReader(selectedRow, state);
     stage = 'finish';
     const finish = await finishRow(ctx, {
       projectId: input.projectId,
@@ -191,6 +192,7 @@ async function observePage(
       queuePosition: queue?.position ?? null,
       queue,
       ...(wouldConflict ? { wouldConflict } : {}),
+      ...(orderWait ? { orderWait } : {}),
       queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
       pendingAttempt,
       events,

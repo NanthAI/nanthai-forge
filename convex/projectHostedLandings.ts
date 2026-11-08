@@ -13,12 +13,45 @@ import { invariant } from '../src/errors';
 import {
   LANDINGS_ATTEMPTS,
   LANDINGS_DEFAULT_LIMIT,
+  LANDINGS_HELD_MS,
   LANDINGS_MAX_LIMIT,
   LANDINGS_OUTPUT_BYTES,
   LANDINGS_READ_BYTES,
+  LANDINGS_REASON_CHARS,
   LANDINGS_RUN_IDS,
 } from '../src/hosted-landings-view';
 
+type AttemptProgress = {
+  timing?: { composeStartedAt?: string; ciEndedAt?: string; settledAt?: string };
+  error?: { code: string; message: string } | null;
+};
+/** Recomposes in the read chain, plus at most one per attempt past it (the count stays exact when not partial). */
+function recomposes(attempts: HostedLandingAttempt[], lastNumber: number | undefined) {
+  if (!attempts.length || lastNumber === undefined) return null;
+  const candidates = new Set(attempts.map(attempt => attempt.candidate?.id ?? `n${attempt.number}`)).size;
+  return Math.max(0, candidates - 1) + Math.max(0, lastNumber - attempts.at(-1)!.number);
+}
+/** A passed check whose attempt waited before it settled: an older submission taking main first,
+ * a lease or a main move. Stored reason, never inferred. Read from attempt rows already loaded. */
+function heldAfterCheck(attempts: HostedLandingAttempt[], progress: Array<AttemptProgress | null>) {
+  const held = [];
+  for (const [index, attempt] of attempts.entries()) {
+    const timing = progress[index]?.timing;
+    const from = Date.parse(timing?.ciEndedAt ?? ''),
+      to = Date.parse(timing?.settledAt ?? '');
+    if (!(to - from >= LANDINGS_HELD_MS)) continue;
+    const error = progress[index]?.error;
+    held.push({
+      attempt: attempt.number,
+      from: timing!.ciEndedAt!,
+      to: timing!.settledAt!,
+      seconds: Math.round((to - from) / 1000),
+      outcome: error?.code ?? 'landed',
+      reason: error?.message.slice(0, LANDINGS_REASON_CHARS) ?? null,
+    });
+  }
+  return held;
+}
 const AUDIT_VERDICT: Record<string, string> = { green: 'passed', red: 'failed', stalled: 'stalled' };
 const iso = (ms: number | undefined) => (ms === undefined ? null : new Date(ms).toISOString());
 /** One landing's evidence from rows already stored. Five indexed reads beyond the receipt itself. */
@@ -40,9 +73,10 @@ async function evidence(
     .order('asc')
     .take(LANDINGS_ATTEMPTS);
   const attempts = chain.map(row => {
-    bytes += row.value.length;
+    bytes += row.value.length + (row.progress?.length ?? 0);
     return JSON.parse(row.value) as HostedLandingAttempt;
   });
+  const progress = chain.map(row => (row.progress ? (JSON.parse(row.progress) as AttemptProgress) : null));
   // A longer chain than we read: take the true last number from one more indexed read.
   const last =
     chain.length === LANDINGS_ATTEMPTS
@@ -113,7 +147,11 @@ async function evidence(
       followingAudit: audit
         ? { runId: audit.runId, verdict: AUDIT_VERDICT[audit.kind] ?? audit.kind, sequence: audit.sequence }
         : null,
-      recomposeCount: last ? Math.max(0, last.number - 1) : null,
+      // A check binding replaces an attempt without composing again: count distinct Candidates.
+      recomposeCount: recomposes(attempts, last?.number),
+      // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
+      firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
+      heldAfterCheck: heldAfterCheck(attempts, progress),
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
     },

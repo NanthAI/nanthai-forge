@@ -31,6 +31,8 @@ type Result = {
     conflict?: { command?: string; instruction?: string; state?: string; laneId?: string; workIn?: string };
   };
   conflict?: { command?: string; instruction?: string; workIn?: string };
+  /** A passed entry parked behind an older submission that takes main first. */
+  orderWait?: { submissionId?: string };
 };
 export const resultOf = (response: HostedAgentResponse) => (response.result ?? {}) as Result;
 export function landPhase(response: HostedAgentResponse): string | undefined {
@@ -57,7 +59,11 @@ export function landSummary(response: HostedAgentResponse): string[] {
     ];
   // A passed check is not a landing, and a queued landing is not a failure: say which.
   if (phase === 'ready' && submission?.observation?.state !== 'terminal-failed')
-    return ['CHECK PASSED; queued to land, not landed yet (waiting for acceptance)'];
+    return [
+      result.orderWait?.submissionId
+        ? `CHECK PASSED; not landed yet: waiting for older submission ${result.orderWait.submissionId} to take main first`
+        : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
+    ];
   if (result.phase === 'check' && result.run?.status === 'passed')
     return ['CHECK PASSED (check only; this command does not land)'];
   // The conflict's resolution Lane already completed: its landing carried this work.
