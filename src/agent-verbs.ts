@@ -83,6 +83,7 @@ export const namedReads = [
   'review',
   'diff',
   'show',
+  'history',
   'brief',
   'peers',
   'queue',

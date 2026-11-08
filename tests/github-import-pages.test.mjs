@@ -97,9 +97,14 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     await s.worker(id);
     if (job.totalKnown && job.completed === job.total)
       assert.deepEqual(
-        s.scheduled.slice(beforeScheduled).map(task => getFunctionName(task.fn)),
-        s.scheduled.length > beforeScheduled ? ['projectGithubImportCatalog:purge'] : [],
-        'publication schedules only the bounded progress-row purge',
+        s.scheduled
+          .slice(beforeScheduled)
+          .map(task => getFunctionName(task.fn))
+          .sort(),
+        s.scheduled.length > beforeScheduled
+          ? ['projectGithubImportCatalog:purge', 'projectHistoryImport:run']
+          : [],
+        'publication schedules only the bounded progress-row purge and one history import',
       );
     assert.notEqual(
       s.tables.projectGithubImports.get(id).phase,

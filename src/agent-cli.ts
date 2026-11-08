@@ -103,7 +103,7 @@ without it (preflight:require). ack answers every pending overlap notice; land -
 a blocking notice is open (overlapGate:block). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
 
 Reads: tests, status, landing, observe, wait, log, link,
-       records, candidate, provenance, candidates, review, diff, show, brief, peers,
+       records, candidate, provenance, candidates, review, diff, show, history, brief, peers,
        handoff-read, making-of, metrics, improve, decisions, friction-list, policy, check-settings, capabilities,
        planning (hosted backlog; writes: put-planning-item, comment-planning-item; start planningItemId).
 Operator (nforge x ROOT ACTION): accept, cancel, revert, undo-revert, undo-sync, abandon,
@@ -353,6 +353,9 @@ function actionHelp(action: string): string {
   if (action === 'show')
     result +=
       'Select exactly one state (full digest), laneId (saved head) or channel ("main": its current head), plus a relative file path. Hosted checkouts default to the opened Lane and accept channel:"main"; at:"main" is the same, and at:"base" reads the Lane\'s pinned base (the main it started from, not later landings) so a file can be compared without the project clone. Writes exact bytes to stdout without JSON or an added newline. Binary/invalid UTF-8 or files over 1 MiB require force:true. MCP returns source pins and content with encoding utf8 or base64.\n';
+  if (action === 'history')
+    result +=
+      'Hosted projects imported from GitHub keep their Git history. op:"log" {commit?,path?,limit?,skip?}, op:"blame" {path,commit?,start?,end?}, op:"show" {path,commit?,force?} (exact bytes on stdout), op:"status". commit is a hex id; default is the newest stored main commit (main\'s latest GitHub-mirrored commit, else the import commit). One server call per read checks access; packs download once per machine into the history cache and git reads them. Owner: op:"limit" {bytes} sets the per-project history limit (default 1 GiB); op:"retry" re-runs a failed or over-limit history import.\n';
   if (action === 'link')
     result +=
       'Select exactly one laneId, viewId or save (full source digest). path is an optional relative source file; line requires path. Links target the hosted app; an unpublished head may be unavailable until source is pushed.\n';
@@ -637,6 +640,19 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   }
   const hosted = hostedAgentAddress(root, selected);
   action = canonical(lowerVerb(form!, Boolean(hosted)));
+  if (action === 'history') {
+    invariant(
+      hosted,
+      'HISTORY_HOSTED_ONLY',
+      "history reads a hosted project's imported Git history; run it in a hosted checkout or Lane.",
+    );
+    if (
+      options.beforeDispatch &&
+      !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))
+    )
+      return;
+    return await (await import('./hosted-history-output.js')).hostedHistoryCli(root, selected, hosted);
+  }
   invariant(
     selected.action === undefined ||
       (typeof selected.action === 'string' && canonical(selected.action) === action),

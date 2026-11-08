@@ -100,6 +100,8 @@ export const projectPurgeTables = {
   projectObjectCatalog: 'by_project',
   projectGithubImportInventory: 'by_project',
   projectGithubImports: 'by_project',
+  projectHistory: 'by_project',
+  projectHistoryPacks: 'by_project',
   projectUploadCleanup: 'by_project',
   projectReaders: 'by_project_and_reader',
   projectReaderOperations: 'by_project_and_operation',

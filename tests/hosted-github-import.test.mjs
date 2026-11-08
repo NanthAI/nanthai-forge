@@ -143,6 +143,12 @@ test('retry-safe personal mirror publishes complete source/Work atomically and d
   );
   assert.deepEqual(await storedBytes(s, row), s.bytes);
   assert.equal(backup.preview.channels[0].name, 'main');
+  // Git history follows publication in its own scheduled run (Issue e103bacf).
+  const history = [...s.tables.projectHistory.values()].find(row => row.projectId === job.projectId);
+  assert.equal(history?.importCommit, job.commit);
+  assert.equal(history.importState, backup.preview.head);
+  assert.equal(history.status, 'pending');
+  assert.ok(s.scheduled.some(task => getFunctionName(task.fn) === 'projectHistoryImport:run'));
   const count = s.tables.projectBackups.size;
   await s.advance(id);
   assert.equal(s.tables.projectBackups.size, count);

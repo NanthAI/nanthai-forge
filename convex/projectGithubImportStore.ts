@@ -16,6 +16,7 @@ import { initialImportProgress, initialArchiveCursor } from '../src/github-impor
 import { completion, recipePin, completeObjects } from './projectGithubImportBatch';
 import { retain, inventoryEntry } from './projectGithubImportInventory';
 import { catalogEntry, recordWindow } from './projectGithubImportCatalog';
+import { beginHistory } from './projectHistoryStore';
 
 const key = { actor: v.string(), operationId: v.string(), request: v.string() };
 async function find(ctx: QueryCtx, input: { actor: string; operationId: string; request: string }) {
@@ -333,6 +334,8 @@ export const publish = internalMutation({
       work: { backupId, generationId, operationId: row.operationId, initialRevision: 0, revision: 0 },
     });
     await ctx.db.patch(row._id, { phase: 'ready', error: undefined });
+    // Git history (log, blame, old versions) follows in its own bounded run.
+    await beginHistory(ctx, row, bootstrap.head);
     return true;
   },
 });

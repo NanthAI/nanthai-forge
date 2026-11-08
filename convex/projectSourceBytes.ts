@@ -20,6 +20,7 @@ export async function storeSourceBytes(
   bytes: Uint8Array,
   pin: { sha256: string; size: number },
   reuse = false,
+  created?: (wrote: boolean) => void,
 ): Promise<{ storageId: Id<'_storage'> } | { r2Key: string }> {
   invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Source output size changed.');
   invariant(projectId, 'SOURCE_JOB_INVALID', 'R2 source needs its exact project binding.');
@@ -63,5 +64,7 @@ export async function storeSourceBytes(
     'R2_VERIFY_FAILED',
     'Exact source size and checksum were not confirmed.',
   );
+  // true: this PUT wrote the object; false (412): it already existed and may belong to another writer.
+  created?.(response.status !== 412);
   return { r2Key: key };
 }

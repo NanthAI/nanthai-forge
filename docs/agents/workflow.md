@@ -173,6 +173,23 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   other landings changed) and `at:"main"` is `channel:"main"`. `expected` binds Lane versions. Missing source fails
   without substitution. All source reads exclude drafts and recheck access on
   cache hits.
+- `history {op,commit?,path?}` reads the Git history of a project imported from
+  GitHub, so log, blame and old versions match GitHub. `op:"log"`
+  (`limit` ≤1000, default 50, `skip`, optional `path`), `op:"blame"` (`path`,
+  optional `start`/`end` lines; ranges of final lines per commit with author and
+  summary), `op:"show"` (exact bytes at `commit` on stdout; binary or over 1 MiB
+  needs `force:true`) and `op:"status"`. `commit` is a hex id or unique prefix;
+  default `head` is the newest stored main commit: main's latest GitHub-mirrored
+  commit when the mirror publishes to the imported repository, else the import
+  commit (`headState` names its State when known). Each read is one server action
+  that rechecks access; when main's mirror moved past stored history it first adds
+  one catch-up pack (coalesced: any number of landings cost one pack). Packs
+  download once per machine into `~/.cache/forge/history` (`FORGE_HISTORY_CACHE`)
+  and the local `git` reads them (`GIT_REQUIRED` without Git). Forge landings that
+  were not mirrored to GitHub are not in this history yet. Owners set the
+  per-project limit with `op:"limit"` (`bytes`, default 1 GiB, at most 8 GiB) and
+  re-run a failed or over-limit import with `op:"retry"`; above the limit no history
+  is stored and reads return `HISTORY_OVER_LIMIT`.
 
 - `review`, `candidate`/`candidates` (`view`/`views`), `provenance`, `records`,
   `brief`, `link`, `log`, `handoff`/`handoff-read`, `report`, `making-of`,

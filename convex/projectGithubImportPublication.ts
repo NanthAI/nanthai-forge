@@ -12,6 +12,7 @@ import { findObject } from './projectObjectFind';
 import { purgeInventory } from './projectGithubImportCatalog';
 import { invariant } from '../src/errors';
 import { selectBornMain } from './projectHostedBirth';
+import { beginHistory } from './projectHistoryStore';
 const pin = v.object({ sha256: v.string(), size: v.number() });
 export const begin = internalMutation({
   args: {
@@ -158,6 +159,8 @@ export const finish = internalMutation({
       origin: 'github-import',
     });
     await ctx.db.patch(job._id, { phase: 'ready', error: undefined });
+    // Git history (log, blame, old versions) follows in its own bounded run.
+    await beginHistory(ctx, job, publication.head);
     await purgeInventory(ctx, job._id, job.owner);
     return null;
   },

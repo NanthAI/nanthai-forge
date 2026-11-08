@@ -37,6 +37,7 @@ import { hostedSnapshotTables } from './projectHostedSnapshotFields';
 import { checkTables } from './projectCheckFields';
 import { coordinationTables } from './coordinationFields';
 import { githubImportTables } from './projectGithubImportFields';
+import { historyTables } from './projectHistoryFields';
 import { publicationTables } from './projectPublicationFields';
 import { objectTables } from './projectObjectFields';
 import { artifactBlobTables } from './artifactBlobFields';
@@ -577,6 +578,7 @@ export default defineSchema({
   ...objectTables,
   ...artifactBlobTables,
   ...githubImportTables,
+  ...historyTables,
   derivedArtifacts: defineTable(derivedFields)
     .index('by_original_and_kind_and_pin', ['original', 'kind', 'pin'])
     .index('by_original_and_removed', ['original', 'removed']),
