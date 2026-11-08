@@ -35,7 +35,9 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input = { ...input, generation };
-        const transport = convexSourceTransport(ctx, input, state.locations);
+        const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
+          overlapWrites: true,
+        });
         let output;
         try {
           if (state.jobKind === 'save' && !state.cursor && !state.batchId)
@@ -43,6 +45,7 @@ export const step = internalAction({
           if (!output) {
             // Reuse the already-authorized begin and bounded descriptors on fallback.
             delegated = true;
+            await transport.settle();
             await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
               ...input,
               loaded: JSON.stringify({ ...state, locations: [...transport.locations.values()] }),
@@ -50,6 +53,7 @@ export const step = internalAction({
             });
             return null;
           }
+          await transport.settle();
           const outputCount = transport.outputs.length;
           const resultText = transport.smallOutput(output);
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {

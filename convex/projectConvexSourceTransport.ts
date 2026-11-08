@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
-import { mapSourceOrdered } from '../src/hosted-source-parallel';
+import { mapSourceOrdered, sourceIoConcurrency } from '../src/hosted-source-parallel';
 import type { StepTransport } from '../src/hosted-source-step';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/portable-hash';
@@ -34,6 +34,9 @@ export function convexSourceTransport(
   { projectId, jobId, step }: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
   initial: ObjectLocation[] = [],
   delegatedAt?: number,
+  /** `upload` returns once the bytes are verified and lets the R2 write (PUT and HEAD) run on
+   * behind the work after it; callers must `settle()` before they read `outputs`. */
+  { overlapWrites = false }: { overlapWrites?: boolean } = {},
 ) {
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
   const input = { projectId, jobId, step };
@@ -43,7 +46,12 @@ export function convexSourceTransport(
     clock = sourceStepClock(delegatedAt),
     // The last few small outputs, by digest: a step's final result manifest is one of them, so
     // commit can carry it to publication without a separate action re-reading it from R2.
-    small = new Map<string, string>();
+    small = new Map<string, string>(),
+    // Overlapped writes in upload order, at most sourceIoConcurrency in flight.
+    writing: Promise<SourceOutput>[] = [];
+  const settle = async () => {
+    while (writing.length) outputs.push(await writing.shift()!);
+  };
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>(),
     parents = new Map<string, string[]>();
@@ -150,9 +158,16 @@ export function convexSourceTransport(
     },
     upload: async (pin, stream) => {
       const output = await prepareOutput(pin, stream);
-      outputs.push(await output.store());
+      if (!overlapWrites) return void outputs.push(await output.store());
+      // Content-addressed, create-only writes: digest checks and State generations above stay in
+      // order, the write overlaps the merge work that follows, and outputs keep upload order.
+      const stored = output.store();
+      stored.catch(() => {});
+      writing.push(stored);
+      if (writing.length >= sourceIoConcurrency) outputs.push(await writing.shift()!);
     },
     uploadBatch: async objects => {
+      await settle();
       // Digest checks and State generations stay in input order (a child State may
       // name a parent from this same batch); only the immutable R2 writes overlap.
       const prepared: { store(): Promise<SourceOutput> }[] = [];
@@ -276,6 +291,8 @@ export function convexSourceTransport(
   return {
     io,
     outputs,
+    /** Wait for overlapped writes; `outputs` is complete only after this. */
+    settle,
     locations,
     reads,
     clock,

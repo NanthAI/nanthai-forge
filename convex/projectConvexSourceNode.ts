@@ -46,11 +46,12 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs, clock, smallOutput } = convexSourceTransport(
+        const { io, outputs, settle, clock, smallOutput } = convexSourceTransport(
             ctx,
             input,
             state.locations,
             supplied ? delegatedAt : undefined,
+            { overlapWrites: true },
           ),
           durable = sourceStorage(ctx, input.projectId);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
@@ -81,6 +82,13 @@ export const step = internalAction({
           }
           const from = cursor.phase;
           result = await runSourceStep(cursor, io);
+          // The cursor write overlaps the step's last output writes; both finish before staging.
+          const [saved] = await Promise.all([
+            result.cursor.phase === 'done'
+              ? null
+              : saveSourceProgress(result.cursor, progress, durable.store).then(saved => saved.id),
+            settle(),
+          ]);
           const outputCount = outputs.length;
           const logStep = () =>
             logSourceStep(input, {
@@ -93,10 +101,6 @@ export const step = internalAction({
               outputs: outputCount,
               started,
             });
-          const saved =
-            result.cursor.phase === 'done'
-              ? null
-              : (await saveSourceProgress(result.cursor, progress, durable.store)).id;
           if (fanout) {
             const plan = fanout as SourceFanout;
             // The saved cursor refers to States this step already uploaded; the step
