@@ -23,6 +23,7 @@ import {
   deltaDisplacement,
   deltaJournalName,
   deltaObstructed,
+  deltaObstructionError,
   journalCheckoutDelta,
 } from './hosted-checkout-delta.js';
 import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-delta-settle.js';
@@ -314,15 +315,18 @@ async function checkout(
       );
       metrics.files = files.length;
       // A trusted installed baseline changes in place: only paths whose bytes or mode differ are
-      // fetched, verified, staged and flushed. No baseline, or a file/directory flip, stages all.
+      // fetched, verified, staged and flushed. No baseline, a file/directory flip or a spelling-only
+      // rename stages all (a private Lane directory swaps whole). An untracked obstruction refuses
+      // here, before anything is fetched or staged; the clean check would refuse it after staging.
       const installedHere = before?.operationId === request.operationId;
-      let delta = installedHere
+      const delta = installedHere
         ? { install: [], remove: [] }
         : before
           ? checkoutDelta(materializedFiles(before), files)
           : null;
-      if (delta && !installedHere && (await checkoutIo(async () => deltaObstructed(root, delta!))))
-        delta = null;
+      const obstruction =
+        delta && !installedHere ? await checkoutIo(async () => deltaObstructed(root, delta)) : null;
+      if (obstruction) throw deltaObstructionError(obstruction);
       const staged = delta ? delta.install : files;
       await metrics.measure('cacheVerify', () =>
         cache.ensure(
@@ -442,13 +446,7 @@ async function checkout(
                         'Another checkout updated this client while source was downloading.',
                       );
                       const obstruction = deltaObstructed(root, delta);
-                      if (obstruction)
-                        throw new ForgeError(
-                          'WORK_CONFLICT',
-                          `Local checkout content at ${JSON.stringify(obstruction)} is preserved.`,
-                          undefined,
-                          { obstruction: { kind: 'extra-source', path: obstruction } },
-                        );
+                      if (obstruction) throw deltaObstructionError(obstruction);
                       // Ignored artifacts stay where they are; only changed paths move.
                       const pin = ({ path, blob, mode }: NativeFile) => ({ path, blob, mode });
                       sweepCheckoutStages(cache.root);

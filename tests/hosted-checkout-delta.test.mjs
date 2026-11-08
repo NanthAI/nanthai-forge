@@ -134,3 +134,42 @@ test('an edit racing the in-place install is restored in place and refused', asy
   assert.deepEqual(readFileSync(join(s.root, '.forge', 'hosted-lane.json')), marker);
   assert(!readdirSync(clientCacheRoot(s.root)).some(name => name.startsWith('delta-')));
 });
+test('an untracked obstruction refuses a sync before any object is fetched or staged', async t => {
+  const s = await fixture(t);
+  // A folder holding only unsaved Finder state sits where the sync brings a file.
+  s.setFiles([
+    { ...s.files[0], blob: s.put('after\n') },
+    ...s.files.slice(1),
+    { path: 'dist', blob: s.put('incoming file\n'), mode: 'file' },
+  ]);
+  const command = s.command();
+  mkdirSync(join(s.root, 'dist'));
+  writeFileSync(join(s.root, 'dist/.DS_Store'), 'finder');
+  const mkdtemp = fs.mkdtempSync,
+    stages = [];
+  t.mock.method(fs, 'mkdtempSync', (prefix, ...rest) => {
+    stages.push(String(prefix).slice(String(prefix).lastIndexOf('/') + 1));
+    return mkdtemp(prefix, ...rest);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(applyHostedSync(s.root, command, s.transport), error => {
+      assert.equal(error.code, 'WORK_CONFLICT');
+      // The typed local-apply refusal, with recover-apply as the next step.
+      assert.deepEqual(error.recovery.blockers, [{ kind: 'extra-source', path: 'dist' }]);
+      return true;
+    });
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  // Only the selected State is read; no changed blob is fetched and no stage is built.
+  assert.deepEqual(s.reads, [command.lane.head]);
+  assert.deepEqual(
+    stages.filter(name => /^(delta|checkout)-$/.test(name)),
+    [],
+    stages.join(','),
+  );
+  assert.equal(readFileSync(join(s.root, 'dist/.DS_Store'), 'utf8'), 'finder');
+  assert.equal(readHostedLaneCheckout(s.root).selection.head, s.from.head);
+});

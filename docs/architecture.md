@@ -705,7 +705,16 @@ same in-place delta journal as a Lane checkout (below): only changed paths are
 fetched, verified, staged and flushed, the checkout is validated through its stat
 index, and the baseline marker is published last. File/directory flips apply in
 place too (the old file moves aside before the directory is made; a directory
-emptied by removals goes before a file takes its name). A pull killed mid-apply is
+emptied by removals goes before a file takes its name), and so do renames that
+change only case or Unicode normalization: a file's old spelling moves aside
+before the new one installs, and a directory is renamed through a temporary name
+in the same parent to its exact new spelling, on case-insensitive and
+case-sensitive filesystems alike. Such a journal is version 3, so an older client
+asks for an upgrade instead of finishing it without the renames. Only an ambiguous
+spelling (two paths that share one folded name) still builds a full stage, and
+that stage copies unchanged bytes from the clone instead of downloading them. An
+untracked file or folder where the pull must install refuses with an
+`extra-source` obstruction before anything is fetched or staged. A pull killed mid-apply is
 finished, rolled back or refused by the next pull exactly as in a Lane; an error
 inside a live pull rolls the root back at once, because people read the clone
 between commands. A `publish.json` journal left by an older client still rolls back
@@ -1257,7 +1266,10 @@ removed before the journal, so the journal is the last record to go. Unchanged f
 ignored output stays where it is, and emptied directories are removed. Without a
 trusted marker, when a path changes between file and directory, or when an incoming
 path or parent differs from an installed one only by case or Unicode
-normalization, the whole private stage is built and swapped; day-old stages no
+normalization, a Lane checkout builds and swaps the whole private stage (a Lane is a
+Forge-managed directory; the clone root applies these in place, above). An untracked
+file or folder at an incoming path or parent refuses with an `extra-source`
+obstruction before any object is fetched or staged; day-old stages no
 journal names are swept. A local artifact-path
 journal precedes that directory swap. Artifacts move from the retained previous
 checkout only after publication, and original-operation replay resumes those

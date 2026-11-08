@@ -266,7 +266,7 @@ test('a parent replaced by a link after a crash is refused, never followed', asy
 
 test('a journal from a newer client asks for an upgrade instead of failing to parse', async t => {
   const s = await fixture(t);
-  writeFileSync(journal(s.root), JSON.stringify({ schema: 3, future: true }));
+  writeFileSync(journal(s.root), JSON.stringify({ schema: 4, future: true }));
   await assert.rejects(applyHostedSync(s.root, s.command(), s.transport), {
     code: 'CLI_UPGRADE_REQUIRED',
   });

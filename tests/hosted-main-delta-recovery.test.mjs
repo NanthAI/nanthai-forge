@@ -253,7 +253,7 @@ test('a parent replaced by a link after a crash is refused, never followed', asy
 test('a journal from a newer client asks for an upgrade instead of failing to parse', async t => {
   const f = pullFixture(t);
   f.select([['src/0.txt', 'next']]);
-  writeFileSync(journal(f), JSON.stringify({ schema: 3, future: true }));
+  writeFileSync(journal(f), JSON.stringify({ schema: 4, future: true }));
   await assert.rejects(pull(f), { code: 'CLI_UPGRADE_REQUIRED' });
   assert(existsSync(journal(f)));
 });
@@ -340,19 +340,187 @@ test('file/directory flips apply in place, survive a crash and undo cleanly afte
   assert.deepEqual(deltaDirectories(f), []);
 });
 
-test('a case-only rename with new content installs the exact spelling', async t => {
+/** README.md and Docs/ (with Docs/Sub/ and an ignored build output) are renamed by case only;
+ * main also changes README's bytes. */
+async function caseOnly(t) {
   const f = pullFixture(t);
-  f.select([['README.md', 'old readme\n']]);
+  f.select([
+    ['.gitignore', '*.log\n'],
+    ['README.md', 'old readme\n'],
+    ['Docs/a.md', 'guide\n'],
+    ['Docs/Sub/b.md', 'nested\n'],
+  ]);
   await pull(f);
+  writeFileSync(join(f.root, 'Docs/out.log'), 'ignored output');
+  const inode = statSync(f.root).ino,
+    docs = statSync(join(f.root, 'Docs')).ino;
   f.select([
     ['README.md', null],
+    ['Docs/a.md', null],
+    ['Docs/Sub/b.md', null],
     ['readme.md', 'new readme\n'],
+    ['docs/a.md', 'guide\n'],
+    ['docs/sub/b.md', 'nested\n'],
   ]);
-  const result = await pull(f);
-  assert.equal(result.head, f.main().head);
+  return { f, inode, docs };
+}
+function assertCaseOnly(f, inode, docs) {
+  assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
   const names = readdirSync(f.root);
   assert(names.includes('readme.md') && !names.includes('README.md'), names.join(','));
+  assert(names.includes('docs') && !names.includes('Docs'), names.join(','));
+  assert.deepEqual(readdirSync(join(f.root, 'docs')).sort(), ['a.md', 'out.log', 'sub']);
+  assert.deepEqual(readdirSync(join(f.root, 'docs/sub')), ['b.md']);
   assert.equal(readFileSync(join(f.root, 'readme.md'), 'utf8'), 'new readme\n');
+  assert.equal(readFileSync(join(f.root, 'docs/sub/b.md'), 'utf8'), 'nested\n');
+  assert.equal(readFileSync(join(f.root, 'docs/out.log'), 'utf8'), 'ignored output');
+  assert.equal(statSync(join(f.root, 'docs')).ino, docs, 'the directory is renamed, not rebuilt');
+  assert.equal(statSync(f.root).ino, inode, 'the clone root is never swapped');
+  assert.equal(existsSync(journal(f)), false);
+  assert.deepEqual(deltaDirectories(f), []);
+  assert(!names.some(name => name.startsWith('.forge-respell-')), names.join(','));
+}
+const respelling = (name, from) => name === 'renameSync' && from.includes('/.forge-respell-');
+
+test('a case-only rename of a file and a directory applies in place with the exact spelling', async t => {
+  const { f, inode, docs } = await caseOnly(t);
+  f.reset();
+  const result = await pull(f);
+  assert.equal(result.head, f.main().head);
+  assertCaseOnly(f, inode, docs);
+  // Only the manifest and README's new bytes are fetched; renamed bytes come from the clone.
+  assert.equal(f.calls.gets.length, 2);
+});
+
+test('a pull killed between the two renames of a directory spelling is finished by the next pull', async t => {
+  const { f, inode, docs } = await caseOnly(t);
+  await crashPull(t, f, respelling);
+  assert(
+    readdirSync(f.root).some(name => name.startsWith('.forge-respell-')),
+    'killed at the temporary name',
+  );
+  await pull(f);
+  assertCaseOnly(f, inode, docs);
+});
+
+test('a respelled directory whose stage is lost rolls back and the same pull then completes', async t => {
+  const { f, inode, docs } = await caseOnly(t);
+  // Killed after the directory took its new spelling and before anything was installed.
+  await crashPull(
+    t,
+    f,
+    (name, from, to) => name === 'renameSync' && inStage(from) && to.startsWith(`${f.root}/`),
+  );
+  rmSync(join(cache(f), JSON.parse(readFileSync(journal(f), 'utf8')).stage), { recursive: true });
+  await pull(f);
+  assertCaseOnly(f, inode, docs);
+});
+
+test('an error inside a live pull after a directory took its new spelling restores the old one', async t => {
+  const { f, inode, docs } = await caseOnly(t);
+  const rename = fs.renameSync;
+  let failed = false;
+  t.mock.method(fs, 'renameSync', (from, to) => {
+    if (!failed && inStage(from) && String(to).startsWith(`${f.root}/`)) {
+      failed = true;
+      throw new Error('synthetic failure');
+    }
+    return rename(from, to);
+  });
+  syncBuiltinESMExports();
+  try {
+    await assert.rejects(pull(f), /synthetic failure/);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  const names = readdirSync(f.root);
+  assert(names.includes('Docs') && !names.includes('docs'), names.join(','));
+  assert(names.includes('README.md') && !names.includes('readme.md'), names.join(','));
+  assert.deepEqual(readdirSync(join(f.root, 'Docs')).sort(), ['Sub', 'a.md', 'out.log']);
+  assert.equal(readFileSync(join(f.root, 'README.md'), 'utf8'), 'old readme\n');
+  assert.equal(readFileSync(join(f.root, 'Docs/Sub/b.md'), 'utf8'), 'nested\n');
+  assert.equal(existsSync(journal(f)), false);
+  await pull(f);
+  assertCaseOnly(f, inode, docs);
+});
+
+test('a normalization-only rename (NFD to NFC) applies in place with the exact spelling', async t => {
+  const nfd = 'cafe\u0301',
+    nfc = 'caf\u00e9';
+  const f = pullFixture(t);
+  f.select([
+    [`${nfd}.txt`, 'old menu\n'],
+    [`${nfd}/x.txt`, 'inside\n'],
+  ]);
+  await pull(f);
+  const inode = statSync(f.root).ino;
+  f.select([
+    [`${nfd}.txt`, null],
+    [`${nfd}/x.txt`, null],
+    [`${nfc}.txt`, 'new menu\n'],
+    [`${nfc}/x.txt`, 'inside\n'],
+  ]);
+  await pull(f);
+  const names = readdirSync(f.root);
+  assert(names.includes(`${nfc}.txt`) && !names.includes(`${nfd}.txt`), JSON.stringify(names));
+  assert(names.includes(nfc) && !names.includes(nfd), JSON.stringify(names));
+  assert.equal(readFileSync(join(f.root, `${nfc}.txt`), 'utf8'), 'new menu\n');
+  assert.equal(readFileSync(join(f.root, nfc, 'x.txt'), 'utf8'), 'inside\n');
+  assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
+  assert.equal(statSync(f.root).ino, inode, 'the clone root is never swapped');
+  assert.deepEqual(deltaDirectories(f), []);
+});
+
+test('an untracked obstruction refuses before any object is fetched or staged', async t => {
+  const f = pullFixture(t, 50);
+  // A stray file holds an incoming parent; a folder with only unsaved Finder state holds an
+  // incoming file. Both are refused by the clean check too, so nothing is ever staged for them.
+  for (const [setup, change, path] of [
+    [() => writeFileSync(join(f.root, 'new'), 'stray'), ['new/n.txt', 'arrived\n'], 'new'],
+    [
+      () => {
+        mkdirSync(join(f.root, 'dist'));
+        writeFileSync(join(f.root, 'dist/.DS_Store'), 'finder');
+      },
+      ['dist', 'incoming file\n'],
+      'dist',
+    ],
+  ]) {
+    setup();
+    f.select([['src/0.txt', `changed for ${path}\n`], change]);
+    const objects = readdirSync(join(cache(f), 'objects')).sort();
+    const mkdtemp = fs.mkdtempSync,
+      stages = [];
+    t.mock.method(fs, 'mkdtempSync', (prefix, ...rest) => {
+      stages.push(basename(String(prefix)));
+      return mkdtemp(prefix, ...rest);
+    });
+    syncBuiltinESMExports();
+    f.reset();
+    try {
+      await assert.rejects(pull(f), error => {
+        assert.equal(error.code, 'WORK_CONFLICT');
+        assert.deepEqual(error.recovery.obstruction, { kind: 'extra-source', path });
+        return true;
+      });
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    // Only the selected manifest is read: no blob page, download, reuse copy or stage.
+    assert.deepEqual(f.calls.gets, [f.main().head]);
+    assert.deepEqual(f.calls.pages, [[f.main().head]]);
+    assert.deepEqual(
+      stages.filter(name => /^(delta|checkout|reuse)-$/.test(name)),
+      [],
+      stages.join(','),
+    );
+    assert.deepEqual(readdirSync(join(cache(f), 'objects')).sort(), [...objects, f.main().head].sort());
+    rmSync(join(f.root, path), { recursive: true });
+    await pull(f);
+    assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
+  }
 });
 
 test('a legacy per-file publication journal from an older client still rolls back first', async t => {

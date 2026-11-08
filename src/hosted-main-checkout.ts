@@ -26,6 +26,8 @@ import {
   deltaDisplacement,
   deltaJournalName,
   deltaObstructed,
+  deltaObstructionError,
+  deltaRespell,
   journalCheckoutDelta,
   type CheckoutDelta,
 } from './hosted-checkout-delta.js';
@@ -207,8 +209,11 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
   const state = parseNativeState(readFileSync(join(objects.objects, selection.head)));
   // A pull changes the clone root in place (it never swaps the directory a shell may be in): only
   // changed paths are fetched, verified, staged, flushed and journaled, and the checkout is validated
-  // through the stat index. A first checkout, or a case/normalization-only rename or an untracked
-  // obstruction, keeps the full private-stage install.
+  // through the stat index. Case/normalization-only renames apply in place too. An untracked
+  // obstruction refuses here, before any object is fetched or staged (the clean check inside the
+  // lock would refuse it anyway). Only a first checkout, or an ambiguous spelling (two paths that
+  // share one folded name), keeps the full private-stage install, which still copies unchanged
+  // bytes from the clone instead of downloading them.
   let delta: CheckoutDelta | null = null,
     baselineDigest: string | null = null;
   if (request.refresh) {
@@ -217,8 +222,9 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
     if (bytes && baseline) {
       baselineDigest = digest(bytes);
       delta = checkoutDelta(baseline.state.files, state.files, { transitions: true });
-      if (delta && deltaObstructed(root, delta)) delta = null;
-      if (delta) reuseMainSource(root, objects.objects, baseline.state.files, delta.install);
+      const obstruction = delta && deltaObstructed(root, delta);
+      if (obstruction) throw deltaObstructionError(obstruction);
+      reuseMainSource(root, objects.objects, baseline.state.files, delta ? delta.install : state.files);
     }
   }
   const stagedFiles = delta ? delta.install : state.files;
@@ -286,13 +292,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
           'Another pull updated this client while the selected head was downloading.',
         );
         const obstruction = deltaObstructed(root, delta);
-        if (obstruction)
-          throw new ForgeError(
-            'WORK_CONFLICT',
-            `Local checkout content at ${JSON.stringify(obstruction)} is preserved.`,
-            undefined,
-            { obstruction: { kind: 'extra-source', path: obstruction } },
-          );
+        if (obstruction) throw deltaObstructionError(obstruction);
         sweepCheckoutStages(cache);
         journalCheckoutDelta(cache, {
           operationId: request.operationId,
@@ -303,6 +303,7 @@ export async function checkoutHostedMain(root: string, input: unknown, transport
           install: delta.install.map(({ path, blob, mode }) => ({ path, blob, mode })),
           displace: deltaDisplacement(root, delta, beforeFiles),
           targetFiles: state.files,
+          ...(delta.respell ? { respell: deltaRespell(root, delta) } : {}),
         });
         let settled;
         try {

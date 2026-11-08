@@ -12,11 +12,13 @@ import {
   deltaMatches as matches,
   deltaPendingError,
   deltaRetainedName,
+  fold,
   readDeltaJournal,
   writeDeltaJournal,
   type DeltaJournal,
   type DeltaPin,
 } from './hosted-checkout-delta.js';
+import { exactly, parentOf, respellBack, respellForward } from './hosted-checkout-delta-respell.js';
 
 export type DeltaSettlement = {
   outcome: 'published' | 'rolled-back';
@@ -174,21 +176,29 @@ function rollForward(
     journal.install.filter(file => exists(join(stage, file.path))).map(file => file.path),
   );
   const installing = new Set(journal.install.map(file => file.path));
+  const present = exactly(root, journal);
   for (const file of journal.displace) {
     if (installing.has(file.path) && !pending.has(file.path)) continue;
     track(file.path);
     guard(file.path);
     const from = join(root, file.path),
       to = join(backup, file.path);
-    if (exists(from) && !exists(to)) {
+    if (present(file.path) && !exists(to)) {
       mkdirSync(dirname(to), { recursive: true, mode: 0o700 });
       renameSync(from, to);
     }
   }
+  // New directory spellings next (shallowest first), so emptied-directory paths below are spelled
+  // as the target spells them; a rollback renames them back.
+  for (const entry of journal.respell ?? []) {
+    guard(entry.path);
+    respellForward(root, entry, track);
+  }
   // A directory taking a file's place (or holding an incoming file's name) is emptied first.
-  const installPaths = journal.install.map(file => file.path);
+  // Compared by folded spelling: on a case-insensitive filesystem `Foo/` holds the name of `foo`.
+  const installPaths = journal.install.map(file => fold(file.path));
   const flipped = (directory: string) =>
-    installPaths.some(path => directory === path || directory.startsWith(`${path}/`));
+    installPaths.some(path => fold(directory) === path || fold(directory).startsWith(`${path}/`));
   for (const directory of journal.directories) if (flipped(directory)) removeEmptied(root, directory, track);
   const changed = journal.displace.filter(
     file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file),
@@ -228,7 +238,9 @@ function rollForward(
     }
     renameSync(join(stage, file.path), to);
   }
-  const parents = [...journal.install, ...journal.displace].map(file => dirname(join(root, file.path)));
+  const parents = [...journal.install, ...journal.displace, ...(journal.respell ?? [])].map(file =>
+    dirname(join(root, file.path)),
+  );
   for (const directory of journal.directories) {
     if (!flipped(directory)) removeEmptied(root, directory, track);
     parents.push(dirname(join(root, directory)));
@@ -280,14 +292,20 @@ function rollBack(steps: Steps, track: (path: string) => void, conflict?: ForgeE
   if (!journal.aborting) writeDeltaJournal(cacheRoot, { ...journal, aborting: true });
   const guard = parentGuard(root),
     touched: string[] = [];
+  const present = exactly(root, journal);
   for (const file of journal.install) {
     const at = join(root, file.path);
-    if (exists(join(stage, file.path)) || !exists(at)) continue;
+    if (exists(join(stage, file.path)) || !present(file.path)) continue;
     track(file.path);
     guard(file.path);
     if (!wasInstalled(at, file, journal, backup)) continue;
     rmSync(at);
     touched.push(dirname(at));
+  }
+  for (const entry of [...(journal.respell ?? [])].reverse()) {
+    guard(entry.path);
+    respellBack(root, entry, track);
+    touched.push(join(root, parentOf(entry.path)));
   }
   let kept = exists(join(backup, 'occupied'));
   for (const file of journal.displace) {
