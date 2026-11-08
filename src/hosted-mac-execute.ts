@@ -9,6 +9,8 @@ import { compactProviderOutput } from './check-compact-output.js';
 import { deliverMacCallback } from './hosted-mac-delivery.js';
 import { createReadStream, readFileSync } from 'node:fs';
 import { captureArtifacts } from './work-artifacts.js';
+import { junitDirEnv } from './junit-report.js';
+import { readJunitReports } from './junit-report-files.js';
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
@@ -202,6 +204,9 @@ export async function executeHostedMacCheck(
         );
         const runtime = checkProcessEnvironment(run.check, environment, root);
         runtime.prepare();
+        // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
+        const junitDir = join(root, 'junit');
+        await mkdir(junitDir, { recursive: true, mode: 0o700 });
         const secrets = [
           key,
           process.env.FORGE_AUTH_TOKEN ?? '',
@@ -256,7 +261,7 @@ export async function executeHostedMacCheck(
         const reports: ContractTimingReader['reports'] = {};
         const child = spawn(execute[0]!, execute.slice(1), {
           cwd: checkout,
-          env: runtime.env,
+          env: { ...runtime.env, [junitDirEnv]: junitDir },
           detached: process.platform !== 'win32',
           stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -316,6 +321,11 @@ export async function executeHostedMacCheck(
           };
           const [exitCode] = await Promise.all([exit, stream('stdout'), stream('stderr')]);
           signal.throwIfAborted();
+          // Forge's own markers win; JUnit fills in the files they did not report.
+          const junitReader = new ContractTimingReader({ secrets, paths: [root, homedir()] });
+          for (const report of readJunitReports(junitDir, checkout).reports)
+            if (!(report.file in reports)) junitReader.report(report);
+          Object.assign(reports, junitReader.reports);
           for (const artifact of await captureArtifacts(checkout, root, run.check.artifactPaths ?? [])) {
             if (artifact.status !== 'retained') continue;
             await collectHostedOutput(

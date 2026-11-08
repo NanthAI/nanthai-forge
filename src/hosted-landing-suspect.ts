@@ -20,8 +20,31 @@ export function landingSuspect(state: SuspectState) {
   );
 }
 
-const testFile = /^tests\/(?:.+\/)?([^/]+)\.test\.[cm]?[jt]sx?$/;
-const sourceFile = /^(?:src|convex|scripts|web\/src|netlify\/functions)\/(?:.+\/)?([^/]+)\.[cm]?[jt]sx?$/;
+const codeFile =
+  /^(.+)\.(?:[cm]?[jt]sx?|py|go|rb|rs|java|kts?|swift|cs|php|scala|exs?|dart|c|cc|cpp|h|hpp)$/i;
+/** The module a test names, in any folder and for common conventions: `x.test.ts`,
+ * `x.spec.js`, `test_x.py`, `x_test.go`, `XTest.java`, `XTests.cs`,
+ * `x_spec.rb`, or a dotted test class (`tests.test_x.TestY`, `com.acme.XTest`). */
+export function testStem(file: string) {
+  const name = file.split(/[\\/]/).pop() ?? '';
+  const base = codeFile.exec(name)?.[1] ?? name;
+  const stem = (part: string) =>
+    /^(.+?)[._](?:test|spec)s?$/i.exec(part)?.[1] ??
+    /^tests?_(.+)$/i.exec(part)?.[1] ??
+    /^(.+?[a-z0-9])(?:Tests?|Spec)$/.exec(part)?.[1];
+  if (codeFile.test(name) || !base.includes('.')) return stem(base)?.toLowerCase();
+  for (const part of base.split('.')) {
+    const found = stem(part);
+    if (found) return found.toLowerCase();
+  }
+  return undefined;
+}
+/** The module stem of a changed source file in any folder; test files are not sources. */
+export function sourceStem(path: string) {
+  const name = path.split('/').pop() ?? '';
+  const base = codeFile.exec(name)?.[1];
+  return base && !testStem(name) ? base.toLowerCase() : undefined;
+}
 /** Generic module names say nothing about which change a test exercises. */
 const genericStems = new Set(['index', 'main', 'types', 'schema', 'server', 'utils', 'errors', 'fields']);
 
@@ -34,8 +57,9 @@ export function pathAliases(path: string) {
 
 /** Changed-file and one-hop import attribution of one failing test file:
  * the member changed the test itself, a declared contract test, the module
- * named by the test (tests/x.test.mjs exercises src/x.ts, convex/x.ts, ...),
- * or a module the failure excerpt names (including its dist/ build). */
+ * named by the test in any folder (x.test.mjs or test_x.py exercises any changed
+ * x.ts or x.py), a changed source in the package a report names, or a module the
+ * failure excerpt names (including its dist/ build). */
 export function memberExplainsFailure(
   member: { paths: readonly string[]; tests: readonly string[] },
   file: string,
@@ -44,9 +68,20 @@ export function memberExplainsFailure(
   if (member.tests.includes(file) || member.paths.includes(file)) return true;
   if (firstError && member.paths.some(path => pathAliases(path).some(alias => firstError.includes(alias))))
     return true;
-  const stem = testFile.exec(file)?.[1];
-  if (!stem || genericStems.has(stem) || stem.length < 5) return false;
-  return member.paths.some(path => sourceFile.exec(path)?.[1] === stem);
+  const stem = testStem(file);
+  if (stem && !genericStems.has(stem) && stem.length >= 5)
+    return member.paths.some(path => sourceStem(path) === stem);
+  // A package-named report (Go: `example.com/repo/pkg/billing`) names its directory.
+  if (!file.includes('/') || codeFile.test(file)) return false;
+  return member.paths.some(path => {
+    const directory = path.split('/').slice(0, -1).join('/');
+    return Boolean(
+      directory &&
+      sourceStem(path) &&
+      !genericStems.has(directory.split('/').pop()!) &&
+      (file === directory || file.endsWith(`/${directory}`)),
+    );
+  });
 }
 
 /** A member whose previous combined failure failed some of the same files fails

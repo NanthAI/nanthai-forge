@@ -175,7 +175,10 @@ function executorSurface(t) {
     'FORGE_ACTIONS_PLAN',
     'FORGE_TEST_RETRY_FILES',
     'FORGE_TEST_COVERAGE_HEAD',
+    'FORGE_JUNIT_DIR',
   ]);
+  // Contract 3: the fixed supervisor's private JUnit report directory reaches the check.
+  process.env.FORGE_JUNIT_DIR = '/private/junit';
   for (const [mode, shard, selection, groups, standard, part] of [
     [
       'standard-static',
@@ -236,6 +239,7 @@ function executorSurface(t) {
     surface[mode] = calls;
   }
   delete process.env.FORGE_ACTIONS_POOL_PART;
+  delete process.env.FORGE_JUNIT_DIR;
   return surface;
 }
 

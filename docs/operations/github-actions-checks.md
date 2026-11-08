@@ -88,7 +88,8 @@ executor); once Lane A is on main, Lane B changes the scripts that use it and ra
 The contract only grows: to remove something, first stop requiring it, then remove it. Contract 2
 (2026-11-06) added the [shard pool](#shard-pool) parts: the executor may run a shard as its kept front
 and then single pool units (tests only), each a plain `scripts/test-files.mjs FILES...` call, so check
-scripts need nothing new. Plan
+scripts need nothing new. Contract 3 (2026-11-08) passes the supervisor's private
+`FORGE_JUNIT_DIR` through to the check ([JUnit reports](#junit-xml-reports-from-any-check)). Plan
 recipe fields written by the planner and read by the executor belong to the same surface. Runtime
 pins (Node) are provided by the control workflow: raise the pin through the executor Lane first.
 
@@ -328,6 +329,40 @@ private repository in about 29 s end to end (one static job).
 
 This sends only synthetic source, creates a run-owned ref, dispatches one tiny job
 and removes the ref after recording success. It does not land Forge source.
+
+### JUnit XML reports from any check
+
+Forge's own check prints `__FORGE_TESTS__` markers. Any other check command can instead
+write JUnit XML, which vitest, jest-junit, pytest, Go (gotestsum or go-junit-report),
+Maven Surefire and Gradle all produce. The fixed runner (Actions jobs and the Mac runner)
+gives every check a fresh private directory outside the checkout in `FORGE_JUNIT_DIR`;
+write one or more `*.xml` files there, for example:
+
+```json
+{"name":"verify","executable":"sh","args":["-c","pnpm vitest run --reporter=default --reporter=junit --outputFile.junit=\"$FORGE_JUNIT_DIR/vitest.xml\""]}
+```
+
+(`pytest --junitxml="$FORGE_JUNIT_DIR/pytest.xml"`, or point jest-junit's
+`JEST_JUNIT_OUTPUT_DIR` at it.) After the command exits the runner reads those files as
+data, never running repository code, into the same per-file records as the markers:
+failed files with their first error, durations for timing history, and
+flakes the tool reported as a failed attempt that passed on rerun (`flakyFailure`,
+`rerunFailure`). The exit code still decides pass or fail. The test file is the case's or
+suite's `file` attribute, else a path-like classname or suite name, else a dotted pytest
+module (`tests.test_api.TestUser` → `tests/test_api.py`), else the classname. Paths inside the
+checkout become relative; other absolute paths keep only their name. Markers win for a file
+both report. Limits: 32 report files, 8 MiB each and 16 MiB together, 5000 test files; one
+unclosed token over 1 MiB, a DOCTYPE, mismatched elements, a link or an empty report makes
+that file ignored with a one-line log note, so the run keeps its previous evidence (exit code
+and log). Reading is a stream with no extra Convex call; a green run's records ride in the
+existing result call. The directory is removed after the job.
+
+Failing files then name likely members of a failed batch by file name in any folder: a test
+`x.test.ts`, `x.spec.js`, `test_x.py`, `x_test.go`, `XTest.java` or `x_spec.rb` (or a dotted
+test class) explains a member that changed a source `x.*` anywhere, and a Go package report
+explains a changed source in that package's directory. Generic or short names (`index`,
+`main`, under five characters) name no one. A named member checks alone instead of the whole
+batch splitting in halves ([landing batches](landing-batches.md)).
 
 ## Convex dispatch with the GitHub App
 

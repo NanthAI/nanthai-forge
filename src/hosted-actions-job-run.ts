@@ -19,6 +19,8 @@ import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
 import { poolUnits } from '../scripts/shard-pool.mjs';
 import { describePoolOutcome, poolClaimsSchema, runShardPool } from './hosted-actions-pool.js';
 import { secretScanFailureCommand, type SecretScanResult } from './secret-scan.js';
+import { junitDirEnv } from './junit-report.js';
+import { junitDirectory, mergeJunitReports, readJunitReports } from './junit-report-files.js';
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
@@ -97,6 +99,8 @@ async function executeActiveActionsJob(
     const clean = redactor.write(bytes);
     tail = Buffer.concat([tail, clean]).subarray(-directLogBytes);
   };
+  // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
+  const junit = junitDirectory();
   /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
   const spawnPart = (part?: string) => {
     const child = spawn(command[0]!, command.slice(1), {
@@ -109,6 +113,7 @@ async function executeActiveActionsJob(
         FORGE_ACTIONS_PLAN: planPath,
         FORGE_ACTIONS_SHARD: shard,
         ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
+        [junitDirEnv]: junit.directory,
       },
     });
     // Decode across chunks before parsing complete machine reports.
@@ -133,31 +138,41 @@ async function executeActiveActionsJob(
     recipe.pool && recipe.standard && shard !== 'static' && !setupFailed
       ? poolUnits(recipe.groups, recipe.pool)
       : null;
-  let exitCode = await spawnPart(units ? 'kept' : undefined);
+  const note = (line: string) => {
+    console.log(line);
+    observe(Buffer.from(`${line}\n`));
+  };
+  let exitCode: number;
   let yielded: string[] | undefined;
-  if (units) {
-    const note = (line: string) => {
-      console.log(line);
-      observe(Buffer.from(`${line}\n`));
-    };
-    // Kept files that never started (install or build failed) mean no unit can run here either.
-    if (exitCode !== 0 && !Object.keys(reports.reports).length)
-      note('Shard pool: skipped; the kept files did not run, so this shard claims nothing');
-    else {
-      const claims = poolClaimsSchema.safeParse(client.poolClaims);
-      const outcome = await runShardPool({
-        units,
-        home: index,
-        claims: claims.success ? claims.data : null,
-        request: ((url: string, init: RequestInit) => client.request(url, init)) as typeof fetch,
-        run: async unit => {
-          const code = await spawnPart(String(unit.unit));
-          if (!exitCode) exitCode = code;
-        },
-      });
-      note(describePoolOutcome(outcome, index, units));
-      yielded = outcome.yielded.flatMap(unit => units[unit]!.files);
+  try {
+    exitCode = await spawnPart(units ? 'kept' : undefined);
+    if (units) {
+      // Kept files that never started (install or build failed) mean no unit can run here either.
+      if (exitCode !== 0 && !Object.keys(reports.reports).length)
+        note('Shard pool: skipped; the kept files did not run, so this shard claims nothing');
+      else {
+        const claims = poolClaimsSchema.safeParse(client.poolClaims);
+        const outcome = await runShardPool({
+          units,
+          home: index,
+          claims: claims.success ? claims.data : null,
+          request: ((url: string, init: RequestInit) => client.request(url, init)) as typeof fetch,
+          run: async unit => {
+            const code = await spawnPart(String(unit.unit));
+            if (!exitCode) exitCode = code;
+          },
+        });
+        note(describePoolOutcome(outcome, index, units));
+        yielded = outcome.yielded.flatMap(unit => units[unit]!.files);
+      }
     }
+    // Forge's own markers win; JUnit fills in the files they did not report.
+    const junitReports = readJunitReports(junit.directory, directory);
+    for (const line of junitReports.notes) note(line);
+    const added = mergeJunitReports(reports, junitReports.reports);
+    if (added) note(`JUnit: read ${added} test file report${added === 1 ? '' : 's'}.`);
+  } finally {
+    junit.remove();
   }
   tail = Buffer.concat([tail, redactor.write(Buffer.alloc(0), true)]).subarray(-directLogBytes);
   const log = tail.length

@@ -8,6 +8,8 @@ import {
   memberExplainsFailure,
   passedAlone,
   repeatOffender,
+  sourceStem,
+  testStem,
 } from '../dist/hosted-landing-suspect.js';
 import { progressWakeDue, CHECK_PROGRESS_WAKE_MS } from '../dist/landing-stall.js';
 
@@ -40,6 +42,34 @@ test('wave 1 51d09ad5: a failing test names the module it exercises, not only a 
   );
   // Declared contract tests and changed test files still count.
   assert(memberExplainsFailure({ paths: [], tests: ['tests/x.test.mjs'] }, 'tests/x.test.mjs'));
+});
+
+test('test-to-source matching works by file name in any folder and common conventions', () => {
+  const explains = (path, file) => memberExplainsFailure({ paths: [path], tests: [] }, file);
+  // Monorepo, Python, Go, Java and Ruby layouts: none under tests/ or src/.
+  assert(explains('packages/billing/lib/invoice.ts', 'packages/billing/__tests__/invoice.spec.ts'));
+  assert(explains('apps/web/components/CartBadge.tsx', 'apps/web/components/CartBadge.test.tsx'));
+  assert(explains('shop/refunds.py', 'tests/unit/test_refunds.py'));
+  assert(explains('internal/ledger/posting.go', 'internal/ledger/posting_test.go'));
+  assert(explains('src/main/java/com/acme/Ledger.java', 'src/test/java/com/acme/LedgerTest.java'));
+  assert(explains('app/models/account.rb', 'spec/models/account_spec.rb'));
+  // Dotted test classes and Go package reports.
+  assert(explains('src/main/java/com/acme/Ledger.java', 'com.acme.LedgerTest'));
+  assert(explains('internal/payments/charge.go', 'example.com/shop/internal/payments'));
+  assert(!explains('internal/paymentsx/charge.go', 'example.com/shop/internal/payments'));
+  // Forge's own layout still matches.
+  assert(explains('convex/projectHostedCulprit.ts', 'tests/projectHostedCulprit.test.mjs'));
+  // Different stems, test files, docs, generic and short names never match.
+  assert(!explains('packages/billing/lib/invoices.ts', 'packages/billing/test/invoice.spec.ts'));
+  assert(!explains('packages/billing/test/other.spec.ts', 'packages/billing/test/invoice.spec.ts'));
+  assert(!explains('docs/invoice.md', 'test/invoice.test.ts'));
+  assert(!explains('lib/index.ts', 'test/index.test.ts'));
+  assert(!explains('lib/cart.ts', 'test/cart.test.ts'));
+  assert.equal(testStem('a/b/userService.test.ts'), 'userservice');
+  assert.equal(testStem('lib/latest.ts'), undefined);
+  assert.equal(sourceStem('lib/userService.ts'), 'userservice');
+  assert.equal(sourceStem('lib/userService.test.ts'), undefined);
+  assert.equal(sourceStem('README.md'), undefined);
 });
 
 test('a member that failed the same files with different peers is the common factor', () => {

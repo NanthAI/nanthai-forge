@@ -35,6 +35,8 @@ export function runActionsCheck(execute = execFileSync, { install = true, build 
         'FORGE_TEST_TIMINGS',
         'FORGE_TEST_TIMINGS_HISTORY',
         'FORGE_SOURCE_CACHE_DIR',
+        // Fresh private directory for the check's JUnit XML reports (src/junit-report.ts).
+        'FORGE_JUNIT_DIR',
         'npm_config_cache',
         'npm_config_userconfig',
         'npm_config_globalconfig',

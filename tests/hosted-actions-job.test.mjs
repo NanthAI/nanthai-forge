@@ -676,6 +676,50 @@ test('an inline-log server receives the bounded log inside the one result call',
   assert.equal(actionsJobCalls(withoutInlineLog), 6);
 });
 
+test('any check command may write JUnit XML to FORGE_JUNIT_DIR; the result names its failing files', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const posted = [];
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (command.kind !== 'output' && command.kind !== 'result') return realCall(command);
+    posted.push(command);
+    return {};
+  };
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  t.mock.method(process.stdout, 'write', () => true);
+  const xml =
+    '<testsuites><testsuite name="lib/test/ledger.spec.js">' +
+    '<testcase classname="lib/test/ledger.spec.js" name="posts" time="0.2"><failure message="unbalanced"/></testcase>' +
+    '<testcase classname="lib/test/cart.spec.js" name="adds" time="0.3"/></testsuite></testsuites>';
+  const program = `const {writeFileSync}=require('node:fs'); const dir=process.env.FORGE_JUNIT_DIR; if(!dir||dir.startsWith(process.cwd()))process.exit(98); writeFileSync(require('node:path').join(dir,'report.xml'), ${JSON.stringify(xml)}); console.log('dir='+dir); process.exitCode = 1;`;
+  const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+    process.execPath,
+    '--eval',
+    program,
+  ]);
+  assert.equal(exit, 1);
+  const { result, logBytes } = posted.find(command => command.kind === 'result');
+  assert.deepEqual(result.contractReports['lib/test/ledger.spec.js'], {
+    durationMs: 200,
+    failed: true,
+    firstError: 'posts: unbalanced',
+  });
+  assert.equal(result.contractReports['lib/test/cart.spec.js'].failed, false);
+  assert.deepEqual(result.testFiles.counts, { total: 2, failed: 1, flaky: 0 });
+  assert.deepEqual(
+    result.testFiles.failed.map(item => item.file),
+    ['lib/test/ledger.spec.js'],
+  );
+  const log = Buffer.from(logBytes, 'base64').toString('utf8');
+  assert.match(log, /JUnit: read 2 test file reports\./);
+  const dir = /dir=(\S+)/.exec(log)?.[1];
+  assert(dir && !existsSync(dir), 'the private report directory is removed after the job');
+});
+
 test('a result too large to carry its log falls back to the separate output upload', async t => {
   const s = fixture(t),
     candidate = join(s.directory, 'candidate'),
