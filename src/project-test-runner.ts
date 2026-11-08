@@ -2,6 +2,7 @@
 import { changeSalt, stableKey } from '../scripts/test-tiebreak.mjs';
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
+import { documentationPath } from './prose-paths.js';
 import type { PackageGraph } from './package-graph.js';
 import {
   FILES_PLACEHOLDER,
@@ -295,7 +296,8 @@ export function orderRunnerTests(tests: string[], changedPaths: string[]): strin
     .sort((a, b) => b.near - a.near || (a.key < b.key ? -1 : 1))
     .map(item => item.test);
 }
-const documentation = (path: string) => /\.(?:md|mdx|txt)$/i.test(path);
+/** Prose only (src/prose-paths.ts): a dependency, build or fixture `.txt` is never docs. */
+const documentation = documentationPath;
 
 /** Tests an import graph reached for the change (src/js-import-graph.ts importGraphTests). */
 export type ImportedTests = { tests: string[]; openTests: number; untraced: string[] };

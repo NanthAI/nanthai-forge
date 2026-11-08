@@ -151,9 +151,14 @@ for (const [name, memberPaths] of [
     assert.equal(runCount(f), 3);
   });
 
-// Any ecosystem (Issue 6af95601): nested build inputs and ordered migration folders.
+// Any ecosystem (Issue 6af95601): nested build inputs and ordered migration folders; test harness
+// files of every ecosystem (Issue c2f6a26a, rule v4: before it these landed on their first check).
 for (const [name, memberPaths] of [
   ['a nested conftest.py', ['pkg/conftest.py', 'pkg/test_b.py']],
+  ['a nested vitest.setup.ts', ['src/cart.ts', 'packages/x/vitest.setup.ts']],
+  ['an RSpec spec_helper.rb', ['app/models/cart.rb', 'spec/spec_helper.rb']],
+  ['a Jest manual mock', ['src/cart.ts', 'src/__mocks__/axios.js']],
+  ['an Elixir mix.exs', ['apps/core/lib/cart.ex', 'apps/core/mix.exs']],
   ['a migration sequence folder both sides add to', ['app/migrations/0005_a.py', 'app/migrations/0005_b.py']],
   [
     'an Alembic versions folder both sides add to',
@@ -188,7 +193,7 @@ test('replay: an in-package manifest change lands on its first check beside an i
   });
   assert.deepEqual(f.reuseDecisions, ['proof']);
   const proof = receipts(f)[1].crossHeadProof;
-  assert.equal(proof.riskRule, 'first-check-risk-v3');
+  assert.equal(proof.riskRule, 'first-check-risk-v4');
   assert.deepEqual(proof.placedRisk, [{ path: 'packages/c/package.json', reach: ['js:packages/c'] }]);
   assert.equal(runCount(f), 2, 'no recheck (before: global-risk and a third run)');
   // A dependent package on the other side, or no pinned graph, keeps the recheck.

@@ -12,7 +12,13 @@
 import { z } from 'zod';
 import { enclosingPackages, withDependents, type PackageGraph } from './package-graph.js';
 import { packageKey, type Ecosystem, type GraphPackage } from './package-graph-types.js';
-import { firstCheckRisk, firstCheckRiskPaths, sharedSequenceFolders } from './first-check-risk.js';
+import { documentationPath } from './prose-paths.js';
+import {
+  firstCheckRisk,
+  firstCheckRiskPaths,
+  sharedSequenceFolders,
+  type FirstCheckRiskRule,
+} from './first-check-risk.js';
 
 export const PACKAGE_PLACEMENT_RULE = 'package-placement-v1';
 /** A larger graph is not pinned (the proof then keeps every manifest global). */
@@ -90,7 +96,7 @@ export function outsideReach(graph: Graph, paths: readonly string[], reach: read
   const keys = new Set(reach);
   return paths.every(path => {
     const owners = enclosingPackages(graph, path);
-    if (!owners.length) return /\.(?:md|mdx|txt|rst|adoc)$/i.test(path);
+    if (!owners.length) return documentationPath(path);
     return owners.every(pkg => !keys.has(packageKey(pkg)));
   });
 }
@@ -135,13 +141,16 @@ export function placedRiskBetween(
   return placed.flat();
 }
 /** Server re-check of a proof's placed list from its own fields (no graph): each placed path is a
- * below-root manifest or lockfile on exactly one side, one side only places, and nothing else is risk. */
+ * below-root manifest or lockfile on exactly one side, one side only places, and nothing else is risk,
+ * all under the rule the proof was decided with. */
 export function validPlacedRisk(proof: {
   candidatePaths: string[];
   mainPaths: string[];
   checkEntries: string[];
+  riskRule: FirstCheckRiskRule;
   placedRisk?: PlacedRisk[] | undefined;
 }) {
+  const rule = proof.riskRule;
   const placed = proof.placedRisk ?? [];
   const paths = new Set(placed.map(item => item.path));
   const onCandidate = placed.filter(item => proof.candidatePaths.includes(item.path)).length,
@@ -155,10 +164,11 @@ export function validPlacedRisk(proof: {
       item =>
         item.reach.length > 0 &&
         item.reach.every(key => !key.endsWith(':')) &&
-        firstCheckRisk(item.path, proof.checkEntries) === 'package manifest or lockfile' &&
+        firstCheckRisk(item.path, proof.checkEntries, rule) === 'package manifest or lockfile' &&
         !WORKSPACE.test(item.path),
     ) &&
-    !sharedSequenceFolders(proof.candidatePaths, proof.mainPaths).length &&
-    !firstCheckRiskPaths([...rest(proof.candidatePaths), ...rest(proof.mainPaths)], proof.checkEntries).length
+    !sharedSequenceFolders(proof.candidatePaths, proof.mainPaths, rule).length &&
+    !firstCheckRiskPaths([...rest(proof.candidatePaths), ...rest(proof.mainPaths)], proof.checkEntries, rule)
+      .length
   );
 }

@@ -267,8 +267,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `tests/x.rs`), when the project's runner runs that file.
 - **Package graph, any ecosystem.** From manifests alone (never running repository code) Forge maps
   each changed path to its owning package and selects it plus every package that depends on it:
-  Go modules (`go.mod`; a module requiring another depends on it; a change to `_test.go` files or
-  `testdata/` only runs that package folder), Rust crates (Cargo workspace `members`/`exclude`, `path`
+  Go modules (`go.mod`; a module requiring another depends on it; a change to `_test.go` files only
+  runs that package folder, and a `testdata/` file, which other packages' tests may read by a
+  relative path, runs its whole module and the modules that require it), Rust crates (Cargo workspace `members`/`exclude`, `path`
   and `[workspace.dependencies]` edges), Python packages (`pyproject.toml` `[project]`/Poetry or
   `setup.cfg`, src layouts, requirement names and `[tool.uv.sources]` paths; `setup.py` is code and is
   never read), Gradle projects (`settings.gradle(.kts)` `include`, `project(":x")` and `projects.x`
@@ -292,7 +293,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   narrow it, a manifest cannot be read, the layout
   is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
   no unambiguous command exists (Python without pytest declared, Bun workspaces). Repository docs
-  outside every package change nothing. A package found only by its manifest inside another
+  outside every package change nothing. Docs means prose (`src/prose-paths.ts`, one rule for every
+  selector): Markdown, MDX, reStructuredText, AsciiDoc, and `.txt` only with a prose name (`README`,
+  `LICENSE`, `NOTICE`, `CHANGELOG`, …) or under `docs/`; `requirements.txt`, `CMakeLists.txt` and
+  any file under a fixture, `testdata` or snapshot folder are inputs, never docs. A package found only by its manifest inside another
   package's folder also selects the enclosing package, unless that package has no tests and nothing
   depends on it. When the manifests place no package, the reason names them and why (a Gradle build
   file with no settings file, a `package.json` with neither workspaces nor its own lockfile). Edges between ecosystems (a JS package that
@@ -386,7 +390,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   (computed paths, by-name closures, three or more modules away) never fills it.
   A *comment-only* edit (the parser sees the same program for JS and TS; for `#`-comment languages
   only the leading header changed) adds only the tests that read the file's text, never its
-  importers (`local.commentOnly`). The base bytes come from this machine's object stores; without
+  importers (`local.commentOnly`). A comment that a tool reads as an instruction is code: a
+  type-checker or linter directive (`@ts-expect-error`, `eslint-disable`, `type: ignore`, `noqa`),
+  a test-environment or JSX pragma, an encoding or `frozen_string_literal` line, a Dockerfile parser
+  directive, a YAML schema line or a build tag. The base bytes come from this machine's object stores; without
   them a path counts as changed.
   A *docs-only* change (Markdown under `docs/` or at the root) parses no import graph: it runs only
   the tests that read a changed document, beside the static checks it triggers. A test reads a

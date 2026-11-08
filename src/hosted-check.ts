@@ -35,6 +35,7 @@ export function hostedCheckDefinition(command: unknown, id: string, at: string) 
     ...(c.actions ? { actions: c.actions } : {}),
     ...(c.selection ? { selection: c.selection } : {}),
     ...(c.docsPaths?.length ? { docsPaths: [...new Set(c.docsPaths)] } : {}),
+    ...(c.globalRiskPaths?.length ? { globalRiskPaths: [...new Set(c.globalRiskPaths)] } : {}),
     ...(c.submodules === false ? { submodules: false } : {}),
     ...(c.actionsToolchains ? { actionsToolchains: c.actionsToolchains } : {}),
     ...(c.actionsCache ? { actionsCache: c.actionsCache } : {}),

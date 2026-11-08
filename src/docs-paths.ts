@@ -7,23 +7,39 @@ import { markdownPath, TESTED_DOCS_MAX, TESTED_DOCS_RULE, type TestedDocs } from
  * globs of files that no test or build reads. A project without it gets today's safe
  * behaviour: the whole command always runs and every Markdown overlap rechecks. */
 export const DOCS_PATHS_MAX = 32;
+/** A repository-relative glob (docs/workflows.md glob syntax): compiles, no leading `/`, no `..`. */
+const repositoryGlob = (glob: string) => {
+  try {
+    globPattern(glob);
+    return !glob.startsWith('/') && !glob.split('/').includes('..');
+  } catch {
+    return false;
+  }
+};
 export const docsPathsSchema = z
   .array(
     z
       .string()
       .min(1)
       .max(200)
-      .refine(glob => {
-        try {
-          globPattern(glob);
-          return !glob.startsWith('/') && !glob.split('/').includes('..');
-        } catch {
-          return false;
-        }
-      }, 'Select repository-relative globs such as docs/** or **/*.md.'),
+      .refine(repositoryGlob, 'Select repository-relative globs such as docs/** or **/*.md.'),
   )
   .min(1)
   .max(DOCS_PATHS_MAX);
+/** Opt-in, per check definition: files that can change every test or build result but that
+ * Forge cannot recognise by shape (a custom harness, a shared fixture corpus). A change to one
+ * never lands on an earlier check or overtakes an older landing (src/first-check-risk.ts). */
+export const GLOBAL_RISK_PATHS_MAX = 64;
+export const globalRiskPathsSchema = z
+  .array(
+    z
+      .string()
+      .min(1)
+      .max(200)
+      .refine(repositoryGlob, 'Select repository-relative globs such as test/harness/** or tools/env.sh.'),
+  )
+  .min(1)
+  .max(GLOBAL_RISK_PATHS_MAX);
 
 const compiled = new Map<string, RegExp[]>();
 function patterns(globs: readonly string[]): RegExp[] {

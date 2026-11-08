@@ -70,6 +70,7 @@ export function recordEvidence(
     ...(command.actions ? { actions: command.actions } : {}),
     ...(command.selection ? { selection: command.selection } : {}),
     ...(command.docsPaths?.length ? { docsPaths: [...new Set(command.docsPaths)] } : {}),
+    ...(command.globalRiskPaths?.length ? { globalRiskPaths: [...new Set(command.globalRiskPaths)] } : {}),
     ...(command.submodules === false ? { submodules: false } : {}),
     ...(command.actionsToolchains ? { actionsToolchains: command.actionsToolchains } : {}),
     ...(command.actionsCache ? { actionsCache: command.actionsCache } : {}),

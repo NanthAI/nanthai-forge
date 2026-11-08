@@ -7,20 +7,27 @@
  * names it). It reads paths only, so it works with any CI. A match always
  * keeps today's recheck; so does any doubt.
  */
+import { globPattern } from './autonomy-policy.js';
 import { isStandardForgeCheck, STANDARD_CHECK_INPUTS } from './standard-check.js';
+import { HARNESS_RISK_V4, proseRootText } from './first-check-risk-v4.js';
 
 /** Proofs pin the rule they were decided under: v1 receipts keep v1 decisions, v2 added nested
  * non-JS build inputs, database schema files and sequence folders; v3 keeps v2's list and places a
- * manifest or lockfile inside a package of the pinned package graph (src/package-placement.ts). */
+ * manifest or lockfile inside a package of the pinned package graph (src/package-placement.ts); v4
+ * adds test-harness, runner and build files of every ecosystem by shape (src/first-check-risk-v4.ts)
+ * and counts a root `.txt` as prose only by name. Declared `globalRiskPaths` join the check entries. */
 export const FIRST_CHECK_RISK_RULES = [
   'first-check-risk-v1',
   'first-check-risk-v2',
   'first-check-risk-v3',
+  'first-check-risk-v4',
 ] as const;
 export type FirstCheckRiskRule = (typeof FIRST_CHECK_RISK_RULES)[number];
-export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v3';
-const since = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
+export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v4';
+/** True when `rule` is `from` or a later rule. */
+export const riskRuleSince = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
   FIRST_CHECK_RISK_RULES.indexOf(rule) >= FIRST_CHECK_RISK_RULES.indexOf(from);
+const since = riskRuleSince;
 const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] = [
   // Package manifests and lockfiles, for the common ecosystems.
   {
@@ -76,11 +83,25 @@ const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] =
     since: 'first-check-risk-v2',
     test: /(?:^|\/)(?:schema\.(?:rb|sql)|structure\.sql)$/,
   },
+  ...HARNESS_RISK_V4.map(test => ({
+    reason: 'build, lint or test configuration',
+    since: 'first-check-risk-v4' as const,
+    test,
+  })),
 ];
 
 /** A check entry: an exact path, or a glob where `*` stays inside one path
- * segment and `{a,b}` is a choice (no nesting). */
+ * segment and `{a,b}` is a choice (no nesting). A declared global-risk glob may also
+ * use `**`, `?` and `[...]`; one that does not compile matches every path (widen). */
 function entryMatcher(entry: string): (path: string) => boolean {
+  if (/\*\*|[?[]/.test(entry)) {
+    try {
+      const pattern = globPattern(entry);
+      return path => pattern.test(path);
+    } catch {
+      return () => true;
+    }
+  }
   if (!/[*{]/.test(entry)) return path => path === entry;
   let source = '';
   for (const part of entry.split(/(\{[^{}]*\}|\*)/))
@@ -94,8 +115,12 @@ function entryMatcher(entry: string): (path: string) => boolean {
 const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const segmentGlob = (text: string) => text.split('*').map(escapeRegExp).join('[^/]*');
 
-/** Root files are configuration unless they are plain prose. */
-const rootConfig = (path: string) => !path.includes('/') && !/\.(?:md|txt)$/i.test(path);
+/** Root files are configuration unless they are plain prose. Before v4 every root `.txt` was prose;
+ * from v4 only a prose name is (a root `constraints.txt` or `CMakeLists.txt` is a build input). */
+const rootConfig = (path: string, rule: FirstCheckRiskRule) =>
+  !path.includes('/') &&
+  !/\.md$/i.test(path) &&
+  !(/\.txt$/i.test(path) && (!since(rule, 'first-check-risk-v4') || proseRootText(path)));
 
 /** Reason the path is global-risk, or null. `checkEntries` are the files the
  * project's check definition runs (its own data, any runner). */
@@ -112,7 +137,7 @@ function riskOf(
   rule: FirstCheckRiskRule,
 ): string | null {
   if (entries.some(entry => entry(path))) return 'check script or check contract';
-  if (rootConfig(path)) return 'root configuration';
+  if (rootConfig(path, rule)) return 'root configuration';
   return (
     patterns.find(pattern => (!pattern.since || since(rule, pattern.since)) && pattern.test.test(path))
       ?.reason ?? null
@@ -155,16 +180,19 @@ export function checkEntryPaths(check: { executable: string; args: readonly stri
 }
 
 /** Entry files of a check run: its command's entries (above, same order), then those of the
- * Actions setup command it runs first, which can change every result just as the check script can.
- * The same files governance protects (src/public-governance.ts definedCheckEntryPaths). */
+ * Actions setup command it runs first, which can change every result just as the check script can
+ * (the same files governance protects, src/public-governance.ts definedCheckEntryPaths), then the
+ * definition's declared `globalRiskPaths` globs (risk only; governance does not protect them). */
 export function checkRunEntryPaths(check: {
   executable: string;
   args: readonly string[];
   actions?: { setup?: { executable: string; args: readonly string[] } | undefined } | undefined;
+  globalRiskPaths?: readonly string[] | undefined;
 }) {
   const paths = checkEntryPaths(check);
   const setup = check.actions?.setup;
-  for (const path of setup ? checkEntryPaths(setup) : []) if (!paths.includes(path)) paths.push(path);
+  for (const path of [...(setup ? checkEntryPaths(setup) : []), ...(check.globalRiskPaths ?? [])])
+    if (!paths.includes(path)) paths.push(path);
   return paths;
 }
 

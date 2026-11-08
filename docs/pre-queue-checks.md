@@ -88,9 +88,12 @@ configured check (no `configure-check`) skips it and queues as before.
 
 ### Global-risk files
 
-One list, in `src/first-check-risk.ts` (rule `first-check-risk-v3`; a proof pins the
-rule it was decided under, so older receipts keep their v1 and v2 decisions). A change
-or a main delta touching any of these always rechecks, except a placed manifest (below):
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v4`; a proof pins the
+rule it was decided under, so older receipts keep their v1, v2 and v3 decisions). The
+same list decides which older landing a newer one may overtake. A change or a main
+delta touching any of these always rechecks, except a placed manifest (below). When a
+shape is in doubt it is on the list: a wrong match costs one recheck, a miss lands a
+change on a check that never ran the new harness.
 
 - package manifests and lockfiles (npm, pnpm, Yarn, Bun, Cargo, Go, Python,
   Ruby, Composer, Maven, Gradle) and `.npmrc`/`.yarnrc`;
@@ -125,7 +128,30 @@ or a main delta touching any of these always rechecks, except a placed manifest 
   `alembic/versions` (Django, Rails, Flyway, Prisma, Alembic), the change rechecks even
   though the paths are disjoint (`0005_a.py` and `0005_b.py` would leave two leaf
   migrations on main). Reads paths only; folders in different places do not interact;
-- any other root-level file that is not `.md` or `.txt`.
+- from v4 (`src/first-check-risk-v4.ts`), test-harness, runner and build files of every
+  ecosystem by shape, at any depth: runner setup files (`vitest.setup.ts`,
+  `jest.preset.js`, `vitest.workspace.ts`, `setupTests.ts`, `global-setup.ts`,
+  `karma.conf.js`), harness-named files and `support/` or `setup/` folders inside a
+  test folder (`spec/spec_helper.rb`, `spec/rails_helper.rb`, `spec/support/**`,
+  `test/test_helper.exs`, `tests/bootstrap.php`, `test/setup.ts`), Jest `__mocks__/`,
+  dot-rc files (`.mocharc.yml`, `.nycrc`, `.coveragerc`), `.rspec`, `phpunit.xml(.dist)`,
+  `.env*`, compose files, and the build and dependency files of Ruby, Elixir, Swift,
+  Dart, Scala, Deno, Bun, Nix, Haskell, OCaml, Zig, C/C++ (Meson, `*.mk`, Conan, vcpkg)
+  and JS workspace tools (`turbo.json`, `nx.json`, `project.json`); a test file itself
+  (`*.test.*`, `*_spec.*`) is not harness;
+- every path matching the check definition's declared `globalRiskPaths` (below);
+- any other root-level file that is not `.md` or a prose `.txt` (`README`, `LICENSE`,
+  `NOTICE`, `CHANGELOG`, `llms.txt`, …; before v4 every root `.txt`).
+
+A project declares what Forge cannot recognise by shape (a custom harness folder, a
+fixture corpus every test reads) as `globalRiskPaths` on its check definition:
+repository-relative globs (`**`, `*`, `?`, `{a,b}`; at most 64), part of the definition
+digest. They are risk for first-check reuse and for overtaking only; unlike the command's
+entry files they need no owner approval.
+
+```sh
+nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","args":["ci/check.sh"],"environmentLabel":"","globalRiskPaths":["test/harness/**","fixtures/shared/**"]}}'
+```
 
 From v3 (Issue 5cfcca4b), a package manifest or lockfile inside a package is
 **placed**: the checked run pins its manifest package graph in the selection

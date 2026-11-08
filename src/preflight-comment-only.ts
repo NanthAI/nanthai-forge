@@ -41,10 +41,27 @@ const afterHeader = (text: string) => {
   while (start < lines.length && /^\s*(?:#.*)?$/.test(lines[start]!)) start++;
   return [...shebang, ...lines.slice(start)].join('\n');
 };
+/** Comments that tools read as instructions, in any language: type-checker and linter directives
+ * (`@ts-expect-error`, `eslint-disable`, `type: ignore`, `noqa`, `ruff:`, `pyright:`, `rubocop:`,
+ * `shellcheck`), test-environment and JSX pragmas (`@vitest-environment`, `@jest-environment`,
+ * `@jsx`), triple-slash references, coverage switches, encoding and magic lines
+ * (`frozen_string_literal`, `-*- coding -*-`, `vim:`), Dockerfile parser directives (`syntax=`,
+ * `escape=`, `check=`), YAML schema lines, build tags and source maps. Editing one changes what runs
+ * or how it is checked, so it is code. */
+const DIRECTIVE =
+  /(?:\/\/+|\/\*+|#+|^\s*\*)\s*(?:@ts-|@jsx|@flow|@vitest-environment|@jest-environment|@vite-ignore|@preserve|<reference\b|<amd-|#\s*source(?:Mapping)?URL|eslint|oxlint|biome-ignore|prettier-ignore|deno-lint|deno-fmt|istanbul\b|c8\b|v8\b|webpack|frozen_string_literal|-\*-|vim?:|coding[:=]|type:|ruff:|noqa|pyright:|mypy:|pylint:|isort:|fmt:|pragma\b|rubocop:|shellcheck|syntax=|escape=|check=|yaml-language-server|go:|\+build|nolint|NOLINT|lint:|@generated|nocheck|typecheck|sorbet|typed:)/i;
+const directives = (text: string) =>
+  text
+    .split('\n')
+    .filter(line => DIRECTIVE.test(line))
+    .map(line => line.trim());
+
 /** True when `before` and `after` differ only in comments (and, for JS/TS, layout): the same
- * program runs. Header-only languages compare everything after their leading `#` block. */
+ * program runs. Header-only languages compare everything after their leading `#` block. A changed,
+ * added or removed directive comment (above) is never comment-only. */
 export function commentOnlyEdit(path: string, before: string, after: string): boolean {
   if (before === after) return false;
+  if (directives(before).join('\n') !== directives(after).join('\n')) return false;
   const kind = scriptKind(path);
   if (kind !== null) {
     const left = program(path, before, kind);

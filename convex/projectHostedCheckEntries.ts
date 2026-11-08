@@ -8,7 +8,7 @@ import { checkSchema } from '../src/work-types';
 const maxDefinitions = 100;
 /**
  * Keep `hostedProjects.checkEntries` equal to the entry files of every check
- * definition and setup action. It runs only when an owner saves a definition (rare;
+ * definition and setup action, and `globalRiskPaths` to their declared global-risk globs. It runs only when an owner saves a definition (rare;
  * one indexed read of that project's definitions and one patch), so each landing
  * decision reads the list from the project row it already loaded: no extra read or call.
  */
@@ -17,7 +17,11 @@ export async function refreshCheckEntries(ctx: MutationCtx, projectId: Id<'hoste
     .query('projectHostedCheckSettings')
     .withIndex('by_project_and_kind', q => q.eq('projectId', projectId).eq('kind', 'definition'))
     .take(maxDefinitions);
-  const entries = definedCheckEntryPaths(rows.map(row => checkSchema.parse(JSON.parse(row.value))));
-  await ctx.db.patch(projectId, { checkEntries: entries });
+  const checks = rows.map(row => checkSchema.parse(JSON.parse(row.value)));
+  const entries = definedCheckEntryPaths(checks);
+  // Declared global-risk globs stay apart from the entries: they are risk for landing order, not
+  // paths that need owner approval.
+  const globalRiskPaths = [...new Set(checks.flatMap(check => check.globalRiskPaths ?? []))].sort();
+  await ctx.db.patch(projectId, { checkEntries: entries, globalRiskPaths });
   return entries;
 }

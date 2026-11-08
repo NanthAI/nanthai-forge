@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { FIRST_CHECK_RISK_RULES, globalRiskBetween } from './first-check-risk.js';
+import { FIRST_CHECK_RISK_RULES, globalRiskBetween, riskRuleSince } from './first-check-risk.js';
 import { markdownPath, TESTED_DOCS_RULE } from './tested-docs.js';
 import { validPlacedRisk } from './package-placement.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -66,8 +66,8 @@ const cleanDisjointProof = z
     ...cleanDisjointV1,
     docsOverlap: z.array(z.string()),
     testedDocsRule: z.literal(TESTED_DOCS_RULE),
-    /** Rule v3 (Issue 5cfcca4b): manifests and lockfiles placed inside a package, with the
-     * package keys each can affect; the other side changed nothing those packages hold. */
+    /** Rule v3 and later (Issue 5cfcca4b): manifests and lockfiles placed inside a package, with
+     * the package keys each can affect; the other side changed nothing those packages hold. */
     placedRisk: z
       .array(z.object({ path: z.string().min(1), reach: z.array(z.string().min(1)).min(1) }).strict())
       .min(1)
@@ -113,7 +113,7 @@ export function validCrossHeadProof(proof: CrossHeadProof) {
         path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
       ) &&
       (proof.algorithm === 'clean-disjoint-v2' && proof.placedRisk
-        ? proof.riskRule === 'first-check-risk-v3' && validPlacedRisk(proof)
+        ? riskRuleSince(proof.riskRule, 'first-check-risk-v3') && validPlacedRisk(proof)
         : !globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule))
     );
   const heads = [proof.checkedBase.head, proof.checked.head, proof.main.head, proof.head];

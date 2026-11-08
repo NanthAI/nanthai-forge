@@ -357,6 +357,8 @@ const projectFields = {
   autonomyPolicy: v.optional(autonomyPolicy),
   /** Entry files of every check definition and setup action (src/public-governance.ts); kept current by the definition save. Absent until the first save after this field existed. */
   checkEntries: v.optional(v.array(v.string())),
+  /** Declared `globalRiskPaths` globs of every check definition, refreshed with `checkEntries`; global-risk only, never owner-protected. */
+  globalRiskPaths: v.optional(v.array(v.string())),
   agentGuidance: v.optional(v.string()),
   exchangeCleanupCursor: v.optional(v.string()),
   exchangeCleanupDone: v.optional(v.boolean()),

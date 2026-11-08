@@ -503,6 +503,30 @@ test('a contributor change to a non-gating check or a setup action needs owner a
   }
 });
 
+test('declared globalRiskPaths fold into the project row apart from protected check entries', async () => {
+  const f = await projectCheckFixture(['.bench/ci.sh']);
+  await f.rawChecks.configure(
+    {
+      kind: 'definition',
+      checkId: randomUUID(),
+      command: {
+        name: 'lint',
+        environmentLabel: 'clean',
+        executable: 'node',
+        args: ['tools/lint-check.mjs'],
+        globalRiskPaths: ['spec/harness/**', 'tools/env.sh'],
+      },
+    },
+    null,
+  );
+  const project = f.tables.hostedProjects.get(f.projectId);
+  assert.deepEqual(project.checkEntries, ['.bench/ci.sh', 'tools/lint-check.mjs']);
+  assert.deepEqual(project.globalRiskPaths, ['spec/harness/**', 'tools/env.sh']);
+  // Risk for landing order and reuse only: a contributor change there needs no owner approval.
+  const result = await f.accept(await prepared(f, ['spec/harness/env.rb', 'src/app.ts']), 'contributor');
+  assert.equal(result.status, 'landed');
+});
+
 test('contributor ordinary changes auto-land; owner own protected Lane auto-lands; review policy still applies', async () => {
   for (const agent of [true, false]) {
     const f = await publicFixture();

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digestChunks } from './portable-hash.js';
+import { documentationPath } from './prose-paths.js';
 import { moduleEcosystem, moduleNarrowing } from './module-selection.js';
 import type { ModuleGraph } from './module-graph-types.js';
 import { cargoGraph, goGraph } from './package-graph-go-rust.js';
@@ -127,7 +128,6 @@ export type PackageSelection =
   | { scope: 'scoped' | 'none'; reason: string; packages: SelectedPackage[]; commands: PackageCommand[] }
   | { scope: 'full'; reason: string };
 
-const DOCUMENTATION = /\.(?:md|mdx|txt|rst|adoc)$/i;
 const label = (pkg: GraphPackage) => `${pkg.ecosystem}:${pkg.dir || '.'}`;
 const within = (dir: string, path: string) => !dir || path.startsWith(`${dir}/`);
 
@@ -186,8 +186,8 @@ export function packageSelection(
       continue;
     }
     const owning = enclosingPackages(graph, path);
-    if (!owning.length || (owning.every(pkg => !pkg.dir) && DOCUMENTATION.test(path))) {
-      if (DOCUMENTATION.test(path)) continue;
+    if (!owning.length || (owning.every(pkg => !pkg.dir) && documentationPath(path))) {
+      if (documentationPath(path)) continue;
       return full(`${path} is outside every package`);
     }
     for (const pkg of owning) owners.set(packageKey(pkg), pkg);

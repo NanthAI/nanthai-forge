@@ -32,8 +32,9 @@ export async function landingChangedPaths(
   }
 }
 
-/** The overtaking side: its paths and the project's check entry files (global-risk
- * for any runner, folded into the project row when a definition is saved). Null
+/** The overtaking side: its paths and the project's check entry files and declared
+ * global-risk globs (global-risk for any runner, folded into the project row when a
+ * definition is saved). Null
  * when either is unknown, so nothing is overtaken. */
 export async function overtakingSide(
   ctx: QueryCtx | MutationCtx,
@@ -43,5 +44,7 @@ export async function overtakingSide(
   const project = await ctx.db.get(row.projectId);
   if (!project?.checkEntries) return null;
   const paths = await landingChangedPaths(ctx, row, state);
-  return paths ? { paths, checkEntries: project.checkEntries } : null;
+  return paths
+    ? { paths, checkEntries: [...project.checkEntries, ...(project.globalRiskPaths ?? [])] }
+    : null;
 }

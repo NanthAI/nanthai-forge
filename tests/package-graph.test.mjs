@@ -58,8 +58,10 @@ test('Go: a changed module runs with the modules that require it; test-only chan
   assert.equal(lib.scope, 'scoped');
   assert.deepEqual(names(lib), ['lib:changed', 'svc:dependent']);
   assert.deepEqual(commands(lib), ['lib go test ./...', 'svc go test ./...']);
+  assert.deepEqual(commands(select(go, ['lib/sum/sum_test.go'])), ['lib go test ./sum']);
+  // testdata is data any test of the module may read by a relative path: the module and its dependents.
   const tests = select(go, ['lib/sum/sum_test.go', 'lib/sum/testdata/case.json']);
-  assert.deepEqual(commands(tests), ['lib go test ./sum']);
+  assert.deepEqual(commands(tests), ['lib go test ./...', 'svc go test ./...']);
   assert.deepEqual(commands(select(go, ['tools/gen.go', 'README.md'])), ['tools go test ./...']);
   // A root file (go.work) belongs to no package: full, with the reason.
   const root = select(go, ['go.work']);
@@ -69,6 +71,40 @@ test('Go: a changed module runs with the modules that require it; test-only chan
   const single = { 'go.mod': 'module example.com/one\n', 'a/a.go': '', 'a/a_test.go': '' };
   assert.equal(select(single, ['a/a.go']).scope, 'full');
   assert.deepEqual(commands(select(single, ['a/a_test.go'])), [' go test ./a']);
+});
+
+test('replay (Go): shared testdata read from another package runs that package too', () => {
+  const tree = {
+    'go.mod': 'module example.com/one\n',
+    'pkg/a/a.go': 'package a\n',
+    'pkg/a/testdata/x.json': '{}',
+    'pkg/b/b.go': 'package b\n',
+    'pkg/b/b_test.go': 'package b\n// reads ../a/testdata/x.json\n',
+  };
+  // Before: only pkg/a ran (`go test ./pkg/a`); pkg/b's reader was skipped.
+  const selection = select(tree, ['pkg/a/testdata/x.json']);
+  assert.equal(selection.scope, 'full', JSON.stringify(selection));
+  assert.deepEqual(commands(select(tree, ['pkg/b/b_test.go'])), [' go test ./pkg/b']);
+});
+
+test('replay (*.txt): dependency, build and fixture text files select their consumers, prose does not', () => {
+  const tree = {
+    'pyproject.toml': '[project]\nname = "root"\n',
+    'requirements.txt': 'requests==2.32.0\n',
+    'pkgs/leaf/pyproject.toml': '[project]\nname = "leaf"\n',
+    'pkgs/leaf/x.py': '',
+    'pkgs/other/pyproject.toml': '[project]\nname = "other"\n',
+    'pkgs/other/y.py': '',
+    'tests/fixtures/expected.txt': 'golden\n',
+    'LICENSE.txt': 'text\n',
+    'docs/notes.txt': 'prose\n',
+  };
+  const graph = graphOf(tree);
+  // Before: requirements.txt was skipped as documentation and the check scoped to the leaf.
+  assert.notEqual(packageSelection(graph, ['requirements.txt', 'pkgs/leaf/x.py']).scope, 'scoped');
+  for (const path of ['requirements.txt', 'CMakeLists.txt', 'tests/fixtures/expected.txt'])
+    assert.notEqual(packageSelection(graph, [path]).scope, 'none', path);
+  assert.equal(packageSelection(graph, ['LICENSE.txt', 'docs/notes.txt']).scope, 'none');
 });
 
 const cargo = {

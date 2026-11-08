@@ -978,6 +978,11 @@ A definition may also declare `docsPaths` (globs; see
 matches them runs no command on the Actions runner, and the server refuses a
 docs-scoped plan for a command whose check declares none.
 
+A definition may declare `globalRiskPaths` (globs; see
+[global-risk files](../pre-queue-checks.md#global-risk-files)): files that can change
+every result but that Forge cannot recognise by shape. A change on either side of a
+composition that touches one never lands on an earlier check.
+
 ### Submodules in checks
 
 The Actions planner and the self-hosted runner replace each submodule pointer in

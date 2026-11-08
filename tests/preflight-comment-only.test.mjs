@@ -125,3 +125,30 @@ test('preflight finds comment-only paths from the base State in the local object
   );
   assert.equal(unknown.local.commentOnly, undefined);
 });
+
+test('replay: a changed magic comment is code in every language, never comment-only', () => {
+  const cases = [
+    ['lib/a.rb', '# frozen_string_literal: true\nputs "x"\n', 'puts "x"\n'],
+    ['lib/a.py', '# -*- coding: latin-1 -*-\nx = 1\n', '# -*- coding: utf-8 -*-\nx = 1\n'],
+    ['lib/a.py', 'x = f()  # type: ignore\n', 'x = f()\n'],
+    ['lib/a.py', '# ruff: noqa\nx = 1\n', 'x = 1\n'],
+    ['Dockerfile', '# syntax=docker/dockerfile:1.4\nFROM a\n', 'FROM a\n'],
+    ['Dockerfile', '# escape=`\nFROM a\n', 'FROM a\n'],
+    ['ci.yml', '# yaml-language-server: $schema=a.json\nx: 1\n', 'x: 1\n'],
+    ['run.sh', '# shellcheck disable=SC2086\necho $x\n', 'echo $x\n'],
+    ['src/a.ts', '// @ts-expect-error\nconst n: number = "x";\n', 'const n: number = "x";\n'],
+    ['src/a.ts', '// @ts-nocheck\nexport const n = 1;\n', 'export const n = 1;\n'],
+    ['src/a.test.ts', '/** @vitest-environment jsdom */\nexport {};\n', 'export {};\n'],
+    ['src/a.test.js', '/** @jest-environment jsdom */\nexport {};\n', 'export {};\n'],
+    ['src/a.tsx', '/** @jsxImportSource preact */\nexport const a = <b />;\n', 'export const a = <b />;\n'],
+    ['src/a.ts', '/// <reference types="vite/client" />\nexport {};\n', 'export {};\n'],
+    ['src/a.js', '/* eslint-disable no-undef */\nx();\n', 'x();\n'],
+  ];
+  for (const [path, before, after] of cases) {
+    assert.equal(commentOnlyEdit(path, before, after), false, `${path}: ${before.split('\n')[0]}`);
+    assert.equal(commentOnlyEdit(path, after, before), false, `${path} (added)`);
+  }
+  // Ordinary comments stay comment-only.
+  assert.equal(commentOnlyEdit('lib/a.rb', '# old note\nputs "x"\n', '# new note\nputs "x"\n'), true);
+  assert.equal(commentOnlyEdit('src/a.ts', '// old\nexport {};\n', '// new\nexport {};\n'), true);
+});

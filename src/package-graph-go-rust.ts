@@ -14,8 +14,9 @@ import {
 
 /** Go: every go.mod is a module (Go itself skips vendor/ and testdata/). A module depends on another
  * in-repository module it requires (replaced or not, so a published copy is over-, never under-
- * selected). A change to `_test.go` files or `testdata/` only is tested in its own package folder:
- * nothing can import a test file. */
+ * selected). A change to `_test.go` files only is tested in its own package folder: nothing can
+ * import a test file. A `testdata/` file is data that any test of the module may read by a relative
+ * path (`../a/testdata/x.json`), so it selects its whole module and the modules that require it. */
 export function goGraph(paths: string[], read: ManifestReader): EcosystemResult {
   const manifests = paths.filter(
     path => basename(path) === 'go.mod' && !/(?:^|\/)(?:vendor|testdata)\//.test(path),
@@ -61,7 +62,7 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
     ecosystem: 'go',
     packages: modules.map(item => item.pkg),
     leafOwner(path) {
-      const test = /_test\.go$/.test(path) ? dirname(path) : /^(.*?)\/?testdata\//.exec(path)?.[1];
+      const test = /_test\.go$/.test(path) && !/(?:^|\/)testdata\//.test(path) ? dirname(path) : undefined;
       const module = test === undefined ? undefined : moduleOf(path);
       if (test === undefined || !module) return undefined;
       return {
