@@ -7,6 +7,7 @@ import { LandingProgress, LandingRail } from './LandingProgress';
 import { landingState, elapsed, type LandingRead } from './landing-model';
 import { RequestChanges, type ReviewRecipient } from '../review/RequestChanges';
 import { ReviewDisposition, type ReviewAcceptance } from '../review/ReviewDisposition';
+import type { OwnerReview } from './OwnerReviewActions';
 import './landing.css';
 export type LandingDecisionProps = {
   read?: LandingRead | null;
@@ -38,6 +39,8 @@ export type LandingDecisionProps = {
   requestOpen?: boolean;
   requestSent?: { text: string; to: string };
   children?: ReactNode;
+  /** Owner Accept/Decline for a landing held for review (fe5bea80). */
+  review?: OwnerReview;
 };
 export function LandingDecision(props: LandingDecisionProps) {
   const [confirm, setConfirm] = useState(props.initialRevert ?? false),
@@ -94,6 +97,7 @@ export function LandingDecision(props: LandingDecisionProps) {
           cancel={props.cancel}
           busy={props.busy}
           aheadLabel={props.aheadLabel}
+          review={props.review}
         />
       ) : landed ? (
         <>

@@ -49,6 +49,7 @@ const Secrets = lazy(() => import('./Secrets'));
 const ProjectBackups = lazy(() => import('./ProjectBackups'));
 const AccountData = lazy(() => import('./AccountData'));
 const DeviceLogin = lazy(() => import('./DeviceLogin'));
+const OwnerApprove = lazy(() => import('./OwnerApprove'));
 const DeviceCredentials = lazy(() =>
   import('./DeviceLogin').then(module => ({ default: module.DeviceCredentials })),
 );
@@ -666,7 +667,13 @@ export default function Hosted() {
     <ClerkProvider publishableKey={key}>
       <ConvexProviderWithClerk client={client} useAuth={useConvexTokenAuth}>
         <Suspense fallback={<AppLoader />}>
-          {location.pathname === '/device' ? <DeviceLogin /> : <ConnectedExplorer />}
+          {location.pathname === '/device' ? (
+            <DeviceLogin />
+          ) : location.pathname === '/approve' ? (
+            <OwnerApprove />
+          ) : (
+            <ConnectedExplorer />
+          )}
         </Suspense>
       </ConvexProviderWithClerk>
     </ClerkProvider>

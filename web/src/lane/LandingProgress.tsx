@@ -3,6 +3,7 @@ import { hostedHref } from '../cockpit/hosted-links';
 import { Glyph } from '../ui/Glyph';
 import { Button } from '../ui/primitives';
 import { clockTime, elapsed, landingState, type LandingRead } from './landing-model';
+import { OwnerReviewActions, type OwnerReview } from './OwnerReviewActions';
 export function LandingRail({
   landed = false,
   checked = true,
@@ -54,14 +55,18 @@ export function LandingProgress({
   cancel,
   busy,
   aheadLabel,
+  review,
 }: {
   read: LandingRead;
   cancel?: () => void;
   busy?: boolean;
   aheadLabel?: string;
+  /** A signed-in owner's Accept/Decline for a landing held for review. */
+  review?: OwnerReview;
 }) {
   const state = landingState(read),
     { request, attempt, run } = read;
+  const held = request.observation.pendingReason === 'waiting-for-review';
   return (
     <div className="fx-land" aria-live="polite">
       <LandingRail checked={run?.status === 'passed'} checking={Boolean(run && run.status !== 'passed')} />
@@ -133,14 +138,20 @@ export function LandingProgress({
           </div>
         </li>
       </ol>
-      <div className="fx-land-actions">
-        {cancel && (
-          <Button variant="ghost" disabled={busy} onClick={cancel}>
-            Cancel landing
-          </Button>
-        )}
-        <span>updates live · no action needed</span>
-      </div>
+      {held && review ? (
+        <OwnerReviewActions review={{ ...review, busy: review.busy ?? busy }} />
+      ) : (
+        <div className="fx-land-actions">
+          {cancel && (
+            <Button variant="ghost" disabled={busy} onClick={cancel}>
+              Cancel landing
+            </Button>
+          )}
+          <span>
+            {held ? 'updates live · waits for the project owner' : 'updates live · no action needed'}
+          </span>
+        </div>
+      )}
     </div>
   );
 }

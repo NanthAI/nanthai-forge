@@ -61,12 +61,27 @@ held landing stays listed in `queue` without a position, and `land`, `wait`, `qu
 and `status` name the hold, its paths and the next step (see
 [held landings](../agents/workflow.md)).
 
-The owner can call `projectHostedAcceptance:approve` with the exact `projectId`,
-`submissionId` and `attemptId`. This is explicit person acceptance; device/agent
-credentials cannot approve. It publishes through the same guarded transaction and
-records the owner in the receipt. Retrying returns the original receipt. The existing
-browser person-acceptance route can also select that exact Candidate as an owner
-request. A main or policy race still requires a fresh pinned attempt.
+A signed-in owner accepts or declines a held landing in one step: **Accept into main**
+or **Decline** on its review page, or on `/approve?project=…&submission=…`. The agent
+gets that link from `nforge agent ROOT approve-link {"operationId":"…"}` (one query; the
+link carries no attempt id, the page reads the current attempt). Both call
+`projectHostedAcceptance:approve` or `projectHostedOwnerReview:decline` with the exact
+`projectId`, `submissionId` and `attemptId`. They are explicit person acceptance:
+device/agent credentials and contributors are refused. Approve publishes through the
+same guarded transaction and records the owner in the receipt; retrying returns the
+original receipt. Decline ends the submission with `REVIEW_DECLINED` and the owner's
+reason. The submitter's `wait` is subscribed to the submission, so it returns on either
+decision with no polling.
+
+Approval names one exact attempt. A held landing does not recompose while it waits, so
+when main has moved the approval cannot publish that stale Candidate. Approve instead
+keeps a server-only grant on the landing (owner, attempt, input and dependency
+manifest pins, policy digest, changed paths), and the landing makes a fresh attempt on
+current main with a full check. That fresh attempt lands with the owner as approver only
+if its inputs and dependencies are byte-identical, the policy digest is unchanged, the
+owner is unchanged, its own check passed, and it changes no path the approved Candidate
+did not. Otherwise it holds for review again. A busy queue does the same without
+recomposing: the landing takes its turn. Agents cannot create a grant.
 
 The own-Lane exception uses retained server provenance: all input Lanes and dependency
 Candidates must be owner-only. Any contributor write clears a Lane's owner-only flag;

@@ -227,6 +227,7 @@ const examples: Record<string, unknown> = {
   candidates: { laneId: 'LANE_ID', offset: 0, limit: 20 },
   brief: { situation: 'continue-lane', laneId: 'LANE_ID', agent: 'generic' },
   policy: {},
+  'approve-link': { operationId: 'LANDING_UUID' },
   'set-policy': { operationId: 'UUID', preset: 'trusted' },
   'undo-sync': { laneId: 'LANE_ID', syncOperationId: 'SYNC_UUID' },
   guidance: {

@@ -16,7 +16,13 @@ import {
 import { publishAcceptance } from './projectHostedAcceptancePublish';
 import { completeAcceptedHeads, guardAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
+import { grantOwnerApproval } from './projectHostedOwnerGrant';
+import { releaseApprovedReview } from './projectHostedOwnerReview';
+import { finishRow } from './projectHostedFinishWake';
+import { landingQueue } from './projectHostedLandingStore';
+import { releaseLandingQueue } from './projectHostedLandingWake';
+import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
 async function publishSelected(
@@ -116,7 +122,9 @@ export const accept = mutation({
   },
 });
 /** Explicit acceptance of an exact prepared contributor Candidate by the owner.
- * Device identities remain agents and cannot approve their own automation. */
+ * Device identities remain agents and cannot approve their own automation. The approval is
+ * retained for this submission (fe5bea80): when the queue is busy or main moved, the finish driver
+ * takes its turn or recomposes, and that fresh attempt lands with it only for identical source. */
 export const approve = mutation({
   args: selection,
   returns: v.string(),
@@ -129,7 +137,7 @@ export const approve = mutation({
         'PROJECT_UNAVAILABLE',
         'Owner approval requires explicit person acceptance.',
       );
-      const { attempt, state } = await acceptanceSelection(ctx, input);
+      const { row, attempt, state } = await acceptanceSelection(ctx, input);
       if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
         return canonicalPayload(
           await publishSelected(
@@ -140,6 +148,7 @@ export const approve = mutation({
             state,
           ),
         );
+      await grantOwnerApproval(ctx, row, actor, attempt);
       const claim = await claimReadyLanding(
         ctx,
         {
@@ -150,8 +159,33 @@ export const approve = mutation({
         Date.now(),
         false,
       );
-      if (!claim || 'waitingFor' in claim) return canonicalPayload({ status: 'pending', reason: 'queued' });
-      const published = await publishSelected(ctx, claim, Date.now(), actor, state);
+      if (!claim || 'waitingFor' in claim)
+        return canonicalPayload(
+          (await releaseApprovedReview(ctx, input))
+            ? { status: 'pending', reason: 'approved; lands in its turn' }
+            : { status: 'pending', reason: 'queued' },
+        );
+      let published;
+      try {
+        published = await publishSelected(ctx, claim, Date.now(), actor, state);
+      } catch (error) {
+        const finish = await finishRow(ctx, input);
+        if (
+          !finish ||
+          !(error instanceof ForgeError) ||
+          !['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code)
+        )
+          throw error;
+        // Same recovery as the finish driver: yield main, recompose and check this exact selection.
+        const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+        if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
+        await reserveFinishRetry(ctx, finish, JSON.parse(finish.value));
+        return canonicalPayload({
+          status: 'pending',
+          reason:
+            'approved; main moved, so this exact source is checked again on current main and lands with this approval',
+        });
+      }
       await recordMutationReceipt(ctx, {
         projectId: input.projectId,
         actor: actor.id,

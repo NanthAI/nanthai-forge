@@ -39,7 +39,7 @@ export function projectRouteIdentity(href: string) {
   if (parts.length < 2 || reservedRoots.has(parts[0]!)) return null;
   return { handle: parts[0]!, slug: parts[1]! };
 }
-const reservedRoots = new Set(['assets', 'device', 'settings', 'local', 'api']);
+const reservedRoots = new Set(['assets', 'device', 'approve', 'settings', 'local', 'api']);
 export function routeMode(value: 'local' | 'hosted') {
   mode = value;
 }
@@ -90,7 +90,7 @@ export function routeUrlState(href = typeof location === 'undefined' ? 'http://l
     url.pathname = '/';
     return url;
   }
-  if (parts.length < 2 || ['assets', 'device', 'settings'].includes(parts[0]!)) return url;
+  if (parts.length < 2 || ['assets', 'device', 'approve', 'settings'].includes(parts[0]!)) return url;
   const original = new URLSearchParams(p);
   const [owner, project] = parts;
   const explicitDestination = original.has('tab') || original.has('projectTab');
@@ -192,6 +192,7 @@ export function cleanUrl(
   if (
     raw.origin !== new URL(base).origin ||
     raw.pathname === '/device' ||
+    raw.pathname === '/approve' ||
     raw.pathname.startsWith('/assets/')
   )
     return raw.href;

@@ -45,6 +45,7 @@ import {
   hostedAgentRecordActions,
   hostedAgentPlanningActions,
   hostedAgentPolicyActions,
+  hostedAgentReviewActions,
 } from './hosted-agent-contract.js';
 import { executeHostedPolicy } from './hosted-agent-policy.js';
 import { executeHostedPlanning, markPlanningStarted } from './hosted-agent-planning.js';
@@ -129,6 +130,7 @@ import { isHostedReplyError, parseHostedResponse } from './hosted-response.js';
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 const quietActions = new Set([
+  'approve-link',
   'diff',
   'peers',
   'queue',
@@ -488,6 +490,7 @@ export class HostedAgentTransport {
         'check-settings',
         ...hostedAgentPlanningActions,
         ...hostedAgentPolicyActions,
+        ...hostedAgentReviewActions,
       ].includes(action)
     )
       return;
@@ -522,6 +525,7 @@ export class HostedAgentTransport {
         'landing',
         'check-settings',
         'policy',
+        'approve-link',
         ...hostedAgentPlanningActions,
       ].includes(requestedAction)
     )
@@ -602,6 +606,28 @@ export class HostedAgentTransport {
           operationId as string | undefined,
         );
         return this.response(action, policy.operationId, policy.result);
+      }
+      // One query, no capability discovery; the page needs a signed-in owner, never this credential.
+      if ((hostedAgentReviewActions as readonly string[]).includes(action)) {
+        invariant(
+          typeof operationId === 'string',
+          'BAD_ARGUMENT',
+          'approve-link needs operationId: the original landing UUID from land --save.',
+        );
+        const link = await this.query<{ url: string | null; held: boolean }>(
+          'projectHostedOwnerReview:link',
+          {
+            operationId,
+          },
+        );
+        return this.response(action, null, {
+          ...link,
+          next: link.held
+            ? link.url
+              ? 'Hand this link to the project owner; they open it signed in and accept or decline. Your wait returns on their decision.'
+              : 'This deployment has no web address configured; the owner accepts on the review page.'
+            : 'This landing is not waiting for review.',
+        });
       }
       if (action === 'pull') {
         const result = await pullHostedProject(

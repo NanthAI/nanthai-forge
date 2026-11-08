@@ -98,6 +98,7 @@ export const namedReads = [
   'decisions',
   'friction-list',
   'policy',
+  'approve-link',
   'check-settings',
   'capabilities',
   'resolve',

@@ -351,6 +351,11 @@ export function HostedReview({
                 void landing.accept(observedRun?.status === 'passed' ? observedRun.id : undefined)
               }
               cancel={() => void landing.cancel()}
+              review={
+                owner
+                  ? { accept: () => void landing.approve(), decline: why => void landing.decline(why) }
+                  : undefined
+              }
               revert={
                 owner && (landing.read?.request.acceptance?.receiptId || acceptance?.id)
                   ? why =>

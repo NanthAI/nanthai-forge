@@ -11,6 +11,7 @@ import { hostedError } from '../snapshot';
 import { landingFailureExcerpt } from './landing-output';
 import { useReadRetry } from '../ui/read-retry';
 import { useToast } from '../ui/Toast';
+import { ownerApprove, ownerDecline } from './owner-review-api';
 // Keeps original operation IDs over route changes and ambiguous replies in this page.
 const clients = new WeakMap<object, Map<string, BrowserLanding>>();
 const operations = new Map<string, string>();
@@ -106,6 +107,13 @@ export function useHostedLanding(projectId: Id<'hostedProjects'>, candidateId: s
         ? invoke(`retry:${failed.request.id}`, id => landing.retry(id, failed.request, failed.attempt.check))
         : invoke('accept', id => landing.accept(id, candidateId, runId));
     },
+    // Owner review of the exact held attempt this page shows (fe5bea80); the server re-checks both.
+    approve: () =>
+      read ? invoke(`approve:${read.attempt.id}`, () => ownerApprove(landing.io, read)) : Promise.resolve(),
+    decline: (why: string) =>
+      read
+        ? invoke(`decline:${read.attempt.id}`, id => ownerDecline(landing.io, read, id, why))
+        : Promise.resolve(),
     cancel: () => {
       const selected = reverseRead?.request.observation.state === 'pending' ? reverseRead : read;
       return selected

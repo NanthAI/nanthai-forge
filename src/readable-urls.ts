@@ -16,6 +16,7 @@ export const reservedHandles = new Set([
   'worker',
   'github',
   'device',
+  'approve',
   'explore',
   'agents',
   'account',

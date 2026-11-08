@@ -38,6 +38,7 @@ import { requireReuseAudit } from './projectHostedReuseAudit';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
+import { grantedApproval } from './projectHostedOwnerGrant';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -99,7 +100,6 @@ export async function publishAcceptance(
     'PROJECT_UNAVAILABLE',
     'Only explicit owner acceptance can approve protected paths.',
   );
-  const actor = ownerApproval ?? attempt.actor;
   const policy = effectivePolicy(project);
   invariant(
     policyDigestCurrent(policy, attempt.policyDigest),
@@ -118,6 +118,13 @@ export async function publishAcceptance(
     'The exact canonical Candidate differs.',
   );
   const candidate = hostedRecordSchema.parse(JSON.parse(candidateRow.value));
+  // An owner approval retained for this submission (fe5bea80) carries only to exactly this source.
+  const actor =
+    ownerApproval ??
+    (candidate.kind === 'candidate'
+      ? grantedApproval(row.ownerGrant, attempt, project.owner, candidate.governance?.paths ?? null)
+      : undefined) ??
+    attempt.actor;
   invariant(
     candidate.kind === 'candidate' &&
       candidate.result.status === 'clean' &&

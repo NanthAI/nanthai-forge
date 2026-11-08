@@ -37,8 +37,9 @@ export async function cancelHostedLanding(
     abandonOperationId?: string;
     /** The stall deadline ended it (metric 5.3): a Forge outcome, not an operator cancel. */
     drop?: true;
-    /** The supervisor's typed outcome for a drop (19328518): defaults to LANDING_STALLED. */
-    code?: 'LANDING_DRIVER_EXHAUSTED';
+    /** The supervisor's typed outcome for a drop (19328518): defaults to LANDING_STALLED. An owner
+     * declining a held review (fe5bea80) is an operator cancel with its own outcome code. */
+    code?: 'LANDING_DRIVER_EXHAUSTED' | 'REVIEW_DECLINED';
     /** Agent withdraw (78a97771): the Lane whose live landing this cancels, kept in the receipt. */
     withdrawLaneId?: string;
   },
@@ -56,6 +57,7 @@ export async function cancelHostedLanding(
     request,
     ...(input.abandonOperationId ? { parentOperationId: input.abandonOperationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
+    ...(input.code === 'REVIEW_DECLINED' ? { code: input.code } : {}),
     ...(input.withdrawLaneId ? { withdraw: { laneId: input.withdrawLaneId } } : {}),
   };
   const { operation } = await beginHostedOperation(ctx, {
@@ -117,7 +119,11 @@ export async function cancelHostedLanding(
         phase: 'terminal-failed',
         observation: landingObservation('cancelled'),
         error: {
-          code: input.drop ? (input.code ?? 'LANDING_STALLED') : 'LANDING_CANCELLED',
+          code: input.drop
+            ? (input.code ?? 'LANDING_STALLED')
+            : input.code === 'REVIEW_DECLINED'
+              ? input.code
+              : 'LANDING_CANCELLED',
           message: input.reason ?? 'The hosted landing request was cancelled.',
         },
       };

@@ -203,6 +203,18 @@ export const hostedLandingTables = {
     attemptId: v.string(),
     /** This exact solo generation is recomposing and cannot back a successor. */
     pipelineRetiredAttemptId: v.optional(v.string()),
+    /** The owner's explicit approval of one exact held attempt (fe5bea80); server-only. */
+    ownerGrant: v.optional(
+      v.object({
+        actor: v.string(),
+        attemptId: v.string(),
+        inputs: v.string(),
+        dependencies: v.string(),
+        policyDigest: v.string(),
+        paths: v.union(v.array(v.string()), v.null()),
+        at: v.number(),
+      }),
+    ),
     value: v.string(),
   })
     .index('by_project', ['projectId'])
