@@ -29,6 +29,8 @@ test('native batch checks the union once and publishes a named conflict with the
   async function candidate(path) {
     const result = await f.candidate(path, 'changed\n', false);
     mkdirSync(join(result.lane.path, 'tests'));
+    // A Node project: its package.json makes Node's own runner the project's (src/project-test-runner.ts).
+    writeFileSync(join(result.lane.path, 'package.json'), '{}');
     writeFileSync(
       join(result.lane.path, 'tests/prove.test.mjs'),
       `import test from 'node:test';import assert from 'node:assert/strict';import {existsSync} from 'node:fs';test('pair contract',()=>assert.ok(!(existsSync('own.txt')&&existsSync('peer.txt'))));`,

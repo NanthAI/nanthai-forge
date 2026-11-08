@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { gitlinkCommit } from './gitlink.js';
+import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { readEditContext } from './agent-edit-context.js';
 import { conversationSchema } from './agent-edit-types.js';
 import { existsSync, lstatSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
@@ -97,6 +98,8 @@ function writeCache(store: WorkStore, laneId: string, cache: Map<string, CacheEn
 }
 function statKey(root: string, path: string) {
   const stat = lstatSync(join(root, path), { bigint: true });
+  // A submodule directory's stat does not move with its HEAD; its pointer is the key.
+  if (stat.isDirectory()) return `gitlink:${gitlinkDirectoryPointer(root, path).toString()}`;
   return [stat.dev, stat.ino, stat.size, stat.mode, stat.mtimeNs, stat.ctimeNs].join(':');
 }
 
@@ -194,7 +197,12 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
     if (mode === 'gitlink') gitlinkCommit(bytes);
     let blob = digest(bytes);
     if (!headBlobs.has(blob)) {
-      const retained = snapshotBlob(source, join(root, path), bytes, mode === 'symlink');
+      const retained = snapshotBlob(
+        source,
+        join(root, path),
+        bytes,
+        mode === 'symlink' || mode === 'gitlink',
+      );
       blob = retained.blob;
       if (retained.storage?.method === 'clone') storage.cloned++;
       if (retained.storage?.method === 'copy') storage.copied++;

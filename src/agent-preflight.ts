@@ -56,6 +56,7 @@ import {
   type TestRunner,
   type TestRunnerResolution,
 } from './project-test-runner.js';
+import { FORGE_CONFIG_FILE } from './project-config.js';
 import {
   packageGraphFor,
   packageGraphKey,
@@ -443,8 +444,9 @@ function runnerPlan(
     only?: string[] | undefined;
   } = {},
   graph?: () => PackageGraph,
+  forgeJson?: string,
 ): PreflightPlan {
-  const checks = planStatic(packageJson, paths);
+  const checks = planStatic(packageJson, paths, forgeJson);
   if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
   const statics =
     checks.selected.length || checks.untouched.length
@@ -484,10 +486,26 @@ function runnerPlan(
   const inPackages = graph
     ? packageRunnerTests(runner, graph(), allPaths, paths)
     : { tests: [], reason: null };
-  const named = new Set([...selection.changedTests, ...selection.namedTests]);
+  // Declared guards (forge.json or package.json) join the mandatory tier for every runner, as in
+  // Forge's own layout: a guard naming a test the project lacks fails the plan, never skips.
+  const every = new Set(allPaths);
+  const guards = selectGuards(
+    preflightGuards(packageJson, path => every.has(path), forgeJson),
+    paths,
+  ).selected;
+  const mandatory = [...new Set([...guards.flatMap(guard => guard.tests), ...selection.changedTests])];
+  const named = new Set([...mandatory, ...selection.namedTests]);
   const tiers = [
-    { tier: 'mandatory', tests: keep(selection.changedTests) },
-    { tier: 'direct', tests: keep(orderRunnerTests(selection.namedTests, paths)) },
+    { tier: 'mandatory', tests: keep(mandatory) },
+    {
+      tier: 'direct',
+      tests: keep(
+        orderRunnerTests(
+          selection.namedTests.filter(test => !mandatory.includes(test)),
+          paths,
+        ),
+      ),
+    },
     {
       tier: 'package',
       tests: keep(
@@ -525,6 +543,15 @@ function runnerPlan(
     ...(only ? { only: 'stopped' as const } : {}),
     deferredTo: 'pre-queue',
     summary: `Local rule: ${rule}. ${selection.reason}.`,
+    ...(guards.length
+      ? {
+          guards: guards.map(guard => ({
+            name: guard.name,
+            tests: guard.tests,
+            seconds: Math.round(guard.tests.reduce((sum, test) => sum + secondsFor(test), 0) * 10) / 10,
+          })),
+        }
+      : {}),
   };
   const plan: PreflightPlan = {
     status: 'planned',
@@ -668,10 +695,12 @@ export function preflightPlan(
       (built ??= packageGraphFor(context && packageGraphKey(context.files), allPaths(), path =>
         laneText(root, path),
       ));
+    // The language-neutral project file, read once per plan (src/project-config.ts).
+    const forgeJson = laneText(root, FORGE_CONFIG_FILE);
     let resolved: TestRunnerResolution;
     try {
       resolved = projectTestRunner(files.get('package.json'), allPaths, {
-        forgeJson: laneText(root, 'forge.json'),
+        forgeJson,
         packages: graph,
       });
     } catch (error) {
@@ -686,6 +715,7 @@ export function preflightPlan(
         files.get('package.json'),
         options,
         graph,
+        forgeJson,
       );
       if (plan.status === 'planned' && changed.source === 'manifests') plan.changedPathsFrom = 'manifests';
       return plan;
@@ -695,7 +725,7 @@ export function preflightPlan(
     const budgetSeconds = options?.budgetSeconds ?? PREFLIGHT_LOCAL_BUDGET_SECONDS;
     const trim = options?.trim !== false;
     const secondsFor = (test: string) => (stats[test] ? stats[test].ms / 1000 : timing.secondsPerFile);
-    const declaredGuards = preflightGuards(files.get('package.json'), path => files.has(path));
+    const declaredGuards = preflightGuards(files.get('package.json'), path => files.has(path), forgeJson);
     const guards = selectGuards(declaredGuards, changed.paths);
     // Comment-only edits (an SPDX header, a reworded comment) run the same program: they rank only the
     // tests that read the file. Needs the base bytes on this machine; otherwise nothing is skipped.
@@ -845,7 +875,7 @@ export function preflightPlan(
       commentOnly,
       only: !!only,
     });
-    const checks = planStatic(files.get('package.json'), changed.paths);
+    const checks = planStatic(files.get('package.json'), changed.paths, forgeJson);
     if ('reason' in checks) return { status: 'unavailable', reason: checks.reason };
     const plan: PreflightPlan = {
       status: 'planned',
@@ -930,9 +960,9 @@ const rerunCommand = (root: string, laneId: string) =>
 const stoppedCommand = (root: string, laneId: string) =>
   `nforge agent ${shellQuote(root)} preflight ${shellQuote(JSON.stringify({ laneId, retry: true }))}`;
 
-function planStatic(packageJson: string | undefined, paths: string[]) {
+function planStatic(packageJson: string | undefined, paths: string[], forgeJson?: string) {
   try {
-    return selectStaticChecks(staticChecks(packageJson), paths);
+    return selectStaticChecks(staticChecks(packageJson, forgeJson), paths);
   } catch (error) {
     return { reason: `static preflight checks misconfigured: ${(error as Error).message.slice(0, 200)}` };
   }
@@ -1043,7 +1073,7 @@ const observationSchema = z.union([
     .strict(),
 ]);
 
-/** Runs the triggered static checks, then builds (when the project has build:core) and runs the
+/** Runs the triggered static checks, then builds (Forge's own Node layout with build:core) and runs the
  * selected tests here, output to stderr, then records the result for this saved head. stdout stays
  * one JSON receipt. Static checks run first: they take seconds, catch what the landing check's
  * static job would reject, and a failure there ends the run before any build or test. Tests then
@@ -1087,7 +1117,10 @@ export function runPreflight(
     if (staticResults.some(result => result.outcome === 'failed')) exitCode = 1;
   }
   if (plan.tests.length && exitCode === 0) {
+    // Only Forge's own Node layout (no project runner) builds first; another project's script of
+    // that name is not Forge's to run, and its runner builds what it needs.
     const scripts = (() => {
+      if (plan.runner) return undefined;
       try {
         return (
           JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {

@@ -15,6 +15,7 @@ import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { digest } from './hash.js';
+import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
@@ -98,12 +99,21 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
   const marked: string[] = [];
   for (const path of local) {
     const stat = lstatSync(join(root, path));
-    const mode = stat.isSymbolicLink() ? 'symlink' : stat.mode & 0o111 ? 'executable' : 'file';
+    const before = baselineFiles.get(path);
+    // A submodule is its pointer: a pointer file or a checkout (directory) whose HEAD names it.
+    const mode = stat.isSymbolicLink()
+      ? 'symlink'
+      : stat.isDirectory() || before?.mode === 'gitlink'
+        ? 'gitlink'
+        : stat.mode & 0o111
+          ? 'executable'
+          : 'file';
     const baseline = files.get(path)?.blob;
     let blob: string;
     // The same blob the bytes would hash to: the stat index vouches only for unchanged baseline files.
-    const indexed = baseline ? indexedBlob(index, path, stat, baseline) : undefined;
-    if (indexed) blob = indexed;
+    const indexed = baseline && !stat.isDirectory() ? indexedBlob(index, path, stat, baseline) : undefined;
+    if (stat.isDirectory()) blob = digest(gitlinkDirectoryPointer(root, path));
+    else if (indexed) blob = indexed;
     else if (mode === 'symlink') blob = digest(readlinkSync(join(root, path), { encoding: 'buffer' }));
     else {
       const reader = new SourceFileReader(root, path, 'SOURCE_CHANGED');
@@ -115,7 +125,6 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
         reader.close();
       }
     }
-    const before = baselineFiles.get(path);
     if (!before || before.blob !== blob || before.mode !== mode) changed.push(path);
     files.set(path, { path, blob, mode });
   }

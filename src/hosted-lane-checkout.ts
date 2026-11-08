@@ -51,6 +51,7 @@ import {
   type HostedLaneCheckoutMarker,
 } from './hosted-lane-checkout-marker.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { withSubmoduleCheckouts } from './submodule-checkout.js';
 export interface LaneTransport extends CheckoutObjectTransport {
   select(laneId: string): Promise<HostedLaneSelection>;
 }
@@ -536,7 +537,9 @@ export async function checkoutHostedLane(
   sharedObjects?: string,
 ) {
   const request = hostedLaneCheckoutSchema.parse(input);
-  return withCheckoutOpenMetrics(resolve(root), request, metrics =>
-    checkout(root, request, transport, sharedObjects, metrics),
+  return withSubmoduleCheckouts(root, () =>
+    withCheckoutOpenMetrics(resolve(root), request, metrics =>
+      checkout(root, request, transport, sharedObjects, metrics),
+    ),
   );
 }

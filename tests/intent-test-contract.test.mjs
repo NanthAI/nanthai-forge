@@ -97,6 +97,7 @@ test('complete machine timing reports survive chunk boundaries; truncated or inv
 });
 test('proposal includes newly added tests and the derived import impact set', () => {
   const files = new Map([
+    ['package.json', '{}'],
     ['src/leaf.ts', 'export const leaf = 1'],
     [a, "import '../dist/leaf.js';"],
     [b, "import 'node:assert';"],

@@ -3,6 +3,7 @@ import { changeSalt, stableKey } from '../scripts/test-tiebreak.mjs';
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
 import type { PackageGraph } from './package-graph.js';
+import { declaredPreflight } from './project-config.js';
 
 /** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
  * them (`command`; an element `{files}` expands to the files, else they are appended). Preflight, the
@@ -12,9 +13,9 @@ import type { PackageGraph } from './package-graph.js';
  * 1. declared: `preflight.tests` `{ glob: string | string[], command: string[] }` in a root
  *    `forge.json` (any language) or under `forge` in package.json (declaring it in both is an error);
  * 2. inferred from the package.json `test` script: `node --test [globs]`, `vitest`, `jest`;
- * 3. no `test` script: a `vitest` or `jest` dependency, else files that match Node's own test
- *    file patterns (the only runner that needs no dependency; with no package.json, only when the
- *    package graph of rule 4 cannot place the repository);
+ * 3. no `test` script: a `vitest` or `jest` dependency, else, in a project with a package.json, files
+ *    that match Node's own test file patterns (the only runner that needs no dependency; without a
+ *    package.json, `.js` fixtures under `test/` do not make a Go or Python repository a Node one);
  * 4. when the caller supplies the manifest package graph (src/package-graph.ts): each ecosystem's own
  *    command per affected package (`go test`, `cargo test -p`, pytest, Gradle, Maven, `dotnet test`,
  *    the workspace package manager), when that command is unambiguous.
@@ -176,9 +177,6 @@ function scriptRunner(script: string, prefix: () => string[]): Omit<TestRunner, 
   return null;
 }
 
-const declaredTests = (forge: unknown) =>
-  record(forge) && record(forge.preflight) ? forge.preflight.tests : undefined;
-
 /** Rule 4: the package graph's per-ecosystem commands, or why there is none. */
 function graphRunner(options: RunnerOptions, reason: string): TestRunnerResolution {
   const graph = options.packages?.();
@@ -214,26 +212,16 @@ export function projectTestRunner(
   } catch {
     /* No manifest: only the file rule can apply. */
   }
-  let neutral: unknown;
-  if (options.forgeJson !== undefined)
-    try {
-      neutral = JSON.parse(options.forgeJson);
-    } catch {
-      throw new Error('forge.json is not JSON');
-    }
-  const fromPackage = declaredTests(manifest.forge);
-  const fromForge = declaredTests(neutral);
-  if (fromPackage !== undefined && fromForge !== undefined)
-    throw new Error('preflight.tests is declared in both forge.json and package.json; keep one');
-  const declared = fromForge ?? fromPackage;
-  if (declared !== undefined) {
-    const where = fromForge !== undefined ? ('forge.json' as const) : ('package.json' as const);
+  const found = declaredPreflight('tests', packageJson, options.forgeJson);
+  const declared = found?.value;
+  if (found && declared !== undefined) {
+    const where = found.from;
     const entry = record(declared) ? declared : {};
     const globs = typeof entry.glob === 'string' && entry.glob ? [entry.glob] : strings(entry.glob);
     const command = strings(entry.command);
     if (!globs?.every(glob => safeRelative(glob)) || !command)
       throw new Error(
-        `${where === 'forge.json' ? 'forge.json preflight.tests' : 'forge.preflight.tests'} needs {"glob": string | string[], "command": string[]}: ${JSON.stringify(declared).slice(0, 120)}`,
+        `${found.label} needs {"glob": string | string[], "command": string[]}: ${JSON.stringify(declared).slice(0, 120)}`,
       );
     const program = command[0] === 'node' && command.includes('--test') ? 'node' : 'declared';
     return {
@@ -278,13 +266,9 @@ export function projectTestRunner(
     )!;
     return { status: 'available', runner: { ...found, source: 'dependency', layout: 'generic' } };
   }
-  const node = [...files].filter(matcher(NODE_GLOBS));
-  // With no package.json, stray `.js` files under a `test/` folder do not make a Go, Rust or Python
-  // repository a Node project: its manifest package graph runs it when that graph reads.
-  if (node.length && packageJson === undefined && options.packages) {
-    const packages = graphRunner(options, '');
-    if (packages.status === 'available') return packages;
-  }
+  // Rule 3 is for Node projects: with no package.json, stray `.js` files (fixtures under `test/`)
+  // do not make a Go, Rust or Python repository one; the package graph or forge.json runs it.
+  const node = packageJson === undefined ? [] : [...files].filter(matcher(NODE_GLOBS));
   if (node.length) {
     // Top-level `tests/*.test.mjs` files keep the import-graph selector that reads that layout.
     const globs = node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
@@ -301,7 +285,9 @@ export function projectTestRunner(
   }
   return graphRunner(
     options,
-    `no test runner declared or inferred (no package.json test script, test framework dependency or Node test file); ${DECLARE}`,
+    packageJson === undefined
+      ? `no test runner declared or inferred (no package.json, so no Node runner applies); ${DECLARE}`
+      : `no test runner declared or inferred (no package.json test script, test framework dependency or Node test file); ${DECLARE}`,
   );
 }
 

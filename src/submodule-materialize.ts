@@ -77,6 +77,7 @@ export function submoduleRefusal(refusals: SubmoduleRefusal[]) {
   );
 }
 
+export type SubmoduleOptions = Options;
 type Options = {
   /** Private per-run cache: one bare repository per URL, each commit fetched once. */
   cache: string;
@@ -164,7 +165,7 @@ export async function materializeSubmodules(
   return done;
 }
 
-function vetted(item: { url: string | null; origin: string | undefined }) {
+export function vetted(item: { url: string | null; origin: string | undefined }) {
   if (fileUrlsForTests() && item.url?.startsWith('file://')) return { url: item.url };
   return submoduleFetchUrl(item.url, item.origin);
 }
@@ -193,13 +194,13 @@ async function workspaceTarget(directory: string, path: string) {
   return target;
 }
 
-class SubmoduleFetcher {
+export class SubmoduleFetcher {
   private readonly fetched = new Set<string>();
   private readonly scratch: string;
   constructor(private readonly options: Options) {
     this.scratch = join(options.cache, `.scratch-${randomUUID()}`);
   }
-  private repository(url: string) {
+  repository(url: string) {
     return join(this.options.cache, `${createHash('sha256').update(url).digest('hex').slice(0, 32)}.git`);
   }
   /** true: fetched now; false: already cached; otherwise why it is unavailable. */
@@ -272,12 +273,26 @@ async function hasCommit(repository: string, commit: string, options: Options) {
   );
 }
 
-function git(
-  repository: string,
+/** Hardened Git: no inherited config, hooks, credential helper, filters, prompts or LFS
+ * smudge; only HTTPS leaves the machine. `config` adds per-call settings (Forge's own cache
+ * is read over a local path). `repository` null runs without `--git-dir` (init). */
+export function submoduleGit(
+  repository: string | null,
   args: string[],
-  options: Options,
+  options: Pick<Options, 'cache'>,
   timeout = 90_000,
   extra: Record<string, string> = {},
+  config: string[] = [],
+) {
+  return git(repository, args, options, timeout, extra, config);
+}
+function git(
+  repository: string | null,
+  args: string[],
+  options: Pick<Options, 'cache'>,
+  timeout = 90_000,
+  extra: Record<string, string> = {},
+  config: string[] = [],
 ) {
   const file = fileUrlsForTests();
   return new Promise<string>((resolve, reject) => {
@@ -302,12 +317,12 @@ function git(
         '-c',
         'protocol.https.allow=always',
         ...(file ? ['-c', 'protocol.file.allow=always'] : []),
+        ...config.flatMap(item => ['-c', item]),
         '-c',
         'http.followRedirects=initial',
         '-c',
         'transfer.fsckObjects=true',
-        '--git-dir',
-        repository,
+        ...(repository === null ? [] : ['--git-dir', repository]),
         ...args,
       ],
       {

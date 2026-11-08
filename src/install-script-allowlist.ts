@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { declaredInstallScripts, FORGE_CONFIG_FILE } from './project-config.js';
 
 /** The repository's own statement of which dependency install scripts may run. */
 export type InstallScriptAllowlist =
@@ -46,7 +47,7 @@ function yamlNames(source: string, key: string): string[] | undefined {
 
 /** Read the allowlist a repository declares for dependency build scripts, or null when it
  * declares none (the caller then skips every script). Reads files only; runs nothing.
- * npm: none of its own. pnpm: `onlyBuiltDependencies`/`allowBuilds` in pnpm-workspace.yaml or
+ * forge.json: `install.scripts: true` (all). npm: none of its own. pnpm: `onlyBuiltDependencies`/`allowBuilds` in pnpm-workspace.yaml or
  * package.json (`pnpm.*`). bun: `trustedDependencies`. yarn berry: `enableScripts: true` (all) and
  * `dependenciesMeta.<name>.built`. Package names from every source are merged. */
 export function readInstallScriptAllowlist(root: string): InstallScriptAllowlist | null {
@@ -54,6 +55,8 @@ export function readInstallScriptAllowlist(root: string): InstallScriptAllowlist
   const add = (source: string, packages: string[] | undefined) => {
     if (packages) found.push({ source, packages });
   };
+  if (declaredInstallScripts(text(join(root, FORGE_CONFIG_FILE))))
+    return { source: FORGE_CONFIG_FILE, all: true };
   const yarnrc = text(join(root, '.yarnrc.yml'));
   if (yarnrc !== undefined && /^enableScripts:\s*true\s*$/m.test(yarnrc))
     return { source: '.yarnrc.yml', all: true };

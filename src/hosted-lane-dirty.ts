@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { digest } from './hash.js';
+import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { nativePaths } from './source-paths.js';
 import { indexedBlob, readCheckoutStatIndex, statIndexRefresh } from './checkout-stat-index.js';
 import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
@@ -29,6 +30,11 @@ export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {
       if (!old) return true;
       const absolute = join(root, path),
         stat = lstatSync(absolute);
+      // A submodule checkout (the scanner returns a directory only for one) stands for its HEAD.
+      if (stat.isDirectory()) {
+        if (old.mode !== 'gitlink' || digest(gitlinkDirectoryPointer(root, path)) !== old.blob) return true;
+        continue;
+      }
       if (!stat.isSymbolicLink() && (!stat.isFile() || stat.size > LARGE_FILE)) return true;
       const mode = stat.isSymbolicLink()
         ? 'symlink'

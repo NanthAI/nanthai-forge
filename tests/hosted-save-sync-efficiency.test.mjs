@@ -325,6 +325,7 @@ test('unchanged save has no object or worker calls', async t => {
     changedPaths: { paths: ['tests/selected.test.mjs'], complete: true },
   };
   mkdirSync(join(root, 'tests'), { recursive: true });
+  writeFileSync(join(root, 'package.json'), '{}');
   writeFileSync(
     join(root, 'tests/selected.test.mjs'),
     "import test from 'node:test'; test('selected', () => {});",

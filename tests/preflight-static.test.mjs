@@ -388,3 +388,40 @@ test('replay (b78ca196): a Node global in a Convex-loaded src file fails preflig
     ['tests/runtime-guard.test.mjs'],
   );
 });
+
+test('forge.json declares static checks and guards for any language; package.json forge stays the fallback', () => {
+  const neutral = JSON.stringify({
+    preflight: {
+      static: [{ name: 'vet', command: ['go', 'vet', './...'], inputs: ['**/*.go'] }],
+      guards: [{ name: 'api', tests: ['api/api_test.go'], inputs: ['api/**'] }],
+    },
+    install: { later: true },
+  });
+  const has = path => path === 'api/api_test.go';
+  // A Go repository with no package.json at all.
+  assert.deepEqual(
+    staticChecks(undefined, neutral).map(check => [check.name, check.command.join(' '), check.source]),
+    [['vet', 'go vet ./...', 'declared']],
+  );
+  assert.deepEqual(preflightGuards(undefined, has, neutral), [
+    { name: 'api', tests: ['api/api_test.go'], inputs: ['api/**'] },
+  ]);
+  // Forge's own package.json config is read unchanged when there is no forge.json.
+  const forge = JSON.parse(manifest(['check'], { check: 'x' }));
+  assert.deepEqual(staticChecks(JSON.stringify(forge)), staticChecks(JSON.stringify(forge), undefined));
+  assert.equal(staticChecks(JSON.stringify(forge))[0].name, 'check');
+  // forge.json without a static key leaves package.json's declaration in force.
+  assert.equal(staticChecks(JSON.stringify(forge), '{"preflight":{}}')[0].name, 'check');
+  // A setting in both files, a malformed forge.json or a broken entry fails loudly, naming the file.
+  assert.throws(() => staticChecks(JSON.stringify(forge), '{"preflight":{"static":[]}}'), /both forge\.json/);
+  assert.throws(() => staticChecks(undefined, '{"preflight":'), /forge\.json is not JSON/);
+  assert.throws(() => preflightGuards(undefined, has, '[]'), /forge\.json must hold a JSON object/);
+  assert.throws(
+    () => staticChecks(undefined, '{"preflight":{"static":["lint"]}}'),
+    /forge\.json preflight\.static/,
+  );
+  assert.throws(
+    () => preflightGuards(undefined, () => false, neutral),
+    /forge\.json preflight\.guards names a guard that cannot run/,
+  );
+});

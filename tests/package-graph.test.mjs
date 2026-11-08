@@ -364,7 +364,8 @@ test('forge.json declares a runner for any language; package.json keeps working;
   const goPaths = Object.keys(goRepo);
   const graph = () => buildPackageGraph(goPaths, path => goRepo[path]);
   assert.equal(projectTestRunner(undefined, () => goPaths, { packages: graph }).runner.layout, 'packages');
-  assert.equal(projectTestRunner(undefined, () => goPaths).runner.source, 'files');
+  // Without the graph either, Node's file rule still needs a package.json (slice F, e89be958).
+  assert.equal(projectTestRunner(undefined, () => goPaths).status, 'unavailable');
   // Without a declaration and without the graph, nothing is guessed.
   assert.equal(projectTestRunner(undefined, () => ['a.go']).status, 'unavailable');
 

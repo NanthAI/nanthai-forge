@@ -2,12 +2,23 @@
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import { safeRelative } from './safe-relative.js';
+import { testStem } from './hosted-landing-suspect.js';
 /** Forge's own Node test layout: the standard check's selector and shards read only these. */
 export const standardTestPath = (path: string) =>
   safeRelative(path) && /^tests\/.+\.test\.[cm]?[jt]s$/.test(path);
+const JS_TEST = /(?:^|\/)(?:__tests__\/.+\.[cm]?[jt]sx?|[^/]+[.\-_](?:test|spec)\.[cm]?[jt]sx?)$/;
+const TEST_FOLDER = /(?:^|\/)(?:__tests__|tests?|specs?|testing)\//;
+const DOCUMENT = /\.(?:md|mdx|txt|rst|adoc)$/i;
+/** A file name or folder that reads as a test in any language: `x_test.go`, `test_x.py`,
+ * `XTest.java`, `XTests.cs`, `x_spec.rb`, Rust `tests/x.rs`, Maven `src/test/…/FooIT.java`. */
+const anyLanguageTest = (path: string) => {
+  const name = path.split('/').pop() ?? '';
+  return /\.[A-Za-z0-9]+$/.test(name) && !DOCUMENT.test(name) && (!!testStem(name) || TEST_FOLDER.test(path));
+};
 /** A test file at any safe relative path, for any project runner: `name.test.ts`, `name.spec.tsx`,
- * a file under `__tests__/`, or Forge's `tests/*.test.mjs`. Which files a project actually runs is
- * its runner's glob (src/project-test-runner.ts); this bounds what a stored contract may name. */
+ * a file under `__tests__/`, Forge's `tests/*.test.mjs`, or another language's test name or test
+ * folder. Which files a project actually runs is its runner's glob (src/project-test-runner.ts),
+ * and a contract may select only those; this bounds what a stored contract may name. */
 export const contractTestPath = z
   .string()
   .refine(
@@ -16,7 +27,7 @@ export const contractTestPath = z
       (safeRelative(path) &&
         !/[\x00-\x1f\x7f]/.test(path) &&
         !path.split('/').includes('node_modules') &&
-        /(?:^|\/)(?:__tests__\/.+\.[cm]?[jt]sx?|[^/]+[.\-_](?:test|spec)\.[cm]?[jt]sx?)$/.test(path)),
+        (JS_TEST.test(path) || anyLanguageTest(path))),
   );
 export const contractTestsInput = z.object({
   laneId: z.uuid().optional(),

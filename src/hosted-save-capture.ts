@@ -26,6 +26,7 @@ import { SourceFileReader } from './source-file-reader.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { gitlinkCommit } from './gitlink.js';
+import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { digest } from './hash.js';
 import { scanSourcePaths } from './source-paths.js';
 import { notSavedCollector, notSavedFile } from './save-not-saved.js';
@@ -72,15 +73,17 @@ function captureFile(
   const absolute = join(root, path),
     stat = lstatSync(absolute),
     temporary = join(directory, randomUUID());
+  // A submodule checkout (the scanner returns a directory only for one) saves its HEAD commit.
+  const submodule = stat.isDirectory();
   const mode: NativeFile['mode'] = stat.isSymbolicLink()
     ? 'symlink'
-    : previous?.mode === 'gitlink'
+    : submodule || previous?.mode === 'gitlink'
       ? 'gitlink'
       : stat.mode & 0o111
         ? 'executable'
         : 'file';
   // An unchanged file (same lstat as when its baseline blob was last read) is not read again.
-  if (previous && previous.mode === mode && indexedBlob(index, path, stat, previous.blob))
+  if (!submodule && previous && previous.mode === mode && indexedBlob(index, path, stat, previous.blob))
     return {
       file: { blob: previous.blob, mode },
       pin: { sha256: previous.blob, size: stat.size },
@@ -93,7 +96,10 @@ function captureFile(
   let pin: { sha256: string; size: number },
     bytes: Buffer | null = null;
   const markerScan = conflictMarkerScan();
-  if (stat.isSymbolicLink()) {
+  if (submodule) {
+    bytes = gitlinkDirectoryPointer(root, path);
+    pin = { sha256: digest(bytes), size: bytes.length };
+  } else if (stat.isSymbolicLink()) {
     invariant(
       realpathSync(dirname(absolute)) === dirname(absolute),
       'SOURCE_CHANGED',
@@ -197,7 +203,8 @@ export async function captureHostedSave(
   for (const path of local.sort()) {
     const old = baseline.get(path),
       observed = captureFile(root, path, directory, old, index);
-    observedStats.set(path, statEntry(observed.stat, observed.file.blob));
+    // A directory's stat does not move with its HEAD; submodules are never vouched for by it.
+    if (!observed.stat.isDirectory()) observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
       if (observed.markers) marked.push(path);
       const baseBlob = bases[path] ?? old?.blob ?? digest('');

@@ -122,8 +122,10 @@ test('the runner is inferred from the test script, then dependencies, then Node 
   assert.ok(runnerTestPath(node.runner, 'test/a.test.js'));
   assert.ok(!runnerTestPath(node.runner, 'src/a.test.js'));
 
-  const files = resolve(undefined, ['lib/a.test.js', 'node_modules/x/b.test.js']);
+  // Node's own file patterns apply to Node projects (a package.json); without one they are unavailable.
+  const files = resolve({}, ['lib/a.test.js', 'node_modules/x/b.test.js']);
   assert.equal(files.runner.source, 'files');
+  assert.equal(resolve(undefined, ['lib/a.test.js']).status, 'unavailable');
   assert.equal(files.runner.layout, 'generic');
   assert.equal(resolve({}, ['tests/a.test.mjs', 'tests/fixture.mjs']).runner.layout, 'forge-node');
 
@@ -317,4 +319,29 @@ test('semantic union tests run with the project runner; Forge layout keeps its c
   );
   assert.notEqual(missing.status, 0);
   assert.match(missing.stderr, /SEMANTIC_TESTS_UNAVAILABLE: src\/a\.spec\.ts: no runner/);
+});
+
+test('Intent contract tests accept test names of every language and still refuse sources and unsafe paths', () => {
+  for (const path of [
+    'pkg/sum/sum_test.go',
+    'tests/test_sum.py',
+    'pkg/sum_test.py',
+    'src/test/java/com/acme/SumTest.java',
+    'Acme.Tests/SumTests.cs',
+    'tests/sum.rs',
+    'spec/sum_spec.rb',
+    'packages/core/src/sum.test.ts',
+  ])
+    assert.equal(contractTestPath.safeParse(path).success, true, path);
+  for (const path of [
+    'pkg/sum/sum.go',
+    'src/sum.py',
+    'src/main/java/com/acme/Sum.java',
+    'tests/README.md',
+    'docs/test_plan.md',
+    '../x_test.go',
+    'node_modules/x/x_test.go',
+    'tests/a\u0007_test.go',
+  ])
+    assert.equal(contractTestPath.safeParse(path).success, false, path);
 });

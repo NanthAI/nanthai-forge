@@ -475,6 +475,7 @@ test('checkout tree fields preserve preflight across equivalent States and refus
   const s = setup(t);
   const files = [
     ...s.files,
+    { path: 'package.json', blob: s.put('{}'), mode: 'file' },
     {
       path: 'tests/preflight.test.mjs',
       blob: s.put("import test from 'node:test'; test('passes', () => {});"),

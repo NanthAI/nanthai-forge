@@ -3,6 +3,7 @@ import { lstatSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { readSource, safeRelative } from './files.js';
 import { invariant } from './errors.js';
+import { gitlinkDirectory, gitlinkDirectoryPointer } from './gitlink-workspace.js';
 
 /** Read the link itself, never its target; reject redirected parent directories. */
 export function nativeFile(root: string, path: string) {
@@ -17,6 +18,9 @@ export function nativeFile(root: string, path: string) {
     stat = lstatSync(full);
   if (stat.isSymbolicLink())
     return { bytes: readlinkSync(full, { encoding: 'buffer' }), mode: 'symlink' as const };
+  // A checked-out submodule stands for its pointer: the commit its HEAD names.
+  if (stat.isDirectory() && gitlinkDirectory(root, path))
+    return { bytes: gitlinkDirectoryPointer(root, path), mode: 'gitlink' as const };
   const bytes = readSource(root, path, Number.MAX_SAFE_INTEGER);
   invariant(bytes, 'SOURCE_CHANGED', 'Source disappeared while capturing.');
   return { bytes, mode: stat.mode & 0o111 ? ('executable' as const) : ('file' as const) };

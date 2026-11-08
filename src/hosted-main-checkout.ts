@@ -20,6 +20,7 @@ import {
   flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
+import { withSubmoduleCheckouts } from './submodule-checkout.js';
 import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import {
   checkoutDelta,
@@ -61,6 +62,9 @@ function save(path: string, value: unknown) {
 /** Client source checkout; deliberately creates no Work owner or acceptance authority. */
 export async function checkoutHostedMain(root: string, input: unknown, transport: MainTransport) {
   const request = requestSchema.parse(input);
+  return withSubmoduleCheckouts(root, () => checkoutMain(root, request, transport));
+}
+async function checkoutMain(root: string, request: z.infer<typeof requestSchema>, transport: MainTransport) {
   root = canonicalRoot(root);
   const cache = clientCacheRoot(root),
     lock = join(cache, 'lock');

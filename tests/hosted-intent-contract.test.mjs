@@ -32,6 +32,7 @@ async function fixture() {
       }),
     );
   const baseFiles = {
+    'package.json': '{}',
     'src/leaf.ts': 'export const leaf = 1;',
     [a]: "import '../dist/leaf.js';",
     [b]: "import 'node:assert';",

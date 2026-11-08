@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { workLocked } from './work-lock.js';
+import { withSubmoduleCheckouts } from './submodule-checkout.js';
 import {
   checkoutPathExists,
   cleanHostedCheckout,
@@ -118,6 +119,9 @@ function clashing(root: string, changes: CheckoutChange[], delta: CheckoutDelta 
  * deletions) in the client cache, then restores those paths to the exact baseline in place. Every
  * step is journaled and retryable; no submitted source work is replaced or cancelled. */
 export async function recoverLocalApply(root: string, id: string, transport: LaneTransport) {
+  return withSubmoduleCheckouts(root, () => recoverApply(root, id, transport));
+}
+async function recoverApply(root: string, id: string, transport: LaneTransport) {
   const lexical = unfollowedRoot(root),
     retained = join(unfollowedClientCacheRoot(root), blockedName(id));
   root = canonicalRoot(root);

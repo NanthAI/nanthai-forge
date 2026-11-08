@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawnSync } from 'node:child_process';
 import { globRegExp } from './path-glob.js';
+import { declaredPreflight } from './project-config.js';
 
 export { globRegExp };
 
-/** A cheap, repository-wide check the landing check also runs. Declared in the project's
- * package.json as `forge.preflight.static`; each entry is a script name or an object:
+/** A cheap, repository-wide check the landing check also runs. Declared as `preflight.static` in a
+ * root forge.json (any language) or as `forge.preflight.static` in package.json; each entry is a
+ * package.json script name or an object:
  * `{ name?, script? | command?: string[], inputs?: glob[] }`. `inputs` limits the check to changes
  * touching them; without it any change triggers the check. Absent a declaration, only formatter
  * checks the project already names conventionally run. Nothing else is guessed: an unknown
@@ -33,18 +35,18 @@ const strings = (value: unknown): string[] | null =>
     ? (value as string[])
     : null;
 
-/** The project's static checks from its package.json text. Unparseable or absent text means none. */
-export function staticChecks(packageJson: string | undefined): StaticCheck[] {
+/** The project's static checks from its forge.json and package.json texts. Unparseable or absent
+ * package.json text declares none; a malformed forge.json throws (src/project-config.ts). */
+export function staticChecks(packageJson: string | undefined, forgeJson?: string): StaticCheck[] {
   let manifest: unknown;
   try {
     manifest = JSON.parse(packageJson ?? '');
   } catch {
-    return [];
+    /* Only forge.json can declare checks. */
   }
-  if (!record(manifest)) return [];
-  const scripts = record(manifest.scripts) ? manifest.scripts : {};
-  const forge = record(manifest.forge) ? manifest.forge : {};
-  const declared = record(forge.preflight) ? forge.preflight.static : undefined;
+  const scripts = record(manifest) && record(manifest.scripts) ? manifest.scripts : {};
+  const found = declaredPreflight('static', packageJson, forgeJson);
+  const declared = found?.value;
   if (Array.isArray(declared)) {
     const checks: StaticCheck[] = [];
     for (const item of declared) {
@@ -54,7 +56,7 @@ export function staticChecks(packageJson: string | undefined): StaticCheck[] {
       // A declared script the project no longer has must not silently stop checking: fail the plan.
       if (!command?.[0] || (typeof entry.script === 'string' && typeof scripts[entry.script] !== 'string'))
         throw new Error(
-          `forge.preflight.static names a check that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
+          `${found!.label} names a check that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
         );
       checks.push({
         name:
@@ -73,29 +75,26 @@ export function staticChecks(packageJson: string | undefined): StaticCheck[] {
 }
 
 /** A cheap guard test the project always wants run first when a change touches its `inputs`
- * (declared as `forge.preflight.guards`: `{name, tests: [path, ...], inputs?: [glob, ...]}`).
+ * (declared as `preflight.guards` in forge.json or `forge.preflight.guards` in package.json:
+ * `{name, tests: [path, ...], inputs?: [glob, ...]}`).
  * Guards join the protected mandatory tier: the local time budget never trims or stops them. */
 export type PreflightGuard = { name: string; tests: string[]; inputs: string[] | null };
 
 /** The project's declared guards. A malformed entry or a test file the project lacks throws, so a
  * renamed guard test cannot silently stop guarding. */
-export function preflightGuards(packageJson: string | undefined, hasFile: (path: string) => boolean) {
-  let manifest: unknown;
-  try {
-    manifest = JSON.parse(packageJson ?? '');
-  } catch {
-    return [];
-  }
-  const forge = record(manifest) && record(manifest.forge) ? manifest.forge : {};
-  const declared = record(forge.preflight) ? forge.preflight.guards : undefined;
+export function preflightGuards(
+  packageJson: string | undefined,
+  hasFile: (path: string) => boolean,
+  forgeJson?: string,
+) {
+  const found = declaredPreflight('guards', packageJson, forgeJson);
+  const declared = found?.value;
   if (!Array.isArray(declared)) return [];
   return declared.map((item): PreflightGuard => {
     const entry = record(item) ? item : {};
     const tests = strings(entry.tests);
     if (typeof entry.name !== 'string' || !entry.name || !tests?.every(test => hasFile(test)))
-      throw new Error(
-        `forge.preflight.guards names a guard that cannot run: ${JSON.stringify(item).slice(0, 120)}`,
-      );
+      throw new Error(`${found!.label} names a guard that cannot run: ${JSON.stringify(item).slice(0, 120)}`);
     return { name: entry.name, tests, inputs: strings(entry.inputs) };
   });
 }

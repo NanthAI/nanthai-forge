@@ -126,6 +126,8 @@ import {
 } from './hosted-metric-outbox.js';
 import { isHostedReplyError, parseHostedResponse } from './hosted-response.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
+/** A boolean option as given, else unset. */
+const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 const quietActions = new Set([
   'diff',
   'peers',
@@ -984,10 +986,10 @@ export class HostedAgentTransport {
           : undefined;
         if (action === 'finish') result = await recoverHostedFinish(session, result);
         if (action === 'start') {
-          // The replay command keeps the client-only opt-in to run dependency install scripts.
+          // The replay command keeps the client-only choice to run dependency install scripts.
           const startData =
-            placement.installScripts === true
-              ? { ...(command.data as object), installScripts: true }
+            typeof placement.installScripts === 'boolean'
+              ? { ...(command.data as object), installScripts: placement.installScripts }
               : command.data;
           const started = parseHostedResponse(hostedStartResultSchema, result);
           const into =
@@ -1196,7 +1198,8 @@ export class HostedAgentTransport {
     const shared = await boundedStep(
       this.shareDependencies(
         opened.value.root,
-        (data as { installScripts?: boolean } | null)?.installScripts === true,
+        // An explicit start flag wins; unset leaves it to the repository (forge.json install.scripts).
+        flag((data as { installScripts?: unknown } | null)?.installScripts),
       ),
       left(),
     );
@@ -1210,7 +1213,7 @@ export class HostedAgentTransport {
     };
   }
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
-  private async shareDependencies(path: string, runScripts = false) {
+  private async shareDependencies(path: string, runScripts?: boolean) {
     try {
       const shared = await shareDependencies(path, { runScripts });
       const notice = skippedScriptsNotice(shared);

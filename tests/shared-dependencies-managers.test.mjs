@@ -272,7 +272,7 @@ test('a declared build allowlist is rebuilt; without one scripts are skipped and
   assert.deepEqual(none.skippedScripts, { packages: 2, command: 'pnpm rebuild' });
   assert.match(
     skippedScriptsNotice(none),
-    /Skipped install scripts of 2 packages\. Run them with: pnpm rebuild \(in the Lane\), or start with \{"installScripts":true\}\./,
+    /Skipped install scripts of 2 packages\. Run them with: pnpm rebuild \(in the Lane\), or start with \{"installScripts":true\} or set \{"install":\{"scripts":true\}\} in forge\.json\./,
   );
   await share(repo(directory, 'bun', bunFiles({}, { trustedDependencies: ['sharp'] })), cache);
   assert.ok(calls().some(l => l.startsWith('bun pm trust sharp |')));

@@ -128,8 +128,10 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   `npm rebuild`, `pnpm rebuild`, `bun pm trust --all` or `yarn rebuild` in the Lane. The pnpm lockfile
   records which packages need a build and gives a count; the yarn and bun lockfiles do not, so their line
   says only that dependency scripts were skipped. To run them at install instead, add `"installScripts":true`
-  to `start` (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`); that install is
-  cached apart from the script-less one. Nothing is printed when no skipped package declared a script.
+  to `start` (`nforge agent ROOT start '{"planningItemId":"ID","installScripts":true}'`), or set it once
+  for the repository with `{"install":{"scripts":true}}` in a root `forge.json`; an explicit
+  `installScripts` (`true` or `false`) on `start` wins over the file. That install is cached apart from
+  the script-less one. Nothing is printed when no skipped package declared a script.
 - Workspaces: the workspace folders the lockfile records (npm `packages`, pnpm `importers`, Yarn Berry
   `@workspace:` entries, `bun.lock` `workspaces`; Yarn classic and `bun.lockb` use the `workspaces`
   field of `package.json`) are copied to the install stage with their `package.json`, and their manifests
@@ -194,11 +196,19 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 
 ### preflight
 
+- **Project file `forge.json`.** Project settings for any language live in one JSON object at
+  the repository root: `{"preflight": {"tests": {…}, "static": […], "guards": […]}}`, each
+  described below, and `{"install": {"scripts": true}}` (see [shareDependencies](#sharedependencies)). A JS project may instead keep the same `preflight` object under `forge` in
+  `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
+  is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
+  it does not know are ignored.
 - **Static checks first.** Cheap repository-wide checks the landing check also runs (formatting,
   the foundation check, document and schema guards) run before any build or test, whenever the
   change touches their inputs, and a failure ends the run with that check's own output and no tests
-  started (`receipt.static`, plan `static.selected` and `static.untouched`). They are declared in
-  the project's `package.json` as `forge.preflight.static`: each entry is a script name or
+  started (`receipt.static`, plan `static.selected` and `static.untouched`). They are declared as
+  `preflight.static` in a root `forge.json` (any language, for example
+  `{"preflight":{"static":[{"name":"vet","command":["go","vet","./..."],"inputs":["**/*.go"]}]}}`)
+  or as `forge.preflight.static` in `package.json`: each entry is a `package.json` script name or
   `{name?, script? | command?: [program, ...args], inputs?: [glob, ...]}`; without `inputs` any
   change triggers it, and a declared script the project no longer defines makes the plan
   unavailable instead of silently skipping. With no declaration only a conventionally named
@@ -215,14 +225,19 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   Declaring it in both is an error. Without a declaration Forge infers it, running no repository
   code: from the `test` script (`node --test [paths]`, `vitest`, `jest`, launched through the
   package manager its `packageManager` field or lockfile names), else a `vitest` or `jest`
-  dependency, else files matching Node's own test patterns, else the **package graph** below. When
+  dependency, else, when the repository has a `package.json`, files matching Node's own test
+  patterns (`.js` fixtures in a Go or Python repository are not Node tests), else the **package
+  graph** below. When
   nothing applies, preflight runs the static checks alone and says `tests unavailable` with the
   reason (`unavailable` when no static check applies), and the `tests` read returns scope
   `unavailable`. Node's runner over top-level `tests/*.test.mjs` keeps the import-graph tiers below.
   Any other declared or inferred runner selects by path: changed test files, then the tests named
   for a changed module (`sum.test.ts` for `sum.ts`, closest folder first), then its test files
-  inside the packages the change affects; the landing check runs the rest. Contract tests may live
-  at any test path (`*.test.*`, `*.spec.*`, `__tests__/`).
+  inside the packages the change affects; the landing check runs the rest. A runner declared or
+  inferred this way also runs the triggered guards first. Contract tests may live at any test path
+  in any language (`*.test.*`, `*.spec.*`, `__tests__/`, `x_test.go`, `test_x.py`, `XTest.java`,
+  `XTests.cs`, `x_spec.rb`, or a file under a `test/`, `tests/` or `spec/` folder such as Rust
+  `tests/x.rs`), when the project's runner runs that file.
 - **Package graph, any ecosystem.** From manifests alone (never running repository code) Forge maps
   each changed path to its owning package and selects it plus every package that depends on it:
   Go modules (`go.mod`; a module requiring another depends on it; a change to `_test.go` files or
@@ -264,7 +279,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   the landing timing they already hold: no extra call), else 60 s per command. `estimateBasis`
   says which (`measured`, `hosted`, `default`).
 - `nforge agent ROOT preflight '{"laneId":"…"}'` always runs changed tests, explicit coverage,
-  smoke and the project's declared *guards* (`forge.preflight.guards` in `package.json`, filtered by
+  smoke and the project's declared *guards* (`preflight.guards` in `forge.json`, or
+  `forge.preflight.guards` in `package.json`, filtered by
   path rules, protected like mandatory tests, cost in `local.guards`; see
   [workflows](workflows.md#local-preflight-guards)); then *learned* tests; then *direct* tests; then direct consumers
   of hub modules (`wide`); then *recent* failers; then tests that watch a distinctive name in a changed source (any import distance);

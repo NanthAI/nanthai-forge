@@ -156,7 +156,7 @@ export function skippedInstallScripts(root: string): SkippedScripts | undefined 
 export function skippedScriptsNotice(result: object): string | null {
   const skipped = (result as { skippedScripts?: SkippedScripts }).skippedScripts;
   return skipped
-    ? `Skipped install scripts of ${skipped.packages === null ? 'dependencies' : `${skipped.packages} package${skipped.packages === 1 ? '' : 's'}`}. Run them with: ${skipped.command} (in the Lane), or start with {"installScripts":true}.`
+    ? `Skipped install scripts of ${skipped.packages === null ? 'dependencies' : `${skipped.packages} package${skipped.packages === 1 ? '' : 's'}`}. Run them with: ${skipped.command} (in the Lane), or start with {"installScripts":true} or set {"install":{"scripts":true}} in forge.json.`
     : null;
 }
 /** Build the install stage: root manifest and lockfile plus every workspace package.json (and, for
@@ -188,8 +188,9 @@ export async function shareDependencies(
     enabled?: boolean;
     cache?: string;
     heavy?: boolean;
-    /** Opt in to all dependency install scripts (default: skipped, unless the repository allowlists some). */
-    runScripts?: boolean;
+    /** Opt in to (true) or out of (false) all dependency install scripts; it wins over the repository.
+     * Unset: skipped, unless the repository allows them (forge.json `install.scripts`, an allowlist). */
+    runScripts?: boolean | undefined;
     /** How to run a non-npm manager (default: corepack at the declared version, else PATH). */
     resolve?: (pm: PackageManager) => Promise<ManagerRunner | { reason: string }>;
   } = {},
@@ -217,7 +218,7 @@ export async function shareDependencies(
   const key = dependencyKey(root, runner?.version);
   if (!key) return { status: 'none' };
   const cache = options.cache ?? dependencyCacheDirectory(),
-    runScripts = options.runScripts === true || readInstallScriptAllowlist(root)?.all === true,
+    runScripts = options.runScripts ?? readInstallScriptAllowlist(root)?.all === true,
     prefix = `${pm.name}${runScripts ? '-scripts' : ''}`,
     entry = join(cache, `${prefix}-${key}`);
   let installed = false;

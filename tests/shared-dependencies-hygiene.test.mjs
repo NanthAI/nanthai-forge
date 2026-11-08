@@ -414,3 +414,36 @@ test("real npm ci: sibling workspace links reach each Lane's own source", { skip
       root.endsWith('one') ? 'one' : 'two',
     );
 });
+
+test('forge.json install.scripts runs install scripts with no start flag; an explicit flag still wins', async t => {
+  const directory = scratch(t),
+    cache = join(directory, 'deps'),
+    calls = [];
+  const options = { install: fakeInstall(calls), enabled: true, cache, heavy: false };
+  const lock = lockOf({ 'node_modules/native': { version: '1.0.0', hasInstallScript: true } });
+  const opted = lane(directory, 'opted', { lock });
+  writeFileSync(join(opted, 'forge.json'), JSON.stringify({ install: { scripts: true } }));
+  assert.deepEqual(readInstallScriptAllowlist(opted), { source: 'forge.json', all: true });
+  const ran = await shareDependencies(opted, options);
+  assert.equal(calls.at(-1).runScripts, true, 'the project setting runs scripts without a flag');
+  assert.equal(ran.skippedScripts, undefined);
+  // Without the setting (absent, false, malformed), scripts stay skipped.
+  for (const [name, text] of [
+    ['absent', undefined],
+    ['off', JSON.stringify({ install: { scripts: false } })],
+    ['malformed', '{"install":'],
+  ]) {
+    const root = lane(directory, name, { lock, manifest: { name } });
+    const before = calls.length;
+    if (text !== undefined) writeFileSync(join(root, 'forge.json'), text);
+    const result = await shareDependencies(root, options);
+    assert.equal(calls.length, before + 1, name);
+    assert.equal(calls.at(-1).runScripts, false, name);
+    assert.match(skippedScriptsNotice(result), /forge\.json/, name);
+  }
+  // The start flag wins over the project file, both ways.
+  const flagged = lane(directory, 'flagged', { lock, manifest: { name: 'flagged' } });
+  writeFileSync(join(flagged, 'forge.json'), JSON.stringify({ install: { scripts: true } }));
+  await shareDependencies(flagged, { ...options, runScripts: false });
+  assert.equal(calls.at(-1).runScripts, false, 'installScripts:false wins over forge.json');
+});

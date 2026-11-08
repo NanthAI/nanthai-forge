@@ -6,6 +6,7 @@ import { invariant } from './errors.js';
 import { forgeIncludes, ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
 import { credentialNameHold } from './capture-credential-check.js';
 import { forgeCachePath } from './forge-cache-paths.js';
+import { gitlinkDirectory } from './gitlink-workspace.js';
 
 export type NativeExcludedPath = {
   path: string;
@@ -72,6 +73,12 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
       const selected = retainedFiles.has(path),
         descendant = retainedDirectories.has(path);
       const stat = lstatSync(join(root, path));
+      // A submodule checked out at a saved path is one opaque leaf (its pointer is its HEAD);
+      // its files are never walked, captured or reported as added source.
+      if (selected && stat.isDirectory() && !stat.isSymbolicLink() && gitlinkDirectory(root, path)) {
+        if (capture) paths.push(path);
+        continue;
+      }
       if (scope?.some(item => item.startsWith(path + '/')))
         invariant(stat.isDirectory(), 'UNSAFE_PATH', 'Scoped source parent is not a real directory.');
       // Only metadata, dependency installs and real credential names are excluded by name, in

@@ -31,14 +31,16 @@ function fixture(t) {
       ),
     );
   // A sync head: it carries main's change to b.ts and a new c.ts, drops d.ts, keeps a.ts and its
-  // Node test (which names the project's test runner).
+  // Node test (which, in a Node project with a package.json, names the project's test runner).
   const base = state([
+    ['package.json', '{}'],
     ['src/a.ts', 'a'],
     ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b1'],
     ['src/d.ts', 'd'],
   ]);
   const head = state([
+    ['package.json', '{}'],
     ['src/a.ts', 'a'],
     ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b2'],
@@ -46,6 +48,7 @@ function fixture(t) {
   ]);
   // Current main carries b2 too: that path is main's change merged into the Lane, not the Lane's.
   const main = state([
+    ['package.json', '{}'],
     ['src/a.ts', 'a'],
     ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['src/b.ts', 'b2'],
@@ -159,6 +162,7 @@ test('preflight "retry":true plans exactly the files the last run stopped for ti
       ),
     );
   const tests = [
+    ['package.json', '{}'],
     ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['tests/b.test.mjs', "import '../src/a.ts';"],
   ];
