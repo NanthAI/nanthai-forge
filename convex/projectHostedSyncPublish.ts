@@ -11,11 +11,10 @@ import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './
 import { loadSourceJob } from './projectSourceJobs';
 import { sourceServerTiming } from './projectSourceStepTiming';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
-import { hostedLaneSelectionSchema } from '../src/hosted-lane';
 import { savePin } from '../src/hosted-save';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload, type HostedTerminalReceipt } from '../src/hosted-source-operation';
-import { sourceAuthority } from '../src/hosted-source-authority';
+import { syncLaneSelection } from './projectHostedSyncUpToDate';
 import { invariant } from '../src/errors';
 /** Constant-size final CAS: never reads other Lane heads, source pages or Channel history. */
 export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & { result: string }) {
@@ -250,20 +249,7 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
     }
   }
   invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');
-  const selection = hostedLaneSelectionSchema.parse({
-    schema: 2,
-    projectId: input.projectId,
-    laneId: lane.id,
-    intentId: lane.intentId,
-    head: lane.head,
-    version: lane.version,
-    sourceVersion: lane.sourceVersion,
-    lifecycleVersion: lane.lifecycleVersion,
-    state: lane.state,
-    ...(lane.stack ? { stack: lane.stack } : {}),
-    base: lane.base,
-    authority: sourceAuthority((await ctx.db.get(input.projectId))!),
-  });
+  const selection = await syncLaneSelection(ctx, input.projectId, lane);
   return finish(
     {
       status: 'completed',

@@ -31,7 +31,10 @@ export async function saveSourceProgress(
   previous: SourceProgress | null,
   store: (bytes: Uint8Array) => Promise<string>,
 ) {
-  const value: SourceProgress = { kind: 'forge-source-progress-v1', cursor: { ...cursor }, sections: {} };
+  // The one-trip sync delta rides on the step's reply only; durable progress never carries it.
+  const { syncDelta: _reply, ...kept } = cursor;
+  void _reply;
+  const value: SourceProgress = { kind: 'forge-source-progress-v1', cursor: kept, sections: {} };
   for (const field of fields) {
     const bytes = Buffer.from(JSON.stringify(cursor[field] ?? {}));
     if (bytes.length <= 8192) continue;

@@ -16,7 +16,9 @@ export function fakeSourceR2(t) {
   }
   const objects = new Map(),
     requests = [],
-    hooks = { mismatch: false, lostPut: false };
+    // `echo`: a 200 PUT echoes the signed checksum, as R2 does; off, the reply has no echo
+    // (the HEAD-confirmed fallback).
+    hooks = { mismatch: false, lostPut: false, echo: false };
   const original = globalThis.fetch;
   globalThis.fetch = async (target, init = {}) => {
     const url = new URL(target),
@@ -35,7 +37,12 @@ export function fakeSourceR2(t) {
         hooks.lostPut = false;
         throw Error('lost PUT reply');
       }
-      return new Response(null, { status: prior ? 412 : 200 });
+      return new Response(null, {
+        status: prior ? 412 : 200,
+        ...(hooks.echo && !prior
+          ? { headers: { 'x-amz-checksum-sha256': init.headers['x-amz-checksum-sha256'] } }
+          : {}),
+      });
     }
     const bytes = objects.get(url.pathname);
     if (!bytes) return new Response(null, { status: 404 });

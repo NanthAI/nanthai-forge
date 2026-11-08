@@ -138,7 +138,10 @@ export const step = internalAction({
             },
           );
           logStep();
-          return published;
+          // A sync the step published also hands its submitter the result as changes from the
+          // client's Lane head (one-trip sync): in this reply only, never stored.
+          const delta = result.cursor.syncDelta;
+          return published && delta ? JSON.stringify({ ...JSON.parse(published), delta }) : published;
         } catch (error) {
           // Platform failures stay retryable; a fenced step has nothing to settle.
           const domain = sourceDomainError(error);

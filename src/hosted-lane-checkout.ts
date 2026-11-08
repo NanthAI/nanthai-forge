@@ -30,7 +30,7 @@ import { retainedDeltaBackups, settleCheckoutDelta } from './hosted-checkout-del
 import { sweepCheckoutStages } from './hosted-checkout-delta-pending.js';
 import { sweepKeptApply } from './hosted-apply-kept.js';
 import { disposePriorCheckout } from './hosted-checkout-dispose.js';
-import { refuseDeltaConflict, refuseMetadataChange } from './hosted-checkout-carry.js';
+import { refuseDeltaConflict } from './hosted-checkout-carry.js';
 import { withCheckoutOpenMetrics, type CheckoutOpenMetrics } from './checkout-open-metrics.js';
 import { checkoutIo } from './checkout-io.js';
 import { smallCheckout } from './checkout-workload.js';
@@ -64,6 +64,14 @@ const operationSchema = z
   })
   .strict();
 const json = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
+/** What a caller already holds from the server for this exact checkout (one-trip sync). */
+export type CheckoutPrepared = {
+  /** The Lane selection the server returned to this caller for this operation moments ago (a sync
+   * result): it stands in for the opening access read. Reauthorization after a transfer stays. */
+  selection?: HostedLaneSelection;
+  /** The selected State's exact bytes, rebuilt and digest-checked by the caller. */
+  state?: { id: string; bytes: Uint8Array };
+};
 /** Thin editing directory; no native Work owner, Channel writer or acceptance authority. */
 async function checkout(
   root: string,
@@ -71,6 +79,7 @@ async function checkout(
   transport: LaneTransport,
   sharedObjects: string | undefined,
   metrics: CheckoutOpenMetrics,
+  prepared: CheckoutPrepared = {},
 ) {
   const request = hostedLaneCheckoutSchema.parse(input);
   root = canonicalRoot(root);
@@ -181,7 +190,9 @@ async function checkout(
     return marker;
   };
   // Access is checked even on verified cache hits and completed original-operation retries.
-  const observed = parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId));
+  const observed =
+    prepared.selection ??
+    parseHostedResponse(hostedLaneSelectionSchema, await transport.select(request.laneId));
   identity(observed);
   let cooperative = true;
   return withCheckoutMaterialization(
@@ -238,16 +249,15 @@ async function checkout(
                 undefined,
                 { obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` } },
               );
-            // A sync apply onto a trusted baseline judges unsaved changes against the incoming
-            // delta at publication (in place it carries edits to paths it does not touch, as Git
-            // does); only Forge metadata refuses here. Otherwise any local change refuses now.
-            const early: CheckoutChange[] = [];
-            cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker), {
-              deferExtras: true,
-              index: readCheckoutStatIndex(root),
-              ...(marker && request.previous ? { collect: early } : {}),
-            });
-            refuseMetadataChange(early);
+            // A sync apply onto a trusted baseline judges unsaved changes (Forge metadata included)
+            // against the incoming delta at publication, under this lock, in its one tree walk (in
+            // place it carries edits to paths it does not touch, as Git does). Any other checkout
+            // refuses a local change now, before anything is downloaded.
+            if (!(marker && request.previous))
+              cleanHostedCheckout(root, materializedFiles(marker), hostedLaneMarkerName, Boolean(marker), {
+                deferExtras: true,
+                index: readCheckoutStatIndex(root),
+              });
             const next = { request, selection: observed, complete: false, previousMarker: markerDigest() };
             durableReplace(receiptPath, JSON.stringify(next));
             return next;
@@ -285,8 +295,13 @@ async function checkout(
       // Direct machine hits are verified once, where they are used: the State bytes
       // here, and every installed file as it is cloned into the stage.
       const readState = () => checkoutIo(async () => readFileSync(join(cache.objects, selection.head)));
-      await metrics.measure('cacheVerify', () => cache.ensure([selection.head], { installVerifies: true }));
-      let stateBytes = await readState();
+      const held =
+        prepared.state?.id === selection.head && digest(prepared.state.bytes) === selection.head
+          ? prepared.state.bytes
+          : null;
+      if (!held)
+        await metrics.measure('cacheVerify', () => cache.ensure([selection.head], { installVerifies: true }));
+      let stateBytes = held ?? (await readState());
       if (digest(stateBytes) !== selection.head && cache.repairable) {
         await metrics.measure('cacheVerify', () => cache.repair([selection.head]));
         stateBytes = await readState();
@@ -535,11 +550,12 @@ export async function checkoutHostedLane(
   input: unknown,
   transport: LaneTransport,
   sharedObjects?: string,
+  prepared?: CheckoutPrepared,
 ) {
   const request = hostedLaneCheckoutSchema.parse(input);
   return withSubmoduleCheckouts(root, () =>
     withCheckoutOpenMetrics(resolve(root), request, metrics =>
-      checkout(root, request, transport, sharedObjects, metrics),
+      checkout(root, request, transport, sharedObjects, metrics, prepared),
     ),
   );
 }

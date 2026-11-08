@@ -16,6 +16,9 @@ export type InlinePublication = {
   terminal: unknown;
   state: { submittedAt?: number; serverTiming?: unknown };
   chainRun?: { projectId: Id<'hostedProjects'>; actor: string; operationId: string };
+  /** A sync's result as changes from the client's Lane head (src/hosted-sync-delta.ts), added by
+   * the step for its submitter's reply only. */
+  delta?: unknown;
 };
 /** Publish a save, sync or compose result inside the step's terminal commit (1eef1b43): the same
  * publish transaction the scheduled `publish` runs, with no scheduler hop between them. */

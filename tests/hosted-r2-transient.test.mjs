@@ -172,6 +172,30 @@ test('store: healthy PUT+HEAD makes exactly two requests', async t => {
   assert.deepEqual(r2.requests, ['PUT', 'HEAD']);
 });
 
+test('store: a 200 PUT that echoes the exact signed checksum needs no HEAD (one request)', async t => {
+  const { r2 } = lagHeads(t, 0);
+  r2.hooks.echo = true;
+  assert('r2Key' in (await storeSourceBytes({ storage: {} }, project, bytes, pin)));
+  assert.deepEqual(r2.requests, ['PUT']);
+  // The object already exists (412): the existing binding is still confirmed by HEAD.
+  assert('r2Key' in (await storeSourceBytes({ storage: {} }, project, bytes, pin)));
+  assert.deepEqual(r2.requests, ['PUT', 'PUT', 'HEAD']);
+});
+
+test('store: an echo that differs from the signed checksum falls back to the HEAD check', async t => {
+  const r2 = fakeSourceR2(t);
+  const next = globalThis.fetch;
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    const response = await next(url, init);
+    return init.method === 'PUT'
+      ? new Response(null, { status: response.status, headers: { 'x-amz-checksum-sha256': 'other' } })
+      : response;
+  });
+  r2.hooks.mismatch = true;
+  await assert.rejects(storeSourceBytes({ storage: {} }, project, bytes, pin), { code: 'R2_VERIFY_FAILED' });
+  assert.deepEqual(r2.requests, ['PUT', 'HEAD']);
+});
+
 test('store: HEAD 404 right after our PUT is retried and then verifies', async t => {
   const { r2, seen } = lagHeads(t, 2);
   assert('r2Key' in (await storeSourceBytes({ storage: {} }, project, bytes, pin)));

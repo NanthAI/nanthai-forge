@@ -28,7 +28,9 @@ for (const kind of ['compose', 'sync', 'resolve'])
           s.request('resolution', { candidateId: candidate.id, conflicts: candidate.result.conflicts }),
         );
         lane = (await s.readLane(draft.terminal.outcome.result.lane.laneId)).entry;
-      } else lane = await s.lane(s.baseline);
+      } else
+        // Based on an earlier receipt, so the sync is not settled up to date in prepare and runs its job.
+        lane = await s.lane(s.baseline, { base: { head: s.baseline.sha256, receiptId: 'main-earlier' } });
       request = s.request(kind, {
         laneId: lane.laneId,
         expected: s.pins(lane),

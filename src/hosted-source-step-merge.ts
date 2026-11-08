@@ -15,6 +15,7 @@ import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';
+import { syncStateDelta } from './hosted-sync-delta.js';
 import { readJson, sourceStepBytes, full, yieldStep, type StepMeter } from './hosted-source-step-verify.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { sourceWindows, stateSummary } from './hosted-source-fanout.js';
@@ -353,6 +354,22 @@ export async function computeMergeStep(
     c.output = result.output;
     c.head = result.head;
     c.phase = 'done';
+    // The result as changes from the Lane head the client holds (sync and resolve apply it there).
+    const work = (c.plan as { work: { mode: string; left?: { object: { sha256: string } } } }).work,
+      left = work.mode === 'sync' || work.mode === 'resolve' ? work.left?.object.sha256 : undefined;
+    // Full States from their verified bytes: the merge source's `state()` elides message and time
+    // (and cut parents) for ancestry walking, which would never rebuild the exact head.
+    const verified = (id: string) => {
+      try {
+        return parseNativeState(source.object(id));
+      } catch {
+        return null;
+      }
+    };
+    const from = left ? verified(left) : null,
+      head = from ? verified(result.head) : null;
+    const delta = from && head ? syncStateDelta(from, left!, head, result.head) : null;
+    if (delta) c.syncDelta = delta;
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));

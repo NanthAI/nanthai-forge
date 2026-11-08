@@ -92,6 +92,9 @@ export type SourceStepCursor = {
    * their changed paths are unknown and the Candidate waits for the owner. */
   batchDropped?: import('./hosted-landing-batch.js').BatchDropped;
   composeBases?: [string, Pick<NativeFile, 'blob' | 'mode'> | null][];
+  /** A finished sync's result as changes from the client's Lane head (never saved: set only in
+   * the step that finishes; the submitting action passes it to its caller). */
+  syncDelta?: import('./hosted-sync-delta.js').SyncStateDelta;
 };
 export function initialSourceStep(input: WorkerPin): SourceStepCursor {
   return {

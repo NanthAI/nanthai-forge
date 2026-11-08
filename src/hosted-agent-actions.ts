@@ -593,6 +593,8 @@ export async function executeHostedAgent(
             status: source.status,
           },
           new ConvexLaneTransport(session.exchange),
+          // The server just returned this Lane to this caller; its submit reply may carry the State delta.
+          { delta: (observed as { delta?: unknown } | undefined)?.delta },
         );
         clearSyncHandoff(session.root, operationId);
         timing.mark('apply');

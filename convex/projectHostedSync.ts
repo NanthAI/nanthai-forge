@@ -20,6 +20,7 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { savePin } from '../src/hosted-save';
 import { prepareObjectTargets } from './projectObjects';
+import { upToDateSync, finishUpToDateSync } from './projectHostedSyncUpToDate';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 const laneOrigin = (lane: NonNullable<SyncState['lane']>) => ({
   laneId: lane.id,
@@ -119,7 +120,8 @@ export async function prepareHostedSync(
     });
   }
   const project = await activeProject(ctx, auth.projectId, auth.actor);
-  let ownerInputs = false;
+  let ownerInputs = false,
+    upToDate = false;
   let work: SyncState['work'],
     lane: SyncState['lane'] = null,
     origin: SyncState['origin'],
@@ -233,6 +235,11 @@ export async function prepareHostedSync(
         right: await saveObject(ctx, auth.projectId, { sha256: right }),
         ...(stackBase ? { stackBase, stackAfter } : {}),
       };
+      // Main has not moved past this Lane: the job would return up-to-date and write nothing, so
+      // this transaction settles it (no input upload, no source job, no submit call).
+      upToDate =
+        target.kind === 'main' &&
+        (await upToDateSync(ctx, auth.projectId, lane, target, original.ownerOnly && !ownerInputs));
     }
   }
   const state: SyncState = {
@@ -246,13 +253,19 @@ export async function prepareHostedSync(
     resolutionLaneId: prepared.operation.firstAttempt.ids.lane!,
     ...(origin ? { origin } : {}),
     jobOperationId: prepared.operation.firstAttempt.ids.jobOperation!,
-    status: 'ready',
+    status: upToDate ? 'completed' : 'ready',
   };
   await ctx.db.insert('projectHostedSyncs', {
     ...auth,
     jobId: prepared.operation.firstAttempt.ids.job!,
     value: canonicalPayload(state),
   });
+  if (upToDate)
+    return canonicalPayload({
+      state,
+      terminal: await finishUpToDateSync(ctx, auth, state, prepared.operation.firstAttempt),
+      input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+    });
   // The exact input the client uploads before submit, so it needs no progress read for it.
   return canonicalPayload({
     state,

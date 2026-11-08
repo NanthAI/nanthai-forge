@@ -16,12 +16,16 @@ import {
   readlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+const readdir = fs.readdirSync;
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { applyHostedSync } from '../dist/hosted-sync-client.js';
-import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout, hostedLaneMarkerName } from '../dist/hosted-lane-checkout-marker.js';
 import { digest } from '../dist/hash.js';
 import { ForgeError } from '../dist/errors.js';
 import { fixture } from './hosted-sync-client-fixture.mjs';
+import { syncStateDelta, applySyncStateDelta, syncStateDeltaBytes } from '../dist/hosted-sync-delta.js';
 test('explicit sync apply fetches only affected materialized objects and preserves sparse scope', async t => {
   const s = await fixture(t, ['a']),
     command = s.command();
@@ -422,3 +426,102 @@ for (const path of ['full-stage', 'in-place'])
     // In place, only the changed path moved aside, matched its baseline and needs no backup.
     else assert.equal(recovered.priorPreservedAt, undefined);
   });
+test('an up-to-date result the checkout already holds applies with no call, download or tree walk', async t => {
+  const s = await fixture(t);
+  let selects = 0;
+  const select = s.transport.select;
+  s.transport.select = async (...args) => {
+    selects++;
+    return select(...args);
+  };
+  const same = { ...s.command(), status: 'up-to-date', lane: structuredClone(s.from) };
+  const marker = readFileSync(join(s.root, '.forge', hostedLaneMarkerName));
+  const applied = await applyHostedSync(s.root, same, s.transport);
+  assert.equal(applied.alreadyApplied, 'target');
+  assert.equal(applied.head, s.from.head);
+  assert.equal(selects, 0, 'no access read');
+  assert.deepEqual(s.reads, [], 'no State or file download');
+  assert.deepEqual(readFileSync(join(s.root, '.forge', hostedLaneMarkerName)), marker);
+  // Any other pin (here a lifecycle change) still goes through the checkout and records it.
+  const lifecycle = { ...same, operationId: randomUUID(), lane: { ...s.from, lifecycleVersion: 1 } };
+  await applyHostedSync(s.root, lifecycle, s.transport);
+  assert.equal(selects, 1);
+});
+test('an in-place sync apply walks the checkout tree once (2ccb2322 F6)', async t => {
+  const s = await fixture(t);
+  const roots = [];
+  t.mock.method(fs, 'readdirSync', (path, ...rest) => {
+    if (String(path) === s.root) roots.push(path);
+    return readdir(path, ...rest);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const applied = await applyHostedSync(s.root, s.command(), s.transport);
+  assert.equal(applied.head, s.selection().head);
+  assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
+  assert.equal(roots.length, 1, 'one walk of the checkout root');
+});
+test('one-trip sync: a live result with its State delta applies with no access read and no State download', async t => {
+  const s = await fixture(t);
+  let selects = 0;
+  const select = s.transport.select;
+  s.transport.select = async (...args) => {
+    selects++;
+    return select(...args);
+  };
+  const command = s.command(),
+    before = JSON.parse(s.objects.get(s.from.head)),
+    after = JSON.parse(s.objects.get(command.lane.head));
+  const delta = syncStateDelta(before, s.from.head, after, command.lane.head);
+  assert.deepEqual(delta.removed, []);
+  assert.deepEqual(
+    delta.files.map(file => file.path),
+    ['a'],
+  );
+  const applied = await applyHostedSync(s.root, command, s.transport, { delta });
+  assert.equal(applied.head, command.lane.head);
+  assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'after\n');
+  assert.deepEqual(s.reads, [after.files.find(file => file.path === 'a').blob], 'only the changed file');
+  // The changed file was downloaded, so access is read once again before the write.
+  assert.equal(selects, 1);
+  assert.equal(readHostedLaneCheckout(s.root).selection.head, command.lane.head);
+});
+test('one-trip sync: a delta that does not rebuild the exact head is ignored and the State is read', async t => {
+  const s = await fixture(t);
+  const command = s.command(),
+    before = JSON.parse(s.objects.get(s.from.head)),
+    after = JSON.parse(s.objects.get(command.lane.head));
+  const delta = syncStateDelta(before, s.from.head, after, command.lane.head);
+  for (const wrong of [
+    { ...delta, message: 'tampered' },
+    { ...delta, from: 'f'.repeat(64) },
+    { ...delta, extra: true },
+  ])
+    assert.equal(applySyncStateDelta(before, s.from.head, wrong), null);
+  const applied = await applyHostedSync(s.root, command, s.transport, { delta: { ...delta, files: [] } });
+  assert.equal(applied.head, command.lane.head);
+  assert(s.reads.includes(command.lane.head), 'the State is downloaded instead');
+});
+test('one-trip sync: deltas are bounded and omitted for States they cannot carry', () => {
+  const file = (path, n) => ({ path, blob: n.toString(16).padStart(64, '0'), mode: 'file' });
+  const state = files => ({
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [],
+    files,
+    message: 'm',
+    at: 'now',
+  });
+  const big = state(Array.from({ length: 400 }, (_, i) => file(`dir/file-${i}.ts`, i + 1)));
+  assert.equal(syncStateDelta(state([]), 'a'.repeat(64), big, 'b'.repeat(64)), null, 'over the byte bound');
+  assert(
+    JSON.stringify(syncStateDelta(state([]), 'a'.repeat(64), state([file('x', 1)]), 'b'.repeat(64))).length <
+      syncStateDeltaBytes,
+  );
+  assert.equal(syncStateDelta(big, 'a'.repeat(64), big, 'a'.repeat(64)), null, 'unchanged');
+  const imported = { ...big, git: { bundle: 'c'.repeat(64), commit: 'd'.repeat(40), format: 'sha1' } };
+  assert.equal(syncStateDelta(big, 'a'.repeat(64), imported, 'b'.repeat(64)), null);
+});

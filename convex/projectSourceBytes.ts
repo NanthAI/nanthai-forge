@@ -9,8 +9,11 @@ import { retryR2Lag } from '../src/hosted-r2-retry';
 
 /** One byte-write seam for trusted source producers in either Convex runtime. Bytes go
  * to R2 only; the `storageId` result shape remains for callers that still read legacy rows.
- * The caller supplies hash-pinned bytes. R2 enforces the signed checksum, then
- * HEAD confirms the exact binding before the owning transaction publishes it. */
+ * The caller supplies hash-pinned bytes. R2 enforces the signed checksum on the create-only PUT.
+ * A 200 that echoes that exact SHA-256 checksum is R2's own confirmation that this key now holds
+ * exactly these bytes (the checksum fixes the size too), so no HEAD follows. A 412 (the key already
+ * existed), or a reply without the echo, is confirmed by HEAD before the owning transaction
+ * publishes it. */
 export async function storeSourceBytes(
   _ctx: Pick<ActionCtx, 'storage'>,
   projectId: Id<'hostedProjects'> | null,
@@ -45,6 +48,9 @@ export async function storeSourceBytes(
   if (transientSourceStatus(response.status))
     throw new SourceIoError(null, 'source-put', pin.sha256, response.status);
   invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Source upload failed.');
+  await response.body?.cancel().catch(() => {});
+  if (response.status === 200 && response.headers.get('x-amz-checksum-sha256') === checksumOf(pin.sha256))
+    return { r2Key: key };
   // Our own PUT was acknowledged, so a 404 here is read-after-write lag: retry it
   // within the shared bound. Mismatch or any other answer fails at once.
   invariant(

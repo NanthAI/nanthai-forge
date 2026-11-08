@@ -30,8 +30,9 @@ export async function fixture(t, paths, extra = []) {
         kind: 'forge-source-state',
         parents: [],
         files: [...entries].sort((a, b) => a.path.localeCompare(b.path)),
-        at: '2026-01-01T00:00:00Z',
+        // The canonical field order the State writer produces (src/native-source.ts writeState).
         message: 'synthetic',
+        at: '2026-01-01T00:00:00Z',
       }),
     );
   let selection = {

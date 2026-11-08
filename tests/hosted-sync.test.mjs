@@ -7,6 +7,9 @@ import { transfers } from './hosted-compose-fixture.mjs';
 import { syncFixture, api, jobApi, code } from './hosted-sync-fixture.mjs';
 import { maxima } from './hosted-compose-fixture.mjs';
 const target = s => ({ kind: 'main', head: s.main.head, receiptId: s.main.receipt.id });
+// A Lane whose base names the same head under an earlier receipt: its sync is still up to date, but
+// publication rebases the record, so prepare cannot settle it and the source job runs.
+const jobLane = s => s.lane(s.baseline, { base: { head: s.baseline.sha256, receiptId: 'main-earlier' } });
 test('resolution pins the immutable Candidate conflict even after original Lanes save again', async () => {
   const s = await syncFixture(),
     { a, b, candidate } = await s.conflict();
@@ -219,7 +222,7 @@ test('main ABA, stale source versions, foreign conflicts and non-clean targets f
 });
 test('completed retries recheck current access, retain terminal pins across epoch movement, and never redispatch', async () => {
   const s = await syncFixture(),
-    lane = await s.lane(s.baseline),
+    lane = await jobLane(s),
     r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
   const { terminal, output } = await s.execute(r);
   assert.equal(terminal.outcome.result.status, 'up-to-date');
@@ -236,7 +239,7 @@ test('completed retries recheck current access, retain terminal pins across epoc
 });
 test('signed output and current authority are required at publication; original operation wins duplicate delivery', async () => {
   const s = await syncFixture(),
-    lane = await s.lane(s.baseline),
+    lane = await jobLane(s),
     r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
   await Promise.all([s.prepareSync(r), s.prepareSync(r)]);
   await s.submitSync(r);
@@ -259,7 +262,7 @@ test('signed output and current authority are required at publication; original 
 });
 test('source-job failure is retained and finalization needs no browser or recurring sync', async () => {
   const s = await syncFixture(),
-    lane = await s.lane(s.baseline),
+    lane = await jobLane(s),
     r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
   await s.prepareSync(r);
   const { jobId } = await s.submitSync(r),
@@ -283,7 +286,7 @@ test('pending resolution cannot be mistaken for a completed clean composition', 
 });
 test('sync descriptors and output reuse recheck exact execution, authority and project object binding', async () => {
   const s = await syncFixture(),
-    lane = await s.lane(s.baseline),
+    lane = await jobLane(s),
     r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
   await s.prepareSync(r);
   const { jobId } = await s.submitSync(r),
@@ -341,7 +344,7 @@ test('sync descriptors and output reuse recheck exact execution, authority and p
 });
 test('short finalizer fetches only its signed manifest, retries once, and is independent of retained history', async t => {
   const s = await syncFixture(),
-    lane = await s.lane(s.baseline),
+    lane = await jobLane(s),
     r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
   await s.prepareSync(r);
   await s.submitSync(r);
@@ -461,4 +464,58 @@ test('a conflict inside dependency composition resolves before original dependen
   const files = JSON.parse(s.objects.get(final.result.head)).files;
   assert(files.some(file => file.path === 'suffix'));
   assert.equal(s.objects.get(files.find(file => file.path === 'a.txt').blob).toString(), 'chosen\n');
+});
+// A State saved on top of `parent`, its object row carrying the parents a trusted worker records.
+function savedOn(s, parent, text, recorded = true) {
+  const pin = s.state([s.file('a.txt', text), s.hidden], [parent.sha256]);
+  const row = [...s.tables.projectObjects.values()].find(r => r.digest === pin.sha256);
+  if (recorded) s.patch('projectObjects', row._id, { stateParents: [parent.sha256] });
+  return pin;
+}
+const syncRow = (s, r) =>
+  [...s.tables.projectHostedSyncs.values()].find(row => row.operationId === r.operationId);
+test('an up-to-date sync settles in prepare: no input upload, no source job, no Lane write', async () => {
+  const s = await syncFixture();
+  for (const head of [s.baseline, savedOn(s, savedOn(s, s.baseline, 'one\n'), 'two\n')]) {
+    const lane = await s.lane(head),
+      r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
+    const before = (await s.readLane(lane.laneId)).record;
+    const prepared = await s.prepareSync(r);
+    assert.equal(prepared.terminal.outcome.status, 'completed');
+    const result = prepared.terminal.outcome.result;
+    assert.equal(result.status, 'up-to-date');
+    assert.equal(result.lane.head, head.sha256);
+    assert.deepEqual(result.from, {
+      laneId: lane.laneId,
+      head: head.sha256,
+      version: lane.version,
+      sourceVersion: lane.sourceVersion,
+    });
+    assert.deepEqual(result.lane.base, before.base);
+    assert.equal(result.lane.version, before.version, 'the Lane record is not rewritten');
+    assert.deepEqual((await s.readLane(lane.laneId)).record, before);
+    const row = syncRow(s, r);
+    assert.equal(JSON.parse(row.value).status, 'completed');
+    await assert.rejects(s.activate(row.jobId), code('NOT_FOUND'));
+    // A retry and a progress read return the same terminal; nothing is dispatched later.
+    assert.deepEqual((await s.prepareSync(r)).terminal, prepared.terminal);
+    assert.deepEqual((await s.progressSync(r)).terminal, prepared.terminal);
+  }
+});
+test('up-to-date is settled in prepare only when proven; otherwise the source job decides', async () => {
+  const s = await syncFixture();
+  const cases = {
+    'no recorded parents': await s.lane(savedOn(s, s.baseline, 'unrecorded\n', false)),
+    'base names an earlier receipt': await jobLane(s),
+    'head beyond the proof budget': await s.lane(
+      Array.from({ length: 17 }).reduce((parent, _, i) => savedOn(s, parent, `${i}\n`), s.baseline),
+    ),
+    'head does not contain main': await s.lane(savedOn(s, s.state([s.file('a.txt', 'other\n')]), 'x\n')),
+  };
+  for (const [name, lane] of Object.entries(cases)) {
+    const r = s.request('sync', { laneId: lane.laneId, expected: s.pins(lane), target: target(s) });
+    const prepared = await s.prepareSync(r);
+    assert.equal(prepared.terminal, null, name);
+    assert.equal(JSON.parse(syncRow(s, r).value).status, 'ready', name);
+  }
 });

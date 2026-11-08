@@ -717,6 +717,29 @@ cannot proceed. Obstruction errors name the relative path and state that source 
 and only local apply is pending; replay the same original operation after resolving the obstruction. Completed apply retries check current access but do not overwrite
 later edits. There is no filesystem watcher, background pull or recurring timer.
 
+Fast paths (fea47345 B; each falls back to the full path when it cannot prove its case):
+
+- **Up to date in prepare.** A main sync whose Lane base is exactly the target main (head
+  and receipt), whose head is a registered State, and whose head provably contains that main
+  through the parents the trusted worker recorded on object rows (at most 16 rows read) is
+  settled by `prepare` itself with the same `up-to-date` terminal its job would write: no
+  input upload, no source job, no Lane write. Stacks, restore, revert, resolution or an
+  owner-provenance change always take the job.
+- **No-op apply.** When the checkout marker already holds the exact result selection and the
+  checkout is at the target, `applyHostedSync` returns `alreadyApplied:"target"` with no
+  call, download or tree walk.
+- **One-trip apply.** A merged or resolved sync's submit reply carries `delta`: the result
+  State as changes from the Lane head the client holds (at most 32 KiB; reply only, never
+  stored). The client rebuilds the State and uses it only if its digest is exactly the
+  result head; it then skips the Lane access read and the State download. Anything else reads
+  the State as before.
+- **One tree walk.** An in-place sync apply walks the checkout once (the publish-time walk
+  under the checkout lock, which refuses metadata changes); the earlier pre-check walk
+  is gone (2ccb2322 F6).
+- **Server R2 writes.** A 200 create-only PUT whose response echoes the exact signed
+  `x-amz-checksum-sha256` is verified by that echo; a 412 or a missing/different echo still
+  does the HEAD check. This drops one R2 request per new object a source step writes.
+
 
 ## Hosted check output API
 
