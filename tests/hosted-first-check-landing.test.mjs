@@ -4,7 +4,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { checkEntryPaths, firstCheckRisk } from '../dist/first-check-risk.js';
+import {
+  checkEntryPaths,
+  FIRST_CHECK_RISK_RULE,
+  firstCheckRisk,
+  globalRiskBetween,
+  sharedSequenceFolders,
+} from '../dist/first-check-risk.js';
+import { crossHeadProofSchema, validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import { STANDARD_CHECK_INPUTS } from '../dist/standard-check.js';
 const { revertMessage } = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const audit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));
@@ -128,6 +135,32 @@ for (const [name, memberPaths] of [
     assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
     assert.equal(runCount(f), 3);
   });
+
+// Any ecosystem (Issue 6af95601): nested build inputs and ordered migration folders.
+for (const [name, memberPaths] of [
+  ['a nested conftest.py', ['pkg/conftest.py', 'pkg/test_b.py']],
+  ['a migration sequence folder both sides add to', ['app/migrations/0005_a.py', 'app/migrations/0005_b.py']],
+  [
+    'an Alembic versions folder both sides add to',
+    ['svc/alembic/versions/a1.py', 'svc/alembic/versions/b2.py'],
+  ],
+])
+  test(`${name} rechecks (global-risk)`, async t => {
+    const f = await wave(t, { memberPaths, fileCount: 2 });
+    assert.deepEqual(f.reuseDecisions, ['global-risk']);
+    assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'global-risk' });
+    assert.equal(runCount(f), 3);
+  });
+
+test('migrations in different folders still land on the first check', async t => {
+  const f = await wave(t, {
+    memberPaths: ['a/migrations/0005_a.py', 'b/migrations/0005_b.py'],
+    fileCount: 2,
+  });
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  assert.equal(receipts(f)[1].crossHeadProof.riskRule, FIRST_CHECK_RISK_RULE);
+  assert.equal(runCount(f), 2);
+});
 
 // Any CI (Issue 05df5aed): the rule reads paths, manifests and the run's selection
 // only, so a project whose check is its own command lands a clean overtake on its
@@ -446,4 +479,91 @@ test('a revert receipt names the re-land command and undo within 1024 bytes', ()
     assert.match(message, /\.\.\. Re-land after fixing: .* Undo: revert this receipt\.$/);
   }
   assert.equal(revertMessage('s', null), 's Undo: revert this receipt.');
+});
+
+test('v2 nested build inputs of every ecosystem are global-risk at any depth (v1 was not)', () => {
+  for (const path of [
+    'crates/x/build.rs',
+    'crates/x/.cargo/config.toml',
+    'crates/x/.cargo/config',
+    'crates/x/rust-toolchain.toml',
+    'pkg/conftest.py',
+    'pkg/pytest.ini',
+    'pkg/tox.ini',
+    'pkg/noxfile.py',
+    'pkg/mypy.ini',
+    'pkg/.python-version',
+    'src/App/App.csproj',
+    'src/App/Lib.fsproj',
+    'src/App.sln',
+    'src/App.slnx',
+    'src/Directory.Build.props',
+    'src/Directory.Build.targets',
+    'src/Directory.Packages.props',
+    'src/App/packages.lock.json',
+    'src/global.json',
+    'src/NuGet.Config',
+    'app/gradle/libs.versions.toml',
+    'app/gradle/wrapper/gradle-wrapper.properties',
+    'app/buildSrc/src/main/kotlin/Conv.kt',
+    'svc/BUILD',
+    'svc/BUILD.bazel',
+    'svc/defs.bzl',
+    'svc/WORKSPACE',
+    'svc/MODULE.bazel',
+    'native/CMakeLists.txt',
+    'native/cmake/Find.cmake',
+    'tools/go.work.sum',
+    'db/schema.rb',
+    'db/structure.sql',
+    'db/schema.sql',
+  ]) {
+    assert.equal(firstCheckRisk(path, [], 'first-check-risk-v1'), null, `v1 ${path}`);
+    assert.notEqual(firstCheckRisk(path), null, path);
+    assert.equal(firstCheckRisk(path, [], 'first-check-risk-v2') !== null, true, path);
+  }
+  // Ordinary source stays reusable.
+  for (const path of [
+    'pkg/a.py',
+    'crates/x/src/lib.rs',
+    'src/App/Program.cs',
+    'svc/main.go',
+    'app/src/Main.java',
+  ])
+    assert.equal(firstCheckRisk(path), null, path);
+});
+
+test('the sequence-folder rule needs both sides in the same folder and is v2 only', () => {
+  const a = ['app/migrations/0005_a.py'],
+    b = ['app/migrations/0005_b.py'];
+  assert.deepEqual(sharedSequenceFolders(a, b), ['app/migrations']);
+  assert.deepEqual(sharedSequenceFolders(a, b, 'first-check-risk-v1'), []);
+  assert.equal(globalRiskBetween(a, b), true);
+  assert.equal(globalRiskBetween(a, b, [], 'first-check-risk-v1'), false);
+  assert.equal(globalRiskBetween(a, ['other/migrations/0005_b.py']), false);
+  assert.equal(globalRiskBetween(a, ['app/models.py']), false);
+  assert.equal(globalRiskBetween(['app/models.py'], ['app/models_b.py']), false);
+  for (const [x, y] of [
+    ['db/migrate/20260101_a.rb', 'db/migrate/20260102_b.rb'],
+    ['svc/alembic/versions/a1.py', 'svc/alembic/versions/b2.py'],
+    ['prisma/migrations/2026_a/migration.sql', 'prisma/migrations/2026_b/migration.sql'],
+    ['migrations/V2__a.sql', 'migrations/V2__b.sql'],
+    ['src/main/resources/db/migration/V2__a.sql', 'src/main/resources/db/migration/V2__b.sql'],
+  ])
+    assert.equal(globalRiskBetween([x], [y]), true, x);
+});
+
+test('a proof keeps the risk rule it was decided under: v1 accepts, v2 refuses a shared migration folder', () => {
+  const proof = riskRule => ({
+    algorithm: 'clean-disjoint-v2',
+    candidatePaths: ['app/migrations/0005_a.py'],
+    mainPaths: ['app/migrations/0005_b.py'],
+    docsOverlap: [],
+    checkEntries: [],
+    riskRule,
+  });
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v1')), true);
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v2')), false);
+  // A v1 receipt written before the bump still parses (the schema pins a rule, not one literal).
+  assert.equal(crossHeadProofSchema.options.length, 3);
 });

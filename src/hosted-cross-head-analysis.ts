@@ -8,7 +8,7 @@ import {
   type CleanDisjointProof,
   type CrossHeadProof,
 } from './hosted-cross-head-proof.js';
-import { FIRST_CHECK_RISK_RULE, firstCheckRiskPaths } from './first-check-risk.js';
+import { FIRST_CHECK_RISK_RULE, globalRiskBetween } from './first-check-risk.js';
 import { markdownPath, pinnedTestedDocs, TESTED_DOCS_RULE } from './tested-docs.js';
 
 type Basis = Pick<
@@ -71,8 +71,7 @@ export async function analyzeCrossHeadReuse(
   if (pathsOverlap(rest(candidatePaths), mainPaths) || pathsOverlap(candidatePaths, rest(mainPaths)))
     return { reason: 'path-overlap' };
   if (!docsOverlap.every(markdownPath)) return { reason: 'path-overlap' };
-  if (firstCheckRiskPaths([...candidatePaths, ...mainPaths], checkEntries).length)
-    return { reason: 'global-risk' };
+  if (globalRiskBetween(candidatePaths, mainPaths, checkEntries)) return { reason: 'global-risk' };
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
   // An overlapping Markdown file is the server's clean text merge: it exists on all four
   // sides as a plain file (no add, delete or mode change) and takes the composed bytes.

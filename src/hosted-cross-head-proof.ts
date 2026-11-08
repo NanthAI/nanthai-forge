@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { FIRST_CHECK_RISK_RULE, firstCheckRiskPaths } from './first-check-risk.js';
+import { FIRST_CHECK_RISK_RULES, globalRiskBetween } from './first-check-risk.js';
 import { markdownPath, TESTED_DOCS_RULE } from './tested-docs.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const main = z.object({ head: hash, receiptId: z.string().min(1) }).strict();
@@ -49,7 +49,7 @@ const conservativeImpactProof = z
  * global-risk file. The main audit verifies the new head afterwards. */
 const cleanDisjointV1 = {
   ...basis,
-  riskRule: z.literal(FIRST_CHECK_RISK_RULE),
+  riskRule: z.enum(FIRST_CHECK_RISK_RULES),
   checkEntries: z.array(z.string()),
   checkedScope: z.enum(['full', 'docs']),
 };
@@ -105,7 +105,7 @@ export function validCrossHeadProof(proof: CrossHeadProof) {
       docs.every(
         path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
       ) &&
-      firstCheckRiskPaths([...proof.candidatePaths, ...proof.mainPaths], proof.checkEntries).length === 0
+      !globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule)
     );
   const heads = [proof.checkedBase.head, proof.checked.head, proof.main.head, proof.head];
   const union = (selections: typeof proof.candidateSelections) =>

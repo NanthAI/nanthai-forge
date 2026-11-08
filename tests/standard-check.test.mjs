@@ -2,12 +2,17 @@
 // Forge's own check is one predicate; its settings and extra inputs never reach other projects.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isStandardForgeCheck } from '../dist/standard-check.js';
-import { checkEntryPaths, firstCheckRisk, firstCheckRiskPaths } from '../dist/first-check-risk.js';
+import {
+  checkEntryPaths,
+  firstCheckRisk,
+  firstCheckRiskPaths,
+  sharedSequenceFolders,
+} from '../dist/first-check-risk.js';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 
 const forgeCheck = { executable: 'node', args: ['scripts/forge-check.mjs'] };
@@ -133,6 +138,24 @@ test('Forge own check inputs are global-risk exactly as before, for its check on
     firstCheckRiskPaths(['scripts/test-files.mjs', 'src/a.ts', 'tests/check-runtime.mjs'], entries),
     ['scripts/test-files.mjs', 'tests/check-runtime.mjs'],
   );
+});
+
+test("Forge's own files keep their v1 decisions under first-check-risk-v2", () => {
+  const entries = checkEntryPaths(forgeCheck);
+  const own = ['src', 'tests', 'scripts', 'docs', 'convex', 'web/src', 'evals', 'skills', 'models'].flatMap(
+    dir =>
+      existsSync(dir)
+        ? readdirSync(dir, { recursive: true }).map(path => `${dir}/${path}`.split(sep).join('/'))
+        : [],
+  );
+  assert(own.length > 500, 'walked the repository');
+  for (const path of [...own, ...samplePaths, 'package.json', 'web/package.json'])
+    assert.equal(
+      firstCheckRisk(path, entries, 'first-check-risk-v2'),
+      firstCheckRisk(path, entries, 'first-check-risk-v1'),
+      path,
+    );
+  assert.equal(sharedSequenceFolders(own, own).length, 0, 'no sequence folder in Forge');
 });
 
 test('a non-Forge repository keeps its own scripts/test-*.ts reusable', () => {

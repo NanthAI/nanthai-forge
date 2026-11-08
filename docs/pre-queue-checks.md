@@ -84,7 +84,8 @@ configured check (no `configure-check`) skips it and queues as before.
 
 ### Global-risk files
 
-One list, in `src/first-check-risk.ts` (rule `first-check-risk-v1`). A change
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v2`; a proof pins the
+rule it was decided under, so older receipts keep their v1 decisions). A change
 or a main delta touching any of these always rechecks:
 
 - package manifests and lockfiles (npm, pnpm, Yarn, Bun, Cargo, Go, Python,
@@ -104,7 +105,21 @@ or a main delta touching any of these always rechecks:
   `test-*`, `tests/check-runtime.mjs`, …). Other repositories' files of the same
   names are ordinary files, except `scripts/check-contract.mjs`, which the Actions
   executor reads from every Candidate;
-- database schema (`convex/schema.ts`, `schema.prisma`);
+- from v2, build inputs of other ecosystems at any depth: Rust (`build.rs`,
+  `.cargo/config(.toml)`, `rust-toolchain`), Python (`conftest.py`, `pytest.ini`,
+  `tox.ini`, `noxfile.py`, `mypy.ini`, `.python-version`), .NET (`*.csproj`,
+  `*.fsproj`, `*.vbproj`, `*.sln(x)`, `Directory.Build.props/targets`,
+  `Directory.Packages.props`, `packages.lock.json`, `global.json`, `nuget.config`),
+  Gradle (`gradle/libs.versions.toml`, `*.versions.toml`, `gradle-wrapper.properties`,
+  `buildSrc/**`), Bazel (`BUILD(.bazel)`, `WORKSPACE`, `MODULE.bazel`, `.bazelrc`,
+  `*.bzl`), CMake (`CMakeLists.txt`, `CMakePresets.json`, `*.cmake`) and `go.work.sum`;
+- database schema (`convex/schema.ts`, `schema.prisma`, and from v2 `schema.rb`,
+  `schema.sql`, `structure.sql`);
+- from v2, a **sequence folder** both sides changed: when the change and main each
+  changed a file under the same `migrations`/`migration` folder, `db/migrate` or
+  `alembic/versions` (Django, Rails, Flyway, Prisma, Alembic), the change rechecks even
+  though the paths are disjoint (`0005_a.py` and `0005_b.py` would leave two leaf
+  migrations on main). Reads paths only; folders in different places do not interact;
 - any other root-level file that is not `.md` or `.txt`.
 
 The Lane check never re-runs because main moved. Re-running it would race main

@@ -9,8 +9,14 @@
  */
 import { isStandardForgeCheck, STANDARD_CHECK_INPUTS } from './standard-check.js';
 
-export const FIRST_CHECK_RISK_RULE = 'first-check-risk-v1';
-const patterns: { reason: string; test: RegExp }[] = [
+/** Proofs pin the rule they were decided under: v1 receipts keep v1 decisions, new ones use v2
+ * (nested non-JS build inputs, database schema files and sequence folders). */
+export const FIRST_CHECK_RISK_RULES = ['first-check-risk-v1', 'first-check-risk-v2'] as const;
+export type FirstCheckRiskRule = (typeof FIRST_CHECK_RISK_RULES)[number];
+export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v2';
+const since = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
+  FIRST_CHECK_RISK_RULES.indexOf(rule) >= FIRST_CHECK_RISK_RULES.indexOf(from);
+const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] = [
   // Package manifests and lockfiles, for the common ecosystems.
   {
     reason: 'package manifest or lockfile',
@@ -31,6 +37,40 @@ const patterns: { reason: string; test: RegExp }[] = [
   { reason: 'check script or check contract', test: /^scripts\/check-contract\.mjs$/ },
   // Database schema.
   { reason: 'database schema', test: /(?:^|\/)(?:convex\/schema\.ts|schema\.prisma)$/ },
+  // v2: build inputs of other ecosystems at any depth (root files are already root configuration).
+  {
+    reason: 'build, lint or test configuration',
+    since: 'first-check-risk-v2',
+    test: new RegExp(
+      '(?:^|/)(?:' +
+        [
+          // Rust
+          'build\\.rs|rust-toolchain(?:\\.toml)?|\\.cargo/config(?:\\.toml)?',
+          // Python
+          'conftest\\.py|pytest\\.ini|tox\\.ini|noxfile\\.py|mypy\\.ini|\\.python-version',
+          // Gradle
+          'gradle/libs\\.versions\\.toml|[^/]+\\.versions\\.toml|gradle-wrapper\\.properties|buildSrc/.*',
+          // Bazel
+          'BUILD(?:\\.bazel)?|WORKSPACE(?:\\.bazel)?|MODULE\\.bazel|\\.bazelrc|[^/]+\\.bzl',
+          // CMake
+          'CMakeLists\\.txt|CMakePresets\\.json|[^/]+\\.cmake',
+          // Go
+          'go\\.work\\.sum',
+        ].join('|') +
+        ')$',
+    ),
+  },
+  {
+    // .NET project, solution and central-package files; their names are mixed-case in the wild.
+    reason: 'build, lint or test configuration',
+    since: 'first-check-risk-v2',
+    test: /(?:^|\/)(?:[^/]+\.(?:cs|fs|vb)proj|[^/]+\.slnx?|Directory\.(?:Build\.(?:props|targets)|Packages\.props)|packages\.lock\.json|global\.json|nuget\.config)$/i,
+  },
+  {
+    reason: 'database schema',
+    since: 'first-check-risk-v2',
+    test: /(?:^|\/)(?:schema\.(?:rb|sql)|structure\.sql)$/,
+  },
 ];
 
 /** A check entry: an exact path, or a glob where `*` stays inside one path
@@ -54,13 +94,43 @@ const rootConfig = (path: string) => !path.includes('/') && !/\.(?:md|txt)$/i.te
 
 /** Reason the path is global-risk, or null. `checkEntries` are the files the
  * project's check definition runs (its own data, any runner). */
-export function firstCheckRisk(path: string, checkEntries: readonly string[] = []): string | null {
-  return riskOf(path, checkEntries.map(entryMatcher));
+export function firstCheckRisk(
+  path: string,
+  checkEntries: readonly string[] = [],
+  rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
+): string | null {
+  return riskOf(path, checkEntries.map(entryMatcher), rule);
 }
-function riskOf(path: string, entries: ((path: string) => boolean)[]): string | null {
+function riskOf(
+  path: string,
+  entries: ((path: string) => boolean)[],
+  rule: FirstCheckRiskRule,
+): string | null {
   if (entries.some(entry => entry(path))) return 'check script or check contract';
   if (rootConfig(path)) return 'root configuration';
-  return patterns.find(pattern => pattern.test.test(path))?.reason ?? null;
+  return (
+    patterns.find(pattern => (!pattern.since || since(rule, pattern.since)) && pattern.test.test(path))
+      ?.reason ?? null
+  );
+}
+
+/** A folder whose files are applied in order, so two sides that each add one cannot both be right
+ * without a look: Django/Rails/Flyway/Prisma `migrations`, `db/migrate`, Alembic `versions`.
+ * The key is the folder itself; files below it (Prisma's one folder per migration) share it. */
+const SEQUENCE_FOLDER = /^(.*?(?:^|\/)(?:migrations?|db\/migrate|alembic\/versions))\//;
+const sequenceFolders = (paths: readonly string[]) =>
+  new Set(paths.map(path => SEQUENCE_FOLDER.exec(path)?.[1]).filter((folder): folder is string => !!folder));
+
+/** v2: both sides changed files in the same sequence folder (paths only; a disjoint
+ * `0005_a.py` and `0005_b.py` is exactly this). Earlier rules had no such check. */
+export function sharedSequenceFolders(
+  candidatePaths: readonly string[],
+  mainPaths: readonly string[],
+  rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
+): string[] {
+  if (!since(rule, 'first-check-risk-v2')) return [];
+  const main = sequenceFolders(mainPaths);
+  return [...sequenceFolders(candidatePaths)].filter(folder => main.has(folder));
 }
 
 /** Repository files a check command names: its executable and arguments, and any
@@ -79,7 +149,24 @@ export function checkEntryPaths(check: { executable: string; args: readonly stri
   return [...paths];
 }
 
-export function firstCheckRiskPaths(paths: readonly string[], checkEntries: readonly string[] = []) {
+export function firstCheckRiskPaths(
+  paths: readonly string[],
+  checkEntries: readonly string[] = [],
+  rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
+) {
   const entries = checkEntries.map(entryMatcher);
-  return paths.filter(path => riskOf(path, entries) !== null);
+  return paths.filter(path => riskOf(path, entries, rule) !== null);
+}
+
+/** True when the two sides' changes together are global-risk under `rule`. */
+export function globalRiskBetween(
+  candidatePaths: readonly string[],
+  mainPaths: readonly string[],
+  checkEntries: readonly string[] = [],
+  rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
+) {
+  return (
+    firstCheckRiskPaths([...candidatePaths, ...mainPaths], checkEntries, rule).length > 0 ||
+    sharedSequenceFolders(candidatePaths, mainPaths, rule).length > 0
+  );
 }
