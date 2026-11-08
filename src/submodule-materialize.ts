@@ -19,6 +19,8 @@ export type SubmoduleRefusalReason =
   | 'relative-url-without-origin'
   | 'url-unsupported'
   | 'fetch-failed'
+  | 'outside-installation'
+  | 'access-unavailable'
   | 'git-unavailable'
   | 'limit';
 export type SubmoduleRefusal = {
@@ -39,7 +41,11 @@ export function submoduleFetchUrl(
   if (!url) return { reason: 'url-unavailable' };
   if (url.startsWith('./') || url.startsWith('../')) {
     if (!origin) return { reason: 'relative-url-without-origin' };
-    const base = submoduleFetchUrl(origin);
+    // Synthetic fixtures: a local HTTP server stands in for the project's GitHub repository.
+    const base =
+      fileUrlsForTests() && origin.startsWith('http://127.0.0.1:')
+        ? { url: origin }
+        : submoduleFetchUrl(origin);
     if (!('url' in base)) return base;
     const parts = new URL(base.url).pathname.replace(/\/+$/, '').split('/');
     for (const part of url.split('/')) {
@@ -65,20 +71,44 @@ export function submoduleFetchUrl(
   return { url: parsed.href };
 }
 
+/** `OWNER/NAME` of a GitHub repository URL, the only kind a project's App token can serve. */
+export function githubRepositoryOf(url: string): string | null {
+  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(url);
+  if (match) return `${match[1]}/${match[2]}`;
+  // Synthetic fixtures: a local HTTP server stands in for GitHub.
+  const local = fileUrlsForTests()
+    ? /^http:\/\/127\.0\.0\.1:\d+\/([\w.-]+)\/([\w.-]+?)(?:\.git)?$/.exec(url)
+    : null;
+  return local ? `${local[1]}/${local[2]}` : null;
+}
+
+const reasonHints: Partial<Record<SubmoduleRefusalReason, string>> = {
+  'outside-installation':
+    " (not readable without credentials, and its repository is not in the project's GitHub App installation)",
+  'access-unavailable':
+    ' (the repository was not readable without credentials and App access could not be obtained)',
+};
+
 export function submoduleRefusal(refusals: SubmoduleRefusal[]) {
   const first = refusals[0]!;
   return new ForgeError(
     'SUBMODULE_NOT_MATERIALIZED',
-    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}` +
+    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}${reasonHints[first.reason] ?? ''}` +
       (refusals.length > 1 ? `; ${refusals.length - 1} more` : '') +
-      '. Only credential-free HTTPS URLs are fetched; set "submodules": false on the check to run without submodule content.',
+      '. Public HTTPS URLs are fetched without credentials; private GitHub repositories only when the project\'s GitHub App installation includes them. Set "submodules": false on the check to run without submodule content.',
     undefined,
     { refusals: refusals.slice(0, 20), more: Math.max(0, refusals.length - 20) },
   );
 }
 
+/** One read-only token per GitHub repository (`OWNER/NAME`), or why none was issued. */
+export type SubmoduleAccess = (
+  repositories: string[],
+) => Promise<Record<string, { token: string } | { refused: 'outside-installation' | 'unavailable' }>>;
 export type SubmoduleOptions = Options;
 type Options = {
+  /** Asked only after a credential-free fetch of a GitHub URL fails. */
+  access?: SubmoduleAccess | undefined;
   /** Private per-run cache: one bare repository per URL, each commit fetched once. */
   cache: string;
   /** Superproject URL for relative `.gitmodules` URLs. */
@@ -166,7 +196,8 @@ export async function materializeSubmodules(
 }
 
 export function vetted(item: { url: string | null; origin: string | undefined }) {
-  if (fileUrlsForTests() && item.url?.startsWith('file://')) return { url: item.url };
+  if (fileUrlsForTests() && (item.url?.startsWith('file://') || item.url?.startsWith('http://127.0.0.1:')))
+    return { url: item.url };
   return submoduleFetchUrl(item.url, item.origin);
 }
 
@@ -204,7 +235,10 @@ export class SubmoduleFetcher {
     return join(this.options.cache, `${createHash('sha256').update(url).digest('hex').slice(0, 32)}.git`);
   }
   /** true: fetched now; false: already cached; otherwise why it is unavailable. */
-  async pin(url: string, commit: string): Promise<boolean | 'fetch-failed' | 'git-unavailable'> {
+  async pin(
+    url: string,
+    commit: string,
+  ): Promise<boolean | 'fetch-failed' | 'git-unavailable' | 'outside-installation' | 'access-unavailable'> {
     const repository = this.repository(url),
       key = `${url}\0${commit}`;
     if (this.fetched.has(key)) return false;
@@ -216,12 +250,25 @@ export class SubmoduleFetcher {
         this.fetched.add(key);
         return false;
       }
-      await git(
-        repository,
-        ['fetch', '--quiet', '--depth=1', '--no-tags', '--no-recurse-submodules', '--', url, commit],
-        this.options,
-        fetchTimeoutMs,
-      );
+      const gitFetch = (extra?: Record<string, string>) =>
+        git(
+          repository,
+          ['fetch', '--quiet', '--depth=1', '--no-tags', '--no-recurse-submodules', '--', url, commit],
+          this.options,
+          fetchTimeoutMs,
+          extra,
+        );
+      try {
+        await gitFetch();
+      } catch (error) {
+        const name = githubRepositoryOf(url);
+        if ((error as ForgeError).code === 'SUBMODULE_GIT_UNAVAILABLE' || !name || !this.options.access)
+          throw error;
+        // Not readable anonymously: a private repository of the project's installation.
+        const access = await this.access(name);
+        if ('reason' in access) return access.reason;
+        await gitFetch(tokenHeader(url, access.token));
+      }
       await git(repository, ['update-ref', `refs/forge/${commit}`, commit], this.options);
     } catch (error) {
       return (error as ForgeError).code === 'SUBMODULE_GIT_UNAVAILABLE' ? 'git-unavailable' : 'fetch-failed';
@@ -229,6 +276,32 @@ export class SubmoduleFetcher {
     if (!(await hasCommit(repository, commit, this.options))) return 'fetch-failed';
     this.fetched.add(key);
     return true;
+  }
+  private readonly tokens = new Map<
+    string,
+    Promise<{ token: string } | { reason: 'outside-installation' | 'access-unavailable' }>
+  >();
+  /** One request per repository per run; the token lives in memory and is passed only to the fetch. */
+  private access(name: string) {
+    const key = name.toLowerCase();
+    let pending = this.tokens.get(key);
+    if (!pending) {
+      pending = this.options.access!([name]).then(
+        reply => {
+          const entry = reply[name];
+          if (entry && 'token' in entry) return { token: entry.token };
+          return {
+            reason:
+              entry?.refused === 'outside-installation'
+                ? ('outside-installation' as const)
+                : ('access-unavailable' as const),
+          };
+        },
+        () => ({ reason: 'access-unavailable' as const }),
+      );
+      this.tokens.set(key, pending);
+    }
+    return pending;
   }
   /** Writes the commit's tree with a private index; never touches the cache's HEAD. */
   async checkout(url: string, commit: string, target: string) {
@@ -271,6 +344,16 @@ async function hasCommit(repository: string, commit: string, options: Options) {
     () => true,
     () => false,
   );
+}
+
+/** Git config (through the environment, never argv) that sends the token to exactly this
+ * repository's URL and nowhere else. */
+export function tokenHeader(url: string, token: string): Record<string, string> {
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `http.${url.replace(/\/+$/, '')}.extraheader`,
+    GIT_CONFIG_VALUE_0: `AUTHORIZATION: basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+  };
 }
 
 /** Hardened Git: no inherited config, hooks, credential helper, filters, prompts or LFS
@@ -316,7 +399,7 @@ function git(
         'protocol.allow=never',
         '-c',
         'protocol.https.allow=always',
-        ...(file ? ['-c', 'protocol.file.allow=always'] : []),
+        ...(file ? ['-c', 'protocol.file.allow=always', '-c', 'protocol.http.allow=always'] : []),
         ...config.flatMap(item => ['-c', item]),
         '-c',
         'http.followRedirects=initial',

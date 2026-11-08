@@ -989,19 +989,40 @@ The Actions planner and the self-hosted runner replace each submodule pointer in
 the check workspace with its pinned commit's tree, recursively (up to 8 levels and
 256 submodules), like `actions/checkout` with `submodules: recursive`. They fetch
 only credential-free HTTPS URLs from `.gitmodules`; a `git@github.com:` URL is
-fetched as its public HTTPS form, and a relative URL needs a known superproject URL.
+fetched as its public HTTPS form. A relative URL (`../lib.git`) resolves against the
+project's GitHub repository (the Actions repository of the check configuration), as Git
+resolves it against the superproject's remote; a runner with no such repository (a
+connected machine) still refuses it.
 Each commit is fetched once per run (shallow, cached by URL and commit), and shards
 receive the trees in the Candidate artifact. Git runs with no inherited
 configuration, hooks, credential helper, filters, LFS smudge or prompts, and no
 repository code runs. The tree carries no `.git` metadata. Source verification
 checks the pointer bytes; the fetched tree is external content, as on GitHub.
 
+**Private submodules.** A GitHub URL that cannot be read anonymously is fetched with a
+short-lived, read-only (`contents: read`) installation token limited to exactly that
+repository, but only when the GitHub App installation that serves the project's own
+repository also includes it. The Actions job asks once per repository
+(`submoduleAccess` over the OIDC session; capability `checks.submoduleAccess`, so an
+older server simply refuses as before); the server verifies the live run and the
+project's binding, looks up the repository's installation, mints the token and returns
+it with `Cache-Control: no-store`. Public submodules never ask. The token is never
+stored or logged (the job also masks it), reaches Git only through the fetch's
+environment scoped to that repository's URL (not argv, not config files), and is not
+written to the workspace. A repository outside the installation is not given a token
+(`outside-installation`); a failed lookup refuses with `access-unavailable`. Cost per
+private repository: one Convex request (plus the session mutation) and two or three
+GitHub API calls (installation lookup, mint; the project lookup and binding proof are
+added once per call). The fetched content is readable by the check's own commands, as
+with any checkout.
+
 Any other URL (SSH to another host, `http:`, `file:`, credentials, missing), a
-relative URL without a superproject URL, an unreachable commit or a runner without `git` refuses with
+relative URL without a project repository, an unreachable commit, a repository outside
+the installation or a runner without `git` refuses with
 `SUBMODULE_NOT_MATERIALIZED`, naming path, commit, URL and reason. On the
 self-hosted runner the check fails with that line before the command runs; on
-Actions the plan job fails with it. Private submodules through the GitHub App are
-not fetched yet. A check that does not need submodule content sets
+Actions the plan job fails with it. Machine runners do not fetch private submodules
+yet. A check that does not need submodule content sets
 `"submodules": false` in its definition (part of its digest) to keep the pointer
 files.
 

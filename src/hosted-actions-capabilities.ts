@@ -11,6 +11,8 @@ export const actionsInlineLogCapability = 'results.inlineLog';
 export const actionsPoolCapability = 'checks.pool';
 /** The plan's recipe may pin declared toolchains and dependency cache (src/actions-toolchains.ts). */
 export const actionsToolchainsCapability = 'checks.toolchains';
+/** Read-only single-repository tokens for private submodules in the project's App installation. */
+export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
@@ -22,6 +24,7 @@ export const hostedActionsCapabilities = [
   actionsInlineLogCapability,
   actionsPoolCapability,
   actionsToolchainsCapability,
+  actionsSubmoduleAccessCapability,
 ] as const;
 /** Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
@@ -39,7 +42,10 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'plan.plan.recipe.actions': actionsToolchainsCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
-export const actionsCapabilityCommands: Readonly<Record<string, string>> = { sourcePack: 'sourcePack' };
+export const actionsCapabilityCommands: Readonly<Record<string, string>> = {
+  sourcePack: 'sourcePack',
+  submoduleAccess: actionsSubmoduleAccessCapability,
+};
 export function actionsCommandForCapabilities(
   command: z.infer<typeof directCommandSchema>,
   capabilities: readonly string[],

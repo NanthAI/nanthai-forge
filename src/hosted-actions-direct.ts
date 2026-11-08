@@ -63,6 +63,19 @@ export function actionsExecutionCost(run: Pick<HostedCheckRun, 'id' | 'execution
     estimatedCostUsd: null,
   };
 }
+/** A GitHub repository whose private submodule content a check needs (src/submodule-materialize.ts). */
+export const submoduleRepositoryName = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/)
+  .refine(name => name.split('/').every(part => part !== '.' && part !== '..'));
+/** Reply: a one-repository read token, or why none was issued. Anything else is refused. */
+export const submoduleAccessReplySchema = z.record(
+  z.string(),
+  z.union([
+    z.object({ token: z.string().min(1).max(512) }).strict(),
+    z.object({ refused: z.enum(['outside-installation', 'unavailable']) }).strict(),
+  ]),
+);
 export const directPlanSchema = z.object({ recipe: hostedActionsRecipeSchema, lockfile: checkHash }).strict();
 // Command/result metadata may grow. Identity, pins, logs and recipes remain strict.
 export const directCommandSchema = z.discriminatedUnion('kind', [
@@ -73,6 +86,12 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       kind: z.literal('sourcePack'),
       phase: z.enum(['prepare', 'commit']),
       object: sourcePackUploadSchema,
+    })
+    .strip(),
+  z
+    .object({
+      kind: z.literal('submoduleAccess'),
+      repositories: z.array(submoduleRepositoryName).min(1).max(8),
     })
     .strip(),
   z.object({ kind: z.literal('plan'), plan: directPlanSchema }).strip(),

@@ -8,11 +8,13 @@ import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { directSourceWindow } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
 import { digest } from './hash.js';
-import { invariant } from './errors.js';
+import { invariant, type ForgeError } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { mapExchange } from './exchange-parallel.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
-import { materializeSubmodules } from './submodule-materialize.js';
+import { materializeSubmodules, type SubmoduleAccess } from './submodule-materialize.js';
+import { actionsSubmoduleAccessCapability } from './hosted-actions-capabilities.js';
+import { submoduleAccessReplySchema } from './hosted-actions-direct.js';
 
 /** Parallel R2 GETs per descriptor window when the pack is absent or for the delta. */
 export const actionsReadConcurrency = 16;
@@ -206,6 +208,11 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       : await timed('submodulesMs', () =>
           materializeSubmodules(directory, state.files, blob => readFile(join(cache, blob)), {
             cache: join(dirname(cache), 'forge-submodules'),
+            // Relative `.gitmodules` URLs resolve against the project's GitHub repository.
+            ...(run.configuration.provider === 'github-actions'
+              ? { origin: `https://github.com/${run.configuration.repository}` }
+              : {}),
+            access: submoduleAccess(client),
             log: line => console.log(line),
           }),
         );
@@ -250,6 +257,25 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     connection,
     reader,
     submodules,
+  };
+}
+/** Read tokens for private repositories of the project's App installation, through the OIDC
+ * session. Absent on a server without the capability, so those submodules refuse as before. */
+export function submoduleAccess(client: ActionsJobClient): SubmoduleAccess | undefined {
+  if (!client.capabilities.includes(actionsSubmoduleAccessCapability)) return undefined;
+  return async repositories => {
+    try {
+      const reply = submoduleAccessReplySchema.parse(
+        await client.call({ kind: 'submoduleAccess', repositories }),
+      );
+      // Mask before any other use; the token itself is never logged.
+      for (const entry of Object.values(reply))
+        if ('token' in entry) console.log(`::add-mask::${entry.token}`);
+      return reply;
+    } catch (error) {
+      if ((error as ForgeError)?.code === 'CHECK_CANCELLED') throw error;
+      return Object.fromEntries(repositories.map(name => [name, { refused: 'unavailable' as const }]));
+    }
   };
 }
 export async function verifySourceTree(state: NativeState, directory: string) {

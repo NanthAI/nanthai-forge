@@ -681,6 +681,59 @@ test('HTTP rejects forged OIDC before any source or database access', async t =>
   assert.equal((await response.json()).reason, 'authorization');
 });
 
+test('HTTP submodule access mints one read-only token per repository of the run installation, only for a live run', async t => {
+  const s = await fixture(t, 1);
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const github = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
+    const path = new URL(url).pathname;
+    github.push({ path, body: init.body && JSON.parse(init.body) });
+    if (path === '/repos/other/stranger/installation') return Response.json({ id: 77 });
+    if (path.endsWith('/installation')) return Response.json({ id: 9 });
+    if (path === '/app/installations/9/access_tokens') return Response.json({ token: 'synthetic-token' });
+    throw new Error(`unexpected ${path}`);
+  });
+  const modules = { projectHostedActionsSession: sessions };
+  const ctx = {
+    runMutation: (ref, input) => {
+      const [name, method] = getFunctionName(ref).split(':');
+      return s.call(modules[name], method, input);
+    },
+  };
+  const send = (repositories, authorization = `Bearer ${oidc()}`) =>
+    handle._handler(
+      ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization },
+        body: JSON.stringify({ ...s.id, command: { kind: 'submoduleAccess', repositories } }),
+      }),
+    );
+  // Not yet dispatched and acknowledged: no token and no GitHub call.
+  assert.equal((await send(['synthetic/priv'])).status, 403);
+  assert.deepEqual(github, []);
+  await s.bind();
+  assert.equal((await send(['synthetic/priv'], 'Bearer forged')).status, 403);
+  assert.deepEqual(github, []);
+  const response = await send(['synthetic/priv', 'other/stranger']);
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.deepEqual(await response.json(), {
+    'synthetic/priv': { token: 'synthetic-token' },
+    'other/stranger': { refused: 'outside-installation' },
+  });
+  assert.deepEqual(
+    github.filter(call => call.path.endsWith('/access_tokens')).map(call => call.body),
+    [{ repositories: ['priv'], permissions: { contents: 'read' } }],
+  );
+  assert.equal(github[0].path, '/repos/synthetic/project/installation', 'anchored on the run repository');
+  assert.equal((await send(['../x/y'])).status, 403);
+});
+
 test('OIDC HTTP commits one bounded log with its shard result and reconciles a lost reply', async t => {
   const s = await fixture(t, 1);
   await s.bind();

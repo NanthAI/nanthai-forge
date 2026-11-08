@@ -7,11 +7,15 @@ import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import { operatorBinding } from './githubBindingAccess';
 import type { ActionCtx } from './_generated/server';
-import { githubRequest } from '../src/hosted-github-api';
+import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import { ForgeError, invariant } from '../src/errors';
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
+/** Submodule fetches read file contents of one other repository, nothing else. */
+export const submoduleReadPermissions: GithubAppPermissions = { contents: 'read' };
+/** Repositories one submodule-access request may name. */
+export const submoduleRepositoryLimit = 8;
 /** The mirror push uses only the Git data API (blobs, trees, commits, refs), which
  * needs contents write; GitHub always adds metadata read. */
 export const mirrorPermissions: GithubAppPermissions = { contents: 'write' };
@@ -300,4 +304,59 @@ export async function githubAppRequest(
   });
   invariant(response.ok, 'RUNNER_UNAVAILABLE', `GitHub App request failed (${response.status}).`);
   return response;
+}
+export type SubmoduleAccess = Record<
+  string,
+  { token: string } | { refused: 'outside-installation' | 'unavailable' }
+>;
+/** Short-lived read-only tokens for private submodule fetches, one per repository,
+ * each limited to exactly that repository. A repository gets a token only when the
+ * App installation that serves this project's own repository (bound to the project)
+ * also includes it; any other repository is refused with a reason and nothing is
+ * minted. Tokens go to the caller in the response and are never persisted or logged.
+ * GitHub calls: the project's installation lookup (plus binding proof), then one
+ * installation lookup and one mint per accepted repository. */
+export async function submoduleReadTokens(
+  ctx: ActionCtx,
+  projectId: string,
+  repo: string,
+  requested: readonly string[],
+  request: typeof fetch = convexFetch,
+  now = Date.now(),
+): Promise<SubmoduleAccess> {
+  invariant(
+    requested.length > 0 && requested.length <= submoduleRepositoryLimit,
+    'BAD_ARGUMENT',
+    `Name 1 to ${submoduleRepositoryLimit} repositories.`,
+  );
+  for (const name of requested) assertRepositoryName(name);
+  const { api, installation } = await appInstallation(repo, request, now);
+  await repositoryScope(ctx, projectId, repo, api, installation.id, request);
+  const result: SubmoduleAccess = {};
+  for (const name of new Set(requested)) {
+    let other: Installation;
+    try {
+      other = await api<Installation>(`/repos/${name}/installation`);
+    } catch (error) {
+      // 404: the App is not installed there (or the repository is not visible to it).
+      if (error instanceof GithubMirrorApiError && error.status === 404) {
+        result[name] = { refused: 'outside-installation' };
+        continue;
+      }
+      throw error;
+    }
+    if (other.id !== installation.id) {
+      result[name] = { refused: 'outside-installation' };
+      continue;
+    }
+    result[name] = {
+      token: await mintInstallationToken(
+        api,
+        installation.id,
+        { repositories: [name.split('/')[1]!] },
+        submoduleReadPermissions,
+      ),
+    };
+  }
+  return result;
 }

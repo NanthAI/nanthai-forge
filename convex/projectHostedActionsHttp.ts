@@ -28,6 +28,7 @@ import {
   poolClaimPrefix,
   poolUnits,
 } from '../src/hosted-actions-pool';
+import { submoduleReadTokens } from './githubAppToken';
 import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
@@ -146,7 +147,24 @@ export const handle = httpAction(async (ctx, request) => {
       );
     else if (command.kind === 'sourcePack')
       value = await sourcePackCommand(ctx, input, command.phase, command.object);
-    else if (command.kind === 'plan') {
+    else if (command.kind === 'submoduleAccess') {
+      // Authorize the live run first; tokens are minted for its repository's installation only.
+      const run: HostedCheckRun = await ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
+        input,
+      );
+      invariant(
+        run.configuration.provider === 'github-actions',
+        'EVIDENCE_CHANGED',
+        'Submodule access belongs to GitHub Actions runs.',
+      );
+      value = await submoduleReadTokens(
+        ctx,
+        input.projectId,
+        run.configuration.repository,
+        command.repositories,
+      );
+    } else if (command.kind === 'plan') {
       // Recheck before and after storage IO; only immutable small plan metadata crosses this action.
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), input);
       const plan = command.plan;
