@@ -185,7 +185,7 @@ test('build outputs and other ignored files written after a save are never unsav
   // write *.tsbuildinfo). Preflight then refused with LANE_DIRTY until a no-op save moved the marker.
   const root = repo(t, {
     '.forge/hosted-lane.json': '{}',
-    '.gitignore': 'convex/_generated/api.d.ts\n*.tsbuildinfo\nbuild/\n',
+    '.gitignore': 'convex/_generated/api.d.ts\n*.tsbuildinfo\nbuild/\ndist/\n',
     'convex/_generated/api.d.ts': 'generated',
     'tsconfig.tsbuildinfo': '{}',
     'build/out.js': '',

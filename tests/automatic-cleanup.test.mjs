@@ -31,6 +31,8 @@ async function fixture(t, enabled = true, script = "console.log('retained log')"
   const root = mkdtempSync(join(tmpdir(), 'forge-auto-clean-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   writeFileSync(join(root, 'file.txt'), 'original\n');
+  // Check output under build/ is regenerable because the project ignores it, as in Git.
+  if (artifactPaths) writeFileSync(join(root, '.gitignore'), 'build/\n');
   initNative(root);
   const agent = new AgentWorkflow(root),
     store = agent.work.store;

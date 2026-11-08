@@ -23,7 +23,7 @@ test('hosted sync after a build preserves output; remote advance/local conflict 
   const s = await resolutionFixture(t, { overlap: false }),
     f = s.f;
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
-  writeFileSync(join(s.root, '.gitignore'), '/generated/\n');
+  writeFileSync(join(s.root, '.gitignore'), '/generated/\n/dist/\n');
   await s.transport().dispatch('save', { message: 'declare synthetic generated output' });
   const check = build(s.root),
     before = readHostedLaneCheckout(s.root);
@@ -79,7 +79,7 @@ test('full open, conflict edit, build and resolve preserve dependency links with
   const synced = await s.transport().dispatch('sync', { laneId: f.lane.laneId });
   const conflict = synced.result.conflict;
   writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
-  writeFileSync(join(conflict.root, '.gitignore'), '/generated/\n');
+  writeFileSync(join(conflict.root, '.gitignore'), '/generated/\n/dist/\n');
   const check = build(conflict.root);
   const command = { laneId: conflict.laneId, operationId: randomUUID() };
   const fixed = await s.transport(conflict.root).dispatch('resolve', command);

@@ -616,12 +616,13 @@ Transient failures retry the original operation with exponential backoff up to
 one minute between attempts. Disabling the policy stops future attempts; an
 already-sent Git request may still complete.
 
-Automatic projection also omits paths protected by capture's sensitive-name and
-private-directory rules even when an imported State retained them. It shares native
-capture's source rules: modules such as `src/secret-crypto.ts`, `convex/secrets.ts`
-and `web/src/Secrets.tsx`, and exact `.env.example`, `.env.sample` and `.env.template`
-files remain included. Dotenv values, credential/config files, key files and private
-directories remain excluded. These path rules do not scan file contents. The mapping
+Automatic projection also omits paths protected by capture's credential-name and
+metadata rules even when an imported State retained them. It shares native
+capture's source rules: code modules such as `src/secret-crypto.ts`,
+`internal/auth/credentials.go` and `src/Secrets.cs`, files under `build/`, `dist/` or
+`coverage/`, and exact `.env.example`, `.env.sample` and `.env.template` files are
+published. Dotenv values, credential/config files, key files, credential stores
+(`.ssh`, `.aws`, `.azure`, `.gnupg`) and VCS/Forge metadata remain excluded. These path rules do not scan file contents. The mapping
 records those omitted paths for exact retry. Manual sync retains its existing
 exact accepted-tree behavior. Accepted source is never changed by publication.
 

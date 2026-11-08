@@ -20,7 +20,8 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 
 const rules = [
-  { path: '.gitignore', content: '/out/\n/convex/_generated/\n' },
+  // Build output is preserved because the project ignores it, as in Git; Forge never drops a folder by name.
+  { path: '.gitignore', content: '/out/\n/dist/\n/convex/_generated/\n' },
   { path: '.forgeignore', content: '/custom-cache/\n' },
 ];
 // A file turning into a directory keeps the full private-stage install; ordinary edits apply in place.

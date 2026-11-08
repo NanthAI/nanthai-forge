@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { exclusion, sourceExclusion, safeRelative } from './files.js';
+import { captureExclusion, safeRelative } from './files.js';
 import { invariant } from './errors.js';
 import { ignoredBy, readIgnoreLayer, type IgnoreMatch } from './source-ignore.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 
-export type NativeExcludedPath = { path: string; reason: string; ignore?: IgnoreMatch };
+export type NativeExcludedPath = {
+  path: string;
+  reason: string;
+  ignore?: IgnoreMatch;
+  /** A built-in exclusion that the ignore rules also match. */
+  ignoredToo?: boolean;
+};
 type SourcePathOptions = {
   retained?: string[] | undefined;
   excluded?: { path: string; reason: string }[] | undefined;
@@ -67,12 +73,13 @@ export function scanSourcePaths(root: string, options: SourcePathOptions = {}): 
       const stat = lstatSync(join(root, path));
       if (scope?.some(item => item.startsWith(path + '/')))
         invariant(stat.isDirectory(), 'UNSAFE_PATH', 'Scoped source parent is not a real directory.');
-      // Analysis name heuristics must not drop source modules such as secrets.ts.
-      // Real credential/config names and explicit ignore rules stay excluded.
-      const reason = stat.isDirectory() ? exclusion(path) : sourceExclusion(path);
+      // Only metadata, dependency installs and real credential names are excluded by name, in
+      // every language; build folders follow ignore rules (cmd/build/main.go is source).
+      const reason = captureExclusion(path, stat.isDirectory());
       if (reason && !selected && !descendant) {
         excluded?.push({ path, reason });
-        onExcluded?.({ path, reason });
+        // Say whether ignore rules would drop it anyway; only the rest is worth a save notice.
+        onExcluded?.({ path, reason, ignoredToo: !!ignoredBy(next, path, stat.isDirectory()) });
         continue;
       }
       const match = ignoredBy(next, path, stat.isDirectory());

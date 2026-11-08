@@ -27,7 +27,8 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { gitlinkCommit } from './gitlink.js';
 import { digest } from './hash.js';
-import { nativePaths } from './source-paths.js';
+import { scanSourcePaths } from './source-paths.js';
+import { notSavedCollector, notSavedFile } from './save-not-saved.js';
 import { durableReplace, syncFile } from './native-durability.js';
 import { invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
@@ -181,7 +182,8 @@ export async function captureHostedSave(
     cache = clientCacheRoot(root),
     bases = overlapBaseBlobs(cache, marker.selection.base.head);
   const baseline = new Map(marker.state.files.map(file => [file.path, file])),
-    local = nativePaths(root, [...baseline.keys()]);
+    notSaved = notSavedCollector(),
+    local = scanSourcePaths(root, { retained: [...baseline.keys()], onExcluded: notSaved.onExcluded });
   const marked: string[] = [];
   const resolving = pendingConflictPaths(root, marker.selection.laneId).length > 0;
   const changes: SaveChange[] = [],
@@ -236,7 +238,8 @@ export async function captureHostedSave(
       changes.push({ path, before: { blob: old.blob, mode: old.mode }, after: null });
     }
   // Capture is retry state, never a Work owner or a Lane publication.
-  const result = { marker, changes, files };
+  const excluded = notSaved.value();
+  const result = { marker, changes, files, ...(excluded ? { notSaved: excluded } : {}) };
   mkdirSync(clientCacheRoot(root), { recursive: true, mode: 0o700 });
   neverIndex(clientCacheRoot(root));
   writeCheckoutStatIndex(root, since, observedStats);
@@ -249,6 +252,8 @@ export async function captureHostedSave(
       'WORK_STALE',
       'Checkout baseline changed during save preparation.',
     );
+    // Kept after the save settles (capture.json is dropped then), so a replayed receipt repeats it.
+    if (excluded) durableReplace(join(directory, notSavedFile), JSON.stringify(excluded));
     durableReplace(path, JSON.stringify(result));
     return result;
   });

@@ -12,7 +12,7 @@ import {
 import { createHash } from 'node:crypto';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
-import { sourceLanguage } from './languages.js';
+import { codeFileName } from './code-files.js';
 
 export { safeRelative } from './safe-relative.js';
 import { safeRelative } from './safe-relative.js';
@@ -22,48 +22,75 @@ export function sourceRealpath(path: string) {
     ? systemRealpath.native(path)
     : systemRealpath(path);
 }
+/** VCS and Forge metadata, and Forge's private evidence folder: never source or published. */
+const metadataDirectories = ['.git', '.forge', 'private-artifacts'];
+/** Credential stores that a repository never means to publish. */
+const credentialDirectories = ['.ssh', '.aws', '.azure', '.gnupg'];
+/** Analysis also skips build output and other generated trees by name. Capture and
+ * publication never do: they follow `.gitignore`/`.forgeignore`, so a Go `cmd/build`
+ * package or a tracked `build/x.sh` is source (see `captureExclusion`). */
+const analysisDirectories = [
+  ...metadataDirectories,
+  '.netlify',
+  '.next',
+  'node_modules',
+  'dist',
+  'build',
+  'coverage',
+  ...credentialDirectories,
+];
+const sensitiveName = (name: string) =>
+  /^(\.env($|\.)|\.npmrc$|\.netrc$|credentials?([.-]|$)|secrets?([.-]|$))/.test(name) ||
+  /\.(pem|key|p12|pfx|keystore)$/.test(name);
+/** `credentials*`/`secrets*` names that are code modules or packages, never credential values. */
+const credentialStem = /^(credentials?|secrets?)([.-]|$)/i;
+
+/** Analysis policy (code maps, presence, document reads): skips generated trees too. */
 export function exclusion(path: string): string | null {
   const parts = path.toLowerCase().split('/');
-  if (
-    parts.some(p =>
-      [
-        '.git',
-        '.forge',
-        '.netlify',
-        '.next',
-        'node_modules',
-        'dist',
-        'build',
-        'coverage',
-        'private-artifacts',
-        '.ssh',
-        '.aws',
-        '.azure',
-        '.gnupg',
-      ].includes(p),
-    )
-  )
-    return 'protected-directory';
-  const name = parts.at(-1) ?? '';
-  if (
-    /^(\.env($|\.)|\.npmrc$|\.netrc$|credentials?([.-]|$)|secrets?([.-]|$))/.test(name) ||
-    /\.(pem|key|p12|pfx|keystore)$/.test(name)
-  )
-    return 'sensitive-name';
+  if (parts.some(p => analysisDirectories.includes(p))) return 'protected-directory';
+  if (sensitiveName(parts.at(-1) ?? '')) return 'sensitive-name';
   return null;
 }
 
-/** Source capture/publication keeps modules and exact env templates, unlike analysis. */
+/** Source capture/publication of a path that is already source: only VCS/Forge metadata,
+ * credential stores and real credential names are excluded, in every language. Code modules
+ * named `credentials.*`/`secrets.*` and exact env templates are kept. Build folders are
+ * excluded only by ignore rules. O(path), no filesystem reads. */
 export function sourceExclusion(path: string): string | null {
-  const reason = exclusion(path);
-  if (reason !== 'sensitive-name') return reason;
+  const parts = path.toLowerCase().split('/');
+  if (parts.some(p => metadataDirectories.includes(p) || credentialDirectories.includes(p)))
+    return 'protected-directory';
   const name = path.split('/').at(-1) ?? '';
+  if (!sensitiveName(name.toLowerCase())) return null;
   if (
-    (/^(credentials?|secrets?)[.-]/i.test(name) && sourceLanguage(path)) ||
+    (credentialStem.test(name) && codeFileName.test(name)) ||
     /(?:^|\.)env\.(example|sample|template)$/i.test(name)
   )
     return null;
-  return reason;
+  return 'sensitive-name';
+}
+
+/** What a new, untracked path's own name excludes from capture before ignore rules apply.
+ * Adds to `sourceExclusion`: `node_modules` (dependency installs; Forge links one into
+ * every Lane), `.env*` directories (virtualenvs and env stores), and non-code files inside a
+ * `credentials`/`secrets` directory. A code package with such a name (`internal/secrets/`)
+ * is walked and its code captured. Tracked paths are kept regardless. O(path). */
+export function captureExclusion(path: string, directory: boolean): string | null {
+  const parts = path.split('/'),
+    lower = parts.map(part => part.toLowerCase());
+  if (lower.includes('node_modules')) return 'protected-directory';
+  if (directory) {
+    if (lower.some(p => metadataDirectories.includes(p) || credentialDirectories.includes(p)))
+      return 'protected-directory';
+    const name = lower.at(-1) ?? '';
+    return sensitiveName(name) && !credentialStem.test(name) ? 'sensitive-name' : null;
+  }
+  const reason = sourceExclusion(path);
+  if (reason) return reason;
+  if (lower.slice(0, -1).some(part => credentialStem.test(part)) && !codeFileName.test(parts.at(-1) ?? ''))
+    return 'sensitive-name';
+  return null;
 }
 
 export function readSource(

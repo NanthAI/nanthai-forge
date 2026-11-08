@@ -23,6 +23,7 @@ import {
   saveHostedLane,
   settlePriorHostedSave,
 } from './hosted-save-client.js';
+import { capturedNotSaved } from './save-not-saved.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
@@ -484,7 +485,9 @@ export async function executeHostedAgent(
       (outcome as { outcome?: unknown }).outcome && Object.keys(split.stepsMs).length
         ? await session.journal.retain('save-timing', () => split)
         : session.journal.get<typeof split>('save-timing');
-    return kept ? { ...outcome, timing: kept } : outcome;
+    // New paths the capture left out by name (credential names), bounded: the save says so.
+    const notSaved = capturedNotSaved(session.root, operationId);
+    return { ...outcome, ...(kept ? { timing: kept } : {}), ...(notSaved ? { notSaved } : {}) };
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);

@@ -49,8 +49,8 @@ test('retained files and directory prefixes preserve ignore and exclusion covera
     'visible.txt',
     'ignored/deep/keep.txt',
     'ignored/deep/drop.txt',
-    'dist/deep/keep.txt',
-    'dist/deep/drop.txt',
+    'node_modules/deep/keep.txt',
+    'node_modules/deep/drop.txt',
     '.env',
     'other.scratch',
     'keep.scratch',
@@ -61,13 +61,13 @@ test('retained files and directory prefixes preserve ignore and exclusion covera
   }
   const excluded = [];
   assert.deepEqual(
-    nativePaths(root, ['ignored/deep/keep.txt', 'dist/deep/keep.txt', 'keep.scratch'], excluded),
-    ['.gitignore', 'dist/deep/keep.txt', 'ignored/deep/keep.txt', 'keep.scratch', 'visible.txt'],
+    nativePaths(root, ['ignored/deep/keep.txt', 'node_modules/deep/keep.txt', 'keep.scratch'], excluded),
+    ['.gitignore', 'ignored/deep/keep.txt', 'keep.scratch', 'node_modules/deep/keep.txt', 'visible.txt'],
   );
   assert.deepEqual(excluded, [
     { path: '.env', reason: 'sensitive-name' },
-    { path: 'dist/deep/drop.txt', reason: 'protected-directory' },
     { path: 'ignored/deep/drop.txt', reason: 'gitignored' },
+    { path: 'node_modules/deep/drop.txt', reason: 'protected-directory' },
     { path: 'other.scratch', reason: 'gitignored' },
   ]);
 });

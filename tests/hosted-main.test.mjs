@@ -12,7 +12,8 @@ import { fixture, upload, modules } from './project-exchange-fixture.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 import { storedBytes } from './default-r2.mjs';
 const main = await import(moduleUrl('../convex/projectMain.ts'));
-function setup(t) {
+/** `extra` adds tracked files (path, text) to every main State, such as an ignore file. */
+function setup(t, extra = []) {
   const dir = mkdtempSync(join(tmpdir(), 'hosted-main-'));
   t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(dir, 'client'),
@@ -34,7 +35,8 @@ function setup(t) {
         files: [
           { path: 'a.txt', blob: a, mode: 'file' },
           { path: 'bin/run', blob: unchanged, mode: 'executable' },
-        ],
+          ...extra.map(([path, text]) => ({ path, blob: blob(text), mode: 'file' })),
+        ].sort((a, b) => (a.path < b.path ? -1 : 1)),
         message: 'synthetic',
         at: '2026-01-01T00:00:00Z',
       }),
@@ -387,7 +389,8 @@ test('server main unavailable or revoked never falls back to an uploaded native 
 
 test('main checkout uses the shared ignored-output and dependency-link preservation path', async t => {
   const { mkdirSync, symlinkSync, readlinkSync } = await import('node:fs');
-  const s = setup(t);
+  // Build output is preserved because the project ignores it; Forge never drops a folder by name.
+  const s = setup(t, [['.gitignore', '/dist/\n']]);
   await checkoutHostedMain(s.root, s.request(), s.transport);
   mkdirSync(join(s.root, 'dist'));
   writeFileSync(join(s.root, 'dist/app.js'), 'local output');

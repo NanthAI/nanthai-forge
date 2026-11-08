@@ -119,9 +119,18 @@ Native capture and hosted checkout saves read nested `.gitignore` and
 `.forgeignore` files without Git. In each directory, `.forgeignore` follows
 `.gitignore`, with the same patterns, anchored paths, directory rules and `!`
 negation. A Forge negation can re-include a Git-ignored path; excluded parent
-directories must first be re-included. Built-in credential/configuration and
-protected-directory exclusions take precedence for new files. `.forgeignore`
-itself is an ordinary source file. Local Git-worktree and GitHub source analysis
+directories must first be re-included. Built-in rules take precedence for new
+files, and they are the same for every language: VCS and Forge metadata (`.git`,
+`.forge`, Forge's `private-artifacts`), dependency installs (`node_modules`), credential stores (`.ssh`, `.aws`,
+`.azure`, `.gnupg`) and credential names (`.env*` except exact templates, `.npmrc`,
+`.netrc`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.keystore`, and `credentials*`/`secrets*`
+files that are not code). Code modules named `credentials.*` or `secrets.*` in any
+common language (`internal/auth/credentials.go`, `src/Secrets.cs`) are source, and a
+`secrets/` or `credentials/` folder keeps its code files. Build folders such as
+`build/`, `dist/` or `coverage/` are excluded only when `.gitignore` or `.forgeignore`
+names them, so a Go `cmd/build/` package is saved. A save receipt's `notSaved`
+lists up to 20 new paths that a built-in rule left out although no ignore rule
+names them, with the total `count`. `.forgeignore` itself is an ordinary source file. Local Git-worktree and GitHub source analysis
 use the same nested rules; Git-worktree analysis also preserves local Git
 info/exclude settings.
 

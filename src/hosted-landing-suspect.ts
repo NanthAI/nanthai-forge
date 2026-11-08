@@ -3,6 +3,7 @@
  * Pure decisions shared by the landing controller, the landing-queue model map
  * and the synthetic queue harness. None of them grants publication authority:
  * every landing still needs its own exact passed proof on current main. */
+import { codeFileName } from './code-files.js';
 
 type SuspectState = {
   phase: string;
@@ -20,8 +21,7 @@ export function landingSuspect(state: SuspectState) {
   );
 }
 
-const codeFile =
-  /^(.+)\.(?:[cm]?[jt]sx?|py|go|rb|rs|java|kts?|swift|cs|php|scala|exs?|dart|c|cc|cpp|h|hpp)$/i;
+const codeFile = codeFileName;
 /** The module a test names, in any folder and for common conventions: `x.test.ts`,
  * `x.spec.js`, `test_x.py`, `x_test.go`, `XTest.java`, `XTests.cs`,
  * `x_spec.rb`, or a dotted test class (`tests.test_x.TestY`, `com.acme.XTest`). */

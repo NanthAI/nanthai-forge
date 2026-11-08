@@ -81,7 +81,8 @@ test('refresh stages only changed files, including modes and renamed reused byte
   assert(fs.statSync(join(f.root, 'src/1.txt')).mode & 0o111);
 });
 test('tracked deletes/modes refuse; ignored outputs, dependency links and nested Lane cache survive', async t => {
-  const f = pullFixture(t);
+  // Build output is preserved because the project ignores it; Forge never drops a folder by name.
+  const f = pullFixture(t, 3, [['.gitignore', '/dist/\n']]);
   fs.mkdirSync(join(f.root, 'dist'));
   fs.writeFileSync(join(f.root, 'dist/app.js'), 'output');
   fs.symlinkSync('../dependencies', join(f.root, 'node_modules'));
@@ -142,7 +143,7 @@ const fromStage = from =>
 // the same plain command then applies the pinned head.
 for (const point of ['old-file-moved-aside', 'new-file-installed', 'marker-installed', 'journal-removed'])
   test(`failure at ${point} resumes without mixed files or lost artifacts`, async t => {
-    const f = pullFixture(t);
+    const f = pullFixture(t, 3, [['.gitignore', '/dist/\n']]);
     fs.mkdirSync(join(f.root, 'dist'));
     fs.writeFileSync(join(f.root, 'dist/out'), 'keep');
     f.select([

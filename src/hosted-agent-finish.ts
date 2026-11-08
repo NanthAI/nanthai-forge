@@ -8,6 +8,7 @@ import { sourceWaitSnapshot } from './hosted-agent-source-wait.js';
 import { hostedCheckRequestSchema } from './hosted-check.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { saveContract, saveHostedLane } from './hosted-save-client.js';
+import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { inPlaceResolution } from './hosted-conflict-precheck.js';
@@ -33,6 +34,8 @@ import {
 } from './hosted-finish-guard.js';
 import type { WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
+
+const finishNotSavedKey = 'finish-not-saved';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
 
@@ -165,9 +168,11 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const context = session.journal.get<FinishContext>('finish-context');
   const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
   const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);
+  const notSaved = session.journal.get<NotSaved>(finishNotSavedKey);
   const receipt = {
     ...(result as Record<string, unknown>),
     ...(defaults ? { defaults } : {}),
+    ...(notSaved ? { notSaved } : {}),
     // Changed paths this landing carries against the Lane's base; null when the base manifest is not cached.
     ...(changedPaths === undefined ? {} : { changedPaths }),
   };
@@ -295,6 +300,8 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         return { phase: 'save', saveOperationId, progress: saved };
       }
       markLandStep('saved');
+      const notSaved = capturedNotSaved(session.root, saveOperationId);
+      if (notSaved) await session.journal.retain(finishNotSavedKey, () => notSaved);
     }
     const savedMarker = clean ? marker : session.marker();
     const selection = clean ?? savedMarker!.selection;

@@ -6,7 +6,13 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { exclusion, sourceExclusion, fingerprintPrivateFile, readSource } from '../dist/files.js';
+import {
+  captureExclusion,
+  exclusion,
+  sourceExclusion,
+  fingerprintPrivateFile,
+  readSource,
+} from '../dist/files.js';
 import { touchCtime } from './helpers.mjs';
 
 test('source exclusions keep secret-named modules and env templates while protecting credentials', () => {
@@ -47,10 +53,53 @@ test('source exclusions keep secret-named modules and env templates while protec
     '.aws/credentials',
     'private-artifacts/secret-crypto.ts',
     '.forge/secrets.ts',
+    '.git/config',
   ]) {
     assert.notEqual(sourceExclusion(path), null, path);
     assert.equal(sourceExclusion(path), exclusion(path), path);
   }
+});
+
+test('capture and publication never drop source by folder or language name', () => {
+  // Build folders follow ignore rules for capture; analysis still skips them by name.
+  for (const path of [
+    'cmd/build/main.go',
+    'pkg/coverage/c.go',
+    'build/x.sh',
+    'dist/index.js',
+    'src/build/mod.rs',
+    'internal/auth/credentials.go',
+    'src/Auth/Credentials.cs',
+    'app/secrets.kt',
+    'lib/credentials.rb',
+    'Sources/Secrets.swift',
+    'src/secrets.php',
+    'native/credentials.cpp',
+  ]) {
+    assert.equal(sourceExclusion(path), null, path);
+    assert.equal(captureExclusion(path, false), null, path);
+  }
+  for (const path of ['cmd/build/main.go', 'pkg/coverage/c.go', 'build/x.sh'])
+    assert.equal(exclusion(path), 'protected-directory', `analysis keeps its list: ${path}`);
+  for (const path of ['cmd/build', 'pkg/coverage', 'dist', 'internal/secrets', 'credentials'])
+    assert.equal(captureExclusion(path, true), null, path);
+  for (const [path, directory] of [
+    ['.env', false],
+    ['.env', true],
+    ['deploy/.env.production', false],
+    ['tls/server.pem', false],
+    ['credentials.json', false],
+    ['secrets.yaml', false],
+    ['internal/secrets/prod.yaml', false],
+    ['credentials/aws.json', false],
+    ['node_modules', false],
+    ['node_modules', true],
+    ['web/node_modules/x/index.js', false],
+    ['.ssh', true],
+    ['.git', true],
+  ])
+    assert.notEqual(captureExclusion(path, directory), null, path);
+  assert.equal(captureExclusion('internal/secrets/store.go', false), null);
 });
 
 test('private fingerprints reconcile stable metadata-only changes and reject changing content or authority', async t => {

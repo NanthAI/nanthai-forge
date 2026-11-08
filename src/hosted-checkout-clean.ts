@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
-import { readSource, sourceExclusion } from './files.js';
+import { captureExclusion, readSource } from './files.js';
 import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
@@ -93,7 +93,7 @@ export function cleanHostedCheckout(
       const ignored =
         !saved &&
         (parentIgnored ||
-          Boolean(sourceExclusion(path)) ||
+          Boolean(captureExclusion(path, stat.isDirectory())) ||
           Boolean(ignoredBy(next, path, stat.isDirectory())));
       // Prefix intersections must be inspected too: an ignored dependency link
       // cannot become the parent of incoming source, nor hide saved source.

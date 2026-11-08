@@ -6,7 +6,8 @@ import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { ForgeError } from '../dist/errors.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
-export function pullFixture(t, count = 3) {
+/** `extra` adds tracked [path, text] files to the first main, such as an ignore file. */
+export function pullFixture(t, count = 3, extra = []) {
   const directory = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'forge-pull-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const root = join(directory, 'clone'),
@@ -23,6 +24,7 @@ export function pullFixture(t, count = 3) {
     blob: add(`source ${i}\n`),
     mode: 'file',
   }));
+  files.push(...extra.map(([path, text]) => ({ path, blob: add(text), mode: 'file' })));
   let state,
     main,
     allowed = true,

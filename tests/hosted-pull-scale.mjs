@@ -9,7 +9,8 @@ import { pullHostedProject } from '../dist/hosted-pull.js';
 const count = Number(process.argv[2]),
   cleanup = [];
 process.env.FORGE_OBJECT_CACHE = 'off';
-const f = pullFixture({ after: fn => cleanup.push(fn) }, count);
+// Build output survives pull because the project ignores it; Forge never drops a folder by name.
+const f = pullFixture({ after: fn => cleanup.push(fn) }, count, [['.gitignore', '/dist/\n']]);
 try {
   fs.mkdirSync(join(f.root, 'dist'));
   fs.writeFileSync(join(f.root, 'dist/out'), 'regenerable');

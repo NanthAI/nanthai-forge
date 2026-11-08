@@ -182,6 +182,24 @@ test('incident replay fcd197f1: a save that returned submitted and needed 2-3 re
   assert.equal(marker(s).version, s.expected.version + 2);
 });
 
+test('a save receipt names new paths left out by credential name, bounded, and its replay repeats it', async t => {
+  const s = await fixture(t);
+  writeFileSync(join(s.root, 'a.txt'), 'first edit');
+  mkdirSync(join(s.root, 'cmd/build'), { recursive: true });
+  writeFileSync(join(s.root, 'cmd/build/main.go'), 'package main\n');
+  writeFileSync(join(s.root, 'server.pem'), 'synthetic\n');
+  const saving = s.session('save', { message: 'first' });
+  const result = await executeHostedAgent(saving, 'save', { message: 'first' });
+  assert.equal(result.outcome.status, 'completed');
+  assert.deepEqual(result.notSaved, { count: 1, paths: [{ path: 'server.pem', reason: 'sensitive-name' }] });
+  const replay = await executeHostedAgent(
+    s.session('save', { message: 'first' }, { operationId: saving.journal.operationId }),
+    'save',
+    { message: 'first' },
+  );
+  assert.deepEqual(replay.notSaved, result.notSaved);
+});
+
 test('save still running at its budget returns submitted, and the CLI reports IN_PROGRESS with its wait', async t => {
   const s = await fixture(t);
   writeFileSync(join(s.root, 'a.txt'), 'slow edit');
