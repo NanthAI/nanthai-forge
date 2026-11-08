@@ -92,6 +92,8 @@ budget, time box, acceptance bar and metrics that must not regress.
    after sync or main changes. A near-full set belongs to the landing runner;
    never run it, or the full suite, locally: if preflight selects one, let `finish`
    proceed with the advisory preflight status. The landing check is full verification.
+   Hosted preflight can take a few minutes; when your shell stops commands after
+   120 s, run it in the background and wait for it, never re-run it in a loop.
 9. Never weaken, skip or quarantine tests or raise timeouts to hide races. Explain
    any correction to an impossible assertion. Report observed commands, exit codes
    and counts; label unrun work. Runtime/storage changes also need real billed
