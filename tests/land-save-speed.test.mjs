@@ -134,8 +134,20 @@ test('open indexes the checkout; capture, finish fingerprint and dirty read only
       [stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino, stat.mode, file.blob],
     );
   }
-  // As if the Lane was opened a while ago: these installs are now outside the racy window.
-  writeFileSync(indexPath, JSON.stringify({ ...index, since: Date.now() + 5_000 }));
+  // Replay of the hosted flake: on a loaded runner the install of the last files finishes in the
+  // same clock tick as the index snapshot. Touch the last files now, then age the index below.
+  for (const file of marker.state.files.slice(-25)) {
+    const path = join(root, file.path);
+    writeFileSync(path, readFileSync(path));
+    const stat = lstatSync(path);
+    index.entries[file.path] = [stat.size, stat.mtimeMs, stat.ctimeMs, stat.ino, stat.mode, file.blob];
+  }
+  // As if the Lane was opened a while ago: these installs are now outside the racy window. The
+  // reader also bounds `since` by the index file's own mtime (the file system's clock after the
+  // observations), so age that too; `since` alone would be clamped to the moment of this write.
+  const aged = Date.now() + 5_000;
+  writeFileSync(indexPath, JSON.stringify({ ...index, since: aged }));
+  utimesSync(indexPath, new Date(aged), new Date(aged));
   // A same-size edit with its mtime restored: only ctime moves. It must still count as changed.
   const edited = files(marker)[17],
     before = statSync(join(root, edited)),
