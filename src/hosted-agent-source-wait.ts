@@ -49,6 +49,8 @@ export async function waitHostedAgentSource(
   kind: 'Sync' | 'Saves' | 'Compose' = 'Sync',
   /** One subscription for the caller's whole budget (save waits for its own outcome). */
   timeoutSeconds = 60,
+  /** Sees each raw progress value (the receipt reads its server timing); never changes the result. */
+  observe?: (progress: unknown) => void,
 ) {
   let latest = initial;
   return retryHostedObservation({
@@ -57,9 +59,18 @@ export async function waitHostedAgentSource(
     emit: event => process.stderr.write(`${JSON.stringify(event)}\n`),
     pending: () => sourceWaitSnapshot(latest),
     attempt: (_remaining, signal) =>
-      waitHostedAgentSourceOnce(address, operationId, latest, signal, subscribe, kind, value => {
-        latest = value;
-      }),
+      waitHostedAgentSourceOnce(
+        address,
+        operationId,
+        latest,
+        signal,
+        subscribe,
+        kind,
+        value => {
+          latest = value;
+        },
+        observe,
+      ),
   });
 }
 async function waitHostedAgentSourceOnce(
@@ -70,6 +81,7 @@ async function waitHostedAgentSourceOnce(
   subscribe: () => HostedRunSubscription,
   kind: 'Sync' | 'Saves' | 'Compose',
   remember: (value: unknown) => void,
+  observe?: (progress: unknown) => void,
 ) {
   initial = sourceWaitSnapshot(initial);
   if (stopped(initial)) return initial;
@@ -89,6 +101,7 @@ async function waitHostedAgentSourceOnce(
         value => {
           try {
             const progress = typeof value === 'string' ? JSON.parse(value) : value;
+            observe?.(progress);
             const observed = sourceWaitSnapshot(progress);
             if (stopped(observed)) resolve(observed);
             else if (progress?.jobId) {

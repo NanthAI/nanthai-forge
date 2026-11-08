@@ -38,7 +38,25 @@ import {
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
+import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
+import { sourceResultInlineBytes } from './projectConvexSourceTransport';
+import { digest } from '../src/portable-hash';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
+/** The step's own result text, when publication may take it without the complete action's R2 read. */
+export function inlineSourceResult(
+  kind: string,
+  output: { sha256: string; size: number } | null | undefined,
+  result: string | undefined,
+): boolean {
+  return (
+    (kind === 'save' || kind === 'sync') &&
+    output != null &&
+    result !== undefined &&
+    output.size <= sourceResultInlineBytes &&
+    new TextEncoder().encode(result).length === output.size &&
+    digest(result) === output.sha256
+  );
+}
 export const start = internalMutation({
   args: { ...identity, input: v.string() },
   returns: v.string(),
@@ -80,6 +98,7 @@ export async function startConvexSource(
     executionId,
     step: 0,
     cursor: null,
+    timing: { queuedAt: Date.now(), scheduledAt: Date.now(), steps: [] },
   });
   const scheduledId = await ctx.scheduler.runAfter(
     0,
@@ -238,12 +257,16 @@ export const commit = sourceMutation({
     objects: v.array(sourceOutput),
     output: v.union(v.object({ sha256: v.string(), size: v.number() }), v.null()),
     failure: v.union(v.string(), v.null()),
+    timing: v.optional(sourceStepTiming),
+    /** The output manifest's exact text when small: publication then needs no R2 re-read. */
+    result: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const active = await activeStep(ctx, { ...args, generation: args.generation ?? 0 });
     if (!active) return null;
     const terminal = !!args.output || !!args.failure;
+    const now = Date.now();
     // A terminal result may win the race with the watch, but expired work must
     // never schedule another quantum or discard the retained failure context.
     if (!terminal && sourceRetryExpired(active)) {
@@ -276,20 +299,30 @@ export const commit = sourceMutation({
       lastFailure: undefined,
       lastFailureAt: undefined,
       retryAt: undefined,
+      timing: recordSourceStep(active.row.timing, args.timing, now, terminal),
     });
     if (terminal) {
       const kind = active.job.jobKind;
+      const api =
+        kind === 'save'
+          ? 'projectHostedSaveJobs'
+          : kind === 'compose'
+            ? 'projectHostedComposeJobs'
+            : 'projectHostedSyncJobs';
+      // A small save or sync result the step produced itself goes straight to the publish mutation,
+      // which checks it against the job's signed output digest exactly as after an R2 read. Anything
+      // else (a failure, a larger or missing result) takes the complete action, which reads it back.
+      // Compose keeps the action for now: its results reach 512 KiB and its landing path is separate.
+      const inline = inlineSourceResult(kind, args.output, args.result);
       if (kind !== 'register-state')
         await ctx.scheduler.runAfter(
           0,
-          makeFunctionReference<'action'>(
-            kind === 'save'
-              ? 'projectHostedSaveJobs:complete'
-              : kind === 'compose'
-                ? 'projectHostedComposeJobs:complete'
-                : 'projectHostedSyncJobs:complete',
-          ),
-          { projectId: args.projectId, jobId: args.jobId },
+          makeFunctionReference<'action' | 'mutation'>(`${api}:${inline ? 'publish' : 'complete'}`),
+          {
+            projectId: args.projectId,
+            jobId: args.jobId,
+            ...(inline ? { result: args.result } : {}),
+          },
         );
     } else {
       const scheduledId = await ctx.scheduler.runAfter(

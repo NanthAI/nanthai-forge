@@ -517,9 +517,13 @@ export async function executeHostedAgent(
       throw error;
     }
     timing.mark('submit');
-    const result = await session.waitSource(operationId, prepared),
+    let observed: unknown;
+    const result = await session.waitSource(operationId, prepared, 'Sync', undefined, value => {
+        observed = value;
+      }),
       completed = agentSourceOutcome(result);
     timing.mark('hostedWait');
+    timing.server(observed);
     if (completed?.status === 'completed') {
       const source = parseHostedResponse(syncResultSchema, completed.result);
       // A retained handoff owns this install even if the marker vanished during the source wait:

@@ -79,7 +79,13 @@ export const prepare = receiptMutation({
       if (prepared.replayed) {
         const old = await syncRow(ctx, auth);
         invariant(old, 'SOURCE_UNAVAILABLE', 'The original sync is unavailable.');
-        return canonicalPayload({ state: JSON.parse(old.value), terminal: prepared.operation.terminal });
+        const state = JSON.parse(old.value) as SyncState;
+        // The same receipt as the first prepare, so a retried prepare also skips the progress read.
+        return canonicalPayload({
+          state,
+          terminal: prepared.operation.terminal,
+          input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+        });
       }
       const project = await activeProject(ctx, auth.projectId, auth.actor);
       let ownerInputs = false;
@@ -222,7 +228,12 @@ export const prepare = receiptMutation({
         jobId: prepared.operation.firstAttempt.ids.job!,
         value: canonicalPayload(state),
       });
-      return canonicalPayload({ state, terminal: null });
+      // The exact input the client uploads before submit, so it needs no progress read for it.
+      return canonicalPayload({
+        state,
+        terminal: null,
+        input: hostedSyncInput(state, prepared.operation.firstAttempt.at),
+      });
     } catch (error) {
       return report(error);
     }

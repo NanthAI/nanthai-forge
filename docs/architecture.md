@@ -1128,10 +1128,18 @@ raw saves run in the Convex runtime to avoid Node cold starts; larger/recipe
 saves retain the resumable Node worker under the same execution and publication
 fences. Dispatch is transactional and adds no Node action. Unchanged
 paths are preserved from the verified baseline; no repository code runs.
+The Node worker entries load their static import graph on every cold start, so
+they reach no CLI hub (local workspace, records, checks, GitHub, network clients)
+by static import; `tests/convex-source-worker-graph.test.mjs` enforces this.
+Each step reports its run, R2 read/write and Convex call time with its commit; the
+execution's step row keeps them (at most 16 entries) and a sync's state carries
+them to the receipt's `timing.server` split (dispatch, steps, publish, watch).
 
 A trusted source-job completion schedules the save finalizer independently of the
-editing client. Only its small result manifest passes through the finalizing
-action. One publication transaction verifies the original job/input/output and
+editing client. A save or sync step whose result manifest is at most 64 KiB passes
+it on its terminal commit straight to the publish mutation, which checks it against
+the job's signed output digest; any other result goes through the finalizing action,
+which reads it back from storage. One publication transaction verifies the original job/input/output and
 committed State, compares Lane source/record/lifecycle versions, appends the save,
 updates that Lane and retains the terminal operation receipt. A stale attempt
 retains its original delta and failure receipt. Registered States are immutable

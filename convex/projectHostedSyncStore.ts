@@ -25,6 +25,18 @@ export const syncStateSchema = z
     origin: hostedLaneSchema.shape.resolution.unwrap().shape.origin,
     jobOperationId: z.uuid(),
     status: z.enum(['ready', 'submitted', 'completed', 'stale', 'failed']),
+    /** Server clock at submit and the execution's step split at publication (friction 84c1497f). */
+    submittedAt: z.number().optional(),
+    serverTiming: z
+      .object({
+        queuedAt: z.number(),
+        scheduledAt: z.number(),
+        steps: z.array(z.record(z.string(), z.number())).max(16),
+        doneAt: z.number().optional(),
+        publishedAt: z.number(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type SyncState = z.infer<typeof syncStateSchema>;

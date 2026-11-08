@@ -82,7 +82,18 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
   const finish = async (outcome: HostedTerminalReceipt['outcome'], status: 'completed' | 'stale') => {
     const terminal = { attemptId: first.id, at: first.at, outcome };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
-    await writeSyncState(ctx, row._id, { ...state, status });
+    // The receipt's server split: one indexed read of the execution's step row (friction 84c1497f).
+    const execution = (
+      await ctx.db
+        .query('projectSourceSteps')
+        .withIndex('by_project_and_job', q => q.eq('projectId', input.projectId).eq('jobId', row.jobId))
+        .unique()
+    )?.timing;
+    await writeSyncState(ctx, row._id, {
+      ...state,
+      status,
+      ...(execution ? { serverTiming: { ...execution, publishedAt: Date.now() } } : {}),
+    });
     return terminal;
   };
   // Old sync state could derive true from its target alone, omitting a mixed left side.

@@ -232,7 +232,9 @@ test('ten-file save has one execution, atomic progress, lost-reply recovery and 
     const size = s.scheduled.length;
     await s.execute(step);
     assert.equal(s.scheduled.length, size, 'lost commit replay is a no-op');
-    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:complete');
+    // The small result manifest rides on the commit: publication needs no complete action.
+    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:publish');
+    assert.equal(typeof s.scheduled[0].args.result, 'string');
     const calls = s.invocations.filter(n => !['retryStart'].includes(n)).length;
     // Include source storage accesses in addition to every explicit function.
     const count = s.countsIO();
@@ -418,7 +420,7 @@ test('a step that failed on a platform error is retried after the 60 s lease exp
     assert.equal(done.status, 'completed');
     assert.equal(done.executionId, job.executionId);
     assert.equal(s.tables.projectSourceSteps.size, 1, 'one execution');
-    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:complete');
+    assert.equal(s.scheduled[0].name, 'projectHostedSaveJobs:publish');
   } finally {
     Date.now = real;
     s.restore();

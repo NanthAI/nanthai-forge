@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+import { sourceExecutionTiming } from './projectSourceStepTiming';
 import {
   sourceFailureStages,
   sourceFailureClasses,
@@ -48,6 +49,8 @@ export const sourceStepTables = {
     step: v.number(),
     cursor: v.union(v.string(), v.null()),
     batchId: v.optional(v.id('projectSourceBatches')),
+    /** Server phase split for the operation's receipt (friction 84c1497f); older rows have none. */
+    timing: v.optional(sourceExecutionTiming),
   }).index('by_project_and_job', ['projectId', 'jobId']),
   projectSourceBatches: defineTable({
     projectId: v.id('hostedProjects'),

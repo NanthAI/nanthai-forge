@@ -13,6 +13,7 @@ import {
 } from './projectConvexSourcePool';
 import { receiveConvexSourceJobCallback } from './projectSourceJobCallbacks';
 import { sourceFailure, sourceTaskData } from './projectSourceStepFields';
+import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
@@ -56,6 +57,7 @@ export const fork = sourceMutation({
     kind: v.string(),
     end: v.number(),
     tasks: v.array(v.string()),
+    timing: v.optional(sourceStepTiming),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -112,6 +114,8 @@ export const fork = sourceMutation({
       lastFailure: undefined,
       lastFailureAt: undefined,
       retryAt: undefined,
+      // The step after the join reports the fan-out round inside its own waitMs.
+      timing: recordSourceStep(active.row.timing, args.timing, Date.now(), false),
     });
     await heartbeat(ctx, active);
     await drainSourcePool(ctx, batch => validSourceBatch(ctx, batch));

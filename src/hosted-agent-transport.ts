@@ -880,7 +880,7 @@ export class HostedAgentTransport {
           );
           return main;
         },
-        waitSource: (operationId, initial, kind, timeoutSeconds) =>
+        waitSource: (operationId, initial, kind, timeoutSeconds, observe) =>
           waitHostedAgentSource(
             this.address,
             operationId,
@@ -889,6 +889,7 @@ export class HostedAgentTransport {
             this.subscribeSource,
             kind,
             timeoutSeconds,
+            observe,
           ),
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
         finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
@@ -1572,6 +1573,7 @@ export type HostedAgentSession = {
     initial: unknown,
     kind?: 'Sync' | 'Saves' | 'Compose',
     timeoutSeconds?: number,
+    observe?: (progress: unknown) => void,
   ) => Promise<unknown>;
   /** Epoch ms by which an action that waits for its own outcome (save) returns IN_PROGRESS. */
   waitUntil: number;

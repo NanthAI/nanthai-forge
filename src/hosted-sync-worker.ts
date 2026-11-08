@@ -3,7 +3,7 @@ import { hasConflictMarkers } from './conflict-markers.js';
 import { composeStack } from './native-stack-compose.js';
 import { NativeSource, overlappingPaths, type NativeFile } from './native-source.js';
 import { compensatingState } from './compensating-revert.js';
-import { conflictPlan } from './agent-sync.js';
+import { conflictPlan } from './sync-conflict-plan.js';
 import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import { composeConflictPageSchema } from './hosted-compose.js';
 import { syncInputSchema, syncOutputSchema } from './hosted-sync.js';

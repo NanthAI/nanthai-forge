@@ -24,7 +24,13 @@ import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/ho
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 export const step = internalAction({
-  args: { ...identity, step: v.number(), generation: v.optional(v.number()), loaded: v.optional(v.string()) },
+  args: {
+    ...identity,
+    step: v.number(),
+    generation: v.optional(v.number()),
+    loaded: v.optional(v.string()),
+    delegatedAt: v.optional(v.number()),
+  },
   returns: v.null(),
   handler: async (ctx, args): Promise<null> => {
     let generation = args.generation ?? 0;
@@ -33,14 +39,19 @@ export const step = internalAction({
       'step',
       async () => {
         const started = performance.now();
-        const { loaded: supplied, ...input } = args;
+        const { loaded: supplied, delegatedAt, ...input } = args;
         const loaded: string | null =
           supplied ?? (await ctx.runMutation(reference('projectConvexSourceStore:begin'), input));
         if (!loaded) return null;
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs } = convexSourceTransport(ctx, input, state.locations),
+        const { io, outputs, clock, smallOutput } = convexSourceTransport(
+            ctx,
+            input,
+            state.locations,
+            supplied ? delegatedAt : undefined,
+          ),
           durable = sourceStorage(ctx, input.projectId);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
           progress: SourceProgress | null = null;
@@ -57,7 +68,7 @@ export const step = internalAction({
           }
           if (state.batchId) {
             const joined = JSON.parse(
-              await ctx.runMutation(reference('projectConvexSourceFanout:results'), input),
+              await clock.call(() => ctx.runMutation(reference('projectConvexSourceFanout:results'), input)),
             );
             invariant(
               !joined.failure,
@@ -90,27 +101,32 @@ export const step = internalAction({
             const plan = fanout as SourceFanout;
             // The saved cursor refers to States this step already uploaded; the step
             // after the join resolves them, so they must be recorded before the fork.
-            while (outputs.length)
-              await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
-                ...input,
-                objects: outputs.splice(0, 100),
-              });
+            while (outputs.length) {
+              const objects = outputs.splice(0, 100);
+              await clock.call(() =>
+                ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+              );
+            }
             await ctx.runMutation(reference('projectConvexSourceFanout:fork'), {
               ...input,
               cursor: saved,
               kind: plan.kind,
               end: plan.end,
               tasks: plan.tasks.map(task => JSON.stringify(task)),
+              timing: clock.value(),
             });
             logStep();
             return null;
           }
+          const resultText = smallOutput(result.cursor.output);
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: saved,
             objects: outputs,
             output: result.cursor.output,
             failure: null,
+            timing: clock.value(),
+            ...(resultText === null ? {} : { result: resultText }),
           });
           logStep();
           return null;

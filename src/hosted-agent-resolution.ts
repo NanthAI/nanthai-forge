@@ -309,8 +309,12 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
   try {
     progress = await driveAgentSource(session, 'Sync', session.journal.operationId, request);
     timing.mark('submit');
-    progress = await session.waitSource(session.journal.operationId, progress);
+    let observed: unknown;
+    progress = await session.waitSource(session.journal.operationId, progress, 'Sync', undefined, value => {
+      observed = value;
+    });
     timing.mark('hostedWait');
+    timing.server(observed);
   } catch (error) {
     const safe = hostedActionError(error, 'resolution');
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;

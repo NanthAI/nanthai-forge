@@ -46,16 +46,20 @@ export const step = internalAction({
             await ctx.runAction(makeFunctionReference<'action'>('projectConvexSourceNode:step'), {
               ...input,
               loaded: JSON.stringify({ ...state, locations: [...transport.locations.values()] }),
+              delegatedAt: Date.now(),
             });
             return null;
           }
           const outputCount = transport.outputs.length;
+          const resultText = transport.smallOutput(output);
           await ctx.runMutation(reference('projectConvexSourceStore:commit'), {
             ...input,
             cursor: null,
             objects: transport.outputs,
             output,
             failure: null,
+            timing: transport.clock.value(),
+            ...(resultText === null ? {} : { result: resultText }),
           });
           logSourceStep(input, {
             runtime: 'v8',

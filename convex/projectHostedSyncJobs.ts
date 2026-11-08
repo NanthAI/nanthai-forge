@@ -70,7 +70,7 @@ export const submit = mutation({
             ids: { job: row.jobId },
           },
         });
-        await writeSyncState(ctx, row._id, { ...state, status: 'submitted' });
+        await writeSyncState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
       }
       const job = await loadSourceJob(ctx, input.projectId, row.jobId);
       await ctx.scheduler.runAfter(

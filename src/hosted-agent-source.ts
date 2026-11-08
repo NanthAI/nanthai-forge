@@ -83,7 +83,11 @@ export async function driveAgentSource(
       page: canonicalPayload(page.value),
     });
   }
-  const progress = await session.query<SourceProgress>(`projectHosted${kind}:progress`, { operationId });
+  // A sync prepare returns its input; reading progress for it would be one more round trip.
+  const progress =
+    !pages.length && prepared.input
+      ? prepared
+      : await session.query<SourceProgress>(`projectHosted${kind}:progress`, { operationId });
   if (progress.terminal) return progress.terminal;
   invariant(progress.input, 'SOURCE_UNAVAILABLE', 'The prepared source input is unavailable.');
   await session.exchange.upload(savePin(progress.input), Buffer.from(saveBytes(progress.input)));

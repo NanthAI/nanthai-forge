@@ -17,7 +17,10 @@ import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-er
 import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
+import { sourceStepClock } from '../src/source-step-clock';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
+/** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
+export const sourceResultInlineBytes = 64 * 1024;
 export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
@@ -30,12 +33,17 @@ export function convexSourceTransport(
   ctx: ActionCtx,
   { projectId, jobId, step }: { projectId: Id<'hostedProjects'>; jobId: string; step: number },
   initial: ObjectLocation[] = [],
+  delegatedAt?: number,
 ) {
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
   const input = { projectId, jobId, step };
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [],
-    reads = { objects: 0, bytes: 0 };
+    reads = { objects: 0, bytes: 0 },
+    clock = sourceStepClock(delegatedAt),
+    // The last few small outputs, by digest: a step's final result manifest is one of them, so
+    // commit can carry it to publication without a separate action re-reading it from R2.
+    small = new Map<string, string>();
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>(),
     parents = new Map<string, string[]>();
@@ -55,14 +63,16 @@ export function convexSourceTransport(
     windows = 1,
   ): Promise<WorkerObject[]> => {
     const rows: ObjectLocation[] = JSON.parse(
-      await ctx
-        .runMutation(reference('projectConvexSourceObjects:resolve'), {
-          ...input,
-          digests: ids,
-          ancestry,
-          known,
-          windows,
-        })
+      await clock
+        .call(() =>
+          ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
+            ...input,
+            digests: ids,
+            ancestry,
+            known,
+            windows,
+          }),
+        )
         .catch(error => {
           // Nested mutations carry domain codes in ConvexError.data. Summary
           // acquisition needs the reconstructed ForgeError for its narrow allowlist.
@@ -94,15 +104,17 @@ export function convexSourceTransport(
       const pending = ids.filter(id => !locations.has(id));
       if (!pending.length) return { refs: ids.map(id => locations.get(id)!.descriptor), unavailable: [] };
       const result: { rows: ObjectLocation[]; unavailable: string[] } = JSON.parse(
-        await ctx
-          .runMutation(reference('projectConvexSourceObjects:resolve'), {
-            ...input,
-            digests: pending,
-            ancestry: !!hints,
-            known: hints?.known ?? [],
-            probe: true,
-            ...(hints ? { windows: hints.windows } : {}),
-          })
+        await clock
+          .call(() =>
+            ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
+              ...input,
+              digests: pending,
+              ancestry: !!hints,
+              known: hints?.known ?? [],
+              probe: true,
+              ...(hints ? { windows: hints.windows } : {}),
+            }),
+          )
           .catch(error => {
             const domain = sourceDomainError(error);
             if (domain) throw domain;
@@ -134,59 +146,7 @@ export function convexSourceTransport(
     },
     read: async pin => {
       if (!locations.has(pin.sha256)) await resolve([pin.sha256]);
-      const row = locations.get(pin.sha256)!;
-      invariant(
-        row.descriptor.object.size === pin.size,
-        'SOURCE_HASH_MISMATCH',
-        'Source physical size changed.',
-      );
-      reads.objects++;
-      reads.bytes += pin.size;
-      const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
-      if (blob)
-        return (async function* () {
-          const reader = blob.stream().getReader();
-          try {
-            for (;;) {
-              const part = await reader.read();
-              if (part.done) break;
-              yield part.value;
-            }
-          } finally {
-            await reader.cancel();
-          }
-        })();
-      invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
-      let response: Response;
-      try {
-        const url = row.url;
-        // A committed object that answers 404 may be read-after-write lag; the
-        // shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
-        response = await retryR2Lag(
-          () =>
-            convexFetch(url, {
-              headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
-              signal: networkTimeout(15000),
-            }),
-          lagged => lagged.status === 404,
-          lagged => lagged.body?.cancel().catch(() => {}),
-        );
-      } catch (error) {
-        throw new SourceIoError(error, 'source-headers', pin.sha256);
-      }
-      if (transientSourceStatus(response.status)) {
-        await response.body?.cancel().catch(() => {});
-        throw new SourceIoError(null, 'source-headers', pin.sha256, response.status);
-      }
-      invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Exact source download failed.');
-      verifyPackRange(response, row.range, pin.size);
-      return (async function* () {
-        try {
-          yield* response.body as unknown as AsyncIterable<Uint8Array>;
-        } catch (error) {
-          throw new SourceIoError(error, 'source-body', pin.sha256, response.status);
-        }
-      })();
+      return clock.read(() => openRead(pin));
     },
     upload: async (pin, stream) => {
       const output = await prepareOutput(pin, stream);
@@ -198,13 +158,69 @@ export function convexSourceTransport(
       const prepared: { store(): Promise<SourceOutput> }[] = [];
       for (const object of objects) prepared.push(await prepareOutput(object.pin, object.bytes));
       outputs.push(...(await mapSourceOrdered(prepared, output => output.store())));
-      while (outputs.length >= 100)
-        await ctx.runMutation(reference('projectConvexSourceStore:stage'), {
-          ...input,
-          objects: outputs.splice(0, 100),
-        });
+      while (outputs.length >= 100) {
+        const objects = outputs.splice(0, 100);
+        await clock.call(() =>
+          ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+        );
+      }
     },
   };
+  async function openRead(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>> {
+    const row = locations.get(pin.sha256)!;
+    invariant(
+      row.descriptor.object.size === pin.size,
+      'SOURCE_HASH_MISMATCH',
+      'Source physical size changed.',
+    );
+    reads.objects++;
+    reads.bytes += pin.size;
+    const blob = !row.url && row.storageId ? await ctx.storage.get(row.storageId) : null;
+    if (blob)
+      return (async function* () {
+        const reader = blob.stream().getReader();
+        try {
+          for (;;) {
+            const part = await reader.read();
+            if (part.done) break;
+            yield part.value;
+          }
+        } finally {
+          await reader.cancel();
+        }
+      })();
+    invariant(row.url, 'SOURCE_UNAVAILABLE', 'Exact source bytes are unavailable.');
+    let response: Response;
+    try {
+      const url = row.url;
+      // A committed object that answers 404 may be read-after-write lag; the
+      // shared bound retries it, then the exact SOURCE_UNAVAILABLE stands.
+      response = await retryR2Lag(
+        () =>
+          convexFetch(url, {
+            headers: { 'accept-encoding': 'identity', ...packHeaders(row.range, pin.size) },
+            signal: networkTimeout(15000),
+          }),
+        lagged => lagged.status === 404,
+        lagged => lagged.body?.cancel().catch(() => {}),
+      );
+    } catch (error) {
+      throw new SourceIoError(error, 'source-headers', pin.sha256);
+    }
+    if (transientSourceStatus(response.status)) {
+      await response.body?.cancel().catch(() => {});
+      throw new SourceIoError(null, 'source-headers', pin.sha256, response.status);
+    }
+    invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Exact source download failed.');
+    verifyPackRange(response, row.range, pin.size);
+    return (async function* () {
+      try {
+        yield* response.body as unknown as AsyncIterable<Uint8Array>;
+      } catch (error) {
+        throw new SourceIoError(error, 'source-body', pin.sha256, response.status);
+      }
+    })();
+  }
   async function prepareOutput(pin: WorkerPin, stream: AsyncIterable<Uint8Array>) {
     const parts: Uint8Array[] = [];
     let size = 0;
@@ -239,9 +255,14 @@ export function convexSourceTransport(
         if (!(error instanceof ForgeError) || error.code !== 'INVALID_NATIVE_SOURCE') throw error;
       }
     }
+    if (bytes.length <= sourceResultInlineBytes) {
+      small.delete(pin.sha256);
+      small.set(pin.sha256, new TextDecoder().decode(bytes));
+      if (small.size > 8) small.delete(small.keys().next().value!);
+    }
     return {
       async store(): Promise<SourceOutput> {
-        const ref = await durable.store(bytes),
+        const ref = await clock.write(() => durable.store(bytes)),
           r2 = sourceR2Pin(ref);
         return {
           ...pin,
@@ -252,5 +273,16 @@ export function convexSourceTransport(
       },
     };
   }
-  return { io, outputs, locations, reads };
+  return {
+    io,
+    outputs,
+    locations,
+    reads,
+    clock,
+    /** This step's own small output with exactly this pin, as text; otherwise null. */
+    smallOutput: (pin: { sha256: string; size: number } | null) => {
+      const text = pin ? small.get(pin.sha256) : undefined;
+      return text !== undefined && new TextEncoder().encode(text).length === pin!.size ? text : null;
+    },
+  };
 }
