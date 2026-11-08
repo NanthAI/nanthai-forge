@@ -23,7 +23,8 @@ export const command = {
   args: ['scripts/forge-check.mjs'],
   environmentLabel: 'clean',
 };
-export async function checksFixture(source = null) {
+/** `candidateFields` adds fields to the seeded Candidate (for example its governance paths). */
+export async function checksFixture(source = null, { candidateFields = {} } = {}) {
   const s = source?.store ?? lanesFixture();
   const traffic = { acceptedCalls: 0, acceptedArgumentBytes: 0 };
   const projectId =
@@ -132,6 +133,7 @@ export async function checksFixture(source = null) {
     dependencies: put('synthetic-dependencies'),
     algorithm: 'native@fixture',
     result: { status: 'clean', head: state.sha256 },
+    ...candidateFields,
   };
   if (!source)
     await run('seedCandidate', records.writeHostedRecord, {

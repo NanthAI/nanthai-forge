@@ -321,6 +321,18 @@ its check declares more. Either way it receives the changed paths:
   command; see [package graph](parallel-work-defaults.md#preflight)). `scope: "full"` gives the reason
   the graph could not place the change; the command then runs everything. A command may run
   `commands` as given or use `packages` with its own tool.
+- `FORGE_CHECK_PACKAGES_RUN` (same runs, only when the graph selected packages with tests): an
+  executable that runs those `commands` in the checkout, in order, without a shell, with the calling
+  script's environment, and exits with the first failure's code (Forge's
+  `scripts/check-packages-run.mjs`). A repository's own CI script opts in with one line at its test
+  step, after its setup (toolchains, fetched test data, `uv sync`):
+
+  ```sh
+  [ -z "${FORGE_CHECK_PACKAGES_RUN:-}" ] || exec "$FORGE_CHECK_PACKAGES_RUN"
+  ```
+
+  Without the variable (a full run, or a change the graph cannot place) the script goes on with its
+  full steps; steps before the line (lint, build) still run every time.
 
 Declare the contract with `selection` in the check definition; it changes the definition digest:
 
@@ -329,8 +341,8 @@ nforge x ROOT define-check '{"name":"ci","executable":"bash","args":["ci/check.s
 ```
 
 - `"scope":"changed-paths"`: the command reads the file and may scope. Forge sets `mode: "scoped"` only
-  where its own check may scope (a contract, probe or scoped-recheck gate); no gate, a full gate and the
-  post-accept main audit always get `mode: "full"`. A scoped run is **scoped evidence**: it lands on the
+  where its own check may scope (a contract, probe or scoped-recheck gate) or on a package-graph first
+  check (below); no gate, a full gate and the post-accept main audit always get `mode: "full"`. A scoped run is **scoped evidence**: it lands on the
   contract gate's terms and leaves main-audit debt, never full evidence, whatever the command then does.
   A command may write `{"scope":"full"|"scoped",…}` to `FORGE_CHECK_SELECTION`; on hosted Actions a
   passing command that reports a reduced scope when asked for `full` fails with `SCOPE_MISMATCH`.
@@ -340,6 +352,23 @@ nforge x ROOT define-check '{"name":"ci","executable":"bash","args":["ci/check.s
   `FORGE_CHECK_SHARD_TOTAL`), the form `vitest --shard` and `jest --shard` take; the static job gets
   `FORGE_CHECK_PART=static` for lint, types or build. The job passes only when every part passes, so
   the command must cover everything across its parts.
+
+**Package-graph first check.** An Intent without a contract normally gets a full first check. For a
+declared `changed-paths` command on hosted Actions, the server instead stamps the `graph-first` gate
+when every other contract-gate guard holds (contract gate on, auto-on-pass, an eligible agent,
+unprotected known paths, trust, green debt-free main). The planner then reads the Candidate's
+manifests (never its code) and asks for `mode: "scoped"` only when the graph places every changed path
+and selects at most 50% of the testable packages; a root package, an unplaced path, an unknown graph,
+nothing to run or a majority keep the run full (fallback `graph-full`). The share is recorded on the
+run (`selection.graph: {scope, selected, total, reason}`), and the server refuses a scoped plan
+without a minority share. A scoped pass is scoped evidence: it is accepted on the contract gate's terms
+re-read at acceptance (red main holds it), leaves main-audit debt and is covered by the full
+post-accept main audit. It adds no check run and no Convex call. Forge's own recipe keeps full first
+checks (Issue 5562167f): its graph is one root package, so it would always select everything.
+
+`check-settings` lists a `proposals` entry, and `configure-check` returns a `proposal`, for every
+configured command that declares no scope: it runs in full on every check, so the package graph never
+saves a minute. The proposal is the `selection` to add and the one line above.
 
 A check without `selection` keeps today's behaviour: one full job. Local and self-hosted machine runners
 already supply the same file to every command and run it as one job.

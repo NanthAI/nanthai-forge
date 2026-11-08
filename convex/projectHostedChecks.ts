@@ -11,6 +11,7 @@ import {
   type ScopedRecheckBasis,
 } from '../src/scoped-recheck-policy';
 import { semanticPayload } from '../src/semantic-payload';
+import { GRAPH_FIRST_CONTRACT, fromGraphFirstContract, graphFirstCheck } from '../src/graph-first-check';
 import { mergeSemanticMembers, semanticMember } from './projectSemanticContracts';
 import { z } from 'zod';
 import { watchMacLease, macLeaseMs } from './projectHostedCheckLease';
@@ -203,13 +204,22 @@ export async function enqueueHostedCheck(
   // direct Actions session has the additive gate handshake; all other routes
   // retain their existing full-check wire shape.
   const recoveryGate = fixGate({ needsFix: row.restoreBases ?? project.needsFix?.[candidate.intentId] });
+  const check = checkSchema.parse(JSON.parse(definition.value));
+  // No contract, a configured command that reads the changed paths: the contract gate's other
+  // guards decide a package-graph-scoped first check (src/graph-first-check.ts). Same reads.
+  const graphFirst = !member && !input.recheck && graphFirstCheck(check);
   let gate =
     runner.provider === 'github-actions' && !runner.credential && project.autonomyPolicy?.acceptance.gate
       ? (recoveryGate ??
         (await hostedGateForCandidates(ctx, project, [
-          { candidate, actor: { kind: 'agent', id: actor }, contract: member ?? null },
+          {
+            candidate,
+            actor: { kind: 'agent', id: actor },
+            contract: member ?? (graphFirst ? GRAPH_FIRST_CONTRACT : null),
+          },
         ])))
       : undefined;
+  if (gate && graphFirst && !recoveryGate) gate = fromGraphFirstContract(gate);
   if (
     gate?.mode === 'full' &&
     !recoveryGate &&
@@ -226,7 +236,7 @@ export async function enqueueHostedCheck(
     actor,
     at: prepared.operation.firstAttempt.at,
     request,
-    check: checkSchema.parse(JSON.parse(definition.value)),
+    check,
     configuration: runner,
     ...(project.autonomyPolicy?.checkLogs ? { checkLogs: project.autonomyPolicy.checkLogs } : {}),
     keyId,

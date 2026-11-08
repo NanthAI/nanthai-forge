@@ -40,13 +40,19 @@ export function checkoutPackageSelection(directory: string, changed: string[]) {
   return packageTestSelection(graph, changed);
 }
 
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+
 /** For a scoped configured command (docs/workflows.md#check-command-scope): writes the affected
  * packages and their per-ecosystem commands to a file outside the checkout, for `FORGE_CHECK_PACKAGES`.
- * Nothing for a full run or a changes file without paths. `remove()` deletes the file. */
+ * Nothing for a full run or a changes file without paths. `remove()` deletes the file.
+ * With `runner` (Node and scripts/check-packages-run.mjs) and a runnable scoped selection it also
+ * writes `run`, an executable for `FORGE_CHECK_PACKAGES_RUN` that runs those commands in the
+ * checkout, so a repository's own CI script opts in with one line. */
 export function writeCheckPackages(
   directory: string,
   changes: { mode?: unknown; paths?: unknown } | undefined,
-): { path: string; remove: () => void } | null {
+  runner?: { node: string; script: string },
+): { path: string; run: string | null; remove: () => void } | null {
   if (changes?.mode !== 'scoped' || !Array.isArray(changes.paths)) return null;
   const changed = changes.paths.filter((path): path is string => typeof path === 'string');
   const selection = checkoutPackageSelection(directory, changed);
@@ -63,5 +69,14 @@ export function writeCheckPackages(
     }),
     { mode: 0o600, flag: 'wx' },
   );
-  return { path, remove: () => rmSync(folder, { recursive: true, force: true }) };
+  let run: string | null = null;
+  if (runner && selection.scope === 'scoped' && selection.commands.length) {
+    run = join(folder, 'run');
+    writeFileSync(
+      run,
+      `#!/bin/sh\nexec ${[runner.node, runner.script, path, directory].map(shellQuote).join(' ')}\n`,
+      { mode: 0o700, flag: 'wx' },
+    );
+  }
+  return { path, run, remove: () => rmSync(folder, { recursive: true, force: true }) };
 }

@@ -37,6 +37,10 @@ export function commandCheckInputs(plan, shard) {
     ...(changes.mode === 'scoped' && process.env.FORGE_CHECK_PACKAGES
       ? { FORGE_CHECK_PACKAGES: process.env.FORGE_CHECK_PACKAGES }
       : {}),
+    // Its runner (scripts/check-packages-run.mjs), only when the graph selected runnable packages.
+    ...(changes.mode === 'scoped' && process.env.FORGE_CHECK_PACKAGES_RUN
+      ? { FORGE_CHECK_PACKAGES_RUN: process.env.FORGE_CHECK_PACKAGES_RUN }
+      : {}),
   });
   const finish = passed => {
     try {

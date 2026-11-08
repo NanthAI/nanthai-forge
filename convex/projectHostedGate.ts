@@ -18,6 +18,7 @@ import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { gateFor, gateForCandidates, acceptGate, type GateInput } from '../src/contract-gate-policy';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { acceptScopedRecheck, scopedRecheckBase } from '../src/scoped-recheck-policy';
+import { GRAPH_FIRST_CONTRACT, acceptGraphFirst, isGraphFirstGate } from '../src/graph-first-check';
 import type { HostedRecord } from '../src/hosted-records';
 
 /** Behaviour-neutral S0 placeholder; the owning slice supplies the implementation. */
@@ -115,6 +116,9 @@ export async function hostedAcceptGate(
   // A scoped main-race recheck is accepted on the contract gate's terms.
   if (scopedRecheckBase(run.gate))
     return acceptScopedRecheck(await hostedGateInput(ctx, project, candidate, actor, null));
+  // A package-graph first check too, without the Intent contract it does not have.
+  if (isGraphFirstGate(run.gate))
+    return acceptGraphFirst(await hostedGateInput(ctx, project, candidate, actor, GRAPH_FIRST_CONTRACT));
   // The authoritative run retains the contract selected at enqueue. Re-reading
   // today's Intent would add a record-head/body fan-in and replace that declaration.
   const contract =

@@ -80,7 +80,10 @@ async function executeActiveActionsJob(
     // Advisory input: an unreadable tree leaves the command without it, never fails the check.
     if (!recipe.standard && !commandOverride)
       try {
-        packages = writeCheckPackages(directory, recipe.selection?.changes);
+        packages = writeCheckPackages(directory, recipe.selection?.changes, {
+          node: process.execPath,
+          script: join(import.meta.dirname, '../scripts/check-packages-run.mjs'),
+        });
       } catch {
         packages = null;
       }
@@ -134,6 +137,7 @@ async function executeActiveActionsJob(
         FORGE_ACTIONS_SHARD: shard,
         ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
         ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
+        ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
         [junitDirEnv]: junit.directory,
       },
     });

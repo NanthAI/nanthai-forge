@@ -280,9 +280,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   file with no settings file, a `package.json` with neither workspaces nor its own lockfile). Edges between ecosystems (a JS package that
   builds a Rust crate by path) are not seen. The graph is cached per head; the `tests` read reads
   manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
-  A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`
-  ([check command scope](workflows.md#check-command-scope)). It is a selector, never an
-  independence proof.
+  A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`, with a
+  runner for it in `FORGE_CHECK_PACKAGES_RUN`, and an Intent without a contract can get a scoped
+  first check when the graph selects a minority ([check command scope](workflows.md#check-command-scope)).
+  It is a selector, never an independence proof.
 - **Inferred commands advise; declared ones can be required.** A runner Forge inferred (these
   package commands, or `vitest`/`jest` guessed from a dependency with no `test` script) can need
   setup only the project's CI does: test data it fetches, services, a toolchain. Its plan carries

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { markdownPath } from './tested-docs.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { isGraphFirstGate } from './graph-first-check.js';
 import type { CheckGate } from './bet2-gate.js';
 
 /** Why Forge took a slower path instead of a fast one (Issue 7c2e69e1). Every code is
@@ -65,6 +66,8 @@ const SELECTION = {
   'scoped-base-unavailable': L,
   'scoped-root-config': G,
   'scoped-unclassified': L,
+  // A package-graph first check whose graph selects a majority, an unplaced path or nothing to run.
+  'graph-full': G,
 } as const;
 export const FALLBACK_REASONS: Record<FallbackStage, Record<string, FallbackKind>> = {
   'first-check': REUSE,
@@ -105,6 +108,7 @@ export function selectionFallback(input: {
   }
   if (runner === 'unavailable') return 'test-runner-unavailable';
   if (input.selected.scope !== 'full') return undefined;
+  if (isGraphFirstGate(input.gate)) return 'graph-full';
   if (scopedRecheckBase(input.gate) && !input.mainPaths) return 'scoped-base-unavailable';
   if (input.gate?.mode === 'contract') return 'contract-full';
   // An opaque command runs whole for a Markdown-only change unless its check declares docs paths.

@@ -40,6 +40,7 @@ import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
 import { projectLockfile } from './project-lockfile.js';
+import { graphShareFor, isGraphFirstGate } from './graph-first-check.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
  * means no allow entries: findings then fail, never pass. */
@@ -149,6 +150,8 @@ export async function prepareActionsJob(
     ...(docs ? { testedDocs: docs } : {}),
     // Any other command reads this as its changed-paths file (FORGE_CHECK_CHANGES).
     ...('changes' in selected ? { changes: selected.changes } : {}),
+    // A package-graph first check's minority share, recorded on the run (src/graph-first-check.ts).
+    ...('graph' in selected && selected.graph ? { graph: selected.graph } : {}),
     // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
     ...(secrets.findings.length || secrets.allowed || secrets.allowChanges
       ? {
@@ -350,12 +353,15 @@ function gateSelection(
         tests: [] as string[],
       };
     // Any other command gets the changed paths; it scopes only when its check declares so.
-    return commandSelection(run, paths, files, scopedRecheckBase(gate) ? mainPaths : null);
+    return commandSelection(run, paths, files, scopedRecheckBase(gate) ? mainPaths : null, changed =>
+      graphShareFor(files, changed),
+    );
   }
   const forceFull = gate?.mode === 'audit' || (gate?.mode === 'full' && union.length > 0);
+  // Forge's own recipe keeps full first checks (Issue 5562167f): a graph-first gate reads as full here.
   const env = forceFull
     ? { FORGE_CHECK_FULL: '1' }
-    : gate?.mode === 'full'
+    : gate?.mode === 'full' || isGraphFirstGate(gate)
       ? {}
       : gate
         ? { FORGE_CHECK_SCOPED: '1' }

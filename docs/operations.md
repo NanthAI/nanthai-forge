@@ -246,7 +246,7 @@ The list of codes and their kind lives in `src/fallback-reasons.ts`:
 | `main-race` | landing attempt `recheckReason` (main moved; the attempt rechecked) | reuse codes below |
 | `scoped-recheck` | landing attempt `scopedFallback` | `scoped-no-evidence` |
 | `contract-gate` | the run's server gate (`gate.reason` when the contract gate went full) | `contract-supervised`, `contract-actor`, `contract-protected-paths`, `contract-trust`, `contract-none`, `main-red`, `audit-debt`, `contract-other` |
-| `selection` | check run `fallback`, from the runner's pinned selection | `contract-full`, `docs-paths-undeclared`, `test-runner-unavailable`, `scoped-base-unavailable`, `scoped-root-config`, `scoped-unclassified` |
+| `selection` | check run `fallback`, from the runner's pinned selection | `contract-full`, `docs-paths-undeclared`, `test-runner-unavailable`, `scoped-base-unavailable`, `scoped-root-config`, `scoped-unclassified`, `graph-full` (a [package-graph first check](workflows.md#check-command-scope) ran full: majority, unplaced path or nothing to run) |
 
 Reuse codes: `not-eligible`, `not-tried`, `cohort`, `reuse-policy`, `main-red`,
 `audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `path-overlap`,

@@ -13,7 +13,11 @@ import { join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const controlRuntimePackages = ['zod', '@noble/hashes', 'typescript'];
-export const controlRuntimeEntries = ['scripts/hosted-actions-job.mjs', 'scripts/hosted-actions-execute.mjs'];
+export const controlRuntimeEntries = [
+  'scripts/hosted-actions-job.mjs',
+  'scripts/hosted-actions-execute.mjs',
+  'scripts/check-packages-run.mjs',
+];
 
 export function controlRuntimeKey(root = '.', runtime = process) {
   const lock = readFileSync(join(resolve(root), 'package-lock.json'));

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { recoverLocalApply } from './hosted-apply-recovery.js';
+import { commandScopeProposal } from './check-command-scope.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { guideHostedSync, resolveHostedAgent } from './hosted-agent-resolution.js';
 import { syncTiming, type StepTimer } from './sync-timing.js';
@@ -237,8 +238,20 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     policy: { preset: policy.preset, acceptance: policy.acceptance },
     agentLandsOnPass: review === null,
     blockers,
+    // Advice only: a configured command that declares no scope never runs scoped.
+    proposals: definitions.flatMap(({ check }) => {
+      const parsed = proposalCheck.safeParse(check);
+      const proposal = parsed.success ? commandScopeProposal(parsed.data) : null;
+      return proposal ? [proposal] : [];
+    }),
   };
 }
+const proposalCheck = z.looseObject({
+  name: z.string(),
+  executable: z.string(),
+  args: z.array(z.string()),
+  selection: z.looseObject({ scope: z.literal('changed-paths').optional() }).optional(),
+});
 async function configureCheckRequest(
   session: HostedAgentSession,
   command: z.infer<(typeof hostedAgentCommandSchemas)['configure-check']>,
@@ -403,7 +416,9 @@ export async function executeHostedAgent(
     const selected = await session.journal.retain('configure-check-request', () =>
       configureCheckRequest(session, command, operationId),
     );
-    return session.mutation(selected.name, { request: canonicalPayload(selected.request) });
+    const result = await session.mutation(selected.name, { request: canonicalPayload(selected.request) });
+    const proposal = command.command ? commandScopeProposal(command.command) : null;
+    return proposal && result && typeof result === 'object' ? { ...result, proposal } : result;
   }
   if (action === 'configure-runner') {
     const command = hostedAgentCommandSchemas['configure-runner'].parse(input);

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
+import { isStandardForgeCheck } from './standard-check.js';
 import { contractTestPath } from './intent-test-contract.js';
 import { scopedRecheckBase } from './scoped-recheck-policy.js';
 import type { CheckGate } from './bet2-gate.js';
 import { checkCallBudget, maxTestShards } from '../scripts/test-shards.mjs';
+import { GRAPH_FIRST_MAX_SHARE, isGraphFirstGate, type GraphShare } from './graph-first-check.js';
 
 /** Selection contract for any configured check command (docs/workflows.md#check-command-scope).
  * Forge's own recipe (isStandardForgeCheck, src/standard-check.ts) selects and shards test files itself; every other command gets the
@@ -37,6 +39,8 @@ export type CommandSelection = {
   reason: string;
   tests: string[];
   changes: CommandChanges;
+  /** A package-graph-scoped first check's share (src/graph-first-check.ts), recorded on the run. */
+  graph?: GraphShare;
 };
 
 const fits = (paths: readonly string[]) =>
@@ -44,12 +48,15 @@ const fits = (paths: readonly string[]) =>
 
 /** A declared command may scope only where Forge's own check may (a contract, probe or scoped
  * gate); full and audit gates, and runs with no gate, always ask for everything. A scoped run
- * is scoped evidence (main-audit debt), never full, whatever the command then reports. */
+ * is scoped evidence (main-audit debt), never full, whatever the command then reports.
+ * A package-graph first check (`graph-first` gate) scopes only when `share` (the minority rule
+ * over this Candidate's manifests) says so. */
 export function commandSelection(
   run: Run,
   paths: readonly string[],
   files: { has(path: string): boolean },
   mainPaths: readonly string[] | null = null,
+  share?: (paths: string[]) => GraphShare,
 ): CommandSelection {
   const changes = {
     version: 1 as const,
@@ -80,6 +87,18 @@ export function commandSelection(
       changes: { ...changes, mode: 'scoped', mainPaths: [...mainPaths].sort() },
     };
   }
+  if (isGraphFirstGate(gate)) {
+    const graph = share ? share([...paths]) : null;
+    if (!graph) return full('Command scope: package graph unavailable to this planner; full run');
+    if (graph.scope === 'full') return { ...full(`Command scope: ${graph.reason}; full run`), graph };
+    return {
+      scope: 'scoped',
+      reason: `Command scope: package-graph first check, ${graph.reason}, command-selected`,
+      tests: [],
+      changes: { ...changes, mode: 'scoped' },
+      graph,
+    };
+  }
   const tests = [...new Set(gate.tests ?? [])].sort();
   invariant(
     tests.every(test => contractTestPath.safeParse(test).success && files.has(test)),
@@ -91,6 +110,26 @@ export function commandSelection(
     reason: `Command scope: ${gate.reason ?? `${gate.mode} gate`}, command-selected`,
     tests,
     changes: { ...changes, mode: 'scoped', ...(tests.length ? { tests } : {}) },
+  };
+}
+
+/** The one line a repository's CI script adds at its test step to run only the affected packages. */
+export const PACKAGES_RUN_LINE = '[ -z "${FORGE_CHECK_PACKAGES_RUN:-}" ] || exec "$FORGE_CHECK_PACKAGES_RUN"';
+/** What configure-check and check-settings propose for a configured command that declares no scope:
+ * it then runs in full on every check, so the package graph never saves a check minute. */
+export function commandScopeProposal(check: {
+  name?: string;
+  executable: string;
+  args: readonly string[];
+  selection?: Declaration;
+}) {
+  if (isStandardForgeCheck(check) || check.selection?.scope) return null;
+  return {
+    check: check.name ?? null,
+    selection: { scope: 'changed-paths' as const },
+    line: PACKAGES_RUN_LINE,
+    detail:
+      'This command runs in full on every check. Declare selection:{scope:"changed-paths"} (configure-check command) and add the line at its test step, after setup: scoped checks then run only the affected packages with each ecosystem\'s own test command (docs/workflows.md#check-command-scope).',
   };
 }
 
@@ -119,11 +158,23 @@ export function commandShardCount(
   return count >= 2 ? count : 0;
 }
 
+/** A graph-first scoped plan names its share and it is a minority (the planner's rule, re-checked). */
+const graphMinority = (graph: unknown) => {
+  const share = graph as Partial<GraphShare> | undefined;
+  return (
+    share?.scope === 'scoped' &&
+    Number.isSafeInteger(share.selected) &&
+    Number.isSafeInteger(share.total) &&
+    share.selected! >= 1 &&
+    share.selected! <= share.total! * GRAPH_FIRST_MAX_SHARE
+  );
+};
+
 /** Server check of an opaque command's plan: scope, gate tests, changes pins and shard markers. */
 export function validCommandPlan(
   run: Run,
   recipe: {
-    selection: { scope: string; tests: readonly string[]; changes?: unknown };
+    selection: { scope: string; tests: readonly string[]; changes?: unknown; graph?: unknown };
     groups: string[][];
     pool?: unknown;
   },
@@ -145,7 +196,8 @@ export function validCommandPlan(
         declared?.scope === 'changed-paths' &&
         !!run.gate &&
         !['full', 'audit'].includes(run.gate.mode) &&
-        (run.gate.tests ?? []).every(test => selection.tests.includes(test)))) &&
+        (run.gate.tests ?? []).every(test => selection.tests.includes(test)) &&
+        (!isGraphFirstGate(run.gate) || graphMinority(selection.graph)))) &&
     // Older planners send no changes file; when present it must name this exact Candidate.
     (changes === undefined ||
       (changes.version === 1 &&

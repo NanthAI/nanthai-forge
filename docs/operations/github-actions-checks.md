@@ -32,7 +32,10 @@ with their original runtime identity. They cannot dispatch new work or retry sha
 an unstarted old-runtime plan needs a new check on the fixed runtime.
 Other configured commands run once in the static job and receive the changed-paths file; a
 check that declares `selection.shards` also runs its own test shards, and `selection.scope` lets
-it scope ([check command scope](../workflows.md#check-command-scope)). Candidate sources must
+it scope ([check command scope](../workflows.md#check-command-scope)). A scoped run gets the package
+graph's affected packages (`FORGE_CHECK_PACKAGES`) and, when they have tests, a runner for their
+per-ecosystem commands (`FORGE_CHECK_PACKAGES_RUN`, one line in the repository's CI script); an
+Intent without a contract gets a scoped first check when the graph selects a minority of packages. Candidate sources must
 include the Actions-aware standard check script to use Forge's test selection.
 
 **Checks that do not apply skip, never wait.** A project has one configured landing
