@@ -274,7 +274,9 @@ export async function shareDependencies(
     return other
       ? { status: 'none', reason: `${pm.name} install produced no node_modules.` }
       : { status: 'none' };
-  if (other) linkInstall(entry, root, folders);
+  // npm workspaces link siblings inside the root node_modules; they must reach the Lane's source too.
+  const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
+  if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
   else symlinkSync(path, join(root, 'node_modules'), 'dir');
   const skippedScripts = runScripts ? undefined : skippedInstallScripts(root);
   return {

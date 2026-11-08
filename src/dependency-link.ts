@@ -19,9 +19,9 @@ const exists = (path: string) => {
 };
 
 /** Link a Lane to the machine's install. Without workspaces that is one `node_modules` symlink.
- * With workspaces each package has its own `node_modules` (pnpm, Yarn, bun), and links into a
- * sibling workspace package must reach the Lane's own source, not the cached manifest-only copy:
- * those folders become real directories of per-entry symlinks, and workspace links are
+ * With workspaces, links into a sibling workspace package must reach the Lane's own source, not
+ * the cached manifest-only copy: the root `node_modules` (npm) and, for pnpm, Yarn and bun, each
+ * package's own become real directories of per-entry symlinks, and workspace links are
  * re-pointed (relative) at the Lane. A `node_modules` the Lane already has is left alone. */
 export function linkInstall(entry: string, root: string, folders: string[]): void {
   const sources = new Map(folders.map(folder => [real(join(entry, folder)), join(root, folder)]));

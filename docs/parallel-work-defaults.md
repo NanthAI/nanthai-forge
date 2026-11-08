@@ -135,10 +135,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   field of `package.json`) are copied to the install stage with their `package.json`, and their manifests
   are part of the key. If one has no `package.json` or lies outside the repository, `dependencies.status`
   is `none` with a `reason`, and the Lane opens without `node_modules`.
-- pnpm, yarn and bun keep a `node_modules` in each workspace package. Those folders become real
-  directories of links into the shared install, and a link to a sibling workspace package points at that
-  package's source in your Lane, not at the cached manifest. The root `node_modules` is one link when the
-  repository has no workspaces.
+- A repository with workspaces gets real `node_modules` directories of links into the shared install
+  (the root for npm; the root and each workspace package for pnpm, yarn and bun), and a link to a sibling
+  workspace package points at that package's source in your Lane, not at the cached manifest. A cache hit
+  only relinks (local symlinks, no install). The root `node_modules` is one link when the repository has
+  no workspaces.
 - Not shared, with a `reason` and no install: a repository whose install runs repository code (a pnpm
   `.pnpmfile.cjs`, Yarn plugins in `.yarnrc.yml`) and Yarn Berry Plug'n'Play, which has no `node_modules`
   (set `nodeLinker: node-modules` to share). Forge never runs the `yarnPath` release a repository commits.
@@ -146,7 +147,7 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
 - An existing `node_modules` is never replaced.
 - The cache is `$XDG_CACHE_HOME/forge/deps` (default `~/.cache/forge/deps`) and is safe to delete.
 - If your Lane changes the lockfile, replace the link before installing:
-  `rm node_modules && npm ci` (or the same with your manager's frozen install). Removing the link does not
+  `rm -r node_modules && npm ci` (or the same with your manager's frozen install). Removing the links does not
   touch the shared install; for a workspace repository remove each workspace `node_modules` the same way.
 
 ### landWait
