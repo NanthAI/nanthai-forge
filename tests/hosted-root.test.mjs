@@ -34,6 +34,8 @@ test('clone binds and materializes hosted main in an empty DIR, with no owner or
   const result = await clone(f);
   assert.equal(result.head, f.main.head);
   assert.equal(result.path, f.root);
+  assert.equal(result.slug, 'project', 'clone prints the slug that host --delete-project --confirm needs');
+  assert.equal(result.projectId, f.address.projectId);
   assert.deepEqual(hostedAgentAddress(f.root, {}), f.address);
   assert.equal(readFileSync(join(f.root, 'large.bin')).length, 4 * 1024 * 1024);
   assert(!existsSync(join(f.root, '.forge/native.json')));

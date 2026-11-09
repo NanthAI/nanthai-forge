@@ -7,7 +7,12 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { z } from 'zod';
-import { deploymentUrl, readAuth } from './auth-store.js';
+import { authFile, deploymentUrl, readAuth } from './auth-store.js';
+import { mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentDirectory } from './hosted-agent-journal.js';
+import { workLocked } from './work-lock.js';
 import { coordinationClient, type CoordinationTransport } from './coordination-client.js';
 import { readHostState, updateHostState, retirePendingHost } from './host-binding.js';
 import { WorkStore } from './work-store.js';
@@ -38,6 +43,62 @@ export type DeleteProjectOptions = {
   onProgress?: (message: string) => void;
 };
 
+/** Where the delete journal lives and which local binding it may retire. A Git or native ROOT
+ * keeps both in its Work store. A hosted clone or Lane keeps the journal in its client cache and has
+ * no binding. Any other directory (an address given with --deployment) uses the user's Forge
+ * config directory. Neither of the last two needs Git. */
+type Local = {
+  directory: string;
+  deployment?: string | undefined;
+  binding?: { projectId: string; deployment: string } | undefined;
+  locked<T>(run: () => T): T;
+  retire(projectId: string, deployment: string, operationId: string): boolean;
+};
+function storeLocal(store: WorkStore): Local {
+  const initial = readHostState(store);
+  return {
+    directory: store.directory,
+    deployment: initial.binding?.deployment ?? initial.hosting?.deployment,
+    binding: initial.binding,
+    locked: run => store.locked(run),
+    retire: (projectId, deployment, operationId) =>
+      !!updateHostState(store, state =>
+        state.hosting?.projectId !== projectId || deploymentUrl(state.hosting.deployment) !== deployment
+          ? null
+          : retirePendingHost(state, 'project-deleted', operationId),
+      ),
+  };
+}
+function journalLocal(directory: string, deployment?: string): Local {
+  return {
+    directory,
+    deployment,
+    locked: run => workLocked(join(directory, 'host-delete.lock'), run),
+    retire: () => false,
+  };
+}
+function deleteLocal(root: string, options: DeleteProjectOptions): Local {
+  const hosted = ['hosted-main.json', 'hosted-lane.json'].some(name =>
+    existsSync(join(root, '.forge', name)),
+  );
+  if (hosted) return journalLocal(hostedAgentDirectory(root), hostedAgentAddress(root, {})?.url);
+  try {
+    return storeLocal(new WorkStore(root));
+  } catch (error) {
+    // A plain directory is an address: --deployment names the deployment, the project id the project.
+    if (!(error instanceof ForgeError && ['GIT_FAILED', 'NOT_REPOSITORY_ROOT'].includes(error.code)))
+      throw error;
+    invariant(
+      options.deployment,
+      'BAD_ARGUMENT',
+      'ROOT is neither a Forge clone nor a Git worktree: pass --deployment URL to delete by address.',
+    );
+    const directory = join(dirname(authFile()), 'host-delete');
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+    return journalLocal(directory);
+  }
+}
+
 /** Uses the same owner-only list and permanent-removal mutation as the browser. */
 export async function deleteHostedProject(
   root: string,
@@ -49,13 +110,11 @@ export async function deleteHostedProject(
     wait?: (delay: number, signal: AbortSignal) => Promise<void>;
   },
 ) {
-  const store = new WorkStore(root),
-    initial = readHostState(store),
-    binding = initial.binding,
+  const local = deleteLocal(root, options),
+    binding = local.binding,
     selected =
       options.deployment ??
-      binding?.deployment ??
-      initial.hosting?.deployment ??
+      local.deployment ??
       process.env.FORGE_DEPLOYMENT_URL ??
       readAuth().defaultDeployment;
   invariant(selected, 'AUTH_REQUIRED', 'Run nforge login DEPLOYMENT_URL with cli scope first.');
@@ -73,12 +132,12 @@ export async function deleteHostedProject(
     key = createHash('sha256')
       .update(JSON.stringify([deployment, options.projectId]))
       .digest('hex'),
-    path = join(store.directory, `host-delete-${key}.json`);
+    path = join(local.directory, `host-delete-${key}.json`);
   const saveRequest = (request: z.infer<typeof requestSchema>) => {
     const temporary = `${path}.${randomUUID()}`;
     writeFileSync(temporary, JSON.stringify(request) + '\n', { mode: 0o600, flag: 'wx', flush: true });
     renameSync(temporary, path);
-    const directory = openSync(store.directory, 'r');
+    const directory = openSync(local.directory, 'r');
     try {
       fsyncSync(directory);
     } finally {
@@ -112,9 +171,9 @@ export async function deleteHostedProject(
     invariant(
       project.slug && options.confirm === project.slug,
       'HOST_DELETE_CONFIRM_MISMATCH',
-      'Use --confirm with the exact project slug: the last segment of the project URL.',
+      `Use --confirm with the exact project slug${project.slug ? ` (here: ${project.slug})` : ''}: the last segment of the project URL, as nforge clone prints it.`,
     );
-    const request = store.locked(() => {
+    const request = local.locked(() => {
       if (existsSync(path)) {
         const saved = requestSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
         const superseded =
@@ -143,21 +202,14 @@ export async function deleteHostedProject(
       return saved;
     });
     const result = () => {
-      const retired = updateHostState(store, state => {
-        if (
-          state.hosting?.projectId !== options.projectId ||
-          deploymentUrl(state.hosting.deployment) !== deployment
-        )
-          return null;
-        return retirePendingHost(state, 'project-deleted', request.operationId);
-      });
+      const retired = local.retire(options.projectId, deployment, request.operationId);
       return {
         projectId: options.projectId,
         deployment,
         operationId: request.operationId,
         expectedRevision: request.expectedRevision,
         purgeComplete: true,
-        pendingHostCleared: !!retired,
+        pendingHostCleared: retired,
         project,
         message:
           'Project removed permanently; hosted tombstone confirmed. The local owner and binding are retained.',
@@ -184,7 +236,7 @@ export async function deleteHostedProject(
       // This definite server rejection had no effect. A later explicit invocation
       // may refresh its pins, even when another owner request has begun removal.
       if (code === 'WORK_STALE')
-        store.locked(() => {
+        local.locked(() => {
           const saved = requestSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
           if (saved.operationId === request.operationId) saveRequest({ ...saved, rejected: 'WORK_STALE' });
         });

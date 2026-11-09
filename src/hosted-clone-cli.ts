@@ -118,13 +118,15 @@ export async function hostedCloneCli(
   if (beforeRun && !(await beforeRun())) return;
   const client = dependencies?.client ?? new ConvexExchange(url, undefined, '', '', null).client;
   const project = z
-    .object({ id: z.string() })
+    .object({ id: z.string(), handle: z.string().optional(), slug: z.string().optional() })
     .nullable()
     .parse(await client.query(makeFunctionReference<'query'>('urlProjects:resolve'), route));
   invariant(project, 'PROJECT_UNAVAILABLE', 'This hosted project is unavailable with the current account.');
   const exchange = dependencies ? null : new ConvexExchange(url, undefined, project.id, '', null);
   const downloads = exchange ? new HostedCheckoutDownloads(exchange) : null;
-  return cloneHostedProject(
+  // The slug is what `nforge host ROOT --delete-project ID --confirm SLUG` needs; a re-import of the
+  // same name gets a suffixed one, so it is printed rather than guessed.
+  const cloned = await cloneHostedProject(
     root,
     { url, projectId: project.id },
     dependencies?.transport(project.id) ?? {
@@ -135,4 +137,10 @@ export async function hostedCloneCli(
       sourcePack: () => downloads!.sourcePack(),
     },
   );
+  return {
+    ...cloned,
+    projectId: project.id,
+    ...(project.slug ? { slug: project.slug } : {}),
+    ...(project.handle ? { handle: project.handle } : {}),
+  };
 }

@@ -559,15 +559,19 @@ nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG
 nforge host ROOT --delete-project PROJECT_ID --confirm PROJECT_SLUG --deployment https://DEPLOYMENT.convex.cloud
 ```
 
-`--confirm` must exactly match the current project slug, the last segment of its project URL. ROOT can be an unbound
-local Forge owner or a local owner bound to another project; the project ID and
+`--confirm` must exactly match the current project slug, the last segment of its project URL. `nforge clone` prints
+it as `slug`; a second import of the same name gets a suffixed slug such as `name-2`, and a mismatched `--confirm`
+refusal names the current slug. ROOT can be an unbound
+local Forge owner, a local owner bound to another project, an `nforge clone` or Lane checkout of any project
+(no Git needed; the journal lives in its client cache), or any other directory when `--deployment` addresses the
+deployment (the journal then lives beside the saved login). The project ID and
 current owner authentication select the hosted project. Deployment selection uses
 `--deployment`, then ROOT's binding or pending hosting deployment, `FORGE_DEPLOYMENT_URL`, then the saved login's
 default deployment. To delete the project ROOT itself is bound to, explicitly add
 `--allow-bound-project`. The check compares both deployment and project ID.
 
 The command reads the owner's project metadata, retains the operation UUID and
-expected revision privately under ROOT's Work directory before submitting, prints
+expected revision privately under ROOT's Work directory (a clone's client cache, or the config directory for an address) before submitting, prints
 progress, and waits for up to ten observations, backing off from two seconds to
 ten seconds between reads. Completion
 prints `purgeComplete: true` and the observed tombstone (`removal: "deleted"`,

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
@@ -17,6 +17,7 @@ import { readHostState, updateHostState, abandonPendingHost } from '../dist/host
 import { writeAuth } from '../dist/auth-store.js';
 import { coordinationClient } from '../dist/coordination-client.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from '../dist/host-delete.js';
+import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
@@ -591,4 +592,102 @@ test('confirmation mismatch says where the slug is without leaking another proje
       /last segment of the project URL/.test(error.message) &&
       !error.message.includes('Synthetic'),
   );
+});
+
+/** An `nforge clone` of a project: marker plus private address, no Git, no native owner, no Work store. */
+function cloneRoot(t, projectId = 'project') {
+  const root = mkdtempSync(join(tmpdir(), 'forge-delete-clone-'));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    rmSync(`${root}.forge-client`, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+  });
+  mkdirSync(join(root, '.forge'));
+  writeFileSync(join(root, '.forge', 'hosted-main.json'), JSON.stringify({ selection: { projectId } }));
+  writeFileSync(
+    join(hostedAgentDirectory(root), 'address.json'),
+    JSON.stringify({ url: deployment, projectId }),
+  );
+  return root;
+}
+async function withoutGit(run) {
+  const path = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    return await run();
+  } finally {
+    process.env.PATH = path;
+  }
+}
+test('a project is deleted from its own nforge clone with no Git, using the clone address and the printed slug', async t => {
+  const f = setup(t),
+    root = cloneRoot(t);
+  f.project({
+    id: 'project',
+    slug: 'bench-zoo-mixed-2',
+    name: 'Bench zoo',
+    revision: 3,
+    currentBackup: null,
+  });
+  const options = { projectId: 'project', confirm: 'bench-zoo-mixed-2' };
+  const result = await withoutGit(() => deleteHostedProject(root, options, { client: f.client }));
+  assert.equal(result.purgeComplete, true);
+  assert.equal(result.deployment, deployment, 'deployment comes from the clone address');
+  assert.equal(result.pendingHostCleared, false);
+  assert.equal(f.calls.filter(call => call.name.includes('permanentlyDelete')).length, 1);
+  assert.equal(
+    readdirSync(hostedAgentDirectory(root)).some(name => name.startsWith('host-delete-')),
+    true,
+  );
+  assert.equal(readdirSync(root).includes('.git'), false);
+  // The same command reconciles the saved operation instead of repeating the deletion.
+  const again = await withoutGit(() => deleteHostedProject(root, options, { client: f.client }));
+  assert.equal(again.operationId, result.operationId);
+  assert.equal(f.calls.filter(call => call.name.includes('permanentlyDelete')).length, 1);
+});
+test('a duplicate-name import has a suffixed slug: the plain name is refused and the refusal names the slug', async t => {
+  const f = setup(t),
+    root = cloneRoot(t);
+  f.project({
+    id: 'project',
+    slug: 'bench-zoo-mixed-2',
+    name: 'Bench zoo',
+    revision: 3,
+    currentBackup: null,
+  });
+  await assert.rejects(
+    withoutGit(() =>
+      deleteHostedProject(root, { projectId: 'project', confirm: 'bench-zoo-mixed' }, { client: f.client }),
+    ),
+    error => error.code === 'HOST_DELETE_CONFIRM_MISMATCH' && error.message.includes('bench-zoo-mixed-2'),
+  );
+  assert.equal(
+    f.calls.some(call => call.name.includes('permanentlyDelete')),
+    false,
+  );
+  assert.equal(
+    (
+      await withoutGit(() =>
+        deleteHostedProject(
+          root,
+          { projectId: 'project', confirm: 'bench-zoo-mixed-2' },
+          { client: f.client },
+        ),
+      )
+    ).purgeComplete,
+    true,
+  );
+});
+test('any plain directory addresses a project with --deployment; without it the refusal says so', async t => {
+  const f = setup(t),
+    plain = mkdtempSync(join(tmpdir(), 'forge-delete-plain-'));
+  t.after(() => rmSync(plain, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const { deployment: _omitted, ...bare } = f.options;
+  await assert.rejects(
+    withoutGit(() => deleteHostedProject(plain, bare, { client: f.client })),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal(f.calls.length, 0);
+  const result = await withoutGit(() => deleteHostedProject(plain, f.options, { client: f.client }));
+  assert.equal(result.purgeComplete, true);
+  assert.equal(result.deployment, deployment);
 });

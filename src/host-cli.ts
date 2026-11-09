@@ -15,6 +15,7 @@ import { readHostState, updateHostState, type HostState } from './host-binding.j
 import { ForgeError, invariant } from './errors.js';
 export const HOST_HELP = `nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--new] [--json] [--wait]
 nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [--allow-bound-project] [--json]
+  (ROOT: a Git worktree, an nforge clone or Lane, or any directory with --deployment; Git is not needed. SLUG is printed by nforge clone.)
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
 nforge host ROOT --status
 nforge host ROOT --resume [--json]
