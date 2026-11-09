@@ -141,6 +141,28 @@ test('runner minor/patch drift, different job action subsets/order and skipped j
   assert.equal(result.summary.skippedJobs, 1);
 });
 
+test('one repository pinned at two refs in every job is not a SHA change; a drift still is', () => {
+  const both = ['actions/cache@0057@0057', 'actions/cache@v5@caa2', 'actions/checkout@v4@aaaa'];
+  assert.deepEqual(
+    runnerCellRule([job(1, { actions: both }), job(2, { actions: both }), job(3, { actions: both })]).voided,
+    [],
+  );
+  // A job type that runs only one of the two cache steps is a subset, not a change.
+  assert.deepEqual(
+    runnerCellRule([
+      job(1, { actions: both }),
+      job(2, { actions: ['actions/cache@v5@caa2', 'actions/checkout@v4@aaaa'] }),
+    ]).voided,
+    [],
+  );
+  // The @v5 tag resolving to another SHA in one job is a change.
+  const moved = ['actions/cache@0057@0057', 'actions/cache@v5@dddd', 'actions/checkout@v4@aaaa'];
+  assert.match(
+    runnerCellRule([job(1, { actions: both }), job(2, { actions: moved })]).voided.join(),
+    /action SHA.*actions\/cache/,
+  );
+});
+
 test('collect every job once, retain skipped/unreadable evidence, and count action jobs once', async () => {
   const calls = [];
   const records = [job(3), job(1), job(4, { conclusion: 'skipped' }), job(2)].map(

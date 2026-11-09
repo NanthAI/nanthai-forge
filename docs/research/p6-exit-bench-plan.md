@@ -81,11 +81,28 @@ runs; the bench project has its own queue, and dogfood checks run on another rep
   deployed `convex/` equal to the CLI commit's.
 - **During a batch:** the CLI stays held by `.freeze`, as before. GitHub main and the deploy head
   moving are **recorded, not voids** (`versions.moved`), with every deploy run that overlapped the
-  batch and each cell (`deploys`: id, head, start, end, status). A change in the **deployed
-  `convex/` tree** or in **`forge-check.yml`** (the Forge arm's check) still voids the cell and
-  its batch: that is "a deploy which changed the landing path", taken as any `convex/` change
-  (void when unsure). A cell inside a batch no longer needs the CLI to equal main at its own
-  start, only the deployed `convex/` to equal the CLI's.
+  batch and each cell (`deploys`: id, head, start, end, status). A change in **`forge-check.yml`**
+  (the Forge arm's check) still voids the cell and its batch.
+- **Landing path (amended 2026-11-09 after the dry on 5b707970, comment 8f8e049a):** when the
+  **deployed `convex/` tree** changes during a cell or batch, the harness lists the changed files
+  between the start and end deploy heads (one GitHub compare call) and records them
+  (`versions.convexFiles`). The change voids the cell and its batch when any changed `convex/` file
+  is **on the landing path**, that is, not under one of these off-path prefixes
+  (`versions.mjs OFF_LANDING_PATH`): `convex/gitServe`, `convex/projectGithubImport`,
+  `convex/projectGithubInbound`, `convex/projectBoard`, `convex/projectBriefing`,
+  `convex/projectPeople`, `convex/projectPurge`, `convex/projectR2Purge`, `convex/projectR2Sweep`,
+  `convex/projectArchive`, `convex/projectBackup`, `convex/projectLegacy`, `convex/legacy`,
+  `convex/archive`, `convex/backup`, `convex/account`, `convex/abuse`, `convex/sharing`,
+  `convex/team`. It also voids when the list cannot be read or classified (void when unsure).
+  Everything else is on the path, including `schema.ts`, `projectHistory*`, `projectHosted*`,
+  `projectWork*`, `projectCheck*`, `projectLanding*` and `projectFinish*`. A change that touches
+  only off-path files is recorded, not a void. A cell inside a batch checks this against the
+  batch's start record instead of requiring the CLI to equal main, or the deployed `convex/` to
+  equal the CLI's, at its own start.
+- **Runner actions (clarification, same comment):** "the resolved SHA for the same action
+  repository changes within that arm" compares each job's set of SHAs per action repository. A
+  job that uses one repository at two refs (a pinned SHA and a tag) in every job is not a change;
+  jobs whose sets disagree still void.
 - If more than 1 in 4 cells are voided this way, the lead names landing windows instead.
 
 ## Outlier rule (new, 8c9b84fc)

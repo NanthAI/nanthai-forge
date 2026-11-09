@@ -202,12 +202,80 @@ const KEYS = [
   ['agent', s => s.agent],
 ];
 // Readings that follow nanthai-forge main. Builders keep landing while a scored batch runs
-// (lead 2026-11-09, exit plan "Quiet rule and deploys"): main and the deploy head moving are
-// recorded (`moved`), never voids. The deployed convex/ tree (the server the agents land on)
-// and forge-check.yml (the Forge arm's check) still void a scored cell when they change.
-// Dry runs waive all four.
-export const RECORDED_KEYS = ['githubMain', 'deploy.headSha'];
-export const LIVE_MAIN_KEYS = [...RECORDED_KEYS, 'convexTree.deploy', 'checkWorkflow.forge'];
+// (lead 2026-11-09, exit plan "Quiet rule and deploys"): main, the deploy head and the
+// deployed convex/ tree moving are recorded (`moved`), never voids by themselves. A deployed
+// convex/ change voids only when it touches the landing path (`landingPathChanges`), and
+// forge-check.yml (the Forge arm's check) still voids when it changes. Dry runs waive all four.
+export const RECORDED_KEYS = ['githubMain', 'deploy.headSha', 'convexTree.deploy'];
+export const LIVE_MAIN_KEYS = [...RECORDED_KEYS, 'checkWorkflow.forge'];
+
+// convex/ files off the landing path (land, queue, check, acceptance): a deploy that changes
+// only these is recorded, not a void (exit plan "Quiet rule and deploys"). Any other changed
+// convex/ file voids, and so does a change list that cannot be read (void when unsure).
+export const OFF_LANDING_PATH = Object.freeze([
+  'convex/gitServe',
+  'convex/projectGithubImport',
+  'convex/projectGithubInbound',
+  'convex/projectBoard',
+  'convex/projectBriefing',
+  'convex/projectPeople',
+  'convex/projectPurge',
+  'convex/projectR2Purge',
+  'convex/projectR2Sweep',
+  'convex/projectArchive',
+  'convex/projectBackup',
+  'convex/projectLegacy',
+  'convex/legacy',
+  'convex/archive',
+  'convex/backup',
+  'convex/account',
+  'convex/abuse',
+  'convex/sharing',
+  'convex/team',
+]);
+export const offLandingPath = file => OFF_LANDING_PATH.some(prefix => file.startsWith(prefix));
+
+/** The deployed convex/ change between two snapshots, classified: `voids` (empty when the tree
+ * did not change or only off-path files changed) and the changed convex/ `files`. One GitHub
+ * compare call between the two deploy heads, only when the tree changed. */
+export async function landingPathChanges(a, b, exec = out) {
+  const from = a.convexTree?.deploy ?? null,
+    to = b.convexTree?.deploy ?? null;
+  if (from && to && from === to) return { voids: [], files: [] };
+  const x = a.deploy?.headSha,
+    y = b.deploy?.headSha;
+  const unsure = why => ({
+    voids: [`convexTree.deploy: ${from} -> ${to} (${why}; void when unsure)`],
+    files: null,
+  });
+  if (!from || !to || !x || !y) return unsure('unreadable');
+  let view;
+  try {
+    view = JSON.parse(
+      await exec('gh', [
+        'api',
+        `repos/${FORGE}/compare/${x}...${y}`,
+        '--jq',
+        '{status: .status, n: (.files | length), files: [.files[].filename]}',
+      ]),
+    );
+  } catch (error) {
+    return unsure(`changed files unreadable: ${String(error.message ?? error).slice(0, 120)}`);
+  }
+  // GitHub lists at most 300 files per compare; a longer list cannot be classified.
+  if (view.status !== 'ahead' || view.n >= 300) return unsure(`compare ${view.status}, ${view.n} files`);
+  const files = view.files.filter(f => f.startsWith('convex/'));
+  if (!files.length) return unsure('the tree changed but no convex/ file is listed');
+  const on = files.filter(f => !offLandingPath(f));
+  return {
+    voids: on.length
+      ? [
+          `convex/ landing path changed by deploy ${x.slice(0, 12)} -> ${y.slice(0, 12)}: ${on.slice(0, 8).join(', ')}${on.length > 8 ? ` (+${on.length - 8})` : ''}`,
+        ]
+      : [],
+    files,
+  };
+}
 const diff = (a, b, keys, unpinned) =>
   keys
     .filter(([k, get]) => !(unpinned && k === 'harness.commit' && get(a) == null && get(b) == null))
@@ -226,6 +294,19 @@ export function differences(a, b, { liveMain = false, unpinned = false } = {}) {
     unpinned,
   );
 }
+/** Everything that voids between two snapshots: `differences`, plus a deployed convex/ change
+ * on the landing path (`landingPathChanges`; waived with the other main readings when
+ * `liveMain`). `convexFiles`: the changed convex/ files (null when unreadable), recorded. */
+export async function voidingChanges(a, b, { liveMain = false, unpinned = false, exec = out } = {}) {
+  const changes = differences(a, b, { liveMain, unpinned });
+  const convex = await landingPathChanges(a, b, exec);
+  return {
+    changes: liveMain ? changes : [...changes, ...convex.voids],
+    convexFiles: convex.files,
+    waived: liveMain ? convex.voids : [],
+  };
+}
+
 /** The recorded main readings that moved between two snapshots (reported, not voids). */
 export const moved = (a, b) =>
   diff(
@@ -236,8 +317,9 @@ export const moved = (a, b) =>
   );
 
 /** Problems with one snapshot by itself (the GO rules that need no second reading). */
-/** `inBatch`: a cell inside a batch whose start already brought the held CLI to main; main
- * may have moved since (recorded), so only the deployed convex/ must still match the CLI's. */
+/** `inBatch`: a cell inside a batch whose start already brought the held CLI to main and
+ * matched the deployed convex/; main and the deploy may have moved since (recorded; the gate
+ * classifies a convex/ change against the batch pin with `landingPathChanges`). */
 export function snapshotProblems(s, { requireFreeze, liveMain = false, inBatch = false }) {
   const p = [];
   if (!s.cli.commit) p.push('CLI commit unreadable');
@@ -246,7 +328,7 @@ export function snapshotProblems(s, { requireFreeze, liveMain = false, inBatch =
       `CLI ${s.cli.commit} is not GitHub main ${s.githubMain}` +
         (s.cli.git ? ` (mirror maps it to Git ${s.cli.git})` : ' (no mirror mapping for this State head)'),
     );
-  if (!liveMain && (!s.convexTree.cli || s.convexTree.cli !== s.convexTree.deploy))
+  if (!liveMain && !inBatch && (!s.convexTree.cli || s.convexTree.cli !== s.convexTree.deploy))
     p.push(`deployed convex/ (${s.deploy?.headSha?.slice(0, 12)}) differs from the CLI commit's convex/`);
   if (!s.checkWorkflow.forge || !s.checkWorkflow.github) p.push('check workflow version unreadable');
   if (!s.agent) p.push('agent CLI --version unreadable');

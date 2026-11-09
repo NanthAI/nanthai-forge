@@ -37,6 +37,8 @@ import {
   snapshotProblems,
   pinProblems,
   moved,
+  voidingChanges,
+  landingPathChanges,
   deployInFlight,
   deploysDuring,
   benchFreeze,
@@ -220,6 +222,7 @@ const gates = await cellGates({
   pinProblems,
   snapshotProblems,
   differences,
+  landingPathChanges,
   // In a batch the driver checked for a Convex deploy before either cell started; a cell run
   // alone checks it itself (the quiet rule: only a deploy in flight holds a start).
   forgeInFlight: batchDir ? async () => [] : () => deployInFlight(config),
@@ -689,9 +692,10 @@ const clockDriftMs =
     ? null
     : Math.abs(result.githubClock.end.skewMs - result.githubClock.start.skewMs);
 const unpinned = dry && flags.includes('--unpinned');
-const versionChanges = differences(start, end, { liveMain: trial, unpinned });
+const voiding = await voidingChanges(start, end, { liveMain: trial, unpinned });
+const versionChanges = voiding.changes;
 const waivedChanges = trial
-  ? differences(start, end, { unpinned }).filter(d => !versionChanges.includes(d))
+  ? [...differences(start, end, { unpinned }).filter(d => !versionChanges.includes(d)), ...voiding.waived]
   : [];
 const voided = [];
 if (versionChanges.length) voided.push(`versions changed during cell: ${versionChanges.join('; ')}`);
@@ -725,6 +729,7 @@ writeResult({
     end,
     changes: versionChanges,
     moved: moved(start, end),
+    convexFiles: voiding.convexFiles,
     waivedWhileMainLive: waivedChanges,
   },
   // Convex deploy runs that overlapped this cell (exit plan "Quiet rule and deploys").

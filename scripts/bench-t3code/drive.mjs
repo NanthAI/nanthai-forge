@@ -51,8 +51,8 @@ import {
 import {
   snapshot,
   snapshotProblems,
-  differences,
   moved,
+  voidingChanges,
   deployInFlight,
   deploysDuring,
   benchFreeze,
@@ -97,11 +97,12 @@ const alive = pid => {
 };
 const readJson = file => JSON.parse(readFileSync(file, 'utf8'));
 
-/** The batch guard: every version key, start vs end, plus the freeze itself. */
-export function batchGuard(start, end, { unpinned = false } = {}) {
-  const changes = differences(start, end, { unpinned });
+/** The batch guard: every version key, start vs end, a deployed convex/ change on the landing
+ * path, plus the freeze itself. `exec` reaches GitHub (tests pass a fake). */
+export async function batchGuard(start, end, { unpinned = false, exec } = {}) {
+  const { changes, convexFiles } = await voidingChanges(start, end, { unpinned, ...(exec ? { exec } : {}) });
   if (!end.freeze) changes.push('freeze file missing at batch end');
-  return changes;
+  return Object.assign(changes, { convexFiles });
 }
 
 /** Freeze file written by a bench process whose pid is gone (left by a kill -9). */
@@ -384,7 +385,7 @@ async function main() {
           oracleBranch: oracleBranchRecord(r),
         };
       });
-      const changes = batchGuard(start, end, { unpinned: dry && flags.includes('--unpinned') });
+      const changes = await batchGuard(start, end, { unpinned: dry && flags.includes('--unpinned') });
       const runner = runnerFairness(cells, b.mode);
       const voided = [
         ...runner.voided,
@@ -409,12 +410,13 @@ async function main() {
         versions: {
           start,
           end,
-          changes,
+          changes: [...changes],
           moved: moved(start, end),
+          convexFiles: changes.convexFiles,
           fakeVersionChange: fakeChange || undefined,
         },
         // Every Convex deploy run that overlapped the batch (lead 2026-11-09: void only cells that
-        // overlap a deploy which changed the landing path; a convex/ change voids via `changes`).
+        // overlap a deploy which changed the landing path; such a change voids via `changes`).
         deploys: await deploysDuring(config, start.at, end.at),
         cells,
         runner,

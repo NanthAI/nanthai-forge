@@ -71,19 +71,30 @@ export function runnerCellRule(jobs) {
     flags = [];
   if (summary.images.length > 1) voided.push('runner OS image name changed within arm');
   if (summary.runnerMajors.length > 1) voided.push('runner major version changed within arm');
-  const actions = new Map();
-  for (const j of jobs.filter(ran))
+  // Per job, the resolved SHAs of each action repository (independent of requested ref and
+  // order). One job may pin one repository twice (actions/cache@<sha> and @v5 in the same
+  // job): that is not a change. A change is two jobs whose SHA sets for one repository are
+  // incomparable (neither contains the other); a job type that omits a step is a subset.
+  const perRepo = new Map();
+  for (const j of jobs.filter(ran)) {
+    const mine = new Map();
     for (const action of j.actions ?? []) {
       const at = action.lastIndexOf('@'),
-        spec = action.slice(0, at);
-      // Group by repository identity; different job types may omit actions entirely.
-      const name = spec.split('@')[0],
-        sha = action.slice(at + 1);
-      if (!actions.has(name)) actions.set(name, new Set());
-      actions.get(name).add(sha);
+        name = action.slice(0, at).split('@')[0];
+      if (!mine.has(name)) mine.set(name, new Set());
+      mine.get(name).add(action.slice(at + 1));
     }
-  for (const [name, shas] of actions)
-    if (shas.size > 1) voided.push(`action SHA changed within arm: ${name}`);
+    for (const [name, shas] of mine) {
+      if (!perRepo.has(name)) perRepo.set(name, new Map());
+      perRepo.get(name).set([...shas].sort().join(','), shas);
+    }
+  }
+  const within = (a, b) => [...a].every(x => b.has(x));
+  for (const [name, sets] of perRepo) {
+    const distinct = [...sets.values()];
+    if (distinct.some((a, i) => distinct.slice(i + 1).some(b => !within(a, b) && !within(b, a))))
+      voided.push(`action SHA changed within arm: ${name}`);
+  }
   if (summary.imageVersions.length > 1)
     flags.push('mixed runner imageVersions: disclose pool and job counts');
   if (summary.missingEvidenceJobs || !summary.runnerJobs)

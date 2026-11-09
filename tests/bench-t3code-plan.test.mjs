@@ -179,7 +179,10 @@ test('rep 3 rule: winner flip or a >25% spread runs rep 3; close reps do not', (
   assert.equal(primaryMetrics(cellResult({ times: [1, 2, 3, 4], landed: 3, strict: 2 })).timeToMain, 2);
 });
 
-test('batch guard: a version change between batch start and end voids; main moving is recorded', () => {
+const unreadable = async () => {
+  throw new Error('no network in tests');
+};
+test('batch guard: a version change between batch start and end voids; main moving is recorded', async () => {
   const s = {
     cli: { build: 'b', commit: 'c' },
     githubMain: 'c',
@@ -190,27 +193,24 @@ test('batch guard: a version change between batch start and end voids; main movi
     agent: 'codex gpt-6.1-sol high codex-cli 0.164.0',
     freeze: true,
   };
-  assert.deepEqual(batchGuard(s, structuredClone(s)), []);
+  const g = (a, b, o) => batchGuard(a, b, { exec: unreadable, ...o }).then(c => [...c]);
+  assert.deepEqual(await g(s, structuredClone(s)), []);
   // Quiet rule: builders land during a batch; main and the deploy head are recorded, not voids.
-  assert.deepEqual(batchGuard(s, { ...s, githubMain: 'landed' }), []);
-  assert.deepEqual(batchGuard(s, { ...s, deploy: { headSha: 'd-fake-landing' } }), []);
-  // A deploy that changed convex/ (the landing path) or the Forge arm's check still voids.
-  assert.match(batchGuard(s, { ...s, convexTree: { deploy: 't2' } }).join(), /convexTree.deploy: t -> t2/);
+  assert.deepEqual(await g(s, { ...s, githubMain: 'landed' }), []);
+  assert.deepEqual(await g(s, { ...s, deploy: { headSha: 'd-fake-landing' } }), []);
+  // A deploy that changed convex/ voids unless its files are read and all off the landing path.
+  assert.match((await g(s, { ...s, convexTree: { deploy: 't2' } })).join(), /convexTree.deploy: t -> t2/);
   assert.match(
-    batchGuard(s, { ...s, checkWorkflow: { forge: 'f2', github: 'g' } }).join(),
+    (await g(s, { ...s, checkWorkflow: { forge: 'f2', github: 'g' } })).join(),
     /checkWorkflow.forge/,
   );
-  assert.match(batchGuard(s, { ...s, cli: { build: 'b', commit: 'c-fake-update' } }).join(), /cli.commit/);
-  assert.match(batchGuard(s, { ...s, freeze: false }).join(), /freeze file missing/);
+  assert.match((await g(s, { ...s, cli: { build: 'b', commit: 'c-fake-update' } })).join(), /cli.commit/);
+  assert.match((await g(s, { ...s, freeze: false })).join(), /freeze file missing/);
   const lane = { ...s, harness: { commit: null, filesSha256: 'x' } };
-  assert.equal(batchGuard(lane, lane).length, 1, 'a Lane-root harness has no commit: a difference');
-  assert.deepEqual(
-    batchGuard(lane, lane, { unpinned: true }),
-    [],
-    'except in an explicit --unpinned dry run',
-  );
+  assert.equal((await g(lane, lane)).length, 1, 'a Lane-root harness has no commit: a difference');
+  assert.deepEqual(await g(lane, lane, { unpinned: true }), [], 'except in an explicit --unpinned dry run');
   assert.equal(
-    batchGuard(lane, { ...lane, harness: { commit: null, filesSha256: 'y' } }, { unpinned: true }).length,
+    (await g(lane, { ...lane, harness: { commit: null, filesSha256: 'y' } }, { unpinned: true })).length,
     1,
   );
   assert.equal(staleBenchFreeze('bench driver batch n3-r1 pid 999999999'), true);

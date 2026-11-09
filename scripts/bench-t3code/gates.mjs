@@ -77,6 +77,7 @@ export async function gates(
     pinProblems,
     snapshotProblems,
     differences,
+    landingPathChanges = async () => ({ voids: [], files: [] }),
     forgeInFlight,
     pinFile,
   },
@@ -100,6 +101,11 @@ export async function gates(
     runPin = JSON.parse(readFileSync(pinFile, 'utf8'));
     const d = differences(runPin, start, { liveMain, unpinned: dry && flags.includes('--unpinned') });
     if (d.length) refusals.push(`versions differ from the run pin: ${d.join('; ')}`);
+    // A deploy since the batch pin that touched the landing path (exit plan "Quiet rule and
+    // deploys"); off-path convex/ changes are recorded by the cell and the batch.
+    const lp = await landingPathChanges(runPin, start);
+    if (lp.voids.length)
+      (liveMain ? warnings : refusals).push(`versions differ from the run pin: ${lp.voids.join('; ')}`);
   }
   const inFlight = await forgeInFlight().catch(e => [{ error: e.message }]);
   if (inFlight.length)
