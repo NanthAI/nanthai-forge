@@ -49,6 +49,7 @@ export async function grantOwnerApproval(
     policyDigest: attempt.policyDigest,
     paths: await approvedPaths(ctx, row.projectId, attempt),
     at: Date.now(),
+    ...(attempt.candidate.head ? { head: attempt.candidate.head } : {}),
   };
   await ctx.db.patch(row._id, { ownerGrant: grant });
 }

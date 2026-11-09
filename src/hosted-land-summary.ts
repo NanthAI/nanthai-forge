@@ -16,7 +16,7 @@ type Result = {
     phase?: string;
     observation?: { state: string; pendingReason?: string | null };
     error?: { code: string; message: string } | null;
-    acceptance?: { receiptId: string; head: string };
+    acceptance?: { receiptId: string; head: string; acceptedBy?: { note: string } };
     testFiles?: {
       counts?: { failed: number };
       failed?: { file: string; report?: { firstError?: string } }[];
@@ -63,6 +63,8 @@ function outcomeLines(response: HostedAgentResponse): string[] {
           ? `, ${result.changedPaths} changed path${result.changedPaths === 1 ? '' : 's'}`
           : ''
       }`,
+      // A person's acceptance or policy's, never inferred from the submitter (fe5bea80).
+      ...(submission?.acceptance?.acceptedBy ? [submission.acceptance.acceptedBy.note] : []),
     ];
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return [

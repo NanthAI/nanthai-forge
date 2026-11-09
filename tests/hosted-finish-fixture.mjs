@@ -24,6 +24,7 @@ const precomposeApi = await import(moduleUrl('../convex/projectHostedLandingPrec
 const acceptanceApi = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const batchAbandon = await import(moduleUrl('../convex/projectHostedBatchAbandon.ts'));
 const revertNoticeApi = await import(moduleUrl('../convex/projectHostedRevertNotice.ts'));
+const acceptedByNoteApi = await import(moduleUrl('../convex/projectHostedAcceptedByNote.ts'));
 const convexSourceModules = Object.fromEntries(
   await Promise.all(
     [
@@ -362,6 +363,8 @@ export async function finishFixture(
         metrics.stallDeliveries.push(input);
       } else if (task.name === 'projectHostedRevertNotice:accepted') {
         await tx('revertNotice', revertNoticeApi.accepted, input);
+      } else if (task.name === 'projectHostedAcceptedByNote:accepted') {
+        await tx('acceptedByNote', acceptedByNoteApi.accepted, input);
       } else if (task.name === 'projectHostedBatchAbandon:reselect') {
         await tx('batchAbandon', batchAbandon.reselect, input);
       } else if (task.name === 'projectHostedLandingDesired:drive') {

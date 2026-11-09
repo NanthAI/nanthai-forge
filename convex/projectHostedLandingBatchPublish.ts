@@ -49,6 +49,7 @@ import {
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { policyDigestCurrent } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
+import { landingAcceptedBy } from '../src/landing-accepted-by';
 import { invariant } from '../src/errors';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
@@ -402,6 +403,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         receiptId: receipt.id,
         head,
         ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
+        acceptedBy: landingAcceptedBy({ actor: receipt.actor, at: receipt.at }),
       },
       observation: landingObservation('accepted'),
       error: null,

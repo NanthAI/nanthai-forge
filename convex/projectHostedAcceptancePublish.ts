@@ -2,7 +2,7 @@
 import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
-import { protectedGatePaths, reducedEvidenceActor } from '../src/contract-gate-policy';
+import { protectedGatePaths, protectedPathMatches, reducedEvidenceActor } from '../src/contract-gate-policy';
 import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
 import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
@@ -42,6 +42,7 @@ import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
 import { grantedApproval } from './projectHostedOwnerGrant';
 import { approvalHoldReason, attemptApprovals, endLandedApprovals } from './projectHostedApprovalStore';
+import { landingAcceptedBy } from '../src/landing-accepted-by';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -122,12 +123,11 @@ export async function publishAcceptance(
   );
   const candidate = hostedRecordSchema.parse(JSON.parse(candidateRow.value));
   // An owner approval retained for this submission (fe5bea80) carries only to exactly this source.
-  const actor =
-    ownerApproval ??
-    (candidate.kind === 'candidate'
-      ? grantedApproval(row.ownerGrant, attempt, project.owner, candidate.governance?.paths ?? null)
-      : undefined) ??
-    attempt.actor;
+  const granted =
+    ownerApproval || candidate.kind !== 'candidate'
+      ? undefined
+      : grantedApproval(row.ownerGrant, attempt, project.owner, candidate.governance?.paths ?? null);
+  const actor = ownerApproval ?? granted ?? attempt.actor;
   invariant(
     candidate.kind === 'candidate' &&
       candidate.result.status === 'clean' &&
@@ -301,6 +301,19 @@ export async function publishAcceptance(
     return { status: 'pending' as const, reason, request: next };
   }
   const message = await acceptedLandingMessage(ctx, state);
+  // Who accepted it, from facts already loaded (fe5bea80): `actor` names the submitter only.
+  const grant = granted ? row.ownerGrant : undefined;
+  const acceptedBy = landingAcceptedBy({
+    actor,
+    at: new Date(now).toISOString(),
+    acceptedAt: grant?.at ?? now,
+    head: grant ? (grant.head ?? (grant.attemptId === attempt.id ? head : undefined)) : head,
+    protectedPaths:
+      actor.kind === 'person'
+        ? protectedPathMatches(policy, candidate.governance?.paths ?? null, checks)
+        : undefined,
+    carried: grant ? grant.attemptId !== attempt.id : false,
+  });
   const receipt = hostedAcceptanceSchema.parse({
     schema: 1,
     id: identity.receiptId,
@@ -400,6 +413,7 @@ export async function publishAcceptance(
       receiptId: receipt.id,
       head,
       ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
+      acceptedBy,
     },
     observation: landingObservation('accepted'),
     error: null,

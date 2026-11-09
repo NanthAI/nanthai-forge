@@ -13,6 +13,7 @@ import { submissionOutcome } from './landing-submission-state.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { scopedRecheckBasisSchema } from './scoped-recheck-policy.js';
 import { docsResolutionSchema } from './docs-resolution.js';
+import { landingAcceptedBySchema } from './landing-accepted-by.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
@@ -187,7 +188,13 @@ export const hostedLandingStateSchema = z
       .optional(),
     observation: landingObservationSchema,
     acceptance: z
-      .object({ receiptId: z.uuid(), head: hash, docsResolution: docsResolutionSchema.optional() })
+      .object({
+        receiptId: z.uuid(),
+        head: hash,
+        docsResolution: docsResolutionSchema.optional(),
+        /** Who accepted it: a person, or policy with no person (fe5bea80). Absent on older landings. */
+        acceptedBy: landingAcceptedBySchema.optional(),
+      })
       .strict()
       .optional(),
     error: z

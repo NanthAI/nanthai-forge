@@ -8,6 +8,8 @@ export type ReviewAcceptance = {
   actor?: unknown;
   actorDisplayName?: string;
   actorFormerMember?: boolean;
+  /** Who accepted it (fe5bea80): a person, or policy with no person. `actor` alone can be the submitter. */
+  review?: { kind: 'person' | 'auto'; handle: string };
 };
 export function acceptanceName(acceptance: ReviewAcceptance) {
   const actor = acceptance.actor;
@@ -52,7 +54,12 @@ export function ReviewDisposition({
       <p className="fx-review-disposition fx-c-passed" title={acceptance.at}>
         <Glyph name="passed" size={13} />
         {acceptance.channel && acceptance.channel !== 'main' ? 'Accepted into' : 'Landed on'}{' '}
-        {acceptance.channel ?? 'main'} {age(acceptance.at, now, true)} by {acceptanceName(acceptance)}
+        {acceptance.channel ?? 'main'} {age(acceptance.at, now, true)}{' '}
+        {acceptance.review?.kind === 'auto'
+          ? `automatically · no person reviewed it (submitted by ${acceptance.review.handle})`
+          : acceptance.review
+            ? `· accepted by @${acceptance.review.handle}, a person`
+            : `by ${acceptanceName(acceptance)}`}
         {check && ` · ${check} passed on exactly this Candidate`}
         {acceptance.actorFormerMember && <small className="fx-faint"> · former member</small>}
       </p>

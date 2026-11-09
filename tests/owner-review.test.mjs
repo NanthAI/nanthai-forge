@@ -8,6 +8,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { landSummary } from '../dist/hosted-land-summary.js';
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 const { grantedApproval } = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
@@ -110,6 +111,12 @@ test('the owner approves the exact held attempt and the waiting submission lands
   const read = await f.current(state.id);
   assert.equal(read.submission.observation.state, 'landed');
   assert.equal(read.submission.operationId, state.operationId, 'the agent waits on its own operation');
+  const by = read.submission.acceptance.acceptedBy;
+  assert.equal(by.kind, 'person');
+  assert.equal(by.handle, 'owner');
+  assert.equal(by.head, read.submission.acceptance.head, 'the exact Candidate the owner accepted landed');
+  assert.deepEqual(by.paths, ['selected.txt']);
+  assert.equal(by.carried, undefined);
 });
 
 test('main moves after the hold: approval does not publish the stale Candidate; a fresh attempt is checked and lands with it', async t => {
@@ -445,6 +452,70 @@ test('991a1a94 replay: path lifted while held, main moves, the owner approves: i
   const [receipt] = [...f.tables.projectHostedAcceptances.values()].map(row => JSON.parse(row.value));
   assert.equal(receipt.attemptId, landed.submission.attemptId);
   assert.equal(receipt.actor.kind, 'agent', 'the approval was for the old policy; the new one needs none');
+  const by = landed.submission.acceptance.acceptedBy;
+  assert.equal(by.kind, 'auto', 'an automatic acceptance says so: no person reviewed it');
+  assert.equal(by.handle, 'owner');
+  assert.match(by.note, /no person reviewed it/);
+  assert.equal(
+    [...f.tables.projectBoardMessages.values()].filter(note => /a person\) accepted/.test(note.body)).length,
+    0,
+    'an automatic acceptance posts no acceptance note',
+  );
+});
+
+test('6b6f17e7 replay: held for review, the owner accepts, main moved, it re-checks and lands; observe shows the person', async t => {
+  const { f, state, select } = await heldLanding(t);
+  const held = await select();
+  const attempt = [...f.tables.projectHostedLandingAttempts.values()]
+    .map(row => JSON.parse(row.value))
+    .find(value => value.id === held.attemptId);
+  f.moveMain();
+  const reply = JSON.parse(await f.tx('ownerAccepts', acceptance.approve, held));
+  assert.equal(reply.status, 'pending');
+  assert.match(reply.reason, /main moved/);
+  const grantAt = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id)
+    .ownerGrant.at;
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  // The builder's own read of its landing (device credential = agent), exactly as in the incident.
+  // The re-check moved the fixture clock past the synthetic credential's hour.
+  for (const row of f.tables.cliCredentials.values()) row.expiresAt = Date.now() + 60 * 60_000;
+  const page = JSON.parse(
+    await f.tx(
+      'observeLanded',
+      observe.page,
+      { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 },
+      device,
+    ),
+  );
+  const { submission } = page;
+  assert.equal(submission.observation.state, 'landed');
+  assert.notEqual(submission.attemptId, held.attemptId, 'it landed on a fresh attempt');
+  // The submitter and the owner share one handle: actor alone cannot tell who accepted it.
+  assert.equal(submission.actor, 'owner');
+  const by = submission.acceptance.acceptedBy;
+  assert.equal(by.kind, 'person', 'observe names the person acceptance');
+  assert.equal(by.handle, 'owner');
+  assert.equal(by.at, new Date(grantAt).toISOString(), 'the time the person accepted, not the landing time');
+  assert.equal(by.head, attempt.candidate.head, 'the Candidate head the person accepted');
+  assert.deepEqual(by.paths, ['selected.txt'], 'the protected paths the person reviewed');
+  assert.equal(by.carried, true, 'main moved: the same source was checked again and landed with it');
+  // The landing receipt line the CLI prints after LANDED.
+  const lines = landSummary({ result: { phase: 'finish', submission } });
+  assert.match(lines[0], /^LANDED receipt /);
+  assert.match(lines[1], /^Accepted by the person @owner at .*protected paths selected\.txt.*checked again/);
+  // The board: the landing's Lane gets one note, once.
+  const notes = [...f.tables.projectBoardMessages.values()].filter(note =>
+    /a person\) accepted/.test(note.body),
+  );
+  assert.equal(notes.length, 1);
+  assert.match(
+    notes[0].body,
+    /^@owner \(a person\) accepted this landing at .*protected paths selected\.txt/,
+  );
+  assert.match(notes[0].targetKey, /^lane:/);
+  assert.equal(f.pending().length, 0, 'nothing left running');
 });
 
 test('the /approve?lane card offers Grant and Decline only for a live request', () => {

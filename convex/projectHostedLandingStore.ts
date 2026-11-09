@@ -296,6 +296,18 @@ export async function writeLanding(
           ...(row.agentRun ? { agent: row.agentRun } : {}),
         },
       );
+    // A person's acceptance of an agent's submission tells that Lane on the board (fe5bea80); auto-accepts
+    // and a person landing their own submission pay nothing.
+    if (state.acceptance.acceptedBy?.kind === 'person' && state.request.agent === true)
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'mutation'>('projectHostedAcceptedByNote:accepted'),
+        {
+          projectId: row.projectId,
+          receiptId: state.acceptance.receiptId,
+          by: JSON.stringify(state.acceptance.acceptedBy),
+        },
+      );
   }
   await notifyFinish(ctx, state);
   // Lanes stacked on a Lane this landing carried are told once (Issue dc62b120): failed and cancelled alike.

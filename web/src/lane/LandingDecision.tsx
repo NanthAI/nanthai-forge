@@ -8,6 +8,7 @@ import { landingState, elapsed, type LandingRead } from './landing-model';
 import { RequestChanges, type ReviewRecipient } from '../review/RequestChanges';
 import { ReviewDisposition, type ReviewAcceptance } from '../review/ReviewDisposition';
 import type { OwnerReview } from './OwnerReviewActions';
+import { receiptAcceptedBy } from '../../../src/landing-accepted-by';
 import './landing.css';
 export type LandingDecisionProps = {
   read?: LandingRead | null;
@@ -42,6 +43,17 @@ export type LandingDecisionProps = {
   /** Owner Accept/Decline for a landing held for review (fe5bea80). */
   review?: OwnerReview;
 };
+/** The landing's own stamp of who accepted it, or the receipt's actor for older landings; never the
+ * submitter alone (an owner's agent shares the owner's handle). */
+function landedAcceptance(read: LandingRead): ReviewAcceptance {
+  const by =
+    read.request.acceptance?.acceptedBy ?? (read.receipt ? receiptAcceptedBy(read.receipt) : undefined);
+  return {
+    at: read.receipt?.at ?? read.request.at,
+    actor: by?.handle ?? read.attempt.actor.id,
+    ...(by ? { review: { kind: by.kind, handle: by.handle } } : {}),
+  };
+}
 export function LandingDecision(props: LandingDecisionProps) {
   const [confirm, setConfirm] = useState(props.initialRevert ?? false),
     [why, setWhy] = useState(''),
@@ -103,12 +115,7 @@ export function LandingDecision(props: LandingDecisionProps) {
         <>
           <ReviewDisposition
             check={run?.status === 'passed' ? run.check.name : undefined}
-            acceptance={
-              props.acceptance ?? {
-                at: props.read!.receipt?.at ?? props.read!.request.at,
-                actor: props.read!.attempt.actor.id,
-              }
-            }
+            acceptance={props.acceptance ?? landedAcceptance(props.read!)}
           />
           {reversed && (
             <ReviewDisposition

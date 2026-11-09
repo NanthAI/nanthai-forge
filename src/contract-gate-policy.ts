@@ -16,11 +16,17 @@ export type GateInput = {
   /** The project's defined checks (and their setup actions), already loaded by the caller; their entry files are protected like the default paths. */
   checks?: DefinedChecks;
 };
-export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
-  if (paths === null) return true;
+/** The changed paths that are protected: owner-approval paths (with check entry files) and
+ * `acceptance.protectedPaths`. Null when path coverage is unavailable. */
+export function protectedPathMatches(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
+  if (paths === null) return null;
   const approval = ownerApprovalMatcher(policy, checks);
   const patterns = policy.acceptance.protectedPaths.map(globPattern);
-  return paths.some(path => approval(path) || patterns.some(pattern => pattern.test(path)));
+  return paths.filter(path => approval(path) || patterns.some(pattern => pattern.test(path)));
+}
+export function protectedGatePaths(policy: AutonomyPolicy, paths: string[] | null, checks?: DefinedChecks) {
+  const matched = protectedPathMatches(policy, paths, checks);
+  return matched === null || matched.length > 0;
 }
 /** Whether an actor's landings may use reduced evidence (the contract gate, first-check reuse). Decided
  * by project policy: an agent on a non-empty `autoActors` list qualifies, an agent off that list never

@@ -53,10 +53,12 @@ test('clean unchecked person acceptance publishes receipt, snapshot, event and o
     .find(r => r.operationId === request.operationId);
   assert.equal(op.terminal.outcome.status, 'completed');
   assert.equal(op.terminal.outcome.result.observation.state, 'landed');
-  assert.deepEqual(op.terminal.outcome.result.acceptance, {
-    receiptId: receipt.id,
-    head: receipt.candidate.head,
-  });
+  const { acceptedBy, ...stamp } = op.terminal.outcome.result.acceptance;
+  assert.deepEqual(stamp, { receiptId: receipt.id, head: receipt.candidate.head });
+  // A person accepted it (fe5bea80): the stamp says so, with the exact Candidate head.
+  assert.equal(acceptedBy.kind, 'person');
+  assert.equal(acceptedBy.handle, 'owner');
+  assert.equal(acceptedBy.head, receipt.candidate.head);
   assert.equal(f.queue().lease, null);
   assert.equal(f.queue().wake, null);
   const main = f.currentMain();

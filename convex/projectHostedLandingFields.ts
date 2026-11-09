@@ -227,6 +227,8 @@ export const hostedLandingTables = {
         policyDigest: v.string(),
         paths: v.union(v.array(v.string()), v.null()),
         at: v.number(),
+        /** The Candidate head the owner accepted (shown as acceptedBy.head once it lands). */
+        head: v.optional(v.string()),
       }),
     ),
     value: v.string(),

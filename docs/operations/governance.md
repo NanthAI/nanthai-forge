@@ -10,7 +10,7 @@ exact Candidate/check pins, current policy and the main head/receipt CAS still a
 | --- | --- | --- |
 | Signed-in stranger / reader | Read public source and Work. Cannot start, save, compose, sync, finish, register a project runner or upload a proposal to this project. | Cannot accept, approve, change policy/check definitions/runner configuration, publish source, grant membership or change the mirror. |
 | Invited contributor | Start and save hosted Lanes, compose, sync, check and submit finish; use their own local runner or submit an archive proposal for an authorized Intent. Shared Lane writes remain visible as contributor work. | Ordinary server-authoritative public changes may land under auto-on-pass with an exact passing check. Selecting person authority does not bypass these rules. Protected changes need the owner. Cannot change project execution settings, membership, policy, source authority or mirror settings. |
-| Owner | All project operations, including inviting contributors and accepting proposals. | Can explicitly accept an exact prepared Candidate with person authority. Own Lanes can auto-land under auto-on-pass, including protected files; review mode turns automatic landing off. |
+| Owner | All project operations, including inviting contributors and accepting proposals. | Can explicitly accept an exact prepared Candidate with person authority. Own Lanes (owner-only provenance, below) can auto-land under auto-on-pass, including the owner-approval paths. `acceptance.protectedPaths` still holds every agent for a person, the owner's own agents too. Review mode turns automatic landing off. |
 
 Secret Objects have separate per-capability grants. Public visibility and contributor
 membership confer no secret discovery, use, modification or delegation authority.
@@ -68,7 +68,10 @@ link carries no attempt id, the page reads the current attempt). Both call
 `projectHostedAcceptance:approve` or `projectHostedOwnerReview:decline` with the exact
 `projectId`, `submissionId` and `attemptId`. They are explicit person acceptance:
 device/agent credentials and contributors are refused. Approve publishes through the
-same guarded transaction and records the owner in the receipt; retrying returns the
+same guarded transaction and records the owner in the receipt and in the landing's
+`acceptance.acceptedBy` (`kind: "person"`, handle, time, accepted head, protected paths;
+an automatic acceptance is `kind: "auto"`), which `land`, `wait`, `observe`, `landings`
+and the web landing view show; the landing's Lane gets one board note. Retrying returns the
 original receipt. Decline ends the submission with `REVIEW_DECLINED` and the owner's
 reason. The submitter's `wait` is subscribed to the submission, so it returns on either
 decision with no polling.
