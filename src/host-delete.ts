@@ -168,8 +168,21 @@ export async function deleteHostedProject(
   };
   try {
     let project = await readProject();
+    // Once removal has begun the server may clear the slug. The saved request is then the proof: this
+    // exact project, deployment and slug were confirmed before, so a retry reconciles instead of failing.
+    const resumed =
+      (project.removal === 'deleting' || project.removal === 'deleted') &&
+      local.locked(() => {
+        if (!existsSync(path)) return false;
+        const saved = requestSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+        return (
+          saved.deployment === deployment &&
+          saved.projectId === options.projectId &&
+          saved.slug === options.confirm
+        );
+      });
     invariant(
-      project.slug && options.confirm === project.slug,
+      resumed || (project.slug && options.confirm === project.slug),
       'HOST_DELETE_CONFIRM_MISMATCH',
       `Use --confirm with the exact project slug${project.slug ? ` (here: ${project.slug})` : ''}: the last segment of the project URL, as nforge clone prints it.`,
     );

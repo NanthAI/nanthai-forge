@@ -691,3 +691,29 @@ test('any plain directory addresses a project with --deployment; without it the 
   assert.equal(result.purgeComplete, true);
   assert.equal(result.deployment, deployment);
 });
+
+test('a retry after the server cleared the slug reconciles the saved delete; a different slug is still refused', async t => {
+  const f = setup(t);
+  f.client.mutation = async () => {
+    throw new Error('Synthetic lost reply');
+  };
+  await assert.rejects(
+    deleteHostedProject(f.root, f.options, { client: f.client }),
+    code('HOST_DELETE_INTERRUPTED'),
+  );
+  f.project({ id: 'project', name: '', revision: 8, currentBackup: null, removal: 'deleted' });
+  await assert.rejects(
+    deleteHostedProject(f.root, { ...f.options, confirm: 'other' }, { client: f.client }),
+    code('HOST_DELETE_CONFIRM_MISMATCH'),
+  );
+  const result = await deleteHostedProject(f.root, f.options, { client: f.client });
+  assert.equal(result.purgeComplete, true);
+  assert.equal(result.project.removal, 'deleted');
+  // Without a saved request a slugless project is still refused.
+  const g = setup(t);
+  g.project({ id: 'project', name: '', revision: 8, currentBackup: null, removal: 'deleted' });
+  await assert.rejects(
+    deleteHostedProject(g.root, g.options, { client: g.client }),
+    code('HOST_DELETE_CONFIRM_MISMATCH'),
+  );
+});
