@@ -20,7 +20,7 @@ import { saveResultSchema, savePin } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
-import { liveLaneFinish, laneFinishActiveMessage } from './projectHostedLaneFinish';
+import { laneFinishes, laneFinishActiveMessage, supersedeSyncRequired } from './projectHostedLaneFinish';
 import { invariant } from '../src/errors';
 
 /** One small transaction: exact signed worker evidence, committed immutable State,
@@ -99,9 +99,10 @@ export async function publishHostedSave(
   }
   const unchanged = head === lane.head;
   // A moved head silently ends a live finish; the delta is retained for an explicit save.
-  const live = unchanged
+  const finishes = unchanged
     ? null
-    : await liveLaneFinish(ctx, { projectId: input.projectId, laneId: lane.id, headWrittenAt: lane.at });
+    : await laneFinishes(ctx, { projectId: input.projectId, laneId: lane.id, headWrittenAt: lane.at });
+  const live = finishes?.live ?? null;
   if (live && !state.request.supersedeFinish) {
     const terminal = {
       attemptId: operation.firstAttempt.id,
@@ -146,6 +147,16 @@ export async function publishHostedSave(
       record: { ...lane, head, sourceVersion, version, at: first.at },
     });
   }
+  // The same transaction ends this Lane's queued entries that needed a sync: the new head replaces
+  // them, so none is left queued beside the next landing (f7539ebb item 5).
+  const superseded = finishes?.syncRequired.length
+    ? await supersedeSyncRequired(ctx, {
+        projectId: input.projectId,
+        laneId: lane.id,
+        head,
+        submissionIds: finishes.syncRequired,
+      })
+    : [];
   const result = saveResultSchema.parse({
     schema: 1,
     operationId: input.operationId,
@@ -155,7 +166,11 @@ export async function publishHostedSave(
     version,
     sourceVersion,
     unchanged,
-    ...(live ? { supersededFinish: live.submissionId } : {}),
+    ...(live
+      ? { supersededFinish: live.submissionId }
+      : superseded[0]
+        ? { supersededFinish: superseded[0] }
+        : {}),
     at: first.at,
   });
   await writeHostedRecord(ctx, {

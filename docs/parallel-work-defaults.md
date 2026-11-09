@@ -680,9 +680,14 @@ These have no setting: they fix failures and have no sensible alternative.
 - **Retry the same Lane.** A failed land returns `retryCommand` for the same Lane. `cancel`
   receipts carry `cost`: cancelling discards the queue place, the checks and the retry link.
 - **Stale queued landings say so.** When a landing changes a file that a queued, not-yet-checked
-  landing also changes, that entry is marked `wouldConflict` with the files. Its next receipt says
-  to sync and land the same Lane again; the new land replaces the queued entry. This is path
-  advice, not a proven text conflict. Each land reads at most 50 queued entries.
+  landing also changes, that entry is marked `wouldConflict` with the files and its Lane. `wait`
+  and `land` then return `SYNC_REQUIRED` (exit 2, not `IN_PROGRESS`) with one recovery command,
+  the same Lane's `land --save`; observe guidance says the same, and the queue lists the entry as
+  `needs-sync` with no ETA. The save or sync that moves the Lane's head ends the old entry
+  `LANDING_SUPERSEDED` in the same transaction, so it never stays queued beside the new land. This
+  is path advice, not a proven text conflict: the controller may still merge it cleanly if nobody
+  acts. A speculative conflict with an unaccepted predecessor needs no action and keeps waiting.
+  Each land reads at most 20 queued entries and 10 Candidates.
 
 ## Size ceilings
 

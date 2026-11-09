@@ -10,7 +10,7 @@ import {
 } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
-import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
@@ -124,7 +124,7 @@ export const status = query({
       return canonicalPayload({
         request: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
         queuePosition: queue?.position ?? null,
-        queue,
+        queue: syncRequiredQueue(queue, wouldConflict),
         ...(orderWait ? { orderWait } : {}),
         attempt,
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),

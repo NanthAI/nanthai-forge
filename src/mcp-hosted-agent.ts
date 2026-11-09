@@ -387,6 +387,12 @@ export function registerHostedAgentWorkflow(
               },
             };
           }
+          // Main already took files the queued entry changes (f7539ebb): its one recovery, not a wait.
+          if (observed.result.status === 'sync-required')
+            return {
+              ...observed,
+              result: { ...observed.result, ...single, status: 'SYNC_REQUIRED', phase: 'queued' },
+            };
           if (['timeout', 'cancelled'].includes(observed.result.status)) {
             const resume = resumeOf();
             const run = 'run' in observed.result ? (observed.result.run as { status?: string } | null) : null;

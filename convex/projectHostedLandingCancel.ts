@@ -42,6 +42,9 @@ export async function cancelHostedLanding(
     code?: 'LANDING_DRIVER_EXHAUSTED' | 'REVIEW_DECLINED';
     /** Agent withdraw (78a97771): the Lane whose live landing this cancels, kept in the receipt. */
     withdrawLaneId?: string;
+    /** A save of the same Lane moved its head (f7539ebb): the entry ends superseded, not cancelled.
+     * The save already authorized the Lane write, so no separate submitter check applies. */
+    supersede?: { laneId: string; head: string };
   },
 ) {
   const { projectId, actor, request } = input;
@@ -51,14 +54,17 @@ export async function cancelHostedLanding(
   const payload = {
     kind: input.drop
       ? 'hosted-landing-drop'
-      : input.abandonOperationId
-        ? 'hosted-abandon-landing-cancel'
-        : 'hosted-landing-cancel',
+      : input.supersede
+        ? 'hosted-landing-supersede'
+        : input.abandonOperationId
+          ? 'hosted-abandon-landing-cancel'
+          : 'hosted-landing-cancel',
     request,
     ...(input.abandonOperationId ? { parentOperationId: input.abandonOperationId } : {}),
     ...(input.reason ? { reason: input.reason } : {}),
     ...(input.code === 'REVIEW_DECLINED' ? { code: input.code } : {}),
     ...(input.withdrawLaneId ? { withdraw: { laneId: input.withdrawLaneId } } : {}),
+    ...(input.supersede ? { supersede: input.supersede } : {}),
   };
   const { operation } = await beginHostedOperation(ctx, {
     projectId,
@@ -94,7 +100,7 @@ export async function cancelHostedLanding(
   const { row, state } = await loadLanding(ctx, identity);
   // An operator cancel needs the submitter or the project owner. Forge's own stall/exhaust drops and
   // the children of an already authorized Lane abandon carry that authority with them.
-  if (!input.drop && !input.abandonOperationId)
+  if (!input.drop && !input.abandonOperationId && !input.supersede)
     await requireMemberAuthorityById(ctx, projectId, state.actor, actor, 'landing');
   const attempt = await loadLandingAttempt(ctx, { projectId, attemptId: state.attemptId });
   const accepted = await acceptanceRow(ctx, { projectId, receiptId: attempt.operations.accept });
@@ -117,13 +123,17 @@ export async function cancelHostedLanding(
         ...state,
         version: state.version + 1,
         phase: 'terminal-failed',
-        observation: landingObservation('cancelled'),
+        observation: input.supersede
+          ? { state: 'superseded', pendingReason: null, cause: null }
+          : landingObservation('cancelled'),
         error: {
-          code: input.drop
-            ? (input.code ?? 'LANDING_STALLED')
-            : input.code === 'REVIEW_DECLINED'
-              ? input.code
-              : 'LANDING_CANCELLED',
+          code: input.supersede
+            ? 'LANDING_SUPERSEDED'
+            : input.drop
+              ? (input.code ?? 'LANDING_STALLED')
+              : input.code === 'REVIEW_DECLINED'
+                ? input.code
+                : 'LANDING_CANCELLED',
           message: input.reason ?? 'The hosted landing request was cancelled.',
         },
       };

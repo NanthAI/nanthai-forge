@@ -174,6 +174,89 @@ test('queue names the landing’s own Lane when its Intent has several, and with
   assert.notEqual((await f.current(state.id)).submission.phase, 'terminal-failed');
 });
 
+// f7539ebb item 5 (D1, 2026-11-09): after a sync and a new land, the old queued entry stayed
+// queued beside the new one (STALE 41 min) until the lead withdrew it by submissionId.
+test('D1 replay: the Lane’s new head supersedes its queued sync-required entry in the same transaction', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  const row = () =>
+    [...f.tables.projectHostedLandingRequests.values()].find(item => item.submissionId === state.id);
+  assert.equal(row().phase, 'queued');
+  const advice = extra =>
+    JSON.stringify({
+      paths: ['docs/agents/workflow.md'],
+      more: 0,
+      at: new Date().toISOString(),
+      next: 'advice',
+      ...extra,
+    });
+  const supersede = () =>
+    f.tx(
+      'supersede',
+      {
+        _handler: ctx =>
+          laneFinish.supersedeSyncRequired(ctx, {
+            projectId: f.projectId,
+            laneId: f.lane.laneId,
+            head: 'f'.repeat(64),
+          }),
+      },
+      {},
+    );
+  // A speculative predecessor conflict asks nothing of the agent: it is never superseded.
+  f.patch('projectHostedLandingRequests', row()._id, {
+    wouldConflict: advice({
+      code: 'COMPOSITION_CONFLICT',
+      predecessor: {
+        groupId: randomUUID(),
+        submissionId: randomUUID(),
+        head: 'a'.repeat(64),
+        receiptId: randomUUID(),
+      },
+    }),
+  });
+  assert.deepEqual(await supersede(), []);
+  assert.equal(row().phase, 'queued');
+  // Main took its file: the save or sync that moves the Lane head ends the entry at once.
+  f.patch('projectHostedLandingRequests', row()._id, {
+    wouldConflict: advice({ landedSubmissionId: randomUUID(), laneId: f.lane.laneId }),
+  });
+  const before = f.counts.length;
+  assert.deepEqual(await supersede(), [state.id]);
+  const call = f.counts.slice(before).find(c => c.name === 'supersede');
+  assert(call.documents <= 80, `bounded metadata reads: ${call.documents}`);
+  t.diagnostic(JSON.stringify({ reads: call.documents, writes: call.writes }));
+  const ended = (await f.current(state.id)).submission;
+  assert.equal(ended.phase, 'terminal-failed');
+  assert.equal(ended.observation.state, 'superseded');
+  assert.equal(ended.error.code, 'LANDING_SUPERSEDED');
+  assert.match(ended.error.message, /next land --save carries this work/);
+  // Nothing is left for the lead to withdraw by hand.
+  assert.equal(
+    await f.tx(
+      'liveQueued',
+      {
+        _handler: ctx =>
+          laneFinish.liveLaneFinish(
+            ctx,
+            { projectId: f.projectId, laneId: f.lane.laneId, headWrittenAt: '' },
+            { queuedConflicts: true },
+          ),
+      },
+      {},
+    ),
+    null,
+  );
+  await assert.rejects(withdraw(f, { laneId: f.lane.laneId }), code('LANDING_NOT_LIVE'));
+  // Retry-safe: a second head move finds nothing and writes nothing.
+  const again = f.counts.length;
+  assert.deepEqual(await supersede(), []);
+  assert(
+    f.counts.slice(again).every(c => c.writes === 0),
+    'replay writes nothing',
+  );
+});
+
 // Stack on a pending head (D2, Issue 1eb42254): a Lane that collides with a peer whose landing is
 // live stacks on the peer's head with `sync {stackOn}`; its landing then waits for the peer, and
 // when the peer fails the Lane's next sync re-pins it to main (the existing detach path).

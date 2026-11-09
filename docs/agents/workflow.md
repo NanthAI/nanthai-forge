@@ -2283,3 +2283,6 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
 - **Waiting.** While a landing is queued, `land --save`/`wait` print one line per change of phase, queue
   position or outcome (position, ahead, total, wouldConflict advice, recovery, error code), never the whole
   submission or resume cursor again. An IN_PROGRESS result still carries the cursor and one resume command.
+  When main lands a file the queued entry also changes, the wait ends at once with `SYNC_REQUIRED`
+  (exit 2) and the one recovery, the same Lane's `land --save` (with the Lane and message of the
+  original land); run it instead of waiting. Its new head supersedes the old queued entry.

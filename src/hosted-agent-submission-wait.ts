@@ -17,6 +17,7 @@ import { landingRedriver } from './hosted-landing-redrive.js';
 import { rememberLandedOperations } from './landed-operations.js';
 import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 export const hostedSubmissionWaitSchema = z
   .object({
@@ -139,10 +140,18 @@ export async function observeHostedSubmissions(
         ),
     });
     const entry = response.result.submissions.length === 1 ? response.result.submissions[0] : undefined;
+    // A sync-required stop names the one recovery (the same Lane's land --save), not another wait.
+    const sync =
+      response.result.status === 'sync-required'
+        ? response.result.submissions
+            .map(e => ({ e, advice: syncRequiredAdvice(e.wouldConflict, e.submission) }))
+            .find(found => found.advice)
+        : undefined;
     return {
       ...response,
       result: {
         ...response.result,
+        ...(sync ? syncRequiredContinuation(transport.root, sync.advice!) : {}),
         ...(entry?.recovery ? { recovery: entry.recovery } : {}),
         ...(entry?.conflict ? { conflict: entry.conflict } : {}),
         ...(['timeout', 'message'].includes(response.result.status) ? { inProgress: true } : {}),
@@ -183,6 +192,10 @@ async function observeHostedSubmissionsOnce(
   const terminal = () =>
     current.size === operations.length &&
     [...current.values()].every(e => e.submission.observation.state !== 'pending');
+  // Main already took files a queued entry changes (f7539ebb): waiting cannot land it, so the wait
+  // returns at once with the sync recovery. The predecessor variant keeps waiting (no action needed).
+  const syncRequired = () =>
+    [...current.values()].some(e => syncRequiredAdvice(e.wouldConflict, e.submission) !== undefined);
   let client: HostedRunSubscription | undefined;
   let wake = () => {};
   let fail: (error: unknown) => void = () => {};
@@ -400,7 +413,7 @@ async function observeHostedSubmissionsOnce(
     }
   };
   const result = (
-    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message',
+    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message' | 'sync-required',
     delivery?: BoardDelivery,
   ) => {
     const successful =
@@ -410,7 +423,7 @@ async function observeHostedSubmissionsOnce(
     return resultOf(status, successful, delivery);
   };
   const resultOf = (
-    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message',
+    status: 'terminal' | 'changed' | 'timeout' | 'cancelled' | 'message' | 'sync-required',
     successful: boolean,
     delivery?: BoardDelivery,
   ) => ({
@@ -430,6 +443,7 @@ async function observeHostedSubmissionsOnce(
   try {
     for (const operation of operations) await drain(operation);
     if (terminal()) return result('terminal');
+    if (syncRequired()) return result('sync-required');
     if (!baseline && changed && command.until === 'any-change') return result('changed');
     if (signal?.aborted) return result('cancelled');
     if (!command.timeoutSeconds) return result('timeout');
@@ -446,6 +460,7 @@ async function observeHostedSubmissionsOnce(
             for (const operation of operations) await drain(operation);
             if (stopped || signal.aborted) return;
             if (terminal()) resolve(result('terminal'));
+            else if (syncRequired()) resolve(result('sync-required'));
             else if (!baseline && changed && command.until === 'any-change') resolve(result('changed'));
             changed = false;
           })

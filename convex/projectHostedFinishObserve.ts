@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { finishReadReader } from './projectFinishReadReader';
-import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
@@ -190,7 +190,7 @@ async function observePage(
       authority: sourceAuthority(project),
       submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
       queuePosition: queue?.position ?? null,
-      queue,
+      queue: syncRequiredQueue(queue, wouldConflict),
       ...(wouldConflict ? { wouldConflict } : {}),
       ...(orderWait ? { orderWait } : {}),
       queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),

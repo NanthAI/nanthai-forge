@@ -18,7 +18,7 @@ import { loadLanding } from './projectHostedLandingStore';
 import { scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWouldConflict';
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { report } from './errors';
 const identity = { projectId: v.id('hostedProjects'), submissionId: v.string() };
@@ -66,7 +66,7 @@ export const status = query({
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
         queuePosition: queue?.position ?? null,
-        queue,
+        queue: syncRequiredQueue(queue, wouldConflict),
         ...(orderWait ? { orderWait } : {}),
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         pendingAttempt: finishPendingForReader(value.pending),

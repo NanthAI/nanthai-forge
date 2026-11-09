@@ -6,6 +6,7 @@ import type { MutationCtx } from './_generated/server';
 import { loadSync, hostedSyncInput, writeSyncState } from './projectHostedSyncStore';
 import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
+import { supersedeSyncRequired } from './projectHostedLaneFinish';
 import { markRestackConflict } from './projectHostedStackNotice';
 import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
@@ -246,6 +247,9 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
           : {}),
         record: lane,
       });
+      // A sync that moved the head replaces the Lane's queued entries that needed it (f7539ebb).
+      if (changed)
+        await supersedeSyncRequired(ctx, { projectId: input.projectId, laneId: lane.id, head: lane.head });
     }
   }
   invariant(lane, 'SOURCE_JOB_INVALID', 'Retain the resulting Lane.');

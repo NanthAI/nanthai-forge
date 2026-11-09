@@ -33,7 +33,7 @@ import {
   nothingToLandError,
   unsavedEditsError,
 } from './hosted-finish-guard.js';
-import type { WouldConflict } from './hosted-would-conflict.js';
+import { syncRequiredAdvice, syncRequiredContinuation, type WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
 
 const finishNotSavedKey = 'finish-not-saved';
@@ -111,7 +111,16 @@ export async function queuedConflict(session: HostedAgentSession, submission: Ho
       ...(read.queueAheadSelection ? { queueAheadSelection: read.queueAheadSelection } : {}),
     };
     if (!wouldConflict || current.submission.phase !== 'queued') return current;
-    // A queue prediction cannot settle or replace the live submission. Follow
+    // Main already took files this entry changes: waiting does not land it. Name the one recovery,
+    // the same Lane's land --save, which supersedes this entry (f7539ebb).
+    const sync = syncRequiredAdvice(wouldConflict, current.submission);
+    if (sync)
+      return {
+        ...current,
+        wouldConflict,
+        ...syncRequiredContinuation(session.root, sync),
+      };
+    // A predecessor's speculative conflict cannot settle or replace the live submission. Follow
     // its canonical wait; an actual conflict then returns the rejected attempt.
     const parameters = { operationIds: [current.submission.operationId] };
     const command = `nforge agent ${shellQuote(session.root)} wait ${shellQuote(JSON.stringify(parameters))}`;

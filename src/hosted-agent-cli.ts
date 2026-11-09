@@ -22,6 +22,7 @@ import { invariant } from './errors.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
 import { landSummary } from './hosted-land-summary.js';
+import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
@@ -268,6 +269,37 @@ export async function hostedAgentCli(
             ...held,
             board: boardWakeEnvelope(root, board.laneId, delivered),
             ...resume,
+          },
+        };
+      }
+      if (status === 'sync-required') {
+        // Not landed and not in progress (f7539ebb): the entry needs its Lane synced. Exit 2 like any
+        // outcome that needs action, so no "repeat on IN PROGRESS" loop keeps waiting on it.
+        process.exitCode = 2;
+        settleTurnWork(selectedWait.operationIds ?? []);
+        // Readers never see a landing's message: the retained land command keeps it and the Lane.
+        const entries = (submissions ?? []) as { submission: never; wouldConflict?: unknown }[];
+        const found = entries.find(entry => syncRequiredAdvice(entry.wouldConflict, entry.submission));
+        const index = found ? entries.indexOf(found) : -1;
+        const original =
+          index >= 0 && selectedWait.operationIds?.[index]
+            ? retainedHostedOperation(root, selectedWait.operationIds[index]!)?.command
+            : undefined;
+        const sync = found
+          ? syncRequiredContinuation(root, syncRequiredAdvice(found.wouldConflict, found.submission)!, {
+              laneId: typeof original?.laneId === 'string' ? original.laneId : laneId,
+              message: typeof original?.message === 'string' ? original.message : undefined,
+            })
+          : (response.result as { instruction?: string; command?: string });
+        process.stderr.write(`${sync.instruction}\nContinue recovery: ${sync.command}\n`);
+        return {
+          ...response,
+          result: {
+            ...response.result,
+            ...sync,
+            status: 'SYNC_REQUIRED',
+            operationIds: selectedWait.operationIds,
+            phase: 'queued',
           },
         };
       }

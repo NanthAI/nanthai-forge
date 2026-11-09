@@ -9,8 +9,14 @@ import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/portable-hash.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
+import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';
+import { normalizeHostedFinishResult } from '../dist/hosted-agent-finish-result.js';
+import { landSummary } from '../dist/hosted-land-summary.js';
+import { landWaitContinuation } from '../dist/hosted-land-wait.js';
 
 const wouldConflict = await import(moduleUrl('../convex/projectHostedLandingWouldConflict.ts'));
+const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const queueView = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -76,7 +82,7 @@ test('incident replay 2026-10-30 cost builder: a stale queued Candidate is marke
   const marked = JSON.parse(rowOf(f, stale.id).wouldConflict);
   assert.deepEqual(marked.paths, ['convex/cost.ts']);
   assert.equal(marked.landedSubmissionId, landing.id);
-  assert.match(marked.next, /Sync and land this Lane again/);
+  assert.match(marked.next, /^SYNC_REQUIRED: .*Do not keep waiting.*land --save/);
   assert.equal(rowOf(f, unrelated.id).wouldConflict, undefined, 'no shared path');
   assert.equal(rowOf(f, checking.id).wouldConflict, undefined, 'already checked against a pinned main');
   assert.equal(rowOf(f, landing.id).wouldConflict, undefined, 'the landing itself');
@@ -129,23 +135,157 @@ test('dogfood-scale budget: 60 queued entries cost one bounded scan and at most 
   assert.equal(source.writes, marked);
 });
 
-test('a replay of the queued land names its canonical wait; reads only when queued', async () => {
+test('a replay of the queued land names its one continuation; reads only when queued', async () => {
   const reads = [];
+  const laneId = randomUUID();
+  const at = new Date().toISOString();
+  const queued = { id: 'sub-1', operationId: 'op-1', phase: 'queued', observation: { state: 'pending' } };
+  let advice = {
+    paths: ['convex/cost.ts'],
+    more: 0,
+    landedSubmissionId: randomUUID(),
+    laneId,
+    at,
+    next: 'SYNC_REQUIRED',
+  };
   const session = {
     root: '/work/lane',
-    marker: () => ({ selection: { laneId: 'lane-1' } }),
     query: async (name, args) => {
       reads.push([name, args]);
-      return { wouldConflict: { paths: ['convex/cost.ts'], next: 'Sync and land this Lane again' } };
+      return { wouldConflict: advice };
     },
   };
-  const replay = await queuedConflict(session, { id: 'sub-1', operationId: 'op-1', phase: 'queued' });
-  assert.deepEqual(replay.next, { action: 'wait', operationIds: ['op-1'] });
-  assert.equal(replay.nextCommand, `nforge agent '/work/lane' wait '{"operationIds":["op-1"]}'`);
+  // Main already took its file (f7539ebb): the continuation is the same Lane's land --save, not a wait.
+  const replay = await queuedConflict(session, queued);
+  assert.equal(replay.code, 'SYNC_REQUIRED');
+  assert.deepEqual(replay.next, { action: 'land', save: true, laneId });
+  assert.equal(replay.nextCommand, `nforge agent '/work/lane' land --save '{"laneId":"${laneId}"}'`);
   assert.equal(replay.command, replay.nextCommand);
   assert.deepEqual(reads, [['projectHostedLanding:status', { submissionId: 'sub-1' }]]);
+  // A predecessor's speculative conflict needs no agent action: it keeps the canonical wait.
+  advice = {
+    code: 'COMPOSITION_CONFLICT',
+    predecessor: {
+      groupId: randomUUID(),
+      submissionId: randomUUID(),
+      head: 'a'.repeat(64),
+      receiptId: randomUUID(),
+    },
+    paths: ['convex/cost.ts'],
+    more: 0,
+    at,
+    next: 'No agent action is needed.',
+  };
+  const speculative = await queuedConflict(session, queued);
+  assert.deepEqual(speculative.next, { action: 'wait', operationIds: ['op-1'] });
+  assert.equal(speculative.nextCommand, `nforge agent '/work/lane' wait '{"operationIds":["op-1"]}'`);
+  reads.length = 1;
   assert.deepEqual(await queuedConflict(session, { id: 'sub-1', phase: 'checking' }), {});
   assert.equal(reads.length, 1, 'no read past the queue');
   const failing = { ...session, query: async () => Promise.reject(new Error('offline')) };
   assert.deepEqual(await queuedConflict(failing, { id: 'sub-1', phase: 'queued' }), {}, 'advisory only');
+});
+
+test('incident replay 2026-11-09 D1: a queued landing whose file main changed returns SYNC_REQUIRED within one poll, and wait, observe, queue and land agree', async () => {
+  const f = await landingFixture();
+  // D1 queued behind a landing that also changes docs/agents/workflow.md.
+  const ahead = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['docs/agents/workflow.md', 'src/ahead.ts']) }),
+  );
+  const d1 = await f.enqueue(
+    f.request({
+      candidateId: candidateWithPaths(f, ['docs/agents/workflow.md', 'src/d1.ts']),
+      message: 'D1: tighten workflow docs',
+    }),
+  );
+  let reads = 0;
+  const subscriptions = new Set();
+  const page = args =>
+    f.call('syncPage', observe.page, { ...args, projectId: f.projectId }, 'owner').then(JSON.parse);
+  const transport = {
+    root: '/work/root',
+    address: { url: 'https://fixture.invalid', projectId: f.projectId },
+    dispatch: async () => ({
+      schema: 1,
+      transport: 'hosted',
+      action: 'capabilities',
+      operationId: null,
+      result: { actor: 'owner' },
+    }),
+    query: async (name, args) => {
+      assert.equal(name, 'projectHostedFinishObserve:page');
+      reads++;
+      return page(args);
+    },
+  };
+  const subscribe = () => ({
+    onUpdate(_ref, _args, next) {
+      const s = { next };
+      subscriptions.add(s);
+      return () => subscriptions.delete(s);
+    },
+    async close() {},
+  });
+  const waiting = observeHostedSubmissions(
+    transport,
+    { operationIds: [d1.operationId], until: 'acceptance', timeoutSeconds: 30 },
+    undefined,
+    () => {},
+    subscribe,
+  );
+  for (let i = 0; i < 1000 && !subscriptions.size; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(subscriptions.size, 1, 'the wait is live on the queued entry');
+  const before = reads;
+  // Main lands the overlapping path; the existing event-driven mark records it.
+  assert.equal(await mark(f, ['docs/agents/workflow.md', 'src/ahead.ts'], ahead.id), 1);
+  for (const s of subscriptions) s.next(null); // the subscription's one wake
+  const waited = await waiting;
+  assert.equal(reads - before, 1, 'SYNC_REQUIRED within one poll, no extra read');
+  assert.equal(waited.result.status, 'sync-required', 'not IN_PROGRESS, not a timeout');
+  assert.equal(waited.result.code, 'SYNC_REQUIRED');
+  assert.equal(waited.result.inProgress, false);
+  assert.equal(waited.result.successful, false);
+  assert.deepEqual(waited.result.syncRequired.paths, ['docs/agents/workflow.md']);
+  // The fixture's compose names no Lane and readers never see the message: the CLI adds both
+  // from the retained land command; the bare form runs inside the Lane checkout.
+  assert.deepEqual(waited.result.next, { action: 'land', save: true });
+  assert.equal(waited.result.command, `nforge agent '/work/root' land --save '{}'`);
+  assert.match(waited.result.instruction, /^SYNC_REQUIRED: .*Stop waiting.*inside the Lane checkout/);
+  // Observe guidance agrees: the advice and the queue say SYNC_REQUIRED, with no ETA.
+  const observed = await page({ operationId: d1.operationId, nextVersion: 0 });
+  assert.match(observed.wouldConflict.next, /^SYNC_REQUIRED: .*Do not keep waiting/);
+  assert.equal(observed.queue.phase, 'needs-sync');
+  assert.equal(observed.queue.eta, undefined);
+  assert.equal(observed.queue.message, observed.wouldConflict.next);
+  // The queue view (Lane side and owner side read the same rows) shows phase needs-sync.
+  const view = JSON.parse(await f.call('syncQueue', queueView.read, { projectId: f.projectId }, 'owner'));
+  const listed = view.entries.find(entry => entry.submissionId === d1.id);
+  assert.equal(listed.phase, 'needs-sync');
+  assert.deepEqual(listed.needsSync.paths, ['docs/agents/workflow.md']);
+  assert.match(listed.needsSync.next, /^SYNC_REQUIRED/);
+  assert.notEqual(view.entries.find(entry => entry.submissionId === ahead.id).phase, 'needs-sync');
+  // land's receipt names the same recovery (with the Lane it was given), says so, and has no wait.
+  const laneId = randomUUID();
+  const land = normalizeHostedFinishResult(
+    '/work/root',
+    {},
+    {
+      phase: 'finish',
+      replayParameters: { laneId, message: 'D1: tighten workflow docs' },
+      ...waited.result.submissions[0],
+      waitStatus: 'sync-required',
+      inProgress: true,
+    },
+  );
+  assert.equal(land.code, 'SYNC_REQUIRED');
+  assert.equal(land.waitCommand, undefined);
+  assert.equal(
+    land.command,
+    `nforge agent '/work/root' land --save '{"laneId":"${laneId}","message":"D1: tighten workflow docs"}'`,
+  );
+  assert.equal(landWaitContinuation('/work/root', { operationId: d1.operationId, result: land }), undefined);
+  assert.deepEqual(landSummary({ result: land }), [
+    'SYNC REQUIRED; not landed: main changed 1 file(s) this queued landing also changes (docs/agents/workflow.md)',
+    `Continue recovery: ${land.command}`,
+  ]);
 });

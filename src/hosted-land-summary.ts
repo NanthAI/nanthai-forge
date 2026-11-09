@@ -4,6 +4,7 @@ import { scrubText } from './client-error-text.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
+import { syncRequiredSummary } from './hosted-would-conflict.js';
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
 type Result = {
@@ -66,6 +67,13 @@ function outcomeLines(response: HostedAgentResponse): string[] {
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return [
       'SUPERSEDED; this operation does not land the newer saved head. Use its current Lane status before continuing.',
+    ];
+  // Queued, but main already took files it changes (f7539ebb): say so with the one recovery.
+  const sync = (result as { syncRequired?: { paths: string[]; more: number } }).syncRequired;
+  if (sync && submission?.observation?.state === 'pending')
+    return [
+      `SYNC REQUIRED; not landed: ${syncRequiredSummary(sync)}`,
+      ...(result.command ? [`Continue recovery: ${result.command}`] : []),
     ];
   // A held landing is neither queued nor stranded (5c59940b): name the hold and who releases it.
   const replay = (result as { replayParameters?: { laneId?: unknown } }).replayParameters;

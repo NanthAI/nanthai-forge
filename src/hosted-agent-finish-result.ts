@@ -2,6 +2,7 @@
 import { shellQuote } from './agent-brief-render.js';
 import { operationWait } from './agent-operation-wait.js';
 import { landingHold } from './hosted-landing-hold.js';
+import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 type Reply = Record<string, unknown>;
 const failedRuns = new Set(['failed', 'cancelled', 'runner-unavailable', 'interrupted']);
@@ -46,6 +47,20 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
   const run = result.run as { id?: string; status?: string } | undefined;
   if (result.phase === 'check' && run?.id && !['passed', ...failedRuns].includes(run.status ?? ''))
     return { ...result, ...operationWait(root, { runId: run.id }) };
+  // Main already took files this queued entry changes (f7539ebb): the recovery is the same Lane's
+  // land --save, never another wait on this operation.
+  const sync = syncRequiredAdvice(result.wouldConflict, submission);
+  if (sync) {
+    // The land's own parameters keep its Lane and commit message (readers never see the message).
+    const replay = result.replayParameters as { laneId?: unknown; message?: unknown } | undefined;
+    return {
+      ...result,
+      ...syncRequiredContinuation(root, sync, {
+        laneId: typeof replay?.laneId === 'string' ? replay.laneId : undefined,
+        message: typeof replay?.message === 'string' ? replay.message : undefined,
+      }),
+    };
+  }
   const state = submission?.observation?.state ?? submission?.phase;
   // Only unfinished work waits. A terminal conflict follows its sync/resolve recovery,
   // never a wait on an operation that already ended.

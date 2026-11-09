@@ -423,7 +423,12 @@ export async function hostedLandCli(
       ),
     );
   const outcome = landPhase(final);
-  if (outcome === 'terminal-failed' || lines[0]?.startsWith('FAILED')) process.exitCode = 2;
+  if (
+    outcome === 'terminal-failed' ||
+    lines[0]?.startsWith('FAILED') ||
+    lines[0]?.startsWith('SYNC REQUIRED')
+  )
+    process.exitCode = 2;
   else if (!landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
       const resume = landWaitCommand(transport.root ?? root, final);

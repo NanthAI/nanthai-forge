@@ -180,7 +180,9 @@ test('progress and conflict advice invalidate immediately; private finish wake d
   );
   assert(!pending.isCurrent(), 'advice is visible in the same transaction');
   const receipt = await page(f, observe, state.operationId);
-  assert.deepEqual(receipt.wouldConflict, advice);
+  // Accepted-main advice reads with the current SYNC_REQUIRED guidance (f7539ebb).
+  assert.deepEqual({ ...receipt.wouldConflict, next: advice.next }, advice);
+  assert.match(receipt.wouldConflict.next, /^SYNC_REQUIRED/);
   const observed = { ...f.counts.at(-1), isCurrent: f.readSet() };
   const { store } = await import('./hosted-landing-fixture.mjs');
   await f.call(

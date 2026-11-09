@@ -15,6 +15,8 @@ export function landWaitCommand(root: string, response: HostedAgentResponse) {
 
 export function landWaitContinuation(root: string, response: HostedAgentResponse) {
   const result = resultOf(response);
+  // A sync-required entry's continuation is its land --save, not a wait (f7539ebb).
+  if ((result as { syncRequired?: unknown }).syncRequired) return undefined;
   const wait =
     result.phase === 'check' && result.run?.id
       ? runDone.has(result.run.status ?? '')

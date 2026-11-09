@@ -5,6 +5,8 @@ import { accessibleProject } from './projectAuthority';
 import { report } from './errors';
 import { hostedRecordBody } from './projectHostedRecords';
 import { landingRow } from './projectHostedLandingStore';
+import { readWouldConflict } from './projectHostedLandingWouldConflict';
+import { syncRequiredAdvice, syncRequiredNext } from '../src/hosted-would-conflict';
 import { loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { finishRow } from './projectHostedFinishWake';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -88,6 +90,8 @@ export const read = query({
           : [];
         const laneId = composed.length === 1 ? composed[0]!.key : (lanes[0]?.key ?? null);
         const hold = landingHold(state, laneId ?? undefined);
+        // Main already took files this entry changes: it needs its Lane synced, not more waiting (f7539ebb).
+        const sync = syncRequiredAdvice(state.phase === 'queued' ? readWouldConflict(row) : undefined);
         const failed = state.testFiles?.failed.length
           ? state.testFiles.failed.map(file => file.file)
           : (state.batchDiagnostic?.failedTests ?? []);
@@ -98,7 +102,17 @@ export const read = query({
           ...(lanes.length > 1 ? { moreLanes: true } : {}),
           intentId,
           intentTitle: parsed?.success && parsed.data.kind === 'intent' ? parsed.data.outcome : null,
-          phase: state.phase,
+          phase: sync ? 'needs-sync' : state.phase,
+          ...(sync
+            ? {
+                needsSync: {
+                  paths: sync.paths,
+                  ...(sync.more ? { more: sync.more } : {}),
+                  landedSubmissionId: sync.landedSubmissionId,
+                  next: syncRequiredNext({ ...sync, laneId: sync.laneId ?? laneId ?? undefined }),
+                },
+              }
+            : {}),
           priority: state.priority ?? 'normal',
           batchId: state.batchId ?? null,
           inTrain: train.has(state.id),

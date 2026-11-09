@@ -74,7 +74,12 @@ test('queued receipts name exact position, entries ahead, live predecessor and a
     }),
   );
   assert.equal(observed.queue.position, 3);
-  assert.deepEqual(observed.wouldConflict, wouldConflict);
+  // f7539ebb: accepted-main advice reads as SYNC_REQUIRED everywhere, the queue drops its ETA.
+  assert.deepEqual({ ...observed.wouldConflict, next: undefined }, { ...wouldConflict, next: undefined });
+  assert.match(observed.wouldConflict.next, /^SYNC_REQUIRED: main changed 1 file\(s\).*land --save/);
+  assert.equal(observed.queue.phase, 'needs-sync');
+  assert.equal(observed.queue.eta, undefined, 'a sync-required entry has no ETA');
+  assert.equal(observed.queue.message, observed.wouldConflict.next);
   assert.equal(f.metrics.scheduled, scheduled, 'reads do not schedule work');
 });
 
