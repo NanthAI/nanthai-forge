@@ -35,6 +35,12 @@ export const invalidate = internalMutation({
         .withIndex('by_repo', q => q.eq('repoId', repoId))
         .unique();
       if (row?.installationId === input.installationId) await ctx.db.delete(row._id);
+      // Runner grants: one row per Forge owner who proved this repository, so a short page.
+      for (const grant of await ctx.db
+        .query('githubRunnerGrants')
+        .withIndex('by_repo', q => q.eq('repoId', repoId))
+        .take(100))
+        if (grant.installationId === input.installationId) await ctx.db.delete(grant._id);
     }
     await ctx.db.insert('githubBindingWebhookReceipts', { delivery: input.delivery });
     return null;

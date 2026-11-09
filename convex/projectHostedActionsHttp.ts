@@ -31,6 +31,8 @@ import {
   poolUnits,
 } from '../src/hosted-actions-pool';
 import { submoduleReadTokens, type SubmodulePolicy } from './githubAppToken';
+import type { RunnerScope } from './githubBindingAccess';
+import { convexFetch } from './networkFetch';
 import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
@@ -158,7 +160,11 @@ export const handle = httpAction(async (ctx, request) => {
     else if (command.kind === 'submoduleAccess') {
       // Authorize the live run first; the same call reads the owner's current submodule
       // allowlist. Tokens are minted for allowed repositories of its installation only.
-      const { run, policy }: { run: HostedCheckRun; policy: SubmodulePolicy } = JSON.parse(
+      const {
+        run,
+        policy,
+        runnerScope,
+      }: { run: HostedCheckRun; policy: SubmodulePolicy; runnerScope?: RunnerScope | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), {
           ...input,
           submodules: true,
@@ -175,6 +181,9 @@ export const handle = httpAction(async (ctx, request) => {
         run.configuration.repository,
         command.repositories,
         policy,
+        convexFetch,
+        Date.now(),
+        runnerScope ?? null,
       );
     } else if (command.kind === 'plan') {
       // Recheck before and after storage IO; only immutable small plan metadata crosses this action.

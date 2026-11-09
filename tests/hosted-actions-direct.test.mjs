@@ -1651,6 +1651,57 @@ test('cancellation enforces current repository binding before token minting or c
   assert.equal(installations, 1);
 });
 
+test('Issue 77fa4412: a runner grant dispatches and cancels by numeric id with no added Convex call', async t => {
+  const s = await fixture(t);
+  // No operator pair and no stored binding: only the owner's runner grant for this repository.
+  variables(t, {
+    FORGE_GITHUB_REPO_BINDINGS: '',
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  s.insert('githubRunnerGrants', {
+    owner: 'owner',
+    repoId: 77,
+    fullName: repository,
+    installationId: 9,
+    githubAccount: '1001',
+    grantedAt: 1,
+  });
+  const minted = [],
+    names = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/installation')) return Response.json({ id: 9 });
+    if (url.endsWith('/access_tokens')) {
+      minted.push(JSON.parse(init.body));
+      return Response.json({ token: 'synthetic-token' });
+    }
+    if (url.endsWith('/forge-check.yml/dispatches')) return Response.json({ workflow_run_id: 123 });
+    // The private project's runner visibility read (6ba1539d) uses the same grant-scoped token.
+    if (url.endsWith(`/repos/${repository}`)) return Response.json({ private: true, visibility: 'private' });
+    assert(url.endsWith('/actions/runs/123/cancel'));
+    return new Response(null, { status: 202 });
+  });
+  const ctx = {
+    runMutation: (ref, input) => {
+      names.push(getFunctionName(ref));
+      const [module, method] = getFunctionName(ref).split(':');
+      return s.raw(
+        { projectHostedActionsDirect: direct, projectHostedActionsWebhook: webhooks }[module],
+        method,
+        input,
+      );
+    },
+    runQuery: async ref => assert.fail(`no binding query per mint (${getFunctionName(ref)})`),
+  };
+  await direct.dispatch._handler(ctx, s.id);
+  assert.equal((await s.status(s.run.id)).executionId, '123');
+  assert.deepEqual(names, ['projectHostedActionsDirect:reserve', 'projectHostedActionsDirect:observe']);
+  assert.deepEqual(minted, [{ repository_ids: [77], permissions: { actions: 'write', contents: 'read' } }]);
+  await s.cancel(s.run.id);
+  await webhooks.cancel._handler(ctx, s.id);
+  assert.equal(minted.length, 2);
+  assert.deepEqual(minted[1].repository_ids, [77]);
+});
 test('cancelled HTTP calls return a distinct safe 403 that old runners already refuse', async t => {
   const s = await fixture(t);
   await s.bind();

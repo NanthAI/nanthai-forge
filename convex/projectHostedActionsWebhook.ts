@@ -8,7 +8,8 @@ import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore
 import { directActions, settleDirectActions, requestDirectCancel } from './projectHostedActionsDirect';
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { hostedCheckTerminal } from '../src/hosted-check';
-import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
+import { actionsToken, githubAppRequest } from './githubAppToken';
+import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { invariant } from '../src/errors';
 import { applyConclusion } from './projectHostedActionsVerdict';
 const payloadSchema = z.object({
@@ -110,7 +111,11 @@ export const cancellation = internalMutation({
     // unknown outcome; true = scheduled, false = attempted, absent = unscheduled.
     run.actions.cancelScheduled = false;
     await writeHostedCheck(ctx, row._id, run);
-    return JSON.stringify(run);
+    const runnerScope =
+      run.configuration.provider === 'github-actions'
+        ? await runnerTokenScope(ctx, input.projectId, run.configuration.repository)
+        : null;
+    return JSON.stringify({ ...run, runnerScope });
   },
 });
 export const cancel = internalAction({
@@ -122,14 +127,9 @@ export const cancel = internalAction({
         makeFunctionReference<'mutation'>('projectHostedActionsWebhook:cancellation'),
         input,
       ),
-    ) as import('../src/hosted-check').HostedCheckRun | null;
+    ) as (import('../src/hosted-check').HostedCheckRun & { runnerScope?: RunnerScope | null }) | null;
     if (!run || run.configuration.provider !== 'github-actions') return null;
-    const token = await installationToken(
-      ctx,
-      input.projectId,
-      run.configuration.repository,
-      actionsPermissions,
-    );
+    const token = await actionsToken(ctx, input.projectId, run.configuration.repository, run.runnerScope);
     await githubAppRequest(
       `repos/${run.configuration.repository}/actions/runs/${run.executionId}/cancel`,
       token,

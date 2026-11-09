@@ -43,6 +43,20 @@ export const githubBindingTables = {
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_state', ['state']),
+  // One per Forge owner and runner repository: that owner's projects may run checks on
+  // the repository (Actions only; the mirror needs a project binding). Written by
+  // configure-runner after the App proves the owner's linked GitHub account administers it.
+  githubRunnerGrants: defineTable({
+    owner: v.string(),
+    repoId: v.number(),
+    fullName: v.string(),
+    installationId: v.number(),
+    githubAccount: v.string(),
+    grantedAt: v.number(),
+  })
+    .index('by_owner_and_name', ['owner', 'fullName'])
+    .index('by_owner_and_repo', ['owner', 'repoId'])
+    .index('by_repo', ['repoId']),
   githubBindingWebhookReceipts: defineTable({ delivery: v.string() }).index('by_delivery', ['delivery']),
   /** Last GitHub visibility read of a runner repository (lowercase OWNER/NAME), reused
    * for `runnerVisibilityTtlMs`; one row per repository, overwritten in place. */

@@ -256,15 +256,22 @@ export const remove = mutation({
         );
         return null;
       }
-      const binding = await ctx.db
+      const found = await ctx.db
         .query('projectGithubBindings')
         .withIndex('by_repo', q => q.eq('repoId', input.repoId))
         .unique();
+      // Disconnect also withdraws the owner's runner grant, for all of the owner's projects.
+      const grant = await ctx.db
+        .query('githubRunnerGrants')
+        .withIndex('by_owner_and_repo', q => q.eq('owner', actor).eq('repoId', input.repoId))
+        .unique();
       invariant(
-        !binding || binding.projectId === input.projectId,
+        !found || found.projectId === input.projectId || grant,
         'PROJECT_UNAVAILABLE',
         'Repository belongs to another project.',
       );
+      if (grant) await ctx.db.delete(grant._id);
+      const binding = found?.projectId === input.projectId ? found : null;
       if (binding) {
         const installation = await bindingInstallation(ctx, binding.installationId);
         const revision = {

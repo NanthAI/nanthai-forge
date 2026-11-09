@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mainAuditStatus } from './projectHostedMainAuditState';
-import { bindingInstallation, requireStoredRepositoryBinding } from './githubBindingAccess';
+import { bindingInstallation, requireStoredRepositoryBinding, runnerGrant } from './githubBindingAccess';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { z } from 'zod';
 import { v } from 'convex/values';
@@ -108,7 +108,9 @@ export const configure = mutation({
             'The Modal runner has been retired. Select mac, self-hosted or github-actions.',
           );
           if (change.configuration.provider === 'github-actions')
-            await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository);
+            await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository, {
+              runner: true,
+            });
           return {
             kind: 'runner',
             key: 'runner',
@@ -154,7 +156,25 @@ export const current = query({
             row.installationId,
             !(await bindingInstallation(ctx, row.installationId))?.removed,
           );
+      const configuration = runner ? JSON.parse(runner.value) : null;
+      // The owner's runner grant for the configured repository (configure-runner writes it).
+      const grant =
+        input.includeGithubBindings && configuration?.provider === 'github-actions'
+          ? await runnerGrant(ctx, input.projectId, configuration.repository)
+          : null;
       return canonicalPayload({
+        ...(input.includeGithubBindings
+          ? {
+              runnerGrant: grant
+                ? {
+                    repoId: grant.repoId,
+                    fullName: grant.fullName,
+                    installationId: grant.installationId,
+                    grantedAt: grant.grantedAt,
+                  }
+                : null,
+            }
+          : {}),
         githubBindings: bindings
           ? {
               ...bindings,
@@ -165,7 +185,7 @@ export const current = query({
             }
           : null,
         check: definition ? JSON.parse(definition.value) : null,
-        configuration: runner ? JSON.parse(runner.value) : null,
+        configuration,
         configurationDigest: runner?.digest ?? null,
         mainAudit: await mainAuditStatus(ctx, input.projectId),
       });

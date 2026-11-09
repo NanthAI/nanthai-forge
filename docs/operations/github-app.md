@@ -2,8 +2,9 @@
 
 The hosted mirror and Actions runner use Forge's GitHub App. Installation alone
 is insufficient: a repository must have an owner-proven binding to the Forge
-project, or an explicit deployment operator override. A numeric GitHub repository
-ID can have one stored project binding at a time.
+project, an owner runner grant (checks only), or an explicit deployment operator
+override. A numeric GitHub repository ID can have one stored project binding at a
+time; any number of owners can hold a runner grant for it.
 
 ## Owner setup
 
@@ -83,6 +84,48 @@ Disconnect removes the stored claim and fences in-flight proof for that
 installation. Its operation UUID makes retries safe even after a newer binding.
 A different project can then claim the repository with fresh proof.
 
+## Runner grants (checks only)
+
+`configure-runner` needs no browser step and no operator setting. When the
+project has neither a stored binding nor an operator pair for the runner
+repository, configure-runner proves the caller's access through the App and
+records one runner grant per Forge owner and repository (`githubRunnerGrants`,
+`convex/githubRunnerGrants.ts`):
+
+1. The identity provider returns the verified GitHub accounts linked to the
+   caller's Forge account (one call), as for connect.
+2. The App finds its installation on the repository and mints a `metadata: read`
+   token for that one repository name. The token stays on the action stack.
+3. With that token, Forge reads the repository's numeric ID and canonical name,
+   then for each linked account its login (`GET /user/{id}`) and role
+   (`collaborators/{login}/permission`). It stops at the first account whose role
+   is admin or maintain and whose returned user ID matches; otherwise
+   `GITHUB_REPOSITORY_PERMISSION`.
+
+The grant then covers every project the same Forge account owns: their
+configure-runner calls re-prove access and refresh the grant, so a lost role is
+seen at the next configure. A project moved to another owner loses the old
+owner's grant. A grant authorizes only Actions use (dispatch, run lookup,
+cancellation, owner-allowed submodule reads). The mirror and enabling
+`githubMirror.autoPush` still need a stored project binding.
+
+The one owner step is installing the GitHub App on the runner repository with its
+Actions permissions. Several projects share one runner repository safely: each
+run is bound by its dispatch response or signed webhook run ID and the OIDC
+repository claim, not by repository alone. Their checks run Candidate code with
+the runner repository's Actions access, so share a runner only between projects
+whose code you trust there.
+
+Cost: configure is one identity call and four or five GitHub calls. Per check
+there is no extra Convex call: the mutation that already precedes each Actions
+token mint (dispatch reservation, cancellation, lookup, confirmation, submodule
+access) reads the grant (two or three indexed reads), and the token is minted by
+numeric ID once GitHub confirms the same installation. GitHub refuses an ID the
+installation no longer covers. Removal webhooks delete the repository's grants,
+uninstall tombstones them, and `nforge github disconnect --repo-id` withdraws the
+caller's grant for all of their projects. `check-settings` shows the grant for
+the configured runner repository as `runnerGrant`.
+
 ## Enforcement and revocation
 
 Every mirror, workflow dispatch and cancellation token goes through the same
@@ -123,6 +166,7 @@ this repository, so the table shows what Forge asks of each token.
 | Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import; each worker run (archive and paged fallback) | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts`, `projectGithubImportWorker.ts` |
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
+| Runner grant proof | `metadata: read`, one repository by name; reads its ID and one user's role | `configure-runner` without a stored binding or operator pair | `metadataProbeToken`; `githubRunnerGrants.ts` |
 | Mirror push | `contents: write` (Git data API, plus the Git LFS batch API for LFS paths; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
 | Two-way read | `contents: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
 

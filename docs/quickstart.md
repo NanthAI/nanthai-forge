@@ -157,8 +157,11 @@ nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"O
 nforge agent ROOT check-settings '{}'
 ```
 
-The runner repository must already have Forge's check workflow and an authorized
-GitHub App binding. The development operator supplies that runner setup. No npm
+The runner repository must already have Forge's check workflow and the Forge
+GitHub App installed. configure-runner proves that your linked GitHub account
+administers or maintains it and records a runner grant that also covers your
+later projects; no browser step or operator setting is needed
+([runner grants](operations/github-app.md#runner-grants-checks-only)). No npm
 publication, production deployment or upstream repository write is needed for
 the import itself.
 

@@ -10,7 +10,8 @@ import {
   type CheckIdentity,
 } from './projectHostedCheckStore';
 import { hostedCheckTerminal, checkPin, type HostedCheckRun } from '../src/hosted-check';
-import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
+import { actionsToken, githubAppRequest } from './githubAppToken';
+import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { invariant } from '../src/errors';
 import {
   runnerVisibilityRequired,
@@ -176,7 +177,15 @@ export async function reserveDirectActions(ctx: MutationCtx, input: CheckIdentit
 export const reserve = internalMutation({
   args: identity,
   returns: v.string(),
-  handler: async (ctx, input) => JSON.stringify(await reserveDirectActions(ctx, input)),
+  handler: async (ctx, input) => {
+    const run = await reserveDirectActions(ctx, input);
+    // The runner grant rides on this existing call, so dispatch adds no Convex call.
+    return JSON.stringify(
+      run?.configuration.provider === 'github-actions'
+        ? { ...run, runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository) }
+        : run,
+    );
+  },
 });
 export const observe = internalMutation({
   args: {
@@ -274,9 +283,10 @@ export const dispatch = internalAction({
   args: identity,
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
-    const run: (HostedCheckRun & { runnerVisibility?: string }) | null = JSON.parse(
-      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reserve'), input),
-    );
+    const run: (HostedCheckRun & { runnerVisibility?: string; runnerScope?: RunnerScope | null }) | null =
+      JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reserve'), input),
+      );
     if (!run) return null;
     invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
     let outcome: 'accepted' | 'unknown' | 'rejected' = 'rejected',
@@ -292,12 +302,7 @@ export const dispatch = internalAction({
         'RUNNER_UNAVAILABLE',
         'Convex site URL is unavailable.',
       );
-      const token = await installationToken(
-        ctx,
-        input.projectId,
-        run.configuration.repository,
-        actionsPermissions,
-      );
+      const token = await actionsToken(ctx, input.projectId, run.configuration.repository, run.runnerScope);
       if (run.runnerVisibility && run.runnerVisibility !== 'not-required') {
         // The Actions token carries metadata read: one GitHub call per expiry.
         if (run.runnerVisibility === 'unchecked')
@@ -370,7 +375,12 @@ export const pendingReconcile = internalMutation({
   args: { ...identity, fence: v.number() },
   returns: v.union(
     v.null(),
-    v.object({ lookup: v.boolean(), repository: v.string(), reservedAt: v.number() }),
+    v.object({
+      lookup: v.boolean(),
+      repository: v.string(),
+      reservedAt: v.number(),
+      runnerScope: v.union(v.null(), v.object({ repoId: v.number(), installationId: v.number() })),
+    }),
   ),
   handler: async (ctx, input) => {
     const { run } = await writableHostedCheck(ctx, input);
@@ -381,6 +391,7 @@ export const pendingReconcile = internalMutation({
       lookup: actions.outcome === 'unknown',
       repository: run.configuration.repository,
       reservedAt: actions.reservedAt,
+      runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository),
     };
   },
 });
@@ -431,7 +442,12 @@ export const reconcile = internalAction({
   args: { ...identity, fence: v.number() },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
-    const pending: { lookup: boolean; repository: string; reservedAt: number } | null = await ctx.runMutation(
+    const pending: {
+      lookup: boolean;
+      repository: string;
+      reservedAt: number;
+      runnerScope?: RunnerScope | null;
+    } | null = await ctx.runMutation(
       makeFunctionReference<'mutation'>('projectHostedActionsDirect:pendingReconcile'),
       input,
     );
@@ -440,7 +456,7 @@ export const reconcile = internalAction({
       lookup = 'skipped';
     if (pending.lookup)
       try {
-        const token = await installationToken(ctx, input.projectId, pending.repository, actionsPermissions);
+        const token = await actionsToken(ctx, input.projectId, pending.repository, pending.runnerScope);
         const since = new Date(Math.floor(pending.reservedAt / 1000) * 1000 - 60_000).toISOString();
         const response = await githubAppRequest(
           `repos/${pending.repository}/actions/workflows/forge-check.yml/runs?event=workflow_dispatch&per_page=100&created=${encodeURIComponent(`>=${since}`)}`,

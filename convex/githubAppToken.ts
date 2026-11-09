@@ -5,7 +5,7 @@
 import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
-import { operatorBinding } from './githubBindingAccess';
+import { operatorBinding, type RunnerScope } from './githubBindingAccess';
 import type { ActionCtx } from './_generated/server';
 import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import { ForgeError, invariant } from '../src/errors';
@@ -269,6 +269,42 @@ export async function installationTokenMinter(
     return token;
   };
 }
+/** Metadata-read token for one named repository, used only inside the runner-grant proof
+ * (`githubRunnerGrants.ts`) to read its numeric id and a user's role; never returned. */
+export function metadataProbeToken(
+  api: ReturnType<typeof githubRequest>,
+  installationId: number,
+  repo: string,
+) {
+  assertRepositoryName(repo);
+  return mintInstallationToken(
+    api,
+    installationId,
+    { repositories: [repo.split('/')[1]!] },
+    { metadata: 'read' },
+  );
+}
+/** Actions dispatch, run lookup and cancellation. A runner grant's scope (read by the
+ * mutation that precedes this call) mints by its numeric id after GitHub confirms the same
+ * installation, with no Convex call; GitHub refuses an id the installation no longer covers.
+ * Without one, the operator/stored-binding path applies. */
+export async function actionsToken(
+  ctx: ActionCtx,
+  projectId: string,
+  repo: string,
+  scope: RunnerScope | null | undefined,
+  request: typeof fetch = convexFetch,
+  now = Date.now(),
+): Promise<string> {
+  if (!scope) return installationToken(ctx, projectId, repo, actionsPermissions, request, now);
+  const { api, installation } = await appInstallation(repo, request, now);
+  invariant(
+    installation.id === scope.installationId,
+    'GITHUB_REPOSITORY_UNBOUND',
+    'The GitHub App installation on this runner repository changed. Run configure-runner again.',
+  );
+  return mintInstallationToken(api, installation.id, { repository_ids: [scope.repoId] }, actionsPermissions);
+}
 /** Stable shared API for mirror, Actions dispatch and cancellation. */
 export async function installationToken(
   ctx: ActionCtx,
@@ -328,6 +364,7 @@ export async function submoduleReadTokens(
   policy: SubmodulePolicy,
   request: typeof fetch = convexFetch,
   now = Date.now(),
+  runner: RunnerScope | null = null,
 ): Promise<SubmoduleAccess> {
   invariant(
     requested.length > 0 && requested.length <= submoduleRepositoryLimit,
@@ -345,7 +382,9 @@ export async function submoduleReadTokens(
   });
   if (!allowed.length) return result;
   const { api, installation } = await appInstallation(repo, request, now);
-  await repositoryScope(ctx, projectId, repo, api, installation.id, request);
+  // A runner grant was read with the run (same installation required); otherwise prove the binding.
+  if (runner?.installationId !== installation.id)
+    await repositoryScope(ctx, projectId, repo, api, installation.id, request);
   for (const name of allowed) {
     let other: Installation;
     try {

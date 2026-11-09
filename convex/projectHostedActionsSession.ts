@@ -20,6 +20,7 @@ import { hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
 import { latestSourcePack } from './projectSourcePackStore';
 import { hostedTimingHistory } from './projectHostedTestTimings';
 import { submoduleAllowListSchema, type SubmoduleAllow } from '../src/submodule-allowlist';
+import { runnerTokenScope } from './githubBindingAccess';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
   runId: v.string(),
@@ -137,7 +138,15 @@ export const session = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input);
-    if (input.submodules) return JSON.stringify({ run, policy: await submodulePolicy(ctx, input, run) });
+    if (input.submodules)
+      return JSON.stringify({
+        run,
+        policy: await submodulePolicy(ctx, input, run),
+        runnerScope:
+          run.configuration.provider === 'github-actions'
+            ? await runnerTokenScope(ctx, input.projectId, run.configuration.repository)
+            : null,
+      });
     if (!input.timings) return JSON.stringify({ ...run, capabilities: [...hostedActionsCapabilities] });
     const { history } = await hostedTimingHistory(ctx, input.projectId);
     return JSON.stringify({

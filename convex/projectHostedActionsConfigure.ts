@@ -7,7 +7,8 @@ import { action } from './cliServer';
 import { checkHash, checkNumber, checkPin } from '../src/hosted-check';
 import { hostedActionsRuntime } from '../src/hosted-actions';
 import { report } from './errors';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
+import { grantRunner } from './githubRunnerGrants';
 import { submoduleAllowListSchema } from '../src/submodule-allowlist';
 import { actionsPermissions, installationToken, requireInstallationPermissions } from './githubAppToken';
 import { readRepositoryVisibility } from './githubRepositoryVisibility';
@@ -43,8 +44,16 @@ export const configure = action({
       const { repository, runsOn, concurrencyBudget, publicLogs, submodules, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch. The
-      // metadata token proves the binding before any name-scoped token exists.
-      const token = await installationToken(ctx, input.projectId, repository, { metadata: 'read' });
+      // metadata token proves the binding before any name-scoped token exists. Without an
+      // operator or stored binding, the owner's runner grant is proven (or refreshed) instead,
+      // and its proof's metadata token (minted only to read the id and role) is used.
+      let token: string;
+      try {
+        token = await installationToken(ctx, input.projectId, repository, { metadata: 'read' });
+      } catch (error) {
+        if (!(error instanceof ForgeError && error.code === 'GITHUB_REPOSITORY_UNBOUND')) throw error;
+        token = await grantRunner(ctx, input.projectId, repository);
+      }
       await requireInstallationPermissions(repository, actionsPermissions);
       // A private project's logs must not land in a public runner repository unless
       // its owner (the only caller the record and configure mutations accept) opts in.

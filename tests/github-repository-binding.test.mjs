@@ -12,6 +12,9 @@ const oauth = await import(moduleUrl('../convex/githubBindingOAuth.ts'));
 const tokens = await import(moduleUrl('../convex/githubAppToken.ts'));
 const definitions = await import(moduleUrl('../convex/projectHostedCheckDefinitions.ts'));
 const policies = await import(moduleUrl('../convex/projectAutonomy.ts'));
+const grants = await import(moduleUrl('../convex/githubRunnerGrants.ts'));
+const access = await import(moduleUrl('../convex/githubBindingAccess.ts'));
+const visibility = await import(moduleUrl('../convex/githubRepositoryVisibility.ts'));
 const code = wanted => error => (error.data?.code ?? error.code) === wanted;
 const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
 function variables(t, values) {
@@ -51,7 +54,13 @@ function fixture(t) {
   const call = (name, input, actor = 'owner') => s.call(name, store[name], { projectId, ...input }, actor);
   const invoke = async (ref, input) => {
     const [module, name] = getFunctionName(ref).split(':');
-    const functions = { githubBindingStore: store, githubBindingWebhook: webhook }[module];
+    const functions = {
+      githubBindingStore: store,
+      githubBindingWebhook: webhook,
+      githubRunnerGrants: grants,
+      githubRepositoryVisibility: visibility,
+      projectHostedCheckDefinitions: definitions,
+    }[module];
     assert(functions?.[name], `Unexpected function ${module}:${name}`);
     return s.call(name, functions[name], input);
   };
@@ -103,7 +112,10 @@ const identity = (id = 'owner', accounts = [linkedAccount]) =>
       verification: { status: 'verified' },
     })),
   });
-function github(t, { repoId = 42, name = 'synthetic/repo' } = {}) {
+function github(
+  t,
+  { repoId = 42, name = 'synthetic/repo', role = null, roleUser = Number(linkedAccount) } = {},
+) {
   const calls = [],
     scopes = new Map();
   let serial = 0;
@@ -118,13 +130,33 @@ function github(t, { repoId = 42, name = 'synthetic/repo' } = {}) {
       scopes.set(token, scope);
       return Response.json({ token });
     }
+    // Runner-grant proof: the linked account's login by numeric id, then its role.
+    if (url === `https://api.github.com/user/${linkedAccount}`) {
+      assert.deepEqual(
+        scopes.get((init.headers.Authorization ?? init.headers.authorization).slice(7)).permissions,
+        { metadata: 'read' },
+      );
+      return Response.json({ id: Number(linkedAccount), login: 'synthetic-owner' });
+    }
+    if (url.includes('/collaborators/')) {
+      assert.deepEqual(
+        scopes.get((init.headers.Authorization ?? init.headers.authorization).slice(7)).permissions,
+        { metadata: 'read' },
+      );
+      assert(url.endsWith(`/repos/${name}/collaborators/synthetic-owner/permission`));
+      return Response.json({
+        permission: role === 'admin' ? 'admin' : 'write',
+        role_name: role,
+        user: { id: roleUser },
+      });
+    }
     if (url.startsWith('https://api.github.com/repos/')) {
-      const token = init.headers.Authorization.slice(7),
+      const token = (init.headers.Authorization ?? init.headers.authorization).slice(7),
         scope = scopes.get(token);
       // Public repo metadata is visible even outside a token's repository scope;
       // the implementation must still check the returned numeric id.
       assert.deepEqual(scope.permissions, { metadata: 'read' });
-      return Response.json({ id: repoId, full_name: name });
+      return Response.json({ id: repoId, full_name: name, private: true, visibility: 'private' });
     }
     throw new Error('Unexpected synthetic GitHub request');
   };
@@ -697,9 +729,15 @@ test('mirror, dispatch, cancellation and configure all refuse without a binding 
         repository: 'synthetic/repo',
       }),
     }),
-    code('GITHUB_REPOSITORY_UNBOUND'),
+    // No operator or stored binding: configure tries the runner-grant proof, which needs admin.
+    code('GITHUB_REPOSITORY_PERMISSION'),
   );
-  assert.equal(provider.calls.filter(c => c.method !== 'GET').length, 0);
+  // The only write-method call is the proof's metadata-read token; nothing is dispatched or pushed.
+  assert.deepEqual(
+    provider.calls.filter(c => c.method !== 'GET').map(c => c.body.permissions),
+    [{ metadata: 'read' }],
+  );
+  assert.equal(f.s.tables.githubRunnerGrants.size, 0);
 });
 test('signed HTTP removal webhook pages ids and rejects forged signatures before touching bindings', async t => {
   const f = fixture(t);
@@ -802,4 +840,170 @@ test('ordinary check selection does not read repository binding pages', async t 
   );
   assert.equal(current.githubBindings, null);
   assert(!f.s.counts.at(-1).touched.includes('projectGithubBindings'));
+});
+
+// Issue 77fa4412: configure-runner proves the owner's admin/maintain through the App and
+// records one runner grant for the owner's projects, with no browser step or operator setting.
+async function configureRunner(f, projectId = f.projectId, ctx = f.ctx) {
+  const configure = await import(moduleUrl('../convex/projectHostedActionsConfigure.ts'));
+  return configure.configure._handler(ctx, {
+    projectId,
+    request: JSON.stringify({
+      operationId: randomUUID(),
+      authorityEpoch: 1,
+      expected: null,
+      repository: 'synthetic/repo',
+    }),
+  });
+}
+const scopeOf = (f, projectId) =>
+  f.s.call(
+    'scope',
+    { isQuery: true, _handler: ctx => access.runnerTokenScope(ctx, projectId, 'synthetic/repo') },
+    {},
+  );
+function copyProject(f, extra = {}) {
+  const { _id, _creationTime, ...row } = f.s.tables.hostedProjects.get(f.projectId);
+  return f.s.insert('hostedProjects', { ...row, key: randomUUID(), ...extra });
+}
+test('configure-runner records an owner runner grant that covers the owner’s next project only', async t => {
+  const f = fixture(t),
+    provider = github(t, { role: 'maintain' });
+  await configureRunner(f);
+  const [grant] = [...f.s.tables.githubRunnerGrants.values()];
+  assert.equal(grant.owner, 'owner');
+  assert.equal(grant.repoId, 42);
+  assert.equal(grant.installationId, 9);
+  assert.equal(grant.githubAccount, linkedAccount);
+  // Only metadata-read tokens were minted; the runner setting is stored.
+  assert(provider.calls.filter(c => c.method === 'POST').every(c => c.body.permissions.metadata === 'read'));
+  assert.equal(f.s.tables.projectGithubBindings.size, 0);
+  // The owner's second project uses the grant in the direct settings mutation.
+  const second = copyProject(f);
+  const configuration = {
+    provider: 'github-actions',
+    repository: 'Synthetic/Repo',
+    runsOn: 'ubuntu-latest',
+    runtime: 'b'.repeat(64),
+    environmentFingerprint: 'a'.repeat(64),
+  };
+  const request = JSON.stringify({
+    operationId: randomUUID(),
+    authorityEpoch: 1,
+    expected: null,
+    change: { kind: 'runner', configuration },
+  });
+  await f.s.call('configure', definitions.configure, { projectId: second, request });
+  assert.deepEqual(await scopeOf(f, second), {
+    repoId: 42,
+    installationId: 9,
+  });
+  const settings = JSON.parse(
+    await f.s.call('current', definitions.current, {
+      projectId: second,
+      checkId: '',
+      includeGithubBindings: true,
+    }),
+  );
+  assert.equal(settings.runnerGrant.repoId, 42);
+  // Another owner's project, and the mirror policy, gain nothing from the grant.
+  const stranger = copyProject(f, { owner: 'stranger' });
+  await assert.rejects(
+    f.s.call('configure', definitions.configure, { projectId: stranger, request }, 'stranger'),
+    code('GITHUB_REPOSITORY_UNBOUND'),
+  );
+  assert.equal(await scopeOf(f, stranger), null);
+  await assert.rejects(
+    f.s.call('policy', policies.set, {
+      projectId: second,
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        githubMirror: { repo: 'synthetic/repo', autoPush: true, laneRefs: false },
+      }),
+    }),
+    code('GITHUB_REPOSITORY_UNBOUND'),
+  );
+  await assert.rejects(
+    tokens.installationToken(f.ctx, second, 'synthetic/repo', tokens.mirrorPermissions),
+    code('GITHUB_REPOSITORY_UNBOUND'),
+  );
+});
+test('runner grant proof refuses write role, another user’s answer and a renamed repository', async t => {
+  for (const [options, wanted] of [
+    [{ role: 'write' }, 'GITHUB_REPOSITORY_PERMISSION'],
+    [{ role: 'admin', roleUser: 7 }, 'GITHUB_REPOSITORY_PERMISSION'],
+    [{ role: 'admin', name: 'synthetic/other' }, 'GITHUB_REPOSITORY_UNBOUND'],
+  ]) {
+    const f = fixture(t);
+    github(t, options);
+    await assert.rejects(configureRunner(f), code(wanted));
+    assert.equal(f.s.tables.githubRunnerGrants.size, 0);
+  }
+});
+test('grant-scoped Actions tokens: no Convex call per mint; uninstall, removal and disconnect revoke', async t => {
+  const f = fixture(t),
+    provider = github(t, { role: 'admin' });
+  await configureRunner(f);
+  const scope = await scopeOf(f, f.projectId);
+  let convexCalls = 0;
+  const counted = {
+    ...f.ctx,
+    runQuery: async (...args) => (convexCalls++, f.ctx.runQuery(...args)),
+    runMutation: async (...args) => (convexCalls++, f.ctx.runMutation(...args)),
+  };
+  await tokens.actionsToken(counted, f.projectId, 'synthetic/repo', scope);
+  assert.equal(convexCalls, 0);
+  assert.deepEqual(provider.calls.at(-1).body, {
+    repository_ids: [42],
+    permissions: { actions: 'write', contents: 'read' },
+  });
+  // A different live installation is refused before any mint.
+  const posts = provider.calls.filter(c => c.method === 'POST').length;
+  await assert.rejects(
+    tokens.actionsToken(counted, f.projectId, 'synthetic/repo', { ...scope, installationId: 10 }),
+    code('GITHUB_REPOSITORY_UNBOUND'),
+  );
+  assert.equal(provider.calls.filter(c => c.method === 'POST').length, posts);
+  // Without a scope (no grant read), the stored/operator path still refuses.
+  await assert.rejects(
+    tokens.actionsToken(counted, f.projectId, 'synthetic/repo', null),
+    code('GITHUB_REPOSITORY_UNBOUND'),
+  );
+  // Repository removal from the installation deletes the grant.
+  await f.s.call('invalidate', webhook.invalidate, {
+    delivery: 'synthetic-delivery:runner',
+    installationId: 9,
+    removed: false,
+    repoIds: [42],
+  });
+  assert.equal(f.s.tables.githubRunnerGrants.size, 0);
+  // Uninstall tombstones the installation: a fresh grant (from the owner's next project) stops resolving.
+  await configureRunner(f, copyProject(f));
+  assert.deepEqual(await scopeOf(f, f.projectId), scope);
+  await f.s.call('invalidate', webhook.invalidate, {
+    delivery: 'synthetic-delivery:uninstall',
+    installationId: 9,
+    removed: true,
+    repoIds: [],
+  });
+  assert.equal(await scopeOf(f, f.projectId), null);
+  // Disconnect withdraws the owner's grant even while another project holds the stored binding.
+  const f2 = fixture(t);
+  github(t, { role: 'admin' });
+  await configureRunner(f2);
+  const other = f2.s.insert('projectGithubBindings', {
+    projectId: copyProject(f2),
+    repoId: 42,
+    fullName: 'synthetic/repo',
+    installationId: 9,
+    boundBy: 'owner',
+    boundAt: 1,
+  });
+  await f2.call('remove', { operationId: randomUUID(), repoId: 42 });
+  assert.equal(f2.s.tables.githubRunnerGrants.size, 0);
+  assert(f2.s.tables.projectGithubBindings.has(other));
+  // The operator override keeps its own path (no scope read).
+  process.env.FORGE_GITHUB_REPO_BINDINGS = `${f2.projectId}=synthetic/repo`;
+  assert.equal(await scopeOf(f2, f2.projectId), null);
 });

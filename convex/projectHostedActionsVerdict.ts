@@ -6,7 +6,8 @@ import { writableHostedCheck, writeHostedCheck, type LoadedHostedCheck } from '.
 import { settleDirectActions } from './projectHostedActionsDirect';
 import { receiveHostedCheckCallback } from './projectHostedCheckCallbacks';
 import { outputSigningKey } from './projectHostedOutputApi';
-import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
+import { actionsToken, githubAppRequest } from './githubAppToken';
+import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { directCallback, actionsExecutionCost } from '../src/hosted-actions-direct';
 import { signHostedCheckCallback } from '../src/hosted-check-evidence';
 import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
@@ -92,7 +93,11 @@ export const pendingConfirm = internalMutation({
       run.configuration.provider !== 'github-actions'
     )
       return null;
-    return { repository: run.configuration.repository, executionId: run.executionId };
+    return {
+      repository: run.configuration.repository,
+      executionId: run.executionId,
+      runnerScope: await runnerTokenScope(ctx, input.projectId, run.configuration.repository),
+    };
   },
 });
 export const confirmed = internalMutation({
@@ -134,12 +139,12 @@ export const confirm = internalAction({
     const pending = (await ctx.runMutation(
       makeFunctionReference<'mutation'>('projectHostedActionsVerdict:pendingConfirm'),
       { projectId: input.projectId, runId: input.runId, fence: input.fence },
-    )) as { repository: string; executionId: string } | null;
+    )) as { repository: string; executionId: string; runnerScope?: RunnerScope | null } | null;
     if (!pending) return null;
     let completed = false,
       conclusion: string | null = null;
     try {
-      const token = await installationToken(ctx, input.projectId, pending.repository, actionsPermissions);
+      const token = await actionsToken(ctx, input.projectId, pending.repository, pending.runnerScope);
       const response = await githubAppRequest(
         `repos/${pending.repository}/actions/runs/${pending.executionId}`,
         token,

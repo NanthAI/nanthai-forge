@@ -148,6 +148,7 @@ const definitionPage = z.object({
 });
 const currentSettings = z.object({
   githubBindings: z.unknown().optional(),
+  runnerGrant: z.unknown().optional(),
   configuration: z
     .looseObject({
       provider: z.string(),
@@ -240,6 +241,7 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
       : null,
     actions: actionsRunnerSettings(current.configuration),
     githubBindings: current.githubBindings ?? null,
+    ...(current.runnerGrant ? { runnerGrant: current.runnerGrant } : {}),
     ...(current.mainAudit === undefined ? {} : { mainAudit: current.mainAudit }),
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
     policy: { preset: policy.preset, acceptance: policy.acceptance },
