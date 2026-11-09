@@ -57,7 +57,8 @@ on a two-way project, the result carries `protection` for `main`
 ([two-way protection](#two-way-protection-the-ruleset-you-import-once)).
 
 Connect prints the authorize URL and retained operation UUID. Open the URL and
-complete GitHub authorization. The CLI waits on that operation through a reactive
+complete GitHub authorization; an account that already authorized the App sees
+no screen, because GitHub redirects straight back. The CLI waits on that operation through a reactive
 subscription, with no polling or scheduled work. Ctrl-C closes the subscription;
 it does not cancel a completed binding. Retrying identical parameters reconciles
 the same operation. After an authorization failure, use a fresh
