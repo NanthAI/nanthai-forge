@@ -226,7 +226,9 @@ All of these must hold:
 Opt in per project with `githubMirror.inbound: true` (needs `autoPush: true`),
 for example `set-policy {"githubMirror":{"repo":"owner/name","autoPush":true,"laneRefs":false,"inbound":true}}`.
 Forge still owns `main`: a change merged or pushed on GitHub comes back in as an
-ordinary Forge landing and passes the same checks and review rules.
+ordinary Forge landing and passes the same checks and review rules. Setting the
+policy creates the project's mirror queue row (one indexed read, one insert), so the
+first pull request or push is seen at once; no landing has to come first.
 
 - **Trigger:** the App's `push` webhook for `refs/heads/main`
   (`projectGithubInboundQueue:receive`). A push whose head is the mirror's own last

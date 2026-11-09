@@ -656,6 +656,65 @@ test('two-way PR: a head queues one check job; redelivery writes nothing; a newe
   assert.equal(oneWay.counts.at(-1).writes, 0);
   assert.equal(oneWay.scheduled.length, before);
 });
+const policies = await import(moduleUrl('../convex/projectAutonomy.ts'));
+test('friction 77518c88: a freshly connected two-way project checks its first PR, fork or same-repo, with no landing first', async t => {
+  for (const fork of [true, false]) {
+    const f = fixture();
+    f.jobs = () => [...f.tables.projectGithubMirrorJobs.values()];
+    const project = f.tables.hostedProjects.get(f.projectId);
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...project.autonomyPolicy, githubMirror: undefined },
+    });
+    bindRepository(t, f.projectId, 'Synthetic/Mirror');
+    const rows = () => [...f.tables.projectGithubMirrors.values()];
+    const connect = (githubMirror, operationId = randomUUID()) =>
+      f.transaction('connect', policies.set, {
+        projectId: f.projectId,
+        command: JSON.stringify({ action: 'set-policy', operationId, githubMirror }),
+      });
+    // Before connecting, a PR for the repository writes nothing.
+    await f.run('pullReceive', pullQueue.receive._handler, {
+      repository: 'Synthetic/Mirror',
+      number: 3,
+      head: 'a'.repeat(40),
+      fork,
+    });
+    assert.equal(f.jobs().length, 0);
+    await connect({ repo: 'Synthetic/Mirror', autoPush: true, laneRefs: false, inbound: true });
+    assert.equal(rows().length, 1, 'connect creates the queue row; no accepted landing exists');
+    assert.equal(rows()[0].repositoryKey, 'synthetic/mirror');
+    assert.equal(rows()[0].mapping, null);
+    assert.equal(f.tables.projectGithubMirrorJobs.size, 0, 'connect starts no job and wakes nothing');
+    assert.equal(f.scheduled.length, 0);
+    // The first PR head is queued and its check job woken, exactly as after a landing.
+    await f.run('pullReceive', pullQueue.receive._handler, {
+      repository: 'Synthetic/Mirror',
+      number: 7,
+      head: 'b'.repeat(40),
+      fork,
+    });
+    const [job] = pullJobs(f, 7);
+    assert.equal(job.status, 'queued');
+    assert.deepEqual(JSON.parse(job.inbound).pull, { number: 7, head: 'b'.repeat(40), fork });
+    assert.equal(rows()[0].activeId, job._id);
+    assert.deepEqual(
+      f.scheduled.map(row => row.name),
+      ['projectGithubMirror:step'],
+    );
+    // A repeat connect or an unrelated policy edit adds no row and reads no queue.
+    await connect({ repo: 'Synthetic/Mirror', autoPush: true, laneRefs: false, inbound: true });
+    assert.equal(rows().length, 1);
+    await f.transaction('edit', policies.set, {
+      projectId: f.projectId,
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        acceptance: { mode: 'auto-on-pass' },
+      }),
+    });
+    assert(!f.counts.at(-1).touched.includes('projectGithubMirrors'), 'other edits never read the queue');
+  }
+});
 test('two-way PR: a terminal job failure releases the queue and settles forge/verify as error', async () => {
   const f = await twoWayFixture();
   await prHead(f, 'b'.repeat(40));

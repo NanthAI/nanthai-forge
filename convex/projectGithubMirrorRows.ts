@@ -10,6 +10,20 @@ export const mirrorRow = (ctx: MutationCtx | QueryCtx, projectId: Id<'hostedProj
     .query('projectGithubMirrors')
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
+/** The queue row both webhooks and publishes need; absent until a project connects two-way sync or
+ * lands. Idempotent: one indexed read, one insert only when missing (friction 77518c88). */
+export async function ensureMirrorRow(ctx: MutationCtx, projectId: Id<'hostedProjects'>, repo: string) {
+  const old = await mirrorRow(ctx, projectId);
+  if (old) return old;
+  const id = await ctx.db.insert('projectGithubMirrors', {
+    projectId,
+    repository: repo,
+    repositoryKey: repo.toLowerCase(),
+    activeId: null,
+    mapping: null,
+  });
+  return (await ctx.db.get(id))!;
+}
 export async function scheduleMirror(
   ctx: MutationCtx,
   job: Pick<Doc<'projectGithubMirrorJobs'>, '_id' | 'step'>,

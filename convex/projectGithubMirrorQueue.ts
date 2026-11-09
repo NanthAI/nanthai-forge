@@ -4,8 +4,8 @@ import type { Doc } from './_generated/dataModel';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { settleInbound } from './projectGithubInboundQueue';
-import { mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
-export { mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+import { ensureMirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+export { ensureMirrorRow, mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
   ctx: MutationCtx,
@@ -19,17 +19,8 @@ export async function enqueueGithubMirror(
     .withIndex('by_project_and_receipt', q => q.eq('projectId', project._id).eq('receiptId', receipt.id))
     .unique();
   if (old) return;
-  let queue = await mirrorRow(ctx, project._id);
-  if (!queue) {
-    const id = await ctx.db.insert('projectGithubMirrors', {
-      projectId: project._id,
-      repository: policy.repo,
-      repositoryKey: policy.repo.toLowerCase(),
-      activeId: null,
-      mapping: null,
-    });
-    queue = (await ctx.db.get(id))!;
-  } else if (queue.repositoryKey !== queue.repository.toLowerCase())
+  let queue = await ensureMirrorRow(ctx, project._id, policy.repo);
+  if (queue.repositoryKey !== queue.repository.toLowerCase())
     await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });
   // Two-way sync: an inbound job holding the queue settles with the acceptance that landed it.
   if (queue.activeId && (await settleInbound(ctx, queue, receipt))) queue = (await ctx.db.get(queue._id))!;

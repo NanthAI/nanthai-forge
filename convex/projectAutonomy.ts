@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
+import { ensureMirrorRow } from './projectGithubMirrorRows';
 import { v } from 'convex/values';
 import {
   query,
@@ -125,6 +126,16 @@ async function writePolicy(
       ? 0
       : ((await landingQueue(ctx, { projectId: project._id, channel: 'main' }))?.status?.total ?? 0);
   await ctx.db.patch(project._id, { autonomyPolicy: policy });
+  // Friction 77518c88: connecting GitHub sync creates the mirror queue row the pull request and
+  // push webhooks look up, so the first PR is checked without a landing first. Only on an edit that
+  // changes the connection: one indexed read, one insert at most; every other edit adds nothing.
+  const mirror = policy.githubMirror;
+  if (
+    mirror?.autoPush &&
+    project.sourceAuthority?.mode === 'server' &&
+    canonicalPayload(previous.githubMirror ?? null) !== canonicalPayload(mirror)
+  )
+    await ensureMirrorRow(ctx, project._id, mirror.repo);
   await ctx.db.insert('projectPolicyChanges', {
     projectId: project._id,
     operationId: command.operationId,
