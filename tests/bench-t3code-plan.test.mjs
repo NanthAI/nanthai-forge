@@ -1468,7 +1468,8 @@ test('plan check: the committed exit plan, the B1.5d plan frozen as run, and the
   const text = readFileSync(planPath(), 'utf8');
   for (const want of [
     'outlier',
-    'claude-sonnet-5-5',
+    'gpt-6.1-sol',
+    'cfe33f2c',
     'maxSetupRetries = 2',
     'd8cf81b4',
     'Headline rule',
@@ -1483,9 +1484,9 @@ test('plan check: the committed exit plan, the B1.5d plan frozen as run, and the
     assert.ok(!ok.some(p => /PLAN|agent/.test(p)), ok.join('; '));
     writeFileSync(
       join(B, 'config.json'),
-      JSON.stringify({ agent: { provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' } }),
+      JSON.stringify({ agent: { provider: 'claude', model: 'claude-sonnet-5-5', effort: 'cli-default' } }),
     );
-    assert.ok(checkPlan(B).some(p => /config.agent codex\/gpt-6.1-sol\/high differs/.test(p)));
+    assert.ok(checkPlan(B).some(p => /config.agent claude\/claude-sonnet-5-5\/cli-default differs/.test(p)));
   } finally {
     rmSync(B, { recursive: true, force: true });
   }

@@ -70,6 +70,8 @@ What setup cannot do for you, and says so: it cannot rebuild base **fa3b7349** (
 
 `preflight.mjs --dry` and `drive.mjs --dry` are **live qualification**, not offline recovery: they inspect external services and can prepare workspaces. Recover private configuration through the owner, authorize its resources/spend, review those scripts and preconditions, and qualify the exact harness before using them. This handover runs neither a dry cell nor a scored cell. The Phase 6 exit repeat has its own registered plan (the outlier rule, Claude Code in both arms); the historical result is unchanged.
 
+**Agent.** The P6 exit bench runs GPT `gpt-6.1-sol` (effort high) through the Codex CLI in both arms (`plan.mjs DESIGN.agent`, owner decision cfe33f2c), B1.5d's agent: each task gets a fresh `CODEX_HOME` holding only a link to the owner's Codex login, with sub-agents, web search and the other extras disabled (`agent.mjs CODEX_DISABLED`).
+
 **Claude agent.** With `config.agent.provider: claude` each task runs Claude Code in a fresh `CLAUDE_CONFIG_DIR` (no owner settings, memory, sessions, skills or MCP) with the tools `Bash`, `Read`, `Edit`, `Write`, `TodoWrite` only. A fresh home has no login, so the owner saves a long-lived token (`claude setup-token`) at `BENCH_ROOT/secrets/claude-oauth-token` (mode 600; `config.agent.tokenFile` overrides the path). The harness hands it to the CLI on a pipe, never in the agent's environment, and a real cell refuses with `BENCH_CLAUDE_TOKEN_REQUIRED` without it.
 
 ## Harness rules that scoring and batching depend on

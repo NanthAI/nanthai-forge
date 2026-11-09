@@ -16,37 +16,38 @@ The sections below are the only changes.
 
 ## Agent (replaces B1.5d "Model and agent")
 
-- **Claude through Claude Code in both arms** (owner 2026-11-07): `claude -p`, model
-  `claude-sonnet-5-5`, the CLI's default effort (no `--effort` flag), recorded as
-  `DESIGN.agent` and `config.agent` = `{provider: claude, model: claude-sonnet-5-5,
-  effort: cli-default}`. The bench tests Forge against GitHub, not a model: B1.5d ran GPT
-  (`gpt-6.1-sol`, effort high) through the Codex CLI, so the comparison with B1.5d is
-  Forge's % lead over GitHub per N (see Pass/fail), not absolute agent timings.
+- **GPT through the Codex CLI in both arms** (owner 2026-11-09, cfe33f2c; replaces the
+  2026-11-07 Claude Sonnet choice): `codex exec --json`, model `gpt-6.1-sol`, reasoning effort
+  `high`, recorded as `DESIGN.agent` and `config.agent` = `{provider: codex, model: gpt-6.1-sol,
+  effort: high}`. This is B1.5d's exact agent, so the comparison with B1.5d is like for like:
+  absolute timings (seconds) as well as Forge's % lead over GitHub per N. The pass/fail lines
+  below are unchanged; the report gives both readings.
+- **CLI version:** Codex CLI 0.166.0 (B1.5d ran 0.164.0). It is recorded per cell and checked
+  per batch like every version. All flags and disabled features the harness passes exist in
+  0.166, and its rollout keeps the records the token and phase parsers read.
 - **Same as B1.5d in both arms:** the prompt text, 45 min per task, working directory (the
-  workspace root), PATH (the Forge relay shim, then `/usr/local/bin`), the macOS file
-  sandbox, network open, web search off.
-- **Tools:** an allowlist (`--tools`), Claude's equivalents of Codex's shell, patch and plan
-  tools: `Bash`, `Read`, `Edit`, `Write` and `TodoWrite`. Everything else is off: sub-agents,
-  workflows, web fetch and search, monitors, schedules, worktrees, skills, tool search and
-  MCP servers (`--strict-mcp-config` with no servers). A built-in a later CLI adds stays off.
-  The tools the session reported at start are recorded per task (`claudeHome.init`).
-- **Isolation:** each task runs in a fresh, empty `CLAUDE_CONFIG_DIR`: no owner settings
-  (`--setting-sources ''`), global CLAUDE.md, memory (`CLAUDE_CODE_DISABLE_AUTO_MEMORY`),
-  skills, plugins, slash commands or past sessions. The sandbox denies the owner's
-  `~/.claude`, `~/.claude.json`, `~/.codex`, every other task's home and the folder that
-  holds this and earlier bench folders. The login is the owner's long-lived Claude Code
-  token (`claude setup-token`), kept at `BENCH_ROOT/secrets/claude-oauth-token` (mode 600,
-  unreadable to agents) and handed to the CLI once on an inherited pipe
-  (`CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR`); it is never in the agent's environment, and
-  every other credential variable is removed. The session transcript is kept next to the
-  task's files and the home deleted. The repository's own files (`AGENTS.md`, `.claude/`)
-  load only as far as Claude Code loads them with no setting sources and slash commands off,
-  identically in both arms.
-- **Usage gate:** before every batch the driver waits until Claude's weekly usage is below
-  85% and, while a 5h window is open, that window is at 40% or less (a window the plan does
-  not report has no use to wait for). An unreadable reading refuses.
-- **Tokens:** Claude's `modelUsage` over every turn and model of the session (input,
-  cached-read and cache-write input, output), turns and model API seconds.
+  workspace root), PATH (the Forge relay shim, then `/usr/local/bin`; non-login shell), the
+  macOS file sandbox, network open, web search off.
+- **Tools:** Codex's shell, patch and plan tools. Sub-agents, web search, browser, computer use,
+  apps, plugins, hooks, image generation, goals, memories, tool suggestions and skill search are
+  disabled (`agent.mjs CODEX_DISABLED`); `--ignore-user-config` and `--ignore-rules` apply.
+- **Isolation:** each task gets a fresh `CODEX_HOME` holding only a link to the owner's Codex
+  login (`~/.codex/auth.json`, never read by the harness; a refreshed token is moved back): no
+  owner config, global AGENTS.md, rules, skills, plugins, MCP servers or past sessions. The
+  sandbox denies the owner's `~/.codex` (except that login file), `~/.claude`, `~/.claude.json`,
+  every other task's home and the folder that holds this and earlier bench folders. The rollout
+  is kept next to the task's files and the home deleted. The repository's own `AGENTS.md` and
+  `.agents/` load as Codex loads them by default, identically in both arms. Claude Code
+  (`claude-sonnet-5-5`) stays selectable (`config.agent.provider`) but is not this run's agent.
+- **Usage gate:** before every batch the driver waits until the Codex weekly usage
+  (`codex-usage`) is below 85% and, when a 5h window is reported, that window is at 40% or
+  less. An unreadable reading refuses. A usage, rate or capacity stop voids that task.
+- **Tokens:** totals over every model request of the session from the Codex rollout's thread
+  total, cross-checked against `codex exec --json` turn totals: input, cached input, output,
+  reasoning output and the request count. Codex input includes its cached part and output
+  includes reasoning; the harness reports uncached input as input minus cached. Codex reports
+  no model API time, so agent time is wall time per task. Rework tokens per landing (lines
+  10-12) use the same per-request records (`phases.mjs`).
 
 ## Base (adds to B1.5d "Repository and tasks")
 
@@ -201,8 +202,8 @@ cost.
 ## Rework tokens per landing (new, bf130503)
 
 Every cell, both arms, is classified offline by `phases.mjs` (deterministic; no product calls).
-Each model response (turn) of a task's session (`<task>.transcript.jsonl`, else the
-`stream-json` output) gets one phase from the source commands it runs (`nforge`, `git`, `gh`)
+Each model response (turn) of a task's session (`<task>.transcript.jsonl`: the Claude transcript
+or the kept Codex rollout; else the `stream-json` output) gets one phase from the source commands it runs (`nforge`, `git`, `gh`)
 and the results of the source commands before it:
 
 - `coding`: before the first save, push, pull request or landing request;
@@ -284,7 +285,7 @@ execution capacity; they add no provider pull, Convex call or database work.
 
 ## Cost
 
-The estimate for the owner (Claude tokens and share of the weekly limit, CI minutes, Convex
+The estimate for the owner (GPT tokens and share of the Codex weekly limit, CI minutes, Convex
 dollars, wall time) is given on Issue 8c9b84fc before the first scored cell, from the
 unscored smoke cells and B1.5d. CI runs on GitHub-hosted runners of a public repository (no
 minutes billed). The driver stops when the Forge arm's Convex spend reaches its budget.
@@ -293,7 +294,8 @@ minutes billed). The driver stops when the Forge arm's Convex spend reaches its 
 
 1. `scripts/bench-t3code/setup --dry`, then `--live` with the flags its output names; the
    owner connects the bench project to the runner repository once
-   (`nforge github connect`, printed by setup) and saves the Claude token file.
+   (`nforge github connect`, printed by setup). The Codex agent uses the owner's Codex login
+   (`~/.codex/auth.json`); only a Claude agent needs the Claude token file.
 2. `node scripts/bench-t3code/pin.mjs <landed SHA>` → `BENCH_ROOT/harness/<sha12>`; run every
    command below from that checkout.
 3. `node scripts/bench-t3code/preflight.mjs` → must print `GO`.
@@ -321,6 +323,10 @@ existed when it was decided.
   `convex/projectBoard` and `convex/projectBriefing` from the proposed off-path list, and asked
   that the report list every recorded, non-voiding deploy with its files. Prompted by the dry
   run on harness 5b707970, which voided on an off-path deploy and on one action at two refs.
+- 2026-11-09, owner decision cfe33f2c (Issue 8c9b84fc): the agent of both arms becomes GPT
+  `gpt-6.1-sol`, effort high, through the Codex CLI (B1.5d's exact agent; CLI 0.166.0 against
+  B1.5d's 0.164.0), replacing the 2026-11-07 Claude Sonnet choice. No scored cell was valid when
+  it was decided. Section "Agent"; the B1.5d comparison becomes absolute as well as % lead.
 - 2026-11-09, lead acdbee8b on cf376b87 (amends 8eab6c1c): the batch start also waits while a
   queued or checking dogfood landing changes landing-path `convex/` files, checked before and
   under the hold, and the batch record logs what the start waited on. Prompted by scored batch

@@ -50,8 +50,8 @@ export const DESIGN = Object.freeze({
   // wall, not all landed, while they do) gets exactly one extra batch: same N, rep, seed and
   // order, both arms (the same machine load as the original).
   outlierFactor: 2,
-  // The agent of both arms (owner 2026-11-07): config.agent must match it exactly.
-  agent: Object.freeze({ provider: 'claude', model: 'claude-sonnet-5-5', effort: 'cli-default' }),
+  // The agent of both arms (owner 2026-11-09, cfe33f2c: B1.5d's): config.agent must match it exactly.
+  agent: Object.freeze({ provider: 'codex', model: 'gpt-6.1-sol', effort: 'high' }),
 });
 
 /** Deterministic 32-bit PRNG seeded from a string (sha256 -> mulberry32). */
