@@ -68,7 +68,6 @@ export const frictionListSchema = z
     cursor: z.string().nullable().default(null),
   })
   .strict();
-export type FrictionListInput = z.infer<typeof frictionListSchema>;
 export const frictionTriageState = z.object({
   status: z.enum(['fixed', 'planned', 'dropped', 'open']),
   reason: z.string().optional(),

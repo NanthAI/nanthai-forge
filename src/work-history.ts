@@ -159,4 +159,3 @@ export function historyWork(store: WorkStore, command: HistoryCommand, revision:
     },
   };
 }
-export type HistoryPage = ReturnType<typeof historyWork>['result'];

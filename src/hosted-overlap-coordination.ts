@@ -17,7 +17,6 @@ export const SCOPE_PATH_CHARS = 300;
 export const PEER_PHASE_READS = 3;
 /** Project setting (agentDefaults.stacking): how a Lane that collides with an admitted peer stacks. */
 export type StackingMode = 'offer' | 'auto';
-export const DEFAULT_STACKING: StackingMode = 'offer';
 
 /** A declared scope entry matches a file: exact path, or every file below an entry ending in `/`. */
 export const inScope = (scope: readonly string[], path: string) =>
@@ -101,4 +100,3 @@ export function stackOffer(input: {
         : `Lane ${peer.laneId.slice(0, 8)} touches your files and is admitted: build on its pending head now instead of repairing a conflict later. If it fails, your next land re-pins to main and checks once.`,
   };
 }
-export type StackOffer = NonNullable<ReturnType<typeof stackOffer>>;

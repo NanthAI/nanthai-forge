@@ -2,7 +2,6 @@
 import { ErrorToast } from './Toast';
 import { useState, type AnchorHTMLAttributes, type ButtonHTMLAttributes, type ReactNode } from 'react';
 import { Glyph, type GlyphName } from './Glyph';
-import { concepts, type Concept } from './concepts';
 import { hue, initials, toneLabel, type Tone } from './status';
 
 /** `rec` is the recommended answer in a decision: outlined, never orange. */
@@ -138,14 +137,6 @@ export function Avatar({
   );
 }
 
-export function PathChip({ path, variant = 'edit' }: { path: string; variant?: 'edit' | 'claim' | 'hot' }) {
-  return (
-    <code className={`fx-path fx-path-${variant}`} title={path}>
-      {path}
-    </code>
-  );
-}
-
 export function DiffStat({ add, del, files }: { add: number; del: number; files?: number }) {
   return (
     <span className="fx-diffstat">
@@ -186,25 +177,6 @@ export function Callout({
       <div className="fx-callout-body">{children}</div>
       {actions && <div className="fx-callout-actions">{actions}</div>}
     </div>
-  );
-}
-
-export function ConceptTerm({
-  concept,
-  explain,
-  plural,
-}: {
-  concept: Concept;
-  explain?: boolean;
-  plural?: boolean;
-}) {
-  const term = concepts[concept];
-  return (
-    <span className="fx-concept" title={`${term.label}: ${term.explain}`}>
-      <Glyph name={term.glyph} size={13} />
-      <span>{plural ? term.plural : term.label}</span>
-      {explain && <span className="fx-concept-explain">{term.explain}</span>}
-    </span>
   );
 }
 

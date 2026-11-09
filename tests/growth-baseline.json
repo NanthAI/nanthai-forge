@@ -11,10 +11,10 @@
   },
   "counts": {
     "tables": 181,
-    "errorCodes": 501,
+    "errorCodes": 500,
     "agentActions": 88,
     "cliCommands": 53,
-    "glossaryTerms": 34
+    "glossaryTerms": 27
   },
   "reasons": []
 }

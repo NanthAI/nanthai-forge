@@ -548,18 +548,3 @@ export function indexBatches(entries: IndexEntry[], limits = { rows: 100, bytes:
   if (batch.length) batches.push(batch);
   return batches;
 }
-
-/** Select only the next RPC batch; do not serialize or partition the entire
- * remaining queue on every durable step. */
-export function firstIndexBatch(entries: IndexEntry[], limits = { rows: 100, bytes: 500000 }) {
-  const batch: IndexEntry[] = [];
-  let bytes = 0;
-  for (const entry of entries) {
-    if (batch.length >= limits.rows) break;
-    const size = new TextEncoder().encode(json(entry)).length;
-    if (batch.length && bytes + size > limits.bytes) break;
-    batch.push(entry);
-    bytes += size;
-  }
-  return batch;
-}

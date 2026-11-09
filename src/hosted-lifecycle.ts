@@ -37,7 +37,6 @@ export const hostedLifecycleRequestSchema = z
     if (r.action === 'complete' && r.target.kind !== 'lane')
       ctx.addIssue({ code: 'custom', message: 'Hosted complete closes one Lane.' });
   });
-export type HostedLifecycleRequest = z.infer<typeof hostedLifecycleRequestSchema>;
 export const hostedLifecycleResultSchema = z
   .object({
     schema: z.literal(1),
@@ -54,4 +53,3 @@ export const hostedLifecycleResultSchema = z
     lane: saveExpectedSchema.extend({ state: z.enum(['active', 'abandoned', 'completed']) }).nullable(),
   })
   .strict();
-export type HostedLifecycleResult = z.infer<typeof hostedLifecycleResultSchema>;

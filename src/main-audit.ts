@@ -18,7 +18,6 @@ export const mainAuditStallMs = 15 * 60_000;
 export const mainAuditStartRetryMs = [5, 15, 60, 60, 60, 60].map(minutes => minutes * 60_000);
 /** A start failure becomes an owner-visible notice from this attempt on. */
 export const mainAuditStartNoticeAttempts = 2;
-export type MainAuditSettings = z.infer<typeof mainAuditSettingsSchema>;
 export function auditDebt(
   count: number,
   firstAt: string | null,

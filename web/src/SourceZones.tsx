@@ -2,9 +2,8 @@
 import { useInventory } from './useInventory';
 import { ErrorToast } from './ui/Toast';
 import { DetailPanel } from './DetailPanel';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useConvex, usePaginatedQuery } from 'convex/react';
-import type { FunctionReturnType } from 'convex/server';
 import type { Doc, Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
 import { hostedError } from './snapshot';
@@ -237,63 +236,5 @@ export default function SourceZones({
       </ul>
       {status === 'CanLoadMore' && <button onClick={() => loadMore(20)}>Load more source Zones</button>}
     </DetailPanel>
-  );
-}
-export function SharedZones() {
-  const client = useConvex(),
-    [result, setResult] = useState<FunctionReturnType<typeof api.zoneActions.shared> | null>(null),
-    [busy, setBusy] = useState(false),
-    [error, setError] = useState('');
-  const load = useCallback(
-    async (cursor: string | null = null) => {
-      setBusy(true);
-      setError('');
-      try {
-        const next = await client.action(api.zoneActions.shared, {
-          paginationOpts: { cursor, numItems: 20 },
-        });
-        setResult(previous => ({
-          ...next,
-          page:
-            cursor && previous
-              ? [...new Map([...previous.page, ...next.page].map(row => [row.id, row])).values()]
-              : next.page,
-        }));
-      } catch (e) {
-        setError(hostedError(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [client],
-  );
-  useEffect(() => {
-    void load();
-  }, [load]);
-  return (
-    <section className="private-imports" aria-label="Source Zones shared with you">
-      <h2>Source Zones shared with you</h2>
-      <button disabled={busy} onClick={() => void load()}>
-        Refresh shared Zones
-      </button>
-      <ul className="import-list">
-        {result?.page.map(zone => (
-          <li key={zone.id}>
-            <strong>{zone.name}</strong>
-            <small>
-              {zone.repository} · {zone.head.slice(0, 12)}
-            </small>
-            <a href={address(zone.id, zone.importId)}>Explore shared Zone</a>
-          </li>
-        ))}
-      </ul>
-      {result?.page.length === 0 && <p>No source Zones available.</p>}
-      {result && !result.isDone && (
-        <button disabled={busy} onClick={() => void load(result.continueCursor)}>
-          Load more shared Zones
-        </button>
-      )}
-      {error && <ErrorToast>{error}</ErrorToast>}
-    </section>
   );
 }

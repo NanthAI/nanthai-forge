@@ -5,9 +5,6 @@ import { invariant } from './errors.js';
 import { intentSchema, workSchema, type WorkData } from './work-types.js';
 import { planningItemSchema } from './work-planning-types.js';
 
-import { latestWorkFormat } from './work-format.js';
-
-export const unifiedWorkFormat = latestWorkFormat;
 const id = z.string().uuid();
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const intentMembershipSchema = z

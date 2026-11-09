@@ -129,7 +129,6 @@ export const saveResultSchema = z
     at: z.iso.datetime(),
   })
   .strict();
-export type SaveResult = z.infer<typeof saveResultSchema>;
 export function saveBytes(value: unknown) {
   return new TextEncoder().encode(canonicalPayload(value));
 }

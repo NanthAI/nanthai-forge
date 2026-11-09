@@ -14,17 +14,6 @@ import { diskMode } from './source-links.js';
 
 const metadata = (path: string) => path === '.forge' || path.startsWith('.forge/');
 
-export function refuseMetadataChange(changes: readonly CheckoutChange[]) {
-  const change = changes.find(item => metadata(item.path));
-  if (change)
-    throw new ForgeError(
-      'WORK_CONFLICT',
-      `Existing Forge metadata at ${JSON.stringify(change.path)} is preserved.`,
-      undefined,
-      { obstruction: { kind: 'unknown-metadata', path: change.path } },
-    );
-}
-
 export function refuseDeltaConflict(
   root: string,
   changes: readonly CheckoutChange[],

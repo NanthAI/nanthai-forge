@@ -2,8 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
-const { intentRows, filterIntents, intentFilters, intentReady, linkedPlanning, readIntentFilter } =
-  await import(moduleUrl('../web/src/intents/model.ts'));
+const { intentRows, filterIntents, intentFilters, intentReady, readIntentFilter } = await import(
+  moduleUrl('../web/src/intents/model.ts')
+);
 
 const lane = (id, intentId, tone, extra = {}) => ({
   id,
@@ -88,18 +89,6 @@ test('older Intent filter links still open a bucket', () => {
   assert.equal(readIntentFilter('bogus'), 'in-motion');
   for (const filter of ['proposed', 'planned', 'in-motion', 'done', 'all'])
     assert.equal(readIntentFilter(filter), filter);
-});
-
-test('linked planning uses the latest version of each item', () => {
-  const items = [
-    { id: 'p', version: 1, intentIds: ['a'], title: 'old' },
-    { id: 'p', version: 2, intentIds: [], title: 'unlinked now' },
-    { id: 'q', version: 1, intentIds: ['a'], title: 'linked' },
-  ];
-  assert.deepEqual(
-    linkedPlanning(items, 'a').map(item => item.title),
-    ['linked'],
-  );
 });
 
 test('Intent status words use the shared vocabulary, including waiting without open Lanes', () => {

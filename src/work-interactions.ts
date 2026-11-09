@@ -127,4 +127,3 @@ export function compareViews(store: WorkStore, command: InteractionCommand, revi
     },
   };
 }
-export type ViewInteraction = ReturnType<typeof compareViews>['result'];

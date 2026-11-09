@@ -185,7 +185,6 @@ export async function prepareObjectTargets(
   if (!objects.length) return [];
   // Every project writes R2, including legacy projects created before R2 was the only path.
   const r2 = r2Config();
-  if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
   const packed = pack ? await preparePack(ctx, projectId, objects, pack, r2) : null;
   const result: PreparedObject[] = [],
     reserved: number[] = [...(packed?.reserved ?? [])];

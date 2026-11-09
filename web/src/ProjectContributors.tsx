@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ErrorToast } from './ui/Toast';
 import { useEffect, useRef, useState } from 'react';
-import { useConvex, usePaginatedQuery, useQuery } from 'convex/react';
+import { useConvex, useQuery } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
 import { api } from '../../convex/_generated/api';
@@ -9,21 +9,6 @@ import { Avatar } from './ui/primitives';
 import { hostedError } from './snapshot';
 
 type ProjectId = Id<'hostedProjects'>;
-export const sharedProjects = makeFunctionReference<
-  'query',
-  { paginationOpts: { numItems: number; cursor: string | null } },
-  {
-    page: {
-      id: ProjectId;
-      key: string;
-      name: string;
-      currentBackup?: Id<'projectBackups'>;
-      revision: number;
-    }[];
-    isDone: boolean;
-    continueCursor: string;
-  }
->('projectContributors:shared');
 const contributors = makeFunctionReference<
   'query',
   { projectId: ProjectId },
@@ -38,41 +23,6 @@ const people = makeFunctionReference<
 const remove = makeFunctionReference<'mutation', { projectId: ProjectId; contributor: string }, null>(
   'projectContributors:remove',
 );
-
-export function SharedProjects({
-  open,
-  disabled = false,
-}: {
-  open: (projectId: ProjectId, name: string) => void;
-  disabled?: boolean;
-}) {
-  const { results, status, loadMore } = usePaginatedQuery(sharedProjects, {}, { initialNumItems: 20 });
-  return (
-    <section className="shared-projects" aria-label="Projects shared with you">
-      <h2>Shared with you</h2>
-      {status === 'LoadingFirstPage' ? (
-        <p role="status">Loading shared projects…</p>
-      ) : !results.length ? (
-        <p className="hosted-note">Projects shared with your Forge account appear here.</p>
-      ) : (
-        <ul className="import-list">
-          {results.map(project => (
-            <li key={project.id}>
-              <div>
-                <strong>{project.name}</strong>
-                <small>Contributor · local execution</small>
-              </div>
-              <button disabled={disabled} onClick={() => open(project.id, project.name)}>
-                Open project
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {status === 'CanLoadMore' && <button onClick={() => loadMore(20)}>Load more shared projects</button>}
-    </section>
-  );
-}
 
 export default function ProjectContributors({
   projectId,

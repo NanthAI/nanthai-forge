@@ -118,9 +118,6 @@ export function parseSecretAllowEntries(bytes: Buffer | undefined) {
   }
   return entries;
 }
-export function parseSecretAllow(bytes: Buffer | undefined) {
-  return new Set(parseSecretAllowEntries(bytes).map(entry => `${entry.path}\0${entry.fingerprint}`));
-}
 /** Author text bound for a receipt and an alert: one line, bounded, and withheld when it
  * holds something the scan would call a credential. */
 function safeText(text: string, max: number) {

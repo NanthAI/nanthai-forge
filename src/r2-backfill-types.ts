@@ -12,7 +12,6 @@ export type BackfillPage = {
   page: BackfillPin[];
   cursor: string;
   isDone: boolean;
-  r2Writes: boolean;
   r2Revision: number;
   retained?: { count: number; bytes: number };
 };

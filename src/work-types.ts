@@ -33,21 +33,12 @@ export {
   metadataCommandSchema,
   type MetadataCommand,
 } from './work-intent-types.js';
-import {
-  nativeContributionReceiptSchema,
-  type NativeContributionCommand,
-} from './native-contribution-types.js';
-import type { NativeGitContributionCommand } from './native-git-contribution.js';
-import type { NativeObjectCommand } from './native-objects.js';
-import { historicalWorkSchema, type HistoricalCommand } from './native-history-types.js';
+import { nativeContributionReceiptSchema } from './native-contribution-types.js';
+import { historicalWorkSchema } from './native-history-types.js';
 import { companionReceiptSchema } from './native-companion-types.js';
 export type { DeclaredInput, InputObservation, InputAssessmentCommand } from './work-input-types.js';
-import {
-  declaredInputSchema,
-  inputObservationSchema,
-  type InputAssessmentCommand,
-} from './work-input-types.js';
-import { planningItemSchema, planningCommentSchema, type PlanningCommand } from './work-planning-types.js';
+import { declaredInputSchema, inputObservationSchema } from './work-input-types.js';
+import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
 export {
   planningItemSchema,
   planningCommentSchema,
@@ -933,7 +924,6 @@ export const releaseCommandSchema = z.discriminatedUnion('action', [
   }),
   z.object({ action: z.literal('export-release'), id }),
 ]);
-export type SourceRelease = z.infer<typeof sourceReleaseSchema>;
 export type ReleaseCommand = z.infer<typeof releaseCommandSchema>;
 export const deploymentFileSchema = z.object({
   runId: id,
@@ -1184,9 +1174,7 @@ export type WorkData = z.infer<typeof workSchema>;
 export type Lane = z.infer<typeof laneSchema>;
 export type WorkView = z.infer<typeof viewSchema>;
 export type Publication = z.infer<typeof publicationSchema>;
-export type PublishCommand = z.infer<typeof publishSchema>;
 export type GithubObservation = z.infer<typeof githubObservationSchema>;
-export type ExternalIntent = z.infer<typeof externalSchema>;
 export type Check = z.infer<typeof checkSchema>;
 export type CheckRun = z.infer<typeof checkRunSchema>;
 export type CheckEnvironment = z.infer<typeof checkEnvironmentSchema>;
@@ -1357,27 +1345,3 @@ export const detailCommandSchema = z.discriminatedUnion('kind', [
     expectedBase: oid,
   }),
 ]);
-export type WorkCommand =
-  | InputAssessmentCommand
-  | NativeGitContributionCommand
-  | NativeContributionCommand
-  | NativeObjectCommand
-  | HistoricalCommand
-  | z.infer<typeof detailCommandSchema>
-  | z.infer<typeof exportWorkCommandSchema>
-  | MirrorCommand
-  | EnvironmentCommand
-  | DeploymentCommand
-  | ContributionCommand
-  | LocalWorkCommand
-  | PublishCommand
-  | z.infer<typeof githubWorkSchema>
-  | EvidenceCommand
-  | PlaybookCommand
-  | HistoryCommand
-  | InteractionCommand
-  | DiscussionCommand
-  | ChannelCommand
-  | InvariantCommand
-  | PlanningCommand
-  | ReleaseCommand;

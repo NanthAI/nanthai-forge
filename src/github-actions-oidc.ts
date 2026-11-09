@@ -20,7 +20,6 @@ export const actionsClaimsSchema = z.object({
   /** Signed by GitHub at run time; a private project needs `private` (src/runner-visibility.ts). */
   repository_visibility: z.string().optional(),
 });
-export type ActionsClaims = z.infer<typeof actionsClaimsSchema>;
 export function validateActionsClaims(
   value: unknown,
   expected: {

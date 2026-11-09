@@ -22,4 +22,3 @@ export const cutoverRequestSchema = z
     pins: cutoverPinsSchema,
   })
   .strict();
-export type CutoverRequest = z.infer<typeof cutoverRequestSchema>;

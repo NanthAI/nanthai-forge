@@ -145,23 +145,6 @@ export function acceptedSince(
     });
 }
 
-/** Group by identity, retaining every acceptance and the latest acceptance's time. */
-export function acceptanceGroups(rows: readonly AcceptedRow[]) {
-  const groups = new Map<string, AcceptedRow[]>();
-  for (const row of [...rows].sort((a, b) => b.at.localeCompare(a.at))) {
-    const key = row.intentId ? `intent:${row.intentId}` : `move:${row.id}`;
-    const group = groups.get(key);
-    if (group) group.push(row);
-    else groups.set(key, [row]);
-  }
-  return [...groups.entries()].map(([id, acceptances]) => ({
-    id,
-    latest: acceptances[0]!,
-    title: acceptances[0]!.intentTitle ?? acceptances[0]!.title,
-    acceptances,
-  }));
-}
-
 /** "1 m 50 s", "42 s", "6 m". */
 export function duration(ms: number): string {
   const seconds = Math.max(0, Math.round(ms / 1000));
@@ -242,26 +225,6 @@ export function awayFacts(
       text: `${stopped} ${stopped === 1 ? 'Lane' : 'Lanes'} stopped for your review`,
     });
   return facts.slice(0, 3);
-}
-
-/** Automatic updates from main recorded on local Lane saves. */
-export function automaticUpdates(
-  lanes: readonly {
-    id: string;
-    checkpoints?: readonly {
-      at: string;
-      automatic?: { undo: string };
-      sync?: { changedPaths: readonly string[] };
-    }[];
-  }[],
-) {
-  return lanes.flatMap(lane =>
-    (lane.checkpoints ?? []).flatMap(save =>
-      save.automatic && save.sync
-        ? [{ laneId: lane.id, at: save.at, files: save.sync.changedPaths.length, undo: save.automatic.undo }]
-        : [],
-    ),
-  );
 }
 
 /** "Answered today · n", from the viewer's acknowledgements in the recent feed. */

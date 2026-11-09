@@ -366,6 +366,7 @@ const projectFields = {
   /** Retired opt-in; kept for existing rows. Placement no longer reads it: bytes always go to R2. */
   r2Writes: v.optional(v.boolean()),
   r2BackfillRevision: v.optional(v.number()),
+  /** Retired flag; kept for existing rows. Nothing writes or reads it. */
   r2StorageUsed: v.optional(v.boolean()),
   r2PrefixPurged: v.optional(v.boolean()),
   owner: v.string(),

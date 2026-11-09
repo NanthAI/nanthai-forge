@@ -455,7 +455,6 @@ export const openDoneWhenLines = (body: string): string[] => {
   }
   return bullets.length ? bullets : text ? [first || 'Done-when text'] : [];
 };
-export const unmetDoneWhen = (body: string) => openDoneWhenLines(body).length;
 
 /** What a builder needs after a landing that left Done-when lines open: which lines (at most five, 100
  * characters each) and the one command that closes the Issue with evidence. Pure text from the item

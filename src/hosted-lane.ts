@@ -60,7 +60,6 @@ export const hostedLaneSelectionSchema = z
     authority: sourceAuthoritySchema,
   })
   .strict();
-export type HostedStart = z.infer<typeof hostedStartSchema>;
 export type HostedLaneSelection = z.infer<typeof hostedLaneSelectionSchema>;
 
 export const hostedStartResultSchema = z
@@ -88,4 +87,3 @@ export const hostedStartResultSchema = z
       .optional(),
   })
   .strict();
-export type HostedStartResult = z.infer<typeof hostedStartResultSchema>;

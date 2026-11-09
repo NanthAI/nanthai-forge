@@ -127,13 +127,3 @@ export function filterIntents(rows: readonly IntentRow[], filter: IntentFilter):
         attentionRank[a.tone] - attentionRank[b.tone] || (b.lastAt ?? '').localeCompare(a.lastAt ?? ''),
     );
 }
-
-/** Latest version of each planning item linked to an Intent. */
-export function linkedPlanning<T extends { id: string; version: number; intentIds: readonly string[] }>(
-  items: readonly T[],
-  intentId: string,
-): T[] {
-  const latest = new Map<string, T>();
-  for (const item of items) if ((latest.get(item.id)?.version ?? 0) < item.version) latest.set(item.id, item);
-  return [...latest.values()].filter(item => item.intentIds.includes(intentId));
-}

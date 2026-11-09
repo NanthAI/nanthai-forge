@@ -70,15 +70,6 @@ export function InfoTip({
   );
 }
 
-/** A count badge. `hot` is reserved for the Needs-you count and turns neutral at zero. */
-export function CountPill({ count, hot = false, label }: { count: number; hot?: boolean; label?: string }) {
-  return (
-    <span className={hot && count > 0 ? 'fx-count fx-count-hot' : 'fx-count'} aria-label={label}>
-      {count}
-    </span>
-  );
-}
-
 /**
  * The one sentence under a page title: the leading clause carries the news, counts inside are
  * links to the panels they summarise.

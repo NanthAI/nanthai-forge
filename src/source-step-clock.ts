@@ -91,4 +91,3 @@ export function sourceStepClock(delegatedAt?: number) {
     },
   };
 }
-export type SourceStepClock = ReturnType<typeof sourceStepClock>;

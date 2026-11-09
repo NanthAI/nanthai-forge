@@ -7,4 +7,3 @@ export const legacyCheckCredentialsRefSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('env'), tokenId: environmentName, tokenSecret: environmentName }).strict(),
   z.object({ kind: z.literal('file'), path: z.string().min(1) }).strict(),
 ]);
-export type LegacyCheckCredentialsRef = z.infer<typeof legacyCheckCredentialsRefSchema>;

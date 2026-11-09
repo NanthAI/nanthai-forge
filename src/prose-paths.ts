@@ -17,9 +17,6 @@ const DATA_FOLDER =
 const TEST_FOLDER = /(?:^|\/)(?:tests?|specs?|__tests__|testing|e2e)\//i;
 const DOCS_FOLDER = /(?:^|\/)docs?\//i;
 
-/** A root `.txt` with a prose name. */
-export const proseTextName = (path: string) => PROSE_TEXT_NAME.test(path.slice(path.lastIndexOf('/') + 1));
-
 /** True for prose: Markdown, MDX, reStructuredText and AsciiDoc, and `.txt` only with a prose name or
  * under a docs folder. A file under a fixture or test-data folder is never documentation, and inside a
  * test folder only a README-style name is. */

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { WorkData, Lane } from './work-types.js';
+import type { WorkData } from './work-types.js';
 
 /** Completion is an explicit metadata observation, never source acceptance/deletion. */
 export function intentLifecycle(
@@ -14,16 +14,4 @@ export function intentLifecycle(
     if (intent.status !== status) (intent.lifecycle ??= []).push({ from: intent.status, to: status, at });
   }
   intent.status = status;
-}
-export function laneLifecycle(
-  data: WorkData,
-  lane: Lane,
-  state: Exclude<Lane['state'], 'creating'>,
-  at: string,
-) {
-  if (state === 'completed' || lane.lifecycle) {
-    data.schema = Math.max(data.schema, 8) as WorkData['schema'];
-    if (lane.state !== state) (lane.lifecycle ??= []).push({ from: lane.state, to: state, at });
-  }
-  lane.state = state;
 }

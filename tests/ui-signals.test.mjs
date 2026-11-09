@@ -60,10 +60,8 @@ test('undo is a button only when it can act; otherwise the slot says why', () =>
   assert.match(renderToStaticMarkup(h(signals.AutoTag)), />auto</);
 });
 
-test('recommended answers are outlined, never brand-filled; the hot count turns neutral at zero', () => {
+test('recommended answers are outlined, never brand-filled; the hot Panel count turns neutral at zero', () => {
   assert.match(renderToStaticMarkup(h(ui.Button, { variant: 'rec' }, 'Accept')), /fx-btn fx-btn-rec/);
-  assert.match(renderToStaticMarkup(h(signals.CountPill, { count: 2, hot: true })), /fx-count fx-count-hot/);
-  assert.doesNotMatch(renderToStaticMarkup(h(signals.CountPill, { count: 0, hot: true })), /hot/);
   assert.match(
     renderToStaticMarkup(h(ui.Panel, { title: 'Needs you', count: 0, hot: true }, 'x')),
     /class="fx-count">0</,

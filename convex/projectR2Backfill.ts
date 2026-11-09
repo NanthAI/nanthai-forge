@@ -20,6 +20,7 @@ export const page = query({
     page: v.array(backfillPin),
     isDone: v.boolean(),
     cursor: v.string(),
+    /** Always true; kept only for CLIs older than the retired opt-in removal, which refuse without it. */
     r2Writes: v.boolean(),
     r2Revision: v.number(),
     /** Convex copies of rows already committed to R2: what cleanup could delete. */

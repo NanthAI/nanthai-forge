@@ -692,8 +692,8 @@ with no source pin (closed → completed, otherwise active); once a Lane has pin
 an Intent, its execution lifecycle owns status. An Intent created from an Issue
 has no source pin until `agent start` with its `intentId` captures one from its
 first Lane; composition and Git `lane` commands on an unpinned Intent fail with
-`INTENT_NOT_STARTED`. `intentState` derives Proposed, Planned, In motion and Done
-for presentation only.
+`INTENT_NOT_STARTED`. The web derives an Intent's display stage from its status
+and Lanes (`intentProgress`), for presentation only.
 
 Hosted Work keeps unified fields and unpinned Intents without down-projecting them
 (`hostedPushWork`, sent by the retired exchange push, is now called only by tests). Record reference validation uses the declared Work format, so

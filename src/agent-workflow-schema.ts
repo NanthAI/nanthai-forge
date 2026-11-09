@@ -293,7 +293,6 @@ type Action<K extends AgentAction['action']> = Extract<AgentAction, { action: K 
 /** Commands after optional pins are resolved; strict requests pass through unchanged. */
 export type StartAction = Action<'start'> & { operationId: string };
 export type CheckpointAction = Action<'checkpoint'> & { operationId: string; expectedHead: string };
-export type SyncAction = Action<'sync'> & { operationId: string; expectedHead: string };
 export type RunAction = Action<'run'> & {
   viewId: string;
   operationId: string;

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostIndexProgressSchema } from './work-index-build-progress.js';
 import {
-  statSync,
   existsSync,
   readFileSync,
   openSync,
@@ -234,16 +233,6 @@ export function requireHostedBinding(store: WorkStore): HostedBinding {
     'Run nforge host ROOT to finish the pending hosting operation.',
   );
   invariant(false, 'HOST_NOT_BOUND', 'Run nforge login, then nforge host ROOT first.');
-}
-
-/** Cheap polling pin; transport observations do not change the Work revision. */
-export function presenceRevision(store: WorkStore) {
-  try {
-    const stat = statSync(join(store.directory, 'hosted-binding.json'));
-    return `${stat.mtimeMs}:${stat.size}`;
-  } catch {
-    return '';
-  }
 }
 
 /** Called only under updateHostState's binding lock. Retain the original pins

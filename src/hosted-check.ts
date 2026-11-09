@@ -300,6 +300,5 @@ export const hostedCheckRunSchema = z
   })
   .strict();
 export type HostedCheckRun = z.infer<typeof hostedCheckRunSchema>;
-export type HostedCheckPlan = z.infer<typeof hostedCheckPlanSchema>;
 export const checkPin = (value: unknown) => digest(canonicalPayload(value));
 export const hostedCheckTerminal = (run: Pick<HostedCheckRun, 'status'>) => checkTerminal(run.status);

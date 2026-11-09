@@ -17,4 +17,3 @@ export const queueAheadSelectionSchema = z.object({
     .max(QUEUE_AHEAD_LIMIT),
   more: z.boolean(),
 });
-export type QueueAheadSelection = z.infer<typeof queueAheadSelectionSchema>;

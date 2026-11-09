@@ -25,7 +25,6 @@ export const hostedSections = {
     'github',
   ],
 } as const satisfies Record<ProjectTab, readonly string[]>;
-export type HostedSection = (typeof hostedSections)[ProjectTab][number];
 
 export function hostedTab(section: string | null): ProjectTab {
   for (const tab of projectTabs)

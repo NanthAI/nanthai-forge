@@ -392,7 +392,6 @@ test('permanent project deletion discovers pre-existing R2 rows and waits for pr
     i++
   )
     await x.run('projectLifecycle:purge', { projectId: 'project' });
-  assert.equal((await x.s.ctx.db.get('project')).r2StorageUsed, true);
   assert.equal((await x.s.ctx.db.get('project')).removal, 'deleting');
   assert.ok(
     x.s.scheduled.some(task => getFunctionName(task.fn) === 'projectR2Maintenance:purgeDeletedProjectPage'),

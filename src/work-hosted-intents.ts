@@ -2,7 +2,6 @@
 import { z } from 'zod';
 import type { WorkData } from './work-types.js';
 import { convertWorkTo18 } from './work-intent-converter.js';
-import { unifiedWorkSchema, type UnifiedWorkData } from './work-unified-types.js';
 import { invariant } from './errors.js';
 
 export const hostedIntentMigrationSchema = z.object({
@@ -65,7 +64,4 @@ export function convertHostedIntents(data: WorkData): WorkData {
   for (const initiative of unified.initiatives)
     initiative.nextMembershipOrder = placements.get(initiative.id) ?? 0;
   return unified as unknown as WorkData;
-}
-export function validateUnifiedHostedWork(data: WorkData): UnifiedWorkData {
-  return unifiedWorkSchema.parse(data);
 }

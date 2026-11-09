@@ -276,6 +276,5 @@ test('R2 bootstrap retries an incomplete reservation without any Convex byte sto
   const rows = [...s.tables.projectObjects.values()];
   assert.equal(rows.length, 3);
   assert(rows.every(r => r.location === 'r2' && r.r2Committed && !r.storageId));
-  assert.equal(s.tables.hostedProjects.get(id).r2StorageUsed, true);
   assert.equal(r2.objects.size, 3);
 });

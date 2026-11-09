@@ -165,33 +165,3 @@ export function PageHead({
     </div>
   );
 }
-
-/** Secondary destinations inside one primary screen (for example Intents · Lanes · Planning). */
-export function SubNav<T extends string>({
-  items,
-  value,
-  onChange,
-  label,
-}: {
-  items: readonly { id: T; label: string; glyph?: GlyphName; count?: number }[];
-  value: T;
-  onChange: (id: T) => void;
-  label: string;
-}) {
-  return (
-    <nav className="fx-subnav" aria-label={label}>
-      {items.map(item => (
-        <button
-          key={item.id}
-          type="button"
-          aria-current={value === item.id ? 'page' : undefined}
-          onClick={() => onChange(item.id)}
-        >
-          {item.glyph && <Glyph name={item.glyph} size={13} />}
-          {item.label}
-          {item.count !== undefined && <span className="fx-count">{item.count}</span>}
-        </button>
-      ))}
-    </nav>
-  );
-}

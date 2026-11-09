@@ -107,4 +107,3 @@ export function flakeList(runs: (MetricRun & { flaky?: RunFlakes | undefined })[
     omittedPerRun,
   };
 }
-export type FlakeList = ReturnType<typeof flakeList>;

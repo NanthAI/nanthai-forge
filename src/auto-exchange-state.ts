@@ -10,7 +10,6 @@ export const usageObservationSchema = z.object({
   observedAt: z.number().finite(),
   totalUsd: z.number().finite().nonnegative(),
 });
-export type UsageObservation = z.infer<typeof usageObservationSchema>;
 export const spendStatusSchema = z.object({
   availability: z.enum(['measured', 'estimated', 'unknown']),
   deltaUsd: z.number().nullable(),
@@ -22,7 +21,6 @@ export const spendStatusSchema = z.object({
   paused: z.boolean(),
   reason: z.enum(['within-window', 'threshold-exceeded', 'unconfigured', 'unavailable', 'stale', 'reset']),
 });
-export type SpendStatus = z.infer<typeof spendStatusSchema>;
 export const autoExchangeStateSchema = z.object({
   projectId: z.string(),
   deployment: z.string(),
@@ -38,4 +36,3 @@ export const autoExchangeStateSchema = z.object({
   samples: z.array(usageObservationSchema).optional(),
   spendCheck: z.object({ command: z.string(), at: z.number() }).optional(),
 });
-export type AutoExchangeState = z.infer<typeof autoExchangeStateSchema>;

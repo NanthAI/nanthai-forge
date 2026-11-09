@@ -41,7 +41,6 @@ export const recoveryConnectionSchema = z.object({
   selection: recoverySelectionSchema,
   binding: recoveryBindingSchema,
 });
-export type RecoveryConnection = z.infer<typeof recoveryConnectionSchema>;
 export const recoveryPreparationSchema = z.object({
   authority: sourceAuthoritySchema.optional(),
   selection: recoverySelectionSchema.nullable(),

@@ -6,7 +6,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 const ui = await import(moduleUrl('../web/src/ui/primitives.tsx'));
 const status = await import(moduleUrl('../web/src/ui/status.ts'));
-const { concepts } = await import(moduleUrl('../web/src/ui/concepts.ts'));
 
 test('freshness keeps quiet sessions listed before folding and never claims presence', () => {
   const now = 10_000_000;
@@ -47,13 +46,6 @@ test('agents and people are distinguishable by shape and label', () => {
   assert.match(agent, /fx-av-agent/);
   assert.match(agent, /title="codex-2 \(agent\)"/);
   assert.match(person, /fx-av-human/);
-});
-
-test('concept terms explain Intent and Candidate in one plain line', () => {
-  assert.equal(concepts.intent.explain, 'The outcome you want.');
-  const html = renderToStaticMarkup(h(ui.ConceptTerm, { concept: 'view', explain: true }));
-  assert.match(html, /title="Candidate: An exact combination of Lanes, ready to check and accept\."/);
-  assert.match(html, /fx-concept-explain/);
 });
 
 test('exact record hides empty values and renders nothing when all are empty', () => {

@@ -32,7 +32,6 @@ export const sourceJobControlSchema = z
     retryUntil: jobNumber.optional(),
   })
   .strict();
-export type SourceJobControl = z.infer<typeof sourceJobControlSchema>;
 
 /** Produced by the internal Convex source worker, never project code. No source bytes,
  * source URLs, account credentials or arbitrary output claims cross this seam. */
@@ -63,7 +62,6 @@ export const sourceJobCallbackSchema = z
     ]),
   })
   .strict();
-export type SourceJobCallback = z.infer<typeof sourceJobCallbackSchema>;
 export const sourceDispatchKey = (projectId: string, jobId: string, operationId: string) =>
   digest(canonicalPayload({ projectId, jobId, operationId }));
 

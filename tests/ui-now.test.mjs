@@ -410,7 +410,7 @@ test('hosted Lanes without line counts show the file count of their latest chang
   assert.deepEqual(b.changes, { add: 1, del: 0, files: 1 });
 });
 
-test('acceptance groups keep Intent identity; Accepted lists each acceptance as a row', async () => {
+test('Accepted lists each acceptance as a row', async () => {
   const rows = nowModel.acceptedSince(
     {
       moves: [
@@ -435,14 +435,6 @@ test('acceptance groups keep Intent identity; Accepted lists each acceptance as 
       runs: [],
     },
     0,
-  );
-  const groups = nowModel.acceptanceGroups(rows);
-  assert.equal(groups.length, 3, 'same titles never merge distinct Intents');
-  assert.equal(groups[0].title, 'Cockpit UI rebuild');
-  assert.equal(groups[0].latest.at, '2026-10-15T12:00:00Z');
-  assert.deepEqual(
-    groups[0].acceptances.map(row => row.id),
-    ['new', 'old'],
   );
   const { Ledger } = await import(moduleUrl('../web/src/cockpit/Ledger.tsx'));
   const html = renderToStaticMarkup(

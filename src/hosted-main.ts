@@ -41,7 +41,6 @@ export const hostedMainV2Schema = z
   .strict();
 export const hostedMainSchema = z.discriminatedUnion('schema', [hostedMainV1Schema, hostedMainV2Schema]);
 export type HostedMain = z.infer<typeof hostedMainSchema>;
-export type HostedMainV1 = z.infer<typeof hostedMainV1Schema>;
 export type HostedMainV2 = z.infer<typeof hostedMainV2Schema>;
 export const mainExpectationSchema = z
   .object({

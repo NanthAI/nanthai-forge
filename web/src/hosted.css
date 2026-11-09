@@ -67,9 +67,9 @@
 .import-management[open]{width:100%}.import-management[open]>summary{margin-bottom:10px}
 @media(max-width:680px){.hosted-intent-heading h2{font-size:23px}.hosted-local-handoff{padding:18px 0;margin:18px 0}.project-picker select{font-size:15px}.import-list li{align-items:flex-start}}
 
-.project-contributors,.project-proposals,.shared-projects{margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}
+.project-contributors,.project-proposals{margin-top:24px;padding-top:16px;border-top:1px solid var(--border)}
 :is(.project-contributors,.project-proposals)>summary{padding:10px 0;font-size:15px;font-weight:600}
-:is(.project-contributors,.project-proposals)>p{max-width:70ch}.shared-projects h2{font-size:20px;margin-bottom:12px}
+:is(.project-contributors,.project-proposals)>p{max-width:70ch}
 :is(.project-contributors,.project-proposals) form{max-width:720px}.project-proposals .import-list>li>div:first-child{min-width:0;flex:1 1 360px}
 .project-proposals .item-provenance{max-width:75ch}.project-proposals code,.project-contributors code{overflow-wrap:anywhere}
 .archive-transfer{max-width:480px;margin-top:12px;font-size:13px;font-variant-numeric:tabular-nums}.archive-transfer progress{margin:8px 0 0}

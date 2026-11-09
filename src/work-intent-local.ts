@@ -47,13 +47,6 @@ export function executionBase(intent: { base?: string }): string {
 export const resolveIntentId = (aliases: readonly IntentAlias[] | undefined, id: string) =>
   aliases?.find(alias => alias.aliasId === id)?.intentId ?? id;
 
-/** Presentation only: never persist. Abandoned appears under Done; Planned has no retained Lane. */
-export function intentState(status: string, laneCount: number) {
-  if (status === 'proposed') return 'Proposed';
-  if (status === 'completed' || status === 'abandoned') return 'Done';
-  return laneCount === 0 ? 'Planned' : 'In motion';
-}
-
 /** Hosted readers accept unified formats; preserve every retained record on push. */
 export function hostedPushWork(data: WorkData): WorkData {
   // Late optional collections must use the journal parser's root field order.

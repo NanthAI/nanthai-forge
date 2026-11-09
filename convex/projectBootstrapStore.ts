@@ -162,7 +162,6 @@ export const publish = internalMutation({
       for (const entry of bootstrap.projection.entries)
         await ctx.db.insert('projectWorkRecords', { projectId: project._id, generationId, ...entry });
       await ctx.db.patch(project._id, {
-        ...(input.objects.some(o => o.r2Key) ? { r2StorageUsed: true } : {}),
         hostingRequest: requestFor(input.name),
         currentBackup: backupId,
         revision: 1,

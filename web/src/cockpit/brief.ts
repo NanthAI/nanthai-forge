@@ -5,7 +5,6 @@ import { api as functions } from '../../../convex/_generated/api';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { BriefContext, Briefing, BriefInput } from '../../../src/agent-brief-types';
 
-export type BriefSituation = BriefInput['situation'];
 export type BriefAgent = BriefInput['agent'];
 export type BriefRequest = Omit<BriefInput, 'agent'> & { agent: BriefAgent };
 export type Brief = Pick<Briefing, 'situation' | 'title' | 'copyText' | 'full' | 'setup' | 'generatedAt'> & {

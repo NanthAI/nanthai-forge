@@ -190,7 +190,7 @@ export async function sourceTransferGrant(
   input: Transfer & { action: 'read' | 'upload' },
   authority: Awaited<ReturnType<typeof authorizeSourceTransfer>>,
 ) {
-  const { row, job } = authority;
+  const { job } = authority;
   const pin = saveObjectSchema.parse(input.pin);
   if (input.action === 'read') {
     // The fixed trusted reader requests only hash-pinned input/recipe closure.
@@ -248,7 +248,6 @@ export async function sourceTransferGrant(
     object = { ...object, r2Key: key };
   }
   invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');
-  if (!project.r2StorageUsed) await ctx.db.patch(row.projectId, { r2StorageUsed: true });
   const target = await presignPut(r2Config(), object.r2Key, { digest: pin.sha256, size: pin.size });
   return { url: target.url, headers: target.headers };
 }

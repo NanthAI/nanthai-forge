@@ -64,8 +64,6 @@ export function supersededOpen({ root, address, actor, command }: Context): bool
   }
 }
 
-/** Retained in the operation's journal once an abandon, reopen or complete was applied. */
-export const LIFECYCLE_APPLIED_KEY = 'lifecycle-applied';
 type LifecycleAction = 'abandon' | 'reopen' | 'complete';
 const lifecycleFile = (root: string) => join(hostedAgentDirectory(root), 'lifecycle-last.json');
 const lifecycleKey = (command: unknown) => {

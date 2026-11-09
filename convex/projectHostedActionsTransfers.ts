@@ -132,7 +132,6 @@ export const grant = internalMutation({
       object = { ...object, r2Key: key };
     }
     invariant(object.r2Key, 'SOURCE_UNAVAILABLE', 'Output storage binding is unavailable.');
-    if (!project.r2StorageUsed) await ctx.db.patch(input.projectId, { r2StorageUsed: true });
     const target = await presignPut(r2Config(), object.r2Key, { digest: pin.sha256, size: pin.size });
     return { url: target.url, headers: target.headers };
   },

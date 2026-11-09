@@ -13,7 +13,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { planningWork } from '../dist/work-planning.js';
 import { restoreWorkFormat } from '../dist/work-restore-format.js';
 
-import { hostedPushWork, intentState } from '../dist/work-intent-local.js';
+import { hostedPushWork } from '../dist/work-intent-local.js';
 import { planningCommandSchema } from '../dist/work-planning-types.js';
 import { unifiedWorkSchema } from '../dist/work-unified-types.js';
 import { digest } from '../dist/hash.js';
@@ -84,11 +84,10 @@ async function legacyOwner(t) {
   return { ...f, initiative, folded, unlinked };
 }
 
-test('lifecycle: ready becomes active, ready requests stay history, and status derives from Lanes', async t => {
+test('lifecycle: ready becomes active and ready requests stay history', async t => {
   const f = await legacyOwner(t);
   let intent = f.store.load().intents.find(item => item.id === f.lane.intentId);
   assert.equal(intent.status, 'active');
-  assert.equal(intentState(intent.status, 1), 'In motion');
   await f.work.dispatch(
     { action: 'intent-status', intentId: f.lane.intentId, status: 'ready' },
     f.store.revision(),
@@ -101,10 +100,6 @@ test('lifecycle: ready becomes active, ready requests stay history, and status d
   );
   const issue = f.store.load().intents.find(item => item.id === f.unlinked);
   assert.equal(issue.base, undefined);
-  assert.equal(intentState(issue.status, 0), 'Planned');
-  assert.equal(intentState('completed', 2), 'Done');
-  assert.equal(intentState('abandoned', 0), 'Done');
-  assert.equal(intentState('proposed', 0), 'Proposed');
 });
 
 test('notes added in current Work receive stable conversation identities', async t => {
@@ -234,7 +229,6 @@ test('closing an unstarted Issue completes its planned Intent', async t => {
   });
   const intent = f.store.load().intents.find(item => item.id === f.unlinked);
   assert.equal(intent.status, 'completed');
-  assert.equal(intentState(intent.status, 0), 'Done');
   assert.equal(intent.memberships.length, 1, 'an unchanged placement is retained');
 });
 

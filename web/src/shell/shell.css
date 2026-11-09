@@ -250,41 +250,6 @@
   flex-wrap: wrap;
 }
 
-/* Secondary navigation */
-.fx-subnav {
-  display: flex;
-  gap: 2px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--fx-line);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-.fx-subnav > button {
-  all: unset;
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 38px;
-  padding: 0 10px;
-  font: 550 12.5px/1 var(--fx-font-ui);
-  color: var(--fx-text-2);
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.fx-subnav > button:hover {
-  color: var(--fx-text);
-}
-.fx-subnav > button[aria-current='page'] {
-  color: var(--fx-text);
-  border-bottom-color: var(--fx-text-2);
-}
-.fx-subnav > button:focus-visible {
-  outline: 2px solid var(--fx-focus);
-  outline-offset: -4px;
-}
-
 /* Hosts a legacy screen inside the new frame until it is rebuilt: its colour variables follow the
    cockpit palette so both read as one product. */
 .fx-legacy {
@@ -451,14 +416,6 @@
 /* Hosted screens inside the shell */
 .project-layout.embedded {
   display: block;
-}
-.fx-sub:has(> .fx-subnav) {
-  padding: 0;
-  min-height: 0;
-}
-.fx-sub > .fx-subnav {
-  flex: 1;
-  border-bottom: 0;
 }
 .fx-crumb {
   border-color: transparent;

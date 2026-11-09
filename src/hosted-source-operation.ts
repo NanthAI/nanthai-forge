@@ -64,7 +64,6 @@ export const hostedOperationSchema = hostedOperationRequestSchema
       ctx.addIssue({ code: 'custom', message: 'First attempt must retain original operation pins.' });
   });
 export type HostedExpectedPins = z.infer<typeof hostedExpectedPinsSchema>;
-export type HostedAttempt = z.infer<typeof hostedAttemptSchema>;
 export type HostedOperation = z.infer<typeof hostedOperationSchema>;
 export type HostedTerminalReceipt = z.infer<typeof hostedTerminalReceiptSchema>;
 

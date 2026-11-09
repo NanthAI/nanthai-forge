@@ -128,7 +128,6 @@ export type SubmoduleAccess = (
     { token: string } | { refused: 'outside-installation' | 'not-allowed' | 'public-logs' | 'unavailable' }
   >
 >;
-export type SubmoduleOptions = Options;
 type Options = {
   /** Asked only after a credential-free fetch of a GitHub URL fails. */
   access?: SubmoduleAccess | undefined;

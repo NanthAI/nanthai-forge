@@ -86,13 +86,6 @@ const peerSchema = z.object({
   }),
   board: z.unknown().optional(),
 });
-export const peerWaitSchema = z
-  .object({
-    /** The peer Lane: full id or an 8+ character prefix. */
-    peer: z.string().regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$/, 'a Lane id or 8+ character prefix'),
-    timeoutSeconds: z.number().nonnegative().finite().optional(),
-  })
-  .strict();
 type PeerOutcome =
   | { status: 'terminal'; peer: z.infer<typeof peerSchema>['peer'] }
   | {

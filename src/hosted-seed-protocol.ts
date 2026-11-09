@@ -31,7 +31,6 @@ export const seedRequestSchema = z
       .strict(),
   })
   .strict();
-export type SeedRequest = z.infer<typeof seedRequestSchema>;
 export const seedEntrySchema = seedPinSchema
   .extend({
     kind: z.enum(['object', 'state', 'metadata']),
