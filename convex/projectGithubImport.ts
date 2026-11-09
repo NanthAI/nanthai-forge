@@ -8,10 +8,14 @@ import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
 import { listGithubTree } from '../src/github-archive-source';
 import { importReadToken } from './githubAppToken';
+import { convexFetch } from './networkFetch';
+import { networkFetch } from '../src/network-fetch';
+import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { githubImportError, githubRequests } from './projectGithubImportFields';
 
 export const start = action({
   args: {
@@ -50,19 +54,34 @@ export const start = action({
         });
         return existing._id;
       }
-      const access = await authorizeGithub(parsed.repository, user.subject, githubConfig());
+      const meter = new ImportRequestMeter(undefined);
+      const access = await authorizeGithub(
+        parsed.repository,
+        user.subject,
+        githubConfig(),
+        meter.wrap(networkFetch),
+      );
+      // Reads go on the Forge App's own quota when it is installed on the
+      // repository; the importer's credential then only proves their access.
+      const token =
+        (await importReadToken(
+          access.repository.full_name,
+          (access.repository as { id?: unknown }).id,
+          meter.wrap(convexFetch),
+        )) ?? access.token;
       const source = await beginGithubSource(
         access.repository.full_name,
         ref ?? access.repository.default_branch,
-        access.token,
+        token,
+        meter.wrap(networkFetch),
       );
       // One recursive listing decides the transfer: a complete tree streams the
       // commit archive; a truncated one keeps directory-by-directory discovery.
       const listing = await listGithubTree(
         source.repository,
         source.pending[0]!.sha,
-        (await importReadToken(access.repository.full_name, (access.repository as { id?: unknown }).id)) ??
-          access.token,
+        token,
+        meter.wrap(networkFetch),
       );
       return await ctx.runMutation(internal.projectGithubImportStore.begin, {
         ...(listing
@@ -82,6 +101,7 @@ export const start = action({
         cursor: '',
         rootTree: source.pending[0]!.sha,
         visibility: access.repository.private ? 'private' : 'public',
+        githubRequests: meter.counts,
       });
     } catch (error) {
       return report(error);
@@ -101,7 +121,9 @@ export const status = action({
     totalBytes: v.number(),
     submodules: v.number(),
     report: v.string(),
-    error: v.union(v.object({ code: v.string(), message: v.string() }), v.null()),
+    error: v.union(githubImportError, v.null()),
+    /** GitHub REST requests so far, by who paid; null for imports started before counting. */
+    githubRequests: v.union(githubRequests, v.null()),
   }),
   handler: async (ctx, input) => {
     try {
@@ -123,6 +145,7 @@ export const status = action({
         submodules: job.submodules ?? 0,
         report: `${job.submodules ?? 0} submodules kept as pointers`,
         error: job.error ?? null,
+        githubRequests: job.githubRequests ?? null,
       };
     } catch (error) {
       return report(error);

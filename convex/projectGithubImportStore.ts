@@ -3,9 +3,9 @@ import { v } from 'convex/values';
 import { blobStore } from './blobStore';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { internal } from './_generated/api';
-import { githubImportDocument } from './projectGithubImportFields';
+import { githubImportDocument, githubRequests } from './projectGithubImportFields';
 import { activeOwnedProject } from './projectAuthority';
-import { readJob } from './projectGithubImportRead';
+import { readJob, readJobState } from './projectGithubImportRead';
 import { createProject } from './projectCreation';
 import { githubHostedProject } from '../src/hosted-github-bootstrap';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
@@ -42,22 +42,7 @@ export const lookup = internalQuery({
 export const get = internalQuery({
   args: { id: v.id('projectGithubImports'), actor: v.string() },
   returns: githubImportDocument,
-  handler: async (ctx, input) => {
-    const row = await readJob(ctx, input);
-    if (row.phase === 'ready' || row.phase === 'error' || !row.task) return row;
-    const task = await ctx.db.system.get(row.task);
-    if (!task || ['failed', 'canceled'].includes(task.state.kind))
-      return {
-        ...row,
-        phase: 'error' as const,
-        error: {
-          code: 'GITHUB_IMPORT_INTERRUPTED',
-          message:
-            'Import worker stopped. Retry the original operation to resume its saved commit and progress.',
-        },
-      };
-    return row;
-  },
+  handler: readJobState,
 });
 export const begin = internalMutation({
   args: {
@@ -71,6 +56,7 @@ export const begin = internalMutation({
     /** A complete recursive listing was seen: stream the commit archive. */
     archive: v.optional(v.object({ total: v.number(), totalBytes: v.number(), submodules: v.number() })),
     visibility: v.union(v.literal('public'), v.literal('private')),
+    githubRequests: v.optional(githubRequests),
   },
   returns: v.id('projectGithubImports'),
   handler: async (ctx, input) => {
@@ -114,6 +100,7 @@ export const begin = internalMutation({
       bytes: 0,
       totalBytes: input.archive?.totalBytes ?? 0,
       ...(input.archive ? { submodules: input.archive.submodules } : {}),
+      ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
     });
     if (input.rootTree && !input.archive)
       await ctx.db.insert('projectGithubImportInventory', {
@@ -146,6 +133,7 @@ export const advance = internalMutation({
     objects: v.optional(v.array(completion)),
     recipes: v.optional(v.array(recipePin)),
     entries: v.optional(v.array(inventoryEntry)),
+    githubRequests: v.optional(githubRequests),
   },
   returns: v.boolean(),
   handler: async (ctx, input) => {
@@ -196,6 +184,7 @@ export const advance = internalMutation({
       phase: input.discovering ? 'discovering' : 'importing',
       totalKnown: !input.discovering,
       error: undefined,
+      ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
     });
     if (row.protocol === undefined) await blobStore(ctx).delete(row.cursor);
     const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
@@ -217,6 +206,7 @@ export const archiveProgress = internalMutation({
     totalBytes: v.number(),
     submodules: v.number(),
     objects: v.array(catalogEntry),
+    githubRequests: v.optional(githubRequests),
   },
   returns: v.boolean(),
   handler: async (ctx, input) => {
@@ -235,17 +225,32 @@ export const archiveProgress = internalMutation({
       totalKnown: true,
       phase: 'importing',
       error: undefined,
+      ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
     });
     return true;
   },
 });
 export const fail = internalMutation({
-  args: { ...identity, code: v.string(), message: v.string() },
+  args: {
+    ...identity,
+    code: v.string(),
+    message: v.string(),
+    retryAt: v.optional(v.number()),
+    githubRequests: v.optional(githubRequests),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const row = await readJob(ctx, input);
     if (row.step === input.step && row.phase !== 'ready')
-      await ctx.db.patch(row._id, { phase: 'error', error: { code: input.code, message: input.message } });
+      await ctx.db.patch(row._id, {
+        phase: 'error',
+        error: {
+          code: input.code,
+          message: input.message,
+          ...(input.retryAt === undefined ? {} : { retryAt: input.retryAt }),
+        },
+        ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
+      });
     return null;
   },
 });

@@ -81,6 +81,19 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   sourcePack() {
     return latestClientSourcePack(this.exchange.client as never, this.exchange.projectId);
   }
+  /** Every transport member, bound, for wrappers that add their own `current`: listing
+   * members by hand dropped the page size and run windows (100-pin pages, split runs). */
+  transport(options: { sourcePack?: boolean } = {}): CheckoutObjectTransport {
+    return {
+      // Older servers still take 500-pin windows: `objects` re-pages them by 100.
+      objectPageSize: this.objectPageSize,
+      objects: ids => this.objects(ids),
+      downloadToFile: (pin, path) => this.downloadToFile(pin, path),
+      downloadFiles: files => this.downloadFiles(files),
+      downloadGroups: pins => this.downloadGroups(pins),
+      ...(options.sourcePack === false ? {} : { sourcePack: () => this.sourcePack() }),
+    };
+  }
   private async describe(digests: string[], runs: boolean) {
     const rows = z.array(rowSchema).parse(
       await this.exchange.client.mutation(

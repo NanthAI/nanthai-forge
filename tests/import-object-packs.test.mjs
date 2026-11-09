@@ -9,6 +9,7 @@ import { ObjectDownloadReader } from '../dist/blob-download.js';
 import { readSigned } from '../dist/exchange-r2-read.js';
 import { packHeaders, verifyPackRange, packRuns } from '../dist/object-pack-range.js';
 import { HostedCheckoutDownloads } from '../dist/hosted-checkout-downloads.js';
+import { HostedCheckoutCache } from '../dist/hosted-checkout-cache.js';
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -358,4 +359,43 @@ test('an expired run signature and an older server fall back to exact per-object
     calls.map(args => Boolean(args.runs)),
     [true, false],
   );
+});
+
+test('clone, pull and root-open wrappers keep 500-pin signed pages and whole pack runs', async t => {
+  const f = await fixture(t);
+  const bodies = Array.from({ length: 600 }, (_, i) => Buffer.from(`wrapped source ${i}`));
+  const pins = bodies.map(bytes => f.upload.put(bytes));
+  await f.upload.drain(true);
+  await f.upload.commit();
+  await f.publish();
+  const calls = [];
+  const transfer = new HostedCheckoutDownloads({
+    projectId: f.projectId,
+    client: {
+      mutation: async (_ref, args) => {
+        calls.push(args);
+        return downloads.describe._handler(f.s.ctx, args);
+      },
+    },
+  });
+  // A wrapper adds its own `current`; listing members by hand once dropped the page size
+  // and run windows, so clones read 100-pin pages and split runs into one-object describes.
+  const wrapped = { current: async () => null, ...transfer.transport({ sourcePack: false }) };
+  assert.equal(wrapped.objectPageSize, 500);
+  assert.equal(typeof wrapped.downloadGroups, 'function');
+  assert.equal('sourcePack' in wrapped, false);
+  const root = mkdtempSync(join(tmpdir(), 'forge-runs-wrapped-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const before = f.bucket.requests.filter(row => row.method === 'GET').length;
+  const cache = new HostedCheckoutCache(root, wrapped, join(root, 'objects'), null);
+  await cache.ensure(pins.map(pin => pin.sha256));
+  assert.deepEqual(
+    calls.map(args => args.digests.length),
+    [500, 100],
+    'two signed pages, no per-object describe',
+  );
+  const gets = f.bucket.requests.filter(row => row.method === 'GET').slice(before);
+  assert.equal(gets.length, 2, 'one ranged GET per page run');
+  for (const [i, pin] of pins.entries())
+    assert.deepEqual(readFileSync(join(cache.objects, pin.sha256)), bodies[i]);
 });

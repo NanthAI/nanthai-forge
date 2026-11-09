@@ -14,7 +14,7 @@ import { r2Config, r2Key, presignGet } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
-import { findObject } from './projectObjectFind';
+import { findObject, findObjects } from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
 import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
 import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
@@ -122,8 +122,9 @@ export const describe = mutation({
       const result: (DownloadRow & { url?: string; run?: RunBinding })[] = [];
       const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
         seen = new Set<string>();
-      for (const digest of digests) {
-        const row = await findObject(ctx, projectId, digest);
+      const rows = await findObjects(ctx, projectId, digests);
+      for (const [i, digest] of digests.entries()) {
+        const row = rows[i];
         invariant(
           row && isStored(row) && !row.removed,
           'INVALID_WORK_BACKUP',
@@ -261,8 +262,9 @@ export const lanePage = mutation({
       const result: (HostedDownloadDescriptor & { run?: RunBinding })[] = [];
       const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
         seen = new Set<string>();
-      for (const digest of digests) {
-        const row = await findObject(ctx, projectId, digest);
+      const rows = await findObjects(ctx, projectId, digests);
+      for (const [i, digest] of digests.entries()) {
+        const row = rows[i];
         invariant(
           row && !row.removed && isStored(row),
           'SOURCE_UNAVAILABLE',

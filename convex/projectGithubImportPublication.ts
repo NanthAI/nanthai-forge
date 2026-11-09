@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { readJob } from './projectGithubImportRead';
+import { githubRequests } from './projectGithubImportFields';
 import { jobIdentity, retain } from './projectGithubImportInventory';
 import { projectBackupPreview } from './schema';
 import { indexEntry } from './projectWorkIndexFields';
@@ -120,7 +121,12 @@ export const stage = internalMutation({
   },
 });
 export const finish = internalMutation({
-  args: { ...jobIdentity, step: v.number(), batches: v.number() },
+  args: {
+    ...jobIdentity,
+    step: v.number(),
+    batches: v.number(),
+    githubRequests: v.optional(githubRequests),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const job = await readJob(ctx, input);
@@ -158,7 +164,11 @@ export const finish = internalMutation({
       generationId: generation._id,
       origin: 'github-import',
     });
-    await ctx.db.patch(job._id, { phase: 'ready', error: undefined });
+    await ctx.db.patch(job._id, {
+      phase: 'ready',
+      error: undefined,
+      ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
+    });
     // Git history (log, blame, old versions) follows in its own bounded run.
     await beginHistory(ctx, job, publication.head);
     await purgeInventory(ctx, job._id, job.owner);

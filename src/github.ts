@@ -79,10 +79,11 @@ export function assertGithubRateLimit(response: Response): void {
         ? reset * 1000
         : NaN,
     ].filter(value => Number.isSafeInteger(value) && value >= now);
+    const retryAt = deadlines.length ? Math.max(...deadlines) : now + 60_000;
     throw new ForgeError(
       'GITHUB_RATE_LIMIT',
-      'GitHub has reached its API rate limit. Retry after its reset.',
-      deadlines.length ? Math.max(...deadlines) : now + 60_000,
+      `GitHub has reached its API rate limit. Retry after ${new Date(retryAt).toISOString()}.`,
+      retryAt,
     );
   }
 }

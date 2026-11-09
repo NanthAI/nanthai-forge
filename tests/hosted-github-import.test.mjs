@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultR2Config, defaultR2Objects, storedBytes } from './default-r2.mjs';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID, createHash, generateKeyPairSync } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
@@ -18,11 +18,15 @@ for (const name of [
   'projectGithubImportObjects',
   'projectGithubImportWorker',
   'projectGithubImport',
+  'projectGithubImportProgress',
   'projectObjectRecipeStore',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-function fixture(t, { privateRepository = false, tooLarge = false, submodules = false } = {}) {
+function fixture(
+  t,
+  { privateRepository = false, tooLarge = false, submodules = false, app = false, userLimit = null } = {},
+) {
   const s = state([]);
   s.tables.projectGithubImports = new Map();
   const original = s.ctx.runQuery;
@@ -34,9 +38,24 @@ function fixture(t, { privateRepository = false, tooLarge = false, submodules = 
         if (modules[name]) return modules[name][fn]._handler(s.ctx, args);
         return original(ref, args);
       };
-  const envKeys = ['CLERK_SECRET_KEY', 'GITHUB_APP_CLIENT_ID', 'GITHUB_APP_CLIENT_SECRET'];
+  const envKeys = [
+    'CLERK_SECRET_KEY',
+    'GITHUB_APP_CLIENT_ID',
+    'GITHUB_APP_CLIENT_SECRET',
+    'GITHUB_APP_ID',
+    'GITHUB_APP_PRIVATE_KEY',
+  ];
   const priorEnv = envKeys.map(key => process.env[key]);
-  if (privateRepository) for (const key of envKeys) process.env[key] = 'synthetic-fixture';
+  if (privateRepository) for (const key of envKeys.slice(0, 3)) process.env[key] = 'synthetic-fixture';
+  if (app) {
+    process.env.GITHUB_APP_ID = '123';
+    process.env.GITHUB_APP_PRIVATE_KEY = generateKeyPairSync('rsa', {
+      modulusLength: 2048,
+    }).privateKey.export({
+      type: 'pkcs8',
+      format: 'pem',
+    });
+  } else for (const key of envKeys.slice(3)) delete process.env[key];
   const previous = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = previous;
@@ -50,60 +69,94 @@ function fixture(t, { privateRepository = false, tooLarge = false, submodules = 
     '[submodule "a"]\npath=vendor-a\nurl=../a.git\n[submodule "b"]\npath=vendor-b\nurl=git@example.invalid:org/b.git\n',
   );
   let denied = false,
+    limited = null,
     blobs = 0;
+  const window = { reset: Math.ceil(Date.now() / 1000) + 3600 };
+  const github = [];
+  const reply = (body, options, init = {}) => {
+    const user = /ghu_/.test(options?.headers?.Authorization ?? '');
+    const headers = new Headers(init.headers);
+    if (user && userLimit) {
+      headers.set('x-ratelimit-limit', String(userLimit));
+      headers.set('x-ratelimit-reset', String(window.reset));
+    }
+    return body instanceof Response
+      ? new Response(body.body, { status: body.status, headers })
+      : new Response(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body), {
+          status: init.status ?? 200,
+          headers,
+        });
+  };
   globalThis.fetch = async (url, options) => {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return previous(url, options);
     const p = new URL(url).pathname;
+    if (new URL(url).hostname === 'api.github.com')
+      github.push({ path: p, method: options?.method ?? 'GET', auth: options?.headers?.Authorization });
     if (p.includes('/oauth_access_tokens/oauth_github')) return Response.json([{ token: 'ghu_synthetic' }]);
     if (p.startsWith('/applications/')) return new Response('{}');
+    if (app && p === '/repos/example/repo/installation') return Response.json({ id: 7 });
+    if (app && p === '/app/installations/7/access_tokens') return Response.json({ token: 'ghs_synthetic' });
     if (denied) return new Response('', { status: 404 });
     if (p === '/repos/example/repo')
-      return Response.json({
-        full_name: 'example/repo',
-        private: privateRepository,
-        default_branch: 'main',
-        html_url: 'https://github.com/example/repo',
-        license: null,
-      });
+      return reply(
+        {
+          id: 42,
+          full_name: 'example/repo',
+          private: privateRepository,
+          default_branch: 'main',
+          html_url: 'https://github.com/example/repo',
+          license: null,
+        },
+        options,
+      );
     if (p.includes('/commits/'))
-      return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: 'b'.repeat(40) } } });
+      return reply({ sha: 'a'.repeat(40), commit: { tree: { sha: 'b'.repeat(40) } } }, options);
     // A truncated recursive listing keeps these cases on directory-by-directory discovery.
     if (p.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
-      return Response.json({ sha: 'b'.repeat(40), truncated: true, tree: [] });
+      return reply({ sha: 'b'.repeat(40), truncated: true, tree: [] }, options);
     if (p.includes('/git/trees/'))
-      return Response.json({
-        sha: 'b'.repeat(40),
-        truncated: false,
-        tree: [
-          ...(submodules
-            ? [
-                { path: 'vendor-a', mode: '160000', type: 'commit', sha: 'c'.repeat(40) },
-                { path: 'vendor-b', mode: '160000', type: 'commit', sha: 'd'.repeat(40) },
-                {
-                  path: '.gitmodules',
-                  mode: '100644',
-                  type: 'blob',
-                  sha: gitSha(modulesBytes),
-                  size: modulesBytes.length,
-                },
-              ]
-            : []),
-          {
-            path: 'data.bin',
-            mode: '100755',
-            type: 'blob',
-            sha: gitSha(bytes),
-            size: tooLarge ? 100 * 1024 * 1024 + 1 : bytes.length,
-          },
-        ],
-      });
+      return reply(
+        {
+          sha: 'b'.repeat(40),
+          truncated: false,
+          tree: [
+            ...(submodules
+              ? [
+                  { path: 'vendor-a', mode: '160000', type: 'commit', sha: 'c'.repeat(40) },
+                  { path: 'vendor-b', mode: '160000', type: 'commit', sha: 'd'.repeat(40) },
+                  {
+                    path: '.gitmodules',
+                    mode: '100644',
+                    type: 'blob',
+                    sha: gitSha(modulesBytes),
+                    size: modulesBytes.length,
+                  },
+                ]
+              : []),
+            {
+              path: 'data.bin',
+              mode: '100755',
+              type: 'blob',
+              sha: gitSha(bytes),
+              size: tooLarge ? 100 * 1024 * 1024 + 1 : bytes.length,
+            },
+          ],
+        },
+        options,
+      );
     if (p.includes('/git/blobs/')) {
+      if (limited)
+        return reply('{}', options, {
+          status: 403,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(limited) },
+        });
       blobs++;
       assert.equal(options.headers.Accept, 'application/vnd.github.raw+json');
-      if (privateRepository) assert.equal(options.headers.Authorization, 'Bearer ghu_synthetic');
-      if (submodules && p.endsWith(gitSha(modulesBytes))) return new Response(modulesBytes);
+      if (app) assert.equal(options.headers.Authorization, 'Bearer ghs_synthetic');
+      else if (privateRepository) assert.equal(options.headers.Authorization, 'Bearer ghu_synthetic');
+      if (submodules && p.endsWith(gitSha(modulesBytes))) return reply(modulesBytes, options);
       assert(p.endsWith(gitSha(bytes)), 'never fetch a submodule commit as blob');
-      return new Response(bytes);
+      return reply(bytes, options);
     }
     throw Error(url);
   };
@@ -118,6 +171,11 @@ function fixture(t, { privateRepository = false, tooLarge = false, submodules = 
     deny: () => {
       denied = true;
     },
+    limit: reset => {
+      limited = reset;
+    },
+    window,
+    github,
     blobs: () => blobs,
   };
 }
@@ -231,6 +289,85 @@ test('private repositories use existing GitHub App user credentials and remain p
   assert.equal(job.phase, 'ready');
   assert.equal(s.tables.hostedProjects.get(job.projectId).visibility, 'private');
   assert.ok(!JSON.stringify([...s.tables.projectGithubImports.values()]).includes('ghu_'));
+});
+
+test('truncated-tree fallback reads through the App installation token; the importer token only re-proves access', async t => {
+  const s = fixture(t, { privateRepository: true, app: true }),
+    id = await s.start();
+  for (let i = 0; i < 3; i++) await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready');
+  const user = s.github.filter(request => request.auth === 'Bearer ghu_synthetic');
+  assert.ok(user.length > 0);
+  assert.deepEqual(
+    [...new Set(user.map(request => request.path))],
+    ['/repos/example/repo'],
+    'the user credential never lists trees, resolves refs or fetches blobs',
+  );
+  for (const read of s.github.filter(request => /\/(git|commits)\//.test(request.path)))
+    assert.equal(read.auth, 'Bearer ghs_synthetic', read.path);
+  const counts = test => s.github.filter(request => test(request.auth ?? '')).length;
+  assert.deepEqual(
+    { user: job.githubRequests.user, app: job.githubRequests.app, anonymous: job.githubRequests.anonymous },
+    {
+      user: user.length,
+      app: counts(auth => /ghs_|^Bearer eyJ|^Basic /.test(auth)),
+      anonymous: counts(auth => !auth),
+    },
+  );
+  const status = await modules.projectGithubImport.status._handler(s.ctx, { id });
+  assert.equal(status.githubRequests.user, user.length);
+  assert.ok(!JSON.stringify([...s.tables.projectGithubImports.values()]).includes('ghs_'));
+});
+
+test('an import stops at 10 percent of the importer limit with a retryable error naming the reset, then resumes', async t => {
+  // 50 requests per hour: this import may spend 5 with the importer's credential.
+  const s = fixture(t, { privateRepository: true, userLimit: 50 }),
+    op = randomUUID(),
+    id = await s.start(op);
+  for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'error'; i++) await s.advance(id);
+  let job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'error');
+  assert.equal(job.error.code, 'GITHUB_RATE_LIMIT');
+  assert.equal(job.error.retryAt, s.window.reset * 1000);
+  assert.ok(job.error.message.includes(new Date(s.window.reset * 1000).toISOString()));
+  assert.equal(job.githubRequests.userWindow.used, 5);
+  assert.equal(s.github.filter(request => request.auth === 'Bearer ghu_synthetic').length, 5);
+  assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
+  const progress = await modules.projectGithubImportProgress.current._handler(s.ctx, { id });
+  assert.equal(progress.error.retryAt, s.window.reset * 1000);
+  // GitHub's window ends: the retained window expires and the same operation resumes.
+  job.githubRequests.userWindow.reset = Math.floor(Date.now() / 1000) - 1;
+  s.window.reset = Math.ceil(Date.now() / 1000) + 3600;
+  assert.equal(await s.start(op), id);
+  for (let i = 0; i < 4 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.advance(id);
+  job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(job.githubRequests.userWindow.reset, s.window.reset);
+});
+
+test('a GitHub rate-limit response fails the import with its reset time instead of stalling, and resumes', async t => {
+  const s = fixture(t),
+    op = randomUUID(),
+    id = await s.start(op),
+    reset = Math.ceil(Date.now() / 1000) + 1800;
+  await s.advance(id);
+  s.limit(reset);
+  await s.advance(id);
+  let job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'error');
+  assert.deepEqual(job.error, {
+    code: 'GITHUB_RATE_LIMIT',
+    message: `GitHub has reached its API rate limit. Retry after ${new Date(reset * 1000).toISOString()}.`,
+    retryAt: reset * 1000,
+  });
+  const status = await modules.projectGithubImport.status._handler(s.ctx, { id });
+  assert.equal(status.error.retryAt, reset * 1000);
+  s.limit(null);
+  assert.equal(await s.start(op), id);
+  for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.advance(id);
+  job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready');
 });
 
 test('a provider-oversized repository fails before any blob or main is published', async t => {

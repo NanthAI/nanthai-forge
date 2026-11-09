@@ -7,6 +7,18 @@ subscription opens the project when complete hosted `main` is published. The
 separate read-only analysis tour calls `hosted.start` and creates no writable
 project. The [quickstart](../quickstart.md) covers installation and Lane work.
 
+From the CLI, `nforge import URL [--ref REF] [--name NAME] [--deployment URL]
+[--operation-id UUID] [--no-wait]` calls the same start with the saved login,
+waits on the same progress subscription (no polling) and prints one JSON report:
+`operationId`, `projectId`, `commit`, `phase`, `ready`, file and byte counts,
+`githubRequests`, any structured `error` and `next` (the `nforge clone` command,
+or the resume command). The original request and operation UUID are kept in
+`$XDG_STATE_HOME/forge/imports/` (default `~/.local/state`), so
+`nforge import --resume UUID` replays it exactly; repeating `--operation-id` with
+another repository, ref or name reports `WORK_OPERATION_CHANGED`. Each resume is
+checked against the caller's current login and GitHub access. A small import costs
+the start action, one subscription and one final status action.
+
 ## Identity, access and publication
 
 `projectGithubImport.start` takes an original operation UUID, GitHub URL, optional
@@ -14,9 +26,33 @@ ref and optional project name. The ref resolves once. Repeating the original
 request resumes the same job and exact commit; changing its request reports
 `WORK_OPERATION_CHANGED`. The import belongs to its signed-in importer. A public
 upstream creates a public mirror; a private upstream stays private. Access is
-checked through the existing GitHub authorization path, with a repository-scoped
-read installation token when available. Credentials are never stored in progress
-or cursor records.
+checked through the existing GitHub authorization path. Credentials are never
+stored in progress or cursor records.
+
+## Which GitHub token pays
+
+| Request | Token |
+| --- | --- |
+| Access check (`GET /repos/OWNER/NAME`), once at start and once per worker run and publication | Public repository: the deployment's `GITHUB_PUBLIC_TOKEN` (or none). Private: the importer's GitHub App user token, which shares their personal hourly limit with `gh` and their other tools |
+| Ref resolution, tree listing, tarball, blob fallback, paged discovery | The Forge GitHub App installation token (`contents`/`metadata` read on that one repository; the App's own quota) when the App is installed there; otherwise the credential from the access check |
+| Installation lookup and token mint | The App JWT (App quota) |
+
+Owner decision (Issue 2ccd3bae): one import may use about 10 percent of the
+importer's hourly GitHub limit. The worker reads the limit and reset from GitHub's
+response headers and refuses the next importer-token request once the import has
+used its share of the current window, before sending it. Like a GitHub 403/429
+rate-limit reply, this ends the run as `GITHUB_RATE_LIMIT` with `retryAt` (ms) and
+the reset time in the message; the job shows `phase: "error"`, nothing is
+published, and repeating the original start after the reset resumes from saved
+progress. It never stalls silently.
+
+`githubRequests` on the job, in `projectGithubImport.status` and in the CLI report
+counts every `api.github.com` request by who paid: `user` (the importer's token),
+`app` (installation token, App JWT or App client credentials), `server`
+(`GITHUB_PUBLIC_TOKEN`) and `anonymous`, plus the importer's current window
+(`userWindow`: GitHub's reset, the requests this import used, the limit). Tokens
+are classified by their public prefix and never stored. Counts ride on the
+existing progress, failure and publication writes: no extra Convex call.
 
 `projectGithubImport.status` returns the project ID, pinned commit, phase, file and
 byte counts, known-total flag and structured failure. The browser subscribes to
@@ -94,7 +130,13 @@ Record the installed CLI `.commit`, repository commit, project ID and timestamps
 for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
 upload waits and attempts, metadata, catalog, projection and ready publication.
 The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on a
-28.9k-file import. Synthetic results establish budgets; live elapsed time and
+28.9k-file import and fixes its GitHub REST total at 9 requests (start: repository,
+commit, tree; run: repository, tree, tarball, two fallback blobs; publication:
+repository). The protocol-2 fixture in `tests/github-import-pages.test.mjs`
+(28,905 files, 4,089 directories) records 33,061 REST requests, one per directory
+and blob, so that path relies on the App installation token; without one, a
+private repository on that path proceeds at about 10 percent of the importer's
+hourly limit per window. Synthetic results establish budgets; live elapsed time and
 billing require separate measurement. A source checkout or local fixture is not
 a published npm release or a production deployment.
 

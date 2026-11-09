@@ -95,6 +95,16 @@ test('a request reads each catalog row once; sorted pages touch one or two rows'
     for (const object of objects.slice(0, 100))
       assert.ok(await find.findObject(request, 'project', object.digest));
   assert.ok(random.reads() <= 4, `${random.reads()} catalog reads: at most one per catalog row`);
+  // A page lookup reads rows concurrently but still each catalog row at most once, in order.
+  const batch = fixture(objects);
+  const digests = [...objects.slice(0, 500).map(o => o.digest), objects[3].digest, hex('absent'), 'bad'];
+  const rows = await find.findObjects({ ...batch.s.ctx }, 'project', digests);
+  assert.ok(batch.reads() <= 4, `${batch.reads()} catalog reads for a 500-digest page`);
+  assert.deepEqual(
+    rows.map(row => row?.size ?? null),
+    [...objects.slice(0, 500).map(o => o.size), 3, null, null],
+  );
+  assert.deepEqual(rows[97].recipe, objects[97].recipe);
 });
 
 test('catalog-backed generations resolve sourceBlobs from the catalog, others do not', async () => {

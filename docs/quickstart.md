@@ -51,6 +51,17 @@ a private upstream retains private visibility and needs current GitHub access.
 The separate **Import from GitHub · read-only analysis** link opens an analysis
 tour; use **New project** for an editable project.
 
+Agents and scripts import the same way from the CLI, after `nforge login`:
+
+```sh
+nforge import https://github.com/OWNER/REPO --ref v1.2.0 --name REPO
+nforge import --resume OPERATION_UUID   # after an interruption or a rate-limit reset
+```
+
+It waits until hosted `main` is ready and prints the project ID, pinned commit,
+readiness, the next `nforge clone` command and the GitHub API requests the import
+made, by who paid for them.
+
 If an import stops, **Resume import** retries the original operation and pinned
 commit. Partial source is never selected as main. Acquisition runs in the hosted
 backend; there is no local recovery or second source upload. See the

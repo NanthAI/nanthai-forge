@@ -7,6 +7,9 @@ import { internal } from './_generated/api';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { importReadToken } from './githubAppToken';
+import { convexFetch } from './networkFetch';
+import { networkFetch } from '../src/network-fetch';
+import type { ImportRequestMeter } from '../src/github-import-meter';
 import {
   githubSourceMode,
   streamGithubSourceBlob,
@@ -40,19 +43,28 @@ type Identity = { id: Id<'projectGithubImports'>; actor: string };
  * R2 packs. Convex sees one compact receipt per bounded upload window;
  * no per-file inventory row is written. Every file is proven against its Git
  * object ID from the listed commit tree before it can enter the State. */
-export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubImports'>, input: Identity) {
+export async function runArchiveImport(
+  ctx: ActionCtx,
+  job: Doc<'projectGithubImports'>,
+  input: Identity,
+  meter: ImportRequestMeter,
+) {
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
-  const access = await authorizeGithub(job.repository, job.owner, githubConfig());
+  const github = meter.wrap(networkFetch);
+  const access = await authorizeGithub(job.repository, job.owner, githubConfig(), github);
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',
     'Repository visibility changed during import; main was not published.',
   );
   const token =
-    (await importReadToken(access.repository.full_name, (access.repository as { id?: unknown }).id)) ??
-    access.token;
-  const listing = await listGithubTree(job.repository, cursor.tree, token);
+    (await importReadToken(
+      access.repository.full_name,
+      (access.repository as { id?: unknown }).id,
+      meter.wrap(convexFetch),
+    )) ?? access.token;
+  const listing = await listGithubTree(job.repository, cursor.tree, token, github);
   invariant(listing, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.files.length, sourceBytes: listing.totalBytes })}`,
@@ -72,6 +84,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
       step: job.step,
       ...counters(),
       objects,
+      githubRequests: meter.counts,
     });
   };
   const catalog = { stored, record: saveWindow };
@@ -125,7 +138,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     return true;
   };
   let complete = true;
-  const archive = await openGithubArchive(job.repository, job.commit, token);
+  const archive = await openGithubArchive(job.repository, job.commit, token, github);
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-open', at: Date.now(), elapsedMillis: Date.now() - started })}`,
   );
@@ -153,7 +166,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
     missing.filter(file => file.mode !== '160000' && file.size <= objectChunkBytes),
     {
       upload,
-      fetchBlob: (entry, consume) => streamGithubSourceBlob(job.repository, entry, consume, token),
+      fetchBlob: (entry, consume) => streamGithubSourceBlob(job.repository, entry, consume, token, github),
       record,
       drain,
       over,
@@ -162,7 +175,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   for (const entry of missing.filter(file => file.mode !== '160000' && file.size > objectChunkBytes)) {
     if (over()) break;
     const matched = await streamLarge(entry, async consume => {
-      await streamGithubSourceBlob(job.repository, entry, consume, token);
+      await streamGithubSourceBlob(job.repository, entry, consume, token, github);
     });
     invariant(matched, 'ARTIFACT_INTEGRITY', 'GitHub blob differs from the selected commit.');
   }
@@ -185,6 +198,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
       cursor: JSON.stringify({ ...cursor, runs: cursor.runs + 1 }),
       ...counters(),
       discovering: false,
+      githubRequests: meter.counts,
     });
     return;
   }
@@ -205,7 +219,7 @@ export async function runArchiveImport(ctx: ActionCtx, job: Doc<'projectGithubIm
   }
   for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
     rows.blobs.push({ key: sha256, value: JSON.stringify({ sha256, size }) });
-  await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog);
+  await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog, meter);
 }
 
 /** Fallback blobs (omitted or rewritten archive members) are fetched in windows

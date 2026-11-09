@@ -3,18 +3,18 @@
 // GitHub import of the bench fork at the base commit into a NEW Forge project (setup step
 // forge-project). The import builds a born-hosted, server-authority main that agents can land
 // on; `nforge host` of a Git checkout does not (it seeds in Git format, so `mainReady` stays
-// false). The CLI has no import command yet (5775aef1), so this calls the same actions the web
-// import does, with the CLI's own login and deadline client from this built checkout's dist/
+// false). This predates `nforge import` (5775aef1), which now does the same; it calls the same
+// actions the web import does, with the CLI's own login and deadline client from this built checkout's dist/
 // (setup runs from a built checkout).
 //   node forge-import.mjs JOURNAL.json '{"url":..,"ref":..,"name":..,"deployment":..}'
 // Resumable: the journal keeps the operation id (start is idempotent on it) and the job id.
 // Prints one JSON line per poll and a final {projectId, phase, error, calls}.
 import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { pathToFileURL } from 'node:url';
 import { makeFunctionReference } from 'convex/server';
 import { resolveAuthToken } from '../../dist/auth-store.js';
 import { deadlineConvexClient } from '../../dist/network-convex-client.js';
+import { isMainModule } from '../main-module.mjs';
 
 export const POLL_MS = 20_000;
 export const DEADLINE_MS = 30 * 60_000;
@@ -94,5 +94,4 @@ async function main([journalPath, specJson]) {
   return r.phase === 'ready' && r.projectId ? 0 : 1;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href)
-  process.exitCode = await main(process.argv.slice(2));
+if (isMainModule(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

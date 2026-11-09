@@ -25,15 +25,21 @@ import {
 import { ImportUpload } from './projectGithubImportUpload';
 import { publishImport } from './projectGithubImportPublish';
 import { runArchiveImport } from './projectGithubImportArchive';
+import { importReadToken } from './githubAppToken';
+import { convexFetch } from './networkFetch';
+import { networkFetch } from '../src/network-fetch';
+import { ImportRequestMeter } from '../src/github-import-meter';
 export const run = internalAction({
   args: { id: v.id('projectGithubImports'), actor: v.string() },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
     const { job, entries } = await ctx.runQuery(internal.projectGithubImportInventory.page, input);
     if (job.phase === 'ready') return null;
+    const meter = new ImportRequestMeter(job.githubRequests),
+      github = meter.wrap(networkFetch);
     try {
       if (job.protocol === 3) {
-        await runArchiveImport(ctx, job, input);
+        await runArchiveImport(ctx, job, input, meter);
         return null;
       }
       invariant(
@@ -43,14 +49,23 @@ export const run = internalAction({
       );
       const progress: ImportProgress = JSON.parse(job.cursor);
       invariant(progress.schema === 2, 'IMPORT_CURSOR_CHANGED', 'Import progress format differs.');
-      const access = await authorizeGithub(job.repository, job.owner, githubConfig());
+      const access = await authorizeGithub(job.repository, job.owner, githubConfig(), github);
       invariant(
         job.visibility === 'private' || !access.repository.private,
         'GITHUB_VISIBILITY_CHANGED',
         'Repository visibility changed during import; main was not published.',
       );
+      // Discovery and blob reads use the App's own quota when it is installed;
+      // the importer's credential only re-proves access (one request per page).
+      const readToken = async () =>
+        (await importReadToken(
+          access.repository.full_name,
+          (access.repository as { id?: unknown }).id,
+          meter.wrap(convexFetch),
+        )) ?? access.token;
       const started = Date.now();
       if (!job.totalKnown) {
+        const token = await readToken();
         let total = job.total,
           totalBytes = job.totalBytes,
           submodules = job.submodules ?? 0,
@@ -91,7 +106,8 @@ export const run = internalAction({
               bytes: 0,
               totalBytes: 0,
             },
-            access.token,
+            token,
+            github,
           );
           for (const child of next.pending) {
             await append({
@@ -140,8 +156,10 @@ export const run = internalAction({
           totalBytes,
           submodules,
           discovering: progress.directories < progress.discovered,
+          githubRequests: meter.counts,
         });
       } else if (job.completed < job.total) {
+        const token = await readToken();
         const upload = new ImportUpload(ctx, job.projectId, job.owner);
         const imported: { part: string; key: string; position: number; value: string }[] = [];
         let bytes = job.bytes,
@@ -158,7 +176,8 @@ export const run = internalAction({
                 async part => {
                   parts.push(part);
                 },
-                access.token,
+                token,
+                github,
               );
               return { pin, bytes: Buffer.concat(parts) };
             })
@@ -178,7 +197,8 @@ export const run = internalAction({
               async part => {
                 parts.push(part);
               },
-              access.token,
+              token,
+              github,
             );
             upload.put(Buffer.concat(parts));
           } else {
@@ -192,7 +212,8 @@ export const run = internalAction({
                   if (await upload.drain()) await upload.commit();
                 }
               },
-              access.token,
+              token,
+              github,
             );
             upload.recipe(pin, builder.finish({ sha256: pin.blob, size: pin.size }).bytes);
           }
@@ -221,8 +242,9 @@ export const run = internalAction({
           discovering: false,
           entries: imported,
           ...upload.receipt(),
+          githubRequests: meter.counts,
         });
-      } else await publishImport(ctx, job);
+      } else await publishImport(ctx, job, undefined, undefined, meter);
     } catch (error) {
       const known = error instanceof ForgeError;
       await ctx.runMutation(internal.projectGithubImportStore.fail, {
@@ -232,6 +254,8 @@ export const run = internalAction({
         message: known
           ? error.message
           : 'Import stopped before publication. Retry resumes the same commit and saved page.',
+        ...(known && error.retryAt !== undefined ? { retryAt: error.retryAt } : {}),
+        githubRequests: meter.counts,
       });
     }
     return null;

@@ -79,10 +79,7 @@ export function cliReleaseSource(address: CliSource) {
             }
             return current();
           },
-          objects: ids => downloads.objects(ids),
-          downloadToFile: (pin, path) => downloads.downloadToFile(pin, path),
-          downloadFiles: files => downloads.downloadFiles(files),
-          sourcePack: () => downloads.sourcePack(),
+          ...downloads.transport(),
         },
       );
     },

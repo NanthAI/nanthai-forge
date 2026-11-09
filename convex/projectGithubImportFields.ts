@@ -1,6 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
+/** GitHub REST requests this import made, by who paid (src/github-import-meter.ts). */
+export const githubRequests = v.object({
+  user: v.number(),
+  app: v.number(),
+  server: v.number(),
+  anonymous: v.number(),
+  userWindow: v.optional(v.object({ reset: v.number(), used: v.number(), limit: v.number() })),
+});
+/** A structured failure; `retryAt` (ms) names a provider reset when one applies. */
+export const githubImportError = v.object({
+  code: v.string(),
+  message: v.string(),
+  retryAt: v.optional(v.number()),
+});
 export const githubImportFields = {
   protocol: v.optional(v.union(v.literal(2), v.literal(3))),
   publication: v.optional(
@@ -28,7 +42,8 @@ export const githubImportFields = {
   bytes: v.number(),
   totalBytes: v.number(),
   submodules: v.optional(v.number()),
-  error: v.optional(v.object({ code: v.string(), message: v.string() })),
+  error: v.optional(githubImportError),
+  githubRequests: v.optional(githubRequests),
   task: v.optional(v.id('_scheduled_functions')),
 };
 export const githubImportDocument = v.object({

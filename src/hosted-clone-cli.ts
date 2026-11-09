@@ -131,10 +131,7 @@ export async function hostedCloneCli(
     { url, projectId: project.id },
     dependencies?.transport(project.id) ?? {
       current: expected => exchange!.current(expected),
-      objects: ids => downloads!.objects(ids),
-      downloadToFile: (pin, path) => downloads!.downloadToFile(pin, path),
-      downloadFiles: files => downloads!.downloadFiles(files),
-      sourcePack: () => downloads!.sourcePack(),
+      ...downloads!.transport(),
     },
   );
   return {

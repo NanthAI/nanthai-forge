@@ -16,6 +16,8 @@ Browse packaged documentation: nforge docs
 
 Usage:
   nforge clone <project-url|project-id> DIR [--deployment URL]
+  nforge import <github-url|OWNER/NAME> [--ref REF] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]
+  nforge import --resume OPERATION_UUID   # resume a pinned GitHub source import; reports project and readiness
   nforge pull [ROOT]           # refresh a clean clone to accepted main (ROOT: cwd clone)
   nforge update [FORGE_CHECKOUT] [--directory DIR] [--state STATE]
   nforge cli rollback [--directory DIR]   # switch to the one retained previous CLI build
@@ -143,6 +145,7 @@ async function main(args: string[]): Promise<unknown> {
       beforeLocal,
     );
   if (args[0] === 'host') return (await import('./host-cli.js')).hostCli(args.slice(1));
+  if (args[0] === 'import') return (await import('./github-import-cli.js')).githubImportCli(args.slice(1));
   if (args[0] === 'policy' || args[0] === 'set-policy') {
     invariant(
       args[1] &&

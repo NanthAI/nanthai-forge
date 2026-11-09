@@ -52,9 +52,7 @@ export function mainCheckoutTransport(
       return hostedMainSchema.parse(typeof value === 'string' ? JSON.parse(value) : value);
     },
     calls: () => ({ ...calls }),
-    objects: ids => downloads.objects(ids),
-    downloadToFile: (pin, path) => downloads.downloadToFile(pin, path),
-    downloadFiles: files => downloads.downloadFiles(files),
+    ...downloads.transport({ sourcePack: false }),
   };
 }
 const pendingSchema = z

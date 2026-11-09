@@ -11,6 +11,8 @@ import { sourceTreeEntries } from '../src/source-tree-index';
 import { nativeManifestSchema } from '../src/work-archive-metadata';
 import { digest } from '../src/hash';
 import { authorizeGithub } from '../src/github-access';
+import { networkFetch } from '../src/network-fetch';
+import { ImportRequestMeter } from '../src/github-import-meter';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
@@ -27,6 +29,7 @@ export async function publishImport(
   job: Doc<'projectGithubImports'>,
   memory?: ImportRows,
   catalog?: ImportCatalog,
+  meter = new ImportRequestMeter(job.githubRequests),
 ) {
   const started = Date.now();
   const metric = (phase: string) =>
@@ -211,7 +214,7 @@ export async function publishImport(
     }
   await flush();
   metric('projection');
-  const access = await authorizeGithub(job.repository, job.owner, githubConfig());
+  const access = await authorizeGithub(job.repository, job.owner, githubConfig(), meter.wrap(networkFetch));
   invariant(
     job.visibility === 'private' || !access.repository.private,
     'GITHUB_VISIBILITY_CHANGED',
@@ -221,6 +224,7 @@ export async function publishImport(
     ...identity,
     step: job.step,
     batches: batch,
+    githubRequests: meter.counts,
   });
   metric('ready');
 }

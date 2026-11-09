@@ -186,6 +186,10 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(job.completed, repo.files);
   // Only the archive-omitted and archive-rewritten files cost a blob request.
   assert.deepEqual(counts, { trees: 2, tarball: 1, archive: 1, blobs: 2 });
+  // Issue 2ccd3bae: the whole archive import is 9 REST requests (start: repository, commit,
+  // tree; run: repository, tree, tarball, 2 blobs; publication: repository). With no App or
+  // deployment token configured here, none of them uses an importer credential.
+  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 9 });
   // Issue 7cbb881c line 3: no per-file row survives ready; documents are O(pages).
   const catalogRows = [...s.tables.projectObjectCatalog.values()].filter(r => r.projectId === job.projectId);
   const catalogued = catalogRows.reduce((sum, row) => sum + row.sizes.length, 0);

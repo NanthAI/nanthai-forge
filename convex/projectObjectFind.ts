@@ -83,6 +83,30 @@ export async function findObject(
   const found = await page(ctx, projectId, digest);
   return found && entry(found, digest);
 }
+/** findObject for a page: per-object rows are read concurrently (one point read per
+ * distinct digest), then catalog misses resolve in sorted order through the request
+ * cache, so each catalog row is still read at most once. Serial reads cost ~3 ms each. */
+export async function findObjects(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+  digests: readonly string[],
+): Promise<(ObjectView | null)[]> {
+  const unique = [...new Set(digests)];
+  const rows = await Promise.all(
+    unique.map(digest =>
+      ctx.db
+        .query('projectObjects')
+        .withIndex('by_project_and_digest', q => q.eq('projectId', projectId).eq('digest', digest))
+        .unique(),
+    ),
+  );
+  const found = new Map<string, ObjectView | null>(unique.map((digest, i) => [digest, rows[i] ?? null]));
+  for (const digest of unique.filter(digest => !found.get(digest) && digestPattern.test(digest)).sort()) {
+    const row = await page(ctx, projectId, digest);
+    found.set(digest, row && entry(row, digest));
+  }
+  return digests.map(digest => found.get(digest) ?? null);
+}
 /** Writers that must return or patch a row id: a catalog entry is copied into an
  * equivalent stored row (rare: catalog objects are already stored). */
 export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<Doc<'projectObjects'>> {

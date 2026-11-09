@@ -54,10 +54,12 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   t.after(() => {
     globalThis.fetch = old;
   });
-  let blobRequests = 0;
+  let blobRequests = 0,
+    apiRequests = 0;
   globalThis.fetch = async (url, init) => {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return old(url, init);
     const path = new URL(url).pathname;
+    if (new URL(url).hostname === 'api.github.com') apiRequests++;
     if (path === '/repos/fixture/scale')
       return Response.json({
         full_name: 'fixture/scale',
@@ -120,6 +122,8 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.equal(job.completed, files + submodules);
   assert.equal(job.submodules, submodules);
   assert.equal(blobRequests, files);
+  // Issue 2ccd3bae: every REST request of the fallback path is counted by who paid it.
+  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: apiRequests });
   assert.ok(
     importCalls <= 5 * Math.ceil(files / 1000),
     `${importCalls} file-page executions exceed 5 per 1,000 files`,
@@ -177,6 +181,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
       submodules,
       executions: count,
       filePageExecutions: importCalls,
+      githubRequests: job.githubRequests,
       ...s.stats(),
       memory: process.memoryUsage(),
       idleScheduled: 0,

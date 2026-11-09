@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { captureGithub, githubInput, githubRepository, githubJson } from '../dist/github.js';
 import { ForgeError } from '../dist/errors.js';
+import { ImportRequestMeter, tokenClass } from '../dist/github-import-meter.js';
 import { moduleUrl } from './convex-module.mjs';
 import { setup as r2Setup } from './r2-harness.mjs';
 import { GraphQuery } from '../dist/graph-query.js';
@@ -81,6 +82,63 @@ test('GitHub response reset deadlines survive hosted errors while ordinary denia
   );
   for (const retryAt of [NaN, -1, '1060000', Number.MAX_SAFE_INTEGER + 1])
     assert.equal(hostedRetryAt({ retryAt }), undefined);
+});
+
+test('import meter classifies who pays for each GitHub request and caps the importer at 10 percent of their window', async () => {
+  for (const [header, kind] of [
+    [undefined, 'anonymous'],
+    ['Bearer ghu_x', 'user'],
+    ['token gho_x', 'user'],
+    ['Bearer ghs_x', 'app'],
+    ['Bearer eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOjF9.sig', 'app'],
+    ['Basic Y2xpZW50OnNlY3JldA==', 'app'],
+    ['Bearer github_pat_x', 'server'],
+  ])
+    assert.equal(tokenClass(header), kind, String(header));
+  let now = 1_000_000;
+  const reset = 4_000; // seconds
+  const meter = new ImportRequestMeter(undefined, () => now);
+  let sent = 0;
+  const github = meter.wrap(async () => {
+    sent++;
+    return new Response('{}', { headers: { 'x-ratelimit-limit': '50', 'x-ratelimit-reset': String(reset) } });
+  });
+  const user = { headers: { Authorization: 'Bearer ghu_synthetic' } };
+  await github('https://api.github.com/repos/o/r', {
+    headers: new Headers({ authorization: 'Bearer ghs_x' }),
+  });
+  await github('https://codeload.github.com/o/r/tar.gz/x', {});
+  await github('https://api.clerk.com/v1/users/u/oauth_access_tokens/oauth_github', user);
+  for (let i = 0; i < 5; i++) await github('https://api.github.com/repos/o/r/git/blobs/x', user);
+  // 10 percent of a 50-request window is 5: the sixth user request is refused before it is sent.
+  await assert.rejects(github('https://api.github.com/repos/o/r/git/blobs/x', user), error => {
+    assert.equal(error.code, 'GITHUB_RATE_LIMIT');
+    assert.equal(error.retryAt, reset * 1000);
+    assert.match(error.message, new RegExp(new Date(reset * 1000).toISOString().replace(/[.]/g, '[.]')));
+    return true;
+  });
+  assert.equal(sent, 8);
+  assert.deepEqual(meter.counts, {
+    user: 5,
+    app: 1,
+    server: 0,
+    anonymous: 0,
+    userWindow: { reset, used: 5, limit: 50 },
+  });
+  // A resumed run keeps the saved window; after GitHub's reset a new window starts.
+  const resumed = new ImportRequestMeter(structuredClone(meter.counts), () => now);
+  await assert.rejects(resumed.wrap(async () => new Response('{}'))('https://api.github.com/x', user), {
+    code: 'GITHUB_RATE_LIMIT',
+  });
+  now = reset * 1000;
+  await resumed.wrap(
+    async () =>
+      new Response('{}', {
+        headers: { 'x-ratelimit-limit': '50', 'x-ratelimit-reset': String(reset + 3600) },
+      }),
+  )('https://api.github.com/x', user);
+  assert.deepEqual(resumed.counts.userWindow, { reset: reset + 3600, used: 1, limit: 50 });
+  assert.equal(resumed.counts.user, 6);
 });
 
 const sha = 'a'.repeat(40),

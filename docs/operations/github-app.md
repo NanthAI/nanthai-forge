@@ -120,7 +120,7 @@ this repository, so the table shows what Forge asks of each token.
 | Operation | Requested permissions | Trigger | Code |
 | --- | --- | --- | --- |
 | Binding discovery | `metadata: read`, only the project's proven repository IDs (one page of 100) | Any token mint below, and runner configuration | `githubAppToken.ts` `repositoryScope` |
-| Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts` |
+| Import read | `contents: read`, `metadata: read`, one numeric repository ID | A user starts a project import; each worker run (archive and paged fallback) | `importReadToken`; `projectGithubImport.ts`, `projectGithubImportArchive.ts`, `projectGithubImportWorker.ts` |
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
 | Mirror push | `contents: write` (Git data API only; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |

@@ -773,3 +773,19 @@ test('forge import: resumes on the journal job id, polls to ready, and a finishe
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('bench scripts run through a symlinked install: the main guard compares real paths', async () => {
+  const { isMainModule } = await import('../scripts/main-module.mjs');
+  const { symlinkSync, realpathSync } = await import('node:fs');
+  const { pathToFileURL, fileURLToPath } = await import('node:url');
+  const script = new URL('../scripts/bench-t3code/forge-import.mjs', import.meta.url);
+  const directory = mkdtempSync(join(tmpdir(), 'bench-link-'));
+  symlinkSync(join(fileURLToPath(script), '..'), join(directory, 'current'));
+  const linked = join(directory, 'current', 'forge-import.mjs');
+  // Node names the main module by its real path, so argv[1] must be resolved before comparing.
+  const real = pathToFileURL(realpathSync(fileURLToPath(script))).href;
+  assert.notEqual(pathToFileURL(linked).href, real);
+  assert.equal(isMainModule(real, linked), true);
+  assert.equal(isMainModule(real, join(directory, 'missing.mjs')), false);
+  assert.equal(isMainModule(real, undefined), false);
+});
