@@ -560,6 +560,7 @@ Configuration is written to the ignored `.env.local`.
 - `FORGE_WEB_URL`: HTTPS origin of the Forge web app serving `/device` with the existing Clerk login. Deploy the Convex auth config, HTTP actions, functions and schema together, then publish the hosted web build. Existing Clerk/GitHub settings remain required. For a custom HTTP origin, set `FORGE_HTTP_URL` in the CLI environment; standard `.convex.cloud` deployment URLs derive `.convex.site`.
 - `FORGE_SECRET_KEYS`: the Secret Object keyring (see [operations](operations.md)).
 - `GITHUB_PUBLIC_TOKEN`: optional, for public GitHub API reads only.
+- `GITHUB_APP_SLUG`: optional, the Forge GitHub App's URL slug. An import refusal for an owner without an installation links `https://github.com/apps/SLUG/installations/new` when it is set.
 - `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY`: required. Every deployment, self-host included, writes source and artifact bytes to R2, with no opt-in and no Convex-storage fallback; missing settings fail writes with `R2_NOT_CONFIGURED`. `R2_ENDPOINT` optionally points at another S3-compatible store (https, or http on loopback). See [data placement](data-placement.md).
 - The list above is the minimum for sign-in, import and R2; hosted checks, Actions and workers read further variables (for example `FORGE_WORKER_KEY`, `NETLIFY_WORKER_URL`, `FORGE_HOSTED_CHECK_KEY_ID`, `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY`); see [GitHub App](operations/github-app.md) and [GitHub Actions checks](operations/github-actions-checks.md).
 

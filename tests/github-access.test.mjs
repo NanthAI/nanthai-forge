@@ -53,3 +53,79 @@ test('anonymous access uses current public visibility and never inherits private
     { code: 'GITHUB_UNAVAILABLE' },
   );
 });
+
+test('a repository outside the App installation names the exact install step', async () => {
+  const config = { clerkSecret: 'test-clerk', appClientId: 'test-app', appClientSecret: 'test-secret' };
+  let installations = [],
+    installationStatus = 200;
+  const urls = [];
+  const request = async (url, options) => {
+    urls.push(url);
+    if (url.startsWith('https://api.clerk.com/'))
+      return new Response(JSON.stringify([{ token: 'ghu_test' }]));
+    if (url.includes('/applications/')) return new Response('{}');
+    if (url.includes('/user/installations'))
+      return new Response(JSON.stringify({ installations }), { status: installationStatus });
+    return new Response('{}', { status: 404 });
+  };
+  const refusal = async (repository = 'acme/secret', extra = config) => {
+    try {
+      await authorizeGithub(repository, 'owner', extra, request);
+    } catch (error) {
+      return error;
+    }
+    assert.fail('expected a refusal');
+  };
+  installations = [
+    {
+      id: 7,
+      app_slug: 'forge-app',
+      repository_selection: 'selected',
+      html_url: 'https://github.com/organizations/acme/settings/installations/7',
+      account: { login: 'Acme', type: 'Organization' },
+    },
+  ];
+  let error = await refusal();
+  assert.equal(error.code, 'GITHUB_UNAVAILABLE');
+  assert.match(error.message, /acme\/secret is not in the Forge GitHub App installation for acme/);
+  assert.match(error.message, /https:\/\/github\.com\/organizations\/acme\/settings\/installations\/7/);
+  assert.match(error.message, /selected repositories/);
+  installations = [
+    { id: 8, repository_selection: 'selected', account: { login: 'someone', type: 'User' } },
+    {
+      id: 9,
+      app_slug: 'forge-app',
+      repository_selection: 'selected',
+      account: { login: 'other', type: 'User' },
+    },
+  ];
+  error = await refusal('someone/private');
+  assert.match(
+    error.message,
+    /https:\/\/github\.com\/settings\/installations\/8/,
+    'user-account fallback link',
+  );
+  installations = [
+    {
+      id: 9,
+      app_slug: 'forge-app',
+      repository_selection: 'selected',
+      account: { login: 'other', type: 'User' },
+    },
+  ];
+  error = await refusal();
+  assert.equal(error.code, 'GITHUB_UNAVAILABLE');
+  assert.match(error.message, /not installed for acme/);
+  assert.match(error.message, /https:\/\/github\.com\/apps\/forge-app\/installations\/new/);
+  installations = [];
+  error = await refusal('acme/secret', { ...config, appSlug: 'configured-app' });
+  assert.match(error.message, /apps\/configured-app\/installations\/new/);
+  error = await refusal();
+  assert.match(error.message, /not installed for acme/);
+  assert.doesNotMatch(error.message, /https:/);
+  installationStatus = 500;
+  error = await refusal();
+  assert.equal(error.code, 'GITHUB_UNAVAILABLE');
+  assert.match(error.message, /GitHub could not provide this repository/);
+  assert.equal(urls.filter(url => url.includes('/user/installations')).length > 0, true);
+});

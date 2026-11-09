@@ -12,6 +12,7 @@ export function githubConfig() {
     appClientId: process.env.GITHUB_APP_CLIENT_ID,
     appClientSecret: process.env.GITHUB_APP_CLIENT_SECRET,
     publicToken: process.env.GITHUB_PUBLIC_TOKEN,
+    appSlug: process.env.GITHUB_APP_SLUG,
   };
 }
 export async function currentAccess(

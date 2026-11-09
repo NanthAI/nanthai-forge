@@ -48,6 +48,11 @@ This imports the selected committed snapshot, including binary files, executable
 modes and symlink targets. Submodules remain commit pointers. Git history and
 external LFS objects are separate. A public upstream produces a public mirror;
 a private upstream retains private visibility and needs current GitHub access.
+If the Forge GitHub App is installed for selected repositories only, a private
+repository outside that selection is refused with its name and a link to the
+installation's settings. Open the link, add the repository under **Repository
+access**, then retry the import. If the App is not installed for that owner, the
+refusal says so and names the install step. No Forge setting changes.
 The separate **Import from GitHub · read-only analysis** link opens an analysis
 tour; use **New project** for an editable project.
 
@@ -94,6 +99,31 @@ Use the returned operation ID to observe or resume the same landing after a lost
 reply. Resolve any reported conflicts in the Lane and retry. If the project's
 existing policy requests local preflight, save first, then run
 `nforge agent LANE_PATH preflight '{}'` before landing.
+
+## No background process
+
+A normal user never needs a Forge background process. `login`, `clone`, `start`,
+`save`, `land`, `wait`, `pull` and `status` are short commands: each runs, prints
+its result and exits. Nothing starts at login or boot, and no service, launchd or
+systemd unit, tray app or listener is installed. Git is needed only to fetch the
+Forge source checkout when you install from source (above); these commands run
+without Git on `PATH`. An idle clone sends no calls.
+
+Two things can stay running, both opt-in and each with one job:
+
+- `nforge worker …` runs hosted checks on your own machine when you choose a
+  self-hosted runner ([self-hosted runner](operations/self-hosted-runner.md)).
+  Stopping it stops only those checks; it does nothing else.
+- `nforge mcp …` is the stdio connection your editor or agent harness starts and
+  stops with its own session. It is the harness's process, not a Forge daemon.
+
+A command may start a helper for one job, such as submitting a landing; it ends
+with that job (`tests/no-resident-process.test.mjs` lists every such child). A
+local Git or native owner project, the Mac-owner workflow, also starts owner
+helpers for landing, presence and file watching; hosted users do not. The old dogfood owner service (a launchd job on one Mac)
+is retired because the hosted queue lands changes
+([retired setup](operations/landing-batches.md#owner-mac-launchd-setup-retired)).
+Its remaining code is removed under the cleanup work, not something to run.
 
 ## Keep the project folder current
 
