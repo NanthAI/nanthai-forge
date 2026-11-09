@@ -119,6 +119,17 @@ export function checkArgs(fn, args, name) {
   check(args === undefined ? {} : args, name, 'ArgumentValidationError');
   checkConvexValue(args, name, 'ArgumentValidationError');
 }
+/** A function's return value against its declared `returns` validator, as Convex checks it after the
+ * handler (a mismatch there is not caught by the handler's own error mapping). */
+const returnChecks = new WeakMap();
+export function checkReturns(fn, value, name) {
+  let check = returnChecks.get(fn.exportReturns);
+  if (!check) {
+    check = compile(JSON.parse(fn.exportReturns()));
+    returnChecks.set(fn.exportReturns, check);
+  }
+  check(value, name, 'ReturnsValidationError');
+}
 /** A function's return value as Convex would serialize it. */
 export const checkReturn = (value, name) => checkConvexValue(value, name, 'ReturnValueError');
 

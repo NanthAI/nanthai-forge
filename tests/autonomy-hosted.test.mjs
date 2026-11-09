@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { checkReturns } from './convex-args.mjs';
 import { state } from './hosted-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -154,6 +155,33 @@ test('new hosted project gets supervised; contributors cannot set policy', async
     policies.read._handler(s.ctx, { projectId: s.projectId }),
     errorCode('PROJECT_UNAVAILABLE'),
   );
+});
+
+test('agentDefaults.stacking sets, reads back and clears through the real Convex shapes (bench c5e86d71)', async t => {
+  const s = await hosted(t);
+  const set = async stacking => {
+    const reply = await policies.set._handler(s.ctx, {
+      projectId: s.projectId,
+      command: JSON.stringify({
+        action: 'set-policy',
+        operationId: randomUUID(),
+        agentDefaults: { stacking },
+      }),
+    });
+    checkReturns(policies.set, reply, 'projectAutonomy:set');
+    const read = await policies.read._handler(s.ctx, { projectId: s.projectId });
+    checkReturns(policies.read, read, 'projectAutonomy:read');
+    return { reply, read };
+  };
+  // The fixture's patch enforces convex/schema.ts, so a validator without the field fails here.
+  const auto = await set('auto');
+  assert.equal(auto.reply.policy.agentDefaults.stacking, 'auto');
+  assert.equal(auto.read.agentDefaults.stacking, 'auto');
+  assert.equal(s.tables.hostedProjects.get(s.projectId).autonomyPolicy.agentDefaults.stacking, 'auto');
+  // Back to the documented default.
+  const offer = await set('offer');
+  assert.equal(offer.read.agentDefaults.stacking, 'offer');
+  assert.equal(s.tables.projectPolicyChanges.size, 2);
 });
 
 test('coordination-only credentials cannot set policy, even with owner subject', async t => {

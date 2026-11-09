@@ -1185,8 +1185,13 @@ export class HostedAgentTransport {
       if (refused && safe.recovery?.retryable !== true)
         throw retryableExchangeError(safe, this.callerOperationId) ?? safe;
       if (safe instanceof SourceAuthorityStaleError || safe.recovery) throw safe;
-      // Version skew needs an upgrade, not a replay.
-      if (safe.code === 'HOSTED_ACTION_UNSUPPORTED' || safe.code === 'CLI_UPGRADE_REQUIRED') throw safe;
+      // Version skew (either side) needs an upgrade, not a replay.
+      if (
+        safe.code === 'HOSTED_ACTION_UNSUPPORTED' ||
+        safe.code === 'CLI_UPGRADE_REQUIRED' ||
+        safe.code === 'HOSTED_SCHEMA_REJECTED'
+      )
+        throw safe;
       throw new ForgeError(
         safe.code,
         gateCodes.has(safe.code)

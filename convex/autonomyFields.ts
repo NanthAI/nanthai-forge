@@ -32,6 +32,7 @@ export const autonomyPolicy = v.object({
       checkpointNudgeMinutes: v.optional(v.number()),
       autoClaim: v.optional(v.boolean()),
       dormantAfterDays: v.optional(v.number()),
+      stacking: v.optional(v.union(v.literal('offer'), v.literal('auto'))),
       stallAlerts: v.optional(
         v.object({
           enabled: v.optional(v.boolean()),
