@@ -427,18 +427,36 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     const own = newWindow();
     try {
       await this.window.run(own, async () => {
-        await this.prepareRecipes(files.map(file => file.pin));
-        const read = await readCompleteRuns(files, new Map([...this.rows, ...own.rows]));
-        const rest = files.filter(file => !read.has(file.pin.sha256));
-        // Small files have eight concurrent GETs. Large/recipe objects stream to disk, four at a
-        // time (each holds at most 4 MiB of read-ahead, so about 16 MiB in all).
-        const small = rest.filter(file => file.pin.size <= 2 * 1024 * 1024);
-        await mapExchange(small, 8, file => this.downloadToFile(file.pin, file.path), {
-          bytes: 16 * 1024 * 1024,
-          size: file => file.pin.size,
-        });
+        // The recipe walk (one describe and GET per tree level) runs while this window's pack runs
+        // and small plain files download, instead of before them (fea47345 round 3).
+        const logical = (file: { pin: ContentPin }) => this.row(file.pin.sha256)?.location === 'recipe';
+        const walk = this.prepareRecipes(files.map(file => file.pin));
+        walk.catch(() => undefined);
+        const plain = async () => {
+          const read = await readCompleteRuns(
+            files.filter(file => !logical(file)),
+            new Map([...this.rows, ...own.rows]),
+          );
+          // Small files have eight concurrent GETs.
+          const small = files.filter(
+            file => !logical(file) && !read.has(file.pin.sha256) && file.pin.size <= 2 * 1024 * 1024,
+          );
+          await mapExchange(small, 8, file => this.downloadToFile(file.pin, file.path), {
+            bytes: 16 * 1024 * 1024,
+            size: file => file.pin.size,
+          });
+          return read;
+        };
+        const [walked, readPlain] = await Promise.allSettled([walk, plain()]);
+        if (walked.status === 'rejected') throw walked.reason;
+        if (readPlain.status === 'rejected') throw readPlain.reason;
+        const read = readPlain.value;
+        // Large/recipe objects stream to disk, four at a time (each holds at most 4 MiB of
+        // read-ahead, so about 16 MiB in all).
         await mapExchange(
-          rest.filter(file => file.pin.size > 2 * 1024 * 1024),
+          files.filter(
+            file => logical(file) || (!read.has(file.pin.sha256) && file.pin.size > 2 * 1024 * 1024),
+          ),
           4,
           file => this.downloadToFile(file.pin, file.path),
         );

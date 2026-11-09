@@ -10,6 +10,7 @@ import {
   existsSync,
   writeFileSync,
   unlinkSync,
+  rmSync,
 } from 'node:fs';
 import { chmod, copyFile, open, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
@@ -110,6 +111,64 @@ export function installHostedCheckout(
     }
     installHostedFile(checkout, objects, file);
   }
+}
+/** Working-tree files follow git (fea47345 round 3): a checkout materialized from the verified
+ * store publishes them without an fsync each; its marker is written and fsynced last, inside the
+ * private stage that one rename publishes. A crash before that rename leaves no marker (the
+ * stage is swept and the checkout rebuilt). A system crash after it, before the checkout's
+ * receipt completes, can leave a file whose metadata is exactly as installed (the stat index
+ * entry: size, times, inode, mode) but whose bytes differ: no write by a person or tool leaves
+ * all of those unchanged, so only such files are rebuilt. Any other difference is treated as an
+ * edit and kept for the usual preservation checks; saving user edits never takes this path. */
+export function interruptedCheckoutDamage(
+  root: string,
+  files: readonly NativeFile[],
+  installed: ReadonlyMap<string, readonly [number, number, number, number, number, string]>,
+) {
+  return files.filter(file => {
+    const entry = installed.get(file.path);
+    if (file.mode === 'symlink' || !entry || entry[5] !== file.blob) return false;
+    try {
+      const stat = lstatSync(join(root, file.path));
+      if (
+        !stat.isFile() ||
+        stat.size !== entry[0] ||
+        stat.mtimeMs !== entry[1] ||
+        stat.ctimeMs !== entry[2] ||
+        stat.ino !== entry[3] ||
+        stat.mode !== entry[4]
+      )
+        return false;
+      const bytes = readSource(root, file.path, Number.MAX_SAFE_INTEGER);
+      return !bytes || digest(bytes) !== file.blob;
+    } catch {
+      return false;
+    }
+  });
+}
+/** Rebuild these files of an interrupted checkout from the store: each is cloned, checked against
+ * its pin and flushed, inside directories that must be real. */
+export function rebuildCheckoutFiles(root: string, objects: string, files: readonly NativeFile[]) {
+  const real = realpathSync(root);
+  for (const file of files) {
+    const directory = join(root, dirname(file.path));
+    mkdirSync(directory, { recursive: true });
+    invariant(
+      realpathSync(directory) === join(real, dirname(file.path)),
+      'UNSAFE_PATH',
+      'Checkout directories must be real.',
+    );
+    rmSync(join(root, file.path), { force: true });
+    installHostedFile(root, objects, file);
+    const bytes = readSource(root, file.path, Number.MAX_SAFE_INTEGER);
+    invariant(
+      bytes && digest(bytes) === file.blob,
+      'INVALID_NATIVE_SOURCE',
+      'Cloned source differs from the selected content.',
+    );
+  }
+  for (const directory of new Set(files.map(file => dirname(join(root, file.path)))))
+    syncDirectory(directory);
 }
 /** Stage all copies before flushing them. Interleaving clone/chmod with fsync
  * repeatedly commits filesystem metadata; separate bounded passes let it coalesce.

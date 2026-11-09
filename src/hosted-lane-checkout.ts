@@ -43,6 +43,8 @@ import {
   stageHostedFiles,
   flushHostedFiles,
   flushHostedCheckoutFiles,
+  interruptedCheckoutDamage,
+  rebuildCheckoutFiles,
 } from './hosted-checkout-files.js';
 import {
   hostedLaneCheckoutSchema,
@@ -348,9 +350,17 @@ async function checkout(
         delta && !installedHere ? await checkoutIo(async () => deltaObstructed(root, delta)) : null;
       if (obstruction) throw deltaObstructionError(obstruction);
       const staged = delta ? delta.install : files;
+      // This operation published a first (whole-stage) tree but did not complete: files a crash tore
+      // are rebuilt. An in-place delta stays durable through its journal and needs none.
+      const repairs =
+        installedHere && operation.previousMarker === null
+          ? await checkoutIo(async () =>
+              interruptedCheckoutDamage(root, files, readCheckoutStatIndex(root).entries),
+            )
+          : [];
       await metrics.measure('cacheVerify', () =>
         cache.ensure(
-          staged.map(file => file.blob),
+          [...staged, ...repairs].map(file => file.blob),
           { installVerifies: true },
         ),
       );
@@ -392,15 +402,21 @@ async function checkout(
                   durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(marker)),
                 'durability',
               );
-              // Both barriers must finish before publication; their order inside a private
-              // stage is immaterial. Drain both even on failure before removing the stage.
-              const flushed = await metrics.measure('durability', () =>
-                Promise.allSettled([
-                  flushHostedFiles(stage, staged),
-                  flushHostedCheckoutFiles(stage, staged),
-                ]),
-              );
-              for (const result of flushed) if (result.status === 'rejected') throw result.reason;
+              if (delta) {
+                // An in-place delta rolls forward from its journaled stage after a crash, so that
+                // stage stays durable. Drain both barriers even on failure before removing it.
+                const flushed = await metrics.measure('durability', () =>
+                  Promise.allSettled([
+                    flushHostedFiles(stage, staged),
+                    flushHostedCheckoutFiles(stage, staged),
+                  ]),
+                );
+                for (const result of flushed) if (result.status === 'rejected') throw result.reason;
+              } else {
+                // A whole new tree follows git: no fsync per file. Its marker (fsynced above) is
+                // reachable once the stage directory is; one rename then publishes both.
+                await checkoutIo(async () => syncDirectory(stage), 'durability');
+              }
               // Stats of the private stage carry over the rename, so the first save reads only edited files.
               return metrics.measure('index', () =>
                 checkoutIo(async () => indexInstalledFiles(stage, staged), 'durability'),
@@ -428,6 +444,7 @@ async function checkout(
                           obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` },
                         },
                       );
+                    if (repairs.length) rebuildCheckoutFiles(root, cache.objects, repairs);
                     if (current?.operationId === request.operationId) preserveArtifacts(files);
                     preserveCaches([...(current?.state.files ?? []), ...state.files]);
                     const index = readCheckoutStatIndex(root);

@@ -19,44 +19,47 @@ export async function* aheadOf<T, R>(items: readonly T[], depth: number, run: (i
 export const heavyObjectBytes = 2 * 1024 * 1024;
 const heavy = (group: ContentPin[]) => group.some(pin => pin.size > heavyObjectBytes);
 
-/** Runs `windows` downloads at once over groups as their pages are described. Groups with a
- * large object start first, so their slow chunk walks overlap the small-file pages instead of
- * trailing them. At most `held` pins are queued or downloading (bounded rows in memory), and
- * every started window settles before this returns or throws its first failure. */
+/** Runs up to `windows` light downloads and, beside them, up to `windows` heavy ones over groups
+ * as their pages are described. A group with a large object starts its slow recipe walk and
+ * chunk stream in its own window as soon as its page is seen, instead of waiting behind (or
+ * trailing) the small-file windows (fea47345 round 3). At most `held` pins are queued or
+ * downloading (bounded rows in memory), and every started window settles before this returns
+ * or throws its first failure. */
 export async function runDownloadWindows(
   pages: AsyncIterable<ContentPin[][]>,
   windows: number,
   download: (group: ContentPin[]) => Promise<void>,
-  held = 2000,
+  held = 4000,
 ) {
-  const queue: ContentPin[][] = [],
+  const queues = { heavy: [] as ContentPin[][], light: [] as ContentPin[][] },
+    running = { heavy: 0, light: 0 },
     active = new Set<Promise<void>>();
   let failed = false,
     stopped = false,
     failure: unknown,
     holding = 0;
   const pump = () => {
-    while (!failed && !stopped && active.size < windows && queue.length) {
-      const group = queue.shift()!;
-      const task: Promise<void> = download(group)
-        .catch(error => {
-          if (!failed) [failed, failure] = [true, error];
-        })
-        .finally(() => {
-          active.delete(task);
-          holding -= group.length;
-          pump();
-        });
-      active.add(task);
-    }
+    for (const kind of ['heavy', 'light'] as const)
+      while (!failed && !stopped && running[kind] < windows && queues[kind].length) {
+        const group = queues[kind].shift()!;
+        running[kind]++;
+        const task: Promise<void> = download(group)
+          .catch(error => {
+            if (!failed) [failed, failure] = [true, error];
+          })
+          .finally(() => {
+            active.delete(task);
+            running[kind]--;
+            holding -= group.length;
+            pump();
+          });
+        active.add(task);
+      }
   };
   try {
     for await (const groups of pages) {
       if (failed) break;
-      const first = groups.filter(heavy),
-        light = queue.findIndex(group => !heavy(group));
-      queue.splice(light < 0 ? queue.length : light, 0, ...first);
-      queue.push(...groups.filter(group => !heavy(group)));
+      for (const group of groups) queues[heavy(group) ? 'heavy' : 'light'].push(group);
       holding += groups.reduce((sum, group) => sum + group.length, 0);
       pump();
       while (!failed && holding > held && active.size) await Promise.race(active);

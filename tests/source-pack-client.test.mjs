@@ -10,13 +10,14 @@ import {
   rmSync,
   writeFileSync,
   readdirSync,
+  existsSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { gzipSync } from 'node:zlib';
 import { withCheckoutMaterialization } from '../dist/checkout-materialization.js';
 import { HostedCheckoutCache, checkoutPackMinimum } from '../dist/hosted-checkout-cache.js';
-import { createSourcePack, unpackSourcePackObjects } from '../dist/source-pack-archive.js';
+import { createSourcePack, unpackSourcePackObjects, fileDigest } from '../dist/source-pack-archive.js';
 import { machineObjectsDirectory } from '../dist/machine-object-store.js';
 import { SourceWorkerReader } from '../dist/hosted-source-worker-reader.js';
 import { digest } from '../dist/hash.js';
@@ -90,8 +91,21 @@ test('Lane open reads one pack plus changed objects, and a second root reads onl
   const ids = data.live.map(file => file.blob);
 
   const first = transport(data.bytes, pack);
+  // Objects saved after the pack are described as soon as its header is read, while it unpacks.
+  let storedAtDescribe = null;
+  const describe = first.objects;
+  first.objects = async digests => {
+    storedAtDescribe ??= existsSync(machine)
+      ? readdirSync(machine).filter(name => !name.startsWith('.')).length
+      : 0;
+    return describe(digests);
+  };
   const cold = new HostedCheckoutCache(join(data.directory, 'a.forge-client'), first, undefined, machine);
   await withCheckoutMaterialization(cold.root, () => cold.ensure(ids), { paths: cold.ioPaths });
+  assert.ok(
+    storedAtDescribe < data.bytes.size / 2,
+    `changed objects overlap the unpack (${storedAtDescribe})`,
+  );
   // Budget: one pack read and one signing page for the 10 changed files (was 30 pages).
   assert.deepEqual(first.calls, { objects: 1, sourcePack: 1, downloads: 10 });
   assert.equal(cold.sourcePack, 'used');
@@ -159,6 +173,22 @@ test('missing, small or invalid packs fall back to per-object reads with exact b
   assert.equal(failed.packObjects, 0);
   for (const id of ids) assert.deepEqual(readFileSync(join(failed.objects, id)), data.bytes.get(id));
   assert.deepEqual(readdirSync(failed.root), ['objects'], 'opening does not parse unchanged source');
+
+  // A pack that breaks after its header: objects it never held were already fetched early, once.
+  const archive = join(data.directory, 'pack.gz'),
+    broken = join(data.directory, 'broken.gz');
+  writeFileSync(broken, readFileSync(archive).subarray(0, Math.floor(readFileSync(archive).length / 2)));
+  const cut = transport(data.bytes, {
+    ...pack,
+    size: readFileSync(broken).length,
+    sha256: await fileDigest(broken),
+    url: await serve(t, broken),
+  });
+  const halfway = new HostedCheckoutCache(join(data.directory, 'h.forge-client'), cut, undefined, null);
+  await withCheckoutMaterialization(halfway.root, () => halfway.ensure(ids), { paths: halfway.ioPaths });
+  assert.equal(halfway.sourcePack, 'failed');
+  assert.equal(cut.calls.downloads, new Set(ids).size, 'no object is fetched twice');
+  for (const id of ids) assert.deepEqual(readFileSync(join(halfway.objects, id)), data.bytes.get(id));
 });
 
 test('pack objects are written only after their own digest matches', async t => {

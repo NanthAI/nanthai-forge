@@ -12,14 +12,21 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { z } from 'zod';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { durableReplace } from './native-durability.js';
 import { hostedAgentAddress } from './hosted-agent-cli.js';
 import { tryHeavySlot } from './heavy-slots.js';
 import { shareDependencies } from './shared-dependencies.js';
-import { cliReleaseSource, type CliSource } from './cli-update-source.js';
+import {
+  CLI_UPDATE_WAIT_MS,
+  cliReleaseSource,
+  cliUpdateCommand,
+  readCliSource,
+  sourceSchema,
+  type CliSource,
+} from './cli-update-source.js';
+export { CLI_UPDATE_WAIT_MS, cliUpdateCommand, readCliSource };
 import { cliBuildCommit, cliInstallation, withCliLock } from './cli-installation.js';
 import {
   activateCliBuild,
@@ -41,10 +48,8 @@ import {
 } from './cli-canary.js';
 import { checkCliRelease, recordCliReleaseNumber, type ReleaseCheckHooks } from './cli-release-check.js';
 
-const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
 /** How long a write command waits for a live concurrent updater (a dead one is reclaimed at once).
  * A normal update takes seconds; this only bounds a wedged updater process. */
-export const CLI_UPDATE_WAIT_MS = 600_000;
 /** After a failed background update, reads stop starting new ones for this long. */
 export const CLI_BACKGROUND_RETRY_MS = 10 * 60_000;
 const failureMark = (installation: string) => join(installation, 'update-failed.json');
@@ -68,21 +73,6 @@ export function cliBackgroundUpdateFailedRecently(installation: string) {
   }
 }
 export const defaultCliInstallation = () => join(homedir(), '.local', 'share', 'forge-cli');
-export const cliUpdateCommand = (installation: string) =>
-  `nforge update --directory ${shellQuote(installation)}`;
-export function readCliSource(installation: string): CliSource {
-  const path = join(installation, 'source.json');
-  if (!existsSync(path)) {
-    const command = `nforge update ${shellQuote(process.cwd())} --directory ${shellQuote(installation)}`;
-    throw new ForgeError(
-      'CLI_UPDATE_SOURCE_REQUIRED',
-      `Configure the release from a hosted Forge source checkout. Next: ${command}`,
-      undefined,
-      { command },
-    );
-  }
-  return sourceSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
-}
 /** Build and install output is diagnostic only: stdout and stderr are buffered and shown (on stderr)
  * when a step fails. A successful update prints nothing, so the caller's stdout stays one result. */
 const OUTPUT_TAIL = 64 * 1024;

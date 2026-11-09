@@ -4,6 +4,10 @@
 // not voids; a convex/ change on the landing path voids. Synthetic readings only; no network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   differences,
   moved,
@@ -81,7 +85,10 @@ test('a deploy that changed a landing-path convex/ file voids; history, schema a
     assert.equal(r.voids.length, 1, file);
     assert.match(r.voids[0], new RegExp(`landing path changed by deploy d -> d2: ${file}`));
   }
-  assert.equal(offLandingPath('convex/projectBoardView.ts'), true);
+  assert.equal(offLandingPath('convex/gitServeAuth.ts'), true);
+  // Board and briefing are on the path: agents read notices, claims and the briefing (c75ed83f).
+  assert.equal(offLandingPath('convex/projectBoardView.ts'), false);
+  assert.equal(offLandingPath('convex/projectBriefing.ts'), false);
   assert.equal(offLandingPath('convex/projectLandingQueue.ts'), false);
 });
 
@@ -218,4 +225,42 @@ test('deploysDuring makes one gh read and returns { error } when it fails', asyn
     throw Error('gh down');
   });
   assert.match(bad.error, /gh down/);
+});
+
+test('the summary lists every recorded deploy per cell with its convex/ files', () => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-deploys-summary-'));
+  try {
+    const cell = (id, extra) => {
+      mkdirSync(join(root, 'runs', `${id}-n3-r1-a1-test`), { recursive: true });
+      writeFileSync(
+        join(root, 'runs', `${id}-n3-r1-a1-test`, 'result.json'),
+        JSON.stringify({ arm: id, cellId: id, key: 'n3-r1', ...extra }),
+      );
+    };
+    const run = { databaseId: 1, headSha: 'd2', status: 'completed' };
+    cell('forge', { deploys: [run], versions: { convexFiles: ['convex/gitServe.ts'] }, voided: [] });
+    cell('github', {
+      deploys: [run],
+      versions: { convexFiles: ['convex/schema.ts'] },
+      voided: [
+        'versions changed during cell: convex/ landing path changed by deploy d -> d2: convex/schema.ts',
+      ],
+    });
+    cell('quiet', { deploys: [], voided: [] });
+    const out = JSON.parse(
+      execFileSync(process.execPath, ['scripts/bench-t3code/summarize.mjs'], {
+        env: { ...process.env, BENCH_ROOT: root },
+        encoding: 'utf8',
+      }),
+    );
+    assert.deepEqual(
+      out.recordedDeploys.map(d => [d.cellId, d.voidedByDeploy, d.convexFiles]),
+      [
+        ['forge', false, ['convex/gitServe.ts']],
+        ['github', true, ['convex/schema.ts']],
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -117,6 +117,8 @@ export async function unpackSourcePackObjects(
   directory: string,
   keep: (blob: string) => boolean,
   observe?: (blob: string, bytes: Buffer) => void,
+  /** The pack's blobs, as soon as its header is read (before any member). */
+  listed?: (blobs: ReadonlySet<string>) => void,
 ) {
   const written = new Set<string>();
   // Files with identical content share one blob: write and report it once.
@@ -124,10 +126,13 @@ export async function unpackSourcePackObjects(
     pack,
     path,
     directory,
-    () => blob => {
-      if (written.has(blob) || !keep(blob)) return false;
-      written.add(blob);
-      return true;
+    files => {
+      listed?.(new Set(files.map(file => file.blob)));
+      return blob => {
+        if (written.has(blob) || !keep(blob)) return false;
+        written.add(blob);
+        return true;
+      };
     },
     observe,
   );

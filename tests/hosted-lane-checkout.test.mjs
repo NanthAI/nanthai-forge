@@ -18,6 +18,8 @@ import {
   readdirSync,
   linkSync,
 } from 'node:fs';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
@@ -29,6 +31,7 @@ import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
 import { sourceTree } from '../dist/source-tree.js';
 import { nativeFile } from '../dist/native-file.js';
 import { digest } from '../dist/hash.js';
+import { tearInstalled } from './checkout-tear.mjs';
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-lane-checkout-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -364,6 +367,45 @@ test('interrupted pre-install and post-install renames reconcile without losing 
     assert.equal(JSON.parse(readFileSync(receiptPath)).complete, true);
     assert.equal(existsSync(join(cache, 'previous')), false);
   }
+});
+test('a whole new tree publishes without an fsync per file; a torn interrupted publication is rebuilt from the store', async t => {
+  const s = setup(t);
+  const original = fs.open,
+    synced = [];
+  t.after(() => {
+    fs.open = original;
+    syncBuiltinESMExports();
+  });
+  fs.open = async (...args) => {
+    const handle = await original(...args),
+      sync = handle.sync.bind(handle);
+    handle.sync = async () => {
+      synced.push(String(args[0]));
+      await sync();
+    };
+    return handle;
+  };
+  syncBuiltinESMExports();
+  const request = s.request();
+  await checkoutHostedLane(s.root, request, s.transport);
+  assert.deepEqual(synced, [], 'working-tree files and directories follow git: no per-file barrier');
+  // A system crash after the publishing rename, before the receipt completed: bytes and a file torn.
+  const cache = `${s.root}.forge-client`,
+    receiptPath = join(cache, `${request.operationId}.json`);
+  const receipt = JSON.parse(readFileSync(receiptPath));
+  receipt.complete = false;
+  writeFileSync(receiptPath, JSON.stringify(receipt), { mode: 0o600 });
+  // Torn: bytes lost while size, times, inode and mode stay exactly as the install recorded them.
+  tearInstalled(s.root, { 'src/a.txt': '\0\0\0\0\0\0', 'binary.dat': Buffer.alloc(6) });
+  const result = await checkoutHostedLane(s.root, request, s.transport);
+  assert.equal(result.downloadedObjects, 0, 'rebuilt from the verified store');
+  assert.equal(readFileSync(join(s.root, 'src/a.txt'), 'utf8'), 'first\n');
+  assert.deepEqual(readFileSync(join(s.root, 'binary.dat')), Buffer.from([0, 255, 128, 1, 10, 0]));
+  assert.equal(JSON.parse(readFileSync(receiptPath)).complete, true);
+  // A completed checkout is never "repaired": later edits are the user's.
+  writeFileSync(join(s.root, 'src/a.txt'), 'user edit');
+  await checkoutHostedLane(s.root, request, s.transport);
+  assert.equal(readFileSync(join(s.root, 'src/a.txt'), 'utf8'), 'user edit');
 });
 test('edits made while new source downloads survive the final install check', async t => {
   const s = setup(t);

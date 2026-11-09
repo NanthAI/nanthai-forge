@@ -30,8 +30,10 @@ export interface CheckoutObjectTransport {
    * stream while the next window's runs download, instead of all waiting for the last page. */
   readonly downloadWindows?: number;
 }
-/** Metadata pages described ahead of the one being downloaded and installed. */
-export const checkoutDescribeAhead = 2;
+/** Metadata pages described ahead of the one being downloaded and installed: with 500-pin pages,
+ * a checkout of about 4,000 objects describes every page at once, so a large file on its last
+ * page is found (and its walk started) early. The calls are the same; only their overlap grows. */
+export const checkoutDescribeAhead = 7;
 /** Windows of at most 16 MiB (one larger object alone). */
 export function sizeGroups(pins: ContentPin[]) {
   const groups: ContentPin[][] = [];
@@ -100,6 +102,11 @@ export class HostedCheckoutCache {
     if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
+    await this.fetchMissing(missing);
+  }
+  /** Describe pages of `missing` and download them in windows. */
+  private async fetchMissing(missing: string[]) {
+    if (!missing.length) return;
     const pageSize = this.transport.objectPageSize ?? 100,
       pages: string[][] = [];
     for (let at = 0; at < missing.length; at += pageSize) pages.push(missing.slice(at, at + pageSize));
@@ -259,17 +266,30 @@ export class HostedCheckoutCache {
       return missing;
     }
     const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'pack-')));
+    let after: string[] = [],
+      early = undefined as Promise<void> | undefined;
     try {
       const archive = join(temporary, 'pack.gz'),
         unpacked = join(temporary, 'objects'),
         wanted = new Set(missing);
       await downloadSourcePack(pack, archive);
+      // Objects saved after this pack are not in it: they are described and downloaded while the
+      // pack unpacks, as soon as its header lists its blobs, instead of after it (fea47345 round 3).
       const written = await unpackSourcePackObjects(
         pack,
         archive,
         unpacked,
         blob => wanted.has(blob) || (this.machine !== null && !checkoutPathExists(join(this.machine, blob))),
-      );
+        undefined,
+        listed => {
+          after = missing.filter(id => !listed.has(id));
+          early = this.fetchMissing(after);
+          early.catch(() => undefined);
+        },
+      ).catch(async error => {
+        await early?.catch(() => undefined);
+        throw error;
+      });
       await checkoutIo(() => rm(archive, { force: true }));
       await mapCheckoutIo(written, async id => {
         const path = join(unpacked, id);
@@ -279,10 +299,16 @@ export class HostedCheckoutCache {
       for (const id of written) if (wanted.delete(id)) this.packObjects++;
       this.packBytes = pack.size;
       this.sourcePack = 'used';
+      await early;
+      for (const id of after) wanted.delete(id);
       return missing.filter(id => wanted.has(id));
     } catch {
+      // A failed early download fails the checkout (it rethrows here), as it would after the
+      // pack; a failed pack falls back to pages for everything the early downloads did not store.
+      await early;
       this.sourcePack = 'failed';
-      return missing;
+      const fetched = new Set(after);
+      return missing.filter(id => !fetched.has(id));
     } finally {
       await checkoutIo(async () => rmSync(temporary, { recursive: true, force: true }));
     }

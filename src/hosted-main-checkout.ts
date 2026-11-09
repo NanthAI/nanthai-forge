@@ -18,6 +18,9 @@ import { durableReplace, syncDirectory } from './native-durability.js';
 import {
   cleanHostedCheckout,
   installHostedFiles,
+  stageHostedFiles,
+  interruptedCheckoutDamage,
+  rebuildCheckoutFiles,
   flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
 import { workLocked } from './work-lock.js';
@@ -239,10 +242,20 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
   await objects.ensure(stagedFiles.map(file => file.blob));
   const stage = mkdtempSync(join(cache, delta ? 'delta-' : 'checkout-'));
   try {
-    await installHostedFiles(stage, objects.objects, stagedFiles);
-    mkdirSync(join(stage, '.forge'), { mode: 0o700 });
-    save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
-    await flushHostedCheckoutFiles(stage, stagedFiles);
+    if (delta) {
+      // An in-place pull rolls forward from its journaled stage after a crash: that stage stays durable.
+      await installHostedFiles(stage, objects.objects, stagedFiles);
+      mkdirSync(join(stage, '.forge'), { mode: 0o700 });
+      save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
+      await flushHostedCheckoutFiles(stage, stagedFiles);
+    } else {
+      // A whole new tree follows git: no fsync per file. Its marker is written and fsynced last,
+      // and one rename publishes it; an interrupted publication is found and rebuilt below.
+      await stageHostedFiles(stage, objects.objects, stagedFiles);
+      mkdirSync(join(stage, '.forge'), { mode: 0o700 });
+      save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
+      syncDirectory(stage);
+    }
     // Stats of the private stage carry over the rename, so later checks read only edited files.
     const installedIndex = delta ? null : indexInstalledFiles(stage, stagedFiles);
     // Reauthorize after a transfer, immediately before publication. When every object came from
@@ -289,6 +302,14 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
           );
         });
       const installed = marker && JSON.stringify(marker.selection) === JSON.stringify(selection);
+      if (installed && !delta && digest(markerBytes!) !== operation.previousMarker) {
+        // This operation published the tree but did not complete: rebuild any file a crash tore.
+        rebuildCheckoutFiles(
+          root,
+          objects.objects,
+          interruptedCheckoutDamage(root, stagedFiles, readCheckoutStatIndex(root).entries),
+        );
+      }
       if (installed) preserveArtifacts();
       preserveCaches([...beforeFiles, ...state.files]);
       const index = readCheckoutStatIndex(root);

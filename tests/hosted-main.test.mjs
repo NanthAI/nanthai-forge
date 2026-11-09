@@ -2,11 +2,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync, chmodSync, lstatSync } from 'node:fs';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { checkoutHostedMain } from '../dist/hosted-main-checkout.js';
 import { digest } from '../dist/hash.js';
+import { clientCacheRoot } from '../dist/root-paths.js';
+import { tearInstalled } from './checkout-tear.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture, upload, modules } from './project-exchange-fixture.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
@@ -251,6 +255,45 @@ test('server refuses revoked readers, cross-project bindings and absent objects'
   await assert.rejects(main.current._handler(s.ctx, { projectId: 'project' }), /SOURCE_UNAVAILABLE/);
 });
 
+test('a clone publishes without an fsync per file; a torn interrupted publication is rebuilt from the store', async t => {
+  const s = setup(t),
+    request = s.request(),
+    original = fs.open,
+    synced = [];
+  t.after(() => {
+    fs.open = original;
+    syncBuiltinESMExports();
+  });
+  fs.open = async (...args) => {
+    const handle = await original(...args),
+      sync = handle.sync.bind(handle);
+    handle.sync = async () => {
+      synced.push(String(args[0]));
+      await sync();
+    };
+    return handle;
+  };
+  syncBuiltinESMExports();
+  await checkoutHostedMain(s.root, request, s.transport);
+  assert.deepEqual(synced, [], 'working-tree files and directories follow git: no per-file barrier');
+  // A system crash after the publishing rename, before the receipt completed.
+  const receiptPath = join(clientCacheRoot(s.root), `${request.operationId}.json`);
+  const receipt = JSON.parse(readFileSync(receiptPath));
+  receipt.complete = false;
+  writeFileSync(receiptPath, JSON.stringify(receipt), { mode: 0o600 });
+  // Torn: bytes lost while size, times, inode and mode stay exactly as the install recorded them.
+  tearInstalled(s.root, { 'a.txt': 'x'.repeat(6), 'bin/run': '\0'.repeat(10) });
+  const result = await checkoutHostedMain(s.root, request, s.transport);
+  assert.equal(result.downloadedObjects, 0, 'rebuilt from the verified store');
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'first\n');
+  assert.equal(readFileSync(join(s.root, 'bin/run'), 'utf8'), 'unchanged\n');
+  assert.equal(lstatSync(join(s.root, 'bin/run')).mode & 0o777, 0o755);
+  assert.equal(JSON.parse(readFileSync(receiptPath)).complete, true);
+  // Another clone operation over an existing clone of the same head never rewrites edits.
+  writeFileSync(join(s.root, 'a.txt'), 'user edit');
+  await assert.rejects(checkoutHostedMain(s.root, s.request(), s.transport), { code: 'WORK_CONFLICT' });
+  assert.equal(readFileSync(join(s.root, 'a.txt'), 'utf8'), 'user edit');
+});
 test('interrupted old pull does not overwrite a newer checkout', async t => {
   const s = setup(t),
     original = s.request();

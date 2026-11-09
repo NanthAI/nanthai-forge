@@ -89,14 +89,17 @@ runs; the bench project has its own queue, and dogfood checks run on another rep
   (`versions.convexFiles`). The change voids the cell and its batch when any changed `convex/` file
   is **on the landing path**, that is, not under one of these off-path prefixes
   (`versions.mjs OFF_LANDING_PATH`): `convex/gitServe`, `convex/projectGithubImport`,
-  `convex/projectGithubInbound`, `convex/projectBoard`, `convex/projectBriefing`,
-  `convex/projectPeople`, `convex/projectPurge`, `convex/projectR2Purge`, `convex/projectR2Sweep`,
+  `convex/projectGithubInbound`, `convex/projectPeople`, `convex/projectPurge`,
+  `convex/projectR2Purge`, `convex/projectR2Sweep`,
   `convex/projectArchive`, `convex/projectBackup`, `convex/projectLegacy`, `convex/legacy`,
   `convex/archive`, `convex/backup`, `convex/account`, `convex/abuse`, `convex/sharing`,
   `convex/team`. It also voids when the list cannot be read or classified (void when unsure).
   Everything else is on the path, including `schema.ts`, `projectHistory*`, `projectHosted*`,
-  `projectWork*`, `projectCheck*`, `projectLanding*` and `projectFinish*`. A change that touches
-  only off-path files is recorded, not a void. A cell inside a batch checks this against the
+  `projectWork*`, `projectCheck*`, `projectLanding*`, `projectFinish*`, and `projectBoard*` and
+  `projectBriefing*` (Forge-arm agents read board notices, claims and the start briefing during a
+  cell; lead c75ed83f). A change that touches only off-path files is recorded, not a void. The
+  bench report lists every deploy recorded during a scored cell that did not void it, with its
+  changed `convex/` files (`summarize.mjs recordedDeploys`), so a reader can check the call. A cell inside a batch checks this against the
   batch's start record instead of requiring the CLI to equal main, or the deployed `convex/` to
   equal the CLI's, at its own start.
 - **Runner actions (clarification, same comment):** "the resolved SHA for the same action
@@ -294,3 +297,18 @@ minutes billed). The driver stops when the Forge arm's Convex spend reaches its 
    overlap cells.
 7. `node scripts/bench-t3code/summarize.mjs`: `rework` holds lines 10-12 and the stacking A/B.
    `node scripts/bench-t3code/rework.mjs RUN_DIR...` re-reads retained cells offline.
+
+## Deviation log
+
+Plan changes after registration. Each was made before the first scored cell; no scored result
+existed when it was decided.
+
+- 2026-11-09, lead 8eab6c1c (Issue 8c9b84fc): the quiet rule. A batch start waits only for a
+  Convex deploy in flight; GitHub main and the deploy head moving during a batch are recorded,
+  not voids. Section "Quiet rule and deploys".
+- 2026-11-09, comment 8f8e049a, approved by the lead in c75ed83f: a deployed `convex/` change
+  voids only when a changed file is on the landing path (off-path list, void when unsure). The
+  runner rule compares each job's SHA set per action repository. The lead removed
+  `convex/projectBoard` and `convex/projectBriefing` from the proposed off-path list, and asked
+  that the report list every recorded, non-voiding deploy with its files. Prompted by the dry
+  run on harness 5b707970, which voided on an off-path deploy and on one action at two refs.

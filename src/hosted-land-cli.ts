@@ -37,11 +37,12 @@ import { waitFailure } from './wait-failure.js';
 import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
 import { landEditedResolution } from './hosted-land-resolution.js';
+import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
 
 export { landPhase, landSummary };
 
-/** Set in the detached submitter; it submits and exits without waiting. */
-export const LAND_CHILD_ENV = 'FORGE_LAND_CHILD';
+/** Set in the detached submitter (LAND_CHILD_ENV): it submits and exits without waiting. */
+export { LAND_CHILD_ENV };
 /** Set in the detached submitter when its land returns at once with a background wake. */
 const LAND_WAKE_ENV = 'FORGE_LAND_WAKE';
 /** The land command's budget in seconds, passed to its detached submitter. */

@@ -1,17 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { randomUUID } from 'node:crypto';
-import { ConvexExchange } from './exchange-client.js';
-import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
-import { checkoutHostedMain } from './hosted-main-checkout.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { z } from 'zod';
 import { hostedMainV2Schema, type HostedMain } from './hosted-main.js';
 import { resolveAuthToken } from './auth-store.js';
 import { deadlineConvexClient } from './network-convex-client.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import { shellQuote } from './shell-quote.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { cliReleaseSignaturesSchema, type CliReleaseSignature } from './cli-release-signature.js';
 export type CliSource = { url: string; projectId: string };
+/** The release check reads only these (and one query); the updater module loads only to install. */
+export const sourceSchema = z.object({ url: z.url(), projectId: z.string().min(1) }).strict();
+export const CLI_UPDATE_WAIT_MS = 600_000;
+export const cliUpdateCommand = (installation: string) =>
+  `nforge update --directory ${shellQuote(installation)}`;
+export function readCliSource(installation: string): CliSource {
+  const path = join(installation, 'source.json');
+  if (!existsSync(path)) {
+    const command = `nforge update ${shellQuote(process.cwd())} --directory ${shellQuote(installation)}`;
+    throw new ForgeError(
+      'CLI_UPDATE_SOURCE_REQUIRED',
+      `Configure the release from a hosted Forge source checkout. Next: ${command}`,
+      undefined,
+      { command },
+    );
+  }
+  return sourceSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+}
 export function cliReleaseSource(address: CliSource) {
   const token = resolveAuthToken(address.url);
   invariant(token, 'AUTH_REQUIRED', 'Run nforge login before checking the CLI release.');
@@ -60,6 +79,11 @@ export function cliReleaseSource(address: CliSource) {
     signatures,
     publishSignature,
     async checkout(root: string, selected: HostedMain) {
+      const [{ ConvexExchange }, { HostedCheckoutDownloads }, { checkoutHostedMain }] = await Promise.all([
+        import('./exchange-client.js'),
+        import('./hosted-checkout-downloads.js'),
+        import('./hosted-main-checkout.js'),
+      ]);
       const downloads = new HostedCheckoutDownloads(
         new ConvexExchange(address.url, undefined, address.projectId, '', null),
       );

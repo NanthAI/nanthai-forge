@@ -135,7 +135,7 @@ test('a failed pass releases capacity and independent volume queues proceed sepa
   assert.deepEqual(queueEntries(options.directory), []);
 });
 
-test('SIGKILL during checkout durability releases its process ticket; the original open recovers', async t => {
+test('SIGKILL while a checkout stage is written releases its process ticket; the original open recovers', async t => {
   const root = fixture(t),
     objects = join(root, 'objects');
   mkdirSync(objects);
@@ -185,7 +185,7 @@ test('SIGKILL during checkout durability releases its process ticket; the origin
   assert.equal(message.barrier, true);
   killed.child.kill('SIGKILL');
   assert.equal((await killed.done).signal, 'SIGKILL');
-  assert.equal(readHostedLaneCheckout(join(root, 'client')), null, 'an unflushed stage is never installed');
+  assert.equal(readHostedLaneCheckout(join(root, 'client')), null, 'an unfinished stage is never installed');
   const retry = worker(t, ['retry', root], extra);
   const completed = await retry.message();
   assert.equal((await retry.done).code, 0);
@@ -196,7 +196,12 @@ test('SIGKILL during checkout durability releases its process ticket; the origin
   const installed = readHostedLaneCheckout(join(root, 'client'));
   assert.equal(installed.operationId, request.operationId);
   for (const file of files) assert.deepEqual(readFileSync(join(root, 'client', file.path)), bytes);
-  assert.deepEqual(queueEntries(materializationDirectory(root)), []);
+  // The device's ticket directory is shared with every checkout on this machine: only ours must be gone.
+  const ours = new Set([killed.child.pid, retry.child.pid]);
+  assert.deepEqual(
+    queueEntries(materializationDirectory(root)).filter(entry => ours.has(entry.pid)),
+    [],
+  );
 });
 
 // Different device ids without requiring mounts or privileged setup.

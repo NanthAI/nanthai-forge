@@ -343,7 +343,8 @@ test('successful updater builds and smoke-checks before selection, then migrates
 });
 
 async function releaseFixture(t, f, head, status) {
-  const calls = new Int32Array(new SharedArrayBuffer(4));
+  // [0] release reads, [1] agent capability reads (refused by the synthetic service).
+  const calls = new Int32Array(new SharedArrayBuffer(8));
   const worker = new Worker(new URL('../scripts/package-cli-release-worker.mjs', import.meta.url), {
     workerData: {
       head,
@@ -468,6 +469,47 @@ test('installed help and targeted argument errors make zero release or work call
   assert.equal(gates, 2);
   assert.equal(Atomics.load(calls, 0), 1);
   assert.equal(existsSync(output), false);
+});
+
+test('valid agent work reads capabilities alongside the release check, once; argument errors read nothing', async t => {
+  const f = fixture(t),
+    calls = await releaseFixture(t, f, a),
+    check = cliVersionCheck();
+  const { agentCli } = await import('../dist/agent-cli.js');
+  const { clientCacheRoot } = await import('../dist/root-paths.js');
+  const root = join(f.directory, 'served');
+  mkdirSync(join(clientCacheRoot(root), 'agent'), { recursive: true });
+  // The synthetic release service also answers (and refuses) this project's capability read.
+  const { url } = JSON.parse(readFileSync(join(f.installation, 'source.json'), 'utf8'));
+  writeFileSync(
+    join(clientCacheRoot(root), 'agent/address.json'),
+    JSON.stringify({ url, projectId: 'project' }),
+  );
+  t.mock.method(process.stdout, 'write', () => true);
+  const gate = args => () => cliStartup(args, f.old, check, { validated: true });
+  for (const args of [
+    ['agent', root, 'start', '{}'],
+    ['agent', root, 'planning', '{"limit":"x"}'],
+  ])
+    await assert.rejects(agentCli(args.slice(1), { beforeDispatch: gate(args) }), { code: 'BAD_ARGUMENT' });
+  assert.deepEqual([...calls], [0, 0]);
+  // The capability read is on the network before the release check runs: this gate waits for it.
+  let seen = -1;
+  const waitForEarlyRead = async () => {
+    for (let i = 0; i < 500 && Atomics.load(calls, 1) === 0; i++)
+      await new Promise(done => setTimeout(done, 10));
+    seen = Atomics.load(calls, 1);
+    assert.equal(await gate(['agent', root, 'planning'])(), true);
+    return false; // A redispatched process handles the valid command instead.
+  };
+  await agentCli([root, 'planning', '{}'], { beforeDispatch: waitForEarlyRead });
+  assert.equal(seen, 1);
+  assert.deepEqual([...calls], [1, 1]);
+  // Past the gate, dispatch takes that same read: one capability call for the whole command.
+  await assert.rejects(
+    agentCli([root, 'planning', '{}'], { beforeDispatch: gate(['agent', root, 'planning']) }),
+  );
+  assert.deepEqual([...calls], [1, 2]);
 });
 
 test('freshness redispatch preserves stdin already consumed by local argument validation', async t => {

@@ -5,7 +5,10 @@ import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
 import { resolve } from 'node:path';
 import { hostedAgentHelp } from './hosted-agent-help.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
-import { hostedAgentAddress, hostedAgentCli } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
+import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
+import { hostedAgentRoot } from './hosted-agent-journal.js';
+import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
 import { canonicalOperationIds } from './operation-id-case.js';
 import { canonicalCandidateAction, noticeViewAlias } from './candidate-names.js';
 import { aliasNotice, landSaveCommand, lowerVerb, newForm, parseVerbForm } from './agent-verbs.js';
@@ -16,8 +19,6 @@ import { sep } from 'node:path';
 import type { AgentWorkflow } from './agent-workflow.js';
 import type { PredictiveOverlap } from './agent-predictive-overlap.js';
 import { invariant } from './errors.js';
-import { hostedLandCli, LAND_CHILD_ENV } from './hosted-land-cli.js';
-import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { housekeepingLines, type IdleLane, type OtherRunLane } from './lane-prune.js';
 
 /** The native owner workflow (and its local Work store) loads only for a native root: every hosted
@@ -698,10 +699,21 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     }
     const command = canonicalOperationIds(root, landSaveCommand(form!, true, selected));
     try {
+      // The hosted command modules load while the release check (and, for commands that start with
+      // it, capability discovery) is on the network, not before it (fea47345 round 3).
+      const modules = Promise.all([
+        import('./hosted-agent-cli.js'),
+        import('./hosted-land-cli.js'),
+        import('./hosted-agent-transport.js'),
+      ]);
+      modules.catch(() => undefined);
       if (options.beforeDispatch) {
         validateHostedCliCommand(root, action, command);
+        if (discoversCapabilitiesFirst(hostedAgentRoot(root), action, command))
+          startEarlyCapabilities(hostedAgentRoot(root), hosted);
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
+      const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;
       notice(selected);
       // The installed CLI detaches the submission and waits by default; in-process callers opt in.
       if (action === 'finish' && (options.process || client.wait !== undefined))

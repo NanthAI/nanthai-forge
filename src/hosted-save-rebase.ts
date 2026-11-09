@@ -20,13 +20,11 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { diskShapeMatches } from './source-links.js';
+import { pendingSavePath } from './hosted-save-pending.js';
+export { pendingSavePath };
 
 type Exchange = ConstructorParameters<typeof ConvexLaneTransport>[0];
 const shell = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
-
-/** One retained save per checkout baseline; its reply may be lost while it publishes. */
-export const pendingSavePath = (root: string, marker: unknown) =>
-  join(clientCacheRoot(root), `save-baseline-${digest(canonicalPayload(marker))}.json`);
 
 /** The one command that always gets an agent unstuck: keep every unsaved edit
  * in a patch next to the checkout, abandon, and re-apply in a fresh Lane. */

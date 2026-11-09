@@ -45,6 +45,15 @@ const server = createServer((request, response) => {
       );
       return;
     }
+    // A second counter (when the caller shares one) counts agent capability reads, refused here.
+    if (input.path === 'projectHostedAgent:capabilities' && calls.length > 1) {
+      Atomics.add(calls, 1, 1);
+      response.writeHead(560, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ status: 'error', errorMessage: 'Synthetic capability refusal', logLines: [] }),
+      );
+      return;
+    }
     if (input.path !== 'projectHostedChannels:current') {
       response.writeHead(500).end('Unexpected synthetic release query');
       return;

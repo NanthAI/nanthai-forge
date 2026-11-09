@@ -211,13 +211,13 @@ export const LIVE_MAIN_KEYS = [...RECORDED_KEYS, 'checkWorkflow.forge'];
 
 // convex/ files off the landing path (land, queue, check, acceptance): a deploy that changes
 // only these is recorded, not a void (exit plan "Quiet rule and deploys"). Any other changed
-// convex/ file voids, and so does a change list that cannot be read (void when unsure).
+// convex/ file voids, and so does a change list that cannot be read (void when unsure). Board
+// and briefing code is on the path: Forge-arm agents read notices, claims and the briefing
+// during a cell (lead c75ed83f).
 export const OFF_LANDING_PATH = Object.freeze([
   'convex/gitServe',
   'convex/projectGithubImport',
   'convex/projectGithubInbound',
-  'convex/projectBoard',
-  'convex/projectBriefing',
   'convex/projectPeople',
   'convex/projectPurge',
   'convex/projectR2Purge',

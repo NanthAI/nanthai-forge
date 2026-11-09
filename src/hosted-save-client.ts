@@ -13,7 +13,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
 import { hostedObjectWriter } from './hosted-object-store.js';
 import { captureHostedSave } from './hosted-save-capture.js';
@@ -28,7 +27,14 @@ import { saveResultSchema, type SaveThen } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { buildSavePages, saveRequestSchema, saveBytes, savePin } from './hosted-save.js';
 import { ForgeError, invariant } from './errors.js';
-import { keepPatchCommand, pendingSavePath, rebaseHostedCheckout } from './hosted-save-rebase.js';
+import { keepPatchCommand, rebaseHostedCheckout } from './hosted-save-rebase.js';
+import {
+  backgroundSaveName,
+  backgroundSaveOperation,
+  pendingSavePath,
+  saveCommandSchema,
+} from './hosted-save-pending.js';
+export { backgroundSaveOperation };
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
@@ -86,9 +92,6 @@ export const saveContract = (capabilities: {
   prepareTargets: capabilities.features?.includes('prepare-upload-targets') ?? false,
   runPublish: capabilities.features?.includes('source-run-publish') ?? false,
 });
-const saveCommandSchema = z
-  .object({ operationId: z.uuid(), message: z.string(), supersedeFinish: z.boolean().optional() })
-  .strict();
 
 const blobName = /^[0-9a-f]{64}$/;
 /** Remove the staged blobs of a save the server has acknowledged. Retries reuse request.json and
@@ -742,9 +745,6 @@ export async function settlePriorHostedSave(
   );
 }
 
-/** A save returned before its settle (fea47345 C) keeps this marker in its directory until the
- * outcome is applied here and, when it failed, reported. */
-const backgroundSaveName = 'background';
 /** Apply the outcome of the save that returned before its settle and, when it did not complete,
  * report that once as SAVE_SETTLE_FAILED: the command that reads it does nothing else, so the agent
  * sees the failure and runs the command again (its edits are still in the checkout). */
@@ -804,16 +804,4 @@ export async function settleBackgroundSave(
     terminal,
   );
   reportBackgroundSave(root, prior, terminal);
-}
-/** The operation id of this checkout's pending save when it returned before its settle (local
- * files only, no call). */
-export function backgroundSaveOperation(root: string): string | undefined {
-  const marker = readHostedLaneCheckout(root);
-  if (!marker) return undefined;
-  const pending = pendingSavePath(root, marker);
-  if (!checkoutPathExists(pending)) return undefined;
-  const prior = saveCommandSchema.parse(JSON.parse(readFileSync(pending, 'utf8')));
-  return checkoutPathExists(join(clientCacheRoot(root), `saves/${prior.operationId}`, backgroundSaveName))
-    ? prior.operationId
-    : undefined;
 }

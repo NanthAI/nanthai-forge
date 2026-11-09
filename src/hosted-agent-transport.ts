@@ -116,7 +116,8 @@ import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.
 import { executeHostedApproval, type ApprovalCommand } from './hosted-agent-approval.js';
 import { savedChangedPaths } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
-import { hostedContractFeatures, missingRequiredFeatures } from './hosted-contract-features.js';
+import { missingRequiredFeatures } from './hosted-contract-features.js';
+import { capabilityOptions, takeEarlyCapabilities } from './hosted-capabilities-early.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { selectHostedFinish } from './hosted-agent-finish-identity.js';
 import { backgroundSaveOperation, reconcileHostedSave, settleBackgroundSave } from './hosted-save-client.js';
@@ -671,31 +672,19 @@ export class HostedAgentTransport {
       const settling = backgroundSaveOperation(this.root);
       let discovery: unknown;
       try {
-        let options: Record<string, unknown> = {
-          // Named contract features (a83b6fd5): the reply lists the ones this server implements.
-          features: [...hostedContractFeatures],
-          noticeVersion: 1,
-          resolveVersion: 1,
-          overlapVersion: 1,
-          overlapEvidenceVersion: 1,
-          mirrorVersion: 1,
-          metricReceiptVersion: 1,
-          planningVersion: 1,
-          defaultsVersion: 1,
-          landingMessageVersion: 1,
-          openLanesVersion: 1,
-          // Split save (fea47345 C): this checkout's save that returned before its settle; the reply
-          // carries its outcome, so reading it costs no extra call. No such save, no field.
-          ...(settling ? { settling } : {}),
-        };
+        let options = capabilityOptions(this.root);
+        // The CLI may have started this exact read alongside its release check: take it once.
+        let early = takeEarlyCapabilities(this.address, { clientVersion: CUTOVER_CLI_VERSION, ...options });
         for (;;) {
           try {
-            discovery = await this.query('projectHostedAgent:capabilities', {
-              clientVersion: CUTOVER_CLI_VERSION,
-              ...options,
-            });
+            discovery = await (early ??
+              this.query('projectHostedAgent:capabilities', {
+                clientVersion: CUTOVER_CLI_VERSION,
+                ...options,
+              }));
             break;
           } catch (error) {
+            early = undefined;
             if (
               !(error instanceof Error) ||
               !error.message.includes('ArgumentValidationError') ||

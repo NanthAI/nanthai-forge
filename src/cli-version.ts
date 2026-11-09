@@ -205,8 +205,9 @@ export async function cliStartup(
   let project: Promise<string | null> | undefined;
   const commandProject = () => (project ??= cliCommandProject(args));
   if (cliLandingCommand(args)) await waitForCliMeasurement(installation, undefined, commandProject);
-  const { cliReleaseSource } = await import('./cli-update-source.js');
-  const { readCliSource, updateCli, cliUpdateCommand, CLI_UPDATE_WAIT_MS } = await import('./cli-update.js');
+  // The updater module (and its install graph) loads only when this command installs in the foreground.
+  const { cliReleaseSource, readCliSource, cliUpdateCommand, CLI_UPDATE_WAIT_MS } =
+    await import('./cli-update-source.js');
   const next = cliUpdateCommand(installation);
   try {
     const address = readCliSource(installation),
@@ -273,6 +274,7 @@ export async function cliStartup(
       `Forge CLI is behind main ${released.slice(0, 8)}; installing it, then running your command.\n`,
     );
     rememberCanaryClone(installation, canaryCloneHint(args));
+    const { updateCli } = await import('./cli-update.js');
     const result = await updateCli(installation, address, selected, undefined, {
       expectedCurrent,
       lockWaitMs: CLI_UPDATE_WAIT_MS,

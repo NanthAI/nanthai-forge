@@ -40,19 +40,18 @@ if (mode === 'writes') {
   fs.open = async (...args) => { assertLease(args[0]); return open(...args); };
   syncBuiltinESMExports();
   if (mode === 'crash') {
-    const original = fs.open;
+    // Whole-tree checkouts publish without a per-file fsync (fea47345 round 3): the crash lands while
+    // the private stage is being written, holding its I/O ticket, before its marker exists.
+    const original = fs.copyFile;
     let paused = false;
-    fs.open = async (...args) => {
-      const handle = await original(...args);
-      if (!paused && String(args[0]).includes('/checkout-')) {
+    fs.copyFile = async (...args) => {
+      if (!paused && String(args[1]).includes('/checkout-')) {
         paused = true;
-        handle.sync = async () => {
-          process.on('message', () => {});
-          process.send({ barrier: true });
-          await new Promise(() => {});
-        };
+        process.on('message', () => {});
+        process.send({ barrier: true });
+        await new Promise(() => {});
       }
-      return handle;
+      return original(...args);
     };
     syncBuiltinESMExports();
   }

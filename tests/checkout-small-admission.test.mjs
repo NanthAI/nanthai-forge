@@ -217,7 +217,7 @@ test(
   },
 );
 
-test('download windows start heavy groups first, stay bounded, and settle every window on failure', async () => {
+test('download windows start heavy groups at once in their own windows, stay bounded, and settle every window on failure', async () => {
   const pin = (name, size = 1) => ({ sha256: name, size });
   async function* pages(list) {
     for (const groups of list) {
@@ -225,28 +225,34 @@ test('download windows start heavy groups first, stay bounded, and settle every 
       yield groups;
     }
   }
-  const order = [];
-  let active = 0,
-    peak = 0;
+  const order = [],
+    active = { heavy: 0, light: 0 },
+    peak = { heavy: 0, light: 0 };
+  let lightBusyAtBig = 0;
   await runDownloadWindows(
     pages([
-      [[pin('a')], [pin('b')]],
-      [[pin('c')], [pin('big', 3 * 1024 * 1024)]],
+      [[pin('a')], [pin('b')], [pin('c')]],
+      [
+        [pin('d')],
+        [pin('big', 3 * 1024 * 1024)],
+        [pin('big2', 3 * 1024 * 1024)],
+        [pin('big3', 3 * 1024 * 1024)],
+      ],
     ]),
     2,
     async group => {
+      const kind = group[0].size > 2 * 1024 * 1024 ? 'heavy' : 'light';
       order.push(group[0].sha256);
-      peak = Math.max(peak, ++active);
-      await delay(5);
-      active--;
+      if (group[0].sha256 === 'big') lightBusyAtBig = active.light;
+      peak[kind] = Math.max(peak[kind], ++active[kind]);
+      await delay(10);
+      active[kind]--;
     },
   );
-  assert.equal(peak, 2);
-  assert.ok(
-    order.indexOf('big') < order.indexOf('c'),
-    'a later page’s large group starts before queued small ones',
-  );
-  assert.deepEqual([...order].sort(), ['a', 'b', 'big', 'c']);
+  assert.deepEqual(peak, { heavy: 2, light: 2 }, 'each kind has its own bounded windows');
+  assert.equal(lightBusyAtBig, 2, 'a later page’s large group starts while both small windows still run');
+  assert.ok(order.indexOf('big') < order.indexOf('c'), 'it never waits behind queued small groups');
+  assert.deepEqual([...order].sort(), ['a', 'b', 'big', 'big2', 'big3', 'c', 'd']);
 
   // Pages wait while too many pins are held; the first failure throws only after all settle.
   let settled = 0,

@@ -70,6 +70,15 @@ export function validateHostedCliCommand(
     'BAD_ARGUMENT',
     `Invalid ${requestedAction} parameters: ${parsed.success ? '' : describeIssues(parsed.error.issues, parameters)}. Run ${actionRoot(requestedAction)} ${requestedAction} --help, correct the named fields and retry.`,
   );
+  // A bare start has nothing to start (Issue ec7bd1b5): refused before any call, as dispatch does.
+  if (requestedAction === 'start') {
+    const asked = parsed.data as { planningItemId?: string; intentId?: string; outcome?: string };
+    invariant(
+      asked.planningItemId || asked.intentId || asked.outcome,
+      'BAD_ARGUMENT',
+      'start needs one of: planningItemId (an Issue id), intentId (join an Intent), or outcome (a new one).',
+    );
+  }
   if (requestedAction === 'wait') {
     invariant(
       [input.runId, (input.operationIds as unknown[] | undefined)?.length, input.peer, input.approval].filter(

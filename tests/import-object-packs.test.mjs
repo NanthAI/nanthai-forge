@@ -425,7 +425,8 @@ test('a recipe clone signs each recipe with its row, overlaps windows, and refet
     [...f.stored.values()].filter(row => row.recipe).map(row => row.recipe.digest),
   );
   assert.equal(recipeObjects.size, 3);
-  let older = false;
+  let older = false,
+    probe = null;
   const calls = [];
   const transfer = () =>
     new HostedCheckoutDownloads({
@@ -433,6 +434,11 @@ test('a recipe clone signs each recipe with its row, overlaps windows, and refet
       client: {
         mutation: async (_ref, args, options) => {
           calls.push({ args, options });
+          if (probe && !args.runs && probe.seen === null) {
+            // The first recipe tree level is slow: what else of the window arrives meanwhile?
+            await new Promise(resolve => setTimeout(resolve, 150));
+            probe.seen = readdirSync(probe.directory).length;
+          }
           const rows = await downloads.describe._handler(f.s.ctx, args);
           // A server from before recipe signing returns recipe rows without a URL.
           return older
@@ -472,6 +478,17 @@ test('a recipe clone signs each recipe with its row, overlaps windows, and refet
   );
   assert.ok(singles.length <= 4, `tree levels are signed once per window (${singles.length} calls)`);
   const newer = calls.length;
+  // The recipe walk (one describe and GET per tree level) overlaps the window's small downloads.
+  const walking = transfer();
+  const window = await walking.objects(pins.slice(bodies.length - 100).map(pin => pin.sha256));
+  const directory = mkdtempSync(join(tmpdir(), 'forge-recipe-window-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  probe = { directory, seen: null };
+  await walking.downloadFiles(window.map(pin => ({ pin, path: join(probe.directory, pin.sha256) })));
+  assert.ok(probe.seen >= 100, `small files arrive during the walk (${probe.seen} of 100)`);
+  for (const pin of window)
+    assert.deepEqual(readFileSync(join(probe.directory, pin.sha256)), expected.get(pin.sha256));
+  probe = null;
   calls.length = 0;
   older = true;
   await clone(null);
