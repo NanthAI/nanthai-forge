@@ -55,24 +55,36 @@ export function candidateIsolation(
       .status !== 0
   )
     return { mode: 'shared', reason: 'unshare, setpriv or mount is missing' };
-  if (
-    exec('id', ['-u', CANDIDATE_USER]).status !== 0 &&
-    // No home directory: creating one costs about 30 s on GitHub's Ubuntu image (measured).
-    exec('sudo', [
-      '-n',
-      'useradd',
-      '--system',
-      '--no-create-home',
-      '--user-group',
-      '--home-dir',
-      '/nonexistent',
-      '--shell',
-      '/usr/sbin/nologin',
-      CANDIDATE_USER,
-    ]).status !== 0
-  )
-    return { mode: 'shared', reason: `could not create the ${CANDIDATE_USER} user` };
   const home = resolve(env.HOME ?? '/');
+  // The account's home is the home the child sees: inside the sandbox the runner's home path is
+  // the Candidate's own empty, writable folder. Code that reads the password database instead of
+  // HOME (os.userInfo().homedir) then lands in the same place, not in a folder that does not exist.
+  const accountHome = home === '/' ? '/nonexistent' : home;
+  const account = exec('id', ['-u', CANDIDATE_USER]).status === 0;
+  if (
+    // No home directory is created: creating one costs about 30 s on GitHub's Ubuntu image (measured).
+    exec(
+      'sudo',
+      account
+        ? ['-n', 'usermod', '--home', accountHome, CANDIDATE_USER]
+        : [
+            '-n',
+            'useradd',
+            '--system',
+            '--no-create-home',
+            '--user-group',
+            '--home-dir',
+            accountHome,
+            '--shell',
+            '/usr/sbin/nologin',
+            CANDIDATE_USER,
+          ],
+    ).status !== 0
+  )
+    return {
+      mode: 'shared',
+      reason: `could not ${account ? 'set up' : 'create'} the ${CANDIDATE_USER} user`,
+    };
   const specs = mkdtempSync(join(tmpdir(), 'forge-candidate-'));
   chmodSync(specs, 0o700);
   let launches = 0;

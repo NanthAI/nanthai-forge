@@ -9,7 +9,11 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { materializationDirectory, withCheckoutMaterialization } from '../dist/checkout-materialization.js';
+import {
+  materializationDirectory,
+  materializationHome,
+  withCheckoutMaterialization,
+} from '../dist/checkout-materialization.js';
 import { checkoutIo, checkoutVolumeCapacity } from '../dist/checkout-io.js';
 import { queueEntries } from '../dist/check-queue.js';
 import { digest } from '../dist/hash.js';
@@ -288,4 +292,36 @@ test('ten processes serialize editing write passes while every request completes
   assert.equal(events.length, 20);
   assert.equal(active, 0);
   assert.deepEqual(queueEntries(join(root, 'queue')), []);
+});
+
+test('an account home that does not exist or is not writable falls back to HOME', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-test-materialization-home-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const account = join(root, 'account'),
+    home = join(root, 'home');
+  mkdirSync(account);
+  assert.equal(
+    materializationHome(() => account, home),
+    account,
+  );
+  // A service account such as `nobody`, or a CI sandbox user (Issue 432164bf).
+  assert.equal(
+    materializationHome(() => '/nonexistent', home),
+    home,
+  );
+  assert.equal(
+    materializationHome(() => join(account, 'missing'), home),
+    home,
+  );
+  writeFileSync(join(root, 'file'), '');
+  assert.equal(
+    materializationHome(() => join(root, 'file'), home),
+    home,
+  );
+  assert.equal(
+    materializationHome(() => {
+      throw new Error('unmapped uid');
+    }, home),
+    home,
+  );
 });

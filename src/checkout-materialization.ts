@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, statSync } from 'node:fs';
 import { setMaxListeners } from 'node:events';
 import { homedir, userInfo } from 'node:os';
 import { inTestProcess } from './test-isolation.js';
@@ -14,16 +14,23 @@ import {
   type CheckoutIoExecutor,
 } from './checkout-io.js';
 
+/** The account's home from the password database when it is a real, writable folder, else HOME.
+ * Unmapped container accounts and service accounts whose home does not exist (`/nonexistent`,
+ * as for `nobody` or a CI sandbox user) keep the ordinary home. */
+export function materializationHome(account: () => string = () => userInfo().homedir, fallback = homedir()) {
+  try {
+    const home = account();
+    accessSync(home, constants.W_OK);
+    if (statSync(home).isDirectory()) return home;
+  } catch {
+    /* Fall back to HOME. */
+  }
+  return fallback;
+}
+
 /** One namespace per OS user/device, independent of project and object-cache settings. */
 export function materializationDirectory(path: string) {
-  let home = homedir();
-  if (!inTestProcess()) {
-    try {
-      home = userInfo().homedir;
-    } catch {
-      /* Unmapped container accounts retain the ordinary home fallback. */
-    }
-  }
+  const home = inTestProcess() ? homedir() : materializationHome();
   return join(home, '.cache', 'forge', 'materialization-v2', String(statSync(path).dev));
 }
 type MaterializationPhase = CheckoutIoPhase | 'shared';

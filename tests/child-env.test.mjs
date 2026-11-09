@@ -442,6 +442,17 @@ test('an existing user is reused; a missing one is created without a home direct
   assert.equal(linux(missing).user, CANDIDATE_USER);
   const add = missing.calls.find(call => call.includes('useradd'));
   assert.ok(add.includes('--no-create-home') && add.includes('--system'), add.join(' '));
+  // The account home is the runner's home path, which the sandbox turns into the Candidate's own
+  // folder: code reading the password database (os.userInfo().homedir) finds a real, writable home.
+  assert.equal(add[add.indexOf('--home-dir') + 1], '/srv/ci-home');
+  const moved = existing.calls.find(call => call.includes('usermod'));
+  assert.deepEqual(moved.slice(-3), ['--home', '/srv/ci-home', CANDIDATE_USER]);
+  const homeless = runner(line => line.startsWith('id '));
+  linux(homeless, { HOME: '/' });
+  const none = homeless.calls.find(call => call.includes('useradd'));
+  assert.equal(none[none.indexOf('--home-dir') + 1], '/nonexistent');
+  const stuck = runner(line => line.includes('usermod'));
+  assert.match(linux(stuck).reason, /could not set up the forge-check user/);
 });
 
 test('a launch passes exactly the child env and the allow-listed paths, moving ownership once', t => {
