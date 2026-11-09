@@ -1,7 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { sourcePackUploadSchema } from './source-pack.js';
-import { checkHash, checkNumber, checkObject, checkPin, type HostedCheckRun } from './hosted-check.js';
+import {
+  candidateIsolationModeSchema,
+  checkHash,
+  checkNumber,
+  checkObject,
+  checkPin,
+  type HostedCheckRun,
+} from './hosted-check.js';
 import { outputMessage, signOutput, type OutputMessage } from './hosted-check-output.js';
 import { hostedCheckCallbackSchema, type HostedCheckCallback } from './hosted-check-evidence.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -33,6 +40,8 @@ export const directResultSchema = z
       .object({ yielded: z.array(contractTestPath).max(4096) })
       .strip()
       .optional(),
+    // Whether this shard ran project code as its own Candidate user or as the runner user.
+    isolation: candidateIsolationModeSchema.optional(),
   })
   .strip();
 /** GitHub's job limit plus clock slack. Implausible runner clocks stay unknown, never fail a check. */

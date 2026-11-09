@@ -54,6 +54,9 @@ export function importedHostedCheck(value: unknown) {
   return check;
 }
 const credential = z.object({ secretId: text, version: checkNumber, operation: text }).strict();
+/** Where a hosted check's project code ran (src/candidate-user.ts). */
+export const candidateIsolationModeSchema = z.enum(['user', 'shared']);
+export const candidateIsolationOptInSchema = z.literal('shared');
 export const hostedActionsRunnerSchema = z
   .object({
     provider: z.literal('github-actions'),
@@ -67,6 +70,10 @@ export const hostedActionsRunnerSchema = z
     /** Owner-only: private repositories checks may read as submodules (src/submodule-allowlist.ts).
      * Stored only when nonempty, so older digests hold. */
     submodules: submoduleAllowListSchema.optional(),
+    /** Owner-only: project code may run as the runner user where the runner cannot start it as
+     * its own Candidate user (a macOS or Windows self-hosted runner). Without it such a run fails
+     * setup. Stored only when set, so older digests hold. */
+    isolation: candidateIsolationOptInSchema.optional(),
     runtime: checkHash,
     environmentFingerprint: checkHash,
     credential: credential.optional(),
@@ -255,6 +262,9 @@ export const hostedCheckRunSchema = z
         /** The dispatch was observed and returned no run id (lost reply or no details). Only then may
          * the workflow_run webhook bind the execution; otherwise the dispatch response's id is used. */
         dispatchedWithoutId: z.literal(true).optional(),
+        /** Where the shards ran project code: `user` when every reporting shard ran it as its own
+         * Candidate user, `shared` when any ran it as the runner user. Absent: no shard said. */
+        isolation: candidateIsolationModeSchema.optional(),
       })
       .strict()
       .optional(),

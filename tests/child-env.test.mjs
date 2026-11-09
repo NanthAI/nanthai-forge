@@ -15,6 +15,7 @@ import {
   candidateAccessNotes,
   candidateIsolation,
   homePaths,
+  sharedIsolationRefusal,
   toolchainReadable,
   toolchainState,
 } from '../dist/candidate-user.js';
@@ -440,6 +441,35 @@ test('the Candidate user falls back to the runner user, with a reason, wherever 
     assert.equal(isolation.mode, 'shared', fails);
     assert.match(isolation.reason, reason);
   }
+});
+
+test('a hosted Actions check refuses every shared fallback by name unless the owner opted in', () => {
+  const actions = { provider: 'github-actions' };
+  const causes = [
+    [
+      candidateIsolation({ env: { FORGE_CANDIDATE_USER: 'off' }, platform: 'linux' }),
+      /FORGE_CANDIDATE_USER=off/,
+    ],
+    [candidateIsolation({ env: {}, platform: 'darwin' }), /darwin runner/],
+    [candidateIsolation({ env: {}, platform: 'win32' }), /win32 runner/],
+    [linux(runner(line => line.includes('sudo -n true'))), /no passwordless sudo/],
+    [linux(runner(line => line.includes('command -v unshare'))), /unshare, setpriv or mount is missing/],
+    [linux(runner(line => line.includes('useradd') || line.startsWith('id '))), /could not create/],
+    [linux(runner(line => line.includes('usermod'))), /could not set up/],
+    [linux(runner(line => line.includes('candidate-sandbox.mjs'))), /self-test failed/],
+  ];
+  for (const [isolation, reason] of causes) {
+    assert.equal(isolation.mode, 'shared');
+    const refusal = sharedIsolationRefusal(isolation, actions);
+    assert.match(refusal, /^CANDIDATE_ISOLATION_UNAVAILABLE: /);
+    assert.match(refusal, reason);
+    assert.match(refusal, /configure-runner isolation:"shared"/);
+    // The owner's runner configuration is the only way through.
+    assert.equal(sharedIsolationRefusal(isolation, { ...actions, isolation: 'shared' }), undefined);
+  }
+  // A Candidate user runs; other runner providers keep their own trust model.
+  assert.equal(sharedIsolationRefusal(linux(runner()), actions), undefined);
+  assert.equal(sharedIsolationRefusal(causes[1][0], { provider: 'self-hosted' }), undefined);
 });
 
 test('an existing user is reused; a missing one is created without a home directory', () => {

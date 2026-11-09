@@ -514,6 +514,27 @@ test('retained shard execution intervals make Actions runner seconds observed; a
     } else assert.deepEqual(terminal.cost, { status: 'unknown' });
   }
 });
+test('run evidence keeps the weakest isolation any shard reported; none reported stays absent', async t => {
+  for (const [reported, expected] of [
+    [['user', 'user'], 'user'],
+    [['user', 'shared'], 'shared'],
+    [['shared', 'user'], 'shared'],
+    [[undefined, undefined], undefined],
+  ]) {
+    const s = await fixture(t);
+    await s.bind();
+    await s.prepare();
+    for (const [index, isolation] of reported.entries())
+      await s.call(results, 'result', {
+        ...s.input(),
+        result: JSON.stringify({ index, exitCode: 0, ...(isolation ? { isolation } : {}) }),
+      });
+    const terminal = await s.conclude();
+    assert.equal(terminal.status, 'passed');
+    assert.equal(terminal.actions.isolation, expected, reported.join());
+  }
+});
+
 test('implausible runner clocks are dropped without failing the shard', async () => {
   const { shardExecution, actionsExecutionCost } = await import('../dist/hosted-actions-direct.js');
   const runAt = '2026-10-30T10:00:00.000Z',

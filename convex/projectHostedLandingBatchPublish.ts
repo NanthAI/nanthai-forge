@@ -302,6 +302,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     executionId: run.executionId!,
     ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
     ...(run.plan?.skipped ? { skipped: run.plan.skipped } : {}),
+    ...(run.actions?.isolation ? { isolation: run.actions.isolation } : {}),
   };
   // Issue 93e14bb0: the shared run diffed the whole stacked change; main's (last) receipt carries it.
   const secretAllowAdded = secretAllowMark(run.plan?.secretAllow, candidate.governance?.paths ?? null);

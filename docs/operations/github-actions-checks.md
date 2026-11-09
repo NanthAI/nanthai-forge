@@ -115,9 +115,18 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
   capabilities and cannot gain privileges, so it cannot read the runner's credentials, the
   supervisor's environment or the step-command files, and cannot use `sudo`. Creating the user takes
   about 20 ms, each launch about 0.2 s. Elsewhere (macOS, Windows, a self-hosted runner without
-  passwordless `sudo`, or `FORGE_CANDIDATE_USER=off`) the child runs as the runner user and the job
-  log says why: `Candidate user: project code runs as the runner user (…)`. The optional
-  `actions.setup` program is the owner's own configuration and still runs as the runner user.
+  passwordless `sudo` or the util-linux tools, a failed launch self-test, or
+  `FORGE_CANDIDATE_USER=off`) the check **fails setup** before any source or project code runs, with
+  `CANDIDATE_ISOLATION_UNAVAILABLE` and the reason. The project owner can allow such a runner with
+  `configure-runner '{"provider":"github-actions","isolation":"shared"}'` (owner-only; shown in the
+  `configure-runner` output and as `actions.isolation` in `check-settings`; kept while the repository
+  stays the same, `"isolation":"user"` withdraws it). Its checks then run project code as the runner
+  user and the job log says why: `Candidate user: project code runs as the runner user (…; the
+  owner's runner configuration allows shared mode)`. Each shard result says which mode it ran in;
+  the run keeps `actions.isolation` (`shared` if any shard was) and the landing receipt shows it as
+  `check.isolation`. The supervisor also removes the job's runner tokens from its own environment
+  before it starts project code, as defence in depth. The optional `actions.setup` program is the
+  owner's own configuration and still runs as the runner user.
 - **Slow caches and registries fail fast.** Every cache restore in a check workflow treats a download
   stalled for 1 minute as a miss (`SEGMENT_DOWNLOAD_TIMEOUT_MINS`), so the job installs normally, and
   every `npm ci` has a 5-minute timeout, so a stalled registry fails the job and Forge retries the
@@ -127,9 +136,10 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
 and every generated one (`tests/action-pins.test.mjs`).
 
 What a pass therefore attests: the pinned plan ran on the provider, every planned shard reported its
-tests from the supervisor, and the provider recorded the run as successful. Without a Candidate user
-(the fallback above), project code shares the runner user's access during its own step, so treat such
-a pass as no stronger than the check's own tests.
+tests from the supervisor, and the provider recorded the run as successful. On a runner the owner
+allowed to run without a Candidate user (`isolation:"shared"` above; the receipt's
+`check.isolation` is `shared`), project code shares the runner user's access during its own step, so
+treat such a pass as no stronger than the check's own tests.
 
 ### Check contract
 

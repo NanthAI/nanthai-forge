@@ -198,6 +198,9 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
         : `as visible as ${configuration.repository ?? 'the runner repository'} on GitHub`,
     // Owner-allowed private submodule repositories; anything else is refused.
     submodules: configuration.submodules ?? [],
+    // user: a check whose job cannot run project code as its own Candidate user fails setup;
+    // shared: the owner allows the runner user there (configure-runner isolation, Issue 3b67363d).
+    isolation: configuration.isolation ?? 'user',
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
   };
@@ -314,9 +317,10 @@ async function configureRunnerRequest(
       !(command.runsOn !== undefined && command.provider !== 'github-actions') &&
       !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions') &&
       !(command.publicLogs !== undefined && command.provider !== 'github-actions') &&
-      !(command.submodules !== undefined && command.provider !== 'github-actions'),
+      !(command.submodules !== undefined && command.provider !== 'github-actions') &&
+      !(command.isolation !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget, publicLogs and submodules), or a full configuration for another provider.',
+    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget, publicLogs, submodules and isolation), or a full configuration for another provider.',
   );
   const current = parseHostedResponse(
     currentSettings,
@@ -343,6 +347,12 @@ async function configureRunnerRequest(
       currentActions?.repository === repository ? currentActions.submodules : undefined,
       command.submodules ?? {},
     );
+    // Shared mode (no Candidate user) carries over the same way; isolation:"user" withdraws it.
+    const isolation =
+      (command.isolation ??
+        (currentActions?.isolation === 'shared' && currentActions.repository === repository
+          ? 'shared'
+          : undefined)) === 'shared';
     return {
       name: 'projectHostedActionsConfigure:configure' as const,
       request: {
@@ -356,6 +366,7 @@ async function configureRunnerRequest(
           : {}),
         ...(publicLogs ? { publicLogs: true } : {}),
         ...(submodules ? { submodules } : {}),
+        ...(isolation ? { isolation: 'shared' } : {}),
       },
     };
   }

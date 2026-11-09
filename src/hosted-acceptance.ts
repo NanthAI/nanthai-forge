@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js';
-import { checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
+import { candidateIsolationModeSchema, checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
@@ -89,6 +89,9 @@ export const hostedAcceptanceSchema = z
         macEvidence: hostedMacEvidenceSchema.optional(),
         /** Test shards the change's paths did not reach: skipped, never pending (Issue 9e71abcc). */
         skipped: checkSkippedSchema.optional(),
+        /** Hosted Actions checks: `user` when project code ran as its own Candidate user, `shared`
+         * when the owner's runner configuration let it run as the runner user (Issue 3b67363d). */
+        isolation: candidateIsolationModeSchema.optional(),
       })
       .strict()
       .nullable(),

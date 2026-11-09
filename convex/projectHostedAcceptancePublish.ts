@@ -222,6 +222,7 @@ export async function publishAcceptance(
       executionId: run.executionId!,
       ...(run.macEvidence ? { macEvidence: run.macEvidence } : {}),
       ...(run.plan?.skipped ? { skipped: run.plan.skipped } : {}),
+      ...(run.actions?.isolation ? { isolation: run.actions.isolation } : {}),
     };
   }
   invariant(

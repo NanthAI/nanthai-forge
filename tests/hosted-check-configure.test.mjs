@@ -585,6 +585,8 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     runner: 'runner: ubuntu-latest',
     logs: 'as visible as NanthAI/nanthai-forge on GitHub',
     submodules: [],
+    // A check that cannot run project code as its own Candidate user fails setup (3b67363d).
+    isolation: 'user',
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',
   });
@@ -903,6 +905,94 @@ test('submodules: owner-only allowlist, empty by default, merged, kept with its 
   assert(
     granted.length > 0 && granted.every(permissions => JSON.stringify(permissions) === '{"metadata":"read"}'),
   );
+});
+
+test('isolation: owner-only opt-in to shared mode, off by default, kept with its repository, shown on settings', async t => {
+  const fixture = project();
+  const { state, run } = cli(t, fixture);
+  bindRepository(t, fixture.projectId, 'NanthAI/nanthai-forge');
+  process.env.FORGE_GITHUB_REPO_BINDINGS += `,${fixture.projectId}=NanthAI/other-runner`;
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const prior = { id: process.env.GITHUB_APP_ID, key: process.env.GITHUB_APP_PRIVATE_KEY };
+  process.env.GITHUB_APP_ID = '12345';
+  process.env.GITHUB_APP_PRIVATE_KEY = privateKey.export({ type: 'pkcs1', format: 'pem' });
+  t.after(() => {
+    for (const [name, value] of [
+      ['GITHUB_APP_ID', prior.id],
+      ['GITHUB_APP_PRIVATE_KEY', prior.key],
+    ])
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  t.mock.method(globalThis, 'fetch', async url => {
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    if (/^https:\/\/api\.github\.com\/repos\/NanthAI\/[\w.-]+$/.test(url))
+      return Response.json({ visibility: 'private' });
+    return Response.json({ id: 77, permissions: { actions: 'write', contents: 'write', metadata: 'read' } });
+  });
+  const plain = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/nanthai-forge',
+    operationId: randomUUID(),
+  });
+  assert.equal(plain.value.isolation, undefined); // default: a Candidate user is required
+  assert.equal((await run('check-settings')).actions.isolation, 'user');
+  // A member cannot opt in, through the command or a full configuration; nothing is written.
+  const versions = settings(fixture.s).length;
+  state.actor = 'peer';
+  for (const input of [
+    { provider: 'github-actions', isolation: 'shared' },
+    { configuration: { ...plain.value, isolation: 'shared' } },
+  ])
+    await assert.rejects(
+      run('configure-runner', { ...input, operationId: randomUUID() }),
+      code('PROJECT_UNAVAILABLE'),
+    );
+  assert.equal(settings(fixture.s).length, versions);
+  state.actor = 'owner';
+  await assert.rejects(
+    run('configure-runner', { provider: 'self-hosted', isolation: 'shared', operationId: randomUUID() }),
+    code('BAD_ARGUMENT'),
+  );
+  // The owner opts in: the configure-runner output and check-settings show it.
+  const shared = await run('configure-runner', {
+    provider: 'github-actions',
+    runsOn: ['self-hosted', 'macOS'],
+    isolation: 'shared',
+    operationId: randomUUID(),
+  });
+  assert.equal(shared.value.isolation, 'shared');
+  assert.equal(shared.digest, checkPin(shared.value));
+  assert.notEqual(shared.digest, plain.digest);
+  const shown = await run('check-settings');
+  assert.equal(shown.actions.isolation, 'shared');
+  assert.equal(shown.runner.configuration.isolation, 'shared');
+  // Kept while the repository stays the same; isolation:"user" withdraws it.
+  const budgeted = await run('configure-runner', {
+    provider: 'github-actions',
+    runsOn: ['self-hosted', 'macOS'],
+    concurrencyBudget: 4,
+    operationId: randomUUID(),
+  });
+  assert.equal(budgeted.value.isolation, 'shared');
+  const withdrawn = await run('configure-runner', {
+    provider: 'github-actions',
+    isolation: 'user',
+    operationId: randomUUID(),
+  });
+  assert.equal(withdrawn.value.isolation, undefined);
+  // An opt-in names one runner repository: switching repositories drops it.
+  await run('configure-runner', {
+    provider: 'github-actions',
+    isolation: 'shared',
+    operationId: randomUUID(),
+  });
+  const moved = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/other-runner',
+    operationId: randomUUID(),
+  });
+  assert.equal(moved.value.isolation, undefined);
 });
 
 test('CLI self-hosted labels remain pinned on replay and explicit empty labels clear the selection metadata', async t => {

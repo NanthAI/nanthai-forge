@@ -85,6 +85,22 @@ test('agent publication retains exact complete-run evidence and current policy',
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
 });
 
+test('the receipt shows where the accepted run ran project code (Issue 3b67363d)', async () => {
+  for (const isolation of ['shared', 'user', undefined]) {
+    const f = await acceptanceFixture(),
+      { state } = await checked(f);
+    if (isolation)
+      for (const [id, row] of f.tables.projectHostedCheckRuns) {
+        const run = JSON.parse(row.value);
+        run.actions = { reservedAt: 0, fence: run.fence, watchdog: null, outcome: 'accepted', isolation };
+        f.patch('projectHostedCheckRuns', id, { value: JSON.stringify(run) });
+      }
+    const result = await f.accept(state);
+    assert.equal(result.status, 'landed');
+    assert.equal(hostedAcceptanceSchema.parse(result.receipt).check.isolation, isolation);
+  }
+});
+
 test('agent unchecked acceptance fails without changing main or consuming the prepared request', async () => {
   const f = await acceptanceFixture(),
     { state } = await f.ready(null, { agent: true });

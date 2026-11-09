@@ -34,20 +34,26 @@ import {
   candidateAccessNotes,
   candidateIsolation,
   homePaths,
+  sharedIsolationRefusal,
   toolchainReadable,
   toolchainState,
   type CandidateIsolation,
 } from './candidate-user.js';
 import { cachePaths } from './actions-toolchains.js';
-let isolation: CandidateIsolation = {
+const unrequested: CandidateIsolation = {
   mode: 'shared',
   reason: 'the supervisor did not request a Candidate user',
 };
+let isolation: CandidateIsolation = unrequested,
+  requested = false;
 /** Called once by the fixed supervisor entry (scripts/hosted-actions-job.mjs) before it runs a
- * shard; embedding callers and tests keep the runner user. */
-export function isolateCandidates(value: CandidateIsolation = candidateIsolation()) {
-  isolation = value;
-  return value;
+ * shard; embedding callers and tests keep the runner user. Once requested, a shared result fails
+ * the check unless the owner's runner configuration allows it (sharedIsolationRefusal). `null`
+ * restores the embedding default. */
+export function isolateCandidates(value: CandidateIsolation | null = candidateIsolation()) {
+  isolation = value ?? unrequested;
+  requested = value !== null;
+  return isolation;
 }
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
@@ -72,6 +78,8 @@ async function executeActiveActionsJob(
   };
   // The plan artifact is a source pin, never a live execution permission.
   const run = await client.preflight();
+  // Nothing after this point reads the runner's job tokens from the environment (Issue 3b67363d).
+  client.holdRunnerTokens();
   lap('preflightMs');
   const recipe = JSON.parse(readFileSync(planPath, 'utf8'));
   const index = shard === 'static' ? recipe.groups.length : Number(shard);
@@ -97,8 +105,10 @@ async function executeActiveActionsJob(
     packages: ReturnType<typeof writeCheckPackages> = null;
   // A plan refusal the Candidate decided fails every job at once with its code; no setup or project code runs.
   const planError = recipe.selection?.planError as { code: string; message: string } | undefined;
+  // No Candidate user and no owner opt-in: the check fails here, before any source or project code.
+  const refused = requested ? sharedIsolationRefusal(isolation, run.configuration) : undefined;
   try {
-    sourceCache = planError ? undefined : await setupActionsJob(run, directory, planPath);
+    sourceCache = planError || refused ? undefined : await setupActionsJob(run, directory, planPath);
     invariant(
       savePin(JSON.parse(readFileSync(planPath, 'utf8'))).sha256 === run.plan.manifest.sha256,
       'EVIDENCE_CHANGED',
@@ -107,7 +117,7 @@ async function executeActiveActionsJob(
     // A scoped configured command also gets the manifest package graph's affected packages
     // (FORGE_CHECK_PACKAGES), read from the verified workspace: no repository code, no Forge call.
     // Advisory input: an unreadable tree leaves the command without it, never fails the check.
-    if (!recipe.standard && !commandOverride)
+    if (!recipe.standard && !commandOverride && !refused)
       try {
         packages = writeCheckPackages(
           directory,
@@ -153,6 +163,14 @@ async function executeActiveActionsJob(
     setupFailed = true;
     command = planErrorCommand(process.execPath, planError);
   }
+  if (refused) {
+    setupFailed = true;
+    command = [
+      process.execPath,
+      '--eval',
+      `console.error(${JSON.stringify(refused)}); process.exitCode = 1;`,
+    ];
+  }
   let tail = Buffer.alloc(0);
   const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const redactor = new HostedOutputRedactor({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
@@ -163,11 +181,13 @@ async function executeActiveActionsJob(
   // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
   const junit = junitDirectory();
   // Candidate children run as their own unprivileged user where the runner allows it (Linux with
-  // passwordless sudo); the result never depends on it, but the log says which (Issue 432164bf).
+  // passwordless sudo, Issue 432164bf); elsewhere only with the owner's opt-in (Issue 3b67363d).
   const placement =
     isolation.mode === 'user'
       ? `Candidate user: project code runs as ${isolation.user}, without the runner's credentials, environment or sudo.`
-      : `Candidate user: project code runs as the runner user (${isolation.reason}).`;
+      : refused
+        ? `Candidate user: unavailable (${isolation.reason}); project code does not run.`
+        : `Candidate user: project code runs as the runner user (${isolation.reason}${requested ? "; the owner's runner configuration allows shared mode" : ''}).`;
   console.log(placement);
   observe(Buffer.from(`${placement}\n`));
   const home = process.env.HOME ?? '';
@@ -306,6 +326,7 @@ async function executeActiveActionsJob(
     contractReports: reports.reports,
     testFiles: checkFileSummary(reports.reports),
     execution: { startedAt, endedAt: new Date().toISOString() },
+    isolation: isolation.mode,
     // Files this home shard yielded to another claimer; the server fails the check if none reports them.
     ...(yielded ? { pool: { yielded } } : {}),
   };

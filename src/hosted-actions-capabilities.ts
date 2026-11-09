@@ -16,6 +16,8 @@ export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
 /** The plan call says it starts the optional source-pack job; a pass then reads the required
  * jobs' conclusions instead of waiting for the run's (friction 0064c3b2). */
 export const actionsPackVerdictCapability = 'checks.packVerdict';
+/** Results say where the shard ran project code (`user` or `shared`); the run and receipt keep it. */
+export const actionsIsolationCapability = 'results.isolation';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
@@ -29,6 +31,7 @@ export const hostedActionsCapabilities = [
   actionsToolchainsCapability,
   actionsSubmoduleAccessCapability,
   actionsPackVerdictCapability,
+  actionsIsolationCapability,
 ] as const;
 /** Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
@@ -45,6 +48,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'result.result.pool': actionsPoolCapability,
   'plan.plan.recipe.actions': actionsToolchainsCapability,
   'plan.packRefresh': actionsPackVerdictCapability,
+  'result.result.isolation': actionsIsolationCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = {

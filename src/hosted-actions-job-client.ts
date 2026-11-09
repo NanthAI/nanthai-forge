@@ -22,6 +22,8 @@ import {
   actionsDeliveryPolicy,
 } from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
+/** The Actions job tokens the supervisor's environment holds: OIDC requests and the cache/artifact service. */
+export const runnerTokenNames = ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_RUNTIME_TOKEN'] as const;
 export class ActionsJobClient {
   run: HostedCheckRun | null = null;
   timings: Record<string, number> = {};
@@ -32,6 +34,7 @@ export class ActionsJobClient {
   poolClaims: unknown = null;
   private token = '';
   private expires = 0;
+  private oidcRequest: { url: string | undefined; token: string | undefined } | null = null;
   private refreshing: Promise<void> | null = null;
   constructor(
     readonly site: string,
@@ -108,13 +111,28 @@ export class ActionsJobClient {
     }
     return value;
   }
+  /**
+   * Keeps the runner's OIDC request credentials in this client and removes the job's tokens from
+   * the supervisor's own environment, so nothing started later inherits or reads them from it
+   * (Issue 3b67363d). Defence in depth only: separating project code from the supervisor is the
+   * Candidate user's job (src/candidate-user.ts). Idempotent; the first token use calls it too.
+   */
+  holdRunnerTokens() {
+    this.oidcRequest ??= {
+      url: process.env.ACTIONS_ID_TOKEN_REQUEST_URL,
+      token: process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN,
+    };
+    for (const name of runnerTokenNames) delete process.env[name];
+    return this.oidcRequest;
+  }
   private async refreshToken() {
-    const url = new URL(process.env.ACTIONS_ID_TOKEN_REQUEST_URL!);
+    const oidc = this.holdRunnerTokens();
+    const url = new URL(oidc.url!);
     url.searchParams.set('audience', this.site);
     const result = await retryActionsInfrastructure(async signal => {
       const response = await actionsInfrastructureResponse(
         await this.request(url, {
-          headers: { authorization: `Bearer ${process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN}` },
+          headers: { authorization: `Bearer ${oidc.token}` },
           signal,
           redirect: 'error',
         }),

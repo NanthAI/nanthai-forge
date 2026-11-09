@@ -34,7 +34,7 @@ import {
   actionsFileConcurrency,
 } from '../dist/hosted-actions-job-source.js';
 import { prepareActionsJob } from '../dist/hosted-actions-job-plan.js';
-import { executeActionsJob } from '../dist/hosted-actions-job-run.js';
+import { executeActionsJob, isolateCandidates } from '../dist/hosted-actions-job-run.js';
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
@@ -743,6 +743,90 @@ test('untrusted traversal manifests and altered downloads fail before materializ
     prepareActionsJob(s.client, join(s.directory, 'candidate'), join(s.directory, 'objects')),
     /Native|Invalid|validation|input/i,
   );
+});
+/** A prepared static job whose result call is captured; `isolation` is what the supervisor found. */
+async function isolationJob(t, isolation) {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate'),
+    prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  isolateCandidates(isolation);
+  t.after(() => isolateCandidates(null));
+  const posted = [];
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (command.kind !== 'result') return realCall(command);
+    posted.push(command);
+    return {};
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const marker = join(s.directory, 'project-code-ran');
+  const execute = () =>
+    executeActionsJob(s.client, candidate, path, 'static', [
+      process.execPath,
+      '--eval',
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')`,
+    ]);
+  const posting = () => {
+    const [{ result, logBytes }] = posted;
+    return { result, log: Buffer.from(logBytes ?? '', 'base64').toString() };
+  };
+  return { s, marker, execute, posting };
+}
+test('Issue 3b67363d: without a Candidate user a hosted check fails setup by name; project code never runs', async t => {
+  const job = await isolationJob(t, { mode: 'shared', reason: 'darwin runner' });
+  const before = job.s.calls.filter(call => call.kind === 'source').length;
+  assert.equal(await job.execute(), 1);
+  assert.equal(existsSync(job.marker), false, 'project code must not run');
+  assert.equal(job.s.calls.filter(call => call.kind === 'source').length, before, 'no source setup either');
+  const { result, log } = job.posting();
+  assert.equal(result.exitCode, 1);
+  assert.equal(result.isolation, 'shared');
+  assert.match(log, /Candidate user: unavailable \(darwin runner\); project code does not run/);
+  assert.match(
+    log,
+    /CANDIDATE_ISOLATION_UNAVAILABLE: .*\(darwin runner\).*configure-runner isolation:"shared"/,
+  );
+  assert.match(result.log.failureSummary, /CANDIDATE_ISOLATION_UNAVAILABLE/);
+});
+test("Issue 3b67363d: the owner's runner configuration lets a non-Linux runner opt in to shared mode", async t => {
+  const job = await isolationJob(t, { mode: 'shared', reason: 'darwin runner' });
+  job.s.client.run.configuration = { ...job.s.client.run.configuration, isolation: 'shared' };
+  assert.equal(await job.execute(), 0);
+  assert.equal(readFileSync(job.marker, 'utf8'), 'ran');
+  const { result, log } = job.posting();
+  assert.equal(result.isolation, 'shared');
+  assert.match(
+    log,
+    /runs as the runner user \(darwin runner; the owner's runner configuration allows shared mode\)/,
+  );
+});
+test('Issue 3b67363d: the supervisor drops the runner tokens from its environment and keeps OIDC working', async t => {
+  const prior = process.env.ACTIONS_RUNTIME_TOKEN;
+  process.env.ACTIONS_RUNTIME_TOKEN = 'synthetic-runtime-token';
+  t.after(() => {
+    if (prior === undefined) delete process.env.ACTIONS_RUNTIME_TOKEN;
+    else process.env.ACTIONS_RUNTIME_TOKEN = prior;
+  });
+  const job = await isolationJob(t, null);
+  const bearer = [];
+  const inner = job.s.client.request;
+  job.s.client.request = async (url, init) => {
+    if (String(url).startsWith('https://oidc.invalid/')) bearer.push(init.headers.authorization);
+    return inner(url, init);
+  };
+  // The planning step already used OIDC once: the request token left the environment then.
+  assert.equal(process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, undefined);
+  assert.equal(await job.execute(), 0);
+  for (const name of ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_RUNTIME_TOKEN'])
+    assert.equal(process.env[name], undefined, name);
+  // A later token refresh still authenticates with the held request token.
+  job.s.client.expires = 0;
+  await job.s.client.call({ kind: 'session' });
+  assert.deepEqual(bearer, ['Bearer synthetic-request-token']);
+  // Embedding callers that never requested a Candidate user keep running, and say so.
+  assert.equal(job.posting().result.isolation, 'shared');
 });
 const withoutInlineLog = hostedActionsCapabilities.filter(value => value !== actionsInlineLogCapability);
 test('fixed supervisor records actual child exit, strips OIDC env and posts bounded output', async t => {

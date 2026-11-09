@@ -37,6 +37,21 @@ export type CandidateIsolation =
     }
   | { mode: 'shared'; reason: string };
 
+/**
+ * A hosted Actions check must not quietly run project code as the runner user: without its own
+ * Candidate user the project's code shares the supervisor's identity. Unless the project owner's
+ * runner configuration opts in (configure-runner isolation:"shared"), such a run fails setup and
+ * names why (Issue 3b67363d). Returns the failure line, or undefined when the run may proceed.
+ */
+export function sharedIsolationRefusal(
+  isolation: CandidateIsolation,
+  configuration: { provider: string; isolation?: 'shared' | undefined },
+) {
+  if (isolation.mode === 'user' || configuration.provider !== 'github-actions') return undefined;
+  if (configuration.isolation === 'shared') return undefined;
+  return `CANDIDATE_ISOLATION_UNAVAILABLE: project code cannot run as its own Candidate user here (${isolation.reason}), so the check fails before it runs. Next: run it on a Linux runner with passwordless sudo, or the project owner allows shared mode for this runner with configure-runner isolation:"shared".`;
+}
+
 type Run = (command: string, args: string[]) => { status: number | null };
 const run: Run = (command, args) => spawnSync(command, args, { stdio: 'ignore', timeout: 20_000 });
 
@@ -44,8 +59,9 @@ const run: Run = (command, args) => spawnSync(command, args, { stdio: 'ignore', 
  * Linux runners where the runner user has passwordless sudo (GitHub-hosted Ubuntu) start every
  * Candidate child as `forge-check` in a private mount namespace (scripts/candidate-sandbox.mjs).
  * The child cannot read the supervisor's or the runner's environment, the runner's credentials or
- * step-command files, and cannot use sudo. Anywhere else the child runs as the runner user, and the
- * job log says why. A launch self-test decides; a failed probe never breaks the check.
+ * step-command files, and cannot use sudo. Anywhere else isolation is `shared`, with the reason: a
+ * hosted check then fails setup unless the owner opted in (sharedIsolationRefusal). A launch
+ * self-test decides; a failed probe itself never throws.
  */
 export function candidateIsolation(
   input: { env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform; run?: Run } = {},

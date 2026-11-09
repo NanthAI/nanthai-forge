@@ -128,6 +128,9 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
         shards: (current.execution?.shards ?? 0) + 1,
       };
     if (result.pool) current.poolClaimed = true;
+    // Run evidence keeps the weakest isolation any shard reported (Issue 3b67363d).
+    if (result.isolation && current.actions)
+      current.actions.isolation = current.actions.isolation === 'shared' ? 'shared' : result.isolation;
     // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
     current.testFiles = checkFileSummary(await recordShardReports(ctx, current, { ...result, digest }));
   };

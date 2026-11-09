@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { githubActionsRunsOnSchema } from '../src/github-actions-runner-label';
 import { makeFunctionReference } from 'convex/server';
 import { action } from './cliServer';
-import { checkHash, checkNumber, checkPin } from '../src/hosted-check';
+import { candidateIsolationOptInSchema, checkHash, checkNumber, checkPin } from '../src/hosted-check';
 import { hostedActionsRuntime } from '../src/hosted-actions';
 import { report } from './errors';
 import { ForgeError, invariant } from '../src/errors';
@@ -25,6 +25,9 @@ const requestSchema = z
     publicLogs: z.boolean().optional(),
     /** Owner-only (the configure transaction): private submodule repositories checks may read. */
     submodules: submoduleAllowListSchema.optional(),
+    /** Owner-only (the configure transaction): project code may run as the runner user where the
+     * runner cannot set up a Candidate user. Without it such a hosted check fails setup. */
+    isolation: candidateIsolationOptInSchema.optional(),
   })
   .strict();
 /** Reuses the existing owner-only, idempotent configuration transaction. No
@@ -41,7 +44,8 @@ export const configure = action({
         'BAD_ARGUMENT',
         'Pass a repository and runsOn as a nonblank label (1–256 characters, no control characters) or 1–100 such labels.',
       );
-      const { repository, runsOn, concurrencyBudget, publicLogs, submodules, ...request } = parsed.data;
+      const { repository, runsOn, concurrencyBudget, publicLogs, submodules, isolation, ...request } =
+        parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch. The
       // metadata token proves the binding before any name-scoped token exists. Without an
@@ -80,6 +84,7 @@ export const configure = action({
                 ...(concurrencyBudget !== undefined ? { concurrencyBudget } : {}),
                 ...(publicLogs ? { publicLogs: true } : {}),
                 ...(submodules ? { submodules } : {}),
+                ...(isolation ? { isolation } : {}),
                 runtime: hostedActionsRuntime,
                 environmentFingerprint: checkPin({
                   runtime: hostedActionsRuntime,

@@ -362,6 +362,9 @@ export const hostedAgentCommandSchemas = {
       concurrencyBudget: z.number().safe().int().min(2).optional(),
       publicLogs: z.boolean().optional(),
       submodules: submoduleAllowChangesSchema.optional(),
+      /** github-actions: "shared" lets project code run as the runner user where no Candidate user
+       * can be set up (macOS/Windows self-hosted); "user" withdraws that. */
+      isolation: z.enum(['user', 'shared']).optional(),
       machineId: uuid.optional(),
       labels: z.array(z.string().min(1)).optional(),
       repository: z
