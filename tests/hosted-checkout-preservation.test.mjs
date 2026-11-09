@@ -12,6 +12,8 @@ import fs, {
   symlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { digest } from '../dist/hash.js';
 import { syncBuiltinESMExports } from 'node:module';
 import { fixture } from './hosted-sync-client-fixture.mjs';
 import { applyHostedSync } from '../dist/hosted-sync-client.js';
@@ -339,4 +341,52 @@ test('ignored native artifact names need not satisfy portable source-name rules'
   writeFileSync(join(s.root, path), 'native output');
   await applyHostedSync(s.root, s.command(), s.transport);
   assert.equal(readFileSync(join(s.root, path), 'utf8'), 'native output');
+});
+
+test('a clone refresh returns untracked paths no saved or incoming path meets to be carried; meeting ones still refuse', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'forge-carry-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const put = (path, text) => {
+    mkdirSync(join(root, path, '..'), { recursive: true });
+    writeFileSync(join(root, path), text);
+    return { path, blob: digest(Buffer.from(text)), mode: 'file' };
+  };
+  const saved = [put('src/a.txt', 'a')];
+  put('.claude/scheduled_tasks.lock', 'lock');
+  put('src/swap.tmp', 'swap');
+  mkdirSync(join(root, 'empty'));
+  const incoming = { path: 'src/new.txt', blob: digest(Buffer.from('n')), mode: 'file' };
+  const target = [...saved, incoming];
+  // Without the option an untracked file refuses, as before (first checkout, Lane checkouts).
+  assert.throws(() => cleanHostedCheckout(root, saved, 'm.json', false, { target }), {
+    code: 'WORK_CONFLICT',
+  });
+  const carried = cleanHostedCheckout(root, saved, 'm.json', false, { target, carryExtras: true });
+  assert.deepEqual(carried.sort(), ['.claude', 'empty', 'src/swap.tmp']);
+  // An untracked file at an incoming path, or one that holds an incoming parent, refuses.
+  put('src/new.txt', 'local');
+  assert.throws(
+    () => cleanHostedCheckout(root, saved, 'm.json', false, { target, carryExtras: true }),
+    e =>
+      e.code === 'WORK_CONFLICT' &&
+      e.recovery.obstruction.path === 'src/new.txt' &&
+      e.recovery.obstruction.kind === 'extra-source',
+  );
+  fs.rmSync(join(root, 'src/new.txt'));
+  put('deep', 'file where a folder arrives');
+  assert.throws(
+    () =>
+      cleanHostedCheckout(root, saved, 'm.json', false, {
+        target: [...target, { path: 'deep/x.txt', blob: incoming.blob, mode: 'file' }],
+        carryExtras: true,
+      }),
+    { code: 'WORK_CONFLICT' },
+  );
+  // A spelling of an incoming path refuses where the disk folds the two names into one entry.
+  fs.rmSync(join(root, 'deep'));
+  put('SRC/New.TXT', 'cased');
+  const same = fs.existsSync(join(root, 'src/new.txt'));
+  const run = () => cleanHostedCheckout(root, saved, 'm.json', false, { target, carryExtras: true });
+  if (same) assert.throws(run, { code: 'WORK_CONFLICT' });
+  else assert.ok(run().includes('SRC'));
 });

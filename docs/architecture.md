@@ -729,7 +729,11 @@ asks for an upgrade instead of finishing it without the renames. Only an ambiguo
 spelling (two paths that share one folded name) still builds a full stage, and
 that stage copies unchanged bytes from the clone instead of downloading them. An
 untracked file or folder where the pull must install refuses with an
-`extra-source` obstruction before anything is fetched or staged. A pull killed mid-apply is
+`extra-source` obstruction before anything is fetched or staged. Any other untracked
+file or folder (editor swap files, `.DS_Store`, a tool's lock file) stays where it is,
+as with `git pull`: the clean check carries it instead of refusing, and a name that
+meets an incoming path only by case or Unicode spelling counts as meeting it. Tracked
+edits still refuse. A pull killed mid-apply is
 finished, rolled back or refused by the next pull exactly as in a Lane; an error
 inside a live pull rolls the root back at once, because people read the clone
 between commands. A `publish.json` journal left by an older client still rolls back

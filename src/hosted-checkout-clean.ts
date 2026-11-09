@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
@@ -9,6 +9,7 @@ import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { diskShapeMatches, diskMode } from './source-links.js';
+import { fold } from './hosted-checkout-delta.js';
 
 export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
 
@@ -26,6 +27,9 @@ export function cleanHostedCheckout(
     index?: CheckoutStatIndex;
     /** List every difference from the saved files instead of refusing at the first one. */
     collect?: CheckoutChange[];
+    /** A clone refresh (Git parity): an untracked path that no saved or incoming path meets stays
+     * where it is and is returned to carry across a directory swap, instead of refusing. */
+    carryExtras?: boolean;
   } = {},
 ): string[] {
   let rootStat;
@@ -49,6 +53,24 @@ export function cleanHostedCheckout(
   for (const file of [...files, ...(options.target ?? [])])
     for (let i = file.path.indexOf('/'); i !== -1; i = file.path.indexOf('/', i + 1))
       directories.add(file.path.slice(0, i));
+  // Spellings an untracked entry may meet on a case- or normalization-insensitive disk.
+  const spelled = new Map<string, string[]>();
+  if (options.carryExtras)
+    for (const path of new Set([...allowed.keys(), ...target.keys(), ...directories])) {
+      const key = fold(path);
+      spelled.set(key, [...(spelled.get(key) ?? []), path]);
+    }
+  /** The same directory entry under another spelling than a saved or incoming path's. */
+  const meetsSpelling = (path: string, stat: Stats) =>
+    (spelled.get(fold(path)) ?? []).some(other => {
+      if (other === path) return false;
+      try {
+        const there = lstatSync(join(root, other));
+        return there.ino === stat.ino && there.dev === stat.dev;
+      } catch {
+        return false;
+      }
+    });
   const preserved: string[] = [];
   function visit(directory: string, layers: ReturnType<typeof ignoreLayer>, parentIgnored = false) {
     const names = readdirSync(join(root, directory));
@@ -107,6 +129,18 @@ export function cleanHostedCheckout(
           .slice(0, -1)
           .some((_, i, parts) => target.has(parts.slice(0, i + 1).join('/')));
       if (!saved && !incoming && !directories.has(path) && !targetParent && ignored) {
+        preserved.push(path);
+        continue;
+      }
+      // Git leaves untracked files alone unless an incoming path would overwrite them. A name that
+      // is a saved or incoming file, or the folder of one, still takes the checks below.
+      if (
+        options.carryExtras &&
+        !saved &&
+        !incoming &&
+        !directories.has(path) &&
+        !meetsSpelling(path, stat)
+      ) {
         preserved.push(path);
         continue;
       }

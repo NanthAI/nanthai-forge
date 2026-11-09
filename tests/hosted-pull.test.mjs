@@ -453,3 +453,114 @@ test('pull names the declared manager’s install command for a changed lockfile
     /^pnpm-lock\.yaml changed .*pnpm install --frozen-lockfile --ignore-scripts/,
   );
 });
+
+// Git parity (Issue 99574435): pull leaves untracked files alone unless an incoming path meets them.
+const stat = path => {
+  const s = fs.lstatSync(path);
+  return { ino: s.ino, mtimeMs: s.mtimeMs, size: s.size };
+};
+test('an untracked file or folder that no incoming change touches does not block pull and is left untouched', async t => {
+  const f = pullFixture(t);
+  fs.mkdirSync(join(f.root, '.claude'));
+  fs.writeFileSync(join(f.root, '.claude/scheduled_tasks.lock'), 'tool lock');
+  fs.writeFileSync(join(f.root, '.DS_Store'), 'finder');
+  fs.mkdirSync(join(f.root, 'src/scratch'), { recursive: true });
+  fs.writeFileSync(join(f.root, 'src/scratch/notes.txt'), 'draft');
+  fs.mkdirSync(join(f.root, 'empty-untracked'));
+  fs.symlinkSync('missing-target', join(f.root, 'dangling'));
+  const kept = ['.claude/scheduled_tasks.lock', '.DS_Store', 'src/scratch/notes.txt'];
+  const before = kept.map(path => stat(join(f.root, path)));
+  f.select([
+    ['src/0.txt', 'incoming'],
+    ['src/new.txt', 'added'],
+  ]);
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'incoming');
+  assert.equal(fs.readFileSync(join(f.root, 'src/new.txt'), 'utf8'), 'added');
+  assert.deepEqual(
+    kept.map(path => stat(join(f.root, path))),
+    before,
+  );
+  assert.equal(fs.readFileSync(join(f.root, '.claude/scheduled_tasks.lock'), 'utf8'), 'tool lock');
+  assert.ok(fs.lstatSync(join(f.root, 'empty-untracked')).isDirectory());
+  assert.equal(fs.readlinkSync(join(f.root, 'dangling')), 'missing-target');
+  assert.equal(readHostedMainMarker(f.root).selection.head, f.main().head);
+  // A later pull with nothing new is still one query and clean.
+  f.reset();
+  await pull(f);
+  assert.equal(f.calls.queries, 1);
+  // A tracked-file edit still refuses beside the untracked file, which stays put.
+  f.select([['src/1.txt', 'next']]);
+  fs.writeFileSync(join(f.root, 'src/2.txt'), 'local');
+  await assert.rejects(
+    pull(f),
+    e => e.code === 'WORK_CONFLICT' && e.recovery.obstruction.kind === 'source-edit',
+  );
+  assert.equal(fs.readFileSync(join(f.root, '.claude/scheduled_tasks.lock'), 'utf8'), 'tool lock');
+});
+test('an untracked file at a path main now adds still refuses with the preserve message', async t => {
+  const f = pullFixture(t);
+  fs.writeFileSync(join(f.root, 'unrelated.tmp'), 'stays');
+  fs.writeFileSync(join(f.root, 'src/new.txt'), 'local draft');
+  f.select([['src/new.txt', 'incoming']]);
+  await assert.rejects(
+    pull(f),
+    e =>
+      e.code === 'WORK_CONFLICT' &&
+      /Local checkout changes at "src\/new.txt" are preserved/.test(e.message) &&
+      e.recovery.obstruction.kind === 'extra-source' &&
+      e.recovery.obstruction.path === 'src/new.txt',
+  );
+  assert.equal(fs.readFileSync(join(f.root, 'src/new.txt'), 'utf8'), 'local draft');
+  assert.equal(fs.readFileSync(join(f.root, 'unrelated.tmp'), 'utf8'), 'stays');
+  // Identical bytes at the incoming path are not a conflict.
+  fs.writeFileSync(join(f.root, 'src/new.txt'), 'incoming');
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'unrelated.tmp'), 'utf8'), 'stays');
+});
+test('untracked file versus incoming directory, and untracked folder versus incoming file, refuse', async t => {
+  const f = pullFixture(t);
+  fs.writeFileSync(join(f.root, 'lib'), 'a file where a folder arrives');
+  fs.mkdirSync(join(f.root, 'docs'));
+  fs.writeFileSync(join(f.root, 'docs/mine.md'), 'mine');
+  f.select([['lib/a.txt', 'incoming']]);
+  await assert.rejects(pull(f), { code: 'WORK_CONFLICT' });
+  f.select([['docs', 'a file where a folder is']]);
+  await assert.rejects(pull(f), { code: 'WORK_CONFLICT' });
+  assert.equal(fs.readFileSync(join(f.root, 'lib'), 'utf8'), 'a file where a folder arrives');
+  assert.equal(fs.readFileSync(join(f.root, 'docs/mine.md'), 'utf8'), 'mine');
+});
+test('an untracked spelling that meets an incoming path on a case-insensitive disk refuses; a sibling does not', async t => {
+  const f = pullFixture(t);
+  const probe = join(f.directory, 'CaseProbe');
+  fs.writeFileSync(probe, '');
+  const insensitive = fs.existsSync(join(f.directory, 'caseprobe'));
+  fs.writeFileSync(join(f.root, 'README.TXT'), 'local');
+  fs.writeFileSync(join(f.root, 'README.bak'), 'sibling');
+  f.select([['readme.txt', 'incoming']]);
+  if (insensitive) {
+    await assert.rejects(pull(f), { code: 'WORK_CONFLICT' });
+    assert.equal(fs.readFileSync(join(f.root, 'README.TXT'), 'utf8'), 'local');
+  } else {
+    await pull(f);
+    assert.equal(fs.readFileSync(join(f.root, 'README.TXT'), 'utf8'), 'local');
+    assert.equal(fs.readFileSync(join(f.root, 'readme.txt'), 'utf8'), 'incoming');
+  }
+  assert.equal(fs.readFileSync(join(f.root, 'README.bak'), 'utf8'), 'sibling');
+});
+test('paths .gitignore and .forgeignore exclude never block pull', async t => {
+  const f = pullFixture(t, 3, [
+    ['.gitignore', '*.log\n/build/\n'],
+    ['.forgeignore', '/scratch/\n'],
+  ]);
+  fs.writeFileSync(join(f.root, 'debug.log'), 'ignored by git rules');
+  fs.mkdirSync(join(f.root, 'build'));
+  fs.writeFileSync(join(f.root, 'build/out.js'), 'output');
+  fs.mkdirSync(join(f.root, 'scratch'));
+  fs.writeFileSync(join(f.root, 'scratch/n.txt'), 'forge rules');
+  f.select([['src/0.txt', 'incoming']]);
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'incoming');
+  for (const path of ['debug.log', 'build/out.js', 'scratch/n.txt'])
+    assert.ok(fs.existsSync(join(f.root, path)), path);
+});

@@ -221,10 +221,11 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
   // A pull changes the clone root in place (it never swaps the directory a shell may be in): only
   // changed paths are fetched, verified, staged, flushed and journaled, and the checkout is validated
   // through the stat index. Case/normalization-only renames apply in place too. An untracked
-  // obstruction refuses here, before any object is fetched or staged (the clean check inside the
-  // lock would refuse it anyway). Only a first checkout, or an ambiguous spelling (two paths that
-  // share one folded name), keeps the full private-stage install, which still copies unchanged
-  // bytes from the clone instead of downloading them.
+  // obstruction at an incoming path refuses here, before any object is fetched or staged; untracked
+  // files nothing incoming meets stay put, as in Git (the clean check carries them). Only a first
+  // checkout, or an ambiguous spelling (two paths that share one folded name), keeps the full
+  // private-stage install, which still copies unchanged bytes from the clone instead of downloading
+  // them.
   let delta: CheckoutDelta | null = null,
     baselineDigest: string | null = null;
   if (request.refresh) {
@@ -298,7 +299,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
             old ? parseNativeStateValue(old.state).files : [],
             'hosted-main.json',
             Boolean(old),
-            { target: state.files },
+            { target: state.files, carryExtras: Boolean(request.refresh) },
           );
         });
       const installed = marker && JSON.stringify(marker.selection) === JSON.stringify(selection);
@@ -316,6 +317,7 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
       const artifacts = cleanHostedCheckout(root, beforeFiles, 'hosted-main.json', Boolean(marker), {
         target: state.files,
         index,
+        carryExtras: Boolean(request.refresh),
       });
       if (!installed && delta) {
         invariant(
