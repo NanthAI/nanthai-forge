@@ -18,6 +18,7 @@ import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
   input?: unknown;
@@ -61,6 +62,8 @@ export async function driveAgentSource(
   pages: { kind: string; index: number; pin: ReturnType<typeof savePin>; value: unknown }[] = [],
   /** Report a WORK_STALE prepare refusal as PrepareRefused (the caller rebuilds its pins). */
   refusable = false,
+  /** Report a CHANNEL_CHANGED prepare refusal as MainPinRefused (the caller rebuilds on main). */
+  mainPinned = false,
 ) {
   const features = session.capabilities.features ?? [],
     // prepare-upload-targets: a sync prepare also returns its input's upload target, asked only
@@ -84,6 +87,7 @@ export async function driveAgentSource(
     // prepare is one transaction: a refusal began no server operation.
     if (refusable && hostedActionError(error, kind.toLowerCase()).code === 'WORK_STALE')
       throw new PrepareRefused(error);
+    if (mainPinned && mainPinRefusal(error, kind.toLowerCase())) throw new MainPinRefused(error);
     throw error;
   }
   if (prepared.terminal) return prepared.terminal;
@@ -130,7 +134,7 @@ export async function composeAgentSource(
   command: z.infer<typeof hostedAgentCommandSchemas.compose>,
   operationId: string,
 ) {
-  const prepared = await session.journal.retain(`compose:${operationId}`, async () => {
+  const build = async () => {
     const main = await session.main();
     const selected = command.inputs ?? [{ laneId: (await selectAgentLane(session, command.laneId)).laneId }];
     const inputs: ComposeEntry[] = [];
@@ -185,8 +189,11 @@ export async function composeAgentSource(
     // One revert Lane alone is a compensating landing (Issue 8dbccdfb); the server checks the claim.
     const revertOf = reverts.length === 1 && !dependencies.length ? reverts[0] : undefined;
     return { request, pages, ...(revertOf ? { revertOf } : {}) };
-  });
-  return driveAgentSource(session, 'Compose', operationId, prepared.request, prepared.pages);
+  };
+  // The request pins main as observed now; a moved main drops and rebuilds it (b8c0a4f6).
+  return sendMainPinned(session.journal, `compose:${operationId}`, build, prepared =>
+    driveAgentSource(session, 'Compose', operationId, prepared.request, prepared.pages, false, true),
+  );
 }
 /** The receipt a composed revert Lane compensates, from the retained compose selection (no call). */
 export function composedRevertOf(session: HostedAgentSession, operationId: string) {
@@ -247,7 +254,7 @@ async function syncAgentSourceOnce(
   command: z.infer<typeof hostedAgentCommandSchemas.sync>,
   operationId: string,
 ) {
-  const request = await session.journal.retain(`sync:${operationId}`, async () => {
+  const build = async () => {
     if (command.candidateId) {
       invariant(
         !command.target && !command.laneId && command.ontoMain === undefined,
@@ -302,6 +309,13 @@ async function syncAgentSourceOnce(
       target: command.target ?? { kind: 'main', head: main!.head, receiptId: main!.receipt.id },
       message: command.message,
     });
-  });
-  return driveAgentSource(session, 'Sync', operationId, request, [], true);
+  };
+  // Only a main target this request observed is rebuilt; an explicit target stays the caller's.
+  return sendMainPinned(
+    session.journal,
+    `sync:${operationId}`,
+    build,
+    request => driveAgentSource(session, 'Sync', operationId, request, [], true, true),
+    !command.candidateId && !command.target,
+  );
 }

@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -335,6 +336,47 @@ test('incident replay 11cd4121 / d4922dbd: a retained stale-pinned sync request 
   );
 });
 
+test('incident replay b8c0a4f6: a sync onto main refused CHANNEL_CHANGED rebuilds on the moved main, an explicit target never', async t => {
+  const s = await fixture(t);
+  let main = { head: digest('main'), receipt: { id: randomUUID() } };
+  const prepares = [];
+  // The real prepare checks the main target after finding no begun operation, in one transaction.
+  const mutation = async (name, args) => {
+    assert.equal(name, 'projectHostedSync:prepare');
+    const request = JSON.parse(args.request);
+    prepares.push(request);
+    if (prepares.length === 1) main = { head: digest('moved'), receipt: { id: randomUUID() } };
+    if (request.target.head !== main.head || request.target.receiptId !== main.receipt.id)
+      throw new ConvexError({
+        code: 'CHANNEL_CHANGED',
+        message: 'Sync against the exact observed main head and receipt.',
+      });
+    return {
+      terminal: { outcome: { status: 'failed', error: { code: 'SYNC_FIXTURE', message: 'stop' } } },
+    };
+  };
+  const command = { ontoMain: true };
+  const sync = s.session('sync', command, { main: async () => main, mutation });
+  const result = await executeHostedAgent(sync, 'sync', command);
+  assert.equal(result.outcome.status, 'failed', 'the rebuilt request reached the fixture sync');
+  assert.deepEqual(
+    prepares.map(request => [request.operationId, request.target.head]),
+    [
+      [sync.journal.operationId, digest('main')],
+      [sync.journal.operationId, digest('moved')],
+    ],
+  );
+  // A target the caller named is its pin: refused once, never replaced.
+  const target = { kind: 'main', head: digest('main'), receiptId: randomUUID() };
+  const pinned = { ontoMain: true, target };
+  prepares.length = 0;
+  await assert.rejects(
+    executeHostedAgent(s.session('sync', pinned, { main: async () => main, mutation }), 'sync', pinned),
+    error => error.data?.code === 'CHANNEL_CHANGED' || error.code === 'CHANNEL_CHANGED',
+  );
+  assert.equal(prepares.length, 1);
+});
+
 test('a sync still refused after rebuilding names the save that fixes it and leaves nothing to install', async t => {
   const s = await fixture(t);
   // Another writer moved the Lane on the server only: this checkout's binding is behind and
@@ -591,4 +633,26 @@ test('every hosted agent action declares how its replay binds to current state',
   }
   for (const action of ['save', 'sync', 'withdraw', 'open'])
     assert.equal(replayBindings[action].kind, 'checked', `${action} receipts describe local state`);
+});
+
+test('guard b8c0a4f6: no retained request reads main inline; main-pinned requests go through sendMainPinned', () => {
+  // A request that pins the observed main and is retained for exact replay can never succeed once
+  // main moves; the server's refusal begins nothing. sendMainPinned drops and rebuilds it.
+  const offenders = [];
+  for (const name of readdirSync('src').filter(file => file.endsWith('.ts'))) {
+    const text = readFileSync(join('src', name), 'utf8');
+    for (let at = text.indexOf('journal.retain('); at !== -1; at = text.indexOf('journal.retain(', at + 1)) {
+      let depth = 0,
+        end = at + 'journal.retain'.length;
+      for (; end < text.length; end++) {
+        if (text[end] === '(') depth++;
+        else if (text[end] === ')' && --depth === 0) break;
+      }
+      if (/\.main\(\)/.test(text.slice(at, end)))
+        offenders.push(`${name}:${text.slice(0, at).split('\n').length}`);
+    }
+  }
+  assert.deepEqual(offenders, [], 'wrap the request in sendMainPinned (src/hosted-main-pin.ts)');
+  for (const name of ['hosted-agent-source.ts', 'hosted-agent-actions.ts'])
+    assert.match(readFileSync(join('src', name), 'utf8'), /sendMainPinned\(/, name);
 });

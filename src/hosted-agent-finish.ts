@@ -35,12 +35,39 @@ import {
 } from './hosted-finish-guard.js';
 import { syncRequiredAdvice, syncRequiredContinuation, type WouldConflict } from './hosted-would-conflict.js';
 import type { HostedAgentResponse, HostedAgentSession } from './hosted-agent-transport.js';
+import { MAIN_PIN_TRIES, MainPinRefused, mainPinRefusal } from './hosted-main-pin.js';
 
 const finishNotSavedKey = 'finish-not-saved';
 
 type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
 
-async function replayFinish(session: HostedAgentSession) {
+/** Enqueue a landing request. A moved main refuses it inside the transaction that would begin it, so
+ * nothing began: its Candidate composed on a main that has since moved, and resending it can never
+ * succeed (b8c0a4f6). Unless the caller pinned that Candidate, drop the request and this finish's
+ * compose, so the next pass composes again on the current main under a new compose operation (the
+ * old Candidate stays, unlanded), and report MainPinRefused. */
+async function enqueueLanding(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
+  try {
+    return await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
+      request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
+      ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+    });
+  } catch (error) {
+    if (pinnedCandidate || !mainPinRefusal(error, 'finish')) throw error;
+    const composeOperationId =
+      session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
+    for (const key of [
+      'finish-request',
+      'finish-compose-operation',
+      'id:compose',
+      ...(composeOperationId ? [`compose:${composeOperationId}`] : []),
+    ])
+      session.journal.forget(key);
+    throw new MainPinRefused(error);
+  }
+}
+
+async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolean) {
   const composeOperationId =
     session.journal.get<string>('finish-compose-operation') ?? session.journal.get<string>('id:compose');
   const desired = session.journal.get('desired-landing');
@@ -78,10 +105,14 @@ async function replayFinish(session: HostedAgentSession) {
     await session.journal.retain('finish-check-run', () => run);
     return { phase: 'check', composeOperationId, run };
   }
-  const submission = await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
-    request: canonicalPayload(request),
-    ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-  });
+  let submission: HostedLandingState;
+  try {
+    submission = await enqueueLanding(session, request, pinnedCandidate);
+  } catch (error) {
+    // The retained request was stale and is dropped: this pass composes on the current main.
+    if (error instanceof MainPinRefused) return null;
+    throw error;
+  }
   return {
     phase: 'finish',
     composeOperationId,
@@ -166,15 +197,25 @@ async function reuseCheckedFinish(session: HostedAgentSession, command: FinishCo
 
 export async function executeHostedFinish(session: HostedAgentSession, input: unknown) {
   let result: unknown;
-  try {
-    result = await executeFinishWork(session, input);
-  } catch (error) {
-    // Ended before anything was submitted: a re-run on new source is new work, not a replay (ac13de6b).
-    const code = (error as { code?: unknown }).code;
-    if (typeof code === 'string' && FINISH_REFUSALS.has(code))
-      await session.journal.retain(finishRefusedKey, () => code);
-    throw error;
-  }
+  for (let tries = 1; ; tries++)
+    try {
+      result = await executeFinishWork(session, input);
+      break;
+    } catch (error) {
+      // Main moved before the landing began: the stale request is dropped, compose again (b8c0a4f6).
+      if (error instanceof MainPinRefused) {
+        if (tries < MAIN_PIN_TRIES) continue;
+        throw new ForgeError(
+          'CHANNEL_CHANGED',
+          `Main moved during each of ${tries} tries to land on its current head. Nothing began, and the stale request was dropped: a replay of this same operation composes on the new main.`,
+        );
+      }
+      // Ended before anything was submitted: a re-run on new source is new work, not a replay (ac13de6b).
+      const code = (error as { code?: unknown }).code;
+      if (typeof code === 'string' && FINISH_REFUSALS.has(code))
+        await session.journal.retain(finishRefusedKey, () => code);
+      throw error;
+    }
   const context = session.journal.get<FinishContext>('finish-context');
   const defaults = session.journal.get<Record<string, unknown>>('finish-defaults');
   const changedPaths = session.journal.get<number | null>(finishChangedPathsKey);
@@ -237,7 +278,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     epoch = session.capabilities.authority.epoch;
   const context = session.journal.get<FinishContext>('finish-context');
   const command = hostedAgentCommandSchemas.finish.parse(context?.command ?? input);
-  const replayed = await replayFinish(session);
+  // A Candidate the caller named is its pin; one this finish composed is rebuilt when main moves.
+  const pinnedCandidate = command.candidateId !== undefined;
+  const replayed = await replayFinish(session, pinnedCandidate);
   if (replayed) return replayed;
   // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
   // any hosted call (41fc0c29). An operation that already ran keeps following its own recovery.
@@ -503,16 +546,13 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     return { phase: 'check', composeOperationId, run };
   }
   // Account JWTs still make agent requests. Person authority is never selected by CLI input.
-  const result = await session.mutation('projectHostedLanding:enqueue', {
-    request: canonicalPayload({ ...request, governanceVersion: 1 }),
-    ...(session.landingAgent ? { agent: session.landingAgent } : {}),
-  });
+  const result = await enqueueLanding(session, request, pinnedCandidate);
   markLandStep('submitted');
   return {
     phase: 'finish',
     composeOperationId,
     submission: result,
-    ...(await queuedConflict(session, result as HostedLandingState)),
+    ...(await queuedConflict(session, result)),
   };
 }
 /** A landing of one revert Lane records the receipt it compensates (Issue 8dbccdfb). */

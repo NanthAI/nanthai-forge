@@ -89,7 +89,12 @@ export function agentFixture(t) {
   const queueView = { total: 0, listed: 0, more: false, train: 0, entries: [] };
   let fail = null,
     pending = false,
-    allowed = true;
+    allowed = true,
+    // Opt-in: start, compose prepare and landing enqueue refuse a stale main pin as the server does,
+    // inside the transaction that would begin the operation (nothing begins, nothing is retained).
+    pinMain = false;
+  const mainMoves = new Map();
+  const staleMain = pin => pin.head !== main.head || pin.receiptId !== main.receipt.id;
   const terminal = result => ({ attemptId: randomUUID(), at, outcome: { status: 'completed', result } });
   const once = (key, make) => {
     if (!operations.has(key)) operations.set(key, make());
@@ -101,6 +106,23 @@ export function agentFixture(t) {
     if (!allowed) throw new ForgeError('PROJECT_UNAVAILABLE', 'Current project access revoked.');
     const request = args.request ? JSON.parse(args.request) : args;
     const id = request.operationId;
+    // Another landing moves main just before this call reaches the server.
+    if (mainMoves.get(name) > 0) {
+      mainMoves.set(name, mainMoves.get(name) - 1);
+      main.head = digest(randomUUID());
+      main.receipt = { ...main.receipt, id: randomUUID() };
+    }
+    if (pinMain) {
+      if (name === 'projectHostedStart:start' && !operations.has(id) && staleMain(request.expectedMain))
+        throw new ForgeError('CHANNEL_CHANGED', 'Hosted main changed from the expected head and receipt.');
+      if (name === 'projectHostedCompose:prepare' && !requests.has(id) && staleMain(request.expectedMain))
+        throw new ForgeError('CHANNEL_CHANGED', 'Compose against the exact observed main head and receipt.');
+      if (name === 'projectHostedLanding:enqueue' && !operations.has(id) && staleMain(request.expectedMain))
+        throw new ForgeError('CHANNEL_CHANGED', 'Select the current main head and receipt.');
+      // A Candidate composes on the main its request observed.
+      if (name === 'projectHostedComposeJobs:submit' && !operations.has(id))
+        candidate.base = { ...requests.get(id).expectedMain };
+    }
     let result;
     if (name === 'projectHostedAgent:capabilities') result = caps;
     else if (name === 'projectHostedChannels:current') result = main;
@@ -416,6 +438,12 @@ export function agentFixture(t) {
     },
     allow(value) {
       allowed = value;
+    },
+    pinMain(value) {
+      pinMain = value;
+    },
+    moveMainBefore(name, times = 1) {
+      mainMoves.set(name, times);
     },
   };
 }

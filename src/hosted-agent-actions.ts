@@ -42,6 +42,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { syncRequestSchema, syncResultSchema } from './hosted-sync.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import { markerAt, retainedLocalApplyBlocked } from './hosted-apply-recovery-records.js';
+import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
 import {
   composeAgentSource,
   driveAgentSource,
@@ -464,7 +465,7 @@ export async function executeHostedAgent(
           plannedIntent(session, command.planningItemId!),
         )
       : undefined;
-    const request = await session.journal.retain('start-request', async () => {
+    const build = async () => {
       const main = await session.main();
       const parent = command.stackOn ? await selectAgentLane(session, command.stackOn) : null;
       return hostedStartSchema.parse({
@@ -489,11 +490,17 @@ export async function executeHostedAgent(
                 ...(command.constraints === undefined ? {} : { constraints: command.constraints }),
               },
       });
+    };
+    // The start transaction checks the main pin before anything begins: a moved main rebuilds it.
+    const started = await sendMainPinned(session.journal, 'start-request', build, async request => {
+      try {
+        return await session.mutation('projectHostedStart:start', request);
+      } catch (error) {
+        if (mainPinRefusal(error, 'start')) throw new MainPinRefused(error);
+        throw error;
+      }
     });
-    return parseHostedResponse(
-      hostedStartResultSchema,
-      await session.mutation('projectHostedStart:start', request),
-    );
+    return parseHostedResponse(hostedStartResultSchema, started);
   }
   if (action === 'open') {
     const command = hostedAgentCommandSchemas.open.parse(input);

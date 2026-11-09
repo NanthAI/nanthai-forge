@@ -1400,6 +1400,12 @@ receipt; a save still running at the deadline returns `IN_PROGRESS` with its `wa
 A new `save` or `save --sync` first settles (waits for) a save this checkout left unfinished. A sync whose retained
 request the server refuses as `WORK_STALE` (no operation began) is rebuilt once from
 current pins; an identical later sync after the Lane moved starts a fresh operation.
+A hosted `start`, `sync` onto main or `land --save` request that pins the main it observed,
+and that the server refuses as `CHANNEL_CHANGED` because main moved first (no operation
+began), is rebuilt on the current main under the same operation, up to 3 tries per call;
+`land --save` composes again when main moved after its compose. A replay of the original
+request after a `CHANNEL_CHANGED` therefore builds on the new main; no fresh `operationId`
+is needed. An explicit `target` or `candidateId` stays the caller's pin and is not rebuilt.
 Native operations use `until:"terminal"`. Hosted check-only and harness checks use
 `{"runId":"RUN_ID"}`; native checks use their run operation id. Before admission,
 source preparation keeps the full original replay command.

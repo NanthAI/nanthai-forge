@@ -300,6 +300,106 @@ test('finish rejects attempts to obtain person authority and pins configured che
   assert.equal(result.result.submission.request.check.checkId, checkId);
 });
 
+const composePrepares = s =>
+  s.calls
+    .filter(call => call.name === 'projectHostedCompose:prepare')
+    .map(call => JSON.parse(call.args.request))
+    .map(request => ({ operationId: request.operationId, head: request.expectedMain.head }));
+
+test('incident replay b8c0a4f6: a land --save refused CHANNEL_CHANGED recomposes on the moved main under the same operation', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID(),
+    before = s.main.head;
+  s.pinMain(true);
+  // Main moves between the compose request's main read and its prepare: the incident's first refusal.
+  s.moveMainBefore('projectHostedCompose:prepare');
+  const command = { operationId, laneId: s.lane.laneId };
+  const landed = await s.transport().dispatch('finish', command);
+  assert.equal(landed.operationId, operationId);
+  assert.equal(landed.result.phase, 'finish');
+  assert.equal(landed.result.submission.request.expectedMain.head, s.main.head, 'lands on the new main');
+  const prepares = composePrepares(s);
+  assert.deepEqual(
+    prepares.map(p => p.head),
+    [before, s.main.head],
+    'the stale request once (refused, nothing began), then the current main',
+  );
+  assert.equal(prepares[1].operationId, prepares[0].operationId, 'the same compose operation');
+  assert.equal(landed.result.composeOperationId, prepares[0].operationId);
+});
+
+test('incident replay b8c0a4f6: main moving on every try drops the stale request, and the first replay lands', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID();
+  s.pinMain(true);
+  s.moveMainBefore('projectHostedCompose:prepare', 3);
+  const command = { operationId, laneId: s.lane.laneId };
+  await assert.rejects(s.transport().dispatch('finish', command), error => {
+    assert.equal(error.code, 'CHANNEL_CHANGED');
+    assert.match(error.message, /a replay of this same operation builds on the new main/);
+    return true;
+  });
+  assert.equal(composePrepares(s).length, 3, 'bounded: three tries per call');
+  // The incident replayed this identical request 8 times; each got the same refusal. Now the
+  // retained stale request is gone, so the first replay composes on the current main and lands.
+  const replay = await s.transport().dispatch('finish', command);
+  assert.equal(replay.operationId, operationId);
+  assert.equal(replay.result.submission.request.expectedMain.head, s.main.head);
+  const prepares = composePrepares(s);
+  assert.equal(prepares.length, 4);
+  assert.equal(new Set(prepares.map(p => p.operationId)).size, 1, 'one compose operation throughout');
+});
+
+test('a landing enqueue refused because main moved after compose composes again on the new main', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID();
+  s.pinMain(true);
+  s.moveMainBefore('projectHostedLanding:enqueue');
+  const landed = await s.transport().dispatch('finish', { operationId, laneId: s.lane.laneId });
+  assert.equal(landed.result.phase, 'finish');
+  assert.equal(landed.result.submission.request.expectedMain.head, s.main.head);
+  const prepares = composePrepares(s);
+  assert.equal(prepares.length, 2, 'composed twice');
+  assert.notEqual(
+    prepares[1].operationId,
+    prepares[0].operationId,
+    'the first compose is terminal: a new one',
+  );
+  assert.equal(prepares[1].head, s.main.head);
+  assert.equal(landed.result.composeOperationId, prepares[1].operationId);
+  assert.equal(s.calls.filter(call => call.name === 'projectHostedLanding:enqueue').length, 2);
+});
+
+test('a healthy land --save makes no extra calls for the main-pin recovery', async t => {
+  const plain = agentFixture(t),
+    pinned = agentFixture(t);
+  pinned.pinMain(true);
+  await plain.transport().dispatch('finish', { laneId: plain.lane.laneId });
+  await pinned.transport().dispatch('finish', { laneId: pinned.lane.laneId });
+  assert.deepEqual(
+    pinned.calls.map(call => call.name),
+    plain.calls.map(call => call.name),
+  );
+});
+
+test('a start refused because main moved rebuilds on the new main under the same operation', async t => {
+  const s = agentFixture(t),
+    operationId = randomUUID();
+  s.pinMain(true);
+  s.moveMainBefore('projectHostedStart:start');
+  await s.transport().dispatch('start', { operationId, outcome: 'Moved main' });
+  const starts = s.calls.filter(call => call.name === 'projectHostedStart:start').map(call => call.args);
+  assert.equal(starts.length, 2);
+  assert.deepEqual(
+    starts.map(start => [start.operationId, start.expectedMain.head]),
+    [
+      [operationId, starts[0].expectedMain.head],
+      [operationId, s.main.head],
+    ],
+  );
+  assert.notEqual(starts[0].expectedMain.head, s.main.head);
+});
+
 test('unavailable capability entry point fails explicitly without creating a local owner or journal', async t => {
   const s = agentFixture(t);
   s.exchange.client.query = async () => {
