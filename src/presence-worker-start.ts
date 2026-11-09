@@ -3,6 +3,7 @@ import { workerPath } from './worker-install.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
 import { existsSync } from 'node:fs';
+import { workerStopReason } from './detached-worker-shutdown.js';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { WorkStore } from './work-store.js';
@@ -68,7 +69,7 @@ export function startOwnerPresence(store: WorkStore) {
         watchOwnerPresence(store, controller.signal),
         watchLandingWorker(store, controller.signal),
       ]);
-    })().catch(() => undefined);
+    })().catch(error => void workerStopReason('presence driver', error));
     owner = {
       users: 1,
       stop: async () => {

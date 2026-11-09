@@ -26,6 +26,7 @@ import { recordLane } from '../dist/lane-registry.js';
 import { digest } from '../dist/hash.js';
 import { createServer } from 'node:net';
 import { openWorkerNotifications } from '../dist/local-worker-notifications.js';
+import { socketDirectory } from '../dist/socket-directory.js';
 import { PeersCache } from '../dist/agent-peers-cache.js';
 
 const hour = 3_600_000;
@@ -401,7 +402,8 @@ test('incident replay: a builder waiting on a long landing loses no Lane folder 
 });
 
 test('a killed driver’s wake directory is swept; live and young ones stay', async t => {
-  const temp = mkdtempSync(join(tmpdir(), 'forge-test-wake-')),
+  // The sockets below sit two levels down; keep the whole path under the Unix socket limit.
+  const temp = socketDirectory('forge-test-wake-', 'nforge-wake-abcdef/wake'),
     saved = process.env.TMPDIR;
   process.env.TMPDIR = temp;
   t.after(() => {
@@ -485,4 +487,30 @@ test('prune keeps a checkout excluded through an alias of its physical root', as
   assert.equal(result.kept.find(item => item.laneId === laneId)?.reason, 'in use by this command');
   assert.equal(result.pruned.length, 0);
   assert(existsSync(join(root, 'src', 'a.txt')));
+});
+
+test('the worker wake socket falls back to a short root when TMPDIR is too deep for a Unix socket', async t => {
+  const deep = mkdtempSync(join(tmpdir(), 'forge-test-deep-')),
+    saved = process.env.TMPDIR;
+  let nested = deep;
+  while (Buffer.byteLength(nested) < 120) nested = join(nested, 'nested-runtime-directory');
+  mkdirSync(nested, { recursive: true });
+  process.env.TMPDIR = nested;
+  t.after(() => {
+    if (saved === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = saved;
+    rmSync(deep, { recursive: true, force: true });
+  });
+  assert(Buffer.byteLength(join(nested, 'nforge-wake-abcdef', 'wake')) > 104);
+  const channel = await openWorkerNotifications();
+  try {
+    assert(Buffer.byteLength(channel.endpoint) <= 100, channel.endpoint);
+    assert(!channel.endpoint.startsWith(nested));
+    const woken = new Promise(resolve => channel.subscribe(resolve));
+    const { createConnection } = await import('node:net');
+    createConnection(channel.endpoint).on('error', () => {});
+    await woken;
+  } finally {
+    await channel.close();
+  }
 });

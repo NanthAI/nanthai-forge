@@ -313,6 +313,15 @@ test('a second worker for the same owner exits at once', async t => {
   assert.equal(first.child.signalCode, null);
 });
 
+test('a worker that cannot start says why on stderr and exits non-zero, with a stack in the diagnostics log', async t => {
+  const home = temp(t, 'worker-why-home');
+  const missing = join(temp(t, 'worker-why'), 'not-an-owner');
+  const running = start(t, missing, { HOME: home, USERPROFILE: home });
+  const [code] = await running.exited;
+  assert.equal(code, 1);
+  assert.match(running.errors, /^presence worker stopped: [A-Z_]+: .+\(stack in .+diagnostics\.log\)\n$/);
+});
+
 test('system errors map to a code, syscall, path and hint', () => {
   const error = Object.assign(new Error('EPERM: operation not permitted, mkdir'), {
     code: 'EPERM',

@@ -135,6 +135,14 @@ export function testImportGraph(files, scriptsChanged = []) {
     // A template widens only to files its literal skeleton can name, as itself or as a
     // folder: `src/file-${i}.ts` names no source file, `../dist/${name}.js` every module.
     const widen = (prefix, detail = 'Computed module path') => {
+      if (prefix?.suffix) {
+        for (const candidate of files.keys())
+          if (
+            builtNames(candidate).some(name => name === prefix.suffix || name.endsWith(`/${prefix.suffix}`))
+          )
+            edge(candidate, path, 'dynamic', detail);
+        return;
+      }
       const template = typeof prefix === 'string' ? null : prefix;
       if (template) prefix = template.head.text;
       const normalized = prefix.startsWith('.')
@@ -280,15 +288,21 @@ export function testImportGraph(files, scriptsChanged = []) {
       ) {
         const prefixes = loadingPrefixes(node.arguments[0], value => resolve(path, value) || external(value));
         if (prefixes.length) {
-          // Packagers load installed artifacts, not repository sources.
-          if (scriptsChanged.some(item => item.path === path) && !docsPackager(path))
+          // Packagers load installed artifacts, not repository sources. A literal ending is bounded.
+          if (
+            prefixes.some(prefix => !prefix.suffix) &&
+            scriptsChanged.some(item => item.path === path) &&
+            !docsPackager(path)
+          )
             uncertain = `Unknown module loading in changed script: ${path}`;
           for (const prefix of prefixes)
             widen(
               prefix,
-              typeof prefix !== 'string' || prefix
-                ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : prefix.head.text}`
-                : 'Unknown module loader',
+              prefix.suffix
+                ? `Computed loader path ending: ${prefix.suffix}`
+                : typeof prefix !== 'string' || prefix
+                  ? `Computed loader domain: ${typeof prefix === 'string' ? prefix : prefix.head.text}`
+                  : 'Unknown module loader',
             );
         }
       }
@@ -338,6 +352,22 @@ function loadingPrefixes(node, known) {
     )
       return [];
     if (['join', 'resolve'].includes(name)) {
+      // `join(dir, 'dist/a.js')` loads a file whose path ends with its trailing literal segments,
+      // whatever `dir` is: those name one module (or none in this repository), never every file.
+      const args = node.arguments ?? [];
+      let tail = args.length;
+      while (tail > 0 && ts.isStringLiteralLike(args[tail - 1])) tail--;
+      const suffix = args
+        .slice(tail)
+        .map(arg => arg.text)
+        .join('/');
+      if (
+        tail > 0 &&
+        /\.(?:[cm]?js|[cm]?tsx?|json)$/.test(suffix) &&
+        !/^\/|[\\:]/.test(suffix) &&
+        suffix.split('/').every(part => part && part !== '.' && part !== '..')
+      )
+        return [{ suffix }];
       const dirs = (node.arguments ?? [])
         .filter(ts.isStringLiteralLike)
         .map(arg => arg.text)

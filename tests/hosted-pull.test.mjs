@@ -3,11 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { syncBuiltinESMExports } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { pullFixture } from './hosted-pull-fixture.mjs';
 import { pullHostedProject, cloneFreshness, mainCheckoutTransport } from '../dist/hosted-pull.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
+import { lockfileState, staleDependenciesNotice } from '../dist/stale-dependencies.js';
 import { readHostedMainMarker } from '../dist/hosted-main-marker.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { getFunctionName } from 'convex/server';
@@ -385,4 +387,69 @@ test('interrupted dangling-symlink publication restores its prior link and repla
   assert.equal(fs.readlinkSync(join(f.root, 'link')), 'old-missing-target');
   await pull(f);
   assert.equal(fs.readlinkSync(join(f.root, 'link')), 'new-missing-target');
+});
+
+test('pull names a changed lockfile with stale folder deps in one line, installs nothing (friction 1c45066e)', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'forge-stale-deps-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const lock = packages => JSON.stringify({ lockfileVersion: 3, packages: { '': {}, ...packages } });
+  const write = (name, text) => {
+    fs.mkdirSync(join(root, name, '..'), { recursive: true });
+    fs.writeFileSync(join(root, name), text);
+  };
+  write('package.json', '{"name":"synthetic"}');
+  write('package-lock.json', lock({ 'node_modules/a': { version: '1.0.0' } }));
+  const before = lockfileState(root).digest;
+  assert.equal(staleDependenciesNotice(root, before), null, 'lockfile unchanged');
+  // The pull brought a package; no node_modules means nothing to be stale.
+  write(
+    'package-lock.json',
+    lock({ 'node_modules/a': { version: '1.0.0' }, 'node_modules/@lezer/go': { version: '1.0.1' } }),
+  );
+  assert.equal(staleDependenciesNotice(root, before), null, 'no node_modules');
+  // A real node_modules from the old lockfile: one line, the command, no install.
+  write('node_modules/.package-lock.json', lock({ 'node_modules/a': { version: '1.0.0' } }));
+  const line = staleDependenciesNotice(root, before);
+  assert.match(
+    line,
+    /^package-lock\.json changed and node_modules is out of date; run: cd '.+' && npm ci --ignore-scripts {2}\(pull does not install\)\n$/,
+  );
+  assert.equal(line.trim().split('\n').length, 1);
+  assert.equal(fs.existsSync(join(root, 'node_modules', '@lezer')), false, 'pull never installs');
+  // Already installed at the locked versions (optional platform packages may be absent): silent.
+  write(
+    'package-lock.json',
+    lock({
+      'node_modules/a': { version: '1.0.0' },
+      'node_modules/@x/mac': { version: '2.0.0', optional: true, os: ['darwin'] },
+    }),
+  );
+  write('node_modules/.package-lock.json', lock({ 'node_modules/a': { version: '1.0.0' } }));
+  assert.equal(staleDependenciesNotice(root, before), null, 'install already matches the lockfile');
+  // A changed version is stale; a missing hidden lockfile cannot be trusted.
+  write('node_modules/.package-lock.json', lock({ 'node_modules/a': { version: '0.9.0' } }));
+  assert.match(staleDependenciesNotice(root, before), /npm ci/);
+  fs.rmSync(join(root, 'node_modules', '.package-lock.json'));
+  assert.match(staleDependenciesNotice(root, before), /npm ci/);
+  // A Forge link to a shared install is followed by the agent actions, not reported here.
+  fs.rmSync(join(root, 'node_modules'), { recursive: true });
+  const shared = join(root, '..', `${root.split('/').at(-1)}-shared`);
+  fs.mkdirSync(shared);
+  t.after(() => fs.rmSync(shared, { recursive: true, force: true }));
+  fs.symlinkSync(shared, join(root, 'node_modules'));
+  assert.equal(staleDependenciesNotice(root, before), null, 'symlinked node_modules');
+});
+
+test('pull names the declared manager’s install command for a changed lockfile', t => {
+  const root = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), 'forge-stale-deps-pnpm-')));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  fs.writeFileSync(join(root, 'package.json'), '{"name":"synthetic","packageManager":"pnpm@9.0.0"}');
+  fs.writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  fs.mkdirSync(join(root, 'node_modules'));
+  const before = lockfileState(root).digest;
+  fs.writeFileSync(join(root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n# changed\n');
+  assert.match(
+    staleDependenciesNotice(root, before),
+    /^pnpm-lock\.yaml changed .*pnpm install --frozen-lockfile --ignore-scripts/,
+  );
 });

@@ -12,6 +12,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { mcpTestEnvironment, requestOptions, callTool } from './mcp-runtime.mjs';
 import { fixture } from './landing-batch-fixture.mjs';
 import { until } from './landing-worker-fixture.mjs';
+import { shortSocketPath } from './helpers/short-socket.mjs';
 import { batchEdit, selectBatch, composeBatch } from '../dist/landing-batch-store.js';
 import { processAlive, processIdentity } from '../dist/local-process.js';
 import { landingWorkerStates, saveLandingWorkerState } from '../dist/landing-worker-status.js';
@@ -76,7 +77,7 @@ export async function replayActionsLifetime(t, drive) {
     endpoint: join(f.root, 'owner-wake.sock'),
   };
   saveLandingWorkerState(f.store, owner);
-  const endpoint = join(f.root, 'gate');
+  const endpoint = shortSocketPath('gate');
   const gate = createServer(socket => {
     sockets.add(socket);
     socket.on('error', () => {});

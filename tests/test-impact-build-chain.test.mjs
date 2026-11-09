@@ -183,6 +183,23 @@ test('the selector scripts do not widen to the source they classify', () => {
     assert.equal(edge(graph, 'src/hash.ts', script), undefined, script);
 });
 
+test('incident 7d98c7da: bench harness scripts do not reach the check pipeline through a measurement loader', () => {
+  // `join(runtime, 'dist/x.js')` once counted as loading every file, and a static check names that
+  // measurement script's path, so every changed script "reached package-script:check" and each
+  // main-race recheck of a script change ran the full suite. A literal ending names only its module.
+  const root = new URL('..', import.meta.url).pathname;
+  const files = sourceFiles(root);
+  // The incident Lane's harness scripts. A script a check names directly still counts (it may spawn it).
+  const bench = ['drain', 'drive', 'gates', 'preflight', 'run-cell', 'versions']
+    .map(name => `scripts/bench-t3code/${name}.mjs`)
+    .filter(path => files.has(path));
+  assert.ok(bench.length > 0);
+  for (const path of bench) {
+    const selection = selected(files, path);
+    assert.doesNotMatch(selection.reason, /Check pipeline, packaging or build dependency/, path);
+  }
+});
+
 test('dogfood-scale graph with fixture templates and workspace paths stays within budget', () => {
   const extra = {};
   for (let i = 0; i < 1600; i++)

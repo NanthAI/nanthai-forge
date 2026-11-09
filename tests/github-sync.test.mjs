@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cleanupOwner } from './owner-cleanup.mjs';
 import { until as untilWorker } from './landing-worker-fixture.mjs';
+import { shortSocketPath } from './helpers/short-socket.mjs';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
 import test, { after } from 'node:test';
@@ -1506,7 +1507,7 @@ test('--wait-audit timeout exits while its newly started audit continues under t
   const { createServer } = await import('node:net');
   const { once } = await import('node:events');
   const f = fixture(t),
-    endpoint = join(f.temporary, 'audit-gate');
+    endpoint = shortSocketPath('audit-gate');
   const sockets = new Set();
   const server = createServer(socket => {
     sockets.add(socket);

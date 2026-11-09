@@ -30,7 +30,7 @@ Tests use synthetic repositories and real Git, Node and MCP subprocesses. Pass-o
 
 Two guards keep hosted code on the intended path. `tests/hot-storage-invariant.test.mjs` fails any new use of Convex file storage in `convex/` (write, read, handle or `v.id('_storage')` field): bytes go to R2 ([data placement](data-placement.md)), and the few remaining uses are legacy-read allowlist entries with a count and an expiry date. `node scripts/check-convex-runtime.mjs` (a verify step) fails when a Convex module without `"use node"` reaches a `node:` builtin through `src/`.
 
-The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files.
+The compact Work/detail and native companion fixtures close their MCP clients and HTTP servers before removing owner directories. CLI presence workers are detached; directory removal retries transient `ENOTEMPTY` errors while those workers release their queue files. A presence worker that stops on an error writes one line (code and message) to stderr and the stack to the diagnostics log, and exits 1; a normal stop exits 0. Test fixtures that listen on a Unix socket take their path from `tests/helpers/short-socket.mjs`, so a deep `TMPDIR` (local preflight) never exceeds the macOS 104-byte limit.
 
 Interaction finish fixtures isolate the outer `FORGE_CHECK_FULL` override so their nested checks exercise the explicitly selected docs, scoped and interaction scenarios. The enclosing verification run keeps its full selection. Interaction and landing fixtures drain post-accept work and join spawned helpers before deleting their owners. Finish replay assertions compare recorded receipt fields separately from live peer observations, whose coverage can change when source becomes unavailable. Peer coverage is independent of machine speed; load regressions require complete reads without retries, while unavailable source remains incomplete. The running-output exchange fixture holds its writer at an explicit barrier during preparation, then verifies that later appended bytes do not change the pinned retry.
 
@@ -333,7 +333,9 @@ modules fail toward full coverage.
 Web edits also run the UI regression files. A computed path widens only to files its
 literal skeleton can name (`head*mid*tail`, or a folder under it); source modules also
 match by their built `dist/` name, so `` `../dist/${name}.js` `` still names every module
-while a fixture template like `` `src/file-${i}.ts` `` names none. Unknown dynamic imports
+while a fixture template like `` `src/file-${i}.ts` `` names none. A `join` or `resolve`
+whose trailing arguments are literal module names (`join(runtime, 'dist/x.js')`) names only
+files ending with them, whatever the leading folder is. Unknown dynamic imports
 widen to all source domains. The package's own name (`@nanthai/forge[/sub]`) resolves
 through `package.json` `exports`, so package smoke depends on the exported entry
 modules; an unmapped subpath stays unknown. A file that declares its own `require`

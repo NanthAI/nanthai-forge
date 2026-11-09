@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createServer, type Socket } from 'node:net';
-import { statSync, mkdtempSync, readFileSync, writeFileSync, rmSync, realpathSync, chmodSync } from 'node:fs';
-import { join, dirname, basename } from 'node:path';
-import { tmpdir } from 'node:os';
+import { statSync, readFileSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { isSocketDirectory, socketDirectory } from './socket-directory.js';
 import { workLocked } from './work-lock.js';
 import { processAlive, processIdentity } from './local-process.js';
 import { startLocalWatcher, type Command } from './local-watcher-worker.js';
 import type { WatchLease } from './local-watcher-client.js';
 
+const WATCH_OWNER_PREFIX = 'forge-watch-owner-';
 /** The owner lease is elected under an existing recoverable local lock. Kernel
  * start identities fence PID reuse; only a dead lease permits socket takeover. */
 export function startSharedWatcher(directory: string) {
@@ -33,13 +34,10 @@ export function startSharedWatcher(directory: string) {
       ) {
         if (processAlive(previous)) return previous;
         const oldDirectory = dirname(previous.socket);
-        if (
-          dirname(oldDirectory) === realpathSync(tmpdir()) &&
-          basename(oldDirectory).startsWith('forge-watch-owner-')
-        )
+        if (isSocketDirectory(oldDirectory, WATCH_OWNER_PREFIX))
           rmSync(oldDirectory, { recursive: true, force: true });
       }
-      const socket = join(mkdtempSync(join(realpathSync(tmpdir()), 'forge-watch-owner-')), 'socket');
+      const socket = join(socketDirectory(WATCH_OWNER_PREFIX, 'socket'), 'socket');
       const next = { ...identity, socket };
       writeFileSync(path, JSON.stringify(next), { mode: 0o600 });
       return next;

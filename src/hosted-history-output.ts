@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import type { HostedAgentAddress } from './hosted-address.js';
+import { hostedActionError } from './hosted-action-error.js';
 import { hostedHistory, hostedHistorySchema } from './hosted-history-cli.js';
 
 /** CLI form of `history`: JSON for log/blame/status/limit/retry; op:"show" writes the
@@ -31,7 +32,10 @@ export async function hostedHistoryCli(
       );
     throw error;
   }
-  const result = await hostedHistory(address, input, transport);
+  // A server refusal (HISTORY_UNAVAILABLE, PROJECT_OWNER_REQUIRED, ...) keeps its code and message.
+  const result = await hostedHistory(address, input, transport).catch(error => {
+    throw hostedActionError(error, 'history');
+  });
   if (parsed.op !== 'show') return { action: 'history', result };
   const file = result as { bytes: Buffer };
   invariant(

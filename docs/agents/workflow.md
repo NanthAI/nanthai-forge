@@ -45,7 +45,10 @@ bounds](../operations/hosted-source-worker.md), including
 `nforge pull [ROOT]` (ROOT defaults to the clone holding the cwd) / `nforge status ROOT` are the `git pull` / `git status`
 equivalents. Agent: `pull {}` / `status {}`; MCP: existing `forge_task` /
 `forge_work_overview`. Pull refuses tracked edits, preserves ignored artifacts
-and resumes interruption. Current: 1 query, 0 GETs; idle: 0 calls.
+and resumes interruption. When the pull changed the lockfile and the folder's own
+`node_modules` no longer matches it, `nforge pull` prints one line with the
+install command for the declared manager (a local file compare: no call, no
+install). Current: 1 query, 0 GETs; idle: 0 calls.
 [Refresh and cost reference](../operations/source-exchange.md#hosted-main-client-checkout).
 
 ## Hosted command contract
@@ -197,7 +200,8 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   ([Git serving](../git-serving.md)). Owners set the
   per-project limit with `op:"limit"` (`bytes`, default 1 GiB, at most 8 GiB) and
   re-run a failed or over-limit import with `op:"retry"`; above the limit no history
-  is stored and reads return `HISTORY_OVER_LIMIT`.
+  is stored and reads return `HISTORY_OVER_LIMIT`. A project with no stored history
+  returns `HISTORY_UNAVAILABLE` with its message (on `status` too), never `INTERNAL_ERROR`.
 
 - `review`, `candidate`/`candidates` (`view`/`views`), `provenance`, `records`,
   `brief`, `link`, `log`, `handoff`/`handoff-read`, `report`, `making-of`,

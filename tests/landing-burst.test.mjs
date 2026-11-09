@@ -18,6 +18,7 @@ import { ForgeError } from '../dist/errors.js';
 import { trustAgents } from './autonomy-fixture.mjs';
 import { immutableDirectory } from './helpers/immutable-directory.mjs';
 import { waitForState } from './helpers/wait-for-state.mjs';
+import { shortSocketPath } from './helpers/short-socket.mjs';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 
@@ -52,7 +53,7 @@ async function fixture(t, { delay = 300, window = 120, concurrency, failWhen = "
     if (!hold || !first) socket.end();
     first = false;
   });
-  const endpoint = join(store.directory, 'check-gate');
+  const endpoint = shortSocketPath('check-gate');
   gate.listen(endpoint);
   await once(gate, 'listening');
   const releaseFirst = () => {

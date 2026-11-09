@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createConnection, createServer } from 'node:net';
-import { chmodSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, lstatSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { socketCandidates, socketDirectory } from './socket-directory.js';
 
 const PREFIX = 'nforge-wake-';
 const STALE_MS = 2 * 3_600_000;
@@ -20,18 +20,20 @@ const reachable = (endpoint: string) =>
 async function sweepStaleChannels(now = Date.now()) {
   try {
     let checked = 0;
-    for (const name of readdirSync(tmpdir())) {
-      if (!name.startsWith(PREFIX)) continue;
-      const directory = join(tmpdir(), name),
-        stat = lstatSync(directory);
-      if (
-        !stat.isDirectory() ||
-        (process.getuid && stat.uid !== process.getuid()) ||
-        now - stat.mtimeMs < STALE_MS
-      )
-        continue;
-      if (++checked > SWEEP_LIMIT) break;
-      if (!(await reachable(join(directory, 'wake')))) rmSync(directory, { recursive: true, force: true });
+    for (const root of socketCandidates()) {
+      for (const name of readdirSync(root)) {
+        if (!name.startsWith(PREFIX)) continue;
+        const directory = join(root, name),
+          stat = lstatSync(directory);
+        if (
+          !stat.isDirectory() ||
+          (process.getuid && stat.uid !== process.getuid()) ||
+          now - stat.mtimeMs < STALE_MS
+        )
+          continue;
+        if (++checked > SWEEP_LIMIT) return;
+        if (!(await reachable(join(directory, 'wake')))) rmSync(directory, { recursive: true, force: true });
+      }
     }
   } catch {
     /* Housekeeping never blocks the driver. */
@@ -41,7 +43,7 @@ async function sweepStaleChannels(now = Date.now()) {
  * notifications, lifecycle clients can explicitly wake a paused owner driver. */
 export async function openWorkerNotifications() {
   if (process.platform !== 'win32') await sweepStaleChannels();
-  const directory = process.platform === 'win32' ? undefined : mkdtempSync(join(tmpdir(), PREFIX));
+  const directory = process.platform === 'win32' ? undefined : socketDirectory(PREFIX, 'wake');
   if (directory) chmodSync(directory, 0o700);
   const endpoint = directory ? join(directory, 'wake') : `\\\\.\\pipe\\nforge-worker-${randomUUID()}`;
   const listeners = new Set<() => void>();

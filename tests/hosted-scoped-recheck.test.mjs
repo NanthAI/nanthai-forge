@@ -548,6 +548,76 @@ test('replay: one member with an unplaced path on its own side keeps the full un
   assert.equal(batchScopedRecheckSelection({ members: [], files: cohortFiles() }).scope, 'full');
 });
 
+// Incident 7d98c7da (dogfood 2026-11-09): a cohort of three ready landings (bench harness scripts,
+// Git serving, approvals) rechecked after the head entry landed a lint configuration change. The
+// cohort ran the full suite (12 shards, 14 min, `scoped-unclassified`) because the bench member's
+// own side "reached the check pipeline": a measurement script loads `join(runtime, 'dist/x.js')`,
+// which counted as loading every file, and a static check names that script's path in its
+// exemption list. A computed path whose trailing segments are literal names only files ending so.
+const pipeline = (loader = "join(runtime, 'dist/exchange.js')") => [
+  ['package.json', '{"scripts":{"check":"node scripts/check-foundation.mjs"}}'],
+  ['scripts/check-foundation.mjs', "import './check-boundaries.mjs';"],
+  [
+    'scripts/check-boundaries.mjs',
+    "export const exempt = new Map([['scripts/measure-latency.mjs', 'intercept']]);",
+  ],
+  [
+    'scripts/measure-latency.mjs',
+    `import { join } from 'node:path'; import { pathToFileURL } from 'node:url';
+const runtime = process.env.RUNTIME ?? '.';
+export const run = async path => (await import(pathToFileURL(${loader}))).exchange;`,
+  ],
+  ['src/exchange.ts', 'export const exchange = 1;'],
+  ['tests/exchange.test.mjs', "import '../dist/exchange.js';"],
+  ['scripts/bench/drain.mjs', 'export const drain = 1;'],
+  ['scripts/bench/run-cell.mjs', "import './drain.mjs'; export const cell = 1;"],
+  ['tests/bench-cell.test.mjs', "import '../scripts/bench/run-cell.mjs';"],
+  ['.oxlintrc.json', '{}'],
+];
+const incidentCohort = [
+  // The bench member: harness scripts and their test.
+  {
+    lanePaths: ['scripts/bench/drain.mjs', 'tests/bench-cell.test.mjs'],
+    mainPaths: ['.oxlintrc.json', 'convex/a.ts'],
+  },
+  // The Git-serving member: Convex modules.
+  { lanePaths: ['convex/a.ts'], mainPaths: ['.oxlintrc.json', 'scripts/bench/drain.mjs'] },
+];
+
+test('incident 7d98c7da: a bench-script member keeps the cohort recheck scoped after a lint-config head', () => {
+  const files = cohortFiles(pipeline());
+  const selected = batchScopedRecheckSelection({ members: incidentCohort, files });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  assert.equal(selected.fallback, undefined);
+  // Main's root configuration reaches every test, so each member reruns its own affected set.
+  for (const test of ['tests/bench-cell.test.mjs', 'tests/a-main.test.mjs', 'tests/a-b.test.mjs'])
+    assert(selected.tests.includes(test), test);
+  for (const test of ['tests/exchange.test.mjs', 'tests/b-only.test.mjs', 'tests/other.test.mjs'])
+    assert(!selected.tests.includes(test), `${test} is main-audit debt`);
+  // The literal ending still names its module: a change to it reaches the loading script's tests.
+  const loaded = scopedRecheckSelection({
+    lanePaths: ['src/exchange.ts'],
+    mainPaths: ['convex/main.ts'],
+    files: cohortFiles([
+      ...pipeline(),
+      ['tests/latency.test.mjs', "import '../scripts/measure-latency.mjs';"],
+      ['tests/exchange-main.test.mjs', "import '../dist/exchange.js'; import '../convex/main.ts';"],
+    ]),
+  });
+  assert.equal(loaded.scope, 'scoped', loaded.reason);
+  assert(loaded.tests.includes('tests/exchange-main.test.mjs'));
+  // A path with no literal ending, or one that leaves its folder, still may load anything: a script
+  // that such a check-pipeline loader can reach keeps the full union.
+  for (const loader of ['join(runtime, path)', "join(runtime, '../dist/exchange.js')"]) {
+    const wide = batchScopedRecheckSelection({
+      members: incidentCohort,
+      files: cohortFiles(pipeline(loader)),
+    });
+    assert.equal(wide.scope, 'full', loader);
+    assert.match(wide.reason, /scripts\/bench\/drain\.mjs reaches package-script:check/);
+  }
+});
+
 test('the cohort gate carries every basis pair; old and other gates never parse as one', () => {
   const a = cohortBasis(hex('1'), hex('2')),
     b = cohortBasis(hex('3'), hex('4'));

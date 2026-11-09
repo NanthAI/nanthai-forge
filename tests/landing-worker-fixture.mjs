@@ -7,6 +7,7 @@ import { watchLocal } from '../dist/local-watcher.js';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { fixture } from './landing-batch-fixture.mjs';
+import { shortSocketPath } from './helpers/short-socket.mjs';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { readMainAuditState } from '../dist/post-accept-state.js';
 
@@ -175,7 +176,7 @@ await watchLandingWorker(new WorkStore(process.argv[1]),c.signal);`;
 // guarantee that a loaded parent observes running before the command completes.
 export async function gatedFixture(t) {
   const f = await fixture(t, { remote: false });
-  const endpoint = join(f.root, 'gate');
+  const endpoint = shortSocketPath('gate');
   const connections = new Set();
   let started = false,
     released = false;

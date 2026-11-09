@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { detachedWorker } from './detached-worker-shutdown.js';
+import { detachedWorker, workerStopReason } from './detached-worker-shutdown.js';
 import { existsSync } from 'node:fs';
 import { watchLocal } from './local-watcher.js';
 import { join } from 'node:path';
@@ -294,6 +294,11 @@ if (process.argv[1]?.endsWith('/presence-worker.js') && process.argv[2]) {
       clearInterval(keepAlive);
       guard.close();
     }
-  }).catch(() => undefined);
-  process.exit(0);
+  }).then(
+    () => process.exit(0),
+    error => {
+      process.stderr.write(workerStopReason('presence worker', error));
+      process.exit(1);
+    },
+  );
 }

@@ -1686,7 +1686,10 @@ export class HostedAgentTransport {
         projectId: this.address.projectId,
       });
     } catch (error) {
-      throw retryableExchangeError(hostedActionError(error, name), this.callerOperationId) ?? error;
+      // The server's typed refusal (HISTORY_UNAVAILABLE, ...) reaches the caller with its code and
+      // message; only a transient one gets the retry wording. Never the raw error: it prints as INTERNAL_ERROR.
+      const typed = hostedActionError(error, name);
+      throw retryableExchangeError(typed, this.callerOperationId) ?? typed;
     }
     return (typeof value === 'string' ? JSON.parse(value) : value) as T;
   }
