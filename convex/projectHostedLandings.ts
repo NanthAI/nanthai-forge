@@ -10,7 +10,7 @@ import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
-import { receiptAcceptedBy } from '../src/landing-accepted-by';
+import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import {
   LANDINGS_ATTEMPTS,
   LANDINGS_DEFAULT_LIMIT,
@@ -156,7 +156,11 @@ async function evidence(
       // Older submissions it waited for after its check passed, and whether footprints overlapped (c6b81429).
       orderWaits: receipt.orderWaits ?? null,
       // A person's acceptance or an automatic one (fe5bea80); older rows fall back to the receipt actor.
-      acceptedBy: state?.acceptance?.acceptedBy ?? (receipt.actor ? receiptAcceptedBy(receipt) : null),
+      acceptedBy: state?.acceptance?.acceptedBy
+        ? landingAcceptedBySchema.parse(state.acceptance.acceptedBy)
+        : receipt.actor
+          ? receiptAcceptedBy(receipt)
+          : null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
     },

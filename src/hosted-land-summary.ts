@@ -5,6 +5,7 @@ import { failedErrorChars, failedErrors } from './check-file-summary.js';
 import { retryableFinishSource } from './hosted-agent-finish-result.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
 import { syncRequiredSummary } from './hosted-would-conflict.js';
+import { acceptedByLine } from './landing-accepted-by.js';
 
 export const terminalPhases = new Set(['landed', 'terminal-failed']);
 type Result = {
@@ -16,7 +17,11 @@ type Result = {
     phase?: string;
     observation?: { state: string; pendingReason?: string | null };
     error?: { code: string; message: string } | null;
-    acceptance?: { receiptId: string; head: string; acceptedBy?: { note: string } };
+    acceptance?: {
+      receiptId: string;
+      head: string;
+      acceptedBy?: { kind: 'person' | 'auto'; actor?: string; note: string };
+    };
     testFiles?: {
       counts?: { failed: number };
       failed?: { file: string; report?: { firstError?: string } }[];
@@ -64,7 +69,7 @@ function outcomeLines(response: HostedAgentResponse): string[] {
           : ''
       }`,
       // A person's acceptance or policy's, never inferred from the submitter (fe5bea80).
-      ...(submission?.acceptance?.acceptedBy ? [submission.acceptance.acceptedBy.note] : []),
+      ...(submission?.acceptance?.acceptedBy ? [acceptedByLine(submission.acceptance.acceptedBy)] : []),
     ];
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')
     return [

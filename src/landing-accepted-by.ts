@@ -6,13 +6,15 @@ export const ACCEPTED_BY_PATHS = 20;
 
 /** Who accepted a landing (Issue fe5bea80). `person`: a person accepted it (the project owner on the
  * review page or /approve, or their own web acceptance). `auto`: project policy accepted it after its
- * check passed and no person reviewed it. `handle` is a public Forge handle; for `auto` it is the
- * submitter. The submission's `actor` is the submitter, not who accepted it: an owner's agent and the
- * owner share one handle, so read this field, never `actor`, to tell the two apart. */
-export const landingAcceptedBySchema = z
+ * check passed and no person reviewed it. `actor` is stored as the account and leaves the server as
+ * the public Forge handle (the public identity rule maps `actor`); readers who may not see people get
+ * none. For `auto` it is the submitter. The submission's own `actor` is the submitter, not who
+ * accepted it: an owner's agent and the owner share one account, so read this field to tell them
+ * apart. `note` never names anyone. */
+const acceptedByObject = z
   .object({
     kind: z.enum(['person', 'auto']),
-    handle: z.string().min(1),
+    actor: z.string().min(1).optional(),
     /** person: when the person accepted; auto: when it landed. */
     at: z.iso.datetime(),
     /** person: the Candidate head the person accepted (absent for grants recorded before it was kept). */
@@ -30,9 +32,18 @@ export const landingAcceptedBySchema = z
     note: z.string().min(1),
   })
   .strict();
-export type LandingAcceptedBy = z.infer<typeof landingAcceptedBySchema>;
+/** Rows stamped by the first release (2026-11-09, minutes) named the account `handle`, a key the
+ * public identity rule does not map: reading renames it to `actor`, so it leaves as a handle. */
+export const landingAcceptedBySchema = z.preprocess(value => {
+  if (!value || typeof value !== 'object' || !('handle' in value)) return value;
+  const { handle, ...rest } = value as Record<string, unknown>;
+  return 'actor' in rest ? rest : { ...rest, actor: handle };
+}, acceptedByObject);
+export type LandingAcceptedBy = z.infer<typeof acceptedByObject>;
 
 const short = (head: string) => head.slice(0, 8);
+export const AUTO_ACCEPTED_NOTE =
+  'Accepted automatically under project policy after its check passed; no person reviewed it.';
 
 /** The stamp written once at publication, from facts the publish transaction already holds. */
 export function landingAcceptedBy(input: {
@@ -46,12 +57,7 @@ export function landingAcceptedBy(input: {
   carried?: boolean | undefined;
 }): LandingAcceptedBy {
   if (input.actor.kind !== 'person')
-    return {
-      kind: 'auto',
-      handle: input.actor.id,
-      at: input.at,
-      note: 'Accepted automatically under project policy after its check passed; no person reviewed it.',
-    };
+    return { kind: 'auto', actor: input.actor.id, at: input.at, note: AUTO_ACCEPTED_NOTE };
   const at = input.acceptedAt === undefined ? input.at : new Date(input.acceptedAt).toISOString();
   const all = input.protectedPaths;
   const paths = all ? all.slice(0, ACCEPTED_BY_PATHS) : all;
@@ -64,13 +70,13 @@ export function landingAcceptedBy(input: {
         : '';
   return {
     kind: 'person',
-    handle: input.actor.id,
+    actor: input.actor.id,
     at,
     ...(input.head ? { head: input.head } : {}),
     ...(all !== undefined ? { paths } : {}),
     ...(more ? { pathsMore: more } : {}),
     ...(input.carried ? { carried: true as const } : {}),
-    note: `Accepted by the person @${input.actor.id} at ${at}${input.head ? ` on Candidate ${short(input.head)}` : ''}${pathText}${
+    note: `A person accepted it at ${at}${input.head ? ` on Candidate ${short(input.head)}` : ''}${pathText}${
       input.carried
         ? '; main moved, so the same source was checked again and landed with that acceptance'
         : ''
@@ -90,7 +96,14 @@ export function receiptAcceptedBy(receipt: {
     fromReceipt: true,
     note:
       by.kind === 'person'
-        ? `Accepted by the person @${by.handle} (from the receipt; the acceptance time was not kept, ${by.at} is the landing time).`
+        ? `A person accepted it (from the receipt; the acceptance time was not kept, ${by.at} is the landing time).`
         : by.note,
   };
+}
+
+/** The line the CLI prints after LANDED: who, then the note. */
+export function acceptedByLine(by: Pick<LandingAcceptedBy, 'kind' | 'actor' | 'note'>) {
+  return by.kind === 'person'
+    ? `ACCEPTED BY A PERSON${by.actor ? ` @${by.actor}` : ''}: ${by.note}`
+    : `AUTO-ACCEPTED${by.actor ? ` (submitted by @${by.actor})` : ''}: ${by.note}`;
 }

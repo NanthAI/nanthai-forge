@@ -5,6 +5,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { acceptancePage } from './projectHostedAcceptanceStore';
 import { postSystemLaneNote } from './projectBoardSystem';
+import { publicActorLabel } from './publicPeople';
 import { fitNote } from './projectHostedApprovalStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { digest } from '../src/portable-hash';
@@ -24,7 +25,7 @@ export async function noteAcceptedBy(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; receiptId: string; by: LandingAcceptedBy },
 ) {
-  if (input.by.kind !== 'person') return 'skipped' as const;
+  if (input.by.kind !== 'person' || !input.by.actor) return 'skipped' as const;
   const page = await acceptancePage(ctx, { ...input, kind: 'inputs', index: 0 });
   const lane = composeLaneSchema.safeParse(
     page ? validateComposePage(JSON.parse(page.value)).entries[0] : null,
@@ -39,9 +40,9 @@ export async function noteAcceptedBy(
     id: acceptedByNoteId(input.receiptId),
     toLaneId: laneId,
     fromLaneId: laneId,
-    author: input.by.handle,
+    author: input.by.actor,
     text: fitNote(
-      `@${input.by.handle} (a person) accepted this landing at ${input.by.at.slice(11, 16)}Z, receipt ${input.receiptId.slice(0, 8)}${paths ? '; protected paths ' : ''}`,
+      `@${await publicActorLabel(ctx, input.by.actor)} (a person) accepted this landing at ${input.by.at.slice(11, 16)}Z, receipt ${input.receiptId.slice(0, 8)}${paths ? '; protected paths ' : ''}`,
       paths,
       '. Reviewed, not an auto-accept.',
     ),

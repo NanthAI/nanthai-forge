@@ -50,8 +50,8 @@ function landedAcceptance(read: LandingRead): ReviewAcceptance {
     read.request.acceptance?.acceptedBy ?? (read.receipt ? receiptAcceptedBy(read.receipt) : undefined);
   return {
     at: read.receipt?.at ?? read.request.at,
-    actor: by?.handle ?? read.attempt.actor.id,
-    ...(by ? { review: { kind: by.kind, handle: by.handle } } : {}),
+    actor: by?.actor ?? read.attempt.actor.id,
+    ...(by ? { review: { kind: by.kind, ...(by.actor ? { actor: by.actor } : {}) } } : {}),
   };
 }
 export function LandingDecision(props: LandingDecisionProps) {

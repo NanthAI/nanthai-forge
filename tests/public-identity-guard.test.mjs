@@ -317,3 +317,26 @@ test('every public function taking a collector signature refuses an anonymous ca
     assert(checked.includes(name), `${name} is guarded`);
   assert.deepEqual(open, []);
 });
+
+test('a landing acceptance stamp names the accepting person by handle only (fe5bea80)', async () => {
+  const { landingAcceptedBy, landingAcceptedBySchema } = await import('../dist/landing-accepted-by.js');
+  const accounts = { [subject]: 'builder' };
+  const by = landingAcceptedBy({
+    actor: { kind: 'person', id: subject },
+    at: '2026-11-09T12:00:00.000Z',
+    protectedPaths: ['.github/workflows/x.yml'],
+  });
+  assert(!by.note.includes('user_'), 'the note names nobody');
+  const state = JSON.stringify({ submission: { acceptance: { receiptId: 'r', head: 'h', acceptedBy: by } } });
+  const writer = fixture({ viewer: subject, contributors: [subject], accounts });
+  const shown = JSON.parse(await people.publicPeople(writer.ctx, { projectId: 'project-1' }, state));
+  assert.equal(shown.submission.acceptance.acceptedBy.actor, 'builder');
+  const reader = fixture({ viewer: 'user_strangerCCCCCCCC', accounts });
+  const hidden = await people.publicPeople(reader.ctx, { projectId: 'project-1' }, state);
+  assert(!hidden.includes('user_'), 'a reader who may not see people sees no account');
+  assert.equal(JSON.parse(hidden).submission.acceptance.acceptedBy.actor, undefined);
+  // Rows from the first release named it `handle`: reading renames it to `actor`.
+  const { actor, ...rest } = by;
+  assert.equal(landingAcceptedBySchema.parse({ ...rest, handle: actor }).actor, subject);
+  assert.equal('handle' in landingAcceptedBySchema.parse({ ...rest, handle: actor }), false);
+});

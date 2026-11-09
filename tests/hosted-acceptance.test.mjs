@@ -57,7 +57,7 @@ test('clean unchecked person acceptance publishes receipt, snapshot, event and o
   assert.deepEqual(stamp, { receiptId: receipt.id, head: receipt.candidate.head });
   // A person accepted it (fe5bea80): the stamp says so, with the exact Candidate head.
   assert.equal(acceptedBy.kind, 'person');
-  assert.equal(acceptedBy.handle, 'owner');
+  assert.equal(acceptedBy.actor, 'owner');
   assert.equal(acceptedBy.head, receipt.candidate.head);
   assert.equal(f.queue().lease, null);
   assert.equal(f.queue().wake, null);
