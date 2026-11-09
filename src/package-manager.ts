@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { isAbsolute, join, relative } from 'node:path';
+import { managerLockfiles } from './ecosystems.js';
 
 /** Which JavaScript package manager a repository declares, and what its install layout needs.
  * Reads files only. One small module so the ecosystem registry can absorb it later. */
@@ -16,13 +17,14 @@ export type PackageManager = {
 /** null: nothing identifies a manager. A reason: a manager is named or implied but cannot be used safely. */
 export type Detection = { manager: PackageManager } | { reason: string } | null;
 
-const LOCKFILES: Record<ManagerName, string[]> = {
-  npm: ['package-lock.json'],
-  pnpm: ['pnpm-lock.yaml'],
-  yarn: ['yarn.lock'],
-  bun: ['bun.lock', 'bun.lockb'],
-};
-const NAMES = Object.keys(LOCKFILES) as ManagerName[];
+const MANAGERS: readonly ManagerName[] = ['npm', 'pnpm', 'yarn', 'bun'];
+const registered = managerLockfiles();
+/** Each manager's lockfiles, from the ecosystem registry (src/ecosystems.ts). */
+const LOCKFILES = Object.fromEntries(MANAGERS.map(name => [name, registered.get(name) ?? []])) as Record<
+  ManagerName,
+  string[]
+>;
+const NAMES = MANAGERS;
 const text = (path: string) => {
   try {
     return readFileSync(path, 'utf8');

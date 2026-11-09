@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ECOSYSTEM_DIRS } from './dependency-dirs.js';
+import { buildDirs, projectOutputDirs } from './ecosystems.js';
 import { automaticResult } from './work-detail-store.js';
 import {
   autoSnapshotRetentionPlan,
@@ -65,20 +66,10 @@ type Item = {
   snapshotBytes?: number;
 };
 type Skipped = { kind: Kind; id: string; reason: string; laneId?: string; runId?: string };
-const BUILD_DIRS = new Set([
-  'node_modules',
-  'dist',
-  'build',
-  'coverage',
-  '.next',
-  '.turbo',
-  '.netlify',
-  'web-dist',
-  'hosted-web-dist',
-]);
-/** `bin`/`obj` are build output only beside a .NET project file. */
-const DOTNET_OUTPUT_DIRS = new Set(['bin', 'obj']);
-const DOTNET_PROJECT = /\.(cs|fs|vb)proj$/i;
+/** Ecosystem build output (src/ecosystems.ts) plus Netlify's and Forge's own web build folders. */
+const BUILD_DIRS = new Set([...buildDirs(), '.netlify', 'web-dist', 'hosted-web-dist']);
+/** Folders that are build output only beside a project file (.NET `bin`/`obj`). */
+const PROJECT_OUTPUT_DIRS = projectOutputDirs();
 
 function stat(path: string) {
   try {
@@ -112,9 +103,10 @@ function regenerable(root: string, entry: { path: string; reason: string }) {
   if (BUILD_DIRS.has(name)) return true;
   if (entry.reason !== 'gitignored' && entry.reason !== 'forgeignored') return false;
   if (ECOSYSTEM_DIRS.has(name)) return true;
-  if (!DOTNET_OUTPUT_DIRS.has(name)) return false;
+  const output = PROJECT_OUTPUT_DIRS.find(candidate => candidate.dirs.has(name));
+  if (!output) return false;
   try {
-    return readdirSync(dirname(join(root, entry.path))).some(sibling => DOTNET_PROJECT.test(sibling));
+    return readdirSync(dirname(join(root, entry.path))).some(sibling => output.beside.test(sibling));
   } catch {
     return false;
   }

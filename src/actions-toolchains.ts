@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { cachePresets } from './ecosystems.js';
 import { safeRelative } from './safe-relative.js';
 
 /** Optional `actionsToolchains` and `actionsCache` of a check definition
@@ -28,32 +29,8 @@ export const JAVA_DISTRIBUTIONS = [
   'dragonwell',
   'graalvm',
 ] as const;
-/** Dependency download caches only, never build output or source. Lockfile globs are the
- * defaults when the declaration names none. */
-export const CACHE_PRESETS = {
-  go: { paths: ['~/go/pkg/mod', '~/.cache/go-build'], lockfiles: ['**/go.sum'] },
-  cargo: {
-    paths: ['~/.cargo/registry/index', '~/.cargo/registry/cache', '~/.cargo/git/db'],
-    lockfiles: ['**/Cargo.lock'],
-  },
-  pip: { paths: ['~/.cache/pip'], lockfiles: ['**/requirements*.txt'] },
-  uv: { paths: ['~/.cache/uv'], lockfiles: ['**/uv.lock'] },
-  poetry: { paths: ['~/.cache/pypoetry'], lockfiles: ['**/poetry.lock'] },
-  maven: { paths: ['~/.m2/repository'], lockfiles: ['**/pom.xml'] },
-  gradle: {
-    paths: ['~/.gradle/caches', '~/.gradle/wrapper'],
-    lockfiles: ['**/*.gradle*', '**/gradle-wrapper.properties'],
-  },
-  nuget: {
-    paths: ['~/.nuget/packages'],
-    lockfiles: ['**/packages.lock.json', '**/*.csproj', '**/Directory.Packages.props'],
-  },
-  npm: { paths: ['~/.npm'], lockfiles: ['**/package-lock.json'] },
-  pnpm: { paths: ['~/.local/share/pnpm/store'], lockfiles: ['**/pnpm-lock.yaml'] },
-  yarn: { paths: ['~/.cache/yarn'], lockfiles: ['**/yarn.lock'] },
-} as const;
-export type CachePreset = keyof typeof CACHE_PRESETS;
-/** Literal for schema snapshots (scripts/schema-snapshot.mjs); a test keeps it equal to the keys. */
+/** Literal for schema snapshots (scripts/schema-snapshot.mjs); a test keeps it equal to the presets
+ * the ecosystem registry (src/ecosystems.ts) declares. */
 export const CACHE_PRESET_NAMES = [
   'go',
   'cargo',
@@ -66,7 +43,19 @@ export const CACHE_PRESET_NAMES = [
   'npm',
   'pnpm',
   'yarn',
-] as const satisfies readonly CachePreset[];
+] as const;
+export type CachePreset = (typeof CACHE_PRESET_NAMES)[number];
+const registeredPresets = cachePresets();
+const preset = (name: CachePreset) => {
+  const found = registeredPresets.get(name);
+  if (!found) throw new Error(`Cache preset ${name} is not in src/ecosystems.ts.`);
+  return found;
+};
+/** Dependency download caches only, never build output or source (src/ecosystems.ts). Lockfile globs
+ * are the defaults when the declaration names none. */
+export const CACHE_PRESETS = Object.fromEntries(
+  CACHE_PRESET_NAMES.map(name => [name, { paths: preset(name).paths, lockfiles: preset(name).lockfiles }]),
+) as Record<CachePreset, { paths: readonly string[]; lockfiles: readonly string[] }>;
 const presetNames = CACHE_PRESET_NAMES;
 
 const version = z
@@ -210,36 +199,15 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
  * gradle, nuget, yarn: resolution there can run repository code or configured programs) are
  * restored only, never seeded. */
 export const CACHE_SEEDS: Partial<
-  Record<CachePreset, { lockfile: string; manifests: string[]; command: string[] }>
-> = {
-  go: { lockfile: 'go.sum', manifests: ['go.mod'], command: ['go', 'mod', 'download'] },
-  npm: {
-    lockfile: 'package-lock.json',
-    manifests: ['package.json'],
-    command: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
-  },
-  pnpm: {
-    lockfile: 'pnpm-lock.yaml',
-    manifests: [],
-    command: ['pnpm', 'fetch', '--ignore-scripts', '--ignore-pnpmfile'],
-  },
-  pip: {
-    lockfile: 'requirements*.txt',
-    manifests: [],
-    // Binary wheels only: building a source distribution would run its setup code.
-    command: [
-      'python3',
-      '-m',
-      'pip',
-      'download',
-      '--only-binary=:all:',
-      '--dest',
-      'wheels',
-      '-r',
-      '{lockfile}',
-    ],
-  },
-};
+  Record<CachePreset, { lockfile: string; manifests: readonly string[]; command: readonly string[] }>
+> = Object.fromEntries(
+  // Key order is part of the seed program's bytes in generated workflows: the first seeds keep their
+  // historical order; seeds added later follow in registry order.
+  [...new Set<CachePreset>(['go', 'npm', 'pnpm', 'pip', ...CACHE_PRESET_NAMES])].flatMap(name => {
+    const seed = registeredPresets.get(name)?.seed;
+    return seed ? [[name, seed]] : [];
+  }),
+);
 /** The seeded presets of a declaration, space-separated ('' when none). */
 export const cacheSeedPresets = (cache: ActionsCache) =>
   cache.presets.filter(preset => CACHE_SEEDS[preset]).join(' ');

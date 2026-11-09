@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type ts from 'typescript';
 import { firstOtherSyntaxProblem, otherSyntaxLanguage } from './native-merge-syntax-other.js';
+import { mergeGates } from './ecosystems.js';
 
 /** A text merge can combine two edits that each compile alone into a file that
  * does not (two `const root` declarations, an unbalanced brace). The merge is
@@ -15,7 +16,7 @@ import { firstOtherSyntaxProblem, otherSyntaxLanguage } from './native-merge-syn
  * conflict. A side that already fails is left to the check; it is not blocked.
  * Files over the size bound, other languages, and any parser failure never block. */
 export const SYNTAX_GATE_MAX_BYTES = 256 * 1024;
-const CHECKED = /\.(?:[cm]?[jt]s|[jt]sx)$/;
+const CHECKED = mergeGates().find(([, grammar]) => grammar === 'typescript')![0];
 export const syntaxCheckedPath = (path: string) => CHECKED.test(path) || !!otherSyntaxLanguage(path);
 
 export type SyntaxProblem = { line: number; column: number; message: string };

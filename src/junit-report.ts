@@ -52,7 +52,11 @@ function attributes(text: string): Attributes {
 const failureTags = new Set(['failure', 'error']);
 /** Surefire/Gradle `flakyFailure`, `rerunFailure` and their `Error` forms: failed attempts of a test. */
 const retryTags = new Set(['flakyFailure', 'flakyError', 'rerunFailure', 'rerunError']);
-const code = /\.(?:[cm]?[jt]sx?|py|go|rb|rs|java|kts?|swift|cs|php|scala|exs?|dart|c|cc|cpp|h|hpp)$/i;
+/** The registry's code extensions (src/ecosystems.ts), written out: this module ships self-contained in
+ * the check payload (src/semantic-check-command.ts), so it imports nothing local. A test keeps it equal. */
+export const JUNIT_CODE_FILE =
+  /\.(?:[cm]?[jt]sx?|rs|go|py|rb|php|java|kts?|scala|cs|swift|exs?|dart|c|cc|cpp|h|hpp)$/i;
+const code = JUNIT_CODE_FILE;
 /** Python test modules named by dotted classname (pytest xunit2: `tests.test_api.TestUser`). */
 const pythonModule = /^(?:test_\w+|\w+_test)$/;
 

@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// The one place that names the analysed languages and their file extensions.
-export type SourceLanguage = 'typescript' | 'javascript' | 'python' | 'java' | 'rust' | 'go' | 'csharp';
-const EXTENSIONS: [RegExp, SourceLanguage][] = [
-  [/\.(ts|tsx|mts|cts)$/, 'typescript'],
-  [/\.(js|jsx|mjs|cjs)$/, 'javascript'],
-  [/\.py$/, 'python'],
-  [/\.java$/, 'java'],
-  [/\.rs$/, 'rust'],
-  [/\.go$/, 'go'],
-  [/\.cs$/, 'csharp'],
-];
+// The analysed languages and their file extensions, from the ecosystem registry (src/ecosystems.ts).
+import { codeMapLanguages, type SourceLanguage } from './ecosystems.js';
+export type { SourceLanguage } from './ecosystems.js';
+const EXTENSIONS: [RegExp, SourceLanguage][] = codeMapLanguages();
 export function sourceLanguage(path: string): SourceLanguage | undefined {
   return EXTENSIONS.find(([pattern]) => pattern.test(path))?.[1];
 }

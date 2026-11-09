@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Parser, SyntaxNode, Tree } from '@lezer/common';
+import { mergeGates, type MergeGrammar } from './ecosystems.js';
 
 /** The merge syntax gate beyond JS/TS. Python, Java and Rust use the Lezer
  * parsers already in the dependencies; JSON uses `JSON.parse`. Source only:
@@ -7,14 +8,10 @@ import type { Parser, SyntaxNode, Tree } from '@lezer/common';
  * problem is the first error node; Python also checks that statements of one
  * block share one indentation, which Lezer's recovery accepts silently. */
 export type OtherSyntaxProblem = { offset: number; message: string };
-type Language = 'python' | 'java' | 'rust' | 'json';
+type Language = Exclude<MergeGrammar, 'typescript'>;
 
-const LANGUAGES: [RegExp, Language][] = [
-  [/\.pyi?$/, 'python'],
-  [/\.java$/, 'java'],
-  [/\.rs$/, 'rust'],
-  [/\.json$/, 'json'],
-];
+/** The registry's parse-gate files (src/ecosystems.ts) other than JS/TS. */
+const LANGUAGES = mergeGates().filter((gate): gate is [RegExp, Language] => gate[1] !== 'typescript');
 export function otherSyntaxLanguage(path: string): Language | undefined {
   return LANGUAGES.find(([pattern]) => pattern.test(path))?.[1];
 }

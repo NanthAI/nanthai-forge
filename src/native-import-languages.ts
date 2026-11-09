@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { importFixups, type ImportFixupLanguage } from './ecosystems.js';
 
 /** Import declarations per file, keyed by their exact line text. `lines` are
  * 0-based line numbers; `safe` is false when removing one copy could change
@@ -113,93 +114,82 @@ function prologue(spec: Prologue) {
 const trailing = String.raw`\s*(?:\/\/.*)?$`;
 const PY_NAMES = (name: string) => String.raw`${name}(?:\s+as\s+\w+)?(?:\s*,\s*${name}(?:\s+as\s+\w+)?)*`;
 const GO_SPEC = String.raw`(?:(?:[A-Za-z_]\w*|\.)\s+)?"[^"\\]*"`;
-const LANGUAGES: [RegExp, ImportLanguage][] = [
-  [
-    /\.pyi?$/,
-    {
-      hint: /^\s*(?:import|from)\s/,
-      declarations: prologue({
-        comments: /^#/,
-        docstrings: true,
-        header: /^$/,
-        single: new RegExp(
-          String.raw`^(?:import\s+${PY_NAMES(String.raw`[\w.]+`)}|from\s+[\w.]+\s+import\s+(?:\*|${PY_NAMES(String.raw`\w+`)}|\(\s*${PY_NAMES(String.raw`\w+`)}\s*,?\s*\)))\s*(?:#.*)?$`,
-        ),
-        multiline: [
-          { start: /^(?:from|import)\s[^#]*\(\s*(?:#.*)?$/, end: /\)/ },
-          { start: /^(?:from|import)\s.*\\$/, end: /[^\\]$/ },
-        ],
-      }),
-      duplicateBreaks: false,
-    },
-  ],
-  [
-    /\.java$/,
-    {
-      hint: /^\s*import\s/,
-      declarations: prologue({
-        comments: /^\/\//,
-        blocks: true,
-        header: /^package\s+[\w.]+\s*;\s*(?:\/\/.*)?$/,
-        single: new RegExp(String.raw`^import\s+(?:static\s+)?[\w.]+(?:\.\*)?\s*;${trailing}`),
-        multiline: [{ start: /^import\s+[^;]*$/, end: /;/ }],
-      }),
-      duplicateBreaks: false,
-    },
-  ],
-  [
-    /\.rs$/,
-    {
-      hint: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s/,
-      declarations: prologue({
-        comments: /^\/\//,
-        blocks: true,
-        header:
-          /^(?:#!\[.*\]|(?:pub(?:\([^)]*\))?\s+)?(?:mod\s+\w+|extern\s+crate\s+\w+(?:\s+as\s+\w+)?)\s*;)\s*(?:\/\/.*)?$/,
-        // A use path holds no strings, so a line from `use` to its first `;` is one statement.
-        single: new RegExp(String.raw`^(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*;${trailing}`),
-        multiline: [{ start: /^(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*$/, end: /;\s*(?:\/\/.*)?$/ }],
-        attribute: /^#\[/,
-      }),
-      duplicateBreaks: true,
-    },
-  ],
-  [
-    /\.go$/,
-    {
-      hint: /"/,
-      declarations: prologue({
-        comments: /^\/\//,
-        blocks: true,
-        header: /^package\s+\w+\s*(?:\/\/.*)?$/,
-        single: new RegExp(`^import\\s+${GO_SPEC}${trailing}`),
-        group: {
-          start: /^import\s*\(\s*(?:\/\/.*)?$/,
-          end: /^\)$/,
-          item: new RegExp(`^${GO_SPEC}${trailing}`),
-        },
-        pinned: /"C"/,
-      }),
-      duplicateBreaks: true,
-    },
-  ],
-  [
-    /\.cs$/,
-    {
-      hint: /^\s*(?:global\s+)?using\s/,
-      declarations: prologue({
-        comments: /^\/\//,
-        blocks: true,
-        header: /^extern\s+alias\s+\w+\s*;$/,
-        single: new RegExp(
-          String.raw`^(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?[A-Za-z_][\w.]*(?:<[\w.,\s<>]*>)?\s*;${trailing}`,
-        ),
-        hazard: /^#/,
-      }),
-      duplicateBreaks: false,
-    },
-  ],
-];
+const READERS: Record<Exclude<ImportFixupLanguage, 'javascript'>, ImportLanguage> = {
+  python: {
+    hint: /^\s*(?:import|from)\s/,
+    declarations: prologue({
+      comments: /^#/,
+      docstrings: true,
+      header: /^$/,
+      single: new RegExp(
+        String.raw`^(?:import\s+${PY_NAMES(String.raw`[\w.]+`)}|from\s+[\w.]+\s+import\s+(?:\*|${PY_NAMES(String.raw`\w+`)}|\(\s*${PY_NAMES(String.raw`\w+`)}\s*,?\s*\)))\s*(?:#.*)?$`,
+      ),
+      multiline: [
+        { start: /^(?:from|import)\s[^#]*\(\s*(?:#.*)?$/, end: /\)/ },
+        { start: /^(?:from|import)\s.*\\$/, end: /[^\\]$/ },
+      ],
+    }),
+    duplicateBreaks: false,
+  },
+  java: {
+    hint: /^\s*import\s/,
+    declarations: prologue({
+      comments: /^\/\//,
+      blocks: true,
+      header: /^package\s+[\w.]+\s*;\s*(?:\/\/.*)?$/,
+      single: new RegExp(String.raw`^import\s+(?:static\s+)?[\w.]+(?:\.\*)?\s*;${trailing}`),
+      multiline: [{ start: /^import\s+[^;]*$/, end: /;/ }],
+    }),
+    duplicateBreaks: false,
+  },
+  rust: {
+    hint: /^\s*(?:pub(?:\([^)]*\))?\s+)?use\s/,
+    declarations: prologue({
+      comments: /^\/\//,
+      blocks: true,
+      header:
+        /^(?:#!\[.*\]|(?:pub(?:\([^)]*\))?\s+)?(?:mod\s+\w+|extern\s+crate\s+\w+(?:\s+as\s+\w+)?)\s*;)\s*(?:\/\/.*)?$/,
+      // A use path holds no strings, so a line from `use` to its first `;` is one statement.
+      single: new RegExp(String.raw`^(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*;${trailing}`),
+      multiline: [{ start: /^(?:pub(?:\([^)]*\))?\s+)?use\s+[^;]*$/, end: /;\s*(?:\/\/.*)?$/ }],
+      attribute: /^#\[/,
+    }),
+    duplicateBreaks: true,
+  },
+  go: {
+    hint: /"/,
+    declarations: prologue({
+      comments: /^\/\//,
+      blocks: true,
+      header: /^package\s+\w+\s*(?:\/\/.*)?$/,
+      single: new RegExp(`^import\\s+${GO_SPEC}${trailing}`),
+      group: {
+        start: /^import\s*\(\s*(?:\/\/.*)?$/,
+        end: /^\)$/,
+        item: new RegExp(`^${GO_SPEC}${trailing}`),
+      },
+      pinned: /"C"/,
+    }),
+    duplicateBreaks: true,
+  },
+  csharp: {
+    hint: /^\s*(?:global\s+)?using\s/,
+    declarations: prologue({
+      comments: /^\/\//,
+      blocks: true,
+      header: /^extern\s+alias\s+\w+\s*;$/,
+      single: new RegExp(
+        String.raw`^(?:global\s+)?using\s+(?:static\s+)?(?:[A-Za-z_]\w*\s*=\s*)?[A-Za-z_][\w.]*(?:<[\w.,\s<>]*>)?\s*;${trailing}`,
+      ),
+      hazard: /^#/,
+    }),
+    duplicateBreaks: false,
+  },
+};
+/** The registry's fix-up files (src/ecosystems.ts); JS/TS is read in src/native-import-merge.ts. */
+const LANGUAGES: [RegExp, ImportLanguage][] = importFixups().flatMap(([pattern, language]) =>
+  language === 'javascript' ? [] : [[pattern, READERS[language]] as [RegExp, ImportLanguage]],
+);
 export function importLanguage(path: string): ImportLanguage | undefined {
   return LANGUAGES.find(([pattern]) => pattern.test(path))?.[1];
 }

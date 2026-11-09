@@ -2,6 +2,10 @@
 import { codeImports } from './code-imports.js';
 import type { ReviewPath } from './native-source-review.js';
 import { computeHunks } from './review-hunks-core.js';
+import { codeFileOf } from './ecosystems.js';
+
+/** The change map reads JS/TS only (any-ecosystem slice J, 348730cd). */
+const JS_SOURCE = codeFileOf('js');
 
 export type ChangeMapNode = {
   id: string;
@@ -36,7 +40,7 @@ export async function readChangeMap(
     const ids = [
       ...new Set(
         batch.flatMap(p =>
-          /\.[cm]?[jt]sx?$/.test(p.path) || touched.has(p.path)
+          JS_SOURCE.test(p.path) || touched.has(p.path)
             ? [p.before?.blob, p.after?.blob].filter((id): id is string => Boolean(id))
             : [],
         ),
@@ -47,7 +51,7 @@ export async function readChangeMap(
     for (const file of batch) {
       const a = file.before ? bytes.get(file.before.blob) : undefined;
       const b = file.after ? bytes.get(file.after.blob) : undefined;
-      if (/\.[cm]?[jt]sx?$/.test(file.path))
+      if (JS_SOURCE.test(file.path))
         for (const content of new Set([a, b]))
           if (content)
             for (const edge of codeImports(

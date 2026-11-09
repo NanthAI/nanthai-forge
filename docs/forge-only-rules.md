@@ -38,8 +38,16 @@ recipe, with why and what other repositories get instead.
 | `build-folders` | product code and shipped scripts: a folder list or alternation with `dist`, `build` or `coverage`, as used to skip or drop paths |
 | `js-extension` | product code and shipped scripts: a JavaScript/TypeScript extension pattern such as `/\.[cm]?[jt]sx?$/`, as used to gate a feature |
 | `package-json-config` | product code and shipped scripts: `package.json` read as a config source |
+| `ecosystem-lockfile` | outside the registry: a lockfile name the [ecosystem registry](agents/ecosystems.md) lists (npm's own is `npm-lockfile`), quoted or in a regular expression |
+| `ecosystem-folders` | outside the registry: two different distinctive registry folder names on one line (`.venv`, `__pycache__`, `node_modules`), or one alone as a list row |
+| `ecosystem-extensions` | outside the registry: two registry code extensions joined as alternatives (`py\|go`), or a `[/\.ext$/, …]` table row |
 
-The last three come from the JS/Node/npm audit (875a57cc). A gate on them must hold for every
+`build-folders`, `js-extension` and `package-json-config` come from the JS/Node/npm audit (875a57cc).
+The `ecosystem-*` rules (Issue 9c0ece48) keep ecosystem knowledge in one registry,
+[`src/ecosystems.ts`](../src/ecosystems.ts): their names come from the registry itself, so a new
+entry's lockfiles, folders and extensions are guarded too. Comment lines do not count. The registry
+is checked against the Forge-only rules only; for an `ecosystem-*` row, the fourth column says why
+the literal stays outside it. A gate on them must hold for every
 ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that slice fixes.
 
 ## Allowlist
@@ -102,23 +110,18 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/test-script-runner.ts` | `node-test` | 1 | recognises `node --test` in a package.json test script | the same inference for vitest and jest |
 | `src/test-script-runner.ts` | `js-extension` | 1 | a JS test-script path argument names a file, not a folder | the same |
 | `src/package-graph-dotnet-js.ts` | `js-extension` | 1 | JS/TS test file names: a JS package with tests but no `test` script makes the package graph's selection full | each ecosystem's own test sources (Gradle `src/test`) |
-| `src/package-graph-dotnet-js.ts` | `npm-lockfile` | 1 | npm's lockfile among the JS workspace's lockfiles in the package graph | pnpm, Yarn and Bun lockfiles beside it |
 | `src/project-test-runner.ts` | `node-test` | 2 | recognises `node --test` in any project's test script | the same inference for vitest and jest |
 | `src/heavy-slots.ts` | `node-test` | 1 | `nforge heavy` refuses an unscoped `node --test` | the same guard for any project |
 | `src/heavy-test-preloads.ts` | `node-test` | 1 | finds the preloads a project's test script passes to `node --test` | the same notice for any project whose test script runs `node --test` |
 | `src/work-docs-admission.ts` | `forge-folders` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/work-docs-admission.ts` | `npm-lockfile` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/integration-preview-checks.ts` | `npm-lockfile` | 2 | integration previews install with `npm ci` only for npm-locked projects | their check sets up its own dependencies |
-| `src/actions-toolchains.ts` | `npm-lockfile` | 2 | npm's rows in the per-ecosystem Actions cache and Candidate-free seed tables (slice C, 721cd45c; 432164bf) | each ecosystem's own lockfile row |
 | `src/actions-toolchains.ts` | `build-folders` | 1 | the dependency seed skips dependency, build and VCS folders of every ecosystem while finding lockfiles (432164bf) | the same list for every repository |
-| `src/actions-toolchains.ts` | `package-json-config` | 1 | npm's seed copies its manifest beside the lockfile (432164bf); each seeded ecosystem names its own | each ecosystem's own manifest row |
 | `src/npm-install.ts` | `npm-lockfile` | 1 | npm's own install reads its lockfile for scripted packages (slice H, 4ce67b9a) | pnpm, Yarn and Bun use their own (src/package-manager-install.ts) |
-| `src/package-manager.ts` | `npm-lockfile` | 1 | npm's row in the per-manager lockfile table (slice H, 4ce67b9a) | each manager's own lockfile row |
 | `src/package-manager.ts` | `package-json-config` | 5 | JS package managers keep `packageManager` and `workspaces` in package.json (slice H, 4ce67b9a) | non-JS repositories install with their own tooling |
 | `src/package-manager-install.ts` | `package-json-config` | 1 | reads the JS install scripts the package manager would run (slice H, 4ce67b9a) | the same for every JS package manager |
 | `src/shared-dependencies.ts` | `npm-lockfile` | 2 | Lanes share an npm install keyed by the exact lockfile | each Lane installs with its own tooling |
-| `src/project-lockfile.ts` | `npm-lockfile` | 2 | the lockfile list, npm first so Forge pins the same bytes as before | their own lockfile (pnpm, Yarn, Bun, Cargo, Go, Python, Ruby, PHP) |
-| `src/agent-clean.ts` | `build-folders` | 3 | Lane cleanup reclaims JS build folders only (any-ecosystem slice H, 4ce67b9a) | after H: gitignored folders named in an ecosystem list |
+| `src/project-lockfile.ts` | `npm-lockfile` | 1 | says npm's lockfile pins first (the list is the registry's, src/ecosystems.ts) | their own lockfile (pnpm, Yarn, Bun, Cargo, Go, Python, Ruby, PHP) |
 | `src/agent-cli.ts` | `build-folders` | 1 | a runner-label example (`["linux","build"]`) in help text, not a folder | — |
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
@@ -138,28 +141,34 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/remote-check-plan.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/shared-dependencies.ts` | `package-json-config` | 6 | Lane dependency sharing is npm-only (any-ecosystem slice H, 4ce67b9a) | each Lane installs with its own tooling |
 | `src/workspace-test-runner.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
-| `src/change-map.ts` | `js-extension` | 2 | the change map reads JS/TS only (any-ecosystem slice J, 348730cd) | path-level map |
 | `src/code-imports.ts` | `js-extension` | 1 | contract import signals are JS/TS-only (any-ecosystem slice E, 7e97573d) | after E: contract unknown, never independence |
 | `src/contract-exports.ts` | `js-extension` | 1 | contract export facts are JS/TS-only (any-ecosystem slice E, 7e97573d) | after E: contract unknown, never independence |
 | `src/first-check-risk.ts` | `js-extension` | 1 | labels nested JS build configs as global-risk (any-ecosystem slice G, 6af95601 adds the other ecosystems) | root configs; after G nested build inputs too |
-| `src/code-files.ts` | `js-extension` | 1 | one code-file name pattern for every listed language, JS/TS among them | the same |
 | `src/hosted-overlap-text.ts` | `js-extension` | 1 | symbol overlap facts (and the JS parse that reads them) are JS/TS-only (any-ecosystem slice E, 7e97573d) | line-range overlap only; no parse |
 | `src/intent-test-contract.ts` | `js-extension` | 2 | contract test names are JS/TS shapes (any-ecosystem slice F, e89be958) | after F: any test name shape |
 | `src/js-import-graph.ts` | `js-extension` | 1 | the JS/TS import graph parses only JS/TS files | path and package selection |
-| `src/junit-report.ts` | `js-extension` | 1 | labels code files of every listed language, JS/TS among them | the same |
-| `src/native-import-merge.ts` | `js-extension` | 1 | duplicate-import fix-up is JS/TS-only (any-ecosystem slice D, 60ff8adb) | after D: Go, Rust, Python, Java, C# |
-| `src/native-merge-syntax.ts` | `js-extension` | 1 | the merge syntax gate is JS/TS-only (any-ecosystem slice D, 60ff8adb) | after D: Python, Java, Rust, JSON |
 | `src/project-test-runner.ts` | `js-extension` | 2 | node, vitest and jest runner inference and module-name matching for JS runners | a declared runner; per-ecosystem inference in 1f2121cb |
 | `src/tested-docs.ts` | `js-extension` | 1 | Forge's standard selector scans these files for Markdown readers | declared `docsPaths` |
 | `src/dependency-link.ts` | `package-json-config` | 1 | reads the `bin` field of a JS workspace package to link its bins into the Lane's `node_modules/.bin` (de6620eb) | non-JS repositories have no `node_modules` link |
 | `src/hosted-actions-job-plan.ts` | `package-json-config` | 1 | the project test runner declaration for the Actions shard plan (any-ecosystem slice F, e89be958) | `forge.json` first, then package.json |
 | `src/install-script-allowlist.ts` | `package-json-config` | 5 | reads npm/pnpm/Bun install-script allowlists where those tools keep them | the same; other ecosystems run no install scripts here |
 | `src/package-graph-dotnet-js.ts` | `package-json-config` | 5 | the JS workspace part of the any-ecosystem package graph reads its manifests as data | each ecosystem's own manifest |
-| `src/package-graph.ts` | `package-json-config` | 1 | names package.json among every ecosystem's manifests | the same |
 | `src/project-test-runner.ts` | `package-json-config` | 1 | names where a runner was declared (`forge.json` or package.json) | `forge.json` |
 | `src/project-config.ts` | `package-json-config` | 2 | package.json `forge.preflight` is the fallback after a neutral `forge.json` (slice F, e89be958) | `forge.json` |
 | `src/package-graph-jvm.ts` | `build-folders` | 3 | Maven's `<build>` XML tag, not a folder | — |
 | `src/package-graph-python.ts` | `build-folders` | 1 | the Python package finder skips Python build and virtualenv folders | each ecosystem skips its own |
+| `scripts/github-actions-check.mjs` | `ecosystem-lockfile` | 1 | the Actions executor's `npm ci` reads npm's own lockfile pair | their own `actions.setup` command |
+| `src/actions-toolchains.ts` | `ecosystem-lockfile` | 1 | a validation-message example (`**/go.sum`) | — |
+| `src/actions-toolchains.ts` | `ecosystem-folders` | 1 | the seed program's skip list is part of the generated workflow bytes (432164bf) | the same list for every repository |
+| `src/contract-packages.ts` | `ecosystem-extensions` | 1 | contract-unknown code extensions, wider than the registry on purpose (any-ecosystem slice E, 7e97573d) | contract unknown, never independence |
+| `src/contract-structural.ts` | `ecosystem-extensions` | 1 | the languages that have a structural contract reader (slice E) | contract unknown, never independence |
+| `src/files.ts` | `ecosystem-folders` | 2 | analysis skips JS installs and Next.js output by name; build folders follow the ignore rules | the same for every repository |
+| `src/first-check-risk.ts` | `ecosystem-lockfile` | 1 | risk rule v1 is frozen (plans pin the rule version); a new ecosystem adds its inputs in the next rule version | the same rule for every repository |
+| `src/package-ci-flags.ts` | `ecosystem-extensions` | 1 | the CI-flag reader: words that name test targets in Python, Go, Rust and .NET commands | — (lexical reading of their own CI) |
+| `src/package-graph-python.ts` | `ecosystem-lockfile` | 2 | the Python reader runs pytest through `uv` or `poetry` from its own lockfile | the same for every Python repository |
+| `src/package-graph-python.ts` | `ecosystem-folders` | 1 | the Python reader skips Python build and virtualenv folders | each ecosystem skips its own |
+| `src/junit-report.ts` | `js-extension` | 1 | labels code files of every listed language, JS/TS among them (written out: the module ships self-contained) | the same |
+| `src/junit-report.ts` | `ecosystem-extensions` | 1 | ships self-contained in the check payload (no local imports); a test keeps it equal to the registry's code extensions | the same for every repository |
 
 ## BYOCI parity
 

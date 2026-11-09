@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invariant } from './errors.js';
+import { checkEnvCaches, checkEnvHomes, checkEnvToolchains } from './ecosystems.js';
 import { digest } from './hash.js';
 
 /**
@@ -11,28 +12,19 @@ import { digest } from './hash.js';
  * the environment fingerprint is unchanged. Everything here is a path, never a credential.
  */
 
-/** Pure content caches: every tool re-verifies or only reads packages from them, and none reads
+/** Pure content caches (src/ecosystems.ts): every tool re-verifies or only reads packages from them, and none reads
  * executable configuration from the directory. Segmented per project below the shared root. */
-const contentCaches: Array<[name: string, leaf: string]> = [
-  ['GOMODCACHE', 'check-go-mod-cache'],
-  ['GOCACHE', 'check-go-build-cache'],
-  ['PIP_CACHE_DIR', 'check-pip-cache'],
-  ['UV_CACHE_DIR', 'check-uv-cache'],
-  ['NUGET_PACKAGES', 'check-nuget-packages'],
-];
+const contentCaches = checkEnvCaches();
 const mavenRepository = 'check-maven-repository';
 /** Tool homes also read executable configuration (Gradle `init.d` and `gradle.properties`, Cargo
  * `config.toml`). The variable points at a fresh directory inside the run, so nothing a check writes
  * there outlives it; only the named content subdirectories are linked in from a per-project store. */
-const toolHomes: Array<{ name: string; leaf: string; run: string; content: string[] }> = [
-  { name: 'CARGO_HOME', leaf: 'check-cargo-home', run: 'cargo-home', content: ['registry', 'git'] },
-  { name: 'GRADLE_USER_HOME', leaf: 'check-gradle-home', run: 'gradle-home', content: ['caches', 'wrapper'] },
-];
+const toolHomes = checkEnvHomes();
 
-/** Toolchain homes hold installed compilers and interpreters, never credentials. */
-const toolchainHomes: Array<[name: string, relative: string[]]> = [
-  ['RUSTUP_HOME', ['.rustup']],
-  ['PYENV_ROOT', ['.pyenv']],
+/** Toolchain homes hold installed compilers and interpreters, never credentials: each ecosystem's
+ * (src/ecosystems.ts), then the version managers that serve every ecosystem. */
+const toolchainHomes: ReadonlyArray<readonly [name: string, relative: readonly string[]]> = [
+  ...checkEnvToolchains(),
   ['MISE_DATA_DIR', ['.local', 'share', 'mise']],
   ['ASDF_DATA_DIR', ['.asdf']],
 ];

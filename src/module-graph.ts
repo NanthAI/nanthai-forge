@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digestChunks } from './portable-hash.js';
+import { moduleGraphLanguages, nonSourceDirPattern } from './ecosystems.js';
 import { goFacts, resolveGo } from './module-graph-go.js';
 import { jvmFacts, resolveJvm } from './module-graph-jvm.js';
 import { pythonFacts, resolvePython } from './module-graph-python.js';
@@ -16,16 +17,10 @@ export type { ModuleGraph, ModuleNode, ModuleLanguage } from './module-graph-typ
  * graph's (src/snapshot.ts DEFAULT_LIMITS): past them the graph is unknown and selection stays at
  * package level. */
 
-const LANGUAGES: [RegExp, ModuleLanguage][] = [
-  [/\.py$/, 'python'],
-  [/\.go$/, 'go'],
-  [/\.rs$/, 'rust'],
-  [/\.java$/, 'java'],
-  [/\.kt$/, 'kotlin'],
-];
-/** Folders a build never compiles from or Forge never reads as module code. */
-const SKIPPED =
-  /(?:^|\/)(?:node_modules|vendor|testdata|target|build|dist|__pycache__|site-packages|venv|\.[^/]+)\//;
+/** Module-graph readers and the folders a build never compiles from or Forge never reads as module
+ * code, from the ecosystem registry (src/ecosystems.ts). */
+const LANGUAGES: [RegExp, ModuleLanguage][] = moduleGraphLanguages();
+const SKIPPED = nonSourceDirPattern();
 export const moduleLanguage = (path: string): ModuleLanguage | undefined =>
   SKIPPED.test(path) ? undefined : LANGUAGES.find(([pattern]) => pattern.test(path))?.[1];
 

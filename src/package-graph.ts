@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digestChunks } from './portable-hash.js';
+import { manifestNames } from './ecosystems.js';
 import { documentationPath } from './prose-paths.js';
 import { moduleEcosystem, moduleNarrowing } from './module-selection.js';
 import { applyPackageFlags, type PackageFlagSource } from './package-command-flags.js';
@@ -35,17 +36,16 @@ export const PACKAGE_GRAPH_MAX_BYTES = 16 * 1024 * 1024;
 
 const HIDDEN = (path: string) =>
   path.split('/').some(part => part.startsWith('.') || part === 'node_modules');
+/** Exact manifest names from the ecosystem registry (src/ecosystems.ts); patterned names stay with
+ * their readers (pythonManifest, jvmManifest, dotnetManifest). */
+const MANIFESTS = manifestNames();
 /** Whether `path` is a manifest the graph reads (paths alone answer everything else). */
 export function packageManifestPath(path: string) {
   if (HIDDEN(path)) return false;
   const name = basename(path);
   return (
-    name === 'go.mod' ||
-    name === 'go.work' ||
+    MANIFESTS.has(name) ||
     path === 'forge.json' ||
-    name === 'Cargo.toml' ||
-    name === 'package.json' ||
-    name === 'pnpm-workspace.yaml' ||
     (pythonManifest(path) && name !== 'setup.py') ||
     jvmManifest(path) ||
     dotnetManifest(path) ||

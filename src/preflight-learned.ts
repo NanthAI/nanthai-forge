@@ -2,6 +2,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { knownLockfiles } from './ecosystems.js';
 import { durableReplace } from './native-durability.js';
 import { retainedRootSibling } from './root-paths.js';
 import { safeRelative } from './safe-relative.js';
@@ -21,8 +22,9 @@ const MAX_LANES = 200;
  * runner's globs; a landing result has no runner at hand, so it falls back to the test-name shape of
  * any ecosystem (`x.test.mjs`, `x_test.go`, `test_x.py`, `XTest.java`). */
 export type TestFilter = (file: string) => boolean;
-const lockfile =
-  /(?:^|\/)(?:package-lock\.json|npm-shrinkwrap\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb?|Cargo\.lock|go\.sum|poetry\.lock|uv\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|gradle\.lockfile|packages\.lock\.json)$/;
+/** Every lockfile the ecosystem registry (src/ecosystems.ts) recognises, at any depth. */
+const LOCKFILES: ReadonlySet<string> = new Set(knownLockfiles());
+const lockfile = { test: (path: string) => LOCKFILES.has(path.slice(path.lastIndexOf('/') + 1)) };
 const storeSchema = z
   .object({
     /** changed path -> failing test -> last failure time (ms). */

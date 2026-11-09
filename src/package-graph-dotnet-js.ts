@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ecosystemEntry, pinLockfiles } from './ecosystems.js';
 import { globRegExp } from './path-glob.js';
 import {
   basename,
@@ -183,27 +184,21 @@ function pnpmGlobs(text: string) {
   return globs;
 }
 
-const LOCKFILES = [
-  'package-lock.json',
-  'npm-shrinkwrap.json',
-  'pnpm-lock.yaml',
-  'yarn.lock',
-  'bun.lock',
-  'bun.lockb',
-];
-/** The package manager of one folder, from its package.json `packageManager` or its lockfile. */
+/** The JS ecosystem's lockfiles and managers (src/ecosystems.ts); npm is the default manager. */
+const JS = ecosystemEntry('js');
+const LOCKFILES = pinLockfiles([JS]);
+const [DEFAULT_MANAGER, ...OTHER_MANAGERS] = JS.managers!;
+/** The package manager of one folder, from its package.json `packageManager` or its lockfile (or,
+ * for pnpm, its workspace file). */
 function managerOf(manifest: Record<string, unknown>, dir: string, present: Set<string>) {
   const at = (file: string) => present.has(dir ? `${dir}/${file}` : file);
   const declared = typeof manifest.packageManager === 'string' ? manifest.packageManager.split('@')[0] : '';
   return (
     declared ||
-    (at('pnpm-lock.yaml') || at('pnpm-workspace.yaml')
-      ? 'pnpm'
-      : at('yarn.lock')
-        ? 'yarn'
-        : at('bun.lock') || at('bun.lockb')
-          ? 'bun'
-          : 'npm')
+    (
+      OTHER_MANAGERS.find(manager => [...(manager.lockfiles ?? []), ...(manager.manifests ?? [])].some(at)) ??
+      DEFAULT_MANAGER!
+    ).name
   );
 }
 

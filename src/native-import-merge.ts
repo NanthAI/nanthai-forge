@@ -3,6 +3,7 @@ import { parser } from '@lezer/javascript';
 import { SourceIoError } from './hosted-source-io-error.js';
 import type { SyntaxNode } from '@lezer/common';
 import { importLanguage, statementKey, type ImportLanguage } from './native-import-languages.js';
+import { importFixups } from './ecosystems.js';
 
 const importsParser = parser.configure({ dialect: 'ts jsx' });
 
@@ -60,8 +61,8 @@ const javascript: ImportLanguage = {
   declarations: parseDeclarations,
   duplicateBreaks: true,
 };
-const languageFor = (path: string) =>
-  /\.(?:[cm]?[jt]s|[jt]sx)$/.test(path) ? javascript : importLanguage(path);
+const JAVASCRIPT = importFixups().find(([, language]) => language === 'javascript')![0];
+const languageFor = (path: string) => (JAVASCRIPT.test(path) ? javascript : importLanguage(path));
 
 /** Coalesce only a new, byte-identical single-line import added once on each
  * side. Existing duplicates and distinct statements remain source truth. JS/TS,

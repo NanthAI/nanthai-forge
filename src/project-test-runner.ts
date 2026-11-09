@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { changeSalt, stableKey } from '../scripts/test-tiebreak.mjs';
+import { ecosystemEntry, managerLockfiles } from './ecosystems.js';
 import { globRegExp } from './path-glob.js';
 import { safeRelative } from './safe-relative.js';
 import { documentationPath } from './prose-paths.js';
@@ -126,12 +127,15 @@ const layout = (program: TestRunner['program'], globs: string[], shape: boolean)
     ? 'forge-node'
     : 'generic';
 
+const JS_LOCKFILES = managerLockfiles([ecosystemEntry('js')]);
 /** The package manager's way to run an installed binary, from `packageManager` or the lockfile. */
 function execPrefix(manifest: Record<string, unknown>, paths: Set<string>) {
   const declared = typeof manifest.packageManager === 'string' ? manifest.packageManager : '';
-  if (declared.startsWith('pnpm@') || paths.has('pnpm-lock.yaml')) return ['pnpm', 'exec'];
-  if (declared.startsWith('yarn@') || paths.has('yarn.lock')) return ['yarn'];
-  if (declared.startsWith('bun@') || paths.has('bun.lock') || paths.has('bun.lockb')) return ['bun', 'x'];
+  const locked = (manager: string) =>
+    declared.startsWith(`${manager}@`) || JS_LOCKFILES.get(manager)!.some(file => paths.has(file));
+  if (locked('pnpm')) return ['pnpm', 'exec'];
+  if (locked('yarn')) return ['yarn'];
+  if (locked('bun')) return ['bun', 'x'];
   return ['npx', '--no-install'];
 }
 
