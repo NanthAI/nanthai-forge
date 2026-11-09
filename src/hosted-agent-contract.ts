@@ -16,6 +16,7 @@ import { invariant } from './errors.js';
 import { isPlanningRef, planningIdHelp } from './planning-id.js';
 import { policyWriteObject } from './autonomy-policy.js';
 import { hostedCheckCommandSchema, hostedCheckRunnerSchema } from './hosted-check.js';
+import { submoduleAllowChangesSchema } from './submodule-allowlist.js';
 import { metricContextField, metricPagingFields } from './self-metrics-page.js';
 export const hostedAgentActions = [
   'tests',
@@ -339,6 +340,7 @@ export const hostedAgentCommandSchemas = {
       runsOn: githubActionsRunsOnSchema.optional(),
       concurrencyBudget: z.number().safe().int().min(2).optional(),
       publicLogs: z.boolean().optional(),
+      submodules: submoduleAllowChangesSchema.optional(),
       machineId: uuid.optional(),
       labels: z.array(z.string().min(1)).optional(),
       repository: z

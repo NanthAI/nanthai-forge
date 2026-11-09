@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { contractDelta, dependentOn, ContractResyncError } from './contract-deps.js';
 import { CODE_FILE } from './contract-exports.js';
+import { laneNeedsContractSync } from './contract-packages.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkData, WorkView } from './work-types.js';
 
@@ -27,10 +28,13 @@ export function assertContractsSynced(
   if (since === previous || !source.contains(previous, since)) return;
   const pivot = source.state(since).files,
     lane = source.state(view.head).files,
-    delta = contractDelta(source, pivot, source.state(previous).files);
-  if (!delta.length) return;
-  const before = new Map(pivot.map(file => [file.path, file.blob])),
+    main = source.state(previous).files,
+    delta = contractDelta(source, pivot, main),
+    before = new Map(pivot.map(file => [file.path, file.blob])),
     mine = lane.filter(file => CODE_FILE.test(file.path) && before.get(file.path) !== file.blob),
-    used = dependentOn(source, mine, lane, delta);
+    used = delta.length ? dependentOn(source, mine, lane, delta) : [];
   if (used.length) throw new ContractResyncError(used, previous);
+  // Code without import-level facts (Go, Python, Java, Rust, C#, …): by package, through the manifest graph.
+  const packaged = laneNeedsContractSync(source, pivot, main, lane);
+  if (packaged) throw new ContractResyncError(packaged.changes, previous, packaged.reason);
 }

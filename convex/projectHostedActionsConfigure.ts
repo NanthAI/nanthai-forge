@@ -8,6 +8,7 @@ import { checkHash, checkNumber, checkPin } from '../src/hosted-check';
 import { hostedActionsRuntime } from '../src/hosted-actions';
 import { report } from './errors';
 import { invariant } from '../src/errors';
+import { submoduleAllowListSchema } from '../src/submodule-allowlist';
 import {
   actionsPermissions,
   requireRepositoryBinding,
@@ -23,6 +24,8 @@ const requestSchema = z
     concurrencyBudget: z.number().safe().int().min(2).optional(),
     /** Owner-only (the configure transaction): accept that check logs are as visible as the repository. */
     publicLogs: z.boolean().optional(),
+    /** Owner-only (the configure transaction): private submodule repositories checks may read. */
+    submodules: submoduleAllowListSchema.optional(),
   })
   .strict();
 /** Reuses the existing owner-only, idempotent configuration transaction. No
@@ -39,7 +42,7 @@ export const configure = action({
         'BAD_ARGUMENT',
         'Pass a repository and runsOn as a nonblank label (1–256 characters, no control characters) or 1–100 such labels.',
       );
-      const { repository, runsOn, concurrencyBudget, publicLogs, ...request } = parsed.data;
+      const { repository, runsOn, concurrencyBudget, publicLogs, submodules, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
       // Actions permission approval fails here, not on the first dispatch.
       await requireRepositoryBinding(ctx, input.projectId, repository);
@@ -60,6 +63,7 @@ export const configure = action({
                 runsOn,
                 ...(concurrencyBudget !== undefined ? { concurrencyBudget } : {}),
                 ...(publicLogs ? { publicLogs: true } : {}),
+                ...(submodules ? { submodules } : {}),
                 runtime: hostedActionsRuntime,
                 environmentFingerprint: checkPin({
                   runtime: hostedActionsRuntime,

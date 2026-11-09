@@ -6,6 +6,7 @@ import type { PackageManager } from './package-manager.js';
 import { cleanCommandEnvironment } from './clean-command-env.js';
 import { readInstallScriptAllowlist } from './install-script-allowlist.js';
 import { CLEAN_INSTALL_HINT } from './npm-install.js';
+import { downloadCacheSettings } from './install-download-cache.js';
 
 /** How to invoke the declared manager: through corepack at the declared version where it can,
  * else the manager already on PATH. Forge never installs a manager globally. */
@@ -37,13 +38,23 @@ export async function resolveRunner(pm: PackageManager): Promise<ManagerRunner |
 
 type Step = { args: string[]; env: Record<string, string> };
 /** The install (and, for allowlisted packages, rebuild) commands per manager. Pure, so tests assert them. */
-export function installSteps(pm: PackageManager, runScripts: boolean, rebuild: string[]): Step[] {
+export function installSteps(
+  pm: PackageManager,
+  runScripts: boolean,
+  rebuild: string[],
+  /** A shared download cache (pnpm, Yarn Berry): script-less installs only. */
+  downloads?: string,
+): Step[] {
+  const cached =
+    downloads && !runScripts && rebuild.length === 0
+      ? downloadCacheSettings(pm, downloads)
+      : { args: [], env: {} };
   const skip = runScripts ? [] : ['--ignore-scripts'];
   const rebuilds = !runScripts && rebuild.length > 0;
   switch (pm.name) {
     case 'pnpm':
       return [
-        { args: ['install', '--frozen-lockfile', ...skip], env: { CI: '1' } },
+        { args: ['install', '--frozen-lockfile', ...skip, ...cached.args], env: { CI: '1' } },
         ...(rebuilds ? [{ args: ['rebuild', ...rebuild], env: { CI: '1' } }] : []),
       ];
     case 'bun':
@@ -59,7 +70,7 @@ export function installSteps(pm: PackageManager, runScripts: boolean, rebuild: s
       return [
         {
           args: ['install', '--immutable'],
-          env: runScripts ? env : { ...env, YARN_ENABLE_SCRIPTS: 'false' },
+          env: { ...(runScripts ? env : { ...env, YARN_ENABLE_SCRIPTS: 'false' }), ...cached.env },
         },
         ...(rebuilds ? [{ args: ['rebuild', ...rebuild], env }] : []),
       ];
@@ -99,11 +110,16 @@ export async function managerInstall(
   directory: string,
   pm: PackageManager,
   runner: ManagerRunner,
-  options: { runScripts?: boolean; rebuild?: string[] } = {},
+  options: { runScripts?: boolean; rebuild?: string[]; downloads?: string } = {},
 ) {
   const clean = cleanCommandEnvironment('install');
   try {
-    for (const step of installSteps(pm, options.runScripts === true, options.rebuild ?? []))
+    for (const step of installSteps(
+      pm,
+      options.runScripts === true,
+      options.rebuild ?? [],
+      options.downloads,
+    ))
       await run(runner, directory, step, clean.env);
   } finally {
     clean.dispose();

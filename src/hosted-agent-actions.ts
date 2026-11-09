@@ -10,6 +10,7 @@ import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { checkLogsField, publicLogsNotice } from './runner-visibility.js';
+import { mergeSubmoduleAllowlist, submoduleAllowSchema } from './submodule-allowlist.js';
 import { z } from 'zod';
 import { githubActionsRunsOnSchema, githubActionsRunnerDescription } from './github-actions-runner-label.js';
 import { makeFunctionReference } from 'convex/server';
@@ -153,6 +154,7 @@ const currentSettings = z.object({
       runsOn: githubActionsRunsOnSchema.optional(),
       concurrencyBudget: z.number().safe().int().min(2).optional(),
       publicLogs: z.literal(true).optional(),
+      submodules: z.array(submoduleAllowSchema).optional(),
       credential: z.unknown().optional(),
     })
     .nullable(),
@@ -189,6 +191,8 @@ function actionsRunnerSettings(configuration: z.infer<typeof currentSettings>['c
       configuration.publicLogs === true
         ? publicLogsNotice(configuration.repository)
         : `as visible as ${configuration.repository ?? 'the runner repository'} on GitHub`,
+    // Owner-allowed private submodule repositories; anything else is refused.
+    submodules: configuration.submodules ?? [],
     installation: direct ? 'derived per operation via the GitHub App' : 'from the credential reference',
     results: direct ? 'OIDC session plus workflow_run webhook' : 'controller callback',
   };
@@ -303,9 +307,10 @@ async function configureRunnerRequest(
       !(command.repository && command.provider !== 'github-actions') &&
       !(command.runsOn !== undefined && command.provider !== 'github-actions') &&
       !(command.concurrencyBudget !== undefined && command.provider !== 'github-actions') &&
-      !(command.publicLogs !== undefined && command.provider !== 'github-actions'),
+      !(command.publicLogs !== undefined && command.provider !== 'github-actions') &&
+      !(command.submodules !== undefined && command.provider !== 'github-actions'),
     'BAD_ARGUMENT',
-    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget and publicLogs), or a full configuration for another provider.',
+    'Choose provider:"self-hosted" (optional machineId and labels; mac is a legacy alias), provider:"github-actions" (repository, optional runsOn, concurrencyBudget, publicLogs and submodules), or a full configuration for another provider.',
   );
   const current = parseHostedResponse(
     currentSettings,
@@ -327,6 +332,11 @@ async function configureRunnerRequest(
     const publicLogs =
       command.publicLogs ??
       (currentActions?.publicLogs === true && currentActions.repository === repository ? true : undefined);
+    // Allowed submodule repositories carry over the same way; submodules merges changes into them.
+    const submodules = mergeSubmoduleAllowlist(
+      currentActions?.repository === repository ? currentActions.submodules : undefined,
+      command.submodules ?? {},
+    );
     return {
       name: 'projectHostedActionsConfigure:configure' as const,
       request: {
@@ -339,6 +349,7 @@ async function configureRunnerRequest(
           ? { concurrencyBudget: command.concurrencyBudget ?? current.configuration?.concurrencyBudget }
           : {}),
         ...(publicLogs ? { publicLogs: true } : {}),
+        ...(submodules ? { submodules } : {}),
       },
     };
   }

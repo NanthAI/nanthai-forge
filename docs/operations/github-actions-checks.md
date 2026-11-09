@@ -1005,24 +1005,52 @@ checks the pointer bytes; the fetched tree is external content, as on GitHub.
 
 **Private submodules.** A GitHub URL that cannot be read anonymously is fetched with a
 short-lived, read-only (`contents: read`) installation token limited to exactly that
-repository, but only when the GitHub App installation that serves the project's own
-repository also includes it. The Actions job asks once per repository
-(`submoduleAccess` over the OIDC session; capability `checks.submoduleAccess`, so an
-older server simply refuses as before); the server verifies the live run and the
-project's binding, looks up the repository's installation, mints the token and returns
-it with `Cache-Control: no-store`. Public submodules never ask. The token is never
-stored or logged (the job also masks it), reaches Git only through the fetch's
-environment scoped to that repository's URL (not argv, not config files), and is not
-written to the workspace. A repository outside the installation is not given a token
-(`outside-installation`); a failed lookup refuses with `access-unavailable`. Cost per
-private repository: one Convex request (plus the session mutation) and two or three
-GitHub API calls (installation lookup, mint; the project lookup and binding proof are
-added once per call). The fetched content is readable by the check's own commands, as
-with any checkout.
+repository, but only when the project owner allowed that repository and the GitHub App
+installation that serves the project's own repository also includes it. Like GitHub,
+where a workflow's token cannot read another private repository until an owner grants
+it, nothing is allowed by default. The project owner allows a repository with
+
+```sh
+nforge agent ROOT configure-runner '{"provider":"github-actions","submodules":{"OWNER/NAME":true}}'
+```
+
+What the owner grants: every change that reaches a check, from any member or agent who
+can land one, can read that repository's contents, and the check's own commands can
+print them into the check logs. `submodules` merges into the current list (`false`
+removes a repository; the list is shown in `check-settings.actions.submodules`). It is
+stored in the runner configuration (owner only: the same configuration transaction as
+`publicLogs`, so a member or agent credential is refused, and it changes the
+configuration digest), and carries over while the runner repository stays the same; a
+different repository starts empty.
+
+When the run's check logs are public (`publicLogs:true`, or a run repository whose
+GitHub-signed OIDC `repository_visibility` claim is not `private`), anything a check
+prints from a private submodule is public. There a
+repository is read only when the owner also allowed it for public logs with
+`{"OWNER/NAME":"public-logs"}`; otherwise it refuses with `public-logs`.
+
+The Actions job asks once per repository (`submoduleAccess` over the OIDC session;
+capability `checks.submoduleAccess`, so an older server simply refuses as before). The
+same session call reads the owner's current runner setting (one row; a withdrawal
+applies to running checks, and runs of a replaced runner repository get nothing). The
+server refuses a repository not on the list (`not-allowed`) or not allowed for public
+logs (`public-logs`) before any GitHub call, then verifies the project's binding, looks
+up the repository's installation, mints the token and returns it with
+`Cache-Control: no-store`. Public submodules never ask. The token is never stored
+or logged (the job also masks it), reaches Git only through the fetch's environment
+scoped to that repository's URL (not argv, not config files), and is not written to
+the workspace. A repository outside the installation is not given a token
+(`outside-installation`); a failed lookup refuses with `access-unavailable`. Each
+refusal names the repository and, for `not-allowed` and `public-logs`, the owner's
+exact command. Cost per private repository: one Convex request (the session mutation,
+which includes the one settings read) and two or three GitHub API calls (installation
+lookup, mint; the project lookup and binding proof are added once per call). A request
+naming only refused repositories makes no GitHub call.
 
 Any other URL (SSH to another host, `http:`, `file:`, credentials, missing), a
-relative URL without a project repository, an unreachable commit, a repository outside
-the installation or a runner without `git` refuses with
+relative URL without a project repository, an unreachable commit, a private repository
+the owner has not allowed, a repository outside the installation or a runner without
+`git` refuses with
 `SUBMODULE_NOT_MATERIALIZED`, naming path, commit, URL and reason. On the
 self-hosted runner the check fails with that line before the command runs; on
 Actions the plan job fails with it. Machine runners do not fetch private submodules

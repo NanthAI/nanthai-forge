@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { digest } from '../dist/hash.js';
 import {
@@ -18,6 +18,8 @@ import { boundOverlapChanges, hostedOverlapAdvice, SYMBOL_LINK_BYTES } from '../
 import { hostedOverlapNotice, overlapBanner } from '../dist/hosted-overlap-notice.js';
 import { saveHostedLane, overlapEvidenceLevel } from '../dist/hosted-save-client.js';
 import { captureHostedSave } from '../dist/hosted-save-capture.js';
+import { packageSymbolLinks } from '../dist/hosted-overlap-packages.js';
+import { buildPackageGraph } from '../dist/package-graph.js';
 import { saveFixture, api } from './hosted-saves-fixture.mjs';
 
 const files = new Set([
@@ -463,4 +465,267 @@ test('TS/JS under docs/ is code too: a changed export there carries symbol facts
   const capture = await captureHostedSave(root, into);
   const change = capture.changes.find(c => c.path === 'docs/example/b.ts');
   assert.deepEqual(change.evidence.symbolLinks, { exports: ['b'], refs: ['docs/example/a.ts#a'] });
+});
+
+// Package-level notes for code without import-level facts (Issue a6566fbe).
+const PKG_GO = {
+  'pkg/a/go.mod': 'module example.com/a\n\ngo 1.22\n',
+  'pkg/a/a.go': 'package a\n\nfunc Greet(name string) string { return "hi " + name }\n',
+  'pkg/b/go.mod':
+    'module example.com/b\n\ngo 1.22\n\nrequire example.com/a v0.0.0\n\nreplace example.com/a => ../a\n',
+  'pkg/b/b.go': 'package b\n\nimport "example.com/a"\n\nfunc Hello() string { return a.Greet("b") }\n',
+  'pkg/c/go.mod': 'module example.com/c\n\ngo 1.22\n',
+  'pkg/c/c.go': 'package c\n\nfunc C() int { return 1 }\n',
+};
+const PKG_PYTHON = {
+  'pyproject.toml': '[tool.uv.workspace]\nmembers = ["libs/*"]\n',
+  'libs/core/pyproject.toml': '[project]\nname = "core"\n',
+  'libs/core/core/api.py': 'def greet(name):\n    return "hi " + name\n',
+  'libs/app/pyproject.toml': '[project]\nname = "app"\ndependencies = ["core"]\n',
+  'libs/app/app/main.py': 'from core.api import greet\n\nprint(greet("x"))\n',
+};
+const PKG_RUST = {
+  'Cargo.toml': '[workspace]\nmembers = ["crates/*"]\nresolver = "2"\n',
+  'crates/core/Cargo.toml': '[package]\nname = "fx-core"\nversion = "0.1.0"\n',
+  'crates/core/src/lib.rs': 'pub fn greet(name: &str) -> String { format!("hi {name}") }\n',
+  'crates/api/Cargo.toml':
+    '[package]\nname = "fx-api"\nversion = "0.1.0"\n\n[dependencies]\nfx-core = { path = "../core" }\n',
+  'crates/api/src/lib.rs': 'pub fn hello() -> String { fx_core::greet("x") }\n',
+};
+const PKG_JAVA = {
+  'settings.gradle.kts': 'rootProject.name = "fx"\ninclude(":core", ":app")\n',
+  'build.gradle.kts': '// root\n',
+  'core/build.gradle.kts': 'plugins { `java-library` }\n',
+  'core/src/main/java/fx/Core.java':
+    'package fx;\npublic class Core { public int run(int a) { return a; } }\n',
+  'app/build.gradle.kts': 'plugins { application }\ndependencies { implementation(project(":core")) }\n',
+  'app/src/main/java/fx/App.java':
+    'package fx;\npublic class App { int go() { return new Core().run(1); } }\n',
+};
+const PKG_CSHARP = {
+  'core/core.csproj': '<Project Sdk="Microsoft.NET.Sdk"></Project>\n',
+  'core/Core.cs': 'namespace Fx { public class Core { public int Run(int a) { return a; } } }\n',
+  'app/app.csproj':
+    '<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><ProjectReference Include="../core/core.csproj" /></ItemGroup></Project>\n',
+  'app/App.cs': 'namespace Fx { public class App { public int Go() { return new Core().Run(1); } } }\n',
+};
+
+/** One saved change with evidence exactly as a save computes it for a non-TS/JS file. */
+function pkgChange(files, path, after, budget = new SymbolBudget()) {
+  const before = files[path] ?? null,
+    baseBlob = digest(before ?? '');
+  const graph = buildPackageGraph(Object.keys(files), name => files[name]);
+  const links = packageSymbolLinks(
+    path,
+    before === null ? null : { text: before, key: baseBlob },
+    { text: after, key: digest(after) },
+    { graph: () => graph, budget },
+  );
+  const evidence = overlapTextEvidence(
+    baseBlob,
+    overlapTextSketch(Buffer.from(before ?? '')),
+    overlapTextSketch(Buffer.from(after)),
+    false,
+    undefined,
+    links,
+  );
+  return {
+    path,
+    before: before === null ? null : { blob: baseBlob, mode: 'file' },
+    after: { blob: digest(after), mode: 'file' },
+    ...(evidence ? { evidence } : {}),
+  };
+}
+const factsOf = item => JSON.parse(item.changes)[0].evidence.symbolLinks;
+
+test('Go: a dependent package edit and an exported signature change get one advisory note, both ways', () => {
+  const provider = lane(PEER, [
+    pkgChange(
+      PKG_GO,
+      'pkg/a/a.go',
+      PKG_GO['pkg/a/a.go'].replace('(name string)', '(name string, loud bool)'),
+    ),
+  ]);
+  const dependent = lane(MINE, [
+    pkgChange(PKG_GO, 'pkg/b/b.go', PKG_GO['pkg/b/b.go'].replace('"b"', '"bee"')),
+  ]);
+  assert.deepEqual(factsOf(provider).exports, ['pkg:go:pkg/a#Greet']);
+  assert.deepEqual(factsOf(dependent), {
+    exports: [],
+    refs: ['pkg:go:pkg/a#*', 'pkg:go:pkg/b#*'],
+  });
+  const seen = advise(dependent, [provider]);
+  assert.equal(seen.count, 1);
+  assert.equal(seen.blockingCount, 0);
+  const [note] = seen.items;
+  assert.equal(note.class, 'advisory');
+  assert.equal(note.reason, 'cross-file-symbol');
+  assert.equal(note.file, 'pkg/b/b.go');
+  assert.equal(
+    note.text,
+    `advisory cross-file: your changed lines in pkg/b/b.go may use package go:pkg/a, where Lane ${PEER} (Intent of ${PEER}) changes Greet in pkg/a/a.go. No answer needed.`,
+  );
+  const reverse = advise(provider, [dependent]);
+  assert.equal(reverse.count, 1);
+  assert.match(
+    reverse.items[0].text,
+    /^advisory cross-file: Lane 85139435-.* has changed lines in pkg\/b\/b\.go that may use package go:pkg\/a, where you change Greet in pkg\/a\/a\.go\./,
+  );
+  assert.equal(reverse.items[0].noticeId, note.noticeId);
+});
+
+test('a body-only change exports nothing: no note; a disjoint package gets none either', () => {
+  const body = lane(PEER, [
+    pkgChange(PKG_GO, 'pkg/a/a.go', PKG_GO['pkg/a/a.go'].replace('"hi "', '"hello "')),
+  ]);
+  assert.deepEqual(factsOf(body).exports, []);
+  const dependent = lane(MINE, [
+    pkgChange(PKG_GO, 'pkg/b/b.go', PKG_GO['pkg/b/b.go'].replace('"b"', '"bee"')),
+  ]);
+  assert.equal(advise(dependent, [body]).count, 0);
+  const signature = lane(PEER, [
+    pkgChange(
+      PKG_GO,
+      'pkg/a/a.go',
+      PKG_GO['pkg/a/a.go'].replace('(name string)', '(name string, loud bool)'),
+    ),
+  ]);
+  const disjoint = lane(MINE, [pkgChange(PKG_GO, 'pkg/c/c.go', PKG_GO['pkg/c/c.go'].replace('1', '2'))]);
+  assert.equal(advise(disjoint, [signature]).count, 0);
+  // A Go test file exports nothing, so it never makes a note for a dependent.
+  const test_ = lane(PEER, [
+    pkgChange(
+      PKG_GO,
+      'pkg/a/a_test.go',
+      'package a\n\nimport "testing"\n\nfunc TestGreet(t *testing.T) {}\n',
+    ),
+  ]);
+  assert.deepEqual(factsOf(test_).exports, []);
+  assert.equal(advise(dependent, [test_]).count, 0);
+});
+
+test('Python, Rust and Java name the changed symbol; C# has no export facts and names the package', () => {
+  const cases = [
+    [
+      PKG_PYTHON,
+      'libs/core/core/api.py',
+      'def greet(name, loud=False):\n    return "hi " + name\n',
+      'libs/app/app/main.py',
+      'from core.api import greet\nprint(greet("y"))\n',
+      /may use package python:libs\/core, where Lane .* changes greet in libs\/core\/core\/api\.py/,
+    ],
+    [
+      PKG_RUST,
+      'crates/core/src/lib.rs',
+      'pub fn greet(name: &str, loud: bool) -> String { format!("hi {name}") }\n',
+      'crates/api/src/lib.rs',
+      'pub fn hello() -> String { fx_core::greet("y", true) }\n',
+      /may use package cargo:crates\/core, where Lane .* changes greet in crates\/core\/src\/lib\.rs/,
+    ],
+    [
+      PKG_JAVA,
+      'core/src/main/java/fx/Core.java',
+      'package fx;\npublic class Core { public long run(int a) { return a; } }\n',
+      'app/src/main/java/fx/App.java',
+      'package fx;\npublic class App { int go() { return new Core().run(2); } }\n',
+      /may use package gradle:core, where Lane .* changes Core in core\/src\/main\/java\/fx\/Core\.java/,
+    ],
+    [
+      PKG_CSHARP,
+      'core/Core.cs',
+      'namespace Fx { public class Core { public int Run(int a) { return a + 1; } } }\n',
+      'app/App.cs',
+      'namespace Fx { public class App { public int Go() { return new Core().Run(2); } } }\n',
+      /may use package dotnet:core, where Lane .* changes a contract \(the changed names are not known\) in core\/Core\.cs/,
+    ],
+  ];
+  for (const [files, providerPath, providerText, userPath, userText, expected] of cases) {
+    const provider = lane(PEER, [pkgChange(files, providerPath, providerText)]),
+      user = lane(MINE, [pkgChange(files, userPath, userText)]);
+    const seen = advise(user, [provider]);
+    assert.equal(seen.count, 1, providerPath);
+    assert.match(seen.items[0].text, expected, providerPath);
+    assert.equal(advise(provider, [user]).count, 1, `${providerPath} reverse`);
+  }
+});
+
+test('missing facts read unavailable, never "no link"; an oversized dependency closure too', () => {
+  // No manifests at all: the graph is unknown, so the file's facts are unavailable.
+  const loose = { 'a/a.go': 'package a\nfunc A() {}\n' };
+  assert.deepEqual(factsOf(lane(MINE, [pkgChange(loose, 'a/a.go', 'package a\nfunc A(x int) {}\n')])), {
+    unavailable: true,
+  });
+  // A budget already spent: unavailable, and the save is never failed or slowed.
+  const spent = new SymbolBudget(0);
+  assert.deepEqual(factsOf(lane(MINE, [pkgChange(PKG_GO, 'pkg/b/b.go', 'package b\n', spent)])), {
+    unavailable: true,
+  });
+  // 70 packages in a dependency chain: the last depends on 69 others, past the per-file cap.
+  const chain = { 'pyproject.toml': '[tool.uv.workspace]\nmembers = ["libs/*"]\n' };
+  for (let i = 0; i < 70; i++) {
+    chain[`libs/p${i}/pyproject.toml`] =
+      `[project]\nname = "p${i}"\n${i ? `dependencies = ["p${i - 1}"]\n` : ''}`;
+    chain[`libs/p${i}/p${i}/m.py`] = 'X = 1\n';
+  }
+  assert.deepEqual(factsOf(lane(MINE, [pkgChange(chain, 'libs/p69/p69/m.py', 'X = 2\n')])), {
+    unavailable: true,
+  });
+  assert.equal(factsOf(lane(MINE, [pkgChange(chain, 'libs/p3/p3/m.py', 'X = 2\n')])).refs.length, 4);
+});
+
+test('save capture: a changed Go file carries package facts from the checkout manifests', async t => {
+  const base = mkdtempSync(join(tmpdir(), 'forge-package-links-'));
+  t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const root = join(base, 'checkout'),
+    path = 'pkg/a/a.go';
+  mkdirSync(join(root, '.forge'), { recursive: true });
+  for (const [file, text] of Object.entries(PKG_GO)) {
+    mkdirSync(join(root, dirname(file)), { recursive: true });
+    writeFileSync(join(root, file), text);
+  }
+  const s = await saveFixture(PKG_GO[path], path);
+  writeFileSync(
+    join(root, '.forge/hosted-lane.json'),
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-hosted-lane-checkout',
+      url: 'https://fixture.invalid',
+      operationId: randomUUID(),
+      selection: {
+        schema: 2,
+        projectId: s.projectId,
+        laneId: s.laneId,
+        intentId: randomUUID(),
+        head: s.baseline.sha256,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: 'active',
+        base: { head: s.baseline.sha256, receiptId: 'main-0' },
+        authority: { mode: 'server', epoch: 1 },
+      },
+      state: s.state,
+      scope: [path],
+      materialized: [path],
+    }),
+  );
+  // The base sketch is retained by the checkout, as after any earlier save or open.
+  rememberOverlapSketch(
+    `${root}.forge-client`,
+    digest(PKG_GO[path]),
+    overlapTextSketch(Buffer.from(PKG_GO[path])),
+  );
+  writeFileSync(join(root, path), PKG_GO[path].replace('(name string)', '(name string, loud bool)'));
+  writeFileSync(join(root, 'pkg/b/b.go'), PKG_GO['pkg/b/b.go'].replace('"b"', '"bee"'));
+  const links = (captured, file) => captured.changes.find(item => item.path === file)?.evidence?.symbolLinks;
+  // Base bytes not retained: the file's contract reads as changed (`*`), never as unchanged.
+  const unread = await captureHostedSave(root, join(base, 'capture-unread'));
+  assert.deepEqual(links(unread, 'pkg/a/a.go').exports, ['pkg:go:pkg/a#*']);
+  // The checkout retains the verified base object: the changed name is known.
+  mkdirSync(join(`${root}.forge-client`, 'objects'), { recursive: true });
+  writeFileSync(join(`${root}.forge-client`, 'objects', digest(PKG_GO[path])), PKG_GO[path]);
+  const captured = await captureHostedSave(root, join(base, 'capture'));
+  assert.deepEqual(links(captured, 'pkg/a/a.go').exports, ['pkg:go:pkg/a#Greet']);
+  assert.deepEqual(links(captured, 'pkg/b/b.go').refs, ['pkg:go:pkg/a#*', 'pkg:go:pkg/b#*']);
+  assert.equal(links(captured, 'pkg/a/go.mod'), undefined, 'manifests carry no symbol facts');
 });

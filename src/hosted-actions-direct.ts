@@ -73,7 +73,9 @@ export const submoduleAccessReplySchema = z.record(
   z.string(),
   z.union([
     z.object({ token: z.string().min(1).max(512) }).strict(),
-    z.object({ refused: z.enum(['outside-installation', 'unavailable']) }).strict(),
+    z
+      .object({ refused: z.enum(['outside-installation', 'not-allowed', 'public-logs', 'unavailable']) })
+      .strict(),
   ]),
 );
 export const directPlanSchema = z.object({ recipe: hostedActionsRecipeSchema, lockfile: checkHash }).strict();

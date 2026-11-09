@@ -3,19 +3,21 @@ import { createHash } from 'node:crypto';
 import { parser as python } from '@lezer/python';
 import { parser as java } from '@lezer/java';
 import { parser as rust } from '@lezer/rust';
+import { parser as go } from '@lezer/go';
 import type { SyntaxNode, Tree } from '@lezer/common';
 import { sourceLanguage } from './languages.js';
 import type { ExportEntry, ExportMap } from './contract-exports.js';
 
-/** Declaration-level export facts for Python, Java and Rust, from the lezer parsers the structural
+/** Declaration-level export facts for Python, Java, Rust and Go, from the lezer parsers the structural
  * analyzers use. Syntactic and approximate like the TS/JS scanner: a contract is a declaration's
  * header (name, parameters, types, visibility), never a body. Visibility is what another file of the
  * same package can use: Python names without a leading `_`, Java members that are not `private`,
- * Rust items with any `pub`. `undefined` means no facts (syntax error): the caller treats the file's
+ * Rust items with any `pub`, and every Go package-level declaration (other files of the same Go package
+ * use unexported names too). `undefined` means no facts (syntax error): the caller treats the file's
  * contract as unknown, never as unchanged. */
-export const STRUCTURAL_CONTRACT_FILE = /\.(?:py|java|rs)$/;
+export const STRUCTURAL_CONTRACT_FILE = /\.(?:py|java|rs|go)$/;
 
-const parsers = { python, java, rust } as const;
+const parsers = { python, java, rust, go } as const;
 const BODIES = new Set([
   'Body',
   'Block',
@@ -129,14 +131,50 @@ function rustExports(tree: Tree, text: string, map: ExportMap) {
   items(tree.topNode, '');
 }
 
+/** Go: every package-level function, method, type, const and var. A function or method contract is its
+ * header, a type its whole spec (fields and interface methods), a const or var its spec; bodies are not. */
+function goExports(tree: Tree, text: string, map: ExportMap) {
+  const specs = (decl: SyntaxNode) => {
+    const list = decl.getChild('SpecList');
+    return list ? kids(list) : kids(decl);
+  };
+  const names = (spec: SyntaxNode) => {
+    const equals = spec.getChild('=');
+    return kids(spec)
+      .filter(child => child.name === 'DefName' && (!equals || child.to <= equals.from))
+      .map(child => text.slice(child.from, child.to))
+      .filter(name => name !== '_');
+  };
+  for (const node of kids(tree.topNode)) {
+    if (node.name === 'FunctionDecl') {
+      const name = named(node, text, 'DefName');
+      if (name && name !== 'init' && name !== '_') map.set(name, entry('function', header(node, text)));
+    } else if (node.name === 'MethodDecl') {
+      const name = named(node, text, 'FieldName'),
+        receiver = node.getChild('Parameters'),
+        owner =
+          receiver &&
+          /[\p{L}_][\p{L}\p{N}_]*(?=\s*(?:\[[^\]]*\])?\s*\)$)/u.exec(text.slice(receiver.from, receiver.to));
+      if (name && owner) map.set(`${owner[0]}.${name}`, entry('function', header(node, text)));
+    } else if (node.name === 'TypeDecl')
+      for (const spec of specs(node).filter(item => item.name === 'TypeSpec')) {
+        const name = named(spec, text, 'DefName');
+        if (name && name !== '_') map.set(name, entry('type', text.slice(spec.from, spec.to)));
+      }
+    else if (node.name === 'ConstDecl' || node.name === 'VarDecl')
+      for (const spec of specs(node).filter(item => item.name === 'ConstSpec' || item.name === 'VarSpec'))
+        for (const name of names(spec)) map.set(name, entry('const', text.slice(spec.from, spec.to)));
+  }
+}
+
 const cache = new Map<string, ExportMap | null>();
-/** Exports of one Python, Java or Rust file, memoized by content key; `undefined` without facts. */
+/** Exports of one Python, Java, Rust or Go file, memoized by content key; `undefined` without facts. */
 export function structuralExports(path: string, text: string, key?: string): ExportMap | undefined {
   const known = key ? cache.get(key) : undefined;
   if (known !== undefined) return known ?? undefined;
   const language = sourceLanguage(path);
   let map: ExportMap | null = null;
-  if (language === 'python' || language === 'java' || language === 'rust') {
+  if (language === 'python' || language === 'java' || language === 'rust' || language === 'go') {
     const tree = parsers[language].parse(text);
     let invalid = false;
     tree.iterate({
@@ -147,11 +185,13 @@ export function structuralExports(path: string, text: string, key?: string): Exp
     });
     if (!invalid) {
       map = new Map();
-      (language === 'python' ? pythonExports : language === 'java' ? javaExports : rustExports)(
-        tree,
-        text,
-        map,
-      );
+      (language === 'python'
+        ? pythonExports
+        : language === 'java'
+          ? javaExports
+          : language === 'go'
+            ? goExports
+            : rustExports)(tree, text, map);
     }
   }
   if (key) {

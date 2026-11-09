@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { assertHostedCheckActive } from './projectHostedCheckStore';
+import { assertHostedCheckActive, checkSetting } from './projectHostedCheckStore';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -11,6 +11,8 @@ import { githubHostedRunsOn } from '../src/github-actions-runner-label';
 import { hostedActionsCapabilities } from '../src/hosted-actions-capabilities';
 import { latestSourcePack } from './projectSourcePackStore';
 import { hostedTimingHistory } from './projectHostedTestTimings';
+import { submoduleAllowListSchema, type SubmoduleAllow } from '../src/submodule-allowlist';
+import { repositoryVisibility } from '../src/runner-visibility';
 export const sessionArgs = {
   projectId: v.id('hostedProjects'),
   runId: v.string(),
@@ -53,12 +55,42 @@ export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
   }
   return selected;
 }
+/** The owner's current submodule policy for this run's runner: one settings read. The
+ * current row, not the run's pinned copy, so a withdrawal applies to running checks; a
+ * runner moved to another repository allows nothing for runs of the old one. Check logs
+ * are public when the owner accepted that or the run's repository is not proven private
+ * by the verified OIDC claims (`repository_visibility`; absent counts as public). */
+async function submodulePolicy(ctx: MutationCtx, input: SessionInput, run: { configuration: object }) {
+  const row = await checkSetting(ctx, input.projectId, 'runner', 'runner');
+  const current = row
+    ? (JSON.parse(row.value) as {
+        provider?: unknown;
+        repository?: unknown;
+        publicLogs?: unknown;
+        submodules?: unknown;
+      })
+    : null;
+  const pinned = run.configuration as { repository?: string; publicLogs?: true };
+  const same =
+    current?.provider === 'github-actions' &&
+    typeof current.repository === 'string' &&
+    current.repository.toLowerCase() === pinned.repository?.toLowerCase();
+  const listed = same ? submoduleAllowListSchema.safeParse(current.submodules) : null;
+  const submodules: SubmoduleAllow[] = listed?.success ? listed.data : [];
+  const claimed = (JSON.parse(input.claims) as { repository_visibility?: unknown }).repository_visibility;
+  const logsPublic =
+    pinned.publicLogs === true ||
+    (same && current.publicLogs === true) ||
+    repositoryVisibility({ visibility: claimed }) !== 'private';
+  return { submodules, logsPublic };
+}
 export const session = internalMutation({
-  args: { ...sessionArgs, timings: v.optional(v.boolean()) },
+  args: { ...sessionArgs, timings: v.optional(v.boolean()), submodules: v.optional(v.boolean()) },
   // JSON text (Issue 0c457ae4): a finished run's reports are keyed by test file.
   returns: v.string(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input);
+    if (input.submodules) return JSON.stringify({ run, policy: await submodulePolicy(ctx, input, run) });
     if (!input.timings) return JSON.stringify({ ...run, capabilities: [...hostedActionsCapabilities] });
     const { history } = await hostedTimingHistory(ctx, input.projectId);
     return JSON.stringify({

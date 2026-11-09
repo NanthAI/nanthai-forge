@@ -110,13 +110,19 @@ function fixture(t) {
     if (previousSettings === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
     else process.env.FORGE_CLIENT_SETTINGS = previousSettings;
   });
-  // The updater process reads credentials/config from XDG_CONFIG_HOME; keep it temp too.
-  const previousXdg = process.env.XDG_CONFIG_HOME;
-  process.env.XDG_CONFIG_HOME = join(directory, 'home', '.config');
-  t.after(() => {
-    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
-    else process.env.XDG_CONFIG_HOME = previousXdg;
-  });
+  // The updater process reads credentials/config from XDG_CONFIG_HOME and landed operations
+  // from XDG_STATE_HOME; keep both in the fixture home, also when a check environment sets them.
+  for (const [name, path] of [
+    ['XDG_CONFIG_HOME', ['.config']],
+    ['XDG_STATE_HOME', ['.local', 'state']],
+  ]) {
+    const previous = process.env[name];
+    process.env[name] = join(directory, 'home', ...path);
+    t.after(() => {
+      if (previous === undefined) delete process.env[name];
+      else process.env[name] = previous;
+    });
+  }
   const installation = join(directory, 'forge-cli'),
     home = join(directory, 'home'),
     clone = join(directory, 'clone');

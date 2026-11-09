@@ -17,6 +17,8 @@ export const actionsClaimsSchema = z.object({
   run_id: z.string().regex(/^[1-9][0-9]*$/),
   run_attempt: z.literal('1'),
   runner_environment: z.enum(['github-hosted', 'self-hosted']),
+  /** Signed by GitHub at run time; a private project needs `private` (src/runner-visibility.ts). */
+  repository_visibility: z.string().optional(),
 });
 export type ActionsClaims = z.infer<typeof actionsClaimsSchema>;
 export function validateActionsClaims(

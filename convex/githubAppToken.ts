@@ -9,6 +9,7 @@ import { operatorBinding } from './githubBindingAccess';
 import type { ActionCtx } from './_generated/server';
 import { githubRequest, GithubMirrorApiError } from '../src/hosted-github-api';
 import { ForgeError, invariant } from '../src/errors';
+import { submoduleDecision, type SubmoduleAllow } from '../src/submodule-allowlist';
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
@@ -307,20 +308,26 @@ export async function githubAppRequest(
 }
 export type SubmoduleAccess = Record<
   string,
-  { token: string } | { refused: 'outside-installation' | 'unavailable' }
+  { token: string } | { refused: 'outside-installation' | 'not-allowed' | 'public-logs' | 'unavailable' }
 >;
+/** The owner's current allowlist for the run's runner, and whether the run's check logs
+ * are public (projectHostedActionsSession: one settings read plus the verified claims). */
+export type SubmodulePolicy = { submodules: readonly SubmoduleAllow[]; logsPublic: boolean };
 /** Short-lived read-only tokens for private submodule fetches, one per repository,
- * each limited to exactly that repository. A repository gets a token only when the
- * App installation that serves this project's own repository (bound to the project)
- * also includes it; any other repository is refused with a reason and nothing is
- * minted. Tokens go to the caller in the response and are never persisted or logged.
- * GitHub calls: the project's installation lookup (plus binding proof), then one
- * installation lookup and one mint per accepted repository. */
+ * each limited to exactly that repository. Refused by default: a repository gets a token
+ * only when the project owner allowed it (and, when the run's check logs are public,
+ * allowed it for public logs too) and the App installation that serves this project's own
+ * repository (bound to the project) also includes it. Anything else is refused with a
+ * reason and nothing is minted. Tokens go to the caller in the response and are never
+ * persisted or logged. GitHub calls: none when no requested repository is allowed;
+ * otherwise the project's installation lookup (plus binding proof), then one installation
+ * lookup and one mint per accepted repository. */
 export async function submoduleReadTokens(
   ctx: ActionCtx,
   projectId: string,
   repo: string,
   requested: readonly string[],
+  policy: SubmodulePolicy,
   request: typeof fetch = convexFetch,
   now = Date.now(),
 ): Promise<SubmoduleAccess> {
@@ -330,10 +337,18 @@ export async function submoduleReadTokens(
     `Name 1 to ${submoduleRepositoryLimit} repositories.`,
   );
   for (const name of requested) assertRepositoryName(name);
+  const result: SubmoduleAccess = {};
+  // The owner's decision comes first, so a refused repository costs no GitHub call.
+  const allowed = [...new Set(requested)].filter(name => {
+    const decision = submoduleDecision(policy.submodules, name, policy.logsPublic);
+    if (decision === 'allowed') return true;
+    result[name] = { refused: decision };
+    return false;
+  });
+  if (!allowed.length) return result;
   const { api, installation } = await appInstallation(repo, request, now);
   await repositoryScope(ctx, projectId, repo, api, installation.id, request);
-  const result: SubmoduleAccess = {};
-  for (const name of new Set(requested)) {
+  for (const name of allowed) {
     let other: Installation;
     try {
       other = await api<Installation>(`/repos/${name}/installation`);

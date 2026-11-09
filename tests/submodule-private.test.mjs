@@ -34,6 +34,12 @@ import {
   hostedActionsCapabilities,
 } from '../dist/hosted-actions-capabilities.js';
 import { digest } from '../dist/hash.js';
+import {
+  mergeSubmoduleAllowlist,
+  submoduleAllowChangesSchema,
+  submoduleAllowLimit,
+  submoduleDecision,
+} from '../dist/submodule-allowlist.js';
 
 const { submoduleReadTokens, submoduleRepositoryLimit } = await import(
   moduleUrl('../convex/githubAppToken.ts')
@@ -226,6 +232,20 @@ test('a repository outside the installation, or unreachable access, refuses clea
   assert.equal(outside.recovery.refusals[0].reason, 'outside-installation');
   assert.match(outside.message, /vendor\/priv/);
   assert.match(outside.message, /not in the project's GitHub App installation/);
+  // Not allowed by the owner, or public check logs: the refusal names the owner's exact command.
+  const denied = await attempt(async () => ({ 'NanthAI/priv': { refused: 'not-allowed' } }));
+  assert.equal(denied.recovery.refusals[0].reason, 'not-allowed');
+  assert.equal(denied.recovery.refusals[0].repository, 'NanthAI/priv');
+  assert(
+    denied.message.includes(
+      `nforge agent ROOT configure-runner '{"provider":"github-actions","submodules":{"NanthAI/priv":true}}'`,
+    ),
+  );
+  assert.match(denied.message, /project owner has not allowed checks to read NanthAI\/priv/);
+  const exposed = await attempt(async () => ({ 'NanthAI/priv': { refused: 'public-logs' } }));
+  assert.equal(exposed.recovery.refusals[0].reason, 'public-logs');
+  assert.match(exposed.message, /check logs are public/);
+  assert(exposed.message.includes(`"submodules":{"NanthAI/priv":"public-logs"}`));
   assert.equal(
     (await attempt(async () => ({ 'NanthAI/priv': { refused: 'unavailable' } }))).recovery.refusals[0].reason,
     'access-unavailable',
@@ -310,9 +330,40 @@ test('the wire command is bounded and gated by the capability', () => {
     submoduleAccessReplySchema.safeParse({ 'a/b': { token, refused: 'unavailable' } }).success,
     false,
   );
+  for (const refused of ['not-allowed', 'public-logs'])
+    assert.equal(submoduleAccessReplySchema.safeParse({ 'a/b': { refused } }).success, true);
 });
 
-test('server: one read-only token per repository, only inside the project installation', async t => {
+test('the owner allowlist merges changes, refuses by default and needs a public-logs grant for public logs', () => {
+  assert.equal(submoduleDecision(undefined, 'a/b', false), 'not-allowed');
+  assert.equal(submoduleDecision([], 'a/b', false), 'not-allowed');
+  const list = mergeSubmoduleAllowlist(undefined, { 'Acme/Lib': true, 'acme/open': 'public-logs' });
+  assert.deepEqual(list, [{ repository: 'Acme/Lib' }, { repository: 'acme/open', publicLogs: true }]);
+  assert.equal(submoduleDecision(list, 'acme/lib', false), 'allowed'); // GitHub names ignore case
+  assert.equal(submoduleDecision(list, 'acme/lib', true), 'public-logs');
+  assert.equal(submoduleDecision(list, 'acme/open', true), 'allowed');
+  assert.equal(submoduleDecision(list, 'acme/other', false), 'not-allowed');
+  // A change replaces one entry and keeps the others; false removes; empty stores nothing.
+  assert.deepEqual(mergeSubmoduleAllowlist(list, { 'acme/lib': 'public-logs' }), [
+    { repository: 'acme/lib', publicLogs: true },
+    { repository: 'acme/open', publicLogs: true },
+  ]);
+  assert.equal(mergeSubmoduleAllowlist(list, { 'acme/lib': false, 'ACME/OPEN': false }), undefined);
+  assert.deepEqual(
+    mergeSubmoduleAllowlist(undefined, { 'b/b': true, 'a/a': true }),
+    mergeSubmoduleAllowlist(undefined, { 'a/a': true, 'b/b': true }),
+  );
+  assert.throws(() =>
+    mergeSubmoduleAllowlist(
+      undefined,
+      Object.fromEntries(Array.from({ length: submoduleAllowLimit + 1 }, (_, i) => [`a/r${i}`, true])),
+    ),
+  );
+  assert.equal(submoduleAllowChangesSchema.safeParse({ '../x': true }).success, false);
+  assert.equal(submoduleAllowChangesSchema.safeParse({ 'a/b': 'yes' }).success, false);
+});
+
+test('server: one read-only token per owner-allowed repository, only inside the project installation', async t => {
   const keys = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const saved = ['GITHUB_APP_ID', 'GITHUB_APP_PRIVATE_KEY', 'FORGE_GITHUB_REPO_BINDINGS'].map(name => [
     name,
@@ -339,18 +390,53 @@ test('server: one read-only token per repository, only inside the project instal
       return new Response(JSON.stringify({ token: 'synthetic-only-token' }));
     throw new Error(`unexpected ${path}`);
   };
-  const run = names => submoduleReadTokens({}, 'p1', 'synthetic/mirror', names, request, 1_000_000);
-  const result = await run(['synthetic/priv', 'other/stranger', 'synthetic/missing', 'synthetic/priv']);
+  const everything = ['synthetic/priv', 'other/stranger', 'synthetic/missing', 'synthetic/broken'].map(
+    repository => ({ repository }),
+  );
+  const run = (names, policy = { submodules: everything, logsPublic: false }) =>
+    submoduleReadTokens({}, 'p1', 'synthetic/mirror', names, policy, request, 1_000_000);
+  const minted = () =>
+    calls.filter(
+      call => call.path === '/app/installations/42/access_tokens' && call.body.permissions.contents,
+    );
+  // Not allowed (the default, an empty list): refused before any GitHub call.
+  assert.deepEqual(await run(['synthetic/priv'], { submodules: [], logsPublic: false }), {
+    'synthetic/priv': { refused: 'not-allowed' },
+  });
+  assert.deepEqual(calls, []);
+  const result = await run([
+    'synthetic/priv',
+    'other/stranger',
+    'synthetic/missing',
+    'synthetic/priv',
+    'synthetic/unlisted',
+  ]);
   assert.deepEqual(result, {
     'synthetic/priv': { token: 'synthetic-only-token' },
     'other/stranger': { refused: 'outside-installation' },
     'synthetic/missing': { refused: 'outside-installation' },
+    'synthetic/unlisted': { refused: 'not-allowed' },
   });
-  const mints = calls.filter(call => call.path === '/app/installations/42/access_tokens');
+  const mints = minted();
   assert.equal(mints.length, 1, 'refused repositories mint nothing');
   assert.deepEqual(mints[0].body, { repositories: ['priv'], permissions: { contents: 'read' } });
-  // 1 project lookup + (lookup per distinct repository) + 1 mint; the duplicate costs nothing.
+  // 1 project lookup + lookup per distinct allowed repository + 1 mint; the duplicate and
+  // the unlisted one cost nothing.
   assert.equal(calls.length, 1 + 3 + 1);
+  assert(!calls.some(call => call.path.includes('unlisted')));
+
+  // Public check logs: refused unless the owner also allowed that repository for public logs,
+  // before any GitHub call.
+  calls.length = 0;
+  assert.deepEqual(await run(['synthetic/priv'], { submodules: everything, logsPublic: true }), {
+    'synthetic/priv': { refused: 'public-logs' },
+  });
+  assert.deepEqual(calls, []);
+  const publicGrant = { submodules: [{ repository: 'synthetic/priv', publicLogs: true }], logsPublic: true };
+  assert.deepEqual(await run(['synthetic/priv'], publicGrant), {
+    'synthetic/priv': { token: 'synthetic-only-token' },
+  });
+  assert.equal(minted().length, 1);
   // GitHub failures other than "not installed" are errors, never silently refused.
   await assert.rejects(run(['synthetic/broken']), { code: 'GITHUB_SYNC_API' });
   // Malformed and unbounded requests, or an unbound project, never reach GitHub.
@@ -367,6 +453,7 @@ test('server: one read-only token per repository, only inside the project instal
       'p2',
       'synthetic/mirror',
       ['synthetic/priv'],
+      { submodules: everything, logsPublic: false },
       request,
       1_000_000,
     ),

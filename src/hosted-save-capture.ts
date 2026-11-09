@@ -28,6 +28,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { gitlinkCommit } from './gitlink.js';
 import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { digest } from './hash.js';
+import { readSource } from './files.js';
 import { scanSourcePaths } from './source-paths.js';
 import { notSavedCollector, notSavedFile } from './save-not-saved.js';
 import { durableReplace, syncFile } from './native-durability.js';
@@ -37,6 +38,7 @@ import type { SaveChange } from './hosted-save.js';
 import {
   rememberOverlapSketch,
   readOverlapText,
+  readOverlapBytes,
   overlapTextSketch,
   sketchCodePath,
   overlapTextEvidence,
@@ -44,6 +46,8 @@ import {
   rememberOverlapBases,
 } from './hosted-overlap-text.js';
 import { outputRoots, SymbolBudget } from './hosted-overlap-symbols.js';
+import { packageFactFile, packageSymbolLinks } from './hosted-overlap-packages.js';
+import { buildPackageGraph, type PackageGraph } from './package-graph.js';
 import { workLocked } from './work-lock.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -201,6 +205,19 @@ export async function captureHostedSave(
       roots: outputRoots(root),
       budget: new SymbolBudget(),
     };
+  // Package facts for code without import-level facts: the checkout's manifest graph, built at most once.
+  let graph: PackageGraph | undefined;
+  const packageContext = {
+    budget: links.budget,
+    graph: () =>
+      (graph ??= buildPackageGraph(existing, path => {
+        try {
+          return readSource(root, path, 1024 * 1024)?.toString('utf8');
+        } catch {
+          return undefined;
+        }
+      })),
+  };
   for (const path of local.sort()) {
     const old = baseline.get(path),
       observed = captureFile(root, path, directory, old, index);
@@ -218,12 +235,25 @@ export async function captureHostedSave(
       // A base sketch cached by an older client lacks export facts: derive it again within the budget.
       if (code && observed.text && base && !base.exports)
         base = links.budget.run(() => readOverlapText(cache, baseBlob, true)) ?? base;
+      // Go, Python, Rust, Java, C# and the rest: matched by package, with changed names where facts exist.
+      const packageLinks =
+        !code && observed.text && packageFactFile(path)
+          ? packageSymbolLinks(
+              path,
+              baseBlob === digest('')
+                ? null
+                : { text: readOverlapBytes(cache, baseBlob)?.toString('utf8'), key: baseBlob },
+              { text: observed.text.toString('utf8'), key: observed.pin.sha256 },
+              packageContext,
+            )
+          : undefined;
       const evidence = overlapTextEvidence(
         baseBlob,
         base,
         observed.sketch ?? null,
         code,
         observed.text ? { ...links, path, text: observed.text.toString('utf8') } : undefined,
+        packageLinks,
       );
       changes.push({
         ...(evidence ? { evidence } : {}),

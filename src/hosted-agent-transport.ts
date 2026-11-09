@@ -53,6 +53,7 @@ import { executeHostedMetrics, METRICS_DEADLINE_MS, metricsDeadline } from './ho
 import { laneLiveness, readLaneEntry, recordLane, withLaneCommand } from './lane-registry.js';
 import { convexLaneStates, laneHousekeeping, markerIdentity } from './lane-prune.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
+import { announceRegistryHosts } from './install-registry-hosts.js';
 import { readClientSettings } from './client-settings.js';
 import {
   knownCapabilities,
@@ -1264,7 +1265,10 @@ export class HostedAgentTransport {
    * relinked (or installed once into the shared cache). Silent when nothing changed; never fails the action. */
   private async refreshDependencies(path: string) {
     try {
-      const shared = await shareDependencies(path, { refresh: true });
+      const shared = await shareDependencies(path, {
+        refresh: true,
+        announce: announceRegistryHosts,
+      });
       if ('relinked' in shared && shared.relinked)
         process.stderr.write(
           `The lockfile changed: node_modules now links the install for the current one (was ${shared.relinked.from}).\n`,
@@ -1282,7 +1286,10 @@ export class HostedAgentTransport {
   /** Never fails the action: dependencies are a convenience the agent can still install itself. */
   private async shareDependencies(path: string, runScripts?: boolean) {
     try {
-      const shared = await shareDependencies(path, { runScripts });
+      const shared = await shareDependencies(path, {
+        runScripts,
+        announce: announceRegistryHosts,
+      });
       const notice = installScriptsNotice(shared);
       if (notice) process.stderr.write(`${notice}\n`);
       return shared;

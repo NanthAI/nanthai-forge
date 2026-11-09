@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { CODE_FILE } from './contract-exports.js';
-import { contractDelta, type ContractSource } from './contract-deps.js';
+import { contractDelta, type ContractChange, type ContractSource } from './contract-deps.js';
 import { STRUCTURAL_CONTRACT_FILE } from './contract-structural.js';
 import {
   enclosingPackages,
@@ -12,12 +12,12 @@ import {
 import { packageKey } from './package-graph-types.js';
 
 /** Package-level contract signal for code without import-precise facts. TS/JS keeps its import-level
- * rule (contract-deps). Python, Java and Rust have export facts (contract-structural); every other
+ * rule (contract-deps). Python, Java, Rust and Go have export facts (contract-structural); every other
  * code file is "contract unknown": any change to it may change what other files use. A missing graph
  * edge never proves independence, so a file Forge cannot place in a package is unplaced and touches
  * everything. */
 export const UNKNOWN_CONTRACT_FILE =
-  /\.(?:go|cs|fs|fsx|vb|kt|kts|scala|sc|groovy|swift|m|mm|c|h|cc|cpp|cxx|hpp|hh|hxx|rb|php|dart|ex|exs|erl|hrl|hs|ml|mli|clj|cljs|lua|zig|nim|jl|r|R|pl|pm)$/;
+  /\.(?:cs|fs|fsx|vb|kt|kts|scala|sc|groovy|swift|m|mm|c|h|cc|cpp|cxx|hpp|hh|hxx|rb|php|dart|ex|exs|erl|hrl|hs|ml|mli|clj|cljs|lua|zig|nim|jl|r|R|pl|pm)$/;
 /** Source files whose edits can use another package's contract. */
 export const isContractSource = (path: string) =>
   CODE_FILE.test(path) || STRUCTURAL_CONTRACT_FILE.test(path) || UNKNOWN_CONTRACT_FILE.test(path);
@@ -112,4 +112,31 @@ export function packageContractHold(
     }
   }
   return null;
+}
+
+/** Why `lane`'s edits to non-TS/JS code may use a contract main changed after `pivot`, or null. Main's
+ * changes are placed in main's own graph (a package main added is not one the Lane can use); the Lane's
+ * edits and reverse dependencies in the Lane's graph. A body-only change in a language with export
+ * facts (Python, Java, Rust, Go) signals nothing. Each graph is built at most once, and only when main
+ * changed such a contract. TS/JS edits are matched by import (contract-deps), never here. */
+export function laneNeedsContractSync(
+  source: ContractSource,
+  pivot: FileRef[],
+  main: FileRef[],
+  lane: FileRef[],
+): { reason: string; changes: ContractChange[] } | null {
+  let mainGraph: PackageGraph | undefined, laneGraph: PackageGraph | undefined;
+  const mine = packageContracts(source, pivot, main, () => (mainGraph ??= contractGraph(source, main)));
+  if (!mine.unplaced && !mine.packages.size) return null;
+  const before = new Map(pivot.map(file => [file.path, file.blob]));
+  const edited = lane
+    .filter(file => before.get(file.path) !== file.blob && !CODE_FILE.test(file.path))
+    .map(file => file.path);
+  const reason = packageContractHold(() => (laneGraph ??= contractGraph(source, lane)), mine, edited);
+  if (!reason) return null;
+  const files = [...new Set([...(mine.unplaced ? [mine.unplaced] : []), ...mine.packages.values()])].sort();
+  return {
+    reason,
+    changes: files.map(file => ({ file, export: '*', kind: 'changed' as const })),
+  };
 }

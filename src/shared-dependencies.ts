@@ -36,6 +36,8 @@ import {
 } from './package-manager-install.js';
 import { acquireHeavySlot, heavySlotDirectory } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
+import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
+import { sharedDownloadCache } from './install-download-cache.js';
 
 export { npmInstaller };
 export type DependencyInstaller = (
@@ -47,6 +49,8 @@ export type DependencyInstaller = (
     /** Set for pnpm, yarn and bun: the declared manager and how to run it. */
     manager?: PackageManager;
     runner?: ManagerRunner | undefined;
+    /** Download cache shared by this project's script-less pnpm and Yarn Berry installs. */
+    downloads?: string;
   },
 ) => Promise<void>;
 /** Install scripts a default (script-less) install skipped, and the command that runs them. */
@@ -88,8 +92,10 @@ export type SharedDependencies =
       scripts?: RanScripts;
       /** The Lane's links followed a changed lockfile; `from` is the key it pointed at before. */
       relinked?: Relinked;
+      /** Hosts besides the public npm registries that the lockfile or install settings name. */
+      registryHosts?: RegistryHosts;
     }
-  | { status: 'failed'; key: string; message: string };
+  | { status: 'failed'; key: string; message: string; registryHosts?: RegistryHosts };
 
 export function dependencyCacheDirectory() {
   return join(process.env.XDG_CACHE_HOME || join(homedir(), '.cache'), 'forge', 'deps');
@@ -283,6 +289,8 @@ export async function shareDependencies(
     refresh?: boolean;
     /** How to run a non-npm manager (default: corepack at the declared version, else PATH). */
     resolve?: (pm: PackageManager) => Promise<ManagerRunner | { reason: string }>;
+    /** Called with the non-public hosts the install will fetch from, before it runs. */
+    announce?: (hosts: RegistryHosts) => void;
   } = {},
 ): Promise<SharedDependencies> {
   if (!(options.enabled ?? readClientSettings().shareDependencies)) return { status: 'off' };
@@ -324,8 +332,11 @@ export async function shareDependencies(
     mode = runScripts ? '-scripts' : rebuild.length ? '-rebuild' : policy.requested ? '-skipped' : '',
     prefix = `${pm.name}${mode}`,
     entry = join(cache, `${prefix}-${key}`);
+  const registryHosts = installRegistryHosts(root, pm),
+    hosts = registryHosts ? { registryHosts } : {};
   let installed = false;
   if (!complete(entry, key)) {
+    if (registryHosts) options.announce?.(registryHosts);
     mkdirSync(cache, { recursive: true });
     // The per-lockfile lock reuses the heavy-slot primitive with one slot; a dead holder is reclaimed.
     const locks = join(cache, `${prefix}-${key}.lock`);
@@ -347,6 +358,12 @@ export async function shareDependencies(
           rmSync(stage, { recursive: true, force: true });
           return { status: 'none', reason: unusable };
         }
+        // Script-less installs of one project share a content-addressed download cache; an install
+        // that runs package scripts keeps a private one (code that could write the shared directory).
+        const downloads =
+          other && !runScripts && !rebuild.length
+            ? sharedDownloadCache(cache, pm, hostedProject(root))
+            : null;
         const settings = readClientSettings(),
           slots = options.heavy === false ? 0 : heavySlots(settings.localHeavySlots);
         const slot = slots ? await acquireHeavySlot(heavySlotDirectory(), slots) : null;
@@ -356,10 +373,15 @@ export async function shareDependencies(
             (other
               ? (directory, installOptions) => managerInstall(directory, pm, runner!, installOptions)
               : npmInstaller)
-          )(stage, { runScripts, rebuild, manager: pm, runner });
+          )(stage, { runScripts, rebuild, manager: pm, runner, ...(downloads ? { downloads } : {}) });
         } catch (error) {
           rmSync(stage, { recursive: true, force: true });
-          return { status: 'failed', key, message: error instanceof Error ? error.message : String(error) };
+          return {
+            status: 'failed',
+            key,
+            message: error instanceof Error ? error.message : String(error),
+            ...hosts,
+          };
         } finally {
           if (slot) rmSync(slot, { recursive: true, force: true });
         }
@@ -410,5 +432,6 @@ export async function shareDependencies(
     ...(skippedScripts ? { skippedScripts } : {}),
     ...(requested ? { requestedScripts: requested } : {}),
     ...(ran ? { scripts: ran } : {}),
+    ...hosts,
   };
 }

@@ -23,6 +23,9 @@ import { linkInstall } from '../dist/dependency-link.js';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { detectPackageManager, managerWorkspaceFolders } from '../dist/package-manager.js';
 import { dependencyKey, shareDependencies, installScriptsNotice } from '../dist/shared-dependencies.js';
+import { hostsInText, installRegistryHosts, registryHostsNotice } from '../dist/install-registry-hosts.js';
+import { sharedDownloadCache, downloadCacheSettings } from '../dist/install-download-cache.js';
+import { installSteps } from '../dist/package-manager-install.js';
 
 const ORIGINAL_PATH = process.env.PATH;
 function scratch(t) {
@@ -196,7 +199,10 @@ test('pnpm installs once for the lockfile; the second Lane links without install
   assert.equal(second.key, first.key);
   const installs = calls().filter(line => line.startsWith('pnpm install'));
   assert.equal(installs.length, 1, 'one install, no install on a cache hit');
-  assert.match(installs[0], /^pnpm install --frozen-lockfile --ignore-scripts \|/);
+  assert.match(
+    installs[0],
+    /^pnpm install --frozen-lockfile --ignore-scripts --store-dir \S+\/downloads\/pnpm\/\w+ --package-import-method=clone-or-copy \|/,
+  );
   // The stage held the lockfile, workspace file and every workspace manifest.
   for (const file of ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'packages'])
     assert.ok(installs[0].includes(file), file);
@@ -213,7 +219,11 @@ test('a declared version runs through corepack; without corepack the manager on 
     calls = fakeManagers(t, directory, ['corepack', 'pnpm'], { pnpm: '9.9.9' });
   const viaCorepack = await share(repo(directory, 'lane', pnpmFiles()), cache);
   assert.equal(viaCorepack.status, 'installed');
-  assert.ok(calls().some(line => line === 'corepack pnpm install --frozen-lockfile --ignore-scripts'));
+  assert.ok(
+    calls().some(line =>
+      line.startsWith('corepack pnpm install --frozen-lockfile --ignore-scripts --store-dir '),
+    ),
+  );
   assert.equal(
     viaCorepack.key,
     dependencyKey(join(directory, 'lane'), '10.4.1'),
@@ -555,4 +565,310 @@ test('a package nothing links, and an existing third-party bin of the same name,
     })().length,
     0,
   );
+});
+
+const SECRET = 'hunter2-token';
+const npmLock = packages => ({ lockfileVersion: 3, packages: { '': { name: 'x' }, ...packages } });
+const hostsOf = root => installRegistryHosts(root, detectPackageManager(root).manager);
+
+test('only the host name is kept: credentials, paths and comments never are', () => {
+  const found = hostsInText(
+    [
+      '# https://yarnpkg.com/en/docs/yarn-lock',
+      `registry=https://user:${SECRET}@Npm.Corp.Example:8443/team/path?token=${SECRET}`,
+      `//npm.pkg.github.com/:_authToken=${SECRET}`,
+      `resolved "git+ssh://git@git.corp.example/org/repo.git#abc"`,
+      `"resolved": "https://registry.npmjs.org/a/-/a-1.0.0.tgz"`,
+    ].join('\n'),
+  );
+  assert.deepEqual(
+    [...found].sort(),
+    ['git.corp.example', 'npm.corp.example:8443', 'npm.pkg.github.com', 'registry.npmjs.org'].sort(),
+  );
+  assert.ok(![...found].some(host => host.includes(SECRET) || host.includes('@') || host.includes('/')));
+});
+
+test('public registries alone list nothing; private hosts are sorted, deduplicated and capped', t => {
+  const directory = scratch(t);
+  const publicOnly = repo(directory, 'public', {
+    'package.json': { name: 'x' },
+    'package-lock.json': npmLock({
+      'node_modules/a': { resolved: 'https://registry.npmjs.org/a/-/a-1.0.0.tgz' },
+      'node_modules/b': { resolved: 'https://registry.yarnpkg.com/b/-/b-1.0.0.tgz' },
+    }),
+  });
+  assert.equal(hostsOf(publicOnly), null);
+  const many = Object.fromEntries(
+    Array.from({ length: 25 }, (_, index) => [
+      `node_modules/p${index}`,
+      { resolved: `https://mirror${String(index).padStart(2, '0')}.example/p${index}.tgz` },
+    ]),
+  );
+  const mixed = repo(directory, 'mixed', {
+    'package.json': { name: 'x' },
+    'package-lock.json': npmLock({
+      ...many,
+      'node_modules/dup': { resolved: 'https://mirror00.example/again.tgz' },
+      'node_modules/git': { resolved: 'git+https://github.com/org/repo.git#abc' },
+    }),
+  });
+  const found = hostsOf(mixed);
+  assert.equal(found.hosts.length, 20);
+  assert.equal(found.more, 6, '26 distinct hosts, 20 listed');
+  assert.deepEqual(found.hosts, [...found.hosts].sort());
+  assert.deepEqual(found.sources, ['package-lock.json']);
+  assert.match(
+    registryHostsNotice(found),
+    /and 6 more, besides the public npm registries \(named by package-lock\.json\)/,
+  );
+});
+
+test('npm reads no settings from the repository, so its .npmrc is not scanned; the other managers read theirs', t => {
+  const directory = scratch(t);
+  const files = extra => ({
+    'package.json': { name: 'x', private: true },
+    ...extra,
+  });
+  const npm = repo(
+    directory,
+    'npm',
+    files({
+      'package-lock.json': npmLock({}),
+      '.npmrc': `registry=https://npm.corp.example/\n//npm.corp.example/:_authToken=${SECRET}\n`,
+    }),
+  );
+  assert.equal(hostsOf(npm), null);
+  const pnpm = repo(
+    directory,
+    'pnpm',
+    files({
+      'pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+      '.npmrc': `registry=https://npm.corp.example/\n//npm.corp.example/:_authToken=${SECRET}\n`,
+    }),
+  );
+  const found = hostsOf(pnpm);
+  assert.deepEqual(found.hosts, ['npm.corp.example']);
+  assert.deepEqual(found.sources, ['.npmrc']);
+  assert.ok(!JSON.stringify(found).includes(SECRET) && !registryHostsNotice(found).includes(SECRET));
+  const berry = repo(
+    directory,
+    'berry',
+    files({
+      'package.json': { name: 'x', packageManager: 'yarn@4.5.0' },
+      'yarn.lock': '__metadata:\n  version: 8\n',
+      '.yarnrc.yml': `nodeLinker: node-modules\nnpmRegistryServer: "https://yarn.corp.example/"\nnpmAuthToken: ${SECRET}\n`,
+    }),
+  );
+  assert.deepEqual(hostsOf(berry).hosts, ['yarn.corp.example']);
+  const bun = repo(
+    directory,
+    'bun',
+    files({
+      'bun.lock':
+        '{\n  "packages": {\n    "a": ["a@1.0.0", "https://bun.corp.example/", {}, "sha512-x"],\n  }\n}\n',
+    }),
+  );
+  assert.deepEqual(hostsOf(bun).hosts, ['bun.corp.example']);
+});
+
+test('the start result carries the hosts and they are announced before the install runs', async t => {
+  const directory = scratch(t);
+  const root = repo(directory, 'lane', {
+    'package.json': { name: 'x' },
+    'package-lock.json': npmLock({ 'node_modules/a': { resolved: 'https://npm.corp.example/a.tgz' } }),
+  });
+  const order = [];
+  const options = {
+    enabled: true,
+    cache: join(directory, 'cache'),
+    heavy: false,
+    announce: found => order.push(`announce ${found.hosts.join(',')}`),
+    install: async stage => {
+      order.push('install');
+      mkdirSync(join(stage, 'node_modules', 'a'), { recursive: true });
+    },
+  };
+  const first = await shareDependencies(root, options);
+  assert.equal(first.status, 'installed');
+  assert.deepEqual(first.registryHosts.hosts, ['npm.corp.example']);
+  assert.deepEqual(order, ['announce npm.corp.example', 'install']);
+  // A second Lane links the cached install: nothing is fetched, nothing announced, hosts still shown.
+  const second = await shareDependencies(
+    repo(directory, 'lane2', {
+      'package.json': { name: 'x' },
+      'package-lock.json': npmLock({ 'node_modules/a': { resolved: 'https://npm.corp.example/a.tgz' } }),
+    }),
+    options,
+  );
+  assert.equal(second.status, 'linked');
+  assert.deepEqual(second.registryHosts.hosts, ['npm.corp.example']);
+  assert.equal(order.length, 2);
+  // A failed install still tells the agent where it tried to fetch from.
+  const failing = await shareDependencies(
+    repo(directory, 'lane3', {
+      'package.json': { name: 'y' },
+      'package-lock.json': npmLock({ 'node_modules/b': { resolved: 'https://other.corp.example/b.tgz' } }),
+    }),
+    {
+      ...options,
+      install: async () => {
+        throw new Error('boom');
+      },
+    },
+  );
+  assert.equal(failing.status, 'failed');
+  assert.deepEqual(failing.registryHosts.hosts, ['other.corp.example']);
+  // A repository on the public registries gets no field and no announcement.
+  const quiet = await shareDependencies(
+    repo(directory, 'lane4', {
+      'package.json': { name: 'z' },
+      'package-lock.json': npmLock({ 'node_modules/c': { resolved: 'https://registry.npmjs.org/c.tgz' } }),
+    }),
+    options,
+  );
+  assert.equal('registryHosts' in quiet, false);
+  assert.equal(order.filter(entry => entry.startsWith('announce')).length, 2);
+});
+
+const dlPnpmFiles = (lock = '', manifest = {}) => ({
+  'package.json': { name: 'root', private: true, packageManager: 'pnpm@10.4.1', ...manifest },
+  'pnpm-lock.yaml': `lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n\npackages:\n\n  esbuild@0.21.0:\n    resolution: {integrity: sha512-x}\n    requiresBuild: true\n${lock}`,
+});
+const dlBerryFiles = (lock = '') => ({
+  'package.json': { name: 'root', private: true, packageManager: 'yarn@4.5.0' },
+  '.yarnrc.yml': 'nodeLinker: node-modules\n',
+  'yarn.lock': `__metadata:\n  version: 8\n${lock}`,
+});
+const dlBunFiles = (lock = '') => ({
+  'package.json': { name: 'root', private: true },
+  'bun.lock': `{\n  "lockfileVersion": 1,\n  "workspaces": { "": { "name": "root" } },\n  "packages": {}\n}\n${lock}`,
+});
+const dlClassicFiles = () => ({
+  'package.json': { name: 'root', private: true },
+  'yarn.lock': '# yarn lockfile v1\n',
+});
+
+/** Runs share with a recording installer; the real managers are never started. */
+function dlRecorder(directory, cache, resolved = '10.4.1') {
+  const seen = [];
+  const options = {
+    enabled: true,
+    cache,
+    heavy: false,
+    resolve: async pm => ({ command: pm.name, prefix: [], version: resolved }),
+    install: async (stage, installOptions) => {
+      seen.push(installOptions.downloads ?? null);
+      mkdirSync(join(stage, 'node_modules', 'dep'), { recursive: true });
+    },
+  };
+  return { seen, share: (root, extra = {}) => shareDependencies(root, { ...options, ...extra }) };
+}
+
+test('pnpm and Yarn Berry installs of one project share a download cache; bun and Yarn classic stay private', async t => {
+  const directory = scratch(t),
+    cache = join(directory, 'cache'),
+    { seen, share } = dlRecorder(directory, cache);
+  // Two different lockfiles of one manager and project: one cache, so the second fetches only what is new.
+  await share(repo(directory, 'p1', dlPnpmFiles()));
+  await share(repo(directory, 'p2', dlPnpmFiles('  extra@1.0.0:\n    resolution: {integrity: sha512-y}\n')));
+  assert.equal(seen.length, 2);
+  assert.equal(seen[0], seen[1]);
+  assert.equal(seen[0], join(cache, 'downloads', 'pnpm', seen[0].split('/').pop()));
+  assert.match(seen[0].split('/').pop(), /^[0-9a-f]{16}$/);
+  await share(repo(directory, 'y1', dlBerryFiles()), {
+    resolve: async pm => ({ command: pm.name, prefix: [], version: '4.5.0' }),
+  });
+  assert.ok(seen[2].includes('/downloads/yarn/'), 'Yarn Berry has its own directory');
+  assert.notEqual(seen[2], seen[0]);
+  // Bun's cache is addressed by name and version, Yarn classic's is not shared: both stay private.
+  await share(repo(directory, 'b1', dlBunFiles()), {
+    resolve: async pm => ({ command: pm.name, prefix: [], version: '1.2.15' }),
+  });
+  await share(repo(directory, 'c1', dlClassicFiles()), {
+    resolve: async pm => ({ command: pm.name, prefix: [], version: '1.22.22' }),
+  });
+  assert.deepEqual(seen.slice(3), [null, null]);
+  // npm keeps using the existing shared npm cache and passes nothing.
+  assert.equal(
+    sharedDownloadCache(
+      cache,
+      detectPackageManager(repo(directory, 'n', { 'package.json': { name: 'n' }, 'package-lock.json': '{}' }))
+        .manager,
+      null,
+    ),
+    null,
+  );
+});
+
+test('a project never reads another project’s downloads, and the directory is private to the user', async t => {
+  const directory = scratch(t),
+    cache = join(directory, 'cache');
+  const { manager } = detectPackageManager(repo(directory, 'p', dlPnpmFiles()));
+  const local = sharedDownloadCache(cache, manager, null),
+    one = sharedDownloadCache(cache, manager, 'https://deployment.example/project-1'),
+    two = sharedDownloadCache(cache, manager, 'https://deployment.example/project-2');
+  assert.equal(new Set([local, one, two]).size, 3, 'one directory per project');
+  assert.equal(lstatSync(one).mode & 0o777, 0o700);
+  assert.equal(sharedDownloadCache(cache, manager, 'https://deployment.example/project-1'), one);
+  // A link where the directory should be is refused: the install keeps a private cache.
+  const target = join(directory, 'elsewhere');
+  mkdirSync(target);
+  const linked = join(cache, 'downloads', 'pnpm');
+  removeInstall(linked);
+  mkdirSync(join(cache, 'downloads'), { recursive: true });
+  symlinkSync(target, linked, 'dir');
+  assert.equal(sharedDownloadCache(cache, manager, null), null);
+  assert.deepEqual(existsSync(join(target, 'anything')), false);
+});
+
+test('an install that runs package scripts keeps a private cache; script-less modes share', async t => {
+  const directory = scratch(t),
+    cache = join(directory, 'cache'),
+    { seen, share } = dlRecorder(directory, cache);
+  await share(repo(directory, 'none', dlPnpmFiles()));
+  await share(repo(directory, 'all', dlPnpmFiles('', { name: 'scripted' })), { runScripts: true });
+  assert.ok(seen[0]);
+  assert.equal(seen[1], null, 'installScripts:true: scripts could write a shared directory');
+  const settings = join(directory, 'client.json');
+  writeFileSync(settings, JSON.stringify({ installScripts: true }));
+  const saved = process.env.FORGE_CLIENT_SETTINGS;
+  process.env.FORGE_CLIENT_SETTINGS = settings;
+  t.after(() => {
+    if (saved === undefined) delete process.env.FORGE_CLIENT_SETTINGS;
+    else process.env.FORGE_CLIENT_SETTINGS = saved;
+  });
+  await share(repo(directory, 'rebuild', dlPnpmFiles('', { pnpm: { onlyBuiltDependencies: ['esbuild'] } })));
+  assert.equal(seen[2], null, 'an allowlisted rebuild runs package scripts too');
+});
+
+test('the commands point the manager at the cache and nothing else changes', () => {
+  const pnpm = { name: 'pnpm', declared: '10.4.1', lockfile: 'pnpm-lock.yaml', berry: false };
+  const berry = { name: 'yarn', declared: '4.5.0', lockfile: 'yarn.lock', berry: true };
+  const bun = { name: 'bun', declared: null, lockfile: 'bun.lock', berry: false };
+  assert.deepEqual(installSteps(pnpm, false, []), [
+    { args: ['install', '--frozen-lockfile', '--ignore-scripts'], env: { CI: '1' } },
+  ]);
+  const [pnpmStep] = installSteps(pnpm, false, [], '/c/pnpm');
+  assert.deepEqual(pnpmStep.args, [
+    'install',
+    '--frozen-lockfile',
+    '--ignore-scripts',
+    '--store-dir',
+    '/c/pnpm',
+    '--package-import-method=clone-or-copy',
+  ]);
+  const [berryStep] = installSteps(berry, false, [], '/c/yarn');
+  assert.equal(berryStep.env.YARN_GLOBAL_FOLDER, '/c/yarn');
+  assert.equal(berryStep.env.YARN_ENABLE_GLOBAL_CACHE, 'true');
+  assert.equal(berryStep.env.YARN_ENABLE_SCRIPTS, 'false', 'scripts stay off');
+  assert.equal(berryStep.env.YARN_IGNORE_PATH, '1', 'the committed release is still never run');
+  // Never with scripts, never for a manager that does not share.
+  assert.deepEqual(installSteps(pnpm, true, [], '/c/pnpm'), installSteps(pnpm, true, []));
+  assert.deepEqual(
+    installSteps(pnpm, false, ['esbuild'], '/c/pnpm')[0],
+    installSteps(pnpm, false, ['esbuild'])[0],
+  );
+  assert.deepEqual(installSteps(berry, true, [], '/c/yarn'), installSteps(berry, true, []));
+  assert.deepEqual(installSteps(bun, false, [], '/c/bun'), installSteps(bun, false, []));
+  assert.deepEqual(downloadCacheSettings(pnpm, '/c').env, {});
 });

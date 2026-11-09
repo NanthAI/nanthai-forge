@@ -8,6 +8,7 @@ import { gitlinkCommit, gitmoduleUrls } from './gitlink.js';
 import type { NativeFile } from './native-state-format.js';
 import { safeRelative } from './safe-relative.js';
 import { inTestProcess } from './test-isolation.js';
+import { submoduleAllowCommand } from './submodule-allowlist.js';
 
 /** Recursive checkouts stop here, like a bounded `submodules: recursive`. */
 export const submoduleDepthLimit = 8;
@@ -20,6 +21,8 @@ export type SubmoduleRefusalReason =
   | 'url-unsupported'
   | 'fetch-failed'
   | 'outside-installation'
+  | 'not-allowed'
+  | 'public-logs'
   | 'access-unavailable'
   | 'git-unavailable'
   | 'limit';
@@ -28,6 +31,8 @@ export type SubmoduleRefusal = {
   commit: string;
   url: string | null;
   reason: SubmoduleRefusalReason;
+  /** `OWNER/NAME` for a private GitHub repository refusal that names an owner command. */
+  repository?: string;
 };
 export type MaterializedSubmodule = { path: string; commit: string; url: string; fetched: boolean };
 
@@ -82,20 +87,27 @@ export function githubRepositoryOf(url: string): string | null {
   return local ? `${local[1]}/${local[2]}` : null;
 }
 
-const reasonHints: Partial<Record<SubmoduleRefusalReason, string>> = {
-  'outside-installation':
+const reasonHints: Partial<Record<SubmoduleRefusalReason, (repository: string) => string>> = {
+  'outside-installation': () =>
     " (not readable without credentials, and its repository is not in the project's GitHub App installation)",
-  'access-unavailable':
+  'access-unavailable': () =>
     ' (the repository was not readable without credentials and App access could not be obtained)',
+  'not-allowed': repository =>
+    ` (not readable without credentials, and the project owner has not allowed checks to read ${repository}; ` +
+    `to allow it, the project owner runs ${submoduleAllowCommand(repository)})`,
+  'public-logs': repository =>
+    ` (${repository} is private and this runner's check logs are public, so anything a check prints from it ` +
+    `would be public; use a runner with private logs, or, only if that is acceptable, the project owner runs ` +
+    `${submoduleAllowCommand(repository, true)})`,
 };
 
 export function submoduleRefusal(refusals: SubmoduleRefusal[]) {
   const first = refusals[0]!;
   return new ForgeError(
     'SUBMODULE_NOT_MATERIALIZED',
-    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}${reasonHints[first.reason] ?? ''}` +
+    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}${reasonHints[first.reason]?.(first.repository ?? 'OWNER/NAME') ?? ''}` +
       (refusals.length > 1 ? `; ${refusals.length - 1} more` : '') +
-      '. Public HTTPS URLs are fetched without credentials; private GitHub repositories only when the project\'s GitHub App installation includes them. Set "submodules": false on the check to run without submodule content.',
+      '. Public HTTPS URLs are fetched without credentials; private GitHub repositories only when the project owner allowed them and the project\'s GitHub App installation includes them. Set "submodules": false on the check to run without submodule content.',
     undefined,
     { refusals: refusals.slice(0, 20), more: Math.max(0, refusals.length - 20) },
   );
@@ -104,7 +116,12 @@ export function submoduleRefusal(refusals: SubmoduleRefusal[]) {
 /** One read-only token per GitHub repository (`OWNER/NAME`), or why none was issued. */
 export type SubmoduleAccess = (
   repositories: string[],
-) => Promise<Record<string, { token: string } | { refused: 'outside-installation' | 'unavailable' }>>;
+) => Promise<
+  Record<
+    string,
+    { token: string } | { refused: 'outside-installation' | 'not-allowed' | 'public-logs' | 'unavailable' }
+  >
+>;
 export type SubmoduleOptions = Options;
 type Options = {
   /** Asked only after a credential-free fetch of a GitHub URL fails. */
@@ -173,8 +190,18 @@ export async function materializeSubmodules(
           { path: item.path, commit: item.commit, url: item.url, reason: target.reason },
         ]);
       const fetched = await fetcher.pin(target.url, item.commit);
-      if (typeof fetched === 'string')
-        throw submoduleRefusal([{ path: item.path, commit: item.commit, url: item.url, reason: fetched }]);
+      if (typeof fetched === 'string') {
+        const repository = githubRepositoryOf(target.url);
+        throw submoduleRefusal([
+          {
+            path: item.path,
+            commit: item.commit,
+            url: item.url,
+            reason: fetched,
+            ...(repository ? { repository } : {}),
+          },
+        ]);
+      }
       await fetcher.checkout(target.url, item.commit, await workspaceTarget(directory, item.path));
       done.push({ path: item.path, commit: item.commit, url: target.url, fetched });
       for (const nested of await fetcher.nested(target.url, item.commit))
@@ -238,7 +265,15 @@ export class SubmoduleFetcher {
   async pin(
     url: string,
     commit: string,
-  ): Promise<boolean | 'fetch-failed' | 'git-unavailable' | 'outside-installation' | 'access-unavailable'> {
+  ): Promise<
+    | boolean
+    | 'fetch-failed'
+    | 'git-unavailable'
+    | 'outside-installation'
+    | 'not-allowed'
+    | 'public-logs'
+    | 'access-unavailable'
+  > {
     const repository = this.repository(url),
       key = `${url}\0${commit}`;
     if (this.fetched.has(key)) return false;
@@ -279,7 +314,10 @@ export class SubmoduleFetcher {
   }
   private readonly tokens = new Map<
     string,
-    Promise<{ token: string } | { reason: 'outside-installation' | 'access-unavailable' }>
+    Promise<
+      | { token: string }
+      | { reason: 'outside-installation' | 'not-allowed' | 'public-logs' | 'access-unavailable' }
+    >
   >();
   /** One request per repository per run; the token lives in memory and is passed only to the fetch. */
   private access(name: string) {
@@ -290,10 +328,11 @@ export class SubmoduleFetcher {
         reply => {
           const entry = reply[name];
           if (entry && 'token' in entry) return { token: entry.token };
+          const refused = entry?.refused;
           return {
             reason:
-              entry?.refused === 'outside-installation'
-                ? ('outside-installation' as const)
+              refused === 'outside-installation' || refused === 'not-allowed' || refused === 'public-logs'
+                ? refused
                 : ('access-unavailable' as const),
           };
         },

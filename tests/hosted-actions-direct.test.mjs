@@ -171,7 +171,22 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
       recipeStorage,
     });
   };
-  return { ...s, scheduled, cancelled, storage, run, id, input, call, raw, reserve, bind, prepare };
+  return {
+    ...s,
+    scheduled,
+    cancelled,
+    storage,
+    run,
+    id,
+    input,
+    call,
+    raw,
+    reserve,
+    bind,
+    prepare,
+    runner,
+    configuration,
+  };
 }
 test('App JWT uses RS256 for GitHub PKCS#1 and PKCS#8; installation is derived per call', async t => {
   for (const type of ['pkcs1', 'pkcs8']) {
@@ -688,7 +703,7 @@ test('HTTP rejects forged OIDC before any source or database access', async t =>
   assert.equal((await response.json()).reason, 'authorization');
 });
 
-test('HTTP submodule access mints one read-only token per repository of the run installation, only for a live run', async t => {
+test('HTTP submodule access mints one read-only token per owner-allowed repository of the run installation, only for a live run', async t => {
   const s = await fixture(t, 1);
   variables(t, {
     GITHUB_APP_ID: '12345',
@@ -711,7 +726,10 @@ test('HTTP submodule access mints one read-only token per repository of the run 
       return s.raw(modules[name], method, input);
     },
   };
-  const send = (repositories, authorization = `Bearer ${oidc()}`) =>
+  // GitHub signs the run repository's visibility into the OIDC token.
+  const signed = visibility =>
+    `Bearer ${oidc(claims(visibility ? { repository_visibility: visibility } : {}))}`;
+  const send = (repositories, authorization = signed('private')) =>
     handle._handler(
       ctx,
       new Request(`${audience}/checks/actions`, {
@@ -726,18 +744,67 @@ test('HTTP submodule access mints one read-only token per repository of the run 
   await s.bind();
   assert.equal((await send(['synthetic/priv'], 'Bearer forged')).status, 403);
   assert.deepEqual(github, []);
-  const response = await send(['synthetic/priv', 'other/stranger']);
+  // Refused by default: nothing is allowed, so nothing reaches GitHub.
+  const closed = await send(['synthetic/priv', 'other/stranger']);
+  assert.equal(closed.status, 200);
+  assert.deepEqual(await closed.json(), {
+    'synthetic/priv': { refused: 'not-allowed' },
+    'other/stranger': { refused: 'not-allowed' },
+  });
+  assert.deepEqual(github, []);
+  // The owner allows two repositories while the run is live; the current setting applies.
+  const allow = async (submodules, expected) =>
+    s.configure(
+      { kind: 'runner', configuration: { ...s.runner, ...(submodules ? { submodules } : {}) } },
+      expected,
+    );
+  const allowed = await allow(
+    [{ repository: 'other/stranger' }, { repository: 'Synthetic/Priv' }],
+    s.configuration.digest,
+  );
+  const response = await send(['synthetic/priv', 'other/stranger', 'synthetic/unlisted']);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.deepEqual(await response.json(), {
     'synthetic/priv': { token: 'synthetic-token' },
     'other/stranger': { refused: 'outside-installation' },
+    'synthetic/unlisted': { refused: 'not-allowed' },
   });
   assert.deepEqual(
     github.filter(call => call.path.endsWith('/access_tokens')).map(call => call.body),
     [{ repositories: ['priv'], permissions: { contents: 'read' } }],
   );
   assert.equal(github[0].path, '/repos/synthetic/project/installation', 'anchored on the run repository');
+  assert(!github.some(call => call.path.startsWith('/repos/synthetic/unlisted')));
+  // A run repository not proven private has public logs: no token without a public-logs grant,
+  // and nothing reaches GitHub.
+  for (const visibility of ['public', 'internal', undefined]) {
+    github.length = 0;
+    assert.deepEqual(await (await send(['synthetic/priv'], signed(visibility))).json(), {
+      'synthetic/priv': { refused: 'public-logs' },
+    });
+    assert.deepEqual(github, []);
+  }
+  // The owner's current publicLogs acceptance also counts, even for a private run repository.
+  const flagged = await s.configure(
+    {
+      kind: 'runner',
+      configuration: { ...s.runner, publicLogs: true, submodules: [{ repository: 'synthetic/priv' }] },
+    },
+    allowed.digest,
+  );
+  github.length = 0;
+  assert.deepEqual(await (await send(['synthetic/priv'])).json(), {
+    'synthetic/priv': { refused: 'public-logs' },
+  });
+  assert.deepEqual(github, []);
+  // Withdrawn by the owner: the next request of the same run is refused.
+  await allow(undefined, flagged.digest);
+  github.length = 0;
+  assert.deepEqual(await (await send(['synthetic/priv'])).json(), {
+    'synthetic/priv': { refused: 'not-allowed' },
+  });
+  assert.deepEqual(github, []);
   assert.equal((await send(['../x/y'])).status, 403);
 });
 

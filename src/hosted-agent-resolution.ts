@@ -10,6 +10,7 @@ import {
   resolvedFinishContinuation,
 } from './hosted-conflict-precheck.js';
 import { shareDependencies, installScriptsNotice } from './shared-dependencies.js';
+import { announceRegistryHosts } from './install-registry-hosts.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { randomUUID } from 'node:crypto';
 import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
@@ -104,7 +105,9 @@ export async function guideHostedSync(session: HostedAgentSession, value: unknow
   const { root } = placed;
   // The run that resolves owns the resolution Lane's idle listing (d730121f).
   recordLane({ laneId: source.lane.laneId, root, ...session.address, agent: sessionAgentSlug() ?? null });
-  const dependencies = await shareDependencies(root).catch((error: unknown) => ({
+  const dependencies = await shareDependencies(root, {
+    announce: announceRegistryHosts,
+  }).catch((error: unknown) => ({
     status: 'failed' as const,
     message: error instanceof Error ? error.message : String(error),
   }));

@@ -29,7 +29,7 @@ import {
   poolClaimPrefix,
   poolUnits,
 } from '../src/hosted-actions-pool';
-import { submoduleReadTokens } from './githubAppToken';
+import { submoduleReadTokens, type SubmodulePolicy } from './githubAppToken';
 import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
@@ -153,12 +153,13 @@ export const handle = httpAction(async (ctx, request) => {
     else if (command.kind === 'sourcePack')
       value = await sourcePackCommand(ctx, input, command.phase, command.object);
     else if (command.kind === 'submoduleAccess') {
-      // Authorize the live run first; tokens are minted for its repository's installation only.
-      const run: HostedCheckRun = JSON.parse(
-        await ctx.runMutation(
-          makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
-          input,
-        ),
+      // Authorize the live run first; the same call reads the owner's current submodule
+      // allowlist. Tokens are minted for allowed repositories of its installation only.
+      const { run, policy }: { run: HostedCheckRun; policy: SubmodulePolicy } = JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), {
+          ...input,
+          submodules: true,
+        }),
       );
       invariant(
         run.configuration.provider === 'github-actions',
@@ -170,6 +171,7 @@ export const handle = httpAction(async (ctx, request) => {
         input.projectId,
         run.configuration.repository,
         command.repositories,
+        policy,
       );
     } else if (command.kind === 'plan') {
       // Recheck before and after storage IO; only immutable small plan metadata crosses this action.

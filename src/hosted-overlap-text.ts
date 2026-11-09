@@ -9,6 +9,7 @@ import { attributionEdits, attributionLines } from './native-text-merge.js';
 import { durableReplace } from './native-durability.js';
 import { overlapEvidenceSchema, type OverlapEvidence } from './hosted-overlap-evidence.js';
 import { readSource } from './files.js';
+import type { SymbolLinks } from './hosted-overlap-evidence.js';
 import {
   symbolBindings,
   symbolLinks,
@@ -115,14 +116,8 @@ export function readOverlapText(cache: string, blob: string, facts = false, code
     // changed path, rather than parsing every file before the Lane can open.
     // Revalidate the exact original bytes: stale/corrupt caches remain advisory.
     try {
-      let bytes = readSource(cache, `objects/${blob}`, limit, blob);
-      if (!bytes) {
-        const reference = readSource(cache, 'overlap-objects.json', 4096);
-        const objects = reference ? JSON.parse(reference.toString('utf8')) : null;
-        if (typeof objects === 'string' && isAbsolute(objects) && !lstatSync(objects).isSymbolicLink())
-          bytes = readSource(realpathSync(objects), blob, limit, blob);
-      }
-      if (!bytes || digest(bytes) !== blob) return null;
+      const bytes = readOverlapBytes(cache, blob);
+      if (!bytes) return null;
       const sketch = overlapTextSketch(bytes, code);
       if (sketch) rememberOverlapSketch(cache, blob, sketch);
       return sketch;
@@ -131,17 +126,42 @@ export function readOverlapText(cache: string, blob: string, facts = false, code
     }
   }
 }
+/** The exact bytes of a retained base blob, verified against its digest; null when not retained. */
+export function readOverlapBytes(cache: string, blob: string): Buffer | null {
+  if (!/^[a-f0-9]{64}$/.test(blob)) return null;
+  try {
+    if (lstatSync(cache).isSymbolicLink()) return null;
+    cache = realpathSync(cache);
+    let bytes = readSource(cache, `objects/${blob}`, limit, blob);
+    if (!bytes) {
+      const reference = readSource(cache, 'overlap-objects.json', 4096);
+      const objects = reference ? JSON.parse(reference.toString('utf8')) : null;
+      if (typeof objects === 'string' && isAbsolute(objects) && !lstatSync(objects).isSymbolicLink())
+        bytes = readSource(realpathSync(objects), blob, limit, blob);
+    }
+    return bytes && digest(bytes) === blob ? bytes : null;
+  } catch {
+    return null;
+  }
+}
 export function overlapTextEvidence(
   baseBlob: string,
   before: Sketch | null,
   after: Sketch | null,
   code: boolean,
   links?: SymbolLinkContext,
+  /** Package-level facts of a non-TS/JS file (hosted-overlap-packages), computed by the caller. */
+  packageLinks?: SymbolLinks,
 ): OverlapEvidence | undefined {
   if (!before || !after) return undefined;
   const edits = attributionEdits(before.lines, after.lines);
   if (!edits) return undefined;
-  const symbolFacts = code && links ? { symbolLinks: symbolLinks(before, after, edits, links) } : {};
+  const symbolFacts =
+    code && links
+      ? { symbolLinks: symbolLinks(before, after, edits, links) }
+      : packageLinks
+        ? { symbolLinks: packageLinks }
+        : {};
   const symbols = code
     ? [...new Set([...Object.keys(before.symbols), ...Object.keys(after.symbols)])].filter(
         name => before.symbols[name] !== after.symbols[name],

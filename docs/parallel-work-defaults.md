@@ -124,6 +124,23 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   uses `check-npm-cache`) and corepack's own home when it exists.
   Your npm, pnpm, Yarn or Bun configuration and credentials are not read, so a project that needs a
   private registry login fails with a line saying so; run its install in the Lane yourself.
+- Where the install fetches from: when the lockfile (npm `resolved`, Yarn classic `resolved`, pnpm `tarball`,
+  git and tarball dependencies) or, for pnpm, Yarn and Bun, the copied install settings (`.npmrc`,
+  `.yarnrc.yml`, `bunfig.toml`) name a host other than `registry.npmjs.org` or `registry.yarnpkg.com`, `start`
+  prints one line on stderr before the install runs and the receipt carries `dependencies.registryHosts`
+  (`hosts`: at most 20 host names with any port, `more`, `sources`: the files that named them). Only host
+  names are read from those files, never users, tokens or paths. The install still sends none of your
+  credentials. One bounded read of files already on disk, no Convex call.
+- Download cache: script-less pnpm and Yarn Berry installs of one project share one download cache
+  (`downloads/pnpm|yarn/PROJECT` in the dependency cache, mode 0700, refused if any part is a link or not
+  yours), so a new lockfile fetches only what the project's earlier installs did not. Both caches are
+  addressed by content: pnpm's store keys packages by the lockfile's integrity and re-verifies files before
+  linking, and Yarn Berry's archives are named by the lockfile checksum and verified when used. pnpm
+  copies or clones from the store (`--package-import-method=clone-or-copy`), so the sealed install
+  shares no file with it. Installs that run package scripts (`installScripts:true`, or an accepted
+  allowlist) keep a private cache, because package code could write the shared directory. Bun's cache is
+  addressed by name and version, and Yarn classic's is not shared either, so those keep a private one.
+  A new project's first install is as slow as before. Delete `downloads` any time.
 - Install scripts are your decision, never the repository's. What a repository declares is a request:
   `{"install":{"scripts":true}}` in a root `forge.json` or Yarn `enableScripts: true` in `.yarnrc.yml`
   (all scripts), or a build-script allowlist: pnpm `onlyBuiltDependencies` or `allowBuilds`
@@ -217,7 +234,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
 | `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
-| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only exact-base intersecting/adjacent hunks, distinct additions or delete/rename versus edit need an answer. Symbol names alone and disjoint same-file edits produce no automatic notice; missing evidence reports incomplete coverage. A peer changing an exported symbol your changed lines use in another file adds one advisory cross-file note per Lane pair, which never blocks. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
+| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only exact-base intersecting/adjacent hunks, distinct additions or delete/rename versus edit need an answer. Symbol names alone and disjoint same-file edits produce no automatic notice; missing evidence reports incomplete coverage. A peer changing an exported symbol your changed lines use in another file adds one advisory cross-file note per Lane pair, which never blocks. Languages without a TS/JS import scanner (Go, Python, Rust, Java, C#, …) are matched by package. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |

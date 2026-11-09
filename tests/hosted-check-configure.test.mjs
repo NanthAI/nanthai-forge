@@ -561,6 +561,7 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
     concurrencyBudget: 12,
     runner: 'runner: ubuntu-latest',
     logs: 'as visible as NanthAI/nanthai-forge on GitHub',
+    submodules: [],
     installation: 'derived per operation via the GitHub App',
     results: 'OIDC session plus workflow_run webhook',
   });
@@ -746,6 +747,109 @@ test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by fals
   assert.equal(moved.value.repository, 'NanthAI/other-runner');
   assert.equal(moved.value.publicLogs, undefined);
   assert(!github.some(url => url.includes('access_tokens'))); // no token minted to opt in
+});
+
+test('submodules: owner-only allowlist, empty by default, merged, kept with its repository, shown on settings', async t => {
+  const fixture = project();
+  const { state, run } = cli(t, fixture);
+  bindRepository(t, fixture.projectId, 'NanthAI/nanthai-forge');
+  process.env.FORGE_GITHUB_REPO_BINDINGS += `,${fixture.projectId}=NanthAI/other-runner`;
+  const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const prior = { id: process.env.GITHUB_APP_ID, key: process.env.GITHUB_APP_PRIVATE_KEY };
+  process.env.GITHUB_APP_ID = '12345';
+  process.env.GITHUB_APP_PRIVATE_KEY = privateKey.export({ type: 'pkcs1', format: 'pem' });
+  t.after(() => {
+    for (const [name, value] of [
+      ['GITHUB_APP_ID', prior.id],
+      ['GITHUB_APP_PRIVATE_KEY', prior.key],
+    ])
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  const github = [];
+  t.mock.method(globalThis, 'fetch', async url => {
+    github.push(url);
+    return Response.json({ id: 77, permissions: { actions: 'write', contents: 'write', metadata: 'read' } });
+  });
+  const plain = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/nanthai-forge',
+    operationId: randomUUID(),
+  });
+  assert.equal(plain.value.submodules, undefined); // default: nothing allowed
+  assert.deepEqual((await run('check-settings')).actions.submodules, []);
+
+  // A member (contributor) cannot allow a repository; nothing is written.
+  const versions = settings(fixture.s).length;
+  state.actor = 'peer';
+  await assert.rejects(
+    run('configure-runner', {
+      provider: 'github-actions',
+      submodules: { 'NanthAI/secret': true },
+      operationId: randomUUID(),
+    }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  // ...nor through the settings mutation directly with a full configuration.
+  await assert.rejects(
+    run('configure-runner', {
+      configuration: { ...plain.value, submodules: [{ repository: 'NanthAI/secret' }] },
+      operationId: randomUUID(),
+    }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(settings(fixture.s).length, versions);
+  state.actor = 'owner';
+  await assert.rejects(
+    run('configure-runner', {
+      provider: 'self-hosted',
+      submodules: { 'NanthAI/lib': true },
+      operationId: randomUUID(),
+    }),
+    code('BAD_ARGUMENT'),
+  );
+
+  const allowed = await run('configure-runner', {
+    provider: 'github-actions',
+    submodules: { 'NanthAI/lib': true, 'NanthAI/open': 'public-logs' },
+    operationId: randomUUID(),
+  });
+  assert.deepEqual(allowed.value.submodules, [
+    { repository: 'NanthAI/lib' },
+    { repository: 'NanthAI/open', publicLogs: true },
+  ]);
+  assert.notEqual(allowed.digest, plain.digest);
+  assert.equal(allowed.digest, checkPin(allowed.value));
+  assert.equal(allowed.value.environmentFingerprint, plain.value.environmentFingerprint);
+  assert.deepEqual((await run('check-settings')).actions.submodules, allowed.value.submodules);
+  // Merged: another change keeps the list; false removes one entry.
+  const budgeted = await run('configure-runner', {
+    provider: 'github-actions',
+    concurrencyBudget: 4,
+    submodules: { 'nanthai/open': false },
+    operationId: randomUUID(),
+  });
+  assert.deepEqual(budgeted.value.submodules, [{ repository: 'NanthAI/lib' }]);
+  // Removing the last entry returns to the default shape.
+  const cleared = await run('configure-runner', {
+    provider: 'github-actions',
+    submodules: { 'NanthAI/lib': false },
+    operationId: randomUUID(),
+  });
+  assert.equal(cleared.value.submodules, undefined);
+  // A grant names one runner repository: switching repositories drops it.
+  await run('configure-runner', {
+    provider: 'github-actions',
+    submodules: { 'NanthAI/lib': true },
+    operationId: randomUUID(),
+  });
+  const moved = await run('configure-runner', {
+    provider: 'github-actions',
+    repository: 'NanthAI/other-runner',
+    operationId: randomUUID(),
+  });
+  assert.equal(moved.value.submodules, undefined);
+  assert(!github.some(url => url.includes('access_tokens'))); // no token minted to allow
 });
 
 test('CLI self-hosted labels remain pinned on replay and explicit empty labels clear the selection metadata', async t => {

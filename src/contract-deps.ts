@@ -159,15 +159,18 @@ export class ContractResyncError extends ForgeError {
   constructor(
     readonly changes: ContractChange[],
     readonly head: string,
+    /** Package-level cause (code without import-level facts): replaces the per-export list in the message. */
+    readonly reason?: string,
   ) {
     super(
       'CONTRACT_RESYNC_REQUIRED',
-      `Main changed contracts this change uses: ${changes
-        .slice(0, 5)
-        .map(item => `${item.file} ${item.export} ${item.kind}`)
-        .join(
-          '; ',
-        )}${changes.length > 5 ? `; +${changes.length - 5} more` : ''}. Sync main, then recheck; finish does this automatically.`,
+      `Main changed contracts this change ${reason ? 'may use' : 'uses'}: ${
+        reason ??
+        `${changes
+          .slice(0, 5)
+          .map(item => `${item.file} ${item.export} ${item.kind}`)
+          .join('; ')}${changes.length > 5 ? `; +${changes.length - 5} more` : ''}`
+      }. Sync main, then recheck; finish does this automatically.`,
     );
   }
 }

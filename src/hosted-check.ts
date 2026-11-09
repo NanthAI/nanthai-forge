@@ -11,6 +11,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { contractTestPath } from './intent-test-contract.js';
 import { secretAllowEvidenceSchema } from './secret-allow.js';
+import { submoduleAllowListSchema } from './submodule-allowlist.js';
 
 export const checkHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const checkNumber = z.number().safe().nonnegative();
@@ -63,6 +64,9 @@ export const hostedActionsRunnerSchema = z
     /** The project owner accepted that check logs in this repository are as visible as
      * the repository (public for a public one). Stored only when true, so older digests hold. */
     publicLogs: z.literal(true).optional(),
+    /** Owner-only: private repositories checks may read as submodules (src/submodule-allowlist.ts).
+     * Stored only when nonempty, so older digests hold. */
+    submodules: submoduleAllowListSchema.optional(),
     runtime: checkHash,
     environmentFingerprint: checkHash,
     credential: credential.optional(),
