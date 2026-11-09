@@ -155,6 +155,8 @@ export function joinMetricAttempts(
       ...(attempt.recheckReason ? { recheckReason: attempt.recheckReason } : {}),
       ...(attempt.scopedFallback ? { scopedFallback: attempt.scopedFallback } : {}),
       ...(child?.recheckReason ? { raceRecheckReason: child.recheckReason } : {}),
+      // The replacement adopted the raced attempt's passing run: no new check ran (Issue bcdd6e40).
+      ...(child && attempt.runId && child.runId === attempt.runId ? { raceReusedBy: child.id } : {}),
       endedAt: child?.at ?? request?.endedAt ?? run?.endedAt,
       progressAt: request?.progressAt ?? [],
       runIds: attempt.runId ? [attempt.runId] : [],

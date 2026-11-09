@@ -28,9 +28,13 @@ function pathFor(
   badRuns: Map<string, MetricRecords['runs']>,
 ) {
   const paths = inputs.map(input => {
-    const history = (histories.get(input.intentId) ?? [])
+    const all = (histories.get(input.intentId) ?? [])
       .filter(s => instant(s.at) <= instant(at))
       .sort((a, b) => instant(a.at) - instant(b.at));
+    if (!all.length) return 'unknown';
+    // A main race resolved by the replacement adopting the passing run is a reuse, not a retry (bcdd6e40).
+    const raceReused = (s: (typeof all)[number]) => !!s.mainRace && !!s.raceReusedBy;
+    const history = all.filter(s => !raceReused(s));
     if (!history.length) return 'unknown';
     const same = (s: (typeof history)[number]) =>
       s.inputs.some(i => i.intentId === input.intentId && i.head === input.head);
@@ -60,6 +64,7 @@ function pathFor(
       )
     )
       return 'after-retry';
+    if (all.some(s => raceReused(s) && same(s))) return 'reused-after-race';
     const priorBadRun = (badRuns.get(`${input.intentId}:${input.head}`) ?? []).some(
       run =>
         run.endedAt &&
@@ -74,8 +79,10 @@ function pathFor(
     ? 'after-fixer'
     : paths.includes('after-retry')
       ? 'after-retry'
-      : paths.length && paths.every(p => p === 'first-try')
-        ? 'first-try'
+      : paths.length && paths.every(p => p === 'first-try' || p === 'reused-after-race')
+        ? paths.includes('reused-after-race')
+          ? 'reused-after-race'
+          : 'first-try'
         : 'unknown';
 }
 /** Pure calculation. Period is [from,to); days are UTC; asOf fixes the 60-minute stall test. */
@@ -126,6 +133,7 @@ export function calculateSelfMetrics(
     firstTry: rows.filter(row => row.day === day && row.path === 'first-try').length,
     afterRetry: rows.filter(row => row.day === day && row.path === 'after-retry').length,
     afterFixer: rows.filter(row => row.day === day && row.path === 'after-fixer').length,
+    reusedAfterRace: rows.filter(row => row.day === day && row.path === 'reused-after-race').length,
     unknown: rows.filter(row => row.day === day && row.path === 'unknown').length,
   }));
   const first = <T extends { at: string }>(items: T[], key: (item: T) => string) =>
@@ -239,8 +247,19 @@ export function calculateSelfMetrics(
     ),
     r => r.id,
   ).filter(r => inPeriod(r.at, period));
+  // A main race resolved by the replacement adopting the raced attempt's own passing run starts no
+  // run and may leave no request row: count it once here unless a request row already counted it.
+  const requestedRunIds = new Set(reusedRequests.map(r => r.runId));
+  const adoptedAfterRace = new Set(
+    records.submissions.flatMap(row => {
+      const adopted = row.mainRace && row.raceReusedBy ? row.raceReusedBy : undefined;
+      const accepted = adopted ? moves.some(move => move.attemptId === adopted) : false;
+      return adopted && accepted && !row.runIds.some(id => requestedRunIds.has(id)) ? [adopted] : [];
+    }),
+  ).size;
   const reused =
     retainedReuses +
+    adoptedAfterRace +
     reusedRequests.filter(
       r =>
         r.reuseKey &&

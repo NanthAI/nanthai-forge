@@ -63,6 +63,8 @@ export type MetricSubmission = {
   scopedFallback?: string | undefined;
   /** On a raced attempt: the recheck reason of the attempt that replaced it. */
   raceRecheckReason?: string | undefined;
+  /** On a raced attempt: the attempt that replaced it, set only when that replacement adopted this attempt's own check run (a reuse, not a new check). */
+  raceReusedBy?: string | undefined;
 };
 export type MetricRun = {
   head?: string;

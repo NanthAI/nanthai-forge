@@ -233,6 +233,28 @@ gap names the horizon actually read. A deploy older than this change reads 30 da
 the coverage gap then says so. A window that still does not fit ends with `METRICS_TIMEOUT`, changes
 nothing and names a command for the later half of the window with a one-day horizon.
 
+Read bound (Convex calls and documents per call). Every `projectSelfMetrics:page` call reads at
+most 100 rows and 512 KB (`maximumRowsRead` 100): the lanes and saves streams also get one body
+per row (at most 200 documents), the first acceptances page adds at most 100 main-audit events,
+and the first receipts page adds three point reads. A window reads about
+`ceil(rows / 100)` pages per stream over the window plus its `contextDays` horizon, eight streams
+side by side, then one bills page (`projectSelfMetricBills:page`), one placement query
+(`projectBytePlacement:convexWritten`), two start-up queries (channel, capabilities) and
+`projectObjectDownloads:signDownloads` calls that hydrate Lane inputs from R2 (at most 8 objects and
+1 MiB per call). Measured on the dogfood project during a 7-builder wave (default `contextDays` 2,
+installed CLI, dev): a 6 h window took 39.5 s with 132 page calls and 43 sign calls; a 24 h window
+took 47.5 s with 145 page calls and 49 sign calls, exit 0, a 342 KB reply. The context horizon,
+not the window, is most of the pages, so 24 h costs only about 10% more than 6 h. Writes are zero and
+an idle project makes no call. Any window that does not finish inside the 100 s deadline ends with
+the structured `METRICS_TIMEOUT` (nothing changed) whose next step is the printed command for the
+later half of the window with `contextDays: 1`; `--limit` pages the reply, not the read.
+
+Waste counts a main race by what it cost. When the replacement attempt adopts the superseded
+attempt's passing run (a reuse, no new check run), that run is not a re-check run, the raced
+row's elapsed time is the race-to-acceptance gap with no runner minutes
+(`reusedAfterRace: true` on the row), the landing's path in 5.1 is `reused-after-race`, and 5.6
+counts the reuse once. A replacement that starts its own run is a re-check run with its runner minutes.
+
 #### Fallback reasons
 
 Each time Forge takes a slower path than its fast one, the decision records a stable

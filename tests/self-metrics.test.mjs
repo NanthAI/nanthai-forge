@@ -65,8 +65,24 @@ test('metric 1: hand-computed first try, same-head retry, fixer saved by another
   const m = calculateSelfMetrics(r, period);
   assert.equal(m.landings, 3);
   assert.deepEqual(m.metric1.days, [
-    { day: '2026-10-20', landings: 2, firstTry: 1, afterRetry: 1, afterFixer: 0, unknown: 0 },
-    { day: '2026-10-21', landings: 1, firstTry: 0, afterRetry: 0, afterFixer: 1, unknown: 0 },
+    {
+      day: '2026-10-20',
+      landings: 2,
+      firstTry: 1,
+      afterRetry: 1,
+      afterFixer: 0,
+      reusedAfterRace: 0,
+      unknown: 0,
+    },
+    {
+      day: '2026-10-21',
+      landings: 1,
+      firstTry: 0,
+      afterRetry: 0,
+      afterFixer: 1,
+      reusedAfterRace: 0,
+      unknown: 0,
+    },
   ]);
   assert.equal(m.metric1.partial, false);
   assert.equal(m.metric1.reverts, 1);

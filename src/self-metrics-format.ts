@@ -4,7 +4,7 @@ const number = (value: number | null | undefined) =>
   value == null ? 'unknown' : Number(value.toFixed(3)).toString();
 export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, string> {
   return {
-    '5.1': `${number(t['5.1'].landings)} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
+    '5.1': `${number(t['5.1'].landings)} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.reusedAfterRace, 0)} reused after main moved, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
     '5.2': `${number(t['5.2'].errors)} / ${number(t['5.2'].finishes)} finishes; ${t['5.2'].byCode.map(c => `${c.code} ${number(c.per100Finishes)}/100`).join(', ') || 'rates unknown'}`,
     '5.3': number(t['5.3'].dropped),
     '5.4': `${number(t['5.4'].delivered)}/${number(t['5.4'].overlappingSaves)} delivered; acknowledgement ${number(t['5.4'].acknowledgementRate)}; median ${number(t['5.4'].medianDeliverySeconds)} s`,

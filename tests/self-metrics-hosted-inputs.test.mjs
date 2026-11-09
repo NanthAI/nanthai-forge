@@ -216,6 +216,50 @@ test('hosted immutable inputs classify first try, retry, fixer and main-race was
   assert.equal(f.meter.writes, 0);
 });
 
+test('a main race resolved by adopting the passing run is one reuse, not a recheck or a lost check', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const first = e.input(randomUUID(), randomUUID(), head('a'), at(-30));
+  e.landing('first', at(1), at(5), first);
+  f.run('first', at(1), at(5), 180);
+  // Second disjoint submission: main moved at 5; the replacement adopts its own passing run and lands 30 s later.
+  const second = e.input(randomUUID(), randomUUID(), head('b'), at(-20));
+  e.landing('second', at(1), at(12), second, 'second-run');
+  e.attempt('second/child', at(5), second, 'second-run', head('2'), 'second');
+  const request = f.tables.projectHostedLandingRequests.at(-1);
+  request.value = JSON.stringify({
+    id: 'second',
+    at: at(1),
+    attemptId: 'second/child',
+    actor: 'builder',
+    phase: 'landed',
+    error: null,
+  });
+  const move = f.tables.projectHostedAcceptances.at(-1);
+  const mv = JSON.parse(move.value);
+  mv.attemptId = 'second/child';
+  mv.at = at(5.5);
+  move.value = JSON.stringify(mv);
+  f.run('second-run', at(1), at(4), 240);
+  const { records } = await readHostedMetricPages(f.query, period);
+  const waste = calculateWaste(records, period);
+  assert.equal(waste.mainRaceRecheckRuns, 0);
+  assert.equal(waste.mainRaceRecheckRunnerMinutes, 0);
+  const race = waste.byCause.find(row => row.cause === 'main-race');
+  assert.equal(race.attempts, 1);
+  assert.equal(
+    race.elapsedMinutes,
+    0.5,
+    'elapsed is the race-to-acceptance gap, not the whole first attempt',
+  );
+  assert.equal(race.runnerMinutes, 0);
+  assert.equal(waste.rows.find(row => row.cause === 'main-race').reusedAfterRace, true);
+  const result = calculateSelfMetrics(records, period);
+  assert.deepEqual(result.metric1.rows.map(row => row.path).sort(), ['first-try', 'reused-after-race']);
+  assert.equal(result.metric6.reused, 1, 'reuse is counted once in 5.6');
+  assert.equal(f.meter.writes, 0);
+});
+
 test('input bytes are verified; unavailable Lane version never classifies a partial selection', async () => {
   const f = fixture(),
     e = evidence(f);

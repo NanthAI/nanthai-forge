@@ -15,6 +15,9 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
   const acceptedRuns = new Set(
     records.moves.flatMap(move => (move.attemptId ? (attemptRuns.get(move.attemptId) ?? []) : [])),
   );
+  const acceptedAt = new Map(
+    records.moves.flatMap(move => (move.attemptId ? [[move.attemptId, move.at] as const] : [])),
+  );
   const seen = new Set<string>();
   const rows = [...records.submissions]
     .sort((a, b) => Number(!!b.mainRace) - Number(!!a.mainRace))
@@ -63,6 +66,10 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
         runnerMinutes += run.runnerMinutes;
         if (run.status === 'passed') discardedPassedRunnerMinutes += run.runnerMinutes;
       }
+      // A race resolved by the replacement adopting this attempt's passing run lost only the
+      // time from the race to the replacement's acceptance, and no runner time (bcdd6e40).
+      const adoptedAt =
+        cause === 'main-race' && row.raceReusedBy ? acceptedAt.get(row.raceReusedBy) : undefined;
       return [
         {
           id: row.id,
@@ -70,24 +77,38 @@ export function calculateWaste(records: MetricRecords, period: MetricPeriod) {
           cause,
           // A main-race row names why its replacement rechecked (7c2e69e1).
           ...(cause === 'main-race' && row.raceRecheckReason ? { recheckReason: row.raceRecheckReason } : {}),
-          elapsedMinutes:
-            minutesBetween(
-              Date.parse(row.at) < Date.parse(period.from) ? period.from : row.at,
-              row.endedAt
-                ? Date.parse(row.endedAt) > Date.parse(period.to)
-                  ? period.to
-                  : row.endedAt
-                : stalled
-                  ? (period.asOf ?? period.to)
-                  : undefined,
-            ) ?? null,
+          ...(adoptedAt ? { reusedAfterRace: true } : {}),
+          elapsedMinutes: adoptedAt
+            ? (minutesBetween(
+                row.endedAt && Date.parse(row.endedAt) > Date.parse(period.from) ? row.endedAt : period.from,
+                Date.parse(adoptedAt) > Date.parse(period.to) ? period.to : adoptedAt,
+              ) ?? null)
+            : (minutesBetween(
+                Date.parse(row.at) < Date.parse(period.from) ? period.from : row.at,
+                row.endedAt
+                  ? Date.parse(row.endedAt) > Date.parse(period.to)
+                    ? period.to
+                    : row.endedAt
+                  : stalled
+                    ? (period.asOf ?? period.to)
+                    : undefined,
+              ) ?? null),
           runnerMinutes,
           discardedPassedRunnerMinutes,
           unknownRunnerRuns,
         },
       ];
     });
-  const recheckRuns = new Set(records.submissions.filter(row => row.recheck).flatMap(row => row.runIds));
+  // Only a run the replacement started is a recheck; a run already attached to the
+  // superseded attempt (adopted by reuse) is the original check, not a recheck.
+  const recheckRuns = new Set(
+    records.submissions
+      .filter(row => row.recheck)
+      .flatMap(row => {
+        const parent = new Set(row.parentAttemptId ? (attemptRuns.get(row.parentAttemptId) ?? []) : []);
+        return row.runIds.filter(id => !parent.has(id));
+      }),
+  );
   const rechecks = records.runs.filter(run => recheckRuns.has(run.id) && inside(run.at));
   const gaps = [
     ...(records.source?.kind === 'hosted' || records.source?.kind === 'joined'
