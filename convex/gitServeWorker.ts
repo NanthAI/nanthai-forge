@@ -176,6 +176,9 @@ export async function workerFetch(
   }
   const plan: BytePlan = { head: planBase64(head), parts, tail: planBase64(tail), bytes };
   return {
-    plan: Response.json(plan, { headers: { 'Content-Type': bytePlanType, 'Cache-Control': 'no-store' } }),
+    // Not Response.json: the Convex runtime replaces its content type with application/json.
+    plan: new Response(JSON.stringify(plan), {
+      headers: { 'Content-Type': bytePlanType, 'Cache-Control': 'no-store' },
+    }),
   };
 }

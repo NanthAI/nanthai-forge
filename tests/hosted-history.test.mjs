@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { promisify } from 'node:util';
 import { gzipSync } from 'node:zlib';
-import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
@@ -1034,6 +1034,11 @@ test('clones over the response limit go through the Worker: capped, raw R2 bytes
     { head: '', tail: '', parts: Array.from({ length: 901 }, () => ({ key: `v1/p/p/o/${'a'.repeat(64)}` })) },
   ];
   const { checkedPlan } = await import('../dist/git-byte-worker.js');
+  // The plan is a plain Response with its own type (Response.json is retyped by Convex).
+  assert.doesNotMatch(
+    readFileSync(new URL('../convex/gitServeWorker.ts', import.meta.url), 'utf8'),
+    /Response\.json\(plan/,
+  );
   for (const plan of plans) assert.equal(checkedPlan(plan), null);
   assert.equal(
     (await worker.worker.fetch(new Request('http://worker.example/anything'), {}, {})).status,

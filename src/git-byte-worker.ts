@@ -89,7 +89,7 @@ export default {
       signal: AbortSignal.timeout(5 * 60_000),
       ...(request.method === 'POST' ? { body: await request.arrayBuffer() } : {}),
     });
-    if (upstream.headers.get('content-type') !== planType) return upstream;
+    if (!(upstream.headers.get('content-type') ?? '').toLowerCase().startsWith(planType)) return upstream;
     const plan = checkedPlan(await upstream.json());
     if (!plan) return plain(502, 'Forge sent an invalid byte plan.');
     const native = (globalThis as { IdentityTransformStream?: typeof TransformStream })
