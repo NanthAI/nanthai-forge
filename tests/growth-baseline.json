@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "phase": "P6",
+  "recordedAt": "2026-11-09",
+  "start": {
+    "tables": 181,
+    "errorCodes": 501,
+    "agentActions": 88,
+    "cliCommands": 53,
+    "glossaryTerms": 34
+  },
+  "counts": {
+    "tables": 181,
+    "errorCodes": 501,
+    "agentActions": 88,
+    "cliCommands": 53,
+    "glossaryTerms": 34
+  },
+  "reasons": []
+}

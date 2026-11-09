@@ -34,6 +34,7 @@ This page lists the guards and says where the next one goes.
 | Action pins | check script `check-action-pins.mjs` | workflow `uses:` lines not pinned to a commit SHA | `tests/action-pins.test.mjs` |
 | Candidate steps | check script `check-candidate-steps.mjs` | in a check job: a step after the check step, an `id` or token on it, a cache save after it or off the default branch, an unbounded cache restore or `npm ci` | `tests/action-pins.test.mjs` |
 | Test signal | check script `check-test-signal.mjs`, ratchet | new real sleeps or timer waits, elapsed-time asserts and reads of `docs/` text in tests: they flake on a loaded runner or fail on prose edits and guard no behaviour (ffbec6ef; t3code cut 43% of its tests as low-signal) | `tests/check-test-signal.test.mjs` |
+| Growth guard | check script `check-growth.mjs`, ratchet | Convex tables, public error codes, agent actions, CLI commands and glossary terms piling up: friction became a slice and a guard, and nothing was removed (ed28fc6b; design review 2026-11-09) | `tests/check-growth.test.mjs` |
 | Token permissions | test | a GitHub App token permission change broke one path class the mirror pushes (708b6943: contents-only token got 403 on a `.github/workflows/` tree). A permission change must be tested against every path class | `tests/hosted-github-mirror-retry.test.mjs`, `tests/github-token-permissions.test.mjs` |
 | Forge-only rules | test | product code keys a fast path on Forge's own check, layout or npm lockfile (audit 1bb0d8e6: first-check reuse only for `scripts/forge-check.mjs`, 05df5aed). An ecosystem lockfile, folder or extension list outside the [ecosystem registry](ecosystems.md) fails too (9c0ece48). Hits are listed in [Forge-only rules](../forge-only-rules.md) | `tests/forge-only-rules.test.mjs` |
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
@@ -70,6 +71,33 @@ baseline or the script, scans all of them. Counting is per source line.
   baseline to the new counts and never raises it (it also drops deleted files). It exits 1 if a file is
   still above its baseline. `--init` writes the first baseline and refuses to overwrite one.
 - Findings name file, lines and pattern only; they never echo source.
+
+## Growth guard
+
+The rule: every brief and every landing note names what the change removes or merges, or says why nothing can
+go. The ratchet `scripts/check-growth.mjs` runs in `npm run check` (static, no project code, no Convex call,
+well under 2 s) and counts:
+
+| Count | Counts |
+| --- | --- |
+| `tables` | Convex tables: `name: defineTable(` in `convex/` (generated code excluded) |
+| `errorCodes` | public error codes: an UPPER_SNAKE literal (3+ characters, not a Node errno such as `ENOTDIR`) that reaches a caller as a structured error code, in `src/`, `convex/` and `netlify/` (tests excluded): the first argument of `new ForgeError(`, the code argument of `invariant(cond, 'CODE', …)`, and a `code: 'CODE'` property. A code counts once however often it appears. It also counts some result codes that are never thrown, so it is an upper bound; the same rule applies on every run |
+| `agentActions` | agent action names in `src/agent-verbs.ts`: the lifecycle verbs, each mode flag's action, board modes, named reads and operator actions |
+| `cliCommands` | top-level commands dispatched in `src/cli.ts` |
+| `glossaryTerms` | public glossary terms: the distinct bold terms in `docs/concepts.md` |
+
+The check fails when a count is above [`tests/growth-baseline.json`](../../tests/growth-baseline.json), and when
+a baseline is above its phase start plus its recorded rises (a hand edit). The baseline moves only through the
+update command:
+
+- `node scripts/check-growth.mjs --update` lowers the baseline to the current counts. Run it after a change
+  that removes something. It never raises a count.
+- `node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`
+  also raises a count that rose, and appends the kind, the old and new count, the reason and the date to the
+  baseline's `reasons` ledger. A reason shorter than 12 characters is refused.
+- `node scripts/check-growth.mjs --print [--json]` prints the current, baseline and phase-start counts. A phase
+  close records this table against the phase start (`start`).
+- Prefer removing or merging something to recording a rise. Renaming is neutral: names are counted, not lines.
 
 ## Add a lint rule
 

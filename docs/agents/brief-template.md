@@ -9,6 +9,7 @@ Use this portable template for one finite slice. The [standard builder block](br
 - Ownership: `<files and concepts owned by this builder>`.
 - Dependencies and order: `<Issue/Lane pins; shared concepts and their owners>`.
 - Non-goals: `<explicit scope boundary>`.
+- Removes or merges: `<what this change deletes or folds into something that exists, or why nothing can go>`; the landing note repeats it ([growth guard](lint-rules.md#growth-guard)).
 - Invariant: `<root cause and all instances to search, not just one reproduction>`.
 
 ## Budget and acceptance

@@ -49,7 +49,8 @@ for configurable product behavior.
 
 Every brief includes this block by reference, keeps AGENTS.md safety rules intact
 when copied, and supplies its Issue, owned files/concepts, dependencies, scale
-budget, time box, acceptance bar and metrics that must not regress.
+budget, time box, acceptance bar, metrics that must not regress, and what it removes or
+merges (or why nothing can go).
 
 1. Read Lane AGENTS.md, DESIGN.md, the Issue body and **every comment**
    (`planning {"id":"ISSUE_ID","reconcile":false}`); comments can amend Done-when. Own one
@@ -126,7 +127,8 @@ budget, time box, acceptance bar and metrics that must not regress.
     receipt alone is not proof. Convex changes also need deployment success at that
     commit; tell the lead the accepted State and do not deploy yourself.
     Comment evidence per acceptance line; unmet lines stay open or name their next
-    Issue. After landing (and `complete` when the Lane stays open), read
+    Issue. The landing note and commit message also say what the change removes or
+    merges, or why nothing can go (growth guard: `node scripts/check-growth.mjs`). After landing (and `complete` when the Lane stays open), read
     `planning {"id":"ISSUE_ID"}` once: a closed Issue is done; a held one
     (`reconciled.held`, or the "N Done-when line(s) still open" comment) names the open
     lines and the one `put-planning-item … "status":"closed"` command. Run it once the
@@ -136,7 +138,8 @@ budget, time box, acceptance bar and metrics that must not regress.
     remove only your own regenerable temporary output.
 13. Convex: any `mutation` or `internalMutation` you add or touch imports from
     `./server` (the `finishReadWriter` wrapper), never `./_generated/server`.
-14. Final report, short and plain: receipt and accepted State; files changed; tests
+14. Final report, short and plain: receipt and accepted State; files changed; what the
+    change removes or merges, or why nothing can go; tests
     run with exact counts; per-operation call/byte budgets; friction filed; what stays
     unverified. When the brief asks for measurement, add a **Run metrics** block: start
     and landing times (UTC); hosted checks run and their minutes; overlap notices seen

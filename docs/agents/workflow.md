@@ -1650,6 +1650,8 @@ the next durable change or explicit lifecycle wake.
 Hosted `handoff` and `handoff-read` are unavailable. Use
 `comment-planning-item {itemId,text}` for delivery evidence on the existing Issue;
 it is a planning comment, not the portable native handoff described below.
+The landing note and the commit message name what the change removes or merges, or why nothing can go
+([growth guard](lint-rules.md#growth-guard)).
 
 Record an optional delivery handoff before stopping so the lead or next agent can
 read what changed, the verification performed, unrun work and next steps:

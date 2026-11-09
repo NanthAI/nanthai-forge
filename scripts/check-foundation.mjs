@@ -14,6 +14,7 @@ import { spdxFindings } from './check-spdx.mjs';
 import { envPrintFindings } from './check-env-print.mjs';
 import { readBaseline, scanSet, testSignalFindings } from './check-test-signal.mjs';
 import { statusListFindings } from './check-status-lists.mjs';
+import { currentCounts, growthFindings, readBaseline as readGrowthBaseline } from './check-growth.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -97,6 +98,9 @@ for (const file of files) {
   const baseline = readBaseline(root);
   for (const path of scanSet(known, changed)) errors.push(...testSignalFindings(path, read(path), baseline));
 }
+// Growth guard (ed28fc6b): tables, error codes, agent actions, CLI commands and glossary terms may not
+// rise above tests/growth-baseline.json without a recorded reason.
+errors.push(...growthFindings(currentCounts(root), readGrowthBaseline(root)));
 
 check(
   read('docs/dependency-licenses.md') === renderDependencyLicenses(json('package-lock.json')),
@@ -129,7 +133,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline.`,
+    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms) is above its baseline.`,
   );
   console.log(
     'Application behavior, external URLs and authenticated/local runtime integration are not tested by this command.',
