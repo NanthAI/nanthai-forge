@@ -55,7 +55,8 @@ export async function batchesFixture(
           ...(admissionCheck === 'default' ? {} : { admissionCheck }),
         },
         ...(concurrency ? { checks: { runner: 'github-actions', concurrency } } : {}),
-        agentDefaults: { stallAlerts: { enabled: false } },
+        // Server land gates (Issue 029138ef) have their own tests (hosted-landing-desired.test.mjs).
+        agentDefaults: { stallAlerts: { enabled: false }, preflight: 'advise' },
       },
     });
   }

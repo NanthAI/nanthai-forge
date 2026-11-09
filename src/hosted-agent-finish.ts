@@ -51,11 +51,22 @@ type FinishCommand = z.infer<typeof hostedAgentCommandSchemas.finish>;
  * succeed (b8c0a4f6). Unless the caller pinned that Candidate, drop the request and this finish's
  * compose, so the next pass composes again on the current main under a new compose operation (the
  * old Candidate stays, unlanded), and report MainPinRefused. */
+/** The retained land gate result (feature land-gates, Issue 029138ef), outside the request like
+ * `agent`; a replay sends the same one. */
+const landGatesArg = (session: HostedAgentSession) => {
+  const gates = session.journal.get<string | null>('finish-gates');
+  return gates ? { gates } : {};
+};
+async function retainLandGates(session: HostedAgentSession, composeOperationId: string) {
+  if (session.landGates)
+    await session.journal.retain('finish-gates', async () => session.landGates!(composeOperationId) ?? null);
+}
 async function enqueueLanding(session: HostedAgentSession, request: unknown, pinnedCandidate: boolean) {
   try {
     return await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
       request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+      ...landGatesArg(session),
     });
   } catch (error) {
     if (pinnedCandidate || !mainPinRefusal(error, 'finish')) throw error;
@@ -80,6 +91,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
     const submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
       request: canonicalPayload(desired),
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+      ...landGatesArg(session),
     });
     // Only a still-preparing submission needs source recovery. Terminal replay
     // remains discovery plus the original admission, without probing old jobs.
@@ -481,10 +493,12 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
           ...revertField(session, composeOperationId),
         }),
       );
+      await retainLandGates(session, composeOperationId);
       const submission = await session.mutation('projectHostedLandingDesired:submit', {
         request: canonicalPayload({ ...desired, governanceVersion: 1 }),
         // The receipt records the agent run that landed it (d730121f); outside the replayed request.
         ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+        ...landGatesArg(session),
       });
       markLandStep('submitted');
       return {
@@ -554,6 +568,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     return { phase: 'check', composeOperationId, run };
   }
   // Account JWTs still make agent requests. Person authority is never selected by CLI input.
+  await retainLandGates(session, composeOperationId);
   const result = await enqueueLanding(session, request, pinnedCandidate);
   markLandStep('submitted');
   return {

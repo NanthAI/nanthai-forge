@@ -45,7 +45,7 @@ const allowAgents = f => {
   const project = [...f.tables.hostedProjects.values()].find(row => row._id === f.projectId);
   const policy = project.autonomyPolicy ?? policyPreset('trusted');
   f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...policy, agentDefaults: { urgentRoles: ['owner', 'agents'] } },
+    autonomyPolicy: { ...policy, agentDefaults: { urgentRoles: ['owner', 'agents'], preflight: 'advise' } },
   });
 };
 

@@ -14,6 +14,7 @@ import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { outputRootObject } from '../dist/hosted-check-output.js';
 import { machineCollectorKey } from '../dist/hosted-collector-key.js';
+import { legacyPolicy } from '../dist/autonomy-policy.js';
 
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -43,6 +44,8 @@ export async function recoveryRunnerDrill(t) {
     owner: 'owner',
     visibility: 'private',
     sourceAuthority: { mode: 'server', epoch: 1 },
+    // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+    autonomyPolicy: { ...legacyPolicy(), agentDefaults: { preflight: 'advise' } },
   });
   recovered.selection.authority.epoch = 1;
   const state = { sha256: recovered.head, size: recovered.source.object(recovered.head).length };

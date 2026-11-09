@@ -7,7 +7,9 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { landSummary } from '../dist/hosted-land-summary.js';
 import { approvalWait, deriveApproval } from '../dist/approval-state.js';
 import { openApprovalsReply } from '../dist/hosted-agent-approval.js';

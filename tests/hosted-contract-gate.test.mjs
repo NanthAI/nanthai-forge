@@ -6,7 +6,9 @@ import { acceptanceFixture, records, api, publish } from './hosted-acceptance-fi
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { hostedRecordSchema } from '../dist/hosted-records.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { stateSchema } from '../dist/native-state-format.js';

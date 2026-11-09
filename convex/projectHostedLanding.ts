@@ -49,6 +49,7 @@ import { loadHostedCheck } from './projectHostedCheckStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
+import { enforceLandGates } from './projectHostedLandGates';
 
 /** Cancel a submission without changing Lane lifecycle; release its unneeded check. */
 export const cancel = mutation({
@@ -76,6 +77,8 @@ export const enqueue = receiptMutation({
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
     agent: v.optional(v.string()),
+    /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
+    gates: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -85,7 +88,7 @@ export const enqueue = receiptMutation({
       return canonicalPayload(
         await enqueueHostedLanding(
           ctx,
-          { projectId: input.projectId, ...landingAgentRun(input.agent) },
+          { projectId: input.projectId, ...landingAgentRun(input.agent), gates: { value: input.gates } },
           request,
           actor,
         ),
@@ -231,7 +234,12 @@ export const attempts = query({
 
 export async function enqueueHostedLanding(
   ctx: import('./_generated/server').MutationCtx,
-  input: { projectId: import('./_generated/dataModel').Id<'hostedProjects'>; agentRun?: string | undefined },
+  input: {
+    projectId: import('./_generated/dataModel').Id<'hostedProjects'>;
+    agentRun?: string | undefined;
+    /** Public entry point only: judge the project land gates (internal re-landings are not). */
+    gates?: { value: string | undefined };
+  },
   request: import('../src/hosted-landing').HostedLandingRequest,
   actor: import('../src/autonomy-policy').AcceptanceActor,
   reserved?: {
@@ -291,6 +299,15 @@ export async function enqueueHostedLanding(
     await initializeFinish(ctx, state);
     return state;
   }
+  // A new operation only: a replay above returns its retained landing unjudged.
+  if (input.gates)
+    await enforceLandGates(ctx, {
+      projectId: input.projectId,
+      project,
+      actor,
+      composeOperationId: request.finish?.composeOperationId,
+      gates: input.gates.value,
+    });
   const submissionId = first.ids.submission!;
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,

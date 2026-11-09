@@ -99,9 +99,10 @@ Hosted start returns Lane pins; start --open materializes it; land --save saves 
 composes and submits durable agent landing. Pending is not accepted.
 
 Project agent defaults (nforge agent ROOT policy shows them; docs/parallel-work-defaults.md):
-preflight runs the saved head's affected tests here and records the result; land --save refuses
-without it (preflight:require). ack answers every pending overlap notice; land --save refuses while
-a blocking notice is open (overlapGate:block). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
+preflight runs the saved head's affected tests here and records the result; land --save and the
+server refuse without it (preflight:require). ack answers every pending overlap notice; under
+overlapGate:block this CLI refuses land --save while a blocking notice is open (advisory, client-side
+only; trial-merge conflict notices replace it, Issue 853fcde3). Receipts carry unsavedFor and a save nudge; urgent is owner-only.
 
 Reads: tests, status, landing, observe, wait, log, link,
        records, candidate, provenance, candidates, review, diff, show, history, brief, peers,

@@ -7,7 +7,9 @@ import { moduleUrl } from './convex-module.mjs';
 import { acceptanceFixture, api, records } from './hosted-acceptance-fixture.mjs';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { code } from './hosted-landing-fixture.mjs';
-import { policyPreset, policyWriteSchema } from '../dist/autonomy-policy.js';
+import { policyPreset as preset, policyWriteSchema } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { governanceReason, DEFAULT_OWNER_APPROVAL_PATHS } from '../dist/public-governance.js';
 import { protectedGatePaths } from '../dist/contract-gate-policy.js';
 import { hostedLandingRequestSchema } from '../dist/hosted-landing.js';

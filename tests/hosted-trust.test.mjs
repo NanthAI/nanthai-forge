@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { acceptanceFixture, records } from './hosted-acceptance-fixture.mjs';
 import { checksFixture } from './hosted-checks-fixture.mjs';
-import { policyPreset, editedPolicy, effectivePolicy } from '../dist/autonomy-policy.js';
+import { policyPreset as preset, editedPolicy, effectivePolicy } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { gateFor } from '../dist/contract-gate-policy.js';
 import { hostedRecordSchema } from '../dist/hosted-records.js';
 import { decisionRecordSchema, decideInputSchema } from '../dist/decision-types.js';

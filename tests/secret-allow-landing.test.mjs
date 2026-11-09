@@ -38,7 +38,7 @@ async function land(t, { selectedFiles, secretAllow }) {
     autonomyPolicy: {
       ...policy,
       acceptance: { ...policy.acceptance, admissionCheck: false },
-      agentDefaults: { stallAlerts: { webhook: 'ntfy' } },
+      agentDefaults: { stallAlerts: { webhook: 'ntfy' }, preflight: 'advise' },
     },
   });
   if (secretAllow) f.rawChecks.setPlanOverrides({ secretAllow });

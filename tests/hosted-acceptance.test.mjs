@@ -5,7 +5,9 @@ import { randomUUID } from 'node:crypto';
 import { acceptanceFixture, api, store, records, control, maxima } from './hosted-acceptance-fixture.mjs';
 import { code } from './hosted-landing-fixture.mjs';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { acceptancePolicyDigest, policyDigestCurrent } from '../dist/policy-digest.js';
 import { digest } from '../dist/portable-hash.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';

@@ -615,7 +615,8 @@ test('restoring original change plus fix preserves work accepted after the culpr
   try {
     const { policyPreset } = await import('../dist/autonomy-policy.js');
     const { batchEligible } = await import('../dist/hosted-landing-batch.js');
-    const policy = policyPreset('trusted');
+    // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+    const policy = { ...policyPreset('trusted'), agentDefaults: { preflight: 'advise' } };
     s.patch('hostedProjects', s.projectId, { autonomyPolicy: policy });
     assert(batchEligible({ owner: 'owner' }, policy, { kind: 'agent', id: 'owner' }, candidate));
     const fixed = JSON.parse(

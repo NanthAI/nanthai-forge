@@ -243,7 +243,12 @@ export const stage = mutation({
           'Compose State differs from its committed registered binding.',
         );
         if (!duplicate)
-          await ctx.db.insert('projectHostedComposeSelections', { ...auth, kind: input.kind, key });
+          await ctx.db.insert('projectHostedComposeSelections', {
+            ...auth,
+            kind: input.kind,
+            key,
+            ...('laneId' in entry ? { head: entry.head } : {}),
+          });
       }
       const next = {
         next: page.next,

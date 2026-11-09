@@ -17,6 +17,7 @@ import { enqueueHostedLanding } from './projectHostedLanding';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { landingRow } from './projectHostedLandingStore';
 import { notifyStackedLandingEnded } from './projectHostedStackNotice';
+import { enforceLandGates } from './projectHostedLandGates';
 import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
@@ -34,13 +35,17 @@ export const submit = receiptMutation({
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
     agent: v.optional(v.string()),
+    /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
+    gates: v.optional(v.string()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, true);
-      return await submitDesiredLanding(ctx, input.projectId, command, actor, input.agent);
+      return await submitDesiredLanding(ctx, input.projectId, command, actor, input.agent, {
+        value: input.gates,
+      });
     } catch (error) {
       return report(error);
     }
@@ -54,6 +59,8 @@ export async function submitDesiredLanding(
   command: z.infer<typeof hostedLandingDesiredSchema>,
   actor: { id: string; kind: 'agent' | 'person' },
   agent?: string,
+  /** Public submit only: judge the project land gates (two-way GitHub sync is not an agent landing). */
+  gates?: { value: string | undefined },
 ): Promise<string> {
   const input = { projectId, agent };
   const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
@@ -150,6 +157,15 @@ export async function submitDesiredLanding(
     });
     return existingCanonical?.value ?? existing.value;
   }
+  // A new desired landing only: replays and joins of a live landing above return unjudged.
+  if (gates)
+    await enforceLandGates(ctx, {
+      projectId: input.projectId,
+      project,
+      actor,
+      composeOperationId: command.composeOperationId,
+      gates: gates.value,
+    });
   const previous = queuedState ?? existingState;
   const id = crypto.randomUUID(),
     attemptId = crypto.randomUUID(),

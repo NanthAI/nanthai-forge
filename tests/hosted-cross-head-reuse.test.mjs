@@ -9,7 +9,9 @@ import { digest } from '../dist/hash.js';
 import { finishFixture, landingApi } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { emptyTrust } from '../dist/agent-trust.js';
 const reuse = await import(moduleUrl('../convex/projectHostedReuseStore.ts'));
 const mainAudit = await import(moduleUrl('../convex/projectHostedMainAudit.ts'));

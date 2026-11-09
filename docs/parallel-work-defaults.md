@@ -240,7 +240,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
 | `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
-| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only exact-base intersecting/adjacent hunks, distinct additions or delete/rename versus edit need an answer. Symbol names alone and disjoint same-file edits produce no automatic notice; missing evidence reports incomplete coverage. A peer changing an exported symbol your changed lines use in another file adds one advisory cross-file note per Lane pair, which never blocks. Languages without a TS/JS import scanner (Go, Python, Rust, Java, C#, …) are matched by package. | `warn` adds the notice to the receipt without refusing; `off` removes it. |
+| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only exact-base intersecting/adjacent hunks, distinct additions or delete/rename versus edit need an answer. Symbol names alone and disjoint same-file edits produce no automatic notice; missing evidence reports incomplete coverage. A peer changing an exported symbol your changed lines use in another file adds one advisory cross-file note per Lane pair, which never blocks. Languages without a TS/JS import scanner (Go, Python, Rust, Java, C#, …) are matched by package. | `warn` adds the notice to the receipt without refusing; `off` removes it. `block` is advisory (CLI-side only) until Issue 853fcde3 replaces it ([details](#overlapgate)). |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
@@ -566,167 +566,22 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   the `ack` command. Disjoint same-file or documentation hunks are advisory and need no answer.
   Each notice records its class and reason. Missing range evidence remains advisory;
   exact landing composition still catches conflicts. The check uses the overlap read that the land receipt already makes.
+- `overlapGate` is advisory: only this CLI checks it, and a client that skips the check is not
+  refused by the server. Issue 853fcde3 replaces path overlap notices, their answers and
+  this gate with exact trial-merge conflict notices at save.
 
-### dormantAfterDays
+### Server enforcement of preflight
 
-- `dormantAfterDays` is stored-only: it is not in the effective defaults that `capabilities` carries
-  (that shape parses strictly in both directions, so a new field there breaks every CLI/server pair that
-  differs by one release). Only the server reads it; absent means 2.
-- A Lane is dormant when its record was last written (save, start, sync, landing, lifecycle change) more
-  than `dormantAfterDays` ago. Dormant Lanes are left out of overlap notices, presence, board signals and
-  the Lanes listed at `start`. Their saved work is kept and any save or start revives them.
-- No scan runs. Overlap reads use an index on the Lane's last activity, so dormant Lanes' rows are never
-  read. Open Lanes saved before this field existed are judged by their presence time (a row with no time
-  at all counts as live) until they next write, a landing completion stamps them from their Lane record
-  (up to five per landing, one indexed range read, empty once healed) or `abandon-dormant` indexes them.
-- `nforge agent ROOT lanes '{"view":"dormant"}'` lists dormant Lanes with `abandonable` (`landed`: an
-  accepted receipt landed the saved head, stamped on the Lane or named in a landed receipt's inputs; `empty`:
-  nothing was ever saved; `null`: other saved work). The dry run also compares the paths a `null` Lane
-  changed with main's bytes (one State read; only when some Lane has a complete change list of at most 200
-  paths): all equal, a deleted path absent, and the Lane reports `abandonable:"on-main"`.
-  `view:"live"` hides them; the default lists all and marks `dormant`.
-- `nforge x ROOT abandon-dormant '{}'` is the owner's dry run; `{"apply":true}` abandons up to 25
-  `landed`/`on-main`/`empty` Lanes per call (never pinned Lanes or other saved work), indexes the remaining dormant
-  Lanes, and says how many are left. The saved head is kept; `start --reopen` undoes it.
-- A landing also completes an accepted Lane when only its record version changed after the pins were taken;
-  a new save or a reopen after the pins still keeps it open.
+The CLI checks `preflight: require` before it composes. The server checks it again when it accepts
+a new agent landing (`projectHostedLanding:enqueue` or `projectHostedLandingDesired:submit`). A
+landing from an older or hand-written client that skips the CLI check is refused with the same
+code (`PREFLIGHT_REQUIRED`) and next step.
 
-- Below `dormantAfterDays` an idle Lane costs one line: advisory notices from Lanes idle more than 6 h
-  collapse into one `idle-lanes` summary per start/peers read, and a Lane whose Intent was landed by a
-  later Lane is superseded (no presence, no advisory notices; blocking notices stay). A dormant window
-  shorter than one day was therefore not needed (Issue 55024d40); keep `dormantAfterDays` at its default.
-
-### stacking
-
-- Stored-only like `dormantAfterDays`: only the server reads it (on the overlap read), and the receipt
-  carries the mode in `overlapNotice.stack.mode`. Absent means `offer`.
-- `offer` (default): a Lane whose files a peer's admitted landing (Lane check passed) also touches gets
-  `overlapNotice.stack` with the command `nforge agent . sync '{"laneId":"…","stackOn":"PEER"}'`.
-- `auto`: the CLI remembers the last offer for that Lane on this machine, and the next plain `sync`
-  sends `stackOn` itself. If the peer's landing has ended by then it falls back to a plain sync once.
-- Either way, a failed peer landing makes `land --save` refuse with `STACK_PARENT_FAILED` and the one
-  `sync` command that re-pins the Lane to main; the landing then checks once.
-- Set: `nforge x ROOT set-policy '{"agentDefaults":{"stacking":"auto"}}'`; back to the default with
-  `"stacking":"offer"`. Like other `agentDefaults` edits it does not invalidate queued landings.
-
-### urgentRoles
-
-- `owner` is the project owner acting in person: a signed-in session, or the owner's CLI with
-  `"asOwner":true` on `prioritize`. `agents` are agents running on the owner's CLI login.
-- Agents share the owner's login, so this is a default-behaviour guard, not an access rule.
-  Contributors never jump the queue, whatever this setting says.
-- `prioritize` with `urgent` from another role is refused with `URGENT_NOT_ALLOWED`. A landing
-  submitted with `priority:"urgent"` by another role stays normal, and its `priorityReason` says why.
-
-### checkpointNudgeMinutes
-
-- Hosted Lane receipts carry `unsavedFor`: minutes since the oldest file edit newer than the Lane's
-  last save. Past the threshold they also carry `nudge` with the save command.
-- It is computed from local file times when an agent calls Forge. Nothing runs in between. A newer
-  file whose bytes and mode still equal the saved baseline is not an edit (stat index first, at most
-  256 files / 64 MiB read per call).
-- No `nudge` while a landing of this checkout is live (the reply names its wait, or this session's
-  turn ledger records it): the landing froze the saved source, and a save would supersede it.
-
-### stallAlerts
-
-- Alerts ride the existing landing stall alarm, which fires after 15 minutes without progress.
-  An idle project schedules nothing.
-- Tier 1, at `notifyAfterMinutes` (default 15): what is stuck, why, what was already retried and
-  the repair command. Tier 2, at `repeatAfterMinutes` (default 30): the same with a diagnosis (the
-  dead step, the last error, who is waiting). Each tier is sent once per stall; progress stops them.
-- The stuck agent sees the latest alert as `stallAlert` on its landing and finish status reads. Alerts never rewrite the landing itself.
-- Channels:
-  - `email`: up to 10 recipient addresses, sent with Cloudflare Email Service from
-    `support@nanthai.tech` (deployment variable `FORGE_ALERT_EMAIL_FROM` overrides it). Needs the
-    deployment variables `FORGE_ALERT_EMAIL_TOKEN` and `FORGE_ALERT_EMAIL_ACCOUNT_ID`.
-  - `webhook`: one POST to the URL in the deployment variable `FORGE_ALERT_WEBHOOK_URL`, shaped for
-    the preset: `ntfy` (phone push; recommended), `slack`, `discord`, `telegram` or `generic` (JSON
-    `{subject,text}`). `off` by default.
-- The webhook URL and the email token are secrets. They live only in deployment environment
-  variables, never in the policy, the repository, logs, receipts or alert text. Delivery logs carry
-  the channel and HTTP status only.
-- Example: `{"agentDefaults":{"stallAlerts":{"email":["you@example.com"],"webhook":"ntfy"}}}`.
-- The same channels carry the landing speed alert: a sustained jump in time to main or check
-  minutes over the project's 7-day median, at most once a metric a day
-  ([regression ladder](agents/regression-ladder.md#rung-1-landing-speed-alert)).
-
-### Reduced-evidence actors
-
-Who may use the contract gate and keep a passed first check across a clean overtake is decided by
-project policy, not by who the owner is. Persons and system actors never qualify.
-
-- `acceptance.autoActors` non-empty: exactly the listed agents qualify (the owner's agent too only if listed).
-- Empty, the default: the owner's agent qualifies. Another agent qualifies only when `trust.enabled`
-  and its earned trust on the Candidate's paths is above `supervised`.
-- Anyone else gets the full gate and the exact recheck after an overtake; nothing is reused for them.
-- Trust is read only when it is enabled (one row per actor); no other call is added.
-
-## Always on
-
-These have no setting: they fix failures and have no sensible alternative.
-
-- **Start returns the Lane first.** A hosted `start` prints `{"started":{"laneId":…,"path":…}}` on
-  stderr as soon as the Lane exists, before its files download.
-  - Before this, `start` from a checkout also downloaded a second full copy of the Lane under
-    `ROOT.forge-client/lanes/`. Across 105 dogfood starts the median was 26 s, p90 110 s, and the
-    worst 34 minutes. The lead root held 203 such copies (5.1 GB).
-  - `path` in the start JSON chooses the directory to open the Lane in.
-  - `"open":false` returns the Lane pins without a checkout.
-  - Neither field is part of the request identity.
-- **A landing never depends on the client staying alive.** `land --save` runs its submission in a
-  detached process with file output.
-  - That process saves, composes and submits. It replays its own request while the save job runs,
-    so submission never waits for the agent to call again.
-  - From submission on, the server drives the landing.
-  - Interrupting the client, killing it or closing its output (for example `| head`) leaves the
-    submission running. Run the same command again to resume or read the outcome.
-- **Messages with any characters.** `--message-file FILE` sets `message` from a file, and
-  `--message-file -` reads it from stdin. `--command-file -` reads the whole JSON request from stdin.
-  Apostrophes, quotes and newlines need no shell quoting.
-- **Closed output is safe.** A closed stdout or stderr reader never crashes `nforge` mid-action.
-- **Version skew names the fix.**
-  - An action this CLI does not know names the upgrade step. If the deployment has advertised it,
-    the error is `CLI_UPGRADE_REQUIRED`.
-  - An action the deployment does not offer says that the server may be older and needs a deploy.
-  - A response this CLI cannot parse says that the versions likely differ.
-  - Newer actions advertised by the server no longer break older CLIs.
-- **No saves during an active land.** Saving a Lane while its land is queued or checking would
-  throw away the checks; the save is refused unless it says `supersedeFinish:true`.
-- **Retry the same Lane.** A failed land returns `retryCommand` for the same Lane. `cancel`
-  receipts carry `cost`: cancelling discards the queue place, the checks and the retry link.
-- **Stale queued landings say so.** When a landing changes a file that a queued, not-yet-checked
-  landing also changes, that entry is marked `wouldConflict` with the files and its Lane. `wait`
-  and `land` then return `SYNC_REQUIRED` (exit 2, not `IN_PROGRESS`) with one recovery command,
-  the same Lane's `land --save`; observe guidance says the same, and the queue lists the entry as
-  `needs-sync` with no ETA. The save or sync that moves the Lane's head ends the old entry
-  `LANDING_SUPERSEDED` in the same transaction, so it never stays queued beside the new land. This
-  is path advice, not a proven text conflict: the controller may still merge it cleanly if nobody
-  acts. A speculative conflict with an unaccepted predecessor needs no action and keeps waiting.
-  Each land reads at most 20 queued entries and 10 Candidates.
-
-## Size ceilings
-
-These fixed ceilings are not settings. Each one falls back to a wider run or a recheck, never to a
-narrower one or a wrong "unaffected": past it, Forge runs more, not less. Every one is a constant
-in the file named in the table.
-
-| Input | Ceiling | Past it | Where |
-| --- | --- | --- | --- |
-| Changed paths handed to a project command (`FORGE_CHECK_CHANGES`) | 128 KiB of JSON, about 3,000 paths | the list is left out and the command runs in full | `src/check-command-scope.ts` |
-| Package manifests read for one head (package graph) | 2,000 manifests and 16 MiB | the layout is unknown: full selection, with the reason | `src/package-graph.ts` |
-| Paths walked in a checkout for the package graph | 500,000 | the graph is unknown: full selection | `src/package-graph-checkout.ts` |
-| JS/TS import graph | 20,000 files, 1 MiB per file, 128 MiB together | selection stays path-only | `src/js-import-graph.ts` |
-| State manifest in first-check reuse | 8 MiB per manifest (roughly 60,000 to 70,000 files) | no first-check reuse: the check runs as usual | `convex/projectHostedReuse.ts` |
-| Secret scan of a file | 1 MiB; binary files (a NUL in the first 8 KiB) are skipped | the file is counted as skipped, not scanned | `src/secret-scan.ts` |
-| JUnit reports per job | 32 files, 8 MiB each, 16 MiB together, 5,000 test files | the rest is not read (extra report files are noted); the check's own result is unchanged | `src/junit-report.ts`, `src/junit-report-files.ts` |
-| Overlap sketch per file | 1 MiB and 20,000 lines | no line-range evidence for that file: advisory only | `src/hosted-overlap-text.ts` |
-
-## What agents are told
-
-The agent skill, MCP tool descriptions, `capabilities` (`rules`) and `llms.txt` carry one line per
-active rule, generated from the effective settings. A rule that is off adds nothing.
-
-First-write hooks default on (`nforge settings firstWriteHooks false` disables
-them). [Hook settings](agents/workflow.md#overlap-before-the-first-write) describe
-reversible removal, per-project switches and advisory coverage.
+- The landing carries `gates`: the CLI's preflight result for each Lane head it composed. The
+  server finds those Lanes and heads in one indexed read of the composition. A landing that names
+  no composition of the caller's own is refused: an agent lands through `land --save`.
+- Preflight runs on the agent's machine and its result is never uploaded. The server requires the
+  CLI's result for the landed head (`passed`, `advised`, `none`, `no-checkout`, …), but it cannot
+  prove the tests ran. A landing of a Lane from outside its checkout reports `no-checkout`, as before.
+- Person landings, replays of an operation and server re-landings are not judged. Projects with
+  `advise` or `off` read nothing extra.

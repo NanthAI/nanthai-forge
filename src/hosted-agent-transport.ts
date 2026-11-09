@@ -66,6 +66,9 @@ import {
 } from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
+import { composedLanes, landGatesArgument } from './hosted-land-gate-client.js';
+import { preflightResult } from './hosted-land-gates.js';
+import type { LandGateEntry } from './hosted-land-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
 import { preflightPlan, readPreflightReceipt, runPreflight } from './agent-preflight.js';
 import { rememberLandingPaths } from './preflight-learned.js';
@@ -918,6 +921,8 @@ export class HostedAgentTransport {
       metricOperationId(journal.operationId);
       this.callerOperationId = journal.operationId;
       this.onOperation?.(action, journal.operationId);
+      // The finish gate's judgement of the checkout's saved head, sent again with the landing.
+      let gatedLane: LandGateEntry | undefined;
       const session: HostedAgentSession = {
         root,
         address: this.address,
@@ -989,7 +994,22 @@ export class HostedAgentTransport {
             await executeHostedRecords(this, 'overlap-acks', {
               answers: answers.slice(at, at + 100),
             });
+          // The server requires this preflight result again at enqueue (Issue 029138ef).
+          gatedLane = { laneId, head, preflight: preflightResult(gates.preflight) };
           return gates;
+        },
+        landGates: (composeOperationId: string) => {
+          if (!this.serverFeatures?.includes('land-gates')) return undefined;
+          // A Candidate composed by an earlier operation (a check-only run reused): this checkout's
+          // saved head, which the server confirms against the composition it lands.
+          const composed = composedLanes(journal, composeOperationId);
+          const selected = readHostedLaneCheckout(root)?.selection;
+          const lanes = composed.length
+            ? composed
+            : selected
+              ? [{ laneId: selected.laneId, head: selected.head }]
+              : [];
+          return landGatesArgument(lanes, gatedLane);
         },
         marker: () => {
           const marker = readHostedLaneCheckout(root);
@@ -1754,4 +1774,6 @@ export type HostedAgentSession = {
     tree?: string,
     overlapAnswer?: 'accept-order',
   ) => Promise<Record<string, unknown>>;
+  /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
+  landGates?: (composeOperationId: string) => string | undefined;
 };

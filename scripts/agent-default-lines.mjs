@@ -23,7 +23,9 @@ export function agentDefaultLines(defaults, root = 'ROOT') {
   if (defaults.overlapGate !== 'off')
     lines.push(
       `Answer blocking overlap notices before land: nforge agent ${root} ack '{"laneId":"…"}'` +
-        (defaults.overlapGate === 'block' ? ' (land refuses while a blocking notice is open).' : '.'),
+        (defaults.overlapGate === 'block'
+          ? ' (this CLI refuses land while a blocking notice is open; advisory, client-side only).'
+          : '.'),
     );
   if (defaults.checkpointNudgeMinutes > 0)
     lines.push(`Save at least every ${defaults.checkpointNudgeMinutes} minutes of edits.`);

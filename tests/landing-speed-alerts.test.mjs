@@ -166,7 +166,10 @@ async function seededLanding(t, stallAlerts) {
   const f = await finishFixture(t);
   const policy = [...f.tables.hostedProjects.values()].find(row => row._id === f.projectId).autonomyPolicy;
   f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...(policy ?? policyPreset('trusted')), agentDefaults: { stallAlerts } },
+    autonomyPolicy: {
+      ...(policy ?? policyPreset('trusted')),
+      agentDefaults: { stallAlerts, preflight: 'advise' },
+    },
   });
   // Committed stamps use the wall clock (new Date()), not the fixture's fake Date.now.
   const wall = new Date().getTime(),

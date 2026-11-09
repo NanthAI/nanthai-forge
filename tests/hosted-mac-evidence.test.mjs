@@ -6,7 +6,9 @@ import { acceptanceFixture, records } from './hosted-acceptance-fixture.mjs';
 import { code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { checkPin } from '../dist/hosted-check.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const machines = await import(moduleUrl('../convex/projectHostedCheckMachines.ts'));
 const secret = 'synthetic-mac-evidence';

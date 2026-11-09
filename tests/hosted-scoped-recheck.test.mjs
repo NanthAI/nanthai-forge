@@ -10,7 +10,9 @@ import {
   scopedRecheckGate,
 } from '../dist/scoped-recheck-policy.js';
 import { actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { firstCheckReceipt, hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { smokeTests } from '../scripts/test-impact.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';

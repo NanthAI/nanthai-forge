@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { acceptanceFixture, pins, landingStore } from './hosted-acceptance-fixture.mjs';
-import { policyPreset } from '../dist/autonomy-policy.js';
+import { policyPreset as preset } from '../dist/autonomy-policy.js';
+// Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
+const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { landingObservation } from '../dist/hosted-landing.js';
 const prior = process.env.FORGE_HOSTED_CHECK_KEY_ID;
 test.before(() => {

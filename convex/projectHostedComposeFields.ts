@@ -23,7 +23,14 @@ export const hostedComposeTables = {
     'kind',
     'index',
   ]),
-  projectHostedComposeSelections: defineTable({ ...identity, kind: v.string(), key: v.string() })
+  projectHostedComposeSelections: defineTable({
+    ...identity,
+    kind: v.string(),
+    key: v.string(),
+    /** The selected Lane's saved head (inputs; absent on rows staged before Issue 029138ef): the
+     * server land gate confirms what a landing lands from this one indexed read. */
+    head: v.optional(v.string()),
+  })
     .index('by_project_and_actor_and_operation_and_kind_and_key', [
       'projectId',
       'actor',

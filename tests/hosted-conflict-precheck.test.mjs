@@ -356,3 +356,28 @@ test('finite conflict status names the sync recovery, never a wait on the ended 
     assert.equal(s.calls.length - before, 3, 'capabilities, canonical status and one landing status read');
   }
 });
+
+test('Issue 029138ef: land --save sends the gate result for the saved head only to a land-gates server, with no added call', async t => {
+  const landings = ['projectHostedLanding:enqueue', 'projectHostedLandingDesired:submit'];
+  const land = async features => {
+    const s = agentFixture(t);
+    if (features) s.caps.features = features;
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const before = s.calls.length;
+    await s.transport().dispatch('finish', { laneId: s.lane.laneId });
+    const calls = s.calls.slice(before);
+    return { s, calls, landing: calls.find(call => landings.includes(call.name)) };
+  };
+  const older = await land(null);
+  assert(older.landing, 'the finish submitted its landing');
+  assert.equal('gates' in older.landing.args, false, 'an older server gets no new argument');
+  const current = await land(['land-gates']);
+  const sent = JSON.parse(current.landing.args.gates);
+  assert.deepEqual(
+    sent.lanes.map(entry => [entry.laneId, entry.head]),
+    [[current.s.lane.laneId, current.s.lane.head]],
+    'one entry: the Lane head this finish composed',
+  );
+  assert.equal(sent.lanes[0].preflight, 'none', 'the finish gate judged it: nothing selected to run');
+  assert.equal(current.calls.length, older.calls.length, 'the gate result rides the existing calls');
+});

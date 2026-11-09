@@ -31,7 +31,8 @@ export async function landingFixture(source = null) {
     f.patch('hostedProjects', f.projectId, {
       autonomyPolicy: {
         ...legacyPolicy(),
-        agentDefaults: { stallAlerts: { enabled: false } },
+        // Server land gates (Issue 029138ef) have their own tests (hosted-landing-desired.test.mjs).
+        agentDefaults: { stallAlerts: { enabled: false }, preflight: 'advise' },
       },
     });
   let now = Date.now(),

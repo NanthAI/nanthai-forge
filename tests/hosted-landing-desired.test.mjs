@@ -316,7 +316,10 @@ test('owner urgent priority survives desired composition into its canonical queu
   // Finishes arrive as agent calls; urgentRoles must include agents for them to stay urgent.
   const project = f.tables.hostedProjects.get(f.projectId);
   f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...project.autonomyPolicy, agentDefaults: { urgentRoles: ['owner', 'agents'] } },
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      agentDefaults: { ...project.autonomyPolicy.agentDefaults, urgentRoles: ['owner', 'agents'] },
+    },
   });
   const state = await submit(f, command);
   assert.equal(state.priority, 'urgent');
@@ -327,4 +330,114 @@ test('owner urgent priority survives desired composition into its canonical queu
   assert.equal(current.priority, 'urgent');
   assert.equal(current.request.priority, 'urgent');
   assert.match(current.priorityReason, /project owner/);
+});
+
+test('Issue 029138ef: the server refuses a direct desired landing that skips the CLI preflight result; the CLI result for the composed head lands as before', async t => {
+  const f = await finishFixture(t);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  const policy = gates =>
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...project.autonomyPolicy,
+        agentDefaults: { ...project.autonomyPolicy.agentDefaults, ...gates },
+      },
+    });
+  const [selected] = [...f.tables.projectHostedComposeSelections.values()].filter(
+    row => row.kind === 'inputs' && row.operationId === f.selection.request.operationId,
+  );
+  assert.match(selected.head, /^[0-9a-f]{64}$/, 'the selection records the composed head');
+  const lane = { laneId: selected.key, head: selected.head };
+  const submitWith = (command, value) =>
+    f
+      .tx('desiredSubmit', desired.submit, {
+        projectId: f.projectId,
+        request: JSON.stringify(command),
+        ...(value === undefined ? {} : { gates: value }),
+      })
+      .then(JSON.parse);
+  const command = request(f);
+  // overlapGate stays a client-side, advisory check until flip 4 (853fcde3): never judged here.
+  policy({ overlapGate: 'block', preflight: 'require' });
+  // A client that skips the CLI (no result, or one for another head) is refused, as the CLI would.
+  await assert.rejects(submitWith(command), error => {
+    assert(code('PREFLIGHT_REQUIRED')(error));
+    assert.match(error.data?.message ?? error.message, /nforge agent ROOT preflight .*Then land again/);
+    return true;
+  });
+  assert.equal(f.tables.projectHostedLandingDesired.size, 0, 'a refusal writes nothing');
+  await assert.rejects(
+    submitWith(command, JSON.stringify({ lanes: [{ ...lane, head: 'a'.repeat(64), preflight: 'passed' }] })),
+    code('PREFLIGHT_REQUIRED'),
+  );
+  await assert.rejects(submitWith(command, '{"lanes":[{"laneId":"x"}]}'), code('BAD_ARGUMENT'));
+  // The CLI's result for this head: the landing proceeds and lands exactly as before.
+  const state = await submitWith(command, JSON.stringify({ lanes: [{ ...lane, preflight: 'passed' }] }));
+  assert.equal(state.phase, 'composing');
+  // A replay of the same operation returns its landing unjudged (no gates needed).
+  assert.equal((await submitWith(command)).id, state.id);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+  // Budget: a gated landing reads one indexed range more than an ungated one.
+  const plain = await finishFixture(t);
+  const ungatedFrom = plain.counts.length;
+  await plain.tx('desiredSubmit', desired.submit, {
+    projectId: plain.projectId,
+    request: JSON.stringify(request(plain)),
+  });
+  const ungated = plain.counts.slice(ungatedFrom).find(count => count.name === 'desiredSubmit');
+  const healthy = await finishFixture(t);
+  const healthyProject = healthy.tables.hostedProjects.get(healthy.projectId);
+  healthy.patch('hostedProjects', healthy.projectId, {
+    autonomyPolicy: {
+      ...healthyProject.autonomyPolicy,
+      agentDefaults: { ...healthyProject.autonomyPolicy.agentDefaults, preflight: 'require' },
+    },
+  });
+  const [own] = [...healthy.tables.projectHostedComposeSelections.values()].filter(
+    row => row.kind === 'inputs' && row.operationId === healthy.selection.request.operationId,
+  );
+  const healthyFrom = healthy.counts.length;
+  await healthy.tx('desiredSubmit', desired.submit, {
+    projectId: healthy.projectId,
+    request: JSON.stringify(request(healthy)),
+    gates: JSON.stringify({ lanes: [{ laneId: own.key, head: own.head, preflight: 'passed' }] }),
+  });
+  const gated = healthy.counts.slice(healthyFrom).find(count => count.name === 'desiredSubmit');
+  assert.equal(gated.ranges - ungated.ranges, 1, 'one indexed read on a healthy gated landing');
+});
+
+test('Issue 029138ef: a direct agent enqueue is judged like a desired one; naming no composition is refused', async t => {
+  const f = await finishFixture(t);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      agentDefaults: { ...project.autonomyPolicy.agentDefaults, preflight: 'require' },
+    },
+  });
+  const [selected] = [...f.tables.projectHostedComposeSelections.values()].filter(
+    row => row.kind === 'inputs' && row.operationId === f.selection.request.operationId,
+  );
+  const enqueue = (request, gates) =>
+    f
+      .tx('finishEnqueue', landingApi.enqueue, {
+        projectId: f.projectId,
+        request: JSON.stringify(request),
+        ...(gates ? { gates } : {}),
+      })
+      .then(JSON.parse);
+  const { finish: _finish, ...unnamed } = f.request({ agent: true });
+  await assert.rejects(enqueue({ ...unnamed, operationId: randomUUID() }), error => {
+    assert(code('PREFLIGHT_REQUIRED')(error));
+    assert.match(error.data?.message ?? error.message, /names no Lane composition/);
+    return true;
+  });
+  const agent = f.request({ agent: true });
+  await assert.rejects(enqueue(agent), code('PREFLIGHT_REQUIRED'));
+  // The preflight result for the composed head is enough.
+  const gates = JSON.stringify({ lanes: [{ laneId: selected.key, head: selected.head, preflight: 'none' }] });
+  const state = await enqueue(agent, gates);
+  assert.equal(state.request.operationId, agent.operationId);
 });

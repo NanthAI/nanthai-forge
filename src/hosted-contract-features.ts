@@ -97,6 +97,11 @@ export const hostedContractFeatures = [
    * before it writes their rows, which then read back with one ranged GET per run. Without it the
    * CLI PUTs each object. */
   'upload-packs',
+  /** Server preflight gate (Issue 029138ef): projectHostedLanding:enqueue and
+   * projectHostedLandingDesired:submit take `gates`, the CLI's preflight result per composed Lane
+   * head; a project with preflight require refuses a new agent landing without it. Without the
+   * feature the CLI sends nothing (an older server judges nothing). */
+  'land-gates',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 
