@@ -60,7 +60,9 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   // The pack: the commit, the trees and the blobs the parent commit lacks.
   let objects: PackObject[] = [];
   let commit = parent.commit;
-  let pack: { chunks: Chunk[]; bytes: number; objects: number } | undefined;
+  let pack:
+    | { chunks: Chunk[]; bytes: number; objects: number; packSha1: string; framed: Chunk[] }
+    | undefined;
   if (headStep.tree.root !== baseStep.tree.root) {
     const commitBytes = laneCommitBytes({
       tree: headStep.tree.root,
@@ -73,8 +75,14 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
     });
     commit = gitHash('commit', commitBytes);
     objects = [{ type: 'commit', bytes: commitBytes }, ...(await work.objects(headStep, stepIds(baseStep)))];
-    const stored = await storePack(ctx, projectId, objects);
-    pack = { chunks: stored.chunks, bytes: stored.bytes, objects: stored.objects };
+    const stored = await storePack(ctx, projectId, objects, { framed: true });
+    pack = {
+      chunks: stored.chunks,
+      bytes: stored.bytes,
+      objects: stored.objects,
+      packSha1: stored.packSha1,
+      framed: stored.framed!,
+    };
   }
   // Aliases of these two States only, so the object stays about two States in size.
   const aliases = work.aliases;

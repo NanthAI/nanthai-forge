@@ -41,6 +41,7 @@ for (const name of [
   'gitServeMainStore',
   'gitServeWorkerStore',
   'gitServeFrame',
+  'gitServeTrees',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 
@@ -1431,6 +1432,88 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   });
   assert.match(Buffer.from(await direct.arrayBuffer()).toString('latin1'), /ERR GIT_NOT_OUR_REF/);
 
+  // The large-pack Worker route (Issue 3bd4a8e9 line 2): members list and fetch the same Lane
+  // refs, signed in up front (session login) or after the 401 a Lane-naming listing answers on
+  // an anonymous session; strangers and anonymous readers get main only.
+  const fixtureFetch = globalThis.fetch;
+  globalThis.fetch = (target, init) =>
+    new URL(target).hostname === '127.0.0.1' ? f.previousFetch(target, init) : fixtureFetch(target, init);
+  const worker = await byteWorker(t, host.base);
+  const env = { FORGE_GIT_WORKER_URL: worker.base, FORGE_GIT_WORKER_MIN_BYTES: '1' };
+  Object.assign(process.env, env);
+  try {
+    const history = () => [...s.tables.projectHistory.values()].find(row => row.projectId === projectId);
+    const viaWorker = join(work, 'worker');
+    const cloned = await client(['clone', url(owner), viaWorker]);
+    assert.match(String(cloned.stderr), /redirecting to http:\/\/127\.0\.0\.1:\d+\/gitw\//);
+    const joined = history().joined;
+    // Session login: the listing names the built Lane; a fetch into an empty repository joins
+    // history and the Lane pack (its framed copy) without replacing the clone's cached trailer.
+    for (const version of ['2', '0']) {
+      const config = [...member, '-c', `protocol.version=${version}`];
+      assert.match(
+        (await client([...config, 'ls-remote', remote])).stdout,
+        new RegExp(`^${commit}\t${ref}$`, 'm'),
+      );
+      const fresh = join(work, `worker-empty-v${version}`);
+      git(work, ['init', '-q', fresh]);
+      worker.reads.length = 0;
+      await client(
+        [...config, '-c', 'transfer.fsckObjects=true', 'fetch', '-q', remote, `${ref}:refs/heads/lane`],
+        fresh,
+      );
+      assert.equal(git(fresh, ['rev-parse', 'lane']).toString().trim(), commit);
+      await client(['fsck', '--full'], fresh);
+      const lanePack = [...s.tables.projectGitLaneCommits.values()][0].pack;
+      const laneKeys = (version === '2' ? lanePack.framed : lanePack.chunks).map(
+        chunk => `v1/p/${projectId}/o/${chunk.sha256}`,
+      );
+      assert.ok(
+        worker.reads.some(read => laneKeys.includes(read.key)),
+        `v${version}: the Lane pack streams from R2`,
+      );
+    }
+    assert.deepEqual(history().joined, joined, "a set with a Lane pack never replaces the clone's trailer");
+    // Anonymous session: the Lane-naming listing answers 401; git sends the login, the Worker
+    // forwards it and the backend checks it as on the direct route. Only the Lane pack comes.
+    worker.reads.length = 0;
+    await client(['fetch', '-q', 'origin', `${ref}:refs/remotes/origin/lane`], viaWorker);
+    assert.equal(git(viaWorker, ['rev-parse', 'origin/lane']).toString().trim(), commit);
+    assert.equal(git(viaWorker, ['show', 'origin/lane:src/app.go']).toString(), edits['src/app.go']);
+    for (const token of [stranger, null]) {
+      const target = token ? url(token) : `${host.base}/git/${projectId}.git`;
+      assert.doesNotMatch((await client(['ls-remote', target])).stdout, /refs\/forge|lanes/);
+      await refused(
+        ['-C', viaWorker, 'fetch', target, ref],
+        token ? /couldn't find remote ref/ : /Username|Authentication/,
+      );
+    }
+    // A signed session for a stranger never takes another login from the request.
+    const plan = await import('../dist/git-worker-plan.js');
+    const session = plan.signWorkerToken(
+      { p: projectId, c: 'cred-stranger', e: Date.now() + 60_000 },
+      plan.workerTokenKey(process.env.R2_SECRET_ACCESS_KEY),
+    );
+    const named = await host.handle(`/gitw/${session}/${projectId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: {
+        'git-protocol': 'version=2',
+        authorization: `Basic ${Buffer.from(`git:${owner}`).toString('base64')}`,
+      },
+      body: protocol.concatBytes([
+        protocol.pkt('command=ls-refs\n'),
+        protocol.delimPkt,
+        protocol.pkt(`ref-prefix ${ref}\n`),
+        protocol.flushPkt,
+      ]),
+    });
+    assert.equal(named.status, 200);
+    assert.doesNotMatch(Buffer.from(await named.arrayBuffer()).toString('latin1'), /refs\/forge/);
+  } finally {
+    for (const name of Object.keys(env)) delete process.env[name];
+    globalThis.fetch = fixtureFetch;
+  }
+
   // A new save moves the ref: the next fetch builds a new commit and drops the old pack.
   const oldPack = built[0].pack.chunks[0].sha256;
   const moved = storeState(s, projectId, source.repo, source.head, {
@@ -1490,6 +1573,48 @@ function wideRepository(t) {
   const head = commit(repo, { 'README.md': '# wide, edited\n' }, 'Readme');
   return { repo, head };
 }
+
+test('pack scans read a chunk as parallel ranges in order and refuse a tampered chunk', async t => {
+  const bytes = Buffer.from(Array.from({ length: 10_000 }, (_, i) => (i * 7) % 251));
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const key = `${defaultR2Config.bucket}/v1/p/scan-project/o/${sha256}`;
+  defaultR2Objects.set(key, bytes);
+  t.after(() => defaultR2Objects.delete(key));
+  const ranges = [];
+  let inFlight = 0,
+    most = 0;
+  t.after(
+    interceptDefaultR2(async (request, init, serve) => {
+      ranges.push(new Headers(init.headers).get('range'));
+      most = Math.max(most, ++inFlight);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      inFlight--;
+      return serve(request, init);
+    }),
+  );
+  const { chunkParts, rangesAhead } = modules.gitServeTrees;
+  const read = async () => {
+    const parts = [];
+    for await (const part of chunkParts('scan-project', { sha256, size: bytes.length }, 1000))
+      parts.push(part);
+    return parts;
+  };
+  const parts = await read();
+  assert.equal(parts.length, 10);
+  assert.ok(Buffer.concat(parts.map(part => part.bytes)).equals(bytes), 'ranges arrive in order');
+  assert.deepEqual(
+    parts.map(part => part.last),
+    [...Array(9).fill(false), true],
+  );
+  assert.equal(ranges.length, 10);
+  assert.ok(ranges.includes('bytes=9000-9999'));
+  assert.ok(most > 1 && most <= rangesAhead, `ranges overlap, at most ${rangesAhead} at a time (${most})`);
+  // The digest is checked when the last range arrives: a tampered chunk ends in null.
+  defaultR2Objects.set(key, Buffer.concat([bytes.subarray(0, 9999), Buffer.from([0])]));
+  const tampered = await read();
+  assert.equal(tampered.length, 10);
+  assert.equal(tampered.at(-1), null);
+});
 
 test('pack trees list a commit tree from ofs- and ref-delta packs fed in small parts', t => {
   const { repo, head } = wideRepository(t);

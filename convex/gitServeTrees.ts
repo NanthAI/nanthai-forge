@@ -8,6 +8,7 @@ import { storeSourceBytes } from './projectSourceBytes';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { presignGet, r2Config, r2Key } from './r2';
 import { historyChunkBytes } from './projectHistoryFields';
+import { createHash } from 'node:crypto';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 import type { NativeFile, NativeState } from '../src/native-state-format';
@@ -24,6 +25,7 @@ import {
   type LfsRule,
 } from '../src/github-lfs';
 import { treeObjects, writePack, type GitEntry, type PackObject } from '../src/git-lane-objects';
+import { PackFramer } from '../src/git-worker-plan';
 
 /** Git trees of Forge States, published the way main's GitHub mirror publishes main (the same
  * paths, LFS pointers and gitlinks). Shared by Lane refs (Issue 09367fb2) and Forge-built main
@@ -62,6 +64,61 @@ async function pool<T>(items: T[], run: (item: T) => Promise<void>) {
 }
 /** Feeds packs (each a list of R2 chunks, read one ahead) to `scan`, newest first, until `done`
  * says so after a chunk; false when a chunk is unreadable or the scan fails. */
+/** Range reads per chunk in flight while a scan parses: one GET of a whole 32 MiB chunk from a
+ * Convex action is network-bound (about 10 s for this repository's import pack, Issue
+ * 3bd4a8e9), so a chunk is read as ranges of rangeBytes, rangesAhead at a time, and parsed in
+ * order as they arrive. */
+export const rangeBytes = 4 * 1024 * 1024,
+  rangesAhead = 6;
+async function readRange(projectId: string, sha256: string, start: number, end: number) {
+  const headers = { Range: `bytes=${start}-${end - 1}` };
+  const response = await convexFetch(await presignGet(r2Config(), r2Key(projectId, sha256), headers), {
+    headers,
+    redirect: 'error',
+    signal: networkTimeout(30_000),
+  });
+  if (response.status !== 206) return null;
+  const bytes = Buffer.from(await response.arrayBuffer());
+  return bytes.length === end - start ? bytes : null;
+}
+/** One chunk's bytes in order, as ranges (`last` on the final one); null for an unreadable
+ * range, or in place of the final range when the chunk's digest differs. */
+export async function* chunkParts(
+  projectId: string,
+  chunk: Chunk,
+  size = rangeBytes,
+): AsyncGenerator<{ bytes: Buffer; last: boolean } | null, void, void> {
+  const ranges: [number, number][] = [];
+  for (let at = 0; at < chunk.size; at += size) ranges.push([at, Math.min(chunk.size, at + size)]);
+  const pending: Promise<Buffer | null>[] = [];
+  let next = 0;
+  const fill = () => {
+    while (next < ranges.length && pending.length < rangesAhead) {
+      const [start, end] = ranges[next++]!;
+      pending.push(readRange(projectId, chunk.sha256, start, end).catch(() => null));
+    }
+  };
+  const hash = createHash('sha256');
+  fill();
+  while (pending.length) {
+    const bytes = await pending.shift()!;
+    fill();
+    if (!bytes) {
+      yield null;
+      return;
+    }
+    hash.update(bytes);
+    const last = !pending.length;
+    if (last && hash.digest('hex') !== chunk.sha256) {
+      yield null;
+      return;
+    }
+    yield { bytes, last };
+  }
+}
+/** Feeds the packs (newest first) to `scan`; stops once `done()` holds, checked after each
+ * range (Git ids are hashes and callers check the tree they list, so stopping before a
+ * chunk's digest is checked is safe). False when a chunk is unreadable or the scan gives up. */
 export async function scanPacks(
   projectId: string,
   packs: Chunk[][],
@@ -70,16 +127,11 @@ export async function scanPacks(
 ) {
   for (const chunks of packs) {
     scan.startPack();
-    let next = chunks.length ? readR2(projectId, chunks[0]!.sha256) : null;
-    for (let i = 0; i < chunks.length; i++) {
-      const bytes = await next;
-      next = i + 1 < chunks.length ? readR2(projectId, chunks[i + 1]!.sha256) : null;
-      const ok = !!bytes && scan.push(bytes, i === chunks.length - 1);
-      if (!ok || done()) {
-        await next?.catch(() => null);
-        return ok;
+    for (let i = 0; i < chunks.length; i++)
+      for await (const part of chunkParts(projectId, chunks[i]!)) {
+        if (!part || !scan.push(part.bytes, part.last && i === chunks.length - 1)) return false;
+        if (done()) return true;
       }
-    }
   }
   return true;
 }
@@ -97,16 +149,26 @@ export async function storePack(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   objects: PackObject[] | Buffer,
+  options: { framed?: boolean } = {},
 ) {
   const bytes = Buffer.isBuffer(objects) ? objects : writePack(objects);
-  const chunks: Chunk[] = [];
-  for (let at = 0; at < bytes.length; at += historyChunkBytes) {
-    const part = bytes.subarray(at, at + historyChunkBytes);
-    const pin = { sha256: digest(part), size: part.length };
-    await storeSourceBytes(ctx, projectId, part, pin);
-    chunks.push(pin);
-  }
+  const store = async (all: Buffer) => {
+    const chunks: Chunk[] = [];
+    for (let at = 0; at < all.length; at += historyChunkBytes) {
+      const part = all.subarray(at, at + historyChunkBytes);
+      const pin = { sha256: digest(part), size: part.length };
+      await storeSourceBytes(ctx, projectId, part, pin);
+      chunks.push(pin);
+    }
+    return chunks;
+  };
+  const chunks = await store(bytes);
+  // The side-band copy protocol v2 serves on the Worker path (src/git-worker-plan.ts).
+  const framer = options.framed ? new PackFramer(bytes.length) : null;
+  const framed = framer ? await store(Buffer.concat(framer.push(bytes))) : undefined;
+  framer?.end();
   return {
+    ...(framed ? { framed } : {}),
     chunks,
     bytes: bytes.length,
     objects: bytes.readUInt32BE(8),

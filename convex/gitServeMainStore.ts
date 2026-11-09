@@ -126,7 +126,7 @@ export const record = internalMutation({
     merged: v.array(v.id('projectHistoryPacks')),
     objectSets: v.array(v.object({ id: v.id('projectHistoryPacks'), objectSet: pin })),
   },
-  returns: v.object({ recorded: v.boolean(), discard: v.array(v.string()) }),
+  returns: v.object({ recorded: v.boolean(), discard: v.array(v.string()), bytes: v.number() }),
   handler: async (ctx, input) => {
     const { projectId, pack } = input;
     const history = await historyRow(ctx, projectId);
@@ -141,7 +141,7 @@ export const record = internalMutation({
       else if (row?.objectSet?.sha256 !== objectSet.sha256) unused.push(objectSet.sha256);
     }
     if (!history || history.status !== 'ready' || (last?.tip ?? history.importCommit) !== input.parent)
-      return { recorded: false, discard: [...fresh, ...unused] };
+      return { recorded: false, discard: [...fresh, ...unused], bytes: history?.bytes ?? 0 };
     const merged = input.merged.map(id => rows.find(row => row._id === id && row.source === 'forge'));
     invariant(
       merged.every(row => row),
@@ -174,13 +174,14 @@ export const record = internalMutation({
       main: pack.main,
       at: Date.now(),
     });
+    const bytes = history.bytes - freed + pack.bytes;
     await ctx.db.patch(history._id, {
-      bytes: history.bytes - freed + pack.bytes,
+      bytes,
       packs: history.packs - merged.length + 1,
       catchUp: undefined,
       updatedAt: Date.now(),
     });
     const kept = new Set(fresh);
-    return { recorded: true, discard: [...discard.filter(sha => !kept.has(sha)), ...unused] };
+    return { recorded: true, discard: [...discard.filter(sha => !kept.has(sha)), ...unused], bytes };
   },
 });

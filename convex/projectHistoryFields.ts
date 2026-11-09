@@ -91,7 +91,17 @@ export const historyTables = {
     baseReceiptId: v.string(),
     commit: v.string(),
     parent: v.string(),
-    pack: v.optional(v.object({ chunks: v.array(historyChunk), bytes: v.number(), objects: v.number() })),
+    pack: v.optional(
+      v.object({
+        chunks: v.array(historyChunk),
+        bytes: v.number(),
+        objects: v.number(),
+        /** The pack's SHA-1 trailer and its side-band framed copy for protocol v2 on the
+         * large-pack Worker path (Issue 3bd4a8e9); rows built before both are rebuilt once. */
+        packSha1: v.optional(v.string()),
+        framed: v.optional(v.array(historyChunk)),
+      }),
+    ),
     at: v.number(),
   })
     .index('by_project', ['projectId'])

@@ -18,6 +18,7 @@ import {
   sidebandData,
   type FetchArgs,
 } from '../src/git-serve-protocol';
+import { selectFetch } from '../src/git-serve-lane-refs';
 import {
   bytePlanType,
   chunkParts,
@@ -143,16 +144,19 @@ export async function setTrailer(
   projectId: string,
   chosen: WorkerPack[],
   joined: { key: string; sha1: string } | undefined,
+  cache = true,
 ) {
   const key = digest(chosen.map(pack => pack.packSha1).join(','));
   let sha1 = joined?.key === key ? joined.sha1 : null;
   if (!sha1) {
     sha1 = await joinedTrailer(projectId, chosen);
-    await ctx.runMutation(internal.gitServeWorkerStore.setJoined, {
-      projectId: projectId as Id<'hostedProjects'>,
-      key,
-      sha1,
-    });
+    // One joined trailer is kept per project (the clone's); a set with Lane packs is not cached.
+    if (cache)
+      await ctx.runMutation(internal.gitServeWorkerStore.setJoined, {
+        projectId: projectId as Id<'hostedProjects'>,
+        key,
+        sha1,
+      });
   }
   return Uint8Array.from(sha1.match(/../g)!, pair => parseInt(pair, 16));
 }
@@ -217,9 +221,14 @@ export async function workerFetch(
   joined: { key: string; sha1: string } | undefined,
   args: FetchArgs,
   v2: null | { gap: string | null },
+  /** Members' built Lane commits (Issue 3bd4a8e9); their packs carry framed copies. */
+  lanes: { commit: string; pack: WorkerPack | null }[] = [],
 ) {
-  const { from, to, common } = selectPacks(packs, args.wants, args.haves);
-  let chosen = packs.slice(from, to + 1);
+  const selected = lanes.length
+    ? selectFetch(packs, lanes, args.wants, args.haves)
+    : { ...selectPacks(packs, args.wants, args.haves), lanes: [] };
+  const { from, to, common } = selected;
+  let chosen = [...packs.slice(from, to + 1), ...selected.lanes.map(i => lanes[i]!.pack!)];
   const ack = pkt(common ? `ACK ${common}\n` : 'NAK\n');
   if (!v2 && !args.done) return { ack, plan: null };
   const joiner = new PackJoiner(chosen);
@@ -246,7 +255,7 @@ export async function workerFetch(
     }
     if (chosen.length > 1) {
       head.push(frame(joiner.header()));
-      tail.push(frame(await setTrailer(ctx, projectId, chosen, joined)));
+      tail.push(frame(await setTrailer(ctx, projectId, chosen, joined, !selected.lanes.length)));
     }
   }
   if (v2) tail.push(flushPkt);

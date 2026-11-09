@@ -7,6 +7,7 @@ import type { Id } from './_generated/dataModel';
 import { storeSourceBytes } from './projectSourceBytes';
 import { r2Config, r2Key } from './r2';
 import { deleteR2Object } from './r2Operations';
+import { workerConfig, workerServes } from './gitServeWorker';
 import { digest } from '../src/portable-hash';
 import { ForgeError, invariant } from '../src/errors';
 import { published } from '../src/hosted-github-mirror';
@@ -220,6 +221,11 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   });
   for (const sha256 of new Set(recorded.discard))
     await deleteR2Object(r2Config(), r2Key(projectId, sha256)).catch(() => {});
+  // A project the Worker serves gets the new pack framed and its clone trailer ahead of the
+  // next clone, as for imported and catch-up packs (Issue 7c36abfb).
+  const worker = workerConfig();
+  if (recorded.recorded && worker && workerServes(worker, recorded.bytes))
+    await ctx.scheduler.runAfter(0, internal.gitServeFrame.prepare, { projectId });
   console.log(
     `FORGE_GIT_MAIN_METRIC ${JSON.stringify({ projectId, ...metric, merged: merged.length, commits, objects: objects.length, packBytes: pack.bytes, ms: Date.now() - started, ...work.metric })}`,
   );

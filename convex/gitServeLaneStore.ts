@@ -42,8 +42,13 @@ const commitRow = (ctx: Ctx, projectId: Id<'hostedProjects'>, laneId: string) =>
     .query('projectGitLaneCommits')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
+/** A row is current while its Lane's head and base have not moved and its pack (if any) has
+ * the framed copy the Worker path serves; an older row is rebuilt once, to the same commit. */
 const current = (row: Doc<'projectGitLaneCommits'>, lane: Doc<'projectHostedOverlapLanes'> | null) =>
-  !!lane?.open && lane.head === row.head && lane.baseReceiptId === row.baseReceiptId;
+  !!lane?.open &&
+  lane.head === row.head &&
+  lane.baseReceiptId === row.baseReceiptId &&
+  (!row.pack || !!row.pack.framed);
 
 /** Most Lane commits a fetch looks up by its wants. */
 export const wantLookups = 16;
@@ -165,8 +170,8 @@ export const resolve = internalQuery({
 
 /** Closed-Lane rows one record removes, oldest first, with their R2 packs. */
 const pruneWindow = 16;
-const chunkSet = (row: Doc<'projectGitLaneCommits'> | null) =>
-  row?.pack?.chunks.map(chunk => chunk.sha256) ?? [];
+const chunkSet = (row: Pick<Doc<'projectGitLaneCommits'>, 'pack'> | null) =>
+  row?.pack ? [...row.pack.chunks, ...(row.pack.framed ?? [])].map(chunk => chunk.sha256) : [];
 /** Records a build unless the Lane moved meanwhile. Returns the R2 objects nothing references
  * any more: a replaced pack and alias object, and packs of closed Lanes (bounded window). */
 export const record = internalMutation({
@@ -177,7 +182,15 @@ export const record = internalMutation({
     baseReceiptId: v.string(),
     commit: v.string(),
     parent: v.string(),
-    pack: v.optional(v.object({ chunks: v.array(historyChunk), bytes: v.number(), objects: v.number() })),
+    pack: v.optional(
+      v.object({
+        chunks: v.array(historyChunk),
+        bytes: v.number(),
+        objects: v.number(),
+        packSha1: v.string(),
+        framed: v.array(historyChunk),
+      }),
+    ),
     aliases: v.optional(historyChunk),
   },
   returns: v.object({ recorded: v.boolean(), discard: v.array(v.string()) }),
@@ -195,9 +208,11 @@ export const record = internalMutation({
     const lane = await laneRow(ctx, input.projectId, input.laneId);
     const existing = await commitRow(ctx, input.projectId, input.laneId);
     const recorded = !!lane?.open && lane.head === input.head && lane.baseReceiptId === input.baseReceiptId;
-    if (!recorded) discard.push(...chunkSet({ pack: input.pack } as Doc<'projectGitLaneCommits'>));
-    else if (existing?.commit !== input.commit) {
-      discard.push(...chunkSet(existing));
+    if (!recorded) discard.push(...chunkSet({ pack: input.pack }));
+    else if (!existing || !current(existing, lane) || existing.commit !== input.commit) {
+      // Content-addressed: a rebuild to the same commit shares its pack chunks.
+      const kept = new Set(chunkSet({ pack: input.pack }));
+      discard.push(...chunkSet(existing).filter(sha => !kept.has(sha)));
       if (existing) await ctx.db.replace(existing._id, { ...fields, at: Date.now() });
       else await ctx.db.insert('projectGitLaneCommits', { ...fields, at: Date.now() });
     }

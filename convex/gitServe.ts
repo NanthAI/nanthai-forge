@@ -17,6 +17,7 @@ import {
   workerRoute,
   workerServes,
   type WorkerConfig,
+  type WorkerPack,
 } from './gitServeWorker';
 import {
   PackJoiner,
@@ -376,7 +377,10 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   if (service === 'git-receive-pack') return text(403, pushRefused);
   if (service !== 'git-upload-pack') return text(403, 'Use Git 1.6.6 or later (smart HTTP).');
   if ((route.service === 'info/refs') !== (request.method === 'GET')) return text(405, 'Method not allowed.');
-  const credential = session ? null : presentedCredential(request.headers.get('authorization'));
+  // A Worker session signed for a login uses that login. An anonymous one (a public project's
+  // listing sends no credentials) takes the login git sends once a listing names a Lane, checked
+  // exactly as on the direct route; the Worker forwards it (Issue 3bd4a8e9).
+  const credential = session?.c ? null : presentedCredential(request.headers.get('authorization'));
   if (credential === 'invalid')
     return unauthorized('Use a Forge login token (nforge login) as the password.');
   const v2 = /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
@@ -385,8 +389,9 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   let body = route.service === 'info/refs' ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
   // Signed-in requests read Lane refs in the same query: the built page for a listing (plus the
   // Lanes it names), or a fetch's wanted commits. Bodies that do not parse answer after access.
+  // A Worker session carries its member's credential id (session.c; checked again in load).
   const laneArgs = (): LaneArgs | undefined => {
-    if (!credential) return undefined;
+    if (!credential && !session?.c) return undefined;
     if (route.service === 'info/refs') return v2 ? undefined : { list: true, named: [], commits: [] };
     try {
       if (!v2) return { list: false, named: [], commits: parseV0Request(body).wants };
@@ -400,7 +405,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   let lanes = gzipped ? undefined : laneArgs();
   // Git sends no credentials while anonymous reads work (public projects). A listing that names
   // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is.
-  if (!credential && !session && v2 && !gzipped && route.service === 'git-upload-pack') {
+  if (!credential && !session?.c && v2 && !gzipped && route.service === 'git-upload-pack') {
     let named: string[] = [];
     try {
       const command = parseV2Request(body);
@@ -419,7 +424,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       ...(session?.c ? { sessionCredentialId: session.c } : {}),
     })) as Loaded | { status: 'bad-credential' } | { status: 'not-found'; signedIn: boolean };
   let loaded = await reload();
-  if (session && loaded.status !== 'ok')
+  if (session && !credential && loaded.status !== 'ok')
     return loaded.status === 'not-found' ? text(404, 'Repository not found.') : sessionEnded();
   if (loaded.status === 'bad-credential')
     return unauthorized('This Forge login expired, was revoked or is not a CLI login. Run nforge login.');
@@ -453,7 +458,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
     const ready = loaded as Loaded;
     const served = (args: FetchArgs, version: 2 | 0) => {
       if (!session) return fetchReply(ready, args, version);
-      const { packs, gap } = servedRefs(ready);
+      const { packs, lanes, gap } = servedRefs(ready);
       return workerFetch(
         ctx,
         ready.projectId,
@@ -461,6 +466,8 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
         ready.history?.row.joined,
         args,
         version === 2 ? { gap } : null,
+        // Current Lane rows carry packSha1 and a framed copy (gitServeLaneStore `current`).
+        lanes as { commit: string; pack: WorkerPack | null }[],
       ).then(reply => reply.plan ?? gitReply(kind, reply.ack));
     };
     if (!v2) return await served(parseV0Request(body), 0);

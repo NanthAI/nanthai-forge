@@ -30,7 +30,17 @@ const planType = 'application/x-forge-git-byte-plan';
 /** Workers Free allows 1,000 reads of Cloudflare services per request. */
 const maxParts = 900;
 const storedKey = /^v1\/p\/[A-Za-z0-9_-]{1,64}\/o\/[0-9a-f]{64}$/;
-const forwarded = ['content-type', 'content-encoding', 'accept', 'git-protocol', 'user-agent'];
+/** Request headers passed to the backend. `authorization` is the login git sends after a
+ * listing that names a Lane answers 401 on an anonymous session (public projects); the backend
+ * checks it like the direct route. */
+const forwarded = [
+  'content-type',
+  'content-encoding',
+  'accept',
+  'git-protocol',
+  'user-agent',
+  'authorization',
+];
 
 /** Equal to advertiseV2() in src/git-serve-protocol.ts (tests/hosted-history.test.mjs). */
 export const v2Advertisement = ['version 2', 'agent=forge/1', 'ls-refs', 'fetch', 'object-format=sha1']

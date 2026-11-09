@@ -125,12 +125,15 @@ at 1 MiB. Nothing runs while no one uses Git: no timers, scheduling or polling.
 
 The first fetch of a Lane head adds one build action: one query for the plan, one query
 per 100 source objects it reads, one record mutation, and R2 PUTs for the Lane pack (the
-commit, plus the trees and blobs its parent lacks) and an alias object (SHA-256 to Git blob
-id for the base and head). It reads the bytes of the files the Lane changed. File Git ids
+commit, plus the trees and blobs its parent lacks), the pack's side-band framed copy (for
+protocol v2 on the Worker path) and an alias object (SHA-256 to Git blob id for the base and
+head). It reads the bytes of the files the Lane changed. File Git ids
 come from the alias object; when it lacks more than 32 of the base's (a project's first
 build, or a base far from the last one built), the build reads the history packs from R2
 once instead and lists the parent commit's tree from them (only trees are kept: about
-1.4 MiB for this repository's 25 MB pack, under 1 s), rather than reading every file. A
+1.4 MiB for this repository's 25 MB pack), rather than reading every file. Each 32 MiB chunk
+is read as 4 MiB ranges, six in flight while earlier ones are parsed: one whole-chunk GET
+from a Convex action took about 10 s of this repository's 14 s first build. A
 scan that finds no such tree, or keeps more than 128 MiB of trees, falls back to reading
 the files. Later fetches of the same head read the cached row. A Lane fetch sends history after the newest stored commit the client has,
 plus the Lane pack. Into a repository without main, that history can repeat an object of
@@ -162,8 +165,14 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   advertisement, fixed text with no repository data, which the Worker answers itself; the
   ls-refs and fetch requests that follow are rechecked. A path segment
   `unpublished-landings` in the redirect says hosted main is ahead of the newest Git commit
-  (a v2 fetch also prints the `remote:` line; v0 has no side-band for it). Lane refs are not
-  listed on this route yet: a large project serves main only.
+  (a v2 fetch also prints the `remote:` line; v0 has no side-band for it).
+- **Lane refs.** Members get the same Lane refs here, under the same rules: a session signed
+  for a member's login lists and serves them. On a public project git's first request sends
+  no login, so the session is anonymous; a listing that names a Lane then answers `401`, git
+  sends the login, the Worker forwards it and the backend checks it like the direct route. A
+  session signed for a login never takes another one from the request. A fetch with a Lane
+  pack streams its framed copy (v2) or raw chunks (v0); its joined trailer is computed for
+  that fetch and not cached, so the clone's cached trailer stays.
 - **Bytes.** For the final fetch the backend returns a byte plan instead of the pack: the
   reply's opening lines, the R2 object keys (whole chunks, or ranges that drop each pack's
   header and trailer when several packs are joined) and the closing bytes. The Worker
