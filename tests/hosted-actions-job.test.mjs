@@ -1172,6 +1172,7 @@ test('6000-file pack plus 20 changes uses two source windows instead of W2 sixte
   );
   assert.equal(result.packRefresh.deltaFiles, 20);
   assert.equal(result.packRefresh.refresh, false);
+  assert.equal(s.calls.find(call => call.kind === 'plan').packRefresh, undefined);
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 2);
   assert.equal(s.traffic.downloads, 23);
   assert(
@@ -1234,6 +1235,8 @@ test('no pack uses W2 and refreshes the pinned accepted base; advertised refresh
       join(s.directory, 'cache'),
     );
     assert.equal(result.packRefresh.refresh, true);
+    // The plan call tells the server: a pass reads the required jobs, never waits on this job (0064c3b2).
+    assert.equal(s.calls.find(call => call.kind === 'plan').packRefresh, true);
     assert.equal(await result.refreshSourcePack(), !unsupported);
     const commands = s.calls.filter(call => call.kind === 'sourcePack');
     assert.equal(commands.length, unsupported ? 1 : 2);

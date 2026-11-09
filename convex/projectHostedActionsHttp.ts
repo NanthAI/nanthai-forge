@@ -215,6 +215,7 @@ export const handle = httpAction(async (ctx, request) => {
           ...input,
           recipe: canonicalPayload(plan.recipe),
           lockfile: plan.lockfile,
+          ...(command.packRefresh ? { packRefresh: true } : {}),
           ...('storageId' in selection
             ? { selectionStorage: selection.storageId }
             : { selectionR2Key: selection.r2Key }),

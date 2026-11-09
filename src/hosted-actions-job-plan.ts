@@ -253,9 +253,20 @@ export async function prepareActionsJob(
   const unsupported = hostedUnsupportedTools(recipe.actions);
   invariant(!unsupported.length, 'ACTIONS_TOOL_UNSUPPORTED', actionsToolUnsupported(unsupported));
   lap('selectMs');
+  // Decided before the plan call: the server reads the required jobs' conclusions early, so a
+  // pass never waits for this optional job (friction 0064c3b2).
+  const packRefresh =
+    client.capabilities.includes('sourcePack') &&
+    refreshSourcePack(
+      source.packed ? client.sourcePack : null,
+      source.deltaFiles,
+      source.deltaBytes,
+      source.totalBytes,
+    );
   const planned = (await client.call({
     kind: 'plan',
     plan: { recipe, lockfile: lockfileDigest(state.files) },
+    ...(packRefresh ? { packRefresh: true as const } : {}),
   })) as typeof run | { run: typeof run; claims: unknown };
   let claims: PoolClaim[] | null = null;
   if (recipe.pool) {
@@ -271,14 +282,7 @@ export async function prepareActionsJob(
   console.log(`plan: phases ${JSON.stringify(phases)}`);
   return {
     packRefresh: {
-      refresh:
-        client.capabilities.includes('sourcePack') &&
-        refreshSourcePack(
-          source.packed ? client.sourcePack : null,
-          source.deltaFiles,
-          source.deltaBytes,
-          source.totalBytes,
-        ),
+      refresh: packRefresh,
       state,
       base,
       packed: source.packed,

@@ -13,6 +13,9 @@ export const actionsPoolCapability = 'checks.pool';
 export const actionsToolchainsCapability = 'checks.toolchains';
 /** Read-only single-repository tokens for private submodules in the project's App installation. */
 export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
+/** The plan call says it starts the optional source-pack job; a pass then reads the required
+ * jobs' conclusions instead of waiting for the run's (friction 0064c3b2). */
+export const actionsPackVerdictCapability = 'checks.packVerdict';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
   'results.testFiles',
@@ -25,6 +28,7 @@ export const hostedActionsCapabilities = [
   actionsPoolCapability,
   actionsToolchainsCapability,
   actionsSubmoduleAccessCapability,
+  actionsPackVerdictCapability,
 ] as const;
 /** Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
@@ -40,6 +44,7 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'plan.plan.recipe.pool': actionsPoolCapability,
   'result.result.pool': actionsPoolCapability,
   'plan.plan.recipe.actions': actionsToolchainsCapability,
+  'plan.packRefresh': actionsPackVerdictCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = {

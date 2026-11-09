@@ -78,6 +78,13 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
   going; after that the 12-hour watchdog settles it. Any conclusion other than success (failure,
   timeout, cancelled) never passes; it ends the run as `runner-unavailable` (or `cancelled`) with
   that reason, and the retry policy decides what follows. The rule is `src/hosted-check-verdict.ts`.
+  When the plan starts the optional source-pack job (`Refresh optional Forge source pack`,
+  continue-on-error, so the run's conclusion never depends on it but still waits for it), the plan
+  call says so (capability `checks.packVerdict`; an older server never sees the field) and the pass instead reads GitHub's job list for the run 10 s after the last shard
+  result (again at 30 s if a job is still running, then the reads above). Every job except the pack
+  job must have completed as success or skipped; another conclusion settles as above. That is one
+  action and one mutation per such run, and only for such runs; the pass no longer waits 25-55 s
+  for the pack job.
   A new adapter supplies the same record from a channel the job cannot write: a signed provider event
   or a provider API read with the adapter's own credential.
 - **Outputs come from the planning step only.** It reads the Candidate as data and runs none of its

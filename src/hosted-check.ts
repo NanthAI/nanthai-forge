@@ -246,6 +246,9 @@ export const hostedCheckRunSchema = z
          * (src/hosted-check-verdict.ts), and `confirm` is the one scheduled read if its event is lost. */
         verdictPending: z.literal(true).optional(),
         confirm: z.string().nullable().optional(),
+        /** The plan started the optional source-pack job, which the run's conclusion waits for:
+         * a pass reads the required jobs' conclusions instead (friction 0064c3b2). */
+        packRefresh: z.literal(true).optional(),
       })
       .strict()
       .optional(),

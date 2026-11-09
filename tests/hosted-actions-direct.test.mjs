@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createPublicKey, verify, sign, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -12,6 +13,7 @@ import { hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { savePin } from '../dist/hosted-save.js';
+import { OPTIONAL_PACK_JOB, requiredJobsConclusion } from '../dist/hosted-check-verdict.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const { githubAppJwt, installationToken, actionsPermissions } = await import(
@@ -150,7 +152,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
     return reserved;
   };
   const input = (overrides = {}) => ({ ...id, claims: JSON.stringify(claims()), ...overrides });
-  const prepare = async (selection = null, actions = undefined) => {
+  const prepare = async (selection = null, actions = undefined, extra = {}) => {
     const r = await s.status(run.id),
       groups = opaque ? [] : Array.from({ length: shards - 1 }, (_, i) => [`tests/synthetic-${i}.test.mjs`]);
     const pins = {
@@ -177,6 +179,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
       lockfile: 'e'.repeat(64),
       selectionStorage,
       recipeStorage,
+      ...extra,
     });
   };
   // Every shard passed: the pass waits for GitHub's signed completed event (Issue 432164bf).
@@ -678,6 +681,112 @@ test('a lost completed event: at most two bounded reads of the run, then only th
       'no third read: the 12 h watchdog is the backstop',
     );
   }
+});
+test('friction 0064c3b2: a pass with the optional pack job settles on the required jobs, never on the pack job', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const job = (name, status, conclusion = null) => ({ name, status, conclusion });
+  const plan = (status, conclusion) => job('hosted-plan', status, conclusion);
+  const pack = job(OPTIONAL_PACK_JOB, 'in_progress');
+  const skipped = [job('forge-static', 'completed', 'skipped'), job('forge-shard', 'completed', 'skipped')];
+  for (const [answers, expected, reads] of [
+    // The job that posted the last result completed; the pack job is still running: pass now.
+    [[[plan('completed', 'success'), ...skipped, pack]], 'passed', 1],
+    [
+      [
+        [plan('in_progress'), pack],
+        [plan('completed', 'success'), pack],
+      ],
+      'passed',
+      2,
+    ],
+    [[[plan('completed', 'failure'), pack]], 'runner-unavailable', 1],
+    // Still running after both jobs reads: the run's own reads and its event decide, as before.
+    [
+      [
+        [plan('in_progress'), pack],
+        [plan('in_progress'), pack],
+      ],
+      'running',
+      2,
+    ],
+  ]) {
+    const s = await fixture(t);
+    bindRepository(t, s.id.projectId, repository);
+    const urls = [],
+      mutations = [];
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      urls.push(url);
+      const jobs = answers[urls.length - 1];
+      return Response.json({ total_count: jobs.length, jobs });
+    });
+    const ctx = {
+      runMutation: (ref, input) => {
+        mutations.push(getFunctionName(ref));
+        return s.call(verdicts, getFunctionName(ref).split(':')[1], input);
+      },
+      runQuery: async () => null,
+    };
+    await s.bind();
+    await s.prepare(null, undefined, { packRefresh: true });
+    for (const index of [0, 1])
+      await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index, exitCode: 0 }) });
+    const confirms = () =>
+      s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+    for (let attempt = 0; attempt < answers.length; attempt++) {
+      const read = confirms().at(-1);
+      assert.equal(read.delay, [10_000, 30_000][attempt], 'seconds after the last result, not minutes');
+      assert.equal(read.input.jobs, true);
+      assert.equal(read.input.target.executionId, '123');
+      await verdicts.confirm._handler(ctx, read.input);
+    }
+    assert.equal(urls.length, reads);
+    assert.ok(urls.every(url => url.endsWith(`/repos/${repository}/actions/runs/123/jobs?per_page=100`)));
+    assert.deepEqual(
+      [...new Set(mutations)],
+      ['projectHostedActionsVerdict:confirmed'],
+      'a jobs read carries its target: no pendingConfirm call',
+    );
+    assert.equal((await s.status(s.run.id)).status, expected);
+    if (expected === 'running') {
+      const fallback = confirms().at(-1);
+      assert.equal(fallback.delay, 5 * 60_000);
+      assert.equal(fallback.input.jobs, undefined, 'then the run reads');
+      assert.equal((await s.conclude('success')).status, 'passed', 'the event still settles it');
+    } else {
+      // The run's completed event, after the pack job, changes nothing.
+      assert.equal((await s.conclude(expected === 'passed' ? 'failure' : 'success')).status, expected);
+    }
+  }
+});
+test('requiredJobsConclusion: only complete pages, every non-pack job completed, pack job ignored', () => {
+  const job = (name, status, conclusion = null) => ({ name, status, conclusion });
+  const page = jobs => ({ total_count: jobs.length, jobs });
+  const plan = job('hosted-plan', 'completed', 'success');
+  assert.equal(requiredJobsConclusion(page([plan, job(OPTIONAL_PACK_JOB, 'in_progress')])), 'success');
+  assert.equal(
+    requiredJobsConclusion(page([plan, job(OPTIONAL_PACK_JOB, 'completed', 'failure')])),
+    'success',
+    'continue-on-error: the run conclusion ignores it too',
+  );
+  assert.equal(requiredJobsConclusion({ total_count: 101, jobs: [plan] }), null, 'incomplete page');
+  assert.equal(requiredJobsConclusion(page([job('forge-static', 'completed', 'skipped')])), null);
+  assert.equal(requiredJobsConclusion(page([job(OPTIONAL_PACK_JOB, 'completed', 'success')])), null);
+  assert.equal(
+    requiredJobsConclusion(page([plan, job('forge-hosted-1', 'completed', 'cancelled')])),
+    'cancelled',
+  );
+  assert.equal(requiredJobsConclusion(page([plan, job('forge-hosted-1', 'queued')])), null);
+  assert.equal(requiredJobsConclusion(null), null);
+  // The name is the workflow's own: renaming the job there must rename it here.
+  assert.match(
+    readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8'),
+    new RegExp(`name: ${OPTIONAL_PACK_JOB}\n    continue-on-error: true`),
+  );
 });
 test('OIDC/session and webhook retain epoch, actor and dispatch fencing before replay', async t => {
   const s = await fixture(t);
@@ -1234,7 +1343,7 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
         headers: { authorization: `Bearer ${oidc()}` },
         body: JSON.stringify({
           ...s.id,
-          command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) } },
+          command: { kind: 'plan', plan: { recipe, lockfile: 'e'.repeat(64) }, packRefresh: true },
         }),
       }),
     );
@@ -1248,6 +1357,8 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
     started = performance.now();
   assert.equal((await send()).status, 200);
   assert.deepEqual(mutations, ['projectHostedActionsSession', 'projectHostedActionsPlan']);
+  // The plan's pack job rides the same plan write (friction 0064c3b2): no added call.
+  assert.equal((await s.status(s.run.id)).actions.packRefresh, true);
   for (const value of [recipe.selection, recipe]) {
     const pin = savePin(value),
       key = `/synthetic/v1/p/${s.projectId}/o/${pin.sha256}`;

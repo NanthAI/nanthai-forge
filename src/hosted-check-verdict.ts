@@ -27,3 +27,28 @@ export function providerVerdict(conclusion: string | null | undefined): Provider
  * conclusion is outstanding. */
 export const hostedCheckOutputSettled = (run: Pick<HostedCheckRun, 'status' | 'actions'>) =>
   hostedCheckTerminal(run) || run.actions?.verdictPending === true;
+
+/** The optional source-pack job's name in forge-check.yml: continue-on-error, so the run's conclusion
+ * never depends on it, but the conclusion still waits for it to finish (friction 0064c3b2). */
+export const OPTIONAL_PACK_JOB = 'Refresh optional Forge source pack';
+
+/**
+ * The run's conclusion without the optional pack job, from GitHub's own job list (a provider API
+ * read with the adapter's credential, which the Candidate's job cannot write): `success` once every
+ * other job completed as success or skipped; another conclusion once they all completed and one did
+ * not succeed; null while one is still running or the page is incomplete (the run's own conclusion
+ * then decides). A pass therefore needs the same provider record as before, for every job that
+ * could have written results.
+ */
+export function requiredJobsConclusion(body: unknown): string | null {
+  const page = body as {
+    total_count?: unknown;
+    jobs?: { name?: unknown; status?: unknown; conclusion?: unknown }[];
+  };
+  if (!Array.isArray(page?.jobs) || page.total_count !== page.jobs.length) return null;
+  const required = page.jobs.filter(job => job.name !== OPTIONAL_PACK_JOB);
+  if (!required.length || required.some(job => job.status !== 'completed')) return null;
+  const failed = required.find(job => job.conclusion !== 'success' && job.conclusion !== 'skipped');
+  if (failed) return typeof failed.conclusion === 'string' ? failed.conclusion.slice(0, 40) : 'unknown';
+  return required.some(job => job.conclusion === 'success') ? 'success' : null;
+}

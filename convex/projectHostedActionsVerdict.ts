@@ -11,12 +11,43 @@ import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { directCallback, actionsExecutionCost } from '../src/hosted-actions-direct';
 import { signHostedCheckCallback } from '../src/hosted-check-evidence';
 import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
-import { providerVerdict } from '../src/hosted-check-verdict';
+import { providerVerdict, requiredJobsConclusion } from '../src/hosted-check-verdict';
 
 /** A lost `workflow_run` event gets one read of the run's conclusion this long after the last
  * shard result, and one more if the run was still going; the 12 h watchdog stays the backstop. */
 export const verdictConfirmMs = [5 * 60_000, 30 * 60_000] as const;
+/** A run whose plan started the optional source-pack job: reads of the required jobs' conclusions
+ * this long after the last shard result (the job that posted it completes a few seconds later),
+ * then the reads above. The run's own conclusion would wait for the pack job (friction 0064c3b2). */
+export const verdictJobsMs = [10_000, 30_000] as const;
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
+/** What a jobs read needs, resolved in the scheduling transaction (no pendingConfirm call). */
+const jobsTarget = v.object({
+  repository: v.string(),
+  executionId: v.string(),
+  runnerScope: v.union(v.null(), v.object({ repoId: v.number(), installationId: v.number() })),
+});
+async function jobsRead(
+  ctx: MutationCtx,
+  projectId: LoadedHostedCheck['row']['projectId'],
+  run: HostedCheckRun,
+) {
+  if (
+    run.actions?.packRefresh !== true ||
+    run.configuration.provider !== 'github-actions' ||
+    !run.executionId
+  )
+    return null;
+  const { repository } = run.configuration;
+  return {
+    jobs: true as const,
+    target: {
+      repository,
+      executionId: run.executionId,
+      runnerScope: await runnerTokenScope(ctx, projectId, repository),
+    },
+  };
+}
 
 /** The one `complete` callback for a run whose every shard reported. */
 export async function completeFromResults(
@@ -50,10 +81,12 @@ export async function completeFromResults(
 export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck) {
   const { row, run } = loaded;
   run.actions!.verdictPending = true;
+  // Only a run with the pack job reads its jobs: every other pass settles on the run's event.
+  const jobs = await jobsRead(ctx, row.projectId, run);
   run.actions!.confirm = await ctx.scheduler.runAfter(
-    verdictConfirmMs[0],
+    jobs ? verdictJobsMs[0] : verdictConfirmMs[0],
     makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
-    { projectId: row.projectId, runId: run.id, fence: run.fence, attempt: 0 },
+    { projectId: row.projectId, runId: run.id, fence: run.fence, attempt: 0, ...jobs },
   );
   await writeHostedCheck(ctx, row._id, run);
   return run;
@@ -107,6 +140,7 @@ export const confirmed = internalMutation({
     attempt: v.number(),
     completed: v.boolean(),
     conclusion: v.union(v.string(), v.null()),
+    jobs: v.optional(v.literal(true)),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -119,13 +153,21 @@ export const confirmed = internalMutation({
       await applyConclusion(ctx, selected, input.conclusion);
       return null;
     }
-    // Still running (another job of the run): one later read, then only the watchdog.
-    const next = verdictConfirmMs[input.attempt + 1];
+    // Still running: the next jobs read, then the run reads, then only the watchdog.
+    const jobsNext = input.jobs ? verdictJobsMs[input.attempt + 1] : undefined;
+    const next = input.jobs ? (jobsNext ?? verdictConfirmMs[0]) : verdictConfirmMs[input.attempt + 1];
+    const jobs = jobsNext === undefined ? null : await jobsRead(ctx, input.projectId, run);
     if (next !== undefined)
       run.actions.confirm = await ctx.scheduler.runAfter(
         next,
         makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
-        { projectId: input.projectId, runId: input.runId, fence: input.fence, attempt: input.attempt + 1 },
+        {
+          projectId: input.projectId,
+          runId: input.runId,
+          fence: input.fence,
+          attempt: input.jobs && !jobs ? 0 : input.attempt + 1,
+          ...jobs,
+        },
       );
     await writeHostedCheck(ctx, row._id, run);
     return null;
@@ -133,30 +175,50 @@ export const confirmed = internalMutation({
 });
 /** One GitHub read of the run, only when its completed event did not arrive in time. */
 export const confirm = internalAction({
-  args: { ...identity, fence: v.number(), attempt: v.number() },
+  args: {
+    ...identity,
+    fence: v.number(),
+    attempt: v.number(),
+    jobs: v.optional(v.literal(true)),
+    target: v.optional(jobsTarget),
+  },
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
-    const pending = (await ctx.runMutation(
-      makeFunctionReference<'mutation'>('projectHostedActionsVerdict:pendingConfirm'),
-      { projectId: input.projectId, runId: input.runId, fence: input.fence },
-    )) as { repository: string; executionId: string; runnerScope?: RunnerScope | null } | null;
+    const { target, ...identityInput } = input;
+    // A jobs read carries its target; `confirmed` still rechecks that the run is pending.
+    const pending =
+      target ??
+      ((await ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectHostedActionsVerdict:pendingConfirm'),
+        {
+          projectId: input.projectId,
+          runId: input.runId,
+          fence: input.fence,
+        },
+      )) as { repository: string; executionId: string; runnerScope?: RunnerScope | null } | null);
     if (!pending) return null;
     let completed = false,
       conclusion: string | null = null;
     try {
       const token = await actionsToken(ctx, input.projectId, pending.repository, pending.runnerScope);
       const response = await githubAppRequest(
-        `repos/${pending.repository}/actions/runs/${pending.executionId}`,
+        `repos/${pending.repository}/actions/runs/${pending.executionId}${input.jobs ? '/jobs?per_page=100' : ''}`,
         token,
       );
-      const body = (await response.json()) as { status?: unknown; conclusion?: unknown };
-      completed = body.status === 'completed';
-      conclusion = typeof body.conclusion === 'string' ? body.conclusion.slice(0, 40) : null;
+      if (input.jobs) {
+        // The required jobs only: the optional pack job never decides, nor holds, the verdict.
+        conclusion = requiredJobsConclusion(await response.json());
+        completed = conclusion !== null;
+      } else {
+        const body = (await response.json()) as { status?: unknown; conclusion?: unknown };
+        completed = body.status === 'completed';
+        conclusion = typeof body.conclusion === 'string' ? body.conclusion.slice(0, 40) : null;
+      }
     } catch {
       // An unreadable answer is not a conclusion: treat it as still running.
     }
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsVerdict:confirmed'), {
-      ...input,
+      ...identityInput,
       completed,
       conclusion,
     });

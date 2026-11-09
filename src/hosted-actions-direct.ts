@@ -96,7 +96,14 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       repositories: z.array(submoduleRepositoryName).min(1).max(8),
     })
     .strip(),
-  z.object({ kind: z.literal('plan'), plan: directPlanSchema }).strip(),
+  z
+    .object({
+      kind: z.literal('plan'),
+      plan: directPlanSchema,
+      /** The plan starts the optional source-pack job: settle a pass from the required jobs. */
+      packRefresh: z.literal(true).optional(),
+    })
+    .strip(),
   z.object({ kind: z.literal('output'), index: checkNumber, log: directLogSchema }).strip(),
   z
     .object({

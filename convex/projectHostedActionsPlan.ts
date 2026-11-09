@@ -26,6 +26,8 @@ export const prepare = internalMutation({
     selectionR2Key: v.optional(v.string()),
     recipeStorage: v.optional(v.id('_storage')),
     recipeR2Key: v.optional(v.string()),
+    /** The plan starts the optional source-pack job (friction 0064c3b2). */
+    packRefresh: v.optional(v.literal(true)),
   },
   // JSON text (Issue 0c457ae4): a replayed plan can return a finished run with per-file reports.
   returns: v.string(),
@@ -175,6 +177,8 @@ export const prepare = internalMutation({
       // A runner's fallback code rides this plan write; unknown values are dropped (7c2e69e1).
       const fallback = selectionFallbackSchema.safeParse(recipe.selection.fallback);
       if (fallback.success) run.fallback = fallback.data;
+      // A pass then reads the required jobs' conclusions instead of the whole run's.
+      if (input.packRefresh && run.actions) run.actions.packRefresh = true;
       run.status = 'running';
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       await writeHostedCheck(ctx, row._id, run);
