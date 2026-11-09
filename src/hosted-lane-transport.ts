@@ -10,10 +10,16 @@ import { hostedDownloadPageSize, type HostedDownloadDescriptor } from './hosted-
 import { readSigned, type SignedObject } from './exchange-r2-read.js';
 import { invariant } from './errors.js';
 import { latestClientSourcePack } from './source-pack-client.js';
+import { readCompleteRuns, runGroups, type PackRunBinding } from './hosted-checkout-runs.js';
+type Descriptor = HostedDownloadDescriptor & { run?: PackRunBinding };
+/** Older servers reject the `runs` argument; their pages keep a signature per object. */
+const olderServer = (error: unknown) => /extra field `?runs/.test(String((error as Error)?.message));
 /** Reuse project-scoped membership, batched R2 signing and dual-location byte transport. */
 export class ConvexLaneTransport implements LaneTransport {
   readonly objectPageSize = hostedDownloadPageSize;
-  private descriptors = new Map<string, HostedDownloadDescriptor>();
+  private descriptors = new Map<string, Descriptor>();
+  private runs = true;
+  private pages = 0;
   constructor(
     private readonly exchange: Pick<
       ConvexExchange,
@@ -39,22 +45,41 @@ export class ConvexLaneTransport implements LaneTransport {
       ),
     );
   }
-  private async page(digests: string[], signed: boolean): Promise<HostedDownloadDescriptor[]> {
-    const rows: HostedDownloadDescriptor[] = await this.exchange.client.mutation(
-      makeFunctionReference<'mutation'>('projectObjectDownloads:lanePage'),
-      { projectId: this.exchange.projectId, digests, signed },
-    );
+  private async page(digests: string[], signed: boolean, runs = false): Promise<Descriptor[]> {
+    type Wire = HostedDownloadDescriptor & { run?: Omit<PackRunBinding, 'key'> & { id: number } };
+    const call = (withRuns: boolean): Promise<Wire[]> =>
+      this.exchange.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:lanePage'), {
+        projectId: this.exchange.projectId,
+        digests,
+        signed,
+        ...(withRuns ? { runs: true } : {}),
+      });
+    let rows;
+    if (runs && signed && this.runs && digests.length > 1)
+      try {
+        rows = await call(true);
+      } catch (error) {
+        if (!olderServer(error)) throw error;
+        this.runs = false;
+      }
+    rows ??= await call(false);
     invariant(
-      rows.length === digests.length && rows.every((row, index) => row.digest === digests[index]),
+      rows.length === digests.length &&
+        rows.every((row, index) => row.digest === digests[index] && (!signed || !row.run || row.range)),
       'INVALID_WORK_BACKUP',
       'Download descriptors differ from the selected content.',
     );
-    return rows;
+    const page = this.pages++;
+    return rows.map(({ run, ...row }) => (run ? { ...row, run: { ...run, key: `${page}:${run.id}` } } : row));
   }
   async objects(digests: string[]) {
-    const rows = await this.page(digests, true);
+    const rows = await this.page(digests, true, true);
     this.descriptors = new Map(rows.map(row => [row.digest, row]));
     return rows.map(row => ({ sha256: row.digest, size: row.size }));
+  }
+  /** Keep each pack run inside one download window. */
+  downloadGroups(pins: ContentPin[]) {
+    return runGroups(pins, digest => this.descriptors.get(digest));
   }
   downloadToFile(pin: ContentPin, path: string) {
     return this.exchange.downloadToFile(pin, path);
@@ -67,13 +92,25 @@ export class ConvexLaneTransport implements LaneTransport {
     }
     if (files.some(file => !this.descriptors.has(file.pin.sha256)))
       await this.objects(files.map(file => file.pin.sha256));
+    // Whole pack runs first (one ranged GET each); their members are checked below with the rest.
+    const runs = await readCompleteRuns(files, this.descriptors);
+    // Run members left over (a run split across calls, or an expired run grant) are signed on their own.
+    const unsigned = files.filter(
+      file => !runs.has(file.pin.sha256) && this.descriptors.get(file.pin.sha256)?.run,
+    );
+    if (unsigned.length)
+      for (const row of await this.page(
+        unsigned.map(file => file.pin.sha256),
+        true,
+      ))
+        this.descriptors.set(row.digest, row);
     // Size discovery already fetched these signatures. Consume them once; a 403
     // refreshes through the same authorized endpoint, never an action per object.
     const signed = new Map<string, SignedObject>();
     for (const { pin } of files) {
       const row = this.descriptors.get(pin.sha256);
       invariant(row?.size === pin.size, 'INVALID_WORK_BACKUP', 'Download binding changed.');
-      if (row.url) signed.set(row.digest, { ...row, url: row.url });
+      if (row.url && !runs.has(row.digest)) signed.set(row.digest, { ...row, url: row.url });
     }
     const direct = await readSigned(
       async (_projectId, digests) => {
@@ -90,7 +127,7 @@ export class ConvexLaneTransport implements LaneTransport {
       (pin, done) => this.exchange.onDownloadProgress?.(pin, done),
       (name, pending) => this.exchange.onCall?.(name, pending),
     );
-    const legacy = files.filter(file => !direct.has(file.pin.sha256));
+    const legacy = files.filter(file => !direct.has(file.pin.sha256) && !runs.has(file.pin.sha256));
     const small = legacy.filter(file => file.pin.size <= 2 * 1024 * 1024);
     if (small.length) {
       const bytes = await this.exchange.downloadBatch(small.map(file => file.pin));
@@ -102,7 +139,7 @@ export class ConvexLaneTransport implements LaneTransport {
     const large = legacy.filter(file => file.pin.size > 2 * 1024 * 1024);
     if (large.length) await this.exchange.prepareDownloads(large.map(file => file.pin));
     for (const file of large) await this.downloadToFile(file.pin, file.path);
-    if (direct.size) {
+    if (direct.size || runs.size) {
       const rows = await this.page(
         files.map(file => file.pin.sha256),
         false,

@@ -7,7 +7,11 @@ import { state } from './hosted-fixture.mjs';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 import { ObjectDownloadReader } from '../dist/blob-download.js';
 import { readSigned } from '../dist/exchange-r2-read.js';
-import { packHeaders, verifyPackRange } from '../dist/object-pack-range.js';
+import { packHeaders, verifyPackRange, packRuns } from '../dist/object-pack-range.js';
+import { HostedCheckoutDownloads } from '../dist/hosted-checkout-downloads.js';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
 const { findObject, objectRow, catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const { rawContent, objectRange } = await import(moduleUrl('../convex/projectObjectContent.ts'));
@@ -229,5 +233,129 @@ test('large streaming windows keep source buffers bounded and PUTs proportional 
       peakOwnedBufferBytes: f.upload.peakBufferedBytes,
       rss: process.memoryUsage().rss,
     }),
+  );
+});
+
+test('a clone reads back-to-back pack objects with one ranged GET per run, signed for exactly their bytes', async t => {
+  const f = await fixture(t);
+  const bodies = Array.from({ length: 7 }, (_, i) => Buffer.from(`source file ${i} `.repeat(i + 1)));
+  const pins = bodies.map(bytes => f.upload.put(bytes));
+  await f.upload.drain(true);
+  await f.upload.commit();
+  await f.publish();
+  // Object 3 is not requested: runs are 0-2 and 4-6, and no grant covers object 3's bytes.
+  const wanted = pins.filter((_, i) => i !== 3);
+  const calls = [];
+  const exchange = {
+    projectId: f.projectId,
+    client: {
+      mutation: async (_ref, args) => {
+        calls.push(args);
+        return downloads.describe._handler(f.s.ctx, args);
+      },
+    },
+  };
+  const transfer = new HostedCheckoutDownloads(exchange);
+  assert.equal(transfer.objectPageSize, 500);
+  await transfer.objects(wanted.map(pin => pin.sha256));
+  const rows = await downloads.describe._handler(f.s.ctx, {
+    projectId: f.projectId,
+    digests: wanted.map(pin => pin.sha256),
+    signed: true,
+    runs: true,
+  });
+  assert.equal(new Set(rows.map(row => row.run?.id)).size, 2, 'two runs around the gap');
+  assert.equal(
+    rows.filter(row => row.url || row.run?.url).length,
+    2,
+    'one signature per run, none per member',
+  );
+  const first = rows.find(row => row.run?.id === 0 && row.run.url).run;
+  const gap = bodies[3].length;
+  assert.equal(
+    (
+      await fetch(first.url, {
+        headers: { Range: `bytes=${first.offset}-${first.offset + first.length + gap - 1}` },
+      })
+    ).status,
+    403,
+    'a run grant cannot read the unrequested neighbour',
+  );
+  const directory = mkdtempSync(join(tmpdir(), 'forge-runs-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const before = f.bucket.requests.filter(row => row.method === 'GET').length;
+  const groups = transfer.downloadGroups(wanted);
+  assert.equal(groups.length, 1);
+  await transfer.downloadFiles(wanted.map(pin => ({ pin, path: join(directory, pin.sha256) })));
+  const gets = f.bucket.requests.filter(row => row.method === 'GET').slice(before);
+  assert.equal(gets.length, 2, 'two ranged GETs for six objects');
+  assert.ok(gets.every(row => row.status === 206));
+  for (const [i, pin] of pins.entries())
+    if (i !== 3) assert.deepEqual(readFileSync(join(directory, pin.sha256)), bodies[i]);
+  assert.equal(calls.length, 1, 'one describe page for the whole set');
+  assert.deepEqual(
+    packRuns([
+      { index: 0, size: 2, pack: { digest: 'p', size: 10, offset: 0 } },
+      { index: 1, size: 3, pack: { digest: 'p', size: 10, offset: 2 } },
+      { index: 2, size: 3, pack: { digest: 'p', size: 10, offset: 2 } },
+    ]),
+    [{ members: [0, 1], offset: 0, length: 5, total: 10 }],
+    'a repeated offset never joins or extends a run',
+  );
+
+  // Damaged pack bytes: the run fails its digest check and leaves no partial files behind.
+  const corrupt = mkdtempSync(join(tmpdir(), 'forge-runs-bad-'));
+  t.after(() => rmSync(corrupt, { recursive: true, force: true }));
+  f.bucket.corrupt.add(f.bucket.key((await findObject(f.s.ctx, f.projectId, pins[0].sha256)).r2Key));
+  const again = new HostedCheckoutDownloads(exchange);
+  await again.objects(wanted.map(pin => pin.sha256));
+  await assert.rejects(
+    again.downloadFiles(wanted.map(pin => ({ pin, path: join(corrupt, pin.sha256) }))),
+    /truncated or corrupt/,
+  );
+  assert.deepEqual(readdirSync(corrupt), []);
+});
+
+test('an expired run signature and an older server fall back to exact per-object reads', async t => {
+  const f = await fixture(t);
+  const bodies = Array.from({ length: 4 }, (_, i) => Buffer.from(`fallback ${i}`));
+  const pins = bodies.map(bytes => f.upload.put(bytes));
+  await f.upload.drain(true);
+  await f.upload.commit();
+  await f.publish();
+  let older = false;
+  const calls = [];
+  const exchange = {
+    projectId: f.projectId,
+    client: {
+      mutation: async (_ref, args) => {
+        calls.push(args);
+        if (older && args.runs)
+          throw new Error(
+            'ArgumentValidationError: Object contains extra field `runs` that is not in the validator.',
+          );
+        return downloads.describe._handler(f.s.ctx, args);
+      },
+    },
+  };
+  const read = async transfer => {
+    const directory = mkdtempSync(join(tmpdir(), 'forge-runs-fallback-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    await transfer.objects(pins.map(pin => pin.sha256));
+    await transfer.downloadFiles(pins.map(pin => ({ pin, path: join(directory, pin.sha256) })));
+    for (const [i, pin] of pins.entries())
+      assert.deepEqual(readFileSync(join(directory, pin.sha256)), bodies[i]);
+  };
+  f.bucket.forbidGets = 1;
+  await read(new HostedCheckoutDownloads(exchange));
+  assert.equal(calls.filter(args => !args.runs).length, 4, 'the expired run re-signs each member on its own');
+  calls.length = 0;
+  older = true;
+  const transfer = new HostedCheckoutDownloads(exchange);
+  await read(transfer);
+  assert.equal(transfer.objectPageSize, 100, 'older servers keep 100-pin pages');
+  assert.deepEqual(
+    calls.map(args => Boolean(args.runs)),
+    [true, false],
   );
 });

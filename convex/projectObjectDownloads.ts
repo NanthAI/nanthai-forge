@@ -16,9 +16,9 @@ import { report } from './errors';
 import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/hosted-download-page';
 import { findObject } from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
-import { packRange, packHeaders } from '../src/object-pack-range';
+import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
+import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
 const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
-
 export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   if (user) return accessibleProject(ctx, projectId, user.subject);
@@ -83,7 +83,13 @@ export const signDownloads = mutation({
  * Checkout clients request signatures in the same bounded page, avoiding a second
  * membership/binding lookup per object. Signing writes no documents. */
 export const describe = mutation({
-  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), signed: v.optional(v.boolean()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    digests: v.array(v.string()),
+    signed: v.optional(v.boolean()),
+    /** Signed pages of up to hostedDownloadPageSize; neighbours in one stored pack share a run. */
+    runs: v.optional(v.boolean()),
+  },
   returns: v.array(
     v.union(
       v.object({
@@ -92,6 +98,7 @@ export const describe = mutation({
         location: v.literal('r2'),
         url: v.optional(v.string()),
         range: rangeValue,
+        run: runValue,
       }),
       v.object({ digest: v.string(), size: v.number(), location: v.literal('convex'), url: v.string() }),
       v.object({
@@ -102,15 +109,19 @@ export const describe = mutation({
       }),
     ),
   ),
-  handler: async (ctx, { projectId, digests, signed }) => {
+  handler: async (ctx, { projectId, digests, signed, runs }) => {
     try {
       await readableProject(ctx, projectId);
       invariant(
-        digests.length <= 100 && digests.every(id => /^[a-f0-9]{64}$/.test(id)),
+        digests.length <= (runs ? hostedDownloadPageSize : 100) &&
+          digests.every(id => /^[a-f0-9]{64}$/.test(id)) &&
+          (!runs || signed),
         'BAD_ARGUMENT',
-        'Read exact content identities in pages of at most 100.',
+        'Read exact content identities in pages of at most 100 (signed runs: 500).',
       );
-      const result: (DownloadRow & { url?: string })[] = [];
+      const result: (DownloadRow & { url?: string; run?: RunBinding })[] = [];
+      const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
+        seen = new Set<string>();
       for (const digest of digests) {
         const row = await findObject(ctx, projectId, digest);
         invariant(
@@ -125,11 +136,16 @@ export const describe = mutation({
             'INVALID_WORK_BACKUP',
             'Stored content has a different project binding.',
           );
+          // Packed rows are signed after the page is read (runs); every other row as before.
+          const deferred = runs === true && !!row.pack && row.size > 0 && !seen.has(digest);
+          seen.add(digest);
+          if (deferred)
+            packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key });
           result.push({
             ...pin,
             location: 'r2',
             ...(row.pack ? { range: packRange(row)! } : {}),
-            ...(signed
+            ...(signed && !deferred
               ? { url: await presignGet(r2Config(), row.r2Key, packHeaders(packRange(row), row.size)) }
               : {}),
           });
@@ -147,6 +163,7 @@ export const describe = mutation({
           result.push({ ...pin, location: 'recipe', recipe: row.recipe });
         }
       }
+      if (runs) await signRuns(result, packed);
       return result;
     } catch (error) {
       return report(error);
@@ -215,11 +232,23 @@ export const source = mutation({
  * retain their existing byte path; never inspect their Convex storage metadata here.
  * The unsigned call rechecks the same bindings after client IO without re-signing. */
 export const lanePage = mutation({
-  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), signed: v.boolean() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    digests: v.array(v.string()),
+    signed: v.boolean(),
+    /** Neighbours in one stored pack share one signed run (see describe). */
+    runs: v.optional(v.boolean()),
+  },
   returns: v.array(
-    v.object({ digest: v.string(), size: v.number(), url: v.optional(v.string()), range: rangeValue }),
+    v.object({
+      digest: v.string(),
+      size: v.number(),
+      url: v.optional(v.string()),
+      range: rangeValue,
+      run: runValue,
+    }),
   ),
-  handler: async (ctx, { projectId, digests, signed }) => {
+  handler: async (ctx, { projectId, digests, signed, runs }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted source.');
@@ -229,7 +258,9 @@ export const lanePage = mutation({
         'BAD_ARGUMENT',
         'Read exact content identities in bounded pages.',
       );
-      const result: HostedDownloadDescriptor[] = [];
+      const result: (HostedDownloadDescriptor & { run?: RunBinding })[] = [];
+      const packed: { index: number; size: number; pack: ObjectPack; key: string }[] = [],
+        seen = new Set<string>();
       for (const digest of digests) {
         const row = await findObject(ctx, projectId, digest);
         invariant(
@@ -237,6 +268,10 @@ export const lanePage = mutation({
           'SOURCE_UNAVAILABLE',
           'Requested project source object is unavailable.',
         );
+        const deferred =
+          runs === true && signed && isR2Object(row) && !!row.pack && row.size > 0 && !seen.has(digest);
+        seen.add(digest);
+        if (deferred) packed.push({ index: result.length, size: row.size, pack: row.pack!, key: row.r2Key! });
         if (isR2Object(row)) {
           invariant(
             row.r2Key === r2Key(projectId, row.pack?.digest ?? digest),
@@ -248,11 +283,12 @@ export const lanePage = mutation({
           digest,
           size: row.size,
           ...(row.pack ? { range: packRange(row)! } : {}),
-          ...(signed && isR2Object(row)
+          ...(signed && isR2Object(row) && !deferred
             ? { url: await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), row.size)) }
             : {}),
         });
       }
+      if (packed.length) await signRuns(result, packed);
       return result;
     } catch (error) {
       return report(error);

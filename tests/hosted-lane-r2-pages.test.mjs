@@ -236,6 +236,77 @@ for (const [count, totalBytes] of [
   });
 }
 
+test('a cold Lane checkout of packed objects reads each pack run with one ranged GET, same calls', async t => {
+  const s = fixture(t),
+    count = 1200,
+    perPack = 600,
+    packs = new Map();
+  const body = i => Buffer.from(`packed source ${i}\n`.repeat(1 + (i % 7)));
+  const files = [];
+  for (let first = 0; first < count; first += perPack) {
+    const bodies = Array.from({ length: perPack }, (_, i) => body(first + i)),
+      bytes = Buffer.concat(bodies),
+      packDigest = digest(bytes);
+    packs.set(packDigest, bytes);
+    let offset = 0;
+    for (const [i, part] of bodies.entries()) {
+      const pin = s.put(part, {
+        r2Key: `v1/p/project/o/${packDigest}`,
+        pack: { digest: packDigest, size: bytes.length, offset },
+      });
+      offset += part.length;
+      files.push({ path: `src/${String(first + i).padStart(5, '0')}.txt`, blob: pin.sha256, mode: 'file' });
+    }
+  }
+  const state = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files,
+      message: 'packed',
+      at: '2026-01-01T00:00:00Z',
+    }),
+  );
+  s.selection.head = s.put(state).sha256;
+  const ranges = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const id = new URL(url).pathname.split('/').at(-1);
+    s.counts.gets++;
+    if (id === s.selection.head) return new Response(state);
+    const pack = packs.get(id),
+      [, from, to] = /^bytes=(\d+)-(\d+)$/.exec(new Headers(init?.headers).get('range'));
+    ranges.push(Number(to) - Number(from) + 1);
+    return new Response(pack.subarray(Number(from), Number(to) + 1), {
+      status: 206,
+      headers: { 'content-range': `bytes ${from}-${to}/${pack.length}` },
+    });
+  });
+  const root = join(s.directory, 'checkout');
+  const result = await checkoutHostedLane(
+    root,
+    {
+      url: 'https://fixture.invalid',
+      projectId: 'project',
+      laneId: s.selection.laneId,
+      operationId: randomUUID(),
+    },
+    s.transport,
+  );
+  assert.equal(result.downloadedObjects, count + 1);
+  for (const i of [0, perPack - 1, perPack, count - 1])
+    assert.deepEqual(readFileSync(join(root, `src/${String(i).padStart(5, '0')}.txt`)), body(i));
+  const pages = Math.ceil(count / 500);
+  assert.equal(s.counts.calls, 2 * pages + 4, 'calls per open are unchanged');
+  // Pages of 500 cut the two 600-object packs into runs of 500, 100+400 and 200.
+  assert.deepEqual(ranges.length, 4, 'four ranged GETs instead of 1,200');
+  assert.equal(s.counts.gets, 4 + 1);
+  assert.equal(s.counts.writes, 0);
+  t.diagnostic(
+    JSON.stringify({ files: count, calls: s.counts.calls, gets: s.counts.gets, runBytes: ranges }),
+  );
+});
+
 test('Lane pages preserve access, credential scope, removal and project binding checks', async t => {
   const s = fixture(t),
     pin = s.put(Buffer.from('guarded'));

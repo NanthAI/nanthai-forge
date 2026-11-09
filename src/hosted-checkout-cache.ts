@@ -19,6 +19,25 @@ export interface CheckoutObjectTransport {
   downloadFiles?(files: { pin: ContentPin; path: string }[]): Promise<void>;
   /** The project's latest source pack, or null. Never throws: a pack is only a cache. */
   sourcePack?(): Promise<SourcePackDownload | null>;
+  /** Download windows that keep transfer units (pack runs) whole; default sizeGroups. */
+  downloadGroups?(pins: ContentPin[]): ContentPin[][];
+}
+/** Windows of at most 16 MiB (one larger object alone). */
+export function sizeGroups(pins: ContentPin[]) {
+  const groups: ContentPin[][] = [];
+  let group: ContentPin[] = [],
+    size = 0;
+  for (const pin of pins) {
+    if (group.length && size + pin.size > 16 * 1024 * 1024) {
+      groups.push(group);
+      group = [];
+      size = 0;
+    }
+    group.push(pin);
+    size += pin.size;
+  }
+  if (group.length) groups.push(group);
+  return groups;
 }
 /** Below this many missing objects, per-object pages are cheaper than one pack. */
 export const checkoutPackMinimum = 500;
@@ -84,18 +103,8 @@ export class HostedCheckoutCache {
         'Source pins differ from selected content.',
       );
       // Transport windows bound both metadata calls and in-memory small-object reads.
-      let group: ContentPin[] = [],
-        size = 0;
-      for (const pin of pins) {
-        if (group.length && size + pin.size > 16 * 1024 * 1024) {
-          await this.download(group);
-          group = [];
-          size = 0;
-        }
-        group.push(pin);
-        size += pin.size;
-      }
-      if (group.length) await this.download(group);
+      for (const group of this.transport.downloadGroups?.(pins) ?? sizeGroups(pins))
+        await this.download(group);
     }
   }
   /** Ids absent or invalid in `objects`. Parallel file reads: per-file latency, not

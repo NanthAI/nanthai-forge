@@ -106,7 +106,8 @@ for (const count of [2538, 5076])
     assert(
       f.calls
         .filter(c => c.name === 'projectObjectDownloads:describe')
-        .every(c => c.args.digests.length <= 100),
+        // Signed run pages hold up to 500 pins; per-object pages stay at 100.
+        .every(c => c.args.digests.length <= (c.args.runs ? 500 : 100)),
     );
     assert(!f.calls.some(c => /downloadPart|downloadBatch|signDownloads|projectMain:objects/.test(c.name)));
   });
