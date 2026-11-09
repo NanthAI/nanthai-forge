@@ -260,7 +260,11 @@ test('a repository outside the installation, or unreachable access, refuses clea
     (await attempt(async () => ({ 'NanthAI/priv': { token: 'wrong' } }))).recovery.refusals[0].reason,
     'fetch-failed',
   );
-  assert.equal((await attempt(undefined)).recovery.refusals[0].reason, 'fetch-failed');
+  // A connected-machine runner has no access path: it says so and names the way out.
+  const machine = await attempt(undefined);
+  assert.equal(machine.recovery.refusals[0].reason, 'fetch-failed');
+  assert.match(machine.message, /connected-machine runner cannot/);
+  assert.match(machine.message, /"submodules": false/);
 });
 
 test('a relative .gitmodules URL resolves against the project repository, then private access applies', async t => {
@@ -278,7 +282,9 @@ test('a relative .gitmodules URL resolves against the project repository, then p
   const asked = [];
   await assert.rejects(
     materializeSubmodules(s.directory, s.files, s.read, { cache: cache(t) }),
-    error => error.recovery.refusals[0].reason === 'relative-url-without-origin',
+    error =>
+      error.recovery.refusals[0].reason === 'relative-url-without-origin' &&
+      /connected machine; use an absolute https URL/.test(error.message),
   );
   await materializeSubmodules(s.directory, s.files, s.read, {
     cache: cache(t),

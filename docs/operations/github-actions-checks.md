@@ -1117,9 +1117,13 @@ the owner has not allowed, a repository outside the installation or a runner wit
 with that line before any project code runs: on the self-hosted runner before the
 command; on Actions the plan pins the refusal (`selection.planError`), so every job
 fails at once with the code and the check settles failed, not runner-unavailable.
-Machine runners do not fetch private submodules yet. A check that does not need submodule content sets
-`"submodules": false` in its definition (part of its digest) to keep the pointer
-files.
+Connected-machine runners (provider mac or self-hosted) have no project GitHub
+repository and no installation, so they never fetch private repositories and refuse
+relative URLs; the refusal says so (`relative-url-without-origin`, or `fetch-failed`
+for a GitHub URL that is not readable anonymously) and names the way out: an absolute
+public URL, a GitHub Actions runner, or `"submodules": false`. A check that does not
+need submodule content sets `"submodules": false` in its definition (part of its digest)
+to keep the pointer files.
 
 `actions.setup` belongs to the App/OIDC Actions supervisor, including when that
 workflow uses a self-hosted runner. Other runner providers do not use this

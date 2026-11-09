@@ -87,15 +87,21 @@ export function githubRepositoryOf(url: string): string | null {
   return local ? `${local[1]}/${local[2]}` : null;
 }
 
-const reasonHints: Partial<Record<SubmoduleRefusalReason, (repository: string) => string>> = {
+const reasonHints: Partial<Record<SubmoduleRefusalReason, (repository?: string) => string>> = {
+  'relative-url-without-origin': () =>
+    " (a relative URL resolves against the project's GitHub repository, and this runner has none, as on a connected machine; use an absolute https URL, or run the check on a GitHub Actions runner)",
+  'fetch-failed': repository =>
+    !repository
+      ? ''
+      : ` (${repository} could not be fetched; if it is private, only a GitHub Actions runner can read it, after the project owner allows it, and a connected-machine runner cannot; make it public or set "submodules": false on the check)`,
   'outside-installation': () =>
     " (not readable without credentials, and its repository is not in the project's GitHub App installation)",
   'access-unavailable': () =>
     ' (the repository was not readable without credentials and App access could not be obtained)',
-  'not-allowed': repository =>
+  'not-allowed': (repository = 'OWNER/NAME') =>
     ` (not readable without credentials, and the project owner has not allowed checks to read ${repository}; ` +
     `to allow it, the project owner runs ${submoduleAllowCommand(repository)})`,
-  'public-logs': repository =>
+  'public-logs': (repository = 'OWNER/NAME') =>
     ` (${repository} is private and this runner's check logs are public, so anything a check prints from it ` +
     `would be public; use a runner with private logs, or, only if that is acceptable, the project owner runs ` +
     `${submoduleAllowCommand(repository, true)})`,
@@ -105,7 +111,7 @@ export function submoduleRefusal(refusals: SubmoduleRefusal[]) {
   const first = refusals[0]!;
   return new ForgeError(
     'SUBMODULE_NOT_MATERIALIZED',
-    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}${reasonHints[first.reason]?.(first.repository ?? 'OWNER/NAME') ?? ''}` +
+    `Submodule ${first.path} @ ${first.commit.slice(0, 12)} (${first.url ?? 'no URL in .gitmodules'}) was not materialized: ${first.reason}${reasonHints[first.reason]?.(first.repository) ?? ''}` +
       (refusals.length > 1 ? `; ${refusals.length - 1} more` : '') +
       '. Public HTTPS URLs are fetched without credentials; private GitHub repositories only when the project owner allowed them and the project\'s GitHub App installation includes them. Set "submodules": false on the check to run without submodule content.',
     undefined,
