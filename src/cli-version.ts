@@ -10,12 +10,7 @@ import {
   cliSelectedBuild,
   retainCliRuntime,
 } from './cli-installation.js';
-import {
-  cliCommandProject,
-  cliLandingCommand,
-  cliMeasuredCommand,
-  waitForCliMeasurement,
-} from './cli-measurement-hold.js';
+import { cliCommandProject, cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
 import {
@@ -64,15 +59,6 @@ const READ_ACTIONS = new Set([
 export function cliReadOnlyCommand(args: string[]) {
   if (['agent', 'x'].includes(args[0]!)) return READ_ACTIONS.has(args[2]?.toLowerCase() ?? '');
   return ['status', 'wait', 'docs', 'heavy', 'doctor'].includes(args[0]!);
-}
-/** Writes that touch no measured code or landing: planning records and friction, and `pull` of
- * accepted main into a clone. Under a measurement hold they run on the held build, like reads
- * (0150d302: planning writes and `pull` were refused CLI_UPDATE_FROZEN). Updates, rollback and
- * every other write stay held. Not used outside a hold, so unheld behaviour is unchanged. */
-const HOLD_PASS_ACTIONS = new Set(['put-planning-item', 'comment-planning-item', 'friction']);
-export function cliHoldPassCommand(args: string[]) {
-  if (['agent', 'x'].includes(args[0]!)) return HOLD_PASS_ACTIONS.has(args[2]?.toLowerCase() ?? '');
-  return args[0] === 'pull';
 }
 /** A parent CLI that just installed and verified main hands that fact to the child it re-runs the
  * command in, so the child does not repeat the release read. Bound to the parent pid. */
@@ -249,12 +235,14 @@ export async function cliStartup(
     // canary, and the next command runs on main. Only a failed background install makes a write
     // install in the foreground, so a broken update never leaves writes silently on old code.
     // An explicit historical rollback (restoreMain) still restores main before any write.
-    // A hold naming this command's project measures it: like a read, it runs on the held build.
+    // A measurement hold pins the selected build; it never stops work (815edfcb: a bench cell's
+    // hold refused every builder save, sync and board write once main moved). Under a hold every
+    // command, read or write, runs on the held build with one notice line; only `update` and
+    // `cli rollback` stay refused, and landings already waited above. A historical rollback still
+    // restores main before a write, which the hold prevents, so that write alone is refused.
     const frozen = existsSync(join(installation, '.freeze'));
-    const measured = frozen && (await cliMeasuredCommand(installation, commandProject));
-    const passing = frozen && cliHoldPassCommand(args);
-    const reading = cliReadOnlyCommand(args) || measured || passing;
-    if (expectedCurrent !== null && (reading || (!restoreMain && !frozen))) {
+    const reading = cliReadOnlyCommand(args);
+    if (expectedCurrent !== null && (reading || !restoreMain)) {
       const state = frozen
         ? 'held by a measurement hold'
         : await startBackgroundCliUpdate(installation, root, released, args).then(
@@ -268,7 +256,7 @@ export async function cliStartup(
           );
       if (reading || !state.startsWith('last install failed')) {
         process.stderr.write(
-          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${measured ? 'measured write' : passing ? 'planning/pull write' : reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
+          `Forge CLI main ${released.slice(0, 8)} ${state}; this ${reading ? 'read' : 'write'} ran on ${installed.slice(0, 8)}.\n`,
         );
         return true;
       }

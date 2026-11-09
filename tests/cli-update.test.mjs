@@ -367,10 +367,18 @@ async function releaseFixture(t, f, head, status) {
   return calls;
 }
 
-test('a one-release-behind installed process under a measurement hold refuses on its next call', async t => {
+test('a one-release-behind installed process under a measurement hold runs on the held build', async t => {
   const f = fixture(t),
     calls = await releaseFixture(t, f, b);
   writeFileSync(join(f.installation, '.freeze'), 'synthetic measurement');
+  assert.equal(
+    await cliStartup(['init-native', join(f.directory, 'unused')], f.old, cliVersionCheck()),
+    true,
+  );
+  assert.equal(Atomics.load(calls, 0), 1);
+  assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
+  // Only an explicit historical rollback, which must restore main before a write, still refuses.
+  writeFileSync(join(f.installation, 'rollback.json'), JSON.stringify({ head: a }));
   await assert.rejects(
     cliStartup(['init-native', join(f.directory, 'never-created')], f.old, cliVersionCheck()),
     error => {
@@ -379,7 +387,6 @@ test('a one-release-behind installed process under a measurement hold refuses on
       return true;
     },
   );
-  assert.equal(Atomics.load(calls, 0), 1);
   assert.equal(existsSync(join(f.directory, 'never-created')), false);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
 });

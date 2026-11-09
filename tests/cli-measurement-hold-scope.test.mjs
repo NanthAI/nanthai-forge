@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // A measurement hold that names the measured project lets that project's own landings run on the
 // held build; every other project's landings still wait, and CLI updates stay refused (8c9b84fc:
-// the exit bench smoke cell hung in `land --save` behind its own hold).
+// the exit bench smoke cell hung in `land --save` behind its own hold). Every other command runs
+// on the held build under any hold (815edfcb).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
@@ -120,34 +121,39 @@ test('CLI updates stay refused for everyone under a scoped hold', async t => {
     updateCliChecked(f.installation, source, undefined, withSignedReleases(read, source.projectId)),
     { code: 'CLI_UPDATE_FROZEN' },
   );
-  // Another project's write under the same hold still refuses to run on a stale build.
-  await assert.rejects(
-    cliStartup(
-      ['agent', f.root, 'save', JSON.stringify({ url: source.url, projectId: DOGFOOD })],
-      f.old,
-      cliVersionCheck(),
-      { validated: true },
-    ),
-    { code: 'CLI_UPDATE_FROZEN' },
-  );
+  // Another project's write under the same hold runs on the held build; nothing is installed.
+  const save = ['agent', f.root, 'save', JSON.stringify({ url: source.url, projectId: DOGFOOD })];
+  assert.equal(await settled(cliStartup(save, f.old, cliVersionCheck(), { validated: true })), true);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
 });
 
-test('planning writes, friction and pull pass any hold on the held build; other writes stay refused', async t => {
+// 815edfcb: once main moved under a bench cell's hold, every builder save, sync, board post and
+// owner set-policy refused CLI_UPDATE_FROZEN for the cell's whole length.
+test('under any hold with main moved, every write runs on the held build; only updates are refused', async t => {
   const f = fixture(t),
     calls = await release(t, f, b);
+  const stderr = [],
+    write = process.stderr.write;
+  process.stderr.write = chunk => (stderr.push(String(chunk)), true);
+  t.after(() => (process.stderr.write = write));
   for (const hold of [`bench cell n1-r1 pid 1\nproject ${BENCH}\n`, 'bench cell n1-r1 pid 1\n']) {
     writeFileSync(f.hold, hold);
     const run = (...args) => cliStartup(args, f.old, cliVersionCheck(), { validated: true });
     const body = JSON.stringify({ url: source.url, projectId: DOGFOOD });
-    for (const action of ['put-planning-item', 'comment-planning-item', 'friction'])
+    for (const action of ['save', 'sync', 'start', 'complete', 'board-post', 'set-policy', 'friction'])
       assert.equal(await settled(run('agent', f.root, action, body)), true, `${action} under ${hold}`);
+    assert.equal(await settled(run('agent', f.root, 'save', '--friction', body)), true, 'save --friction');
+    assert.equal(await settled(run('x', f.root, 'put-planning-item', body)), true, 'planning write');
     assert.equal(await settled(run('pull', f.root)), true, 'pull');
     assert.equal(await settled(run('x', f.root, 'planning', body)), true, 'planning read');
-    for (const action of ['save', 'complete', 'start'])
-      await assert.rejects(run('agent', f.root, action, body), { code: 'CLI_UPDATE_FROZEN' }, action);
-    await assert.rejects(run('agent', f.root, 'put-planning-item-x', body), { code: 'CLI_UPDATE_FROZEN' });
+    const read = { source: { current: async () => assert.fail('unexpected release read') } };
+    await assert.rejects(
+      updateCliChecked(f.installation, source, undefined, withSignedReleases(read, source.projectId)),
+      { code: 'CLI_UPDATE_FROZEN' },
+    );
   }
+  const notice = `main ${b.slice(0, 8)} held by a measurement hold; this write ran on ${a.slice(0, 8)}`;
+  assert.ok(stderr.some(line => line.includes(notice)));
   assert.ok(Atomics.load(calls, 0) > 0);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a, 'no install ran under the hold');
 });

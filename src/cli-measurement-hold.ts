@@ -10,7 +10,7 @@ export function cliLandingCommand(args: string[]) {
   );
 }
 /** Projects a measurement hold names (`project ID` lines). Empty: the hold covers every project.
- * Null: no hold. The measured projects' own commands run on the held build; updates stay held. */
+ * Null: no hold. The measured projects' own landings pass the hold; updates stay held. */
 export function measurementHoldProjects(installation: string): string[] | null {
   let text: string;
   try {
@@ -21,7 +21,7 @@ export function measurementHoldProjects(installation: string): string[] | null {
   return [...text.matchAll(/^project[ \t]+(\S+)[ \t]*$/gm)].map(match => match[1]!);
 }
 /** The hosted project a ROOT-addressed command acts on, read from local files only (its inline
- * url/projectId, else the checkout's binding); null when unknown, so the command stays held. */
+ * url/projectId, else the checkout's binding); null when unknown, so the landing waits. */
 export async function cliCommandProject(args: string[]): Promise<string | null> {
   const root = ['agent', 'x', 'land'].includes(args[0] ?? '') ? args[1] : undefined;
   if (!root || root.startsWith('-')) return null;
@@ -37,16 +37,6 @@ export async function cliCommandProject(args: string[]): Promise<string | null> 
   } catch {
     return null;
   }
-}
-/** True when a scoped hold names the project this command acts on (resolved only then). */
-export async function cliMeasuredCommand(
-  installation: string,
-  project: () => Promise<string | null>,
-): Promise<boolean> {
-  const projects = measurementHoldProjects(installation);
-  if (!projects?.length) return false;
-  const id = await project();
-  return id !== null && projects.includes(id);
 }
 /** Local hints plus a fallback only while a measurement hold is active; no server polling.
  * A hold that names this command's project lets it through, re-read on every hold change. */

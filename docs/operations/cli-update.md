@@ -105,21 +105,21 @@ A later update removes it once it has no live users. If a build is still retired
 process tries to claim it, that process re-runs on current and is not refused. There is no
 background collector, and a no-op update performs no cleanup.
 
-A measurement hold at `DIR/.freeze` prevents changes to current. Landing commands
-explain the wait and watch local hold removal before reading the released version,
-with no timers or server polling. Planning writes (`put-planning-item`,
-`comment-planning-item`, `friction`) and `pull` affect no measurement: like reads, they run on
-the held build for every project, with one stderr line. Other stale processes
-under that hold refuse with `CLI_UPDATE_FROZEN`, naming the hold and recovery
-command. The updater never removes a measurement hold itself.
+A measurement hold at `DIR/.freeze` pins the selected build: it prevents changes to
+current, never other work. While it exists and main has moved, every command, read or
+write (save, sync, board, set-policy, planning, `pull` and the rest), runs on the held
+build with one stderr line naming main and the held build. Only `nforge update` and
+`nforge cli rollback` refuse with `CLI_UPDATE_FROZEN`, naming the hold and recovery
+command; so does a write on an explicit historical rollback, which must restore main
+first. Landing commands also explain the wait and watch local hold removal before
+reading the released version, with no timers or server polling, so main stays fixed
+during a measurement. The updater never removes a measurement hold itself.
 
 A hold can name the projects it measures, one `project PROJECT_ID` line each; other
-lines are free text for the holder. Commands for a named project (read from the
-command's inline `url`/`projectId` or the checkout's binding, locally) run on the
-held build: landings pass instead of waiting, and when main has moved they run on
-the held build with a notice instead of refusing. Landings for every other project,
-or whose project cannot be read locally, still wait. Updates and rollback stay refused
-for everyone. A hold without `project` lines holds every project, as before. Holders
+lines are free text for the holder. Landings for a named project (read from the
+command's inline `url`/`projectId` or the checkout's binding, locally) pass instead of
+waiting and run on the held build. Landings for every other project, or whose project
+cannot be read locally, still wait. Updates and rollback stay refused for everyone. A hold without `project` lines holds every project, as before. Holders
 may rewrite the lines; waiting landings re-read them on each hold change. The bench
 writes its bench project's id, so its own agents land while dogfood landings wait.
 
