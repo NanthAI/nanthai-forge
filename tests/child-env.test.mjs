@@ -10,7 +10,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { childEnv } from '../scripts/child-env.mjs';
-import { CANDIDATE_USER, candidateIsolation, homePaths, toolchainReadable } from '../dist/candidate-user.js';
+import {
+  CANDIDATE_USER,
+  candidateAccessNotes,
+  candidateIsolation,
+  homePaths,
+  toolchainReadable,
+  toolchainState,
+} from '../dist/candidate-user.js';
+import { STATE_ROOT, gitSafeConfig, mountPlan } from '../scripts/candidate-sandbox-plan.mjs';
 import { hostedCheckOutputSettled, providerVerdict } from '../dist/hosted-check-verdict.js';
 import { checkWorkerEnv, checkServiceEnv } from '../dist/worker-environment.js';
 import { nativeGitRunner } from '../dist/native-git-runner.js';
@@ -519,6 +527,250 @@ test('toolchain folders under the home are readable; data homes and other paths 
     '/srv/ci-home',
     '/opt/x',
   ]);
+});
+
+// Toolchains in the Candidate sandbox (Issues f325cede, 1f67da41, 868ebd92, 68632a64).
+/** Runs a mount plan against a model of the namespace: read-only binds refuse writes (EROFS), the
+ * runner's real paths are never written, and only the fresh home and copies are the Candidate's. */
+function simulate({ home, real, files, ...lists }) {
+  const realPath = path => (path.startsWith(`${home}/`) ? join(real, path.slice(home.length)) : path);
+  const exists = path =>
+    path === home || files.has(path) || [...files].some(file => file.startsWith(`${path}/`));
+  const isDirectory = path => exists(path) && !files.has(path);
+  const steps = mountPlan({ home, real, exists, isDirectory, ...lists });
+  const mounts = [];
+  const candidateOwned = new Set([home]);
+  const at = path =>
+    mounts
+      .filter(m => path === m.path || path.startsWith(`${m.path}/`))
+      .sort((a, b) => b.path.length - a.path.length)[0];
+  for (const step of steps) {
+    if (step.step === 'mkdir' || step.step === 'touch') {
+      const mount = at(step.path);
+      if (mount?.ro) throw Object.assign(new Error(`EROFS ${step.path}`), { code: 'EROFS' });
+      assert.ok(step.path.startsWith(`${home}/`) && !mount, `${step.path} is created only in the fresh home`);
+      if (step.step === 'mkdir') candidateOwned.add(step.path);
+    } else if (step.step === 'copy') {
+      assert.ok(step.store.startsWith(`${STATE_ROOT}/`), step.store);
+      assert.ok(exists(step.source), step.source);
+    } else if (step.step === 'bind') {
+      // Writable sources are the Candidate's own lists or its private copies, never a toolchain.
+      mounts.push({ path: step.path, source: step.source, ro: false });
+    } else {
+      const mount = mounts.find(m => m.path === step.path);
+      mount.ro = true;
+    }
+  }
+  return { steps, mounts, realPath };
+}
+
+test('a toolchain folder nested in another one is never written to (CMake: EROFS chown)', () => {
+  const home = '/h',
+    real = '/r';
+  const ninja = `${home}/work/_temp/61b2`,
+    cmake = `${ninja}/cmake-3.31.6-linux-x86_64/bin`;
+  const files = new Set([
+    `${real}/work/_temp/61b2/ninja`,
+    `${real}/work/_temp/61b2/cmake-3.31.6-linux-x86_64/bin/cmake`,
+    `${real}/work/_temp/61b2/cmake-3.31.6-linux-x86_64/share/cmake-3.31/Modules/CMake.cmake`,
+    `${real}/.hex/packages/x`,
+    `${real}/work/repo/repo/CMakeLists.txt`,
+  ]);
+  const { steps, mounts } = simulate({
+    home,
+    real,
+    files,
+    writable: [`${home}/work/repo/repo`],
+    readable: [cmake, ninja, `${home}/missing/bin`],
+  });
+  // The parent is bound read-only once; the nested PATH entry is already visible through it.
+  assert.deepEqual(
+    mounts.map(m => [m.path, m.ro]),
+    [
+      [`${home}/work/repo/repo`, false],
+      [ninja, true],
+    ],
+  );
+  assert.ok(!steps.some(step => step.path === cmake), 'no step touches the nested entry');
+});
+
+test('Elixir: install roots are readable and the Mix home is a private copy', t => {
+  const home = mkdtempSync(join(tmpdir(), 'forge-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const beam = join(home, 'work/_temp/.setup-beam');
+  for (const dir of [
+    'otp/bin',
+    'otp/erts-15.2/bin',
+    'elixir/bin',
+    'elixir/lib',
+    '.mix/escripts',
+    '.mix/archives',
+  ])
+    mkdirSync(join(dir.startsWith('.mix') ? home : beam, dir), { recursive: true });
+  const env = {
+    HOME: home,
+    RUNNER_TEMP: join(home, 'work/_temp'),
+    PATH: [join(beam, 'otp/bin'), join(beam, 'elixir/bin'), join(home, '.mix/escripts'), '/usr/bin'].join(
+      ':',
+    ),
+    INSTALL_DIR_FOR_OTP: join(beam, 'otp'),
+    INSTALL_DIR_FOR_ELIXIR: join(beam, 'elixir'),
+  };
+  const readable = toolchainReadable(env);
+  // Without the install roots only otp/bin is bound, and bin/erl cannot reach erts-*/bin/erlexec.
+  assert.ok(
+    readable.includes(join(beam, 'otp')) && readable.includes(join(beam, 'elixir')),
+    readable.join(' '),
+  );
+  assert.deepEqual(toolchainState(env, ['elixir']), { copies: [join(home, '.mix')], gitSafe: [] });
+  assert.deepEqual(
+    toolchainState(env, ['go']),
+    { copies: [], gitSafe: [] },
+    'undeclared tools change nothing',
+  );
+  const real = '/r';
+  const rel = path => join(real, path.slice(home.length));
+  const files = new Set([
+    rel(join(beam, 'otp/erts-15.2/bin/erlexec')),
+    rel(join(beam, 'otp/bin/erl')),
+    rel(join(beam, 'elixir/lib/elixir.app')),
+    rel(join(beam, 'elixir/bin/elixir')),
+    rel(join(home, '.mix/archives/hex-2.2.1')),
+    rel(join(home, '.mix/escripts/x')),
+  ]);
+  const { steps, mounts } = simulate({ home, real, files, readable, copies: [join(home, '.mix')] });
+  assert.ok(mounts.some(m => m.path === join(beam, 'otp') && m.ro));
+  const mix = mounts.find(m => m.path === join(home, '.mix'));
+  assert.ok(mix && !mix.ro && mix.source.startsWith(`${STATE_ROOT}/`), 'the Mix home is a writable copy');
+  assert.ok(!mounts.some(m => m.path === join(home, '.mix/escripts')), 'escripts come with the copy');
+  assert.deepEqual(steps.find(step => step.step === 'copy').source, rel(join(home, '.mix')));
+});
+
+test('Ruby and Flutter: the toolchain writes go to private copies, the install stays read-only', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-tools-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const cache = join(root, 'toolcache'),
+    home = join(root, 'home');
+  const ruby = join(cache, 'Ruby/3.4.7/x64'),
+    flutter = join(cache, 'flutter/stable-3.35.7-x64/flutter');
+  for (const dir of [
+    `${ruby}/bin`,
+    `${ruby}/lib/ruby/gems/3.4.0/gems`,
+    `${flutter}/bin/cache/dart-sdk/bin`,
+    `${flutter}/.git`,
+    home,
+  ])
+    mkdirSync(dir, { recursive: true });
+  writeFileSync(join(ruby, 'bin/ruby'), '');
+  writeFileSync(join(flutter, 'bin/flutter'), '');
+  // A system Ruby later on PATH, and one outside every install area, are never copied.
+  const system = join(root, 'usr');
+  mkdirSync(join(system, 'bin'), { recursive: true });
+  writeFileSync(join(system, 'bin/ruby'), '');
+  mkdirSync(join(system, 'lib/ruby/gems'), { recursive: true });
+  const env = {
+    HOME: home,
+    RUNNER_TOOL_CACHE: cache,
+    PATH: [
+      join(flutter, 'bin/cache/dart-sdk/bin'),
+      join(flutter, 'bin'),
+      join(ruby, 'bin'),
+      join(system, 'bin'),
+    ].join(':'),
+  };
+  assert.deepEqual(toolchainState(env, ['ruby', 'flutter']), {
+    copies: [join(flutter, 'bin/cache'), join(ruby, 'bin'), join(ruby, 'lib/ruby/gems')].sort(),
+    gitSafe: [flutter],
+  });
+  assert.deepEqual(toolchainState({ ...env, PATH: join(system, 'bin') }, ['ruby']), {
+    copies: [],
+    gitSafe: [],
+  });
+  const files = new Set([
+    join(ruby, 'bin/ruby'),
+    join(ruby, 'lib/ruby/gems/3.4.0/gems/x'),
+    join(flutter, 'bin/flutter'),
+    join(flutter, 'bin/cache/dart-sdk/bin/dart'),
+  ]);
+  const copies = toolchainState(env, ['ruby', 'flutter']).copies;
+  const { steps, mounts } = simulate({ home, real: '/r', files, copies });
+  for (const path of copies) {
+    const mount = mounts.find(m => m.path === path);
+    assert.ok(mount && !mount.ro && mount.source.startsWith(`${STATE_ROOT}/`), path);
+  }
+  assert.ok(
+    steps.every(step => step.step === 'copy' || step.step === 'bind'),
+    'nothing is created, chowned or remounted in the toolchain',
+  );
+  assert.equal(gitSafeConfig(home, [flutter]), `[safe]\n\tdirectory = ${flutter}\n`);
+});
+
+test('guard: the Candidate never gets the real home, a toolchain or a system folder writable', t => {
+  const home = '/srv/ci-home',
+    real = '/var/lib/forge-check/1/real';
+  const files = new Set([
+    `${real}/.ssh/id`,
+    `${real}/.mix/archives/hex`,
+    '/opt/hostedtoolcache/x',
+    '/usr/bin/ruby',
+  ]);
+  const steps = mountPlan({
+    home,
+    real,
+    writable: [],
+    readable: [],
+    copies: ['/', home, '/srv', STATE_ROOT, `${STATE_ROOT}/x`, `${home}/.mix`, '/usr/bin'],
+    exists: path => path === home || [...files].some(file => file === path || file.startsWith(`${path}/`)),
+    isDirectory: path => ![...files].includes(path),
+  });
+  // Only the declared folder is copied; `/`, the home, its parents and the state root never are.
+  assert.deepEqual(
+    steps.filter(step => step.step === 'copy').map(step => step.source),
+    ['/usr/bin', `${real}/.mix`],
+  );
+  for (const step of steps.filter(step => step.step === 'bind'))
+    assert.ok(step.source.startsWith(`${STATE_ROOT}/`), `${step.path} is writable only as a copy`);
+  assert.equal(gitSafeConfig(home, ['/', '/srv', home, '/a"b']), null);
+  // The supervisor never lists a toolchain copy for chown: the original keeps its owner.
+  const isolation = linux(runner());
+  const argv = isolation.command(['true'], {}, '/work/candidate', {
+    writable: ['/work/candidate'],
+    readable: ['/srv/ci-home/.cargo/bin'],
+    copies: ['/opt/hostedtoolcache/Ruby/3.4.7/x64/bin'],
+    gitSafe: ['/opt/hostedtoolcache/flutter/x/flutter'],
+  });
+  t.after(() => rmSync(argv.at(-1), { force: true }));
+  const spec = JSON.parse(readFileSync(argv.at(-1), 'utf8'));
+  assert.deepEqual(spec.chown, ['/work/candidate']);
+  assert.deepEqual(spec.copies, ['/opt/hostedtoolcache/Ruby/3.4.7/x64/bin']);
+  assert.deepEqual(spec.gitSafe, ['/opt/hostedtoolcache/flutter/x/flutter']);
+});
+
+test('a failed Candidate command names the path and the user it could not use', () => {
+  const env = {
+    HOME: '/srv/ci-home',
+    RUNNER_TEMP: '/srv/ci-home/work/_temp',
+    RUNNER_TOOL_CACHE: '/opt/hostedtoolcache',
+  };
+  const notes = candidateAccessNotes({
+    user: CANDIDATE_USER,
+    env,
+    paths: { writable: ['/srv/ci-home/work/r/r'], readable: ['/srv/ci-home/work/_temp/.setup-beam/otp/bin'] },
+    exists: path => path.includes('erts-15'),
+  });
+  notes.accept(
+    'Bundler::OperationNotPermittedError: There was an error while trying to write to `/opt/hostedtoolcache/Ruby/3.4.7/x64/lib/ruby/gems/3.4.0/cache`. Underlying OS system call raised an EPERM error.\n',
+  );
+  notes.accept(
+    '/srv/ci-home/work/_temp/.setup-beam/otp/bin/erl: 57: exec: /srv/ci-home/work/_temp/.setup-beam/otp/erts-15.2/bin/erlexec: not fo',
+  );
+  notes.accept("und\nEACCES: permission denied, open '/srv/ci-home/work/r/r/out.txt'\n");
+  const lines = notes.notes();
+  assert.deepEqual(lines, [
+    'Forge: $RUNNER_TOOL_CACHE/Ruby/3.4.7/x64/lib/ruby/gems/3.4.0/cache is not writable for the Candidate user forge-check: it belongs to the runner (a toolchain or a system folder), which project code may read but not change.',
+    "Forge: $RUNNER_TEMP/.setup-beam/otp/erts-15.2/bin/erlexec exists for the runner but is not visible to the Candidate user forge-check: only the checkout, restored caches and toolchain folders of the runner's home are.",
+  ]);
+  // The Candidate's own checkout is its business, and the readable bin folder is visible.
 });
 
 test("a pass needs the CI provider's success; any other conclusion never passes", () => {

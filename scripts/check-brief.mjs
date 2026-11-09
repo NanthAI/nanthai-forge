@@ -3,6 +3,7 @@
 // Exit 1 and name each missing field. Output never echoes brief text, which may be private.
 // A brief may satisfy a field by pointing at the standard builder block (docs/agents/briefings.md)
 // or at a common-rules file it names; local .md files the brief names are read one level deep.
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -108,33 +109,116 @@ export function lintBrief(brief, briefDir = '.') {
   return briefFindings(brief, rules.join('\n'));
 }
 
-function main(args) {
-  const path = args[0];
-  if (!path || args.length > 1) {
-    console.error('usage: node scripts/check-brief.mjs BRIEF.md   (use - to read stdin)');
+/** The brief's Issue UUID: the first UUID on an "Issue" (or planningItemId) line, as the issue-id field reads it. */
+export function briefIssueId(brief) {
+  for (const line of brief.split('\n'))
+    if (/\bissue\b|planningItemId/i.test(line)) {
+      const found = line.match(UUID);
+      if (found) return found[0].toLowerCase();
+    }
+  return undefined;
+}
+
+/** Reads one planning item by its first 8 characters with `nforge agent . planning` (one read, no
+ * reconcile). Throws an error with code NOT_FOUND when the board has no such item, UNAVAILABLE for
+ * anything else (no login, no checkout, unreachable board, missing CLI). */
+export function cliBoardReader(prefix) {
+  const unavailable = reason => Object.assign(new Error(reason), { code: 'UNAVAILABLE' });
+  const run = spawnSync(
+    'nforge',
+    ['agent', '.', 'planning', JSON.stringify({ id: prefix, reconcile: false })],
+    {
+      encoding: 'utf8',
+      timeout: 30_000,
+      maxBuffer: 4 * 1024 * 1024,
+    },
+  );
+  if (run.error) throw unavailable('nforge could not run');
+  try {
+    if (run.status === 0) {
+      const id = JSON.parse(run.stdout)?.result?.item?.id;
+      if (typeof id === 'string') return { id };
+      throw unavailable('the board returned no item');
+    }
+    const code = JSON.parse(run.stderr.trim().split('\n').pop())?.error?.code;
+    if (code === 'NOT_FOUND') throw Object.assign(new Error('not found'), { code });
+  } catch (error) {
+    if (error?.code) throw error;
+  }
+  throw unavailable('the planning board could not be read');
+}
+
+/** Resolve the brief's Issue against the planning board with one read of its first 8 characters.
+ * `unknown`: no such item. `mismatch`: an item starts with those 8 characters but its full id differs
+ * (a typo in the rest of the UUID). `unchecked`: no login or the board is unreachable; offline lint
+ * still works, so this warns instead of failing. */
+export async function resolveBriefIssue(brief, reader = cliBoardReader) {
+  const id = briefIssueId(brief);
+  if (!id) return { status: 'skipped' };
+  const short = id.slice(0, 8);
+  try {
+    const item = await reader(short);
+    return item?.id?.toLowerCase() === id
+      ? { status: 'ok', short }
+      : { status: 'mismatch', short, found: String(item?.id ?? '').slice(0, 8) };
+  } catch (error) {
+    return error?.code === 'NOT_FOUND'
+      ? { status: 'unknown', short }
+      : { status: 'unchecked', short, reason: String(error?.message ?? 'unreachable') };
+  }
+}
+
+export async function checkBriefMain(
+  args,
+  { reader = cliBoardReader, out = console.log, err = console.error } = {},
+) {
+  const board = !args.includes('--no-board');
+  const rest = args.filter(arg => arg !== '--no-board');
+  const path = rest[0];
+  if (!path || rest.length > 1) {
+    err('usage: node scripts/check-brief.mjs [--no-board] BRIEF.md   (use - to read stdin)');
     return 2;
   }
   let brief;
   try {
     brief = readFileSync(path === '-' ? 0 : path, 'utf8');
   } catch {
-    console.error('check-brief: cannot read the brief');
+    err('check-brief: cannot read the brief');
     return 2;
   }
   const missing = new Set(lintBrief(brief, path === '-' ? '.' : dirname(resolve(path))));
-  if (!missing.size) {
-    console.log('check-brief: ok');
-    return 0;
-  }
+  let failed = missing.size > 0;
   for (const field of briefFields) {
-    if (missing.has(field.name)) console.error(`check-brief: missing ${field.name}: ${field.need}`);
+    if (missing.has(field.name)) err(`check-brief: missing ${field.name}: ${field.need}`);
   }
   for (const hazard of briefHazards) {
-    if (missing.has(hazard.name)) console.error(`check-brief: ${hazard.name}: ${hazard.need}`);
+    if (missing.has(hazard.name)) err(`check-brief: ${hazard.name}: ${hazard.need}`);
   }
-  console.error('See docs/agents/brief-template.md and docs/agents/briefings.md#standard-builder-block.');
-  return 1;
+  if (board && !missing.has('issue-id')) {
+    const issue = await resolveBriefIssue(brief, reader);
+    if (issue.status === 'unknown') {
+      err(
+        `check-brief: unknown-issue: no planning item starts with ${issue.short}; the Issue line names an id that is not on the board.`,
+      );
+      failed = true;
+    } else if (issue.status === 'mismatch') {
+      err(
+        `check-brief: issue-mismatch: the board item ${issue.short}… has a different full id than the brief's Issue UUID (check the rest of the UUID).`,
+      );
+      failed = true;
+    } else if (issue.status === 'unchecked') {
+      err(
+        `check-brief: warning: Issue ${issue.short} was not checked against the planning board (${issue.reason}); linted offline only.`,
+      );
+    }
+  }
+  if (failed) {
+    err('See docs/agents/brief-template.md and docs/agents/briefings.md#standard-builder-block.');
+    return 1;
+  }
+  out('check-brief: ok');
+  return 0;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  process.exitCode = main(process.argv.slice(2));
+  process.exitCode = await checkBriefMain(process.argv.slice(2));

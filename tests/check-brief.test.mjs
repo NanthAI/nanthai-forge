@@ -5,7 +5,15 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { briefFields, briefFindings, lintBrief } from '../scripts/check-brief.mjs';
+import {
+  briefFields,
+  briefFindings,
+  briefIssueId,
+  checkBriefMain,
+  cliBoardReader,
+  lintBrief,
+  resolveBriefIssue,
+} from '../scripts/check-brief.mjs';
 
 const ISSUE = '0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 const script = new URL('../scripts/check-brief.mjs', import.meta.url).pathname;
@@ -105,7 +113,7 @@ test('the packaged brief template: unfilled fails on the fields it leaves open, 
 test('CLI exits 0 on a valid brief, 1 on a gap, 2 on misuse, and never echoes brief text', () => {
   const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));
   try {
-    const run = args => spawnSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+    const run = args => spawnSync(process.execPath, [script, '--no-board', ...args], { encoding: 'utf8' });
     const good = join(dir, 'good.md');
     writeFileSync(good, brief());
     const ok = run([good]);
@@ -121,7 +129,7 @@ test('CLI exits 0 on a valid brief, 1 on a gap, 2 on misuse, and never echoes br
 
     assert.equal(run([]).status, 2);
     assert.equal(run([join(dir, 'absent.md')]).status, 2);
-    const stdin = spawnSync(process.execPath, [script, '-'], {
+    const stdin = spawnSync(process.execPath, [script, '--no-board', '-'], {
       input: brief('safety-block'),
       encoding: 'utf8',
     });
@@ -145,4 +153,81 @@ test('unsafe-command: a brief that tells an agent to print env values or process
   assert.deepEqual(briefFindings(brief(), 'Do not run `env`, `printenv`, `pgrep -fl` or `ps -E`.'), []);
   // Common-rules text counts too.
   assert.deepEqual(briefFindings(brief(), 'Inspect workers with `pgrep -fl node`.'), ['unsafe-command']);
+});
+
+test('ed4c5852: the brief Issue UUID is resolved on the board with one read of its first 8 characters', async () => {
+  assert.equal(briefIssueId(brief()), ISSUE);
+  const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));
+  try {
+    const file = join(dir, 'brief.md');
+    writeFileSync(file, brief());
+    const run = async reader => {
+      const out = [],
+        err = [];
+      const code = await checkBriefMain([file], {
+        reader,
+        out: line => out.push(line),
+        err: line => err.push(line),
+      });
+      return { code, out, err: err.join('\n') };
+    };
+    const reads = [];
+    const known = async prefix => (reads.push(prefix), { id: ISSUE });
+    const ok = await run(known);
+    assert.deepEqual([ok.code, ok.out, reads], [0, ['check-brief: ok'], [ISSUE.slice(0, 8)]]);
+
+    // An id the board does not have fails (the incident: a UUID that never existed).
+    const notFound = async () => {
+      throw Object.assign(new Error('not found'), { code: 'NOT_FOUND' });
+    };
+    const unknown = await run(notFound);
+    assert.equal(unknown.code, 1);
+    assert.match(unknown.err, /unknown-issue: no planning item starts with 0a1b2c3d/);
+    assert.doesNotMatch(unknown.err, new RegExp(ISSUE));
+
+    // An item with the same first 8 characters but another full id fails.
+    const other = `${ISSUE.slice(0, 8)}-ffff-4fff-8fff-ffffffffffff`;
+    const mismatch = await run(async () => ({ id: other }));
+    assert.equal(mismatch.code, 1);
+    assert.match(mismatch.err, /issue-mismatch/);
+
+    // No login, no checkout or an unreachable board: a warning, not a failure.
+    const offline = await run(async () => {
+      throw Object.assign(new Error('the planning board could not be read'), { code: 'UNAVAILABLE' });
+    });
+    assert.equal(offline.code, 0);
+    assert.deepEqual(offline.out, ['check-brief: ok']);
+    assert.match(offline.err, /warning: Issue 0a1b2c3d was not checked against the planning board/);
+
+    // A gap in the brief still fails, and a brief without a full Issue UUID never reads the board.
+    const calls = [];
+    writeFileSync(file, brief('issue-id'));
+    const noIssue = await checkBriefMain([file], {
+      reader: async prefix => calls.push(prefix),
+      out: () => {},
+      err: () => {},
+    });
+    assert.equal(noIssue, 1);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(await resolveBriefIssue(brief('issue-id'), async () => assert.fail('no read')), {
+      status: 'skipped',
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('ed4c5852: the real board reader reports UNAVAILABLE (not NOT_FOUND) outside a Forge checkout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'check-brief-'));
+  const cwd = process.cwd();
+  try {
+    process.chdir(dir);
+    assert.throws(
+      () => cliBoardReader(ISSUE.slice(0, 8)),
+      error => error.code === 'UNAVAILABLE',
+    );
+  } finally {
+    process.chdir(cwd);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

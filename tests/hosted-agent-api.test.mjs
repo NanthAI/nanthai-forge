@@ -249,6 +249,32 @@ test('remote Lane abandonment/reopening uses canonical lifecycle API without a c
   assert.equal(reopened.result.lane.head, abandoned.result.lane.head);
 });
 
+test('a lifecycle change without an operationId is new work each time; the same operationId replays (friction 48366bb2)', async t => {
+  const s = await setup(t),
+    laneId = s.f.lane.laneId,
+    state = async () => (await s.f.readLane(laneId)).state;
+  await s.transport().dispatch('complete', { laneId });
+  const first = await s.transport().dispatch('reopen', { laneId });
+  assert.equal(first.result.lane.state, 'active');
+  // The Lane is completed again; an identical reopen with no operationId must reopen it again, not
+  // answer from the first reopen's receipt and leave the Lane completed.
+  await s.transport().dispatch('complete', { laneId });
+  assert.equal(await state(), 'completed');
+  const second = await s.transport().dispatch('reopen', { laneId });
+  assert.notEqual(second.operationId, first.operationId);
+  assert.equal(second.result.lane.state, 'active');
+  assert.equal(await state(), 'active');
+  // The identical complete is new work too.
+  assert.equal((await s.transport().dispatch('complete', { laneId })).result.lane.state, 'completed');
+  // A retry that names its operationId still replays the same operation (idempotent by id).
+  const named = '6f1d9c5e-2b1a-4c1e-9d7a-3a5b8c9d0e11';
+  const reopened = await s.transport().dispatch('reopen', { laneId, operationId: named });
+  const replay = await s.transport().dispatch('reopen', { laneId, operationId: named });
+  assert.equal(replay.operationId, named);
+  assert.deepEqual(replay.result, reopened.result);
+  assert.equal(await state(), 'active', 'the replay does not flip the Lane again');
+});
+
 test('landing cancellation reconciles a lost reply through the real API without changing Lane or check lifecycle', async t => {
   const s = await setup(t),
     request = s.f.request(),

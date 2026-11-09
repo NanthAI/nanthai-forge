@@ -29,6 +29,7 @@ import {
 import { capturedNotSaved } from './save-not-saved.js';
 import { saveSettledHere, unsavedAfterSave } from './hosted-save-receipt-state.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
+import { lifecycleApplied, recordLifecycleApplied } from './hosted-replay-holds.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
 import { sep } from 'node:path';
@@ -739,22 +740,29 @@ export async function executeHostedAgent(
     }
     const target = 'target' in command ? command.target : undefined;
     const abandonment = action === 'abandon' ? hostedAgentCommandSchemas.abandon.parse(input) : null;
+    const applied = async <T>(done: Promise<T>): Promise<T> => {
+      const result = await done;
+      if (lifecycleApplied(result)) recordLifecycleApplied(session.root, action, input);
+      return result;
+    };
     if (!target && session.marker()) {
       checkLocalLane(session, command.laneId);
-      return transitionHostedLane(
-        session.root,
-        {
-          operationId,
-          action,
-          ...(abandonment
-            ? {
-                reason: abandonment.reason,
-                saveFirst: abandonment.saveFirst,
-                keepPatch: abandonment.keepPatch,
-              }
-            : {}),
-        },
-        session.exchange,
+      return applied(
+        transitionHostedLane(
+          session.root,
+          {
+            operationId,
+            action,
+            ...(abandonment
+              ? {
+                  reason: abandonment.reason,
+                  saveFirst: abandonment.saveFirst,
+                  keepPatch: abandonment.keepPatch,
+                }
+              : {}),
+          },
+          session.exchange,
+        ),
       );
     }
     invariant(
@@ -783,7 +791,9 @@ export async function executeHostedAgent(
         ...(abandonment ? { reason: abandonment.reason } : {}),
       });
     });
-    return session.mutation('projectHostedLifecycle:transition', { request: canonicalPayload(request) });
+    return applied(
+      session.mutation('projectHostedLifecycle:transition', { request: canonicalPayload(request) }),
+    );
   }
   if (action === 'check') {
     const command = hostedAgentCommandSchemas.check.parse(input);

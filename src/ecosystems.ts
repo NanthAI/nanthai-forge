@@ -63,6 +63,14 @@ export type EcosystemManager = {
 };
 
 /** One GitHub Actions dependency-cache preset: download caches only, never build output. */
+/** Folders a declared toolchain writes into its own install while project code runs. The Candidate
+ * user gets a private copy of each (src/candidate-user.ts `toolchainState`); the install itself stays
+ * read-only. `root` is the runner's home, or the folder above the first PATH entry holding `binary`. */
+export type EcosystemToolState = {
+  tool: string;
+  root: 'home' | { binary: string };
+  paths: readonly string[];
+};
 export type EcosystemCachePreset = {
   paths: readonly string[];
   /** Lockfile globs hashed into the cache key when the declaration names none. */
@@ -88,8 +96,13 @@ export type EcosystemEntry = {
   projectOutputDirs?: { dirs: readonly string[]; beside: Extensions };
   /** Folders the module graph never reads as code. */
   nonSourceDirs?: readonly string[];
-  /** GitHub Actions: the setup action (`ACTIONS_TOOLS` in src/actions-toolchains.ts) and cache presets. */
-  actions?: { tool?: string | readonly string[]; cache?: Readonly<Record<string, EcosystemCachePreset>> };
+  /** GitHub Actions: the setup action (`ACTIONS_TOOLS` in src/actions-toolchains.ts), cache presets
+   * and the state folders a declared toolchain writes while project code runs. */
+  actions?: {
+    tool?: string | readonly string[];
+    cache?: Readonly<Record<string, EcosystemCachePreset>>;
+    state?: readonly EcosystemToolState[];
+  };
   /** Per-run check environment (src/check-ecosystem-env.ts). Paths only, never credentials. */
   checkEnv?: {
     /** Pure content caches: `[variable, folder]`, segmented per project. */
@@ -283,6 +296,8 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       tool: 'ruby',
       // Restored only: resolving a Gemfile runs it (Ruby code), so no seed is Candidate-free.
       cache: { bundler: { paths: ['~/.bundle/cache'], lockfiles: ['**/Gemfile.lock'] } },
+      // `bundle install` and `gem install` write gems and binstubs into the toolchain itself.
+      state: [{ tool: 'ruby', root: { binary: 'ruby' }, paths: ['lib/ruby/gems', 'bin'] }],
     },
     checkEnv: {
       caches: [['BUNDLE_USER_CACHE', 'check-bundle-cache']],
@@ -466,6 +481,8 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       tool: 'elixir',
       // Restored only: resolving mix.exs runs it (Elixir code), so no seed is Candidate-free.
       cache: { hex: { paths: ['~/.hex/packages'], lockfiles: ['**/mix.lock'] } },
+      // setup-beam installs Hex and rebar3 into the runner's Mix home; mix reads and updates them.
+      state: [{ tool: 'elixir', root: 'home', paths: ['.mix'] }],
     },
     // Hex's own home holds its API key, so it is never shared; Mix's home holds installed archives.
     checkEnv: { toolchains: [['MIX_HOME', ['.mix']]] },
@@ -488,6 +505,8 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       // Flutter apps and packages (`sdk: flutter`) take Flutter, which bundles its own Dart.
       tool: ['dart', 'flutter'],
       cache: { pub: { paths: ['~/.pub-cache'], lockfiles: ['**/pubspec.lock'] } },
+      // The flutter tool writes stamps, locks and downloaded engine artifacts into its SDK.
+      state: [{ tool: 'flutter', root: { binary: 'flutter' }, paths: ['bin/cache'] }],
     },
     checkEnv: {
       // The pub cache also holds globally activated executables (`bin/`): only packages link in.
@@ -659,6 +678,8 @@ export const cachePresets = (entries = ECOSYSTEMS) =>
 /** Actions setup tools named by entries. */
 export const actionsTools = (entries = ECOSYSTEMS) =>
   all(entry => [entry.actions?.tool ?? []].flat(), entries);
+/** Toolchain state folders by declared tool. */
+export const actionsToolState = (entries = ECOSYSTEMS) => all(entry => entry.actions?.state, entries);
 export const checkEnvCaches = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.caches, entries);
 export const checkEnvHomes = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.homes, entries);
 export const checkEnvToolchains = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.toolchains, entries);

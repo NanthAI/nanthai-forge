@@ -31,9 +31,11 @@ export function planErrorCommand(executable: string, error: { code: string; mess
   ];
 }
 import {
+  candidateAccessNotes,
   candidateIsolation,
   homePaths,
   toolchainReadable,
+  toolchainState,
   type CandidateIsolation,
 } from './candidate-user.js';
 import { cachePaths } from './actions-toolchains.js';
@@ -186,7 +188,17 @@ async function executeActiveActionsJob(
       ...(packages ? [packages.path] : []),
       ...toolchainReadable(process.env, home),
     ],
+    // What the declared toolchains write into their own installs: private copies (src/ecosystems.ts).
+    ...toolchainState(
+      process.env,
+      ((recipe.actions?.toolchains ?? []) as { tool: string }[]).map(t => t.tool),
+      home,
+    ),
   };
+  const access =
+    isolation.mode === 'user'
+      ? candidateAccessNotes({ user: isolation.user, env: process.env, paths })
+      : undefined;
   /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
   const spawnPart = (part?: string) => {
     const env: Record<string, string> = {
@@ -212,10 +224,12 @@ async function executeActiveActionsJob(
     child.stdout.on('data', (text: string) => {
       process.stdout.write(text);
       reports.accept(text);
+      access?.accept(text);
       observe(Buffer.from(text));
     });
     child.stderr.on('data', (text: string) => {
       process.stderr.write(text);
+      access?.accept(text);
       observe(Buffer.from(text));
     });
     return new Promise<number>(resolve => {
@@ -259,6 +273,8 @@ async function executeActiveActionsJob(
         yielded = outcome.yielded.flatMap(unit => units[unit]!.files);
       }
     }
+    // A path the Candidate user could not write or see is named, not only the tool's own error.
+    if (exitCode) for (const line of access?.notes() ?? []) note(line);
     // Forge's own markers win; JUnit fills in the files they did not report.
     const junitReports = readJunitReports(junit.directory, directory);
     for (const line of junitReports.notes) note(line);

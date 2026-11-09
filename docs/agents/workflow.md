@@ -2183,7 +2183,10 @@ operation and never falls back to writing Mac Work.
 `friction-list {id?,status?,area?,laneId?,search?,limit?,cursor?}` reads one newest-first
 page of captured friction (default `status:"open"`, `limit` 50, at most 100 rows
 scanned) as `items` (`id`, `laneId?`, `title`, `area`, `at`, `detail`, `status`,
-`reason?`, `planningItemId?`, `fixedByLaneId?`), `scanned` and `nextCursor`. Filters
+`reason?`, `planningItemId?`, `fixedByLaneId?`), `scanned` and `nextCursor`. A page cuts
+each `detail` at 400 characters and then adds `detailTruncated:true` and `detailLength`;
+`friction-list {"id":"…"}` returns that friction's detail up to 16,000 characters (same flags
+if still cut). Filters
 apply inside the scanned page, so a sparse match can return few items with a
 `nextCursor`; follow it. `id` (a full id or a hex prefix of at least 8 characters, as in
 planning) returns that one friction whatever its status or age: one indexed range read, no

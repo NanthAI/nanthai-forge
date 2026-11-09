@@ -3,22 +3,39 @@
 // node candidate-sandbox.mjs SPEC` (src/candidate-user.ts). Runs as root inside a private mount
 // namespace, so nothing here is visible to the runner. Replaces the runner's home with an empty
 // directory the Candidate user owns, binds back only the listed paths at their own paths
-// (writable ones owned by that user, readable ones read-only), then runs the command as that
-// user with no groups, no capabilities and no_new_privs. Plain Node and util-linux only.
+// (writable ones owned by that user, readable ones read-only, toolchain state folders as private
+// copies; scripts/candidate-sandbox-plan.mjs), then runs the command as that user with no groups,
+// no capabilities and no_new_privs. Plain Node and util-linux only.
 import { spawn, spawnSync } from 'node:child_process';
-import { chownSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {
+  chownSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { join } from 'node:path';
+import { STATE_ROOT, gitSafeConfig, mountPlan } from './candidate-sandbox-plan.mjs';
 
 const specPath = process.argv[2];
 const spec = JSON.parse(readFileSync(specPath, 'utf8'));
 rmSync(specPath, { force: true });
+const home = spec.home;
+const base = `/var/lib/forge-check/${process.pid}`;
+const real = join(base, 'real');
+// Paths in messages are relative to the home, so the retained log keeps them (it masks absolute paths).
+const show = path =>
+  path === home || path.startsWith(`${home}/`) ? `$HOME${path.slice(home.length)}` : path;
 const fail = message => {
   console.error(`Forge: the Candidate user sandbox failed (${message}).`);
   process.exit(125);
 };
-const sh = (command, args) => {
+const sh = (command, args, path) => {
   const result = spawnSync(command, args, { stdio: ['ignore', 'ignore', 'pipe'] });
-  if (result.status !== 0) fail(`${command} ${args[0]}`);
+  if (result.status !== 0) fail(`${command} ${args[0]}${path ? ` ${show(path)}` : ''}`);
 };
 const id = flag => Number(spawnSync('id', [flag, spec.user], { encoding: 'utf8' }).stdout.trim());
 const uid = id('-u'),
@@ -28,40 +45,53 @@ for (const path of spec.chown) {
   if (!existsSync(path)) mkdirSync(path, { recursive: true });
   sh('chown', ['-R', `${uid}:${gid}`, path]);
 }
-const home = spec.home;
-const under = path => path.startsWith(`${home}/`);
-const base = `/var/lib/forge-check/${process.pid}`;
-if (home !== '/' && existsSync(home)) {
-  mkdirSync(join(base, 'real'), { recursive: true });
+const swapped = home !== '/' && existsSync(home);
+if (swapped) {
+  mkdirSync(real, { recursive: true });
   mkdirSync(join(base, 'home'), { recursive: true });
   chownSync(join(base, 'home'), uid, gid);
-  sh('mount', ['--bind', home, join(base, 'real')]);
+  sh('mount', ['--bind', home, real]);
   sh('mount', ['--bind', join(base, 'home'), home]);
-  // Parents first, so a writable cache inside a read-only toolchain folder (or the reverse) nests.
-  const entries = [
-    ...spec.writable.filter(under).map(path => [path, true]),
-    ...spec.readable.filter(under).map(path => [path, false]),
-  ].sort(([a], [b]) => a.length - b.length);
-  for (const [path, writable] of entries) {
-    const source = join(base, 'real', path.slice(home.length));
-    if (!existsSync(source)) continue;
-    // Mount points inside the Candidate's home belong to the Candidate, like any home folder.
-    let parent = home;
-    for (const part of dirname(path).slice(home.length).split('/').filter(Boolean)) {
-      parent = join(parent, part);
-      if (!existsSync(parent)) {
-        mkdirSync(parent);
-        chownSync(parent, uid, gid);
-      }
-    }
-    if (statSync(source).isDirectory()) {
-      if (!existsSync(path)) mkdirSync(path);
-      chownSync(path, uid, gid);
-    } else if (!existsSync(path)) writeFileSync(path, '');
-    sh('mount', ['--bind', source, path]);
-    if (!writable) sh('mount', ['-o', 'remount,bind,ro', path]);
+}
+// Planned against the swapped view: the fresh home, the real one at `real`, the rest as it is.
+const steps = mountPlan({
+  home,
+  real,
+  writable: spec.writable,
+  readable: spec.readable,
+  copies: spec.copies ?? [],
+  exists: existsSync,
+  isDirectory: path => statSync(path).isDirectory(),
+});
+for (const step of steps) {
+  const target = step.path ?? step.store;
+  try {
+    if (step.step === 'mkdir') {
+      mkdirSync(step.path);
+      chownSync(step.path, uid, gid);
+    } else if (step.step === 'touch') writeFileSync(step.path, '');
+    else if (step.step === 'copy') {
+      // Once per job: later launches (pool units) reuse the copy and what the Candidate wrote there.
+      if (existsSync(step.store)) continue;
+      mkdirSync(STATE_ROOT, { recursive: true, mode: 0o711 });
+      const temp = `${step.store}.${process.pid}`;
+      mkdirSync(temp);
+      sh('cp', ['-a', '--', `${step.source}/.`, temp], step.source);
+      sh('chown', ['-R', `${uid}:${gid}`, temp], step.source);
+      renameSync(temp, step.store);
+    } else if (step.step === 'bind') sh('mount', ['--bind', step.source, step.path], step.path);
+    else sh('mount', ['-o', 'remount,bind,ro', step.path], step.path);
+  } catch (error) {
+    fail(`${step.step} ${show(target)}: ${error.code ?? error.message}`);
   }
-  sh('umount', ['-l', join(base, 'real')]);
+}
+if (swapped) {
+  const config = gitSafeConfig(home, spec.gitSafe ?? []);
+  if (config && !existsSync(join(home, '.gitconfig'))) {
+    writeFileSync(join(home, '.gitconfig'), config);
+    chownSync(join(home, '.gitconfig'), uid, gid);
+  }
+  sh('umount', ['-l', real]);
 }
 const child = spawn(
   'setpriv',

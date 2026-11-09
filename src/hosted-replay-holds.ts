@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { HostedAgentJournal } from './hosted-agent-journal.js';
+import { HostedAgentJournal, hostedAgentDirectory } from './hosted-agent-journal.js';
+import { durableReplace } from './native-durability.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';
@@ -63,6 +64,56 @@ export function supersededOpen({ root, address, actor, command }: Context): bool
   }
 }
 
+/** Retained in the operation's journal once an abandon, reopen or complete was applied. */
+export const LIFECYCLE_APPLIED_KEY = 'lifecycle-applied';
+type LifecycleAction = 'abandon' | 'reopen' | 'complete';
+const lifecycleFile = (root: string) => join(hostedAgentDirectory(root), 'lifecycle-last.json');
+const lifecycleKey = (command: unknown) => {
+  const laneId = (command as { laneId?: unknown } | null)?.laneId;
+  return typeof laneId === 'string' ? laneId : '';
+};
+function readLifecycleLast(root: string): Record<string, string> {
+  const path = lifecycleFile(root);
+  if (!checkoutPathExists(path)) return {};
+  const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
+  return value && typeof value === 'object' ? (value as Record<string, string>) : {};
+}
+/** True when a lifecycle result (the server's, or the checkout client's `{phase,result}` wrapper) says
+ * the change was applied; pending, stale and failed results keep their receipt replayable. */
+export function lifecycleApplied(value: unknown): boolean {
+  let result = value;
+  if (typeof result === 'string') {
+    try {
+      result = JSON.parse(result);
+    } catch {
+      return false;
+    }
+  }
+  const inner = (result as { result?: unknown } | null)?.result ?? result;
+  return (inner as { status?: unknown } | null)?.status === 'applied';
+}
+/** Remember the lifecycle change this client last applied to a Lane (small map, one write per change). */
+export function recordLifecycleApplied(root: string, action: LifecycleAction, command: unknown): void {
+  const last = readLifecycleLast(root);
+  last[lifecycleKey(command)] = action;
+  const entries = Object.entries(last).slice(-200);
+  durableReplace(lifecycleFile(root), JSON.stringify(Object.fromEntries(entries)));
+}
+/** A lifecycle change (abandon, reopen, complete) the identical request would replay, though a different
+ * change was applied to that Lane since: the receipt describes a state the Lane has left, so the call is
+ * new work (friction 48366bb2: a replayed reopen left the Lane completed). The same change repeated, or a
+ * reply lost before anything else happened, keeps replaying; an explicit operationId always replays. */
+export function supersededLifecycle(action: LifecycleAction) {
+  return ({ root, command }: Context): boolean => {
+    try {
+      const last = readLifecycleLast(root)[lifecycleKey(command)];
+      return last !== undefined && last !== action;
+    } catch {
+      return false;
+    }
+  };
+}
+
 export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Binding> = {
   start: { kind: 'transport' },
   open: { kind: 'checked', superseded: supersededOpen },
@@ -98,12 +149,12 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   'source-pack': read,
   cancel: server,
   revert: server,
-  abandon: server,
-  complete: server,
+  abandon: { kind: 'checked', superseded: supersededLifecycle('abandon') },
+  complete: { kind: 'checked', superseded: supersededLifecycle('complete') },
   pin: server,
   'complete-merged': server,
   'abandon-dormant': server,
-  reopen: server,
+  reopen: { kind: 'checked', superseded: supersededLifecycle('reopen') },
   status: read,
   observe: read,
   metrics: read,

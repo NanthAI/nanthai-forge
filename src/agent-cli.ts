@@ -75,7 +75,7 @@ start, save, save --sync, land --save and Lane status include a local peers dige
 declares paths; start retains planned claims until the Lane closes.
 nforge x ROOT take {laneId,takeover:true} hands another actor’s Lane to you with its context. peers {laneId,detail:true} reads full details.
 save --friction captures workflow cost in owner Work; improve groups it; x friction-triage records a decision.
-Hosted: friction-list {status?,area?,laneId?,search?,limit?,cursor?} reads one newest-first page (default status open); x friction-triage {frictionIds,status:"dropped",reason} dismisses, {status:"planned",planningItemId} links an Issue.
+Hosted: friction-list {id?,status?,area?,laneId?,search?,limit?,cursor?} reads one newest-first page (default status open; a detail cut at 400 characters says detailTruncated, read it whole with {id}); x friction-triage {frictionIds,status:"dropped",reason} dismisses, {status:"planned",planningItemId} links an Issue.
 Native: start/land --save frictionIds:[ID] links a fixing Lane and closes reports when it lands. Hosted: start and land --save refuse frictionIds; once the fix is accepted, x friction-triage {frictionIds,status:"fixed",laneId} records it.
 After save --sync, resolve any conflict markers, then land --save again. Inside a Lane directory laneId may be omitted.
 

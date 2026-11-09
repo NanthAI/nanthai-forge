@@ -136,9 +136,13 @@ const parseRequest = <T extends z.ZodType>(schema: T, input: string, what: strin
   return parsed.data;
 };
 const clip = (text: string, length: number) => (text.length > length ? `${text.slice(0, length)}…` : text);
+/** A list page keeps each detail short; a read by `id` returns up to the larger cap. A cut detail is
+ * flagged with `detailTruncated` and its full `detailLength`, so a caller knows to read it by id. */
+const LIST_DETAIL_CHARS = 400;
+const ID_DETAIL_CHARS = 16_000;
 type FrictionRow = { value: string; triage?: string };
 /** The list/lookup shape of one captured friction, or null for a count or triage event row. */
-function frictionItem(row: FrictionRow) {
+function frictionItem(row: FrictionRow, detailChars = LIST_DETAIL_CHARS) {
   const event = frictionEventSchema.safeParse(JSON.parse(row.value));
   if (!event.success || event.data.kind !== 'capture') return null;
   const f = event.data;
@@ -151,7 +155,8 @@ function frictionItem(row: FrictionRow) {
       title: clip(f.title, 200),
       area: f.area,
       at: f.at,
-      detail: clip(f.detail, 400),
+      detail: clip(f.detail, detailChars),
+      ...(f.detail.length > detailChars ? { detailTruncated: true, detailLength: f.detail.length } : {}),
       status: state?.status ?? 'open',
       ...(state?.reason ? { reason: clip(state.reason, 400) } : {}),
       ...(state?.planningItemId ? { planningItemId: state.planningItemId } : {}),
@@ -171,7 +176,7 @@ export const read = query({
       const filter = parseRequest(frictionListSchema, input, 'friction-list');
       if (filter.id) {
         // One id or prefix: one indexed read, no page scan, whatever its status or age.
-        const found = frictionItem(await resolveFriction(ctx, projectId, filter.id));
+        const found = frictionItem(await resolveFriction(ctx, projectId, filter.id), ID_DETAIL_CHARS);
         return canonicalPayload({ items: found ? [found.item] : [], scanned: 1, nextCursor: null });
       }
       const page = await ctx.db

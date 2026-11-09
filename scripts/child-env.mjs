@@ -79,8 +79,10 @@ export const toolchainEnvNames = [
   'CONDA',
   'VCPKG_INSTALLATION_ROOT',
 ];
-/** Versioned image locations such as JAVA_HOME_21_X64 or GOROOT_1_23_X64. */
-export const toolchainEnvPattern = /^(?:JAVA_HOME|GOROOT)_[0-9]+(?:_[0-9]+)*_(?:X64|ARM64)$/;
+/** Versioned image locations such as JAVA_HOME_21_X64 or GOROOT_1_23_X64, and setup-beam's install
+ * roots (INSTALL_DIR_FOR_OTP, INSTALL_DIR_FOR_ELIXIR, ...). */
+export const toolchainEnvPattern =
+  /^(?:(?:JAVA_HOME|GOROOT)_[0-9]+(?:_[0-9]+)*_(?:X64|ARM64)|INSTALL_DIR_FOR_[A-Z0-9]+)$/;
 const credentialName = /TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|KEY/i;
 /** Toolchain variable names present in `source`, for `childEnv({ allow })`. */
 export function toolchainEnvAllow(source = process.env) {

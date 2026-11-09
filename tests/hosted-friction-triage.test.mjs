@@ -117,6 +117,27 @@ test('friction-list is bounded and paged; triage rejects unknown ids and incompl
   assert.equal(s.counts().writes, writes, 'a refused triage writes nothing');
 });
 
+test('friction-list flags a cut detail and {id} returns it whole', async t => {
+  const s = fixture(t);
+  const long = `${'incident '.repeat(100)}END-MARKER`; // ~910 characters
+  const { id } = (await file(s, 'long', { detail: long })).result;
+  await file(s, 'short');
+  const page = (await s.transport.dispatch('friction-list', {})).result;
+  const cut = page.items.find(item => item.id === id);
+  assert.equal(cut.detail.length, 401, 'a page keeps 400 characters plus the ellipsis');
+  assert.equal(cut.detailTruncated, true);
+  assert.equal(cut.detailLength, long.length);
+  const whole = page.items.find(item => item.id !== id);
+  assert.equal(whole.detailTruncated, undefined, 'an uncut detail carries no flag');
+  const one = (await s.transport.dispatch('friction-list', { id: id.slice(0, 8) })).result.items[0];
+  assert.equal(one.detail, long, 'a read by id returns the full detail');
+  assert.equal(one.detailTruncated, undefined);
+  const huge = (await file(s, 'huge', { detail: 'x'.repeat(20_000) })).result.id;
+  const capped = (await s.transport.dispatch('friction-list', { id: huge })).result.items[0];
+  assert.equal(capped.detailTruncated, true, 'even an id read is bounded, and says so');
+  assert.equal(capped.detailLength, 20_000);
+});
+
 test('friction-list {id} and triage take a full id or an 8+ character prefix in one indexed read', async t => {
   const s = fixture(t);
   const ids = [];

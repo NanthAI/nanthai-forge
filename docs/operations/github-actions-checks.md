@@ -100,7 +100,18 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
   (GitHub-hosted Ubuntu), each Candidate child runs as the system user `forge-check` in a private
   mount namespace (`src/candidate-user.ts`, `scripts/candidate-sandbox.mjs`): the runner's home is
   replaced by an empty folder, and only the check's working folders, its declared cache folders and
-  the toolchains under the home come back (the toolchains read-only). It has no groups, no
+  the toolchains under the home come back (the toolchains read-only, from their install roots, so a
+  toolchain nested in another one is bound once). Folders a declared toolchain writes into its own
+  install while it runs come as private copies: `ruby` gets its gem folder (`lib/ruby/gems`) and
+  `bin`, so `bundle install` and `gem install` work unchanged; `flutter` gets its SDK's `bin/cache`;
+  `elixir` gets the runner's `~/.mix` (Hex and rebar3 from `setup-beam`). The sandbox copies each
+  folder once per job into `/var/lib/forge-check/state` and mounts the copy, owned by `forge-check`,
+  at the original path in the Candidate's view only; the install itself is never made writable or
+  changed. Only installs in the runner's tool cache, job temp folder or home count, never a system
+  folder. A toolchain that is a git checkout (the Flutter SDK) is marked `safe.directory` in the
+  Candidate's own home, so git reads it although the runner owns it. A Candidate command that fails
+  on a path it cannot write or see gets a line naming the path (relative to `$HOME`,
+  `$RUNNER_TEMP` or `$RUNNER_TOOL_CACHE`) and the user. It has no groups, no
   capabilities and cannot gain privileges, so it cannot read the runner's credentials, the
   supervisor's environment or the step-command files, and cannot use `sudo`. Creating the user takes
   about 20 ms, each launch about 0.2 s. Elsewhere (macOS, Windows, a self-hosted runner without
@@ -1270,8 +1281,8 @@ receives these locations, when the runner image or a setup step sets them: `JAVA
 `Python3_ROOT_DIR`, `PKG_CONFIG_PATH`, `LD_LIBRARY_PATH`, `DOTNET_ROOT`, `NUGET_PACKAGES`,
 `CARGO_HOME`, `RUSTUP_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK`,
 `ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT`, `ANDROID_NDK_LATEST_HOME`, `GRADLE_HOME`,
-`GRADLE_USER_HOME`, `MAVEN_HOME`, `M2_HOME`, `CONDA` and `VCPKG_INSTALLATION_ROOT`
-(`toolchainEnvAllow` in `scripts/child-env.mjs`). The same applies to `actions.setup`. No
+`GRADLE_USER_HOME`, `MAVEN_HOME`, `M2_HOME`, `CONDA`, `VCPKG_INSTALLATION_ROOT` and
+`setup-beam`'s `INSTALL_DIR_FOR_<TOOL>` (`toolchainEnvAllow` in `scripts/child-env.mjs`). The same applies to `actions.setup`. No
 name containing `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH` or `KEY` passes,
 whatever pattern it matches. Forge's standard check keeps its exact environment.
 
