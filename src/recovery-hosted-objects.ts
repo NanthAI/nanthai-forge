@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { RecoveryStateQueue } from './recovery-state-queue.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { fingerprintPrivateFile } from './files.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory, syncFile } from './native-durability.js';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
 import { digest } from './hash.js';
@@ -84,6 +84,8 @@ export class RecoveryObjects {
           downloadToFile: (selected, path) => this.transport.downloadToFile!(selected, path),
         });
         await cache.ensure([pin.sha256]);
+        // Checkout caches skip per-object fsync; this durable store flushes its own copy.
+        syncFile(join(cache.objects, pin.sha256));
         renameSync(join(cache.objects, pin.sha256), target);
         syncDirectory(this.source.directory);
       }

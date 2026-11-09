@@ -18,6 +18,7 @@ import {
   copyFileSync,
   readdirSync,
   utimesSync,
+  statSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1414,4 +1415,35 @@ test('pre-switch hook sees an installed-but-not-active build; a failing check ke
   const result = await updateCli(f.installation, address, undefined, dependencies);
   assert.equal(result.status, 'updated');
   assert.equal(cliBuildCommit(join(f.installation, 'current')), b);
+});
+
+test('each installed build keeps one private compile cache, and caches of removed builds go', t => {
+  const f = fixture(t);
+  const cache = join(f.installation, 'compile-cache');
+  mkdirSync(join(cache, b), { recursive: true });
+  const launcher = pathToFileURL(fileURLToPath(new URL('../dist/cli-launcher.js', import.meta.url))).href;
+  const run = build =>
+    spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `const { enableCliCompileCache } = await import(${JSON.stringify(launcher)});
+         enableCliCompileCache(process.argv[1], process.argv[2]);
+         process.stdout.write((await import('node:module')).getCompileCacheDir() ?? '');`,
+        f.installation,
+        build,
+      ],
+      { encoding: 'utf8', env: childEnv() },
+    );
+  const result = run(f.old);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.startsWith(join(cache, a)), 'the selected build compiles into its own cache');
+  assert.equal((statSync(join(cache, a)).mode & 0o777).toString(8), '700');
+  assert.deepEqual(readdirSync(cache), [a], 'the cache of a build that no longer exists is removed');
+  rmSync(cache, { recursive: true, force: true });
+  writeFileSync(cache, 'not a directory');
+  const blocked = run(f.old);
+  assert.equal(blocked.status, 0, 'a cache failure never stops the command');
+  assert.equal(blocked.stdout, '', 'and the command runs uncached');
 });

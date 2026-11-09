@@ -105,7 +105,13 @@ export const describe = mutation({
         digest: v.string(),
         size: v.number(),
         location: v.literal('recipe'),
-        recipe: v.object({ digest: v.string(), size: v.number() }),
+        /** Signed calls also sign the recipe object itself, so reading it needs no second call. */
+        recipe: v.object({
+          digest: v.string(),
+          size: v.number(),
+          url: v.optional(v.string()),
+          range: rangeValue,
+        }),
       }),
     ),
   ),
@@ -161,7 +167,24 @@ export const describe = mutation({
           result.push({ ...pin, location: 'convex', url });
         } else {
           invariant(row.recipe, 'INVALID_WORK_BACKUP', 'Stored content representation is unavailable.');
-          result.push({ ...pin, location: 'recipe', recipe: row.recipe });
+          const node = signed ? await findObject(ctx, projectId, row.recipe.digest) : null;
+          const signable =
+            node &&
+            !node.removed &&
+            isR2Object(node) &&
+            node.size === row.recipe.size &&
+            node.r2Key === r2Key(projectId, node.pack?.digest ?? row.recipe.digest);
+          result.push({
+            ...pin,
+            location: 'recipe',
+            recipe: signable
+              ? {
+                  ...row.recipe,
+                  url: await presignGet(r2Config(), node.r2Key!, packHeaders(packRange(node), node.size)),
+                  ...(node.pack ? { range: packRange(node)! } : {}),
+                }
+              : { digest: row.recipe.digest, size: row.recipe.size },
+          });
         }
       }
       if (runs) await signRuns(result, packed);

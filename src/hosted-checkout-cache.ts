@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { lstatSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { chmod, open, rename, rm } from 'node:fs/promises';
+import { chmod, rename, rm } from 'node:fs/promises';
 import { checkoutIo, mapCheckoutIo } from './checkout-io.js';
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
@@ -12,6 +12,7 @@ import type { SourcePackDownload } from './source-pack.js';
 import { downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
 import { cloneFile, machineObjectsDirectory, rememberObject } from './machine-object-store.js';
 import { neverIndex } from './forge-disk.js';
+import { aheadOf, runDownloadWindows } from './checkout-download-schedule.js';
 export interface CheckoutObjectTransport {
   readonly objectPageSize?: number;
   objects(digests: string[]): Promise<ContentPin[]>;
@@ -21,7 +22,15 @@ export interface CheckoutObjectTransport {
   sourcePack?(): Promise<SourcePackDownload | null>;
   /** Download windows that keep transfer units (pack runs) whole; default sizeGroups. */
   downloadGroups?(pins: ContentPin[]): ContentPin[][];
+  /** downloadToFile/downloadFiles check every written file's size and digest before they
+   * return, so the cache does not read and hash each new object a second time. */
+  readonly verifiesDownloads?: boolean;
+  /** Download windows this transport runs at once (default 1). Two let a page's large files
+   * stream while the next window's runs download, instead of all waiting for the last page. */
+  readonly downloadWindows?: number;
 }
+/** Metadata pages described ahead of the one being downloaded and installed. */
+export const checkoutDescribeAhead = 2;
 /** Windows of at most 16 MiB (one larger object alone). */
 export function sizeGroups(pins: ContentPin[]) {
   const groups: ContentPin[][] = [];
@@ -90,22 +99,30 @@ export class HostedCheckoutCache {
     if (missing.length && this.fallbackObjects) missing = await this.fromCache(missing);
     if (missing.length >= checkoutPackMinimum && this.transport.sourcePack && this.sourcePack === null)
       missing = await this.fromPack(missing);
-    const pageSize = this.transport.objectPageSize ?? 100;
-    for (let at = 0; at < missing.length; at += pageSize) {
-      const page = missing.slice(at, at + pageSize);
-      const pins = await this.transport.objects(page);
-      invariant(
-        pins.length === page.length &&
-          pins.every(
-            (pin, index) => pin.sha256 === page[index] && Number.isSafeInteger(pin.size) && pin.size >= 0,
-          ),
-        'INVALID_NATIVE_SOURCE',
-        'Source pins differ from selected content.',
-      );
-      // Transport windows bound both metadata calls and in-memory small-object reads.
-      for (const group of this.transport.downloadGroups?.(pins) ?? sizeGroups(pins))
-        await this.download(group);
+    const pageSize = this.transport.objectPageSize ?? 100,
+      pages: string[][] = [];
+    for (let at = 0; at < missing.length; at += pageSize) pages.push(missing.slice(at, at + pageSize));
+    // Later pages' metadata calls overlap earlier pages' transfers and installs (calls unchanged).
+    const transport = this.transport;
+    async function* described() {
+      for await (const [page, pins] of aheadOf(pages, checkoutDescribeAhead, page =>
+        transport.objects(page),
+      )) {
+        invariant(
+          pins.length === page.length &&
+            pins.every(
+              (pin, index) => pin.sha256 === page[index] && Number.isSafeInteger(pin.size) && pin.size >= 0,
+            ),
+          'INVALID_NATIVE_SOURCE',
+          'Source pins differ from selected content.',
+        );
+        // Transport windows bound both metadata calls and in-memory small-object reads.
+        yield transport.downloadGroups?.(pins) ?? sizeGroups(pins);
+      }
     }
+    await runDownloadWindows(described(), Math.max(1, Math.min(4, transport.downloadWindows ?? 1)), group =>
+      this.download(group),
+    );
   }
   /** Ids absent or invalid in `objects`. Parallel file reads: per-file latency, not
    * bandwidth, bounds large trees. */
@@ -153,38 +170,36 @@ export class HostedCheckoutCache {
     this.machineObjects -= unique.length;
     await this.ensure(unique);
   }
+  /** Object stores are caches rebuilt from the server: every reader checks an object's digest
+   * before use (`present`, or the install clone with `repair`), so an object torn by a crash is
+   * fetched again, never trusted. Objects therefore get no fsync each (that was about 2 ms per
+   * object); one directory flush per window covers their names. A checkout flushes its own
+   * installed files before its marker is written. */
   private async download(pins: ContentPin[]) {
     const temporary = await checkoutIo(async () => mkdtempSync(join(this.root, 'download-')));
     const files = pins.map(pin => ({ pin, path: join(temporary, pin.sha256) }));
     try {
       if (this.transport.downloadFiles) await this.transport.downloadFiles(files);
       else for (const { pin, path } of files) await this.transport.downloadToFile(pin, path);
+      const verified = this.transport.verifiesDownloads === true;
       await mapCheckoutIo(files, async ({ pin, path }) => {
+        const stat = lstatSync(path);
         invariant(
-          lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink(),
+          stat.isFile() && !stat.isSymbolicLink(),
           'INVALID_NATIVE_SOURCE',
           'Downloaded source must be a regular file.',
         );
         await chmod(path, 0o600);
-        const actual = await fingerprintPrivateFile(path);
+        // A verifying transport hashed these bytes as it wrote them: check the size only.
+        const actual = verified
+          ? { sha256: pin.sha256, size: stat.size }
+          : await fingerprintPrivateFile(path);
         invariant(
           actual.sha256 === pin.sha256 && actual.size === pin.size,
           'INVALID_NATIVE_SOURCE',
           'Downloaded source is truncated or corrupt.',
         );
       });
-      await mapCheckoutIo(
-        files,
-        async ({ path }) => {
-          const handle = await open(path, 'r');
-          try {
-            await handle.sync();
-          } finally {
-            await handle.close();
-          }
-        },
-        'durability',
-      );
       await mapCheckoutIo(files, async ({ pin, path }) => {
         const target = join(this.objects, pin.sha256);
         await rename(path, target);

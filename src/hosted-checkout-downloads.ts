@@ -4,6 +4,7 @@ import { closeSync, openSync, unlinkSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readNestedCheckoutNode } from './hosted-checkout-recipe-read.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
@@ -59,7 +60,14 @@ const rowSchema = z.discriminatedUnion('location', [
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('recipe'),
-    recipe: z.object({ digest: z.string(), size: z.number().safe().nonnegative() }),
+    recipe: z.object({
+      digest: z.string(),
+      size: z.number().safe().nonnegative(),
+      url: z.url().optional(),
+      range: z
+        .object({ offset: z.number().safe().nonnegative(), total: z.number().safe().positive() })
+        .optional(),
+    }),
   }),
 ]);
 type Row = DownloadRow & { url?: string | undefined; run?: PackRunBinding | undefined };
@@ -69,10 +77,17 @@ const olderServer = (error: unknown) => /extra field `?runs/.test(String((error 
  * pages; bytes never pass through a Convex function. The caller reauthorizes before
  * installing files. This memory holds locations only, never a project's file bytes. */
 export class HostedCheckoutDownloads implements CheckoutObjectTransport {
-  private readonly recipes = new Map<string, ObjectRecipe>();
+  /** Page rows (`objects`), shared by every window until their file is downloaded. */
   private readonly rows = new Map<string, Row>();
+  /** Each download window's own signatures, recipes and index pages (dropped with the window),
+   * so overlapping windows never remove or replace one another's. */
+  private readonly window = new AsyncLocalStorage<Window>();
   private runs = true;
   private pages = 0;
+  /** Every written file's size and digest is checked here (stream hash, run hash, recipe identity). */
+  readonly verifiesDownloads = true;
+  /** Two windows at once; each keeps its own state in `window`. */
+  readonly downloadWindows = 2;
   constructor(private readonly exchange: Pick<ConvexExchange, 'client' | 'projectId'>) {}
   /** One signed page holds up to 500 pins when the server groups pack runs. */
   get objectPageSize() {
@@ -87,6 +102,8 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     return {
       // Older servers still take 500-pin windows: `objects` re-pages them by 100.
       objectPageSize: this.objectPageSize,
+      verifiesDownloads: this.verifiesDownloads,
+      downloadWindows: this.downloadWindows,
       objects: ids => this.objects(ids),
       downloadToFile: (pin, path) => this.downloadToFile(pin, path),
       downloadFiles: files => this.downloadFiles(files),
@@ -104,6 +121,8 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
           signed: true,
           ...(runs ? { runs: true } : {}),
         },
+        // Signing writes nothing: pages described ahead need not wait in the SDK's mutation queue.
+        { skipQueue: true },
       ),
     );
     invariant(
@@ -119,11 +138,25 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         'INVALID_NATIVE_SOURCE',
         'Source location is unsigned.',
       );
-      this.rows.set(row.digest, run ? { ...rest, run: { ...run, key: `${page}:${run.id}` } } : rest);
+      const rows = this.window.getStore()?.rows ?? this.rows;
+      if (row.location === 'recipe') {
+        // A signed recipe object comes with its logical row: reading it needs no describe.
+        const { url, range, ...recipe } = row.recipe;
+        rows.set(row.digest, { ...row, recipe });
+        if (url && !rows.get(recipe.digest)?.url)
+          rows.set(recipe.digest, { ...recipe, location: 'r2', url, ...(range ? { range } : {}) });
+      } else rows.set(row.digest, run ? { ...rest, run: { ...run, key: `${page}:${run.id}` } } : rest);
     }
     return rows.map(row => ({ sha256: row.digest, size: row.size }));
   }
   async objects(digests: string[]): Promise<ContentPin[]> {
+    return this.window.exit(() => this.describePages(digests));
+  }
+  /** This window's row for `digest`, else the shared page row. */
+  private row(digest: string): Row | undefined {
+    return this.window.getStore()?.rows.get(digest) ?? this.rows.get(digest);
+  }
+  private async describePages(digests: string[]): Promise<ContentPin[]> {
     if (this.runs && digests.length > 1)
       try {
         const pins: ContentPin[] = [];
@@ -141,16 +174,25 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   }
   /** Keep each pack run inside one download window (16 MiB, or one run alone). */
   downloadGroups(pins: ContentPin[]): ContentPin[][] {
-    return runGroups(pins, digest => this.rows.get(digest));
+    return runGroups(pins, digest => this.row(digest));
   }
-  private async prepare(pins: ContentPin[]) {
-    const missing = [
-      ...new Map(pins.filter(pin => !this.rows.has(pin.sha256)).map(pin => [pin.sha256, pin])).values(),
-    ];
-    if (missing.length) await this.objects(missing.map(pin => pin.sha256));
+  /** `single`: these pins are read one by one (recipe nodes and chunks), so each needs its own
+   * signature in one page call, never a run binding that is then re-signed per object. */
+  private async prepare(pins: ContentPin[], single = false) {
+    const need = (pin: ContentPin) => {
+      const row = this.row(pin.sha256);
+      return !row || (single && row.location === 'r2' && !row.url);
+    };
+    const missing = [...new Map(pins.filter(need).map(pin => [pin.sha256, pin])).values()].map(
+      pin => pin.sha256,
+    );
+    if (single)
+      for (let at = 0; at < missing.length; at += 100)
+        await this.describe(missing.slice(at, at + 100), false);
+    else if (missing.length) await this.describePages(missing);
     for (const pin of pins)
       invariant(
-        this.rows.get(pin.sha256)?.size === pin.size,
+        this.row(pin.sha256)?.size === pin.size,
         'INVALID_NATIVE_SOURCE',
         'Source location differs from selected size.',
       );
@@ -160,12 +202,12 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     consume: (response: Response, progressed: () => void) => Promise<T>,
   ): Promise<T> {
     await this.prepare([pin]);
-    let row = this.rows.get(pin.sha256)!;
+    let row = this.row(pin.sha256)!;
     invariant(row.location !== 'recipe', 'INVALID_NATIVE_SOURCE', 'Recipe nodes must be physical objects.');
     // A run member read on its own (outside its run) needs its own exact signature.
     if (!row.url) {
       await this.describe([pin.sha256], false);
-      row = this.rows.get(pin.sha256)!;
+      row = this.row(pin.sha256)!;
     }
     for (let attempt = 0; ; attempt++) {
       const result = await exchangeRequest(
@@ -193,7 +235,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       );
       if (!result.refresh) return result.value;
       await this.describe([pin.sha256], false);
-      row = this.rows.get(pin.sha256)!;
+      row = this.row(pin.sha256)!;
       invariant(
         row.size === pin.size && row.location === 'r2' && !!row.url,
         'INVALID_NATIVE_SOURCE',
@@ -203,18 +245,18 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
   }
   private async physical(pin: ContentPin): Promise<Buffer> {
     await this.prepare([pin]);
-    if (this.rows.get(pin.sha256)?.location === 'recipe')
+    if (this.row(pin.sha256)?.location === 'recipe')
       return readNestedCheckoutNode(pin, async (ids, refresh) => {
         // Chunk nodes are read one by one, so each needs its own signature (never a run's).
         const missing = refresh
           ? ids
           : ids.filter(id => {
-              const row = this.rows.get(id);
+              const row = this.row(id);
               return !row || (row.location === 'r2' && !row.url);
             });
         for (let at = 0; at < missing.length; at += 100)
           await this.describe(missing.slice(at, at + 100), false);
-        return ids.map(id => this.rows.get(id)! as DownloadRow & { url?: string });
+        return ids.map(id => this.row(id)! as DownloadRow & { url?: string });
       });
     return this.read(pin, async (response, progressed) => {
       const chunks: Uint8Array[] = [],
@@ -247,9 +289,10 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       return bytes;
     });
   }
-  async downloadToFile(pin: ContentPin, path: string) {
+  async downloadToFile(pin: ContentPin, path: string): Promise<void> {
+    if (!this.window.getStore()) return this.window.run(newWindow(), () => this.downloadToFile(pin, path));
     await this.prepare([pin]);
-    const row = this.rows.get(pin.sha256)!;
+    const row = this.row(pin.sha256)!;
     if (row.location !== 'recipe')
       return this.read(pin, async (response, progressed) => {
         // Open/clean each attempt inside the request deadline; retries never append
@@ -293,31 +336,47 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     try {
       const recipePin = { sha256: row.recipe.digest, size: row.recipe.size };
       const recipe =
-        this.recipes.get(pin.sha256) ??
+        this.state().recipes.get(pin.sha256) ??
         objectRecipeSchema.parse(JSON.parse((await this.physical(recipePin)).toString('utf8')));
       invariant(
         recipe.object.sha256 === pin.sha256 && recipe.object.size === pin.size,
         'INVALID_NATIVE_SOURCE',
         'Recipe differs from selected logical source.',
       );
-      for await (const bytes of readObjectRecipe(
-        recipe,
-        item => this.physical(item),
-        items => this.prepare(items),
-      ))
+      // The next nodes are read while this one is written: at most 8 ahead and 4 MiB held.
+      const ahead = new Map<string, { bytes: number; read: Promise<Buffer> }>();
+      const read = (item: ContentPin) => {
+        const known = this.state().indexPages.get(item.sha256) ?? null;
+        if (known) return Promise.resolve(known);
+        const started = ahead.get(item.sha256);
+        ahead.delete(item.sha256);
+        return started?.read ?? this.physical(item);
+      };
+      for await (const bytes of readObjectRecipe(recipe, read, async items => {
+        await this.prepare(items, true);
+        let held = [...ahead.values()].reduce((sum, entry) => sum + entry.bytes, 0);
+        for (const item of items.slice(1, 9)) {
+          if (ahead.has(item.sha256) || this.state().indexPages.has(item.sha256)) continue;
+          if (held + item.size > 4 * 1024 * 1024) break;
+          const started = this.physical(item);
+          started.catch(() => undefined);
+          ahead.set(item.sha256, { bytes: item.size, read: started });
+          held += item.size;
+        }
+      }))
         await checkoutIo(async () => writeAll(fd, bytes));
     } finally {
       await checkoutIo(async () => closeSync(fd));
     }
   }
   private async prepareRecipes(pins: ContentPin[]) {
-    const logical = pins.filter(pin => this.rows.get(pin.sha256)?.location === 'recipe');
+    const logical = pins.filter(pin => this.row(pin.sha256)?.location === 'recipe');
     const recipePin = (pin: ContentPin) => {
-      const row = this.rows.get(pin.sha256)!;
+      const row = this.row(pin.sha256)!;
       invariant(row.location === 'recipe', 'INVALID_NATIVE_SOURCE', 'Select recipe content.');
       return { sha256: row.recipe.digest, size: row.recipe.size };
     };
-    await this.prepare(logical.map(recipePin));
+    await this.prepare(logical.map(recipePin), true);
     const recipes = await mapExchange(logical, 4, async pin => {
       const recipe = objectRecipeSchema.parse(
         JSON.parse((await this.physical(recipePin(pin))).toString('utf8')),
@@ -329,7 +388,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         'INVALID_NATIVE_SOURCE',
         'Recipe differs from selected logical source.',
       );
-      this.recipes.set(pin.sha256, recipe);
+      this.state().recipes.set(pin.sha256, recipe);
       return recipe;
     });
     // Batch every tree level across all logical objects in this <=100-file window.
@@ -343,12 +402,14 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
           'INVALID_NATIVE_SOURCE',
           'Recipe node exceeds its bounded encoding.',
         );
-      await this.prepare(refs);
+      await this.prepare(refs, true);
       const pages = await mapExchange(
         refs.filter(ref => ref.height > 0),
         4,
         async ref => {
-          const page = objectChunkPageSchema.parse(JSON.parse((await this.physical(ref)).toString('utf8')));
+          const bytes = await this.physical(ref);
+          this.state().indexPages.set(ref.sha256, bytes);
+          const page = objectChunkPageSchema.parse(JSON.parse(bytes.toString('utf8')));
           invariant(
             page.children.every(child => child.height < ref.height) &&
               page.children.reduce((sum, child) => sum + child.length, 0) === ref.length,
@@ -363,25 +424,40 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     }
   }
   async downloadFiles(files: { pin: ContentPin; path: string }[]) {
-    const before = new Set(this.rows.keys()),
-      consumed = new Set(files.map(file => file.pin.sha256));
+    const own = newWindow();
     try {
-      await this.prepareRecipes(files.map(file => file.pin));
-      const read = await readCompleteRuns(files, this.rows);
-      const rest = files.filter(file => !read.has(file.pin.sha256));
-      // Large/recipe objects stream one at a time; small files have eight concurrent GETs.
-      const small = rest.filter(file => file.pin.size <= 2 * 1024 * 1024);
-      await mapExchange(small, 8, file => this.downloadToFile(file.pin, file.path), {
-        bytes: 16 * 1024 * 1024,
-        size: file => file.pin.size,
+      await this.window.run(own, async () => {
+        await this.prepareRecipes(files.map(file => file.pin));
+        const read = await readCompleteRuns(files, new Map([...this.rows, ...own.rows]));
+        const rest = files.filter(file => !read.has(file.pin.sha256));
+        // Small files have eight concurrent GETs. Large/recipe objects stream to disk, four at a
+        // time (each holds at most 4 MiB of read-ahead, so about 16 MiB in all).
+        const small = rest.filter(file => file.pin.size <= 2 * 1024 * 1024);
+        await mapExchange(small, 8, file => this.downloadToFile(file.pin, file.path), {
+          bytes: 16 * 1024 * 1024,
+          size: file => file.pin.size,
+        });
+        await mapExchange(
+          rest.filter(file => file.pin.size > 2 * 1024 * 1024),
+          4,
+          file => this.downloadToFile(file.pin, file.path),
+        );
       });
-      for (const file of rest)
-        if (file.pin.size > 2 * 1024 * 1024) await this.downloadToFile(file.pin, file.path);
     } finally {
-      // Keep only unused pins from the original metadata page, not signatures
-      // for every file/chunk in the checkout. Source bytes remain on disk.
-      for (const id of this.rows.keys()) if (consumed.has(id) || !before.has(id)) this.rows.delete(id);
-      this.recipes.clear();
+      // Keep only unused page rows (including pages described ahead), not signatures for every
+      // file/chunk in the checkout: this window's own state goes with it. Source bytes stay on disk.
+      for (const file of files) {
+        const row = this.rows.get(file.pin.sha256);
+        if (row?.location === 'recipe') this.rows.delete(row.recipe.digest);
+        this.rows.delete(file.pin.sha256);
+      }
     }
   }
+  private state() {
+    const own = this.window.getStore();
+    invariant(own, 'INVALID_NATIVE_SOURCE', 'Checkout downloads run inside a window.');
+    return own;
+  }
 }
+type Window = { rows: Map<string, Row>; recipes: Map<string, ObjectRecipe>; indexPages: Map<string, Buffer> };
+const newWindow = (): Window => ({ rows: new Map(), recipes: new Map(), indexPages: new Map() });

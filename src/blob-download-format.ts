@@ -25,6 +25,10 @@ export const downloadRecipeSchema = z.object({
 export type DownloadRow = { digest: string; size: number } & (
   | { location: 'r2'; range?: PackRange | undefined }
   | { location: 'convex'; url: string }
-  | { location: 'recipe'; recipe: { digest: string; size: number } }
+  // A signed describe may also sign the recipe object itself (url/range); readers may ignore it.
+  | {
+      location: 'recipe';
+      recipe: { digest: string; size: number; url?: string | undefined; range?: PackRange | undefined };
+    }
 );
 export type SignedDownload = { digest: string; size: number; url: string; range?: PackRange };

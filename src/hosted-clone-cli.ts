@@ -117,12 +117,23 @@ export async function hostedCloneCli(
   const url = deploymentUrl(selected);
   if (beforeRun && !(await beforeRun())) return;
   const client = dependencies?.client ?? new ConvexExchange(url, undefined, '', '', null).client;
+  // A clone by project ID reads main alongside the route lookup (two reads at once, same calls);
+  // the read is used only when the lookup names that same project.
+  const named =
+    dependencies || !route.projectId ? null : new ConvexExchange(url, undefined, route.projectId, '', null);
+  let early = named?.current();
+  early?.catch(() => undefined);
   const project = z
     .object({ id: z.string(), handle: z.string().optional(), slug: z.string().optional() })
     .nullable()
     .parse(await client.query(makeFunctionReference<'query'>('urlProjects:resolve'), route));
   invariant(project, 'PROJECT_UNAVAILABLE', 'This hosted project is unavailable with the current account.');
-  const exchange = dependencies ? null : new ConvexExchange(url, undefined, project.id, '', null);
+  const exchange = dependencies
+    ? null
+    : named && project.id === route.projectId
+      ? named
+      : new ConvexExchange(url, undefined, project.id, '', null);
+  if (exchange !== named) early = undefined;
   const downloads = exchange ? new HostedCheckoutDownloads(exchange) : null;
   // The slug is what `nforge host ROOT --delete-project ID --confirm SLUG` needs; a re-import of the
   // same name gets a suffixed one, so it is printed rather than guessed.
@@ -130,7 +141,11 @@ export async function hostedCloneCli(
     root,
     { url, projectId: project.id },
     dependencies?.transport(project.id) ?? {
-      current: expected => exchange!.current(expected),
+      current: expected => {
+        const read = expected === undefined ? early : undefined;
+        early = undefined;
+        return read ?? exchange!.current(expected);
+      },
       ...downloads!.transport(),
     },
   );

@@ -17,7 +17,7 @@ const olderServer = (error: unknown) => /extra field `?runs/.test(String((error 
 /** Reuse project-scoped membership, batched R2 signing and dual-location byte transport. */
 export class ConvexLaneTransport implements LaneTransport {
   readonly objectPageSize = hostedDownloadPageSize;
-  private descriptors = new Map<string, Descriptor>();
+  private readonly descriptors = new Map<string, Descriptor>();
   private runs = true;
   private pages = 0;
   constructor(
@@ -48,12 +48,16 @@ export class ConvexLaneTransport implements LaneTransport {
   private async page(digests: string[], signed: boolean, runs = false): Promise<Descriptor[]> {
     type Wire = HostedDownloadDescriptor & { run?: Omit<PackRunBinding, 'key'> & { id: number } };
     const call = (withRuns: boolean): Promise<Wire[]> =>
-      this.exchange.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:lanePage'), {
-        projectId: this.exchange.projectId,
-        digests,
-        signed,
-        ...(withRuns ? { runs: true } : {}),
-      });
+      this.exchange.client.mutation(
+        makeFunctionReference<'mutation'>('projectObjectDownloads:lanePage'),
+        {
+          projectId: this.exchange.projectId,
+          digests,
+          signed,
+          ...(withRuns ? { runs: true } : {}),
+        },
+        { skipQueue: true },
+      ); // Signing writes nothing; pages described ahead run alongside.
     let rows;
     if (runs && signed && this.runs && digests.length > 1)
       try {
@@ -74,7 +78,8 @@ export class ConvexLaneTransport implements LaneTransport {
   }
   async objects(digests: string[]) {
     const rows = await this.page(digests, true, true);
-    this.descriptors = new Map(rows.map(row => [row.digest, row]));
+    // Merge: the checkout cache describes later pages while an earlier one downloads.
+    for (const row of rows) this.descriptors.set(row.digest, row);
     return rows.map(row => ({ sha256: row.digest, size: row.size }));
   }
   /** Keep each pack run inside one download window. */

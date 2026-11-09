@@ -9,10 +9,12 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { enableCompileCache } from 'node:module';
 import { basename, dirname, join, resolve } from 'node:path';
 import { hostname } from 'node:os';
 import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
@@ -219,6 +221,26 @@ export function claimCliRuntime(installation: string, root: string, waitMs = 0) 
     waitMs,
   );
 }
+/** Node's on-disk compile cache, one owner-only folder per build (about 8 MB): later commands
+ * skip recompiling the unchanged module graph. Node keys and checks entries by source hash, so
+ * a changed file just recompiles. Folders of builds that no longer exist go when a new one is
+ * made, so updates never accumulate them. A cache only: any failure runs uncached. */
+export function enableCliCompileCache(installation: string, build: string) {
+  try {
+    const root = join(installation, 'compile-cache'),
+      name = basename(build),
+      own = join(root, name);
+    if (!existsSync(own)) {
+      mkdirSync(own, { recursive: true, mode: 0o700 });
+      for (const other of readdirSync(root))
+        if (other !== name && !existsSync(join(dirname(build), other)))
+          rmSync(join(root, other), { recursive: true, force: true });
+    }
+    enableCompileCache(own);
+  } catch {
+    /* Uncached. */
+  }
+}
 async function launch() {
   try {
     process.cwd();
@@ -247,6 +269,7 @@ async function launch() {
     },
     CLI_RUNTIME_WAIT_MS,
   );
+  enableCliCompileCache(installation, manager);
   await import(/* @vite-ignore */ pathToFileURL(join(manager, 'dist', 'cli-entry.js')).href);
 }
 // The filename check also prevents this entry from running inside the bundled edit hook.

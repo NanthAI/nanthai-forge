@@ -10,7 +10,7 @@ import { readSigned } from '../dist/exchange-r2-read.js';
 import { packHeaders, verifyPackRange, packRuns } from '../dist/object-pack-range.js';
 import { HostedCheckoutDownloads } from '../dist/hosted-checkout-downloads.js';
 import { HostedCheckoutCache } from '../dist/hosted-checkout-cache.js';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
@@ -398,4 +398,109 @@ test('clone, pull and root-open wrappers keep 500-pin signed pages and whole pac
   assert.equal(gets.length, 2, 'one ranged GET per page run');
   for (const [i, pin] of pins.entries())
     assert.deepEqual(readFileSync(join(cache.objects, pin.sha256)), bodies[i]);
+});
+
+test('a recipe clone signs each recipe with its row, overlaps windows, and refetches torn cached objects', async t => {
+  const f = await fixture(t);
+  const { randomBytes } = await import('node:crypto');
+  const large = Array.from({ length: 3 }, () => randomBytes(3 * 1024 * 1024));
+  const logical = [];
+  for (const bytes of large)
+    logical.push(
+      await f.upload.stream(
+        (async function* () {
+          for (let at = 0; at < bytes.length; at += 256 * 1024) yield bytes.subarray(at, at + 256 * 1024);
+        })(),
+      ),
+    );
+  const bodies = Array.from({ length: 600 }, (_, i) => Buffer.from(`recipe neighbour ${i}`));
+  const pins = [...bodies.map(bytes => f.upload.put(bytes)), ...logical];
+  await f.upload.drain(true);
+  await f.upload.commit();
+  await f.publish();
+  const expected = new Map(
+    pins.map((pin, i) => [pin.sha256, i < bodies.length ? bodies[i] : large[i - bodies.length]]),
+  );
+  const recipeObjects = new Set(
+    [...f.stored.values()].filter(row => row.recipe).map(row => row.recipe.digest),
+  );
+  assert.equal(recipeObjects.size, 3);
+  let older = false;
+  const calls = [];
+  const transfer = () =>
+    new HostedCheckoutDownloads({
+      projectId: f.projectId,
+      client: {
+        mutation: async (_ref, args, options) => {
+          calls.push({ args, options });
+          const rows = await downloads.describe._handler(f.s.ctx, args);
+          // A server from before recipe signing returns recipe rows without a URL.
+          return older
+            ? rows.map(row =>
+                row.location === 'recipe'
+                  ? { ...row, recipe: { digest: row.recipe.digest, size: row.recipe.size } }
+                  : row,
+              )
+            : rows;
+        },
+      },
+    }).transport({ sourcePack: false });
+  const clone = async (machine, directMachine = false) => {
+    const root = mkdtempSync(join(tmpdir(), 'forge-recipe-clone-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const cache = new HostedCheckoutCache(root, transfer(), join(root, 'objects'), machine, directMachine);
+    await cache.ensure(pins.map(pin => pin.sha256));
+    for (const [digest, bytes] of expected)
+      assert.deepEqual(readFileSync(join(cache.objects, digest)), bytes);
+    return cache;
+  };
+  const first = await clone(null);
+  assert.equal(first.downloadedObjects, pins.length);
+  assert.deepEqual(
+    calls.filter(call => call.args.runs).map(call => call.args.digests.length),
+    [500, 103],
+    'two signed pages; the page after the first is described while the first downloads',
+  );
+  assert.ok(
+    calls.every(call => call.options?.skipQueue === true),
+    'describes never wait behind each other',
+  );
+  const singles = calls.filter(call => !call.args.runs);
+  assert.ok(
+    singles.every(call => call.args.digests.every(digest => !recipeObjects.has(digest))),
+    'each recipe object is signed with its logical row, never in a describe of its own',
+  );
+  assert.ok(singles.length <= 4, `tree levels are signed once per window (${singles.length} calls)`);
+  const newer = calls.length;
+  calls.length = 0;
+  older = true;
+  await clone(null);
+  assert.ok(
+    calls.some(call => !call.args.runs && call.args.digests.some(digest => recipeObjects.has(digest))),
+    'an older server still clones: recipe objects are signed by one extra describe',
+  );
+  assert.ok(calls.length <= newer + 2);
+  older = false;
+
+  // Objects get no fsync each, so a crash can leave torn or truncated objects. The store is a
+  // cache: every later read checks the digest and fetches damaged objects again.
+  const machine = mkdtempSync(join(tmpdir(), 'forge-recipe-machine-'));
+  t.after(() => rmSync(machine, { recursive: true, force: true }));
+  const stored = await clone(machine, true);
+  const [torn, truncated, big] = [pins[0], pins[1], logical[0]].map(pin => join(stored.objects, pin.sha256));
+  writeFileSync(torn, Buffer.alloc(bodies[0].length));
+  writeFileSync(truncated, bodies[1].subarray(0, 3));
+  writeFileSync(big, Buffer.alloc(large[0].length));
+  calls.length = 0;
+  const again = await clone(machine, true);
+  assert.equal(again.downloadedObjects, 3, 'only the three damaged objects are fetched again');
+  const perCheckout = mkdtempSync(join(tmpdir(), 'forge-recipe-objects-'));
+  t.after(() => rmSync(perCheckout, { recursive: true, force: true }));
+  const local = new HostedCheckoutCache(perCheckout, transfer(), join(perCheckout, 'objects'), null);
+  await local.ensure(pins.map(pin => pin.sha256));
+  writeFileSync(join(local.objects, pins[2].sha256), Buffer.alloc(bodies[2].length));
+  const reopened = new HostedCheckoutCache(perCheckout, transfer(), join(perCheckout, 'objects'), null);
+  await reopened.ensure(pins.map(pin => pin.sha256));
+  assert.equal(reopened.downloadedObjects, 1);
+  assert.deepEqual(readFileSync(join(reopened.objects, pins[2].sha256)), bodies[2]);
 });

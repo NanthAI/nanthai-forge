@@ -14,6 +14,7 @@ import {
   materializationDirectory,
 } from '../dist/checkout-materialization.js';
 import { HostedCheckoutCache } from '../dist/hosted-checkout-cache.js';
+import { aheadOf, runDownloadWindows } from '../dist/checkout-download-schedule.js';
 import { digest } from '../dist/hash.js';
 import { smallCheckout, smallCheckoutBytes, smallCheckoutFiles } from '../dist/checkout-workload.js';
 
@@ -215,3 +216,77 @@ test(
     }
   },
 );
+
+test('download windows start heavy groups first, stay bounded, and settle every window on failure', async () => {
+  const pin = (name, size = 1) => ({ sha256: name, size });
+  async function* pages(list) {
+    for (const groups of list) {
+      await delay(1);
+      yield groups;
+    }
+  }
+  const order = [];
+  let active = 0,
+    peak = 0;
+  await runDownloadWindows(
+    pages([
+      [[pin('a')], [pin('b')]],
+      [[pin('c')], [pin('big', 3 * 1024 * 1024)]],
+    ]),
+    2,
+    async group => {
+      order.push(group[0].sha256);
+      peak = Math.max(peak, ++active);
+      await delay(5);
+      active--;
+    },
+  );
+  assert.equal(peak, 2);
+  assert.ok(
+    order.indexOf('big') < order.indexOf('c'),
+    'a later page’s large group starts before queued small ones',
+  );
+  assert.deepEqual([...order].sort(), ['a', 'b', 'big', 'c']);
+
+  // Pages wait while too many pins are held; the first failure throws only after all settle.
+  let settled = 0,
+    pulled = 0;
+  const failing = (async function* () {
+    for (let i = 0; i < 20; i++) {
+      pulled++;
+      yield [[pin(`f${i}`)]];
+    }
+  })();
+  await assert.rejects(
+    runDownloadWindows(
+      failing,
+      2,
+      async group => {
+        await delay(group[0].sha256 === 'f0' ? 1 : 10);
+        settled++;
+        if (group[0].sha256 === 'f0') throw new Error('window failed');
+      },
+      2,
+    ),
+    /window failed/,
+  );
+  assert.ok(pulled < 20, 'no page is described past a failure');
+  assert.equal(settled, pulled > 1 ? 2 : 1, 'every started window settled before the failure surfaced');
+
+  // aheadOf keeps `depth` later calls in flight, in order, and surfaces a failure at its own item.
+  const started = [];
+  const seen = [];
+  await assert.rejects(async () => {
+    for await (const [item, value] of aheadOf([1, 2, 3, 4], 2, async item => {
+      started.push(item);
+      if (item === 3) throw new Error('describe 3 failed');
+      return item * 10;
+    })) {
+      seen.push([item, value, started.length]);
+    }
+  }, /describe 3 failed/);
+  assert.deepEqual(seen, [
+    [1, 10, 3],
+    [2, 20, 4],
+  ]);
+});
