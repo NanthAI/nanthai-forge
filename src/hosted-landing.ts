@@ -12,6 +12,7 @@ import { composeRequestSchema } from './hosted-compose.js';
 import { submissionOutcome } from './landing-submission-state.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { scopedRecheckBasisSchema } from './scoped-recheck-policy.js';
+import { docsResolutionSchema } from './docs-resolution.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const finishRetryReasonSchema = z.enum(['flake', 'main-moved', 'infra', 'other']);
@@ -185,7 +186,10 @@ export const hostedLandingStateSchema = z
       .strict()
       .optional(),
     observation: landingObservationSchema,
-    acceptance: z.object({ receiptId: z.uuid(), head: hash }).strict().optional(),
+    acceptance: z
+      .object({ receiptId: z.uuid(), head: hash, docsResolution: docsResolutionSchema.optional() })
+      .strict()
+      .optional(),
     error: z
       .object({ code: z.string().min(1), message: z.string() })
       .strict()

@@ -95,6 +95,8 @@ export type SourceStepCursor = {
    * cursors from older code, which publish unaccounted. */
   batchMerged?: string[];
   composeBases?: [string, Pick<NativeFile, 'blob' | 'mode'> | null][];
+  /** Paths merged so far with the Markdown docs rule; the final compose result records them. */
+  docsPaths?: string[];
   /** A finished sync's result as changes from the client's Lane head (never saved: set only in
    * the step that finishes; the submitting action passes it to its caller). */
   syncDelta?: import('./hosted-sync-delta.js').SyncStateDelta;

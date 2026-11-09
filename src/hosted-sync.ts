@@ -7,6 +7,7 @@ import {
 } from './hosted-save.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedRecordSchema } from './hosted-records.js';
+import { docsMergeSchema, docsResolutionSchema } from './docs-resolution.js';
 export const SYNC_ALGORITHM = 'forge-native-sync-v1';
 export const resolutionSchema = hostedRecordSchema.options[1].shape.resolution.unwrap();
 const common = {
@@ -87,7 +88,7 @@ export const syncOutputSchema = z
     input: object,
     algorithm: z.literal(SYNC_ALGORITHM),
     result: z.discriminatedUnion('status', [
-      z.object({ status: z.literal('merged'), state: object }).strict(),
+      z.object({ status: z.literal('merged'), state: object, docs: docsMergeSchema.optional() }).strict(),
       z.object({ status: z.literal('up-to-date'), state: object }).strict(),
       z.object({ status: z.literal('resolved'), state: object, resolution: resolutionSchema }).strict(),
       z
@@ -117,6 +118,8 @@ export const syncResultSchema = z
       .strict()
       .nullable(),
     resolution: resolutionSchema.nullable(),
+    /** Markdown-only conflicts this sync merged with the docs rule, and how to undo that. */
+    docsResolution: docsResolutionSchema.optional(),
     at: z.iso.datetime(),
   })
   .strict();

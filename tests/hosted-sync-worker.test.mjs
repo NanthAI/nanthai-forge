@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { conflictPlan } from '../dist/agent-sync.js';
+import { resolveDocsComposition } from '../dist/native-docs-resolve.js';
 const at = '2026-01-01T00:00:00.000Z',
   message = 'Native sync parity';
 const plan = (left, right) => ({
@@ -80,6 +81,35 @@ for (const recursive of [false, true])
       assert.equal(result.status, 'conflict');
     });
   }
+// Issue 561996ac: a Lane sync whose only conflict is Markdown docs takes native finish's rule.
+test('a Markdown-only sync conflict merges with the docs rule, byte-identical to native finish', async t => {
+  const s = await composeFixture(),
+    para = side => s.file('docs/status.md', `# Status\n\nIntro.${side ? ` ${side} sentence.` : ''}\n`);
+  const root = s.state([para(''), s.hidden], [s.baseline.sha256]);
+  const lane = s.state([para('Lane'), s.hidden], [root.sha256]),
+    main = s.state([para('Main'), s.hidden], [root.sha256]);
+  const dir = mkdtempSync(join(tmpdir(), 'forge-sync-docs-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const native = new NativeSource(dir);
+  for (const bytes of s.objects.values()) native.put(bytes);
+  const expected = resolveDocsComposition(native, lane.sha256, main.sha256, message, at);
+  const result = JSON.parse((await s.compute(plan(lane, main))).manifest).result;
+  assert.equal(result.status, 'merged');
+  assert.equal(result.state.sha256, expected.head);
+  assert.deepEqual(result.docs, { paths: ['docs/status.md'], rule: 'keep both sides, main first' });
+  const file = JSON.parse(s.objects.get(result.state.sha256)).files.find(f => f.path === 'docs/status.md');
+  assert.equal(s.objects.get(file.blob).toString(), '# Status\n\nIntro. Main sentence. Lane sentence.\n');
+  // A code conflict beside it keeps the native conflict draft for every path.
+  const code = side => s.file('src/x.ts', `export const x = '${side}';\n`);
+  const base2 = s.state([para(''), code('base'), s.hidden], [s.baseline.sha256]);
+  const { result: mixed } = await parity(
+    t,
+    s,
+    s.state([para('Lane'), code('lane'), s.hidden], [base2.sha256]),
+    s.state([para('Main'), code('main'), s.hidden], [base2.sha256]),
+  );
+  assert.equal(mixed.status, 'conflict');
+});
 test('250 conflict paths page automatically and fetch each affected object once', async t => {
   const s = await composeFixture(),
     original = [],

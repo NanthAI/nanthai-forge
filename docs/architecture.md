@@ -1288,6 +1288,9 @@ existing fixed source worker once under the retained job identity. There is no
 recurring sync, idle worker, owner listener or browser lifetime dependency.
 
 The sync worker uses native right-first sync composition and `conflictPlan`.
+A Lane sync onto main, and every hosted compose, whose only conflicts are
+Markdown docs applies native finish's docs rule and records it (see
+[Markdown conflict resolution](agents/workflow.md#markdown-conflict-resolution-on-finish)).
 Only missing State metadata and blobs read by the merge are fetched. A clean
 sync registers its exact State and CAS-updates its original Lane. A conflict
 retains the original Lane and creates an isolated resolution sibling, with the

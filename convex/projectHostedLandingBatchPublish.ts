@@ -49,6 +49,7 @@ import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark } from '../src/secret-allow';
 import { batchCoverageFailure } from './projectHostedBatchCoverage';
 import type { BatchMemberPaths } from '../src/hosted-batch-coverage';
+import { landingDocsUndo } from '../src/docs-resolution';
 
 /** At most eight independently authorized members, one checked head, one main
  * CAS. All receipts, request settlements and completion activations commit with
@@ -343,6 +344,15 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       automatic: true,
       ...(secretAllowAdded && index === members.length - 1 ? { secretAllowAdded } : {}),
       undo: { kind: 'revert', receiptId: member.attempt.operations.accept },
+      // The shared State's docs merges (Issue 561996ac), like secretAllowAdded on the last receipt.
+      ...(candidate.docs && index === members.length - 1
+        ? {
+            docsResolution: {
+              ...candidate.docs,
+              undo: landingDocsUndo(member.attempt.operations.accept),
+            },
+          }
+        : {}),
     });
     const identity = { projectId: claim.projectId, receiptId: receipt.id },
       value = canonicalPayload(receipt);
@@ -371,7 +381,11 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       ...member.state,
       version: member.state.version + 1,
       phase: 'landed' as const,
-      acceptance: { receiptId: receipt.id, head },
+      acceptance: {
+        receiptId: receipt.id,
+        head,
+        ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
+      },
       observation: landingObservation('accepted'),
       error: null,
     };

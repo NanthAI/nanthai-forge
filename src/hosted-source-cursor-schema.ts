@@ -71,6 +71,7 @@ const cursorSchema = z
         z.tuple([z.string(), stateSchema.shape.files.element.pick({ blob: true, mode: true }).nullable()]),
       )
       .optional(),
+    docsPaths: z.array(z.string()).optional(),
   })
   .strict();
 /** Every durable cursor field must parse back: a field missing here fails the next step of any

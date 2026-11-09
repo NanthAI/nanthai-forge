@@ -12,6 +12,7 @@ import { saveObjects, saveLaneRecord, sameSaveLane, type SaveIdentity } from './
 import { loadSourceJob } from './projectSourceJobs';
 import { sourceServerTiming } from './projectSourceStepTiming';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
+import { syncDocsUndo } from '../src/docs-resolution';
 import { savePin } from '../src/hosted-save';
 import { digest } from '../src/portable-hash';
 import { canonicalPayload, type HostedTerminalReceipt } from '../src/hosted-source-operation';
@@ -271,6 +272,9 @@ export async function publishHostedSync(ctx: MutationCtx, input: SaveIdentity & 
             }
           : null,
         resolution: lane.resolution ?? null,
+        ...(result.status === 'merged' && result.docs && state.lane
+          ? { docsResolution: { ...result.docs, undo: syncDocsUndo(state.lane.head) } }
+          : {}),
         at: first.at,
       }),
     },

@@ -168,6 +168,87 @@ test('overlapping main movement retains the new conflicted Candidate and H09 res
   assert.equal(f.tables.projectHostedCheckRuns.size, 1);
 });
 
+// Issue 561996ac (friction 1d7d120a): another Lane lands a sentence on the paragraph this Lane also
+// appended to. The queued entry recomposes on the new main with the native docs rule and lands in
+// its one round, without an agent turn; a code conflict beside it still stops. Both source paths.
+const status = side => [['docs/status.md', `# Status\n\nIntro.${side ? ` ${side} sentence.` : ''}\n`]];
+async function withSource(provider, run) {
+  const keys = [
+      'FORGE_SOURCE_PROVIDER',
+      'FORGE_SOURCE_WORKER',
+      'FORGE_SOURCE_RUNTIME',
+      'FORGE_SOURCE_KEY_ID',
+    ],
+    old = Object.fromEntries(keys.map(k => [k, process.env[k]]));
+  if (provider === 'convex') {
+    for (const key of keys) delete process.env[key];
+    process.env.FORGE_SOURCE_PROVIDER = 'convex';
+  }
+  try {
+    return await run();
+  } finally {
+    for (const [key, value] of Object.entries(old)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+for (const provider of ['fixed-worker', 'convex'])
+  test(`${provider}: a Markdown-only conflict with a newly landed main recomposes and lands in one round, naming the merge and its undo`, async t => {
+    const f = await finishFixture(t, {
+      baselineFiles: status(''),
+      selectedFiles: status('Lane'),
+      mainFiles: status('Main'),
+    });
+    await withSource(provider, async () => {
+      const { state } = await begin(f);
+      f.moveMain();
+      await complete(f);
+      if ((await f.current(state.id)).submission.phase !== 'landed') await complete(f);
+      const landed = await f.current(state.id);
+      assert.equal(landed.submission.phase, 'landed', JSON.stringify(landed.submission.error));
+      const [receipt] = [...f.tables.projectHostedAcceptances.values()].map(row => JSON.parse(row.value));
+      assert.deepEqual(
+        { ...receipt.docsResolution, undo: undefined },
+        { paths: ['docs/status.md'], rule: 'keep both sides, main first', undo: undefined },
+      );
+      assert.match(receipt.docsResolution.undo, /main's lines come first, then the Lane's/);
+      assert.match(receipt.docsResolution.undo, new RegExp(`"receiptId":"${receipt.id}"`));
+      assert.deepEqual(landed.submission.acceptance.docsResolution, receipt.docsResolution);
+      const files = JSON.parse(f.c.objects.get(f.currentMain().head).toString()).files;
+      const bytes = f.c.objects.get(files.find(x => x.path === 'docs/status.md').blob).toString();
+      assert.equal(bytes, '# Status\n\nIntro. Main sentence. Lane sentence.\n');
+      // The journaled in-Convex merge ran (its docs bytes are a calculation like a text merge).
+      if (provider === 'convex') {
+        assert(f.metrics.convexSourceCalls.includes('projectConvexSource:step'));
+        // Same budget as a clean Convex recompose ('Convex source recompose reaches ...' below).
+        assert(f.metrics.convexSourceCalls.length <= 10, JSON.stringify(f.metrics.convexSourceCalls));
+        assert(f.metrics.convexStorageCalls <= 2);
+        t.diagnostic(
+          JSON.stringify({
+            convexSourceCalls: f.metrics.convexSourceCalls.length,
+            convexStorageCalls: f.metrics.convexStorageCalls,
+            sourceExecutions: f.tables.projectSourceSteps.size,
+          }),
+        );
+      }
+    });
+  });
+test('a Markdown conflict beside a code conflict still stops the queued landing with both paths', async t => {
+  const code = side => [['src/x.ts', `export const x = '${side}';\n`]];
+  const f = await finishFixture(t, {
+      baselineFiles: [...status(''), ...code('base')],
+      selectedFiles: [...status('Lane'), ...code('lane')],
+      mainFiles: [...status('Main'), ...code('main')],
+    }),
+    { state } = await begin(f);
+  f.moveMain();
+  await complete(f);
+  const result = await f.current(state.id);
+  assert.equal(result.submission.observation.cause, 'conflict');
+  assert.equal(result.submission.phase, 'terminal-failed');
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+});
 test('a same-head new main receipt starts a distinct exact Candidate/check attempt', async t => {
   const f = await finishFixture(t),
     { state } = await begin(f);

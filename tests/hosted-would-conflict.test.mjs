@@ -101,6 +101,25 @@ test('incident replay 2026-10-30 cost builder: a stale queued Candidate is marke
   assert.equal(rowOf(f, stale.id).wouldConflict, canonicalPayload(marked));
 });
 
+test('shared Markdown docs are not sync-required advice: the recompose merges them (Issue 561996ac)', async () => {
+  const f = await landingFixture();
+  const landing = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['docs/status.md', 'README.md', 'src/y.ts']) }),
+  );
+  const docsOnly = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['docs/status.md', 'README.md']) }),
+  );
+  const mixed = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['docs/status.md', 'src/y.ts']) }),
+  );
+  const nested = await f.enqueue(f.request({ candidateId: candidateWithPaths(f, ['src/notes.md']) }));
+  assert.equal(await mark(f, ['docs/status.md', 'README.md', 'src/y.ts', 'src/notes.md'], landing.id), 2);
+  assert.equal(rowOf(f, docsOnly.id).wouldConflict, undefined);
+  assert.deepEqual(JSON.parse(rowOf(f, mixed.id).wouldConflict).paths, ['src/y.ts']);
+  // Markdown outside docs/ and the root is not documentation scope, as in native finish.
+  assert.deepEqual(JSON.parse(rowOf(f, nested.id).wouldConflict).paths, ['src/notes.md']);
+});
+
 test('a landing with no known paths schedules nothing; publication stays constant-size', async () => {
   const f = await landingFixture();
   const state = await f.enqueue();
@@ -188,13 +207,14 @@ test('a replay of the queued land names its one continuation; reads only when qu
 
 test('incident replay 2026-11-09 D1: a queued landing whose file main changed returns SYNC_REQUIRED within one poll, and wait, observe, queue and land agree', async () => {
   const f = await landingFixture();
-  // D1 queued behind a landing that also changes docs/agents/workflow.md.
+  // D1 queued behind a landing that also changes a shared module. (The incident's shared file was
+  // docs/agents/workflow.md; shared Markdown docs are now merged by the recompose, Issue 561996ac.)
   const ahead = await f.enqueue(
-    f.request({ candidateId: candidateWithPaths(f, ['docs/agents/workflow.md', 'src/ahead.ts']) }),
+    f.request({ candidateId: candidateWithPaths(f, ['src/agent-workflow.ts', 'src/ahead.ts']) }),
   );
   const d1 = await f.enqueue(
     f.request({
-      candidateId: candidateWithPaths(f, ['docs/agents/workflow.md', 'src/d1.ts']),
+      candidateId: candidateWithPaths(f, ['src/agent-workflow.ts', 'src/d1.ts']),
       message: 'D1: tighten workflow docs',
     }),
   );
@@ -237,7 +257,7 @@ test('incident replay 2026-11-09 D1: a queued landing whose file main changed re
   assert.equal(subscriptions.size, 1, 'the wait is live on the queued entry');
   const before = reads;
   // Main lands the overlapping path; the existing event-driven mark records it.
-  assert.equal(await mark(f, ['docs/agents/workflow.md', 'src/ahead.ts'], ahead.id), 1);
+  assert.equal(await mark(f, ['src/agent-workflow.ts', 'src/ahead.ts'], ahead.id), 1);
   for (const s of subscriptions) s.next(null); // the subscription's one wake
   const waited = await waiting;
   assert.equal(reads - before, 1, 'SYNC_REQUIRED within one poll, no extra read');
@@ -245,7 +265,7 @@ test('incident replay 2026-11-09 D1: a queued landing whose file main changed re
   assert.equal(waited.result.code, 'SYNC_REQUIRED');
   assert.equal(waited.result.inProgress, false);
   assert.equal(waited.result.successful, false);
-  assert.deepEqual(waited.result.syncRequired.paths, ['docs/agents/workflow.md']);
+  assert.deepEqual(waited.result.syncRequired.paths, ['src/agent-workflow.ts']);
   // The fixture's compose names no Lane and readers never see the message: the CLI adds both
   // from the retained land command; the bare form runs inside the Lane checkout.
   assert.deepEqual(waited.result.next, { action: 'land', save: true });
@@ -261,7 +281,7 @@ test('incident replay 2026-11-09 D1: a queued landing whose file main changed re
   const view = JSON.parse(await f.call('syncQueue', queueView.read, { projectId: f.projectId }, 'owner'));
   const listed = view.entries.find(entry => entry.submissionId === d1.id);
   assert.equal(listed.phase, 'needs-sync');
-  assert.deepEqual(listed.needsSync.paths, ['docs/agents/workflow.md']);
+  assert.deepEqual(listed.needsSync.paths, ['src/agent-workflow.ts']);
   assert.match(listed.needsSync.next, /^SYNC_REQUIRED/);
   assert.notEqual(view.entries.find(entry => entry.submissionId === ahead.id).phase, 'needs-sync');
   // land's receipt names the same recovery (with the Lane it was given), says so, and has no wait.
@@ -285,7 +305,7 @@ test('incident replay 2026-11-09 D1: a queued landing whose file main changed re
   );
   assert.equal(landWaitContinuation('/work/root', { operationId: d1.operationId, result: land }), undefined);
   assert.deepEqual(landSummary({ result: land }), [
-    'SYNC REQUIRED; not landed: main changed 1 file(s) this queued landing also changes (docs/agents/workflow.md)',
+    'SYNC REQUIRED; not landed: main changed 1 file(s) this queued landing also changes (src/agent-workflow.ts)',
     `Continue recovery: ${land.command}`,
   ]);
 });

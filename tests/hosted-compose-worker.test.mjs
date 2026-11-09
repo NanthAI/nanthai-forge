@@ -9,6 +9,7 @@ import { composeFixture } from './hosted-compose-fixture.mjs';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { NativeSource } from '../dist/native-source.js';
+import { resolveDocsComposition } from '../dist/native-docs-resolve.js';
 const at = '2026-01-01T00:00:00.000Z';
 function plan(s, left, right) {
   const inputs = buildComposePages([
@@ -66,6 +67,79 @@ async function parity(t, s, left, right) {
   for (const [id, bytes] of original) assert.deepEqual(s.objects.get(id), bytes, 'original source retained');
   return output;
 }
+// Issue 561996ac: two Lanes each append a sentence to one paragraph line of a docs file (friction
+// 1d7d120a). The text merge refuses; the docs rule keeps both, main first.
+const STATUS = 'docs/status.md',
+  statusBase = '# Status\n\nIntro.\n';
+function docsSides(s, extra = {}) {
+  const root = s.state([s.file(STATUS, statusBase), s.hidden, ...(extra.base ?? [])], [s.baseline.sha256]);
+  const left = s.state(
+      [s.file(STATUS, '# Status\n\nIntro. Main sentence.\n'), s.hidden, ...(extra.main ?? extra.base ?? [])],
+      [root.sha256],
+    ),
+    right = s.state(
+      [s.file(STATUS, '# Status\n\nIntro. Lane sentence.\n'), s.hidden, ...(extra.lane ?? extra.base ?? [])],
+      [root.sha256],
+    );
+  return { left, right };
+}
+test('a Markdown-only compose conflict merges with native finish’s docs rule and records it', async t => {
+  const s = await composeFixture(),
+    { left, right } = docsSides(s);
+  const dir = mkdtempSync(join(tmpdir(), 'forge-hosted-docs-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const native = new NativeSource(dir);
+  for (const bytes of s.objects.values()) native.put(bytes);
+  assert.equal(native.compose(left.sha256, right.sha256, 'Native review composition', at).head, undefined);
+  const expected = resolveDocsComposition(
+    native,
+    right.sha256,
+    left.sha256,
+    'Native review composition',
+    at,
+    {
+      mainFirst: true,
+    },
+  );
+  const output = await s.compute(plan(s, left, right)),
+    result = JSON.parse(output.manifest).result;
+  assert.equal(result.status, 'clean');
+  assert.equal(result.state.sha256, expected.head, 'byte-identical to the native rule');
+  assert.deepEqual(result.docs, { paths: [STATUS], rule: 'keep both sides, main first' });
+  assert(result.paths.includes(STATUS));
+  const state = JSON.parse(s.objects.get(result.state.sha256));
+  assert.deepEqual(state.parents, [left.sha256, right.sha256], 'main first, as compose orders parents');
+  const bytes = s.objects.get(state.files.find(f => f.path === STATUS).blob).toString();
+  assert.equal(bytes, '# Status\n\nIntro. Main sentence. Lane sentence.\n');
+  assert(!/<<<<<<<|>>>>>>>/.test(bytes));
+});
+test('a docs conflict next to a code conflict, or an edited prose line, still stops the compose', async t => {
+  const s = await composeFixture();
+  const mixed = docsSides(s, {
+    base: [s.file('src/x.ts', 'export const x = 1;\n')],
+    main: [s.file('src/x.ts', 'export const x = 2;\n')],
+    lane: [s.file('src/x.ts', 'export const x = 3;\n')],
+  });
+  const output = await parity(t, s, mixed.left, mixed.right),
+    result = JSON.parse(output.manifest).result;
+  assert.equal(result.status, 'conflict');
+  assert.deepEqual(result.paths, [STATUS, 'src/x.ts']);
+  const root = s.state([s.file(STATUS, statusBase), s.hidden]);
+  const prose = await parity(
+    t,
+    s,
+    s.state([s.file(STATUS, '# Status\n\nMain intro.\n'), s.hidden], [root.sha256]),
+    s.state([s.file(STATUS, '# Status\n\nLane intro.\n'), s.hidden], [root.sha256]),
+  );
+  assert.equal(JSON.parse(prose.manifest).result.status, 'conflict', 'edited prose is ambiguous');
+  const code = await parity(
+    t,
+    s,
+    s.state([s.file('notes.txt', 'base\nmain\n'), s.hidden], [root.sha256]),
+    s.state([s.file('notes.txt', 'base\nlane\n'), s.hidden], [root.sha256]),
+  );
+  assert.equal(JSON.parse(code.manifest).result.status, 'conflict', 'non-Markdown text is never resolved');
+});
 test('criss-cross recursive bases produce byte-identical native source and lazy shared cache', async t => {
   const s = await composeFixture(),
     file = text => s.file('f', text),

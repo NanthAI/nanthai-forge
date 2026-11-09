@@ -10,6 +10,7 @@ import {
 } from './hosted-save.js';
 import { stateSchema } from './native-state-format.js';
 import { invariant } from './errors.js';
+import { docsMergeSchema } from './docs-resolution.js';
 export const COMPOSE_ALGORITHM = 'forge-native-compose-v1';
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const main = z.object({ head: object.shape.sha256, receiptId: z.string().min(1) }).strict();
@@ -64,7 +65,15 @@ export const composeResultSchema = z
     input: object,
     algorithm: z.literal(COMPOSE_ALGORITHM),
     result: z.discriminatedUnion('status', [
-      z.object({ status: z.literal('clean'), state: object, paths: z.array(z.string()).optional() }).strict(),
+      z
+        .object({
+          status: z.literal('clean'),
+          state: object,
+          paths: z.array(z.string()).optional(),
+          /** Markdown-only conflicts merged with native finish's docs rule. */
+          docs: docsMergeSchema.optional(),
+        })
+        .strict(),
       z
         .object({
           status: z.literal('conflict'),

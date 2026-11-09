@@ -8,6 +8,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
 import { invariant } from './errors.js';
 import { sourceJobControlSchema } from './hosted-source-job.js';
+import { docsMergeSchema } from './docs-resolution.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -94,6 +95,8 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
         .strict()
         .optional(),
       semanticPlan: semanticPlanSchema.optional(),
+      /** Markdown-only conflicts the compose merged with native finish's docs rule. */
+      docs: docsMergeSchema.optional(),
       intentId: z.uuid(),
       base: main,
       // Immutable page roots preserve ordered inputs/dependencies without a growing document.

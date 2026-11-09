@@ -12,6 +12,8 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
+import { resolveDocsComposition } from './native-docs-resolve.js';
+import { docsMerge } from './docs-resolution.js';
 
 /** Same native sync orientation and conflict marker plan, on immutable lazy inputs. */
 export async function buildHostedSyncState(
@@ -132,18 +134,31 @@ export async function buildHostedSyncState(
         work.stackBase ? [] : source.mergeBases(left, right),
       );
     }
-    const merged = await calculate(() => {
+    let merged: { head?: string; conflicts: string[] } = await calculate(() => {
       source.state(left);
       source.state(right);
       return work.mode === 'sync' && work.stackBase
         ? composeStack(source, left, right, work.stackBase.object.sha256, plan.message, plan.at)
         : source.compose(left, right, plan.message, plan.at, { insertionOrder: 'right-first' });
     });
+    // A Lane sync whose only conflicts are Markdown docs takes native finish's rule (Lane left,
+    // main right, as this sync merges). Explicit resolutions and stacked syncs keep their conflicts.
+    let docs: ReturnType<typeof docsMerge>;
+    if (!merged.head && work.mode === 'sync' && !work.stackBase) {
+      const resolved = await calculate(() =>
+        resolveDocsComposition(source, left, right, plan.message, plan.at),
+      );
+      if (resolved) {
+        merged = { head: resolved.head, conflicts: [] };
+        docs = docsMerge(resolved.paths);
+      }
+    }
     if (merged.head) {
       invariant(work.mode === 'sync', 'SOURCE_JOB_INVALID', 'The original Candidate must retain a conflict.');
       result = {
         status: merged.head === left ? 'up-to-date' : 'merged',
         state: { sha256: merged.head, size: source.object(merged.head).length },
+        ...(docs ? { docs } : {}),
       };
     } else {
       const pending = await calculate(() =>

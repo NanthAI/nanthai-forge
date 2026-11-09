@@ -27,6 +27,7 @@ import { sourceAncestryCut, sourceAncestryFrontier } from './hosted-source-ances
 import { sourceGenerationWalk } from './hosted-source-generation-cut.js';
 import { describeStackTips, stackedSync } from './hosted-source-stack-tips.js';
 import type { WorkerObject } from './hosted-source-worker-format.js';
+import { docsMerge } from './docs-resolution.js';
 
 export async function prepareMergeStep(
   c: SourceStepCursor,
@@ -385,6 +386,7 @@ export async function computeMergeStep(
       state = (await io.describeBatch([c.head]))[0]!.object;
     }
     const reader = new MemorySourceReader(source, io);
+    const docs = docsMerge(c.docsPaths ?? []);
     c.output = await reader.publish(
       Buffer.from(
         saveBytes(
@@ -399,6 +401,7 @@ export async function computeMergeStep(
               status: 'clean',
               state,
               ...(c.composeBases ? { paths: c.composeBases.map(([path]) => path).sort() } : {}),
+              ...(docs ? { docs } : {}),
             },
           }),
         ),
@@ -468,10 +471,33 @@ export async function computeMergeStep(
       againstMain = true;
     }
   }
+  // Docs merges of earlier quanta (one input each) belong on the final result too.
+  const docsPaths =
+    manifest.result.status === 'clean'
+      ? [...new Set([...(c.docsPaths ?? []), ...result.docsPaths])].sort()
+      : [];
+  let output = result.output;
+  if (
+    manifest.result.status === 'clean' &&
+    !plan.batch &&
+    c.index + 1 === c.selections.length &&
+    c.docsPaths?.length
+  )
+    output = await reader.publish(
+      Buffer.from(
+        saveBytes(
+          composeResultSchema.parse({
+            ...manifest,
+            result: { ...manifest.result, docs: docsMerge(docsPaths) },
+          }),
+        ),
+      ),
+    );
   // The quantum commits below, after its last await. Any await above can throw
   // SourceCalculationsPending, and the step re-runs this same index; moving the
   // cursor first skipped a batch member without merging or dropping it (Issue 55bcad06).
   if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
+  if (docsPaths.length) c.docsPaths = docsPaths;
   c.index++;
   if (member && 'candidateId' in value) {
     invariant(manifest.result.status === 'conflict', 'SOURCE_JOB_INVALID', 'Retain the rejected merge.');
@@ -497,7 +523,7 @@ export async function computeMergeStep(
     )
       c.batchMerged.push(value.candidateId);
     if (c.index === c.selections.length && !plan.batch) {
-      c.output = result.output;
+      c.output = output;
       c.phase = 'done';
     }
   }

@@ -2,10 +2,9 @@
 import { attributionEdits as edits, attributionLines as lines } from './native-text-merge.js';
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
 import { nativeMergeMessage, type NativeMergeResolution } from './native-merge.js';
-
-/** Markdown documentation, matching the standard check's docs scope. */
-export const markdownDoc = (path: string) => /^(?:docs\/.+|[^/]+)\.md$/.test(path);
-export const DOCS_RULE = 'keep both sides, main first';
+import type { NativeInsertionOrder } from './native-text-merge.js';
+import { markdownDoc } from './docs-resolution.js';
+export { DOCS_RULE, markdownDoc } from './docs-resolution.js';
 
 type Edit = { start: number; end: number; lines: string[]; side: 0 | 1 };
 const LIST = /^\s*(?:[-*+]\s|\d+[.)]\s|\|)|^\s*$/;
@@ -23,7 +22,8 @@ const overlaps = (a: Edit, b: Edit) => {
 
 /** Deterministic resolution of a Markdown diff3 conflict, or null when any hunk is
  * ambiguous. Positional hunks keep both insertions (main first). Overlapping edits
- * resolve only inside list/table/blank lines: both sides' new lines, main first. */
+ * resolve only inside list/table/blank lines: both sides' new lines, main first; or
+ * when both sides only appended text to the end of one prose line: main's text first. */
 export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): Buffer | null {
   const original = lines(base),
     a = lines(main),
@@ -61,7 +61,9 @@ export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): B
           : y
         : x.join('') === y.join('')
           ? x
-          : (positional(group, original) ?? listUnion(x, y, original.slice(start, end)));
+          : (positional(group, original) ??
+            listUnion(x, y, original.slice(start, end)) ??
+            lineAppends(group, original));
     if (!resolved) return null;
     output.push(...resolved);
   }
@@ -101,6 +103,30 @@ function positional(group: Edit[], original: string[]) {
   }
   return [...result, ...original.slice(at, Math.max(...group.map(edit => edit.end)))];
 }
+/** Both sides appended to the end of the same prose line (a sentence each, Issue 561996ac): the
+ * line, main's addition, then the Lane's. Any other edit of that line stays a conflict. */
+function lineAppends(group: Edit[], original: string[]) {
+  const [first, second] = group;
+  if (group.length !== 2 || !first || !second || first.side === second.side) return null;
+  const main = first.side === 0 ? first : second,
+    lane = main === first ? second : first;
+  if (
+    main.start !== lane.start ||
+    main.end !== main.start + 1 ||
+    lane.end !== lane.start + 1 ||
+    main.lines.length !== 1 ||
+    lane.lines.length !== 1
+  )
+    return null;
+  const strip = (line: string) => line.replace(/\r?\n$/, '');
+  const line = original[main.start]!,
+    base = strip(line),
+    ours = strip(main.lines[0]!),
+    theirs = strip(lane.lines[0]!);
+  if (!base.trim() || ours.length <= base.length || theirs.length <= base.length) return null;
+  if (!ours.startsWith(base) || !theirs.startsWith(base)) return null;
+  return [base + ours.slice(base.length) + theirs.slice(base.length) + line.slice(base.length)];
+}
 /** Overlapping list/table edits: removals by either side win, then main's and the
  * Lane's new lines in that order. Prose stays a conflict. */
 function listUnion(x: string[], y: string[], region: string[]) {
@@ -111,39 +137,69 @@ function listUnion(x: string[], y: string[], region: string[]) {
   ];
 }
 
+/** Main's bytes of a docs conflict: the right side for a right-first (Lane-oriented) merge, the
+ * left side for a left-first (main-oriented) one. */
+export const docsMainSide = (order: NativeInsertionOrder) => (order === 'right-first' ? 'right' : 'left');
+
 /** Compose `lane` with `main`, resolving Markdown-only text conflicts with the
  * deterministic rule above. Null when any conflict is outside Markdown docs,
- * binary, a delete, a path clash or an ambiguous hunk; callers keep conflicts. */
+ * binary, a delete, a path clash or an ambiguous hunk; callers keep conflicts.
+ * `mainFirst` orients the merge as hosted compose does (main left, parents main then Lane);
+ * the default orients it as a Lane sync (Lane left). A source that journals byte calculations
+ * (`docsContent`) resolves each file there; the rule is the same. */
 export function resolveDocsComposition(
   source: NativeSource,
   lane: string,
   main: string,
   message: string,
   at: string,
+  options: { mainFirst?: boolean } = {},
 ): { head: string; paths: string[]; resolutions?: NativeMergeResolution[] } | null {
-  const merged = source.mergeFiles(lane, main, undefined, undefined, undefined, {
-    insertionOrder: 'right-first',
-  });
+  const order: NativeInsertionOrder = options.mainFirst ? 'left-first' : 'right-first',
+    [left, right] = options.mainFirst ? [main, lane] : [lane, main];
+  const merged = source.mergeFiles(left, right, undefined, undefined, undefined, { insertionOrder: order });
   if (!merged.conflicts.length) return null;
-  const files: NativeFile[] = [...merged.files];
+  const mainOf = docsMainSide(order),
+    laneOf = mainOf === 'left' ? 'right' : 'left';
+  // Every conflict qualifies before any bytes are read or requested.
   for (const item of merged.conflicts) {
-    const { base, left, right } = item;
-    if (!markdownDoc(item.path) || !left || !right || (!base && left.mode !== right.mode)) return null;
-    const bytes = resolveMarkdownText(
-      base ? source.object(base.blob) : Buffer.alloc(0),
-      source.object(right.blob),
-      source.object(left.blob),
-    );
-    if (!bytes) return null;
+    const ours = item[mainOf],
+      theirs = item[laneOf];
+    if (
+      !markdownDoc(item.path) ||
+      item.reason ||
+      !ours ||
+      !theirs ||
+      (!item.base && ours.mode !== theirs.mode)
+    )
+      return null;
+  }
+  const files: NativeFile[] = [...merged.files];
+  const blobs = merged.conflicts.map(item =>
+    source.docsContent
+      ? source.docsContent(item, order)
+      : (() => {
+          const bytes = resolveMarkdownText(
+            item.base ? source.object(item.base.blob) : Buffer.alloc(0),
+            source.object(item[mainOf]!.blob),
+            source.object(item[laneOf]!.blob),
+          );
+          return bytes ? source.put(bytes) : null;
+        })(),
+  );
+  if (blobs.some(blob => !blob)) return null;
+  merged.conflicts.forEach((item, i) => {
+    const ours = item[mainOf]!,
+      theirs = item[laneOf]!;
     files.push({
       path: item.path,
-      mode: base && left.mode === base.mode ? right.mode : left.mode,
-      blob: source.put(bytes),
+      mode: item.base && theirs.mode === item.base.mode ? ours.mode : theirs.mode,
+      blob: blobs[i]!,
     });
-  }
+  });
   if (overlappingPaths(files).length) return null;
   return {
-    head: source.writeState(files, [lane, main], nativeMergeMessage(message, merged.resolutions), at),
+    head: source.writeState(files, [left, right], nativeMergeMessage(message, merged.resolutions), at),
     ...(merged.resolutions.length ? { resolutions: merged.resolutions } : {}),
     paths: merged.conflicts.map(item => item.path).sort(),
   };

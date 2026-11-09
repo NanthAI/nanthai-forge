@@ -71,6 +71,25 @@ test('Markdown resolution keeps both sides deterministically, main first', () =>
   );
   // Deterministic: same input, same bytes.
   assert.equal(resolveText(items, main, lane), list);
+  // Both sides append a sentence to one prose line (Issue 561996ac): the line, main's, the Lane's.
+  const para = ['# Status', '', 'Intro.', ''];
+  const appended = side => ['# Status', '', `Intro. ${side} sentence.`, ''];
+  assert.equal(
+    resolveText(para, appended('Main'), appended('Lane')),
+    text(['# Status', '', 'Intro. Main sentence. Lane sentence.', '']).toString(),
+  );
+  assert.equal(
+    resolveMarkdownText(
+      Buffer.from('Intro.'),
+      Buffer.from('Intro. Main.'),
+      Buffer.from('Intro. Lane.'),
+    )?.toString(),
+    'Intro. Main. Lane.',
+    'no final newline is added',
+  );
+  // A rewritten start, or a second edited line in the same hunk, stays a conflict.
+  assert.equal(resolveText(['Intro here.'], ['Intro there. Main.'], ['Intro here. Lane.']), null);
+  assert.equal(resolveText(['Intro.', 'Two.'], ['Intro. Main.', 'Two!'], ['Intro. Lane.', 'Two.']), null);
   // Ambiguous: prose modified differently on both sides, or an insertion inside a replaced range.
   assert.equal(
     resolveText(prose, ['# Title', '', 'Main.', 'Para two.', ''], ['# Title', '', 'Lane.', 'Para two.', '']),

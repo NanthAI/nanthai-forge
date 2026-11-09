@@ -30,6 +30,7 @@ import {
   type NativeMergeResolution,
   type NativeMergeConflict,
 } from './native-merge.js';
+import type { NativeInsertionOrder } from './native-text-merge.js';
 import { diskGuard } from './disk-guard.js';
 import { nativeFile } from './native-file.js';
 import { NativeWorkspaceFiles } from './native-workspace-files.js';
@@ -112,6 +113,8 @@ export class NativeSource {
     item: NativeMergeConflict,
     channel: string,
   ) => { file?: NativeFile; kind: 'text' | 'binary' };
+  /** The Markdown docs rule's bytes for one conflict (native-docs-resolve), as a blob or null. */
+  docsContent?: (item: NativeMergeConflict, order: NativeInsertionOrder) => string | null;
   private batchingObjects = false;
   readonly directory: string;
   readonly owner: string;

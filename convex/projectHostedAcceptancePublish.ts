@@ -33,6 +33,7 @@ import { landingObservation } from '../src/hosted-landing';
 import { policyDigestCurrent } from '../src/policy-digest';
 import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
+import { landingDocsUndo } from '../src/docs-resolution';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
@@ -327,6 +328,9 @@ export async function publishAcceptance(
     automatic: requiresGovernedCheck(project, actor),
     ...(secretAllowAdded ? { secretAllowAdded } : {}),
     undo: { kind: 'revert', receiptId: identity.receiptId },
+    ...(candidate.docs
+      ? { docsResolution: { ...candidate.docs, undo: landingDocsUndo(identity.receiptId) } }
+      : {}),
   });
   const value = canonicalPayload(receipt);
   await ctx.db.insert('projectHostedAcceptances', {
@@ -381,7 +385,11 @@ export async function publishAcceptance(
     ...state,
     version: state.version + 1,
     phase: 'landed' as const,
-    acceptance: { receiptId: receipt.id, head },
+    acceptance: {
+      receiptId: receipt.id,
+      head,
+      ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
+    },
     observation: landingObservation('accepted'),
     error: null,
   };

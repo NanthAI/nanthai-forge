@@ -10,6 +10,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { SourceIoError, sourceCall } from './hosted-source-io-error.js';
 import { invariant } from './errors.js';
 import { syntaxConflictReason } from './native-merge-syntax.js';
+import { docsMainSide, resolveMarkdownText } from './native-docs-resolve.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with
  * bytes and with line count, so a file over either bound that both sides changed
  * is reported as a conflict instead of merged line by line (Git hosts do the same). */
@@ -24,7 +25,7 @@ export function sourceTextLines(bytes: Buffer) {
 }
 export type SourceCalculation = {
   key: string;
-  kind: 'merge' | 'conflict' | 'markers';
+  kind: 'merge' | 'conflict' | 'markers' | 'docs';
   item: NativeMergeConflict;
   order: NativeInsertionOrder;
   channel: string;
@@ -81,6 +82,8 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
     if (result) resolutions.push(...result.resolutions);
     return result?.blob ?? null;
   };
+  // The Markdown docs rule's bytes (native-docs-resolve) are a calculation like a text merge.
+  source.docsContent = (item, order) => request('docs', item, order)?.blob ?? null;
   source.conflictContent = (item, channel) => {
     const result = request('conflict', item, 'right-first', channel);
     return {
@@ -212,6 +215,14 @@ export async function calculateSourceFiles(
         results.push({ key: request.key, blob: null, kind: 'binary', resolutions: [], reason });
         continue;
       }
+    } else if (request.kind === 'docs') {
+      const main = docsMainSide(request.order) === 'left' ? left : right,
+        lane = main === left ? right : left;
+      bytes = await sourceCall('merge-text', async () => resolveMarkdownText(base, main, lane), {
+        size: base.length + left.length + right.length,
+        objects: required.length,
+      });
+      if (bytes) kind = 'text';
     } else {
       const marked = await sourceCall(
         'merge-markers',

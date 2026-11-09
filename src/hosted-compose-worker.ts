@@ -19,6 +19,8 @@ import { LazyMergeSource, lazyMerge } from './hosted-merge-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 import { syntaxGatedMerge } from './hosted-compose-syntax.js';
 import { assertBatchAccounted } from './hosted-batch-coverage.js';
+import { resolveDocsComposition } from './native-docs-resolve.js';
+import { docsMerge } from './docs-resolution.js';
 
 export type ComposeBases = Map<string, Pick<NativeFile, 'blob' | 'mode'> | null>;
 const sameFile = (a: Pick<NativeFile, 'blob' | 'mode'> | null | undefined, b: typeof a) =>
@@ -57,6 +59,8 @@ export async function buildHostedComposeState(
     selected = 0;
   const dropped: BatchDropped = [];
   const mergedMembers: string[] = [];
+  // Paths merged with native finish's Markdown docs rule, recorded on the clean result.
+  const docsPaths: string[] = [];
   let result: ReturnType<typeof composeResultSchema.parse>['result'] | undefined;
   const publishGenerated = async () => {
     await reader.publishGenerated(source, source.generated);
@@ -111,6 +115,17 @@ export async function buildHostedComposeState(
             ? composeStack(source, right, left, restoreBase.object.sha256, plan.message, plan.at)
             : source.compose(left, right, plan.message, plan.at);
         });
+        // Only Markdown docs conflict: native finish's deterministic rule, main oriented as compose
+        // is. Code, mixed, binary or ambiguous conflicts keep the conflict below. Stacks keep theirs.
+        if (!merged.head && !restoreBase) {
+          const docs = await gated(() =>
+            resolveDocsComposition(source, right, left, plan.message, plan.at, { mainFirst: true }),
+          );
+          if (docs) {
+            merged = { head: docs.head, conflicts: [] };
+            docsPaths.push(...docs.paths);
+          }
+        }
         if (merged.head) {
           head = merged.head;
           if ('candidateId' in entry && plan.batch?.members.includes(entry.candidateId))
@@ -220,10 +235,12 @@ export async function buildHostedComposeState(
     // These exact State manifests are already resident for composition. No blob reads,
     // source scans, graph queries or provider calls are needed for changed paths.
     const paths = bases && changedPaths(bases, source.state(plan.base.head).files, source.state(head).files);
+    const docs = docsMerge(docsPaths);
     result = {
       status: 'clean',
       state: { sha256: head, size: source.object(head).length },
       ...(paths ? { paths } : {}),
+      ...(docs ? { docs } : {}),
     };
   }
   const output = await reader.publish(
@@ -244,6 +261,8 @@ export async function buildHostedComposeState(
     head: result.status === 'clean' ? result.state.sha256 : null,
     state: result.status === 'clean' ? result.state : null,
     output,
+    /** Every docs-merged path (the result names at most DOCS_RESOLUTION_PATHS). */
+    docsPaths: result.status === 'clean' ? [...new Set(docsPaths)].sort() : [],
     metrics: {
       ...reader.metrics,
       pages: pageCount,

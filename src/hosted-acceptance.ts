@@ -7,6 +7,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { secretAllowMarkSchema } from './secret-allow.js';
+import { docsResolutionSchema } from './docs-resolution.js';
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 /** Immutable publication evidence. Input roots retain the exact ordered Lane
@@ -106,6 +107,8 @@ export const hostedAcceptanceSchema = z
     /** The landing added or edited a secret-scan allow entry; project owners were alerted (Issue 93e14bb0). */
     secretAllowAdded: secretAllowMarkSchema.optional(),
     undo: z.object({ kind: z.literal('revert'), receiptId: z.uuid() }).strict(),
+    /** Markdown-only conflicts merged automatically with the docs rule, and how to undo that. */
+    docsResolution: docsResolutionSchema.optional(),
   })
   .strict();
 export type HostedAcceptance = z.infer<typeof hostedAcceptanceSchema>;

@@ -20,7 +20,7 @@ const conflict = z
 const calculation = z
   .object({
     key: z.string(),
-    kind: z.enum(['merge', 'conflict', 'markers']),
+    kind: z.enum(['merge', 'conflict', 'markers', 'docs']),
     item: conflict,
     order: z.enum(['left-first', 'right-first']),
     channel: z.string(),

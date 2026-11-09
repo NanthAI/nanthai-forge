@@ -17,6 +17,7 @@ const fields = [
   'selections',
   'calculations',
   'composeBases',
+  'docsPaths',
 ] as const;
 type Section = { sha256: string; id: string };
 export type SourceProgress = {

@@ -1234,15 +1234,34 @@ Markdown documentation, it writes a deterministic resolution instead of
 markers. Two inserts at the same point keep both, main's first; an insert at
 the edge of the other side's edited lines keeps both. Lines both sides edited
 resolve only inside list items, table rows or blank lines: lines removed by
-either side stay removed, then main's new lines, then the Lane's. Edited prose,
-deletes, binary or mode changes, path clashes and any code conflict keep
-today's behavior: finish stops with `status:"conflict"` and markers. Markers
-are never written into a resolved file, and no side's new line is dropped.
+either side stay removed, then main's new lines, then the Lane's. When both
+sides only appended text to the end of the same prose line (a sentence each),
+the line keeps main's addition, then the Lane's. Other edited prose, deletes,
+binary or mode changes, path clashes and any code conflict keep today's
+behavior: finish stops with `status:"conflict"` and markers. Markers are never
+written into a resolved file, and no side's new line is dropped.
 
 The `Sync main` checkpoint records the resolved paths and rule in its automatic
 summary and undo instructions (`undo-sync`); the finish receipt's `sync` has
 `docsResolution:{paths,rule}`. A retried sync or finish replays the same bytes.
-Standalone `sync` still writes markers.
+Native standalone `sync` still writes markers.
+
+Hosted landings use the same rule (`src/native-docs-resolve.ts`) inside the
+existing compose step, for the landing queue, batches and every recompose on a
+new main: a queued entry whose only conflicts are Markdown docs recomposes and
+continues to its check without an agent turn. The Candidate records
+`docs:{paths,rule}`; the acceptance receipt and the landing's `acceptance` carry
+`docsResolution:{paths,more?,rule,undo}` (a batch's shared State puts it on its
+last receipt), and `undo` names the `revert` command and the paths to edit
+instead. A hosted `sync` of a Lane onto main resolves the same conflicts and
+returns `docsResolution` whose `undo` names the Lane's earlier head
+(`show {state,path}` returns each file's earlier bytes). Explicit conflict
+resolutions and stacked syncs keep markers. Queue path advice
+(`wouldConflict`, `SYNC_REQUIRED`) ignores shared Markdown docs, since the
+recompose merges them or reports an actual conflict. Clean compositions are
+unchanged; a docs-only conflict costs the in-Convex merge one more text
+calculation (one more object-descriptor read when it runs inline) instead of a
+failed landing and an agent round, and bytes stay in R2.
 The check that follows uses ordinary docs selection when the Lane changed only
 Markdown. After an interaction retry, the runner recomputes the same resolution
 before accepting a Markdown-only overlap as `docs` scope; the run's interaction

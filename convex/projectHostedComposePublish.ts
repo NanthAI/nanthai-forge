@@ -90,6 +90,7 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
       ? { governance: { version: 1 as const, paths: result.paths, ownerInputs } }
       : {}),
     ...(state.semanticPlan ? { semanticPlan: state.semanticPlan } : {}),
+    ...(result.status === 'clean' && result.docs ? { docs: result.docs } : {}),
     id: state.candidateId,
     version: 0,
     at: operation.firstAttempt.at,

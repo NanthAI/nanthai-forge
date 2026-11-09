@@ -8,6 +8,7 @@ import type { Id } from './_generated/dataModel';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { markdownDoc } from '../src/docs-resolution';
 
 /** Queued rows scanned and Candidates read per land. Queues at dogfood scale hold a few tens of
  * entries, most already checked or batched; the rest stay unmarked. */
@@ -38,7 +39,8 @@ export const mark = internalMutation({
   handler: (ctx, input) => markWouldConflict(ctx, input),
 });
 
-/** Queued entries that were not checked yet and change a file the landing changed are marked.
+/** Queued entries that were not checked yet and change a file the landing changed are marked
+ * (Markdown docs excepted).
  * Path advice, not a proven text conflict. Cost: one bounded queue read plus at most
  * WOULD_CONFLICT_READS Candidate reads (record head + record). */
 export async function markWouldConflict(
@@ -76,7 +78,11 @@ export async function markWouldConflict(
     if (!record) continue;
     const candidate = hostedRecordSchema.parse(JSON.parse(await hostedRecordBody(ctx, record)));
     if (candidate.kind !== 'candidate') continue;
-    const shared = (candidate.governance?.paths ?? []).filter(path => landed.has(path)).sort();
+    // Shared Markdown docs need no sync: the queue's recompose merges them with the docs rule,
+    // and a conflict it cannot merge surfaces as an actual compose conflict (Issue 561996ac).
+    const shared = (candidate.governance?.paths ?? [])
+      .filter(path => landed.has(path) && !markdownDoc(path))
+      .sort();
     if (!shared.length) continue;
     const paths = shared.slice(0, 10),
       more = shared.length - paths.length;
