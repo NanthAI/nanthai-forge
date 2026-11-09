@@ -16,7 +16,13 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
+import {
+  checkDocument,
+  checkReturn,
+  checkReturns,
+  insertedDocument,
+  updatedDocument,
+} from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
@@ -49,6 +55,7 @@ const projectWorkIndexBuildFailure = await import(moduleUrl('../convex/projectWo
 const projectWorkIndexBuildStore = await import(moduleUrl('../convex/projectWorkIndexBuildStore.ts'));
 const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const publicPeople = await import(moduleUrl('../convex/publicPeople.ts'));
+const projectHistoryStore = await import(moduleUrl('../convex/projectHistoryStore.ts'));
 export const job = (id = 'own') => ({
   _id: id,
   _creationTime: 1,
@@ -494,6 +501,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     teamLifecycle,
     projectLifecycle,
     publicPeople,
+    projectHistoryStore,
   };
   ctx.runAction =
     ctx.runQuery =
@@ -501,7 +509,13 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
       (fn, args) => {
         const [module, name] = getFunctionName(fn).split(':'),
           handler = modules[module][name];
-        const returned = value => (checkReturn(value, getFunctionName(fn)), value);
+        // The value must match the declared `returns` validator (a mismatch fails the call in
+        // production, Issue 4c2635dc) and serialize; a mutation's writes roll back on either.
+        const returned = value => (
+          checkReturns(handler, value, getFunctionName(fn)),
+          checkReturn(value, getFunctionName(fn)),
+          value
+        );
         return handler.isMutation
           ? transaction(async () => returned(await handler._handler(ctx, args)))
           : Promise.resolve(handler._handler(ctx, args)).then(returned);

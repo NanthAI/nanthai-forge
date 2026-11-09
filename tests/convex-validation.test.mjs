@@ -3,11 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { checkArgs } from './convex-args.mjs';
+import { checkArgs, checkReturn, checkReturns } from './convex-args.mjs';
 import { state } from './hosted-fixture.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { readFileSync } from 'node:fs';
+import { moduleUrl } from './convex-module.mjs';
 
 const project = { owner: 'owner', key: 'test', name: 'Test', currentBackup: null, revision: 0 };
 const ref = makeFunctionReference('projectActorNames:purgeDisplayNames');
@@ -190,4 +191,103 @@ test('every Convex table defines each index name once', () => {
     const duplicates = names.filter((name, i) => names.indexOf(name) !== i);
     assert.deepEqual(duplicates, [], `duplicate index in table chain: ${chain.slice(0, 80)}`);
   }
+});
+
+// Issue 4c2635dc: the shared fixture checks every return against the declared `returns` validator.
+// Until then it only checked that a value serialized, so a response production rejects passed.
+const savedPage = route => ({
+  page: [{ id: 'x', importId: 'own', name: 'Saved', route }],
+  isDone: true,
+  continueCursor: '',
+});
+const paginationOpts = { cursor: null, numItems: 10 };
+
+test('the shared fixture fails a return value that does not match the declared validator', async () => {
+  const s = state([]);
+  s.caller('owner');
+  const listRows = makeFunctionReference('savedViews:listRows');
+  // A saved view without the required route fields, planted straight into the table.
+  s.tables.savedViews.set('bookmark', {
+    _id: 'bookmark',
+    importId: 'own',
+    owner: 'owner',
+    name: 'Saved',
+    route: {},
+  });
+  await assert.rejects(
+    s.ctx.runQuery(listRows, { paginationOpts }),
+    /ReturnsValidationError at savedViews:listRows\.page\[0\]\.route\.view \(missing\)/,
+  );
+  // The old check only asked whether the value serializes; this mismatch passed it.
+  checkReturn(savedPage({}), 'savedViews:listRows');
+  // A valid row passes the same call.
+  s.tables.savedViews.get('bookmark').route = { view: 'source', state: 's', file: 'a.ts', line: 1 };
+  assert.equal((await s.ctx.runQuery(listRows, { paginationOpts })).page.length, 1);
+});
+
+test('the history load return that failed in production (Issue 7c36abfb) fails the old fixture and passes the new one', async () => {
+  const s = state([]);
+  const load = (await import(moduleUrl('../convex/projectHistoryStore.ts'))).load;
+  const ref = makeFunctionReference('projectHistoryStore:load');
+  const chunk = { sha256: 'a'.repeat(64), size: 3 };
+  await s.ctx.db.insert('projectHistory', {
+    projectId: 'project',
+    repository: 'example/repo',
+    visibility: 'public',
+    owner: 'owner',
+    importCommit: 'b'.repeat(40),
+    importState: 'state',
+    status: 'ready',
+    bytes: 3,
+    packs: 1,
+    attempt: 1,
+    updatedAt: 1,
+  });
+  await s.ctx.db.insert('projectHistoryPacks', {
+    projectId: 'project',
+    tip: 'b'.repeat(40),
+    haves: [],
+    chunks: [chunk],
+    framed: [chunk],
+    bytes: 3,
+    objects: 1,
+    packSha1: 'c'.repeat(40),
+    source: 'import',
+    at: 1,
+  });
+  const loaded = await s.ctx.runQuery(ref, { projectId: 'project' });
+  assert.deepEqual(loaded.packs[0].framed, [chunk]);
+  // The shipped validator before the fix had no `framed` on a pack view.
+  const oldWire = JSON.parse(load.exportReturns());
+  let dropped = 0;
+  (function drop(node) {
+    if (node && typeof node === 'object') {
+      if (node.type === 'object' && node.value?.framed && node.value?.tip) {
+        delete node.value.framed;
+        dropped++;
+      }
+      Object.values(node).forEach(drop);
+    }
+  })(oldWire);
+  assert.equal(dropped, 1, 'the declared validator carries framed on the pack view');
+  const declared = load.exportReturns;
+  load.exportReturns = () => JSON.stringify(oldWire);
+  try {
+    await assert.rejects(
+      s.ctx.runQuery(ref, { projectId: 'project' }),
+      /ReturnsValidationError at projectHistoryStore:load .*packs\[0\]\.framed \(extra field\)/,
+    );
+    checkReturn(loaded, 'projectHistoryStore:load'); // the old fixture accepted exactly this value
+    assert.throws(() => checkReturns(load, loaded, 'projectHistoryStore:load'), /extra field/);
+  } finally {
+    load.exportReturns = declared;
+  }
+  checkReturns(load, loaded, 'projectHistoryStore:load');
+});
+
+test('return checks skip functions without a declared validator and read undefined as null', () => {
+  checkReturns({ exportReturns: () => 'null' }, { anything: [1n] }, 'plain');
+  const nothing = { exportReturns: () => JSON.stringify(v.null().json) };
+  checkReturns(nothing, undefined, 'void');
+  assert.throws(() => checkReturns(nothing, 0, 'void'), /ReturnsValidationError at void/);
 });

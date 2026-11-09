@@ -56,13 +56,20 @@ test('public and private removals disappear immediately from owner, shared proje
       importId: 'own',
       owner: 'owner',
       name: 'Saved',
-      route: {},
+      route: { view: 'source', state: 'source-pin', file: 'src/a.ts', line: 1 },
     });
     s.tables.projectInterests.set('interest', {
       _id: 'interest',
       importId: 'own',
       owner: 'owner',
+      repository: 'example/project',
+      ref: 'main',
+      starred: true,
+      watching: false,
+      seenHead: null,
       active: true,
+      revision: 1,
+      _creationTime: 1,
     });
     assert.equal((await removal.listMine._handler(s.ctx, { paginationOpts })).page.length, 1);
     const listed = await removal.listAsOwner._handler(s.ctx, { owner: 'owner', paginationOpts });

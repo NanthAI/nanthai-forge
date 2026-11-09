@@ -61,12 +61,14 @@ function project(s, id, owner, backup) {
   });
   s.tables.projectWorkGenerations.set(`${id}-generation`, {
     _id: `${id}-generation`,
+    _creationTime: 1,
     projectId: id,
     format: HOSTED_WORK_INDEX_FORMAT,
     status: 'ready',
     backupId: backup,
     revision: 1,
     initialRevision: 1,
+    nextBatch: 0,
     metadata: JSON.stringify({ sourceHead: digest, counts: { intents: 0 } }),
   });
   s.tables.projectProposals.set(`${id}-proposal`, {

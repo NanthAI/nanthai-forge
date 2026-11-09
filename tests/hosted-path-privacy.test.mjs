@@ -94,6 +94,8 @@ function cleanupFixture() {
     importId: 'own',
     name: 'Retained',
     operationId: 'op',
+    request: 'request',
+    artifactKey: 'saved',
     sourceId: 'source-pin',
     gitHead: 'git-pin',
     files: ['private/file.ts'],
@@ -101,7 +103,14 @@ function cleanupFixture() {
   f.tables.sourceZones.set('zone', row('zone', { ...common, revision: 1, enabled: true }));
   f.tables.agentGrants.set(
     'agent',
-    row('agent', { ...common, tools: ['describe'], expiresAt: 9999999999999, revoked: false }),
+    row('agent', {
+      ...common,
+      tools: ['status'],
+      expiresAt: 9999999999999,
+      revoked: false,
+      tokenHash: 'token-hash',
+      sealed: { keyId: 'key', nonce: 'nonce', tag: 'tag', ciphertext: 'sealed' },
+    }),
   );
   f.tables.savedViews.set(
     'view',

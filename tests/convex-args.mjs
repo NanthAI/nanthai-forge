@@ -79,13 +79,17 @@ function compile(spec) {
   if (type === 'union') {
     const members = spec.value.map(compile);
     return (value, path, kind) => {
+      const reasons = [];
       for (const check of members) {
         try {
           check(value, path, kind);
           return;
-        } catch {}
+        } catch (error) {
+          reasons.push(error.message.replace(`${kind} at `, ''));
+        }
       }
-      fail(kind, path);
+      // Name why each member refused the value, so a mismatch is findable without a debugger.
+      fail(kind, `${path} (no union member matched: ${reasons.join(' | ').slice(0, 400)})`);
     };
   }
   const literal = type === 'literal' ? jsonToConvex(spec.value) : undefined;
@@ -124,11 +128,15 @@ export function checkArgs(fn, args, name) {
 const returnChecks = new WeakMap();
 export function checkReturns(fn, value, name) {
   let check = returnChecks.get(fn.exportReturns);
-  if (!check) {
-    check = compile(JSON.parse(fn.exportReturns()));
+  if (check === undefined) {
+    // A function without `returns` has no validator to check (exported as null).
+    const spec = JSON.parse(fn.exportReturns());
+    check = spec === null ? null : compile(spec);
     returnChecks.set(fn.exportReturns, check);
   }
-  check(value, name, 'ReturnsValidationError');
+  if (!check) return;
+  // A handler returning undefined is stored and validated as null.
+  check(value === undefined ? null : value, name, 'ReturnsValidationError');
 }
 /** A function's return value as Convex would serialize it. */
 export const checkReturn = (value, name) => checkConvexValue(value, name, 'ReturnValueError');

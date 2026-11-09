@@ -387,6 +387,6 @@ test('connection list omits repository metadata when its import belongs to anoth
   const original = s.tables.imports.get('own');
   s.tables.imports.set('own', { ...original, owner: 'another-owner', repository: 'private/other' });
   assert.equal((await grants.list._handler(s.ctx, { paginationOpts })).page[0].repository, undefined);
-  s.tables.imports.set('own', { ...original, removal: 'trashed' });
+  s.tables.imports.set('own', { ...original, removal: 'trash' });
   assert.equal((await grants.list._handler(s.ctx, { paginationOpts })).page[0].repository, undefined);
 });
