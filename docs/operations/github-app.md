@@ -233,6 +233,14 @@ ordinary Forge landing and passes the same checks and review rules.
   onto current `main`. The landing is attributed to the project owner as agent
   `github-inbound`, and it claims no owner review bypass: protected paths still
   need their reviewers.
+- **Git LFS:** a changed file whose bytes are an LFS pointer, at a path the new tree's
+  `.gitattributes` files mark `filter=lfs`, arrives as its object's bytes through the
+  same resolver as [imports](github-project-import.md#git-lfs-files); the mirror pushes
+  it back as the same pointer. Pushes without pointer-shaped files make no LFS, extra
+  `.gitattributes` or lookup call. Limits and refusals are the import's
+  (`GITHUB_LFS_LIMIT` at 1 GiB of unique objects per push, `GITHUB_LFS_OBJECT_MISSING`);
+  an inbound job has no `lfsLimitBytes`, so the advice is to push fewer LFS files at a
+  time. Objects over 1 MiB are stored as chunk recipes in bounded windows.
 - **Limits:** 500 changed directories and 5,000 changed files per push. Larger
   pushes, unsupported modes, or a path that both GitHub and Forge changed since
   the last mirror fail the job visibly (`GITHUB_INBOUND_TOO_LARGE`,

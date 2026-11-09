@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, type MutationCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { mirrorJob } from './projectGithubMirrorRows';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
@@ -13,6 +13,7 @@ import { submitHostedCompose } from './projectHostedComposeJobs';
 import { submitDesiredLanding } from './projectHostedLandingDesired';
 import { checkSetting } from './projectHostedCheckStore';
 import { prepareObjectTargets } from './projectObjects';
+import { completeObjects, recipePin, storedDigests } from './projectGithubImportBatch';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
@@ -75,6 +76,27 @@ export const prepareUploads = internalMutation({
         input.objects.map(object => ({ digest: object.sha256, size: object.size })),
       ),
     );
+  },
+});
+/** Which of these Git LFS oids the project already stores: they are bound, not fetched again. */
+export const storedObjects = internalQuery({
+  args: { ...identity, digests: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, input) => {
+    const active = await mirrorJob(ctx, input);
+    invariant(active?.job.inbound, 'GITHUB_SYNC_PENDING', 'Inbound step changed.');
+    return storedDigests(ctx, active.project._id, input.digests);
+  },
+});
+/** Bind chunked LFS objects (their recipe objects are already stored) to their oids. */
+export const bindRecipes = internalMutation({
+  args: { ...identity, recipes: v.array(recipePin) },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const active = await mirrorJob(ctx, input);
+    invariant(active?.job.inbound, 'GITHUB_SYNC_PENDING', 'Inbound step changed.');
+    await completeObjects(ctx, active.project._id, [], input.recipes);
+    return null;
   },
 });
 /** GitHub main is the recorded commit (Forge's own push), or holds the same tree: no landing. */

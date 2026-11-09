@@ -6,12 +6,26 @@ export const importPageBytes = 8 * 1024 * 1024;
 export const importPageMetadataBytes = 512 * 1024;
 export const importPageDirectories = 128;
 export const importPageMillis = 120_000;
-export type ImportProgress = { schema: 2; directories: number; discovered: number; after: string };
-export const initialImportProgress = (): ImportProgress => ({
+/** Paged (protocol 2) imports carry what Git LFS resolution needs between runs:
+ * the limit, every `.gitattributes` blob seen while listing, and the unique LFS
+ * bytes earlier pages fetched. */
+export type ImportProgress = {
+  schema: 2;
+  directories: number;
+  discovered: number;
+  after: string;
+  lfsLimitBytes?: number;
+  attributes?: { path: string; sha: string; size: number }[];
+  lfsBytes?: number;
+};
+/** `.gitattributes` files a paged import tracks; beyond this the import refuses (GITHUB_LFS_LIMIT). */
+export const lfsAttributeFiles = 1000;
+export const initialImportProgress = (lfsLimitBytes?: number): ImportProgress => ({
   schema: 2,
   directories: 0,
   discovered: 1,
   after: '',
+  ...(lfsLimitBytes === undefined ? {} : { lfsLimitBytes }),
 });
 /** Unique Git LFS object bytes one import may fetch (deduplicated by oid), in
  * line with stored history: 1 GiB by default, raisable by the importer to 8 GiB. */

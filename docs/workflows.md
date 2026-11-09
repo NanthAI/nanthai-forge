@@ -600,6 +600,11 @@ the mirror with `GITHUB_LFS_UPLOAD_LIMIT` before any ref moves. The
 `.gitattributes` objects travel in the mirror's first source window, so a mirror
 makes no extra source query for them.
 
+The reverse holds for [two-way sync](operations/github-app.md#two-way-sync): a pushed
+file that is an LFS pointer at an LFS path comes back into Forge as its object's
+bytes (the same resolver, limits and errors as an import), so Lanes and checks see
+the real file, and the next mirror publishes the same pointer.
+
 Each pushed mirror commit that touches Convex paths starts `.github/workflows/convex-deploy.yml` (dev deploy). Its first job skips, ending green with a notice, any run whose commit has a newer deploy-path commit on `main`, so a drained mirror backlog deploys only the newest head.
 
 Messages retain trailer order, are capped at 1 KiB UTF-8, have controls stripped

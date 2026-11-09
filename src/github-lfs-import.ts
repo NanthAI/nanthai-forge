@@ -29,6 +29,8 @@ export type LfsImportIO = {
     pointer: LfsPointer,
     read: (consume: (part: Buffer) => Promise<void>) => Promise<void>,
   ): Promise<void>;
+  /** Called once with every LFS oid before `stored` is asked (one batched lookup). */
+  preload?(oids: string[]): Promise<void>;
   record(entry: GithubSourceEntry, pin: Pin): void;
   drain(): Promise<void>;
   over(): boolean;
@@ -36,7 +38,21 @@ export type LfsImportIO = {
 };
 const gib = (bytes: number) =>
   bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(2)} GiB` : `${(bytes / 1024 ** 2).toFixed(2)} MiB`;
-const attributeBytes = 1024 * 1024;
+export const lfsAttributeBytes = 1024 * 1024;
+const attributeBytes = lfsAttributeBytes;
+export type LfsImportOptions = {
+  /** Unique LFS bytes earlier pages of the same import already fetched. */
+  carried?: number;
+  /** Count only objects not yet stored toward the limit (paged callers). */
+  skipStored?: boolean;
+  /** Retry advice for callers that have no `lfsLimitBytes` to retry with. */
+  advice?: { limit: string; missing: string };
+};
+const defaultAdvice = {
+  limit:
+    'Retry with a new operation and lfsLimitBytes up to 8 GiB, or lfsLimitBytes 0 to keep LFS pointers as committed bytes.',
+  missing: 'Retry with a new operation and lfsLimitBytes 0 to keep LFS pointers as committed bytes.',
+};
 
 /** Archive imports hold pointer-shaped files until every `.gitattributes` has
  * been seen; only paths Git would smudge (`filter=lfs`) become their objects.
@@ -48,7 +64,19 @@ export class LfsImport {
   objectBytes = 0;
   objects = 0;
   fetched = 0;
-  constructor(private limitBytes: number) {}
+  /** Bytes of the objects fetched by this resolve (not those already stored). */
+  fetchedBytes = 0;
+  constructor(
+    private limitBytes: number,
+    private options: LfsImportOptions = {},
+  ) {}
+  /** One `.gitattributes` the caller read itself (paged imports and inbound sync). */
+  addAttributes(path: string, text: string) {
+    this.attributes.push({ path, text });
+  }
+  get holding() {
+    return this.held.size;
+  }
 
   /** True when the caller must not store these committed bytes yet. */
   hold(entry: GithubSourceEntry, bytes: Buffer): boolean {
@@ -82,13 +110,18 @@ export class LfsImport {
     }
     this.held.clear();
     const objects = [...wanted.values()];
+    if (objects.length) await io.preload?.(objects.map(object => object.pointer.oid));
+    const counted = this.options.skipStored
+      ? objects.filter(object => !io.stored(object.pointer.oid))
+      : objects;
+    const carried = this.options.carried ?? 0;
     this.objects = objects.length;
-    this.objectBytes = objects.reduce((sum, object) => sum + object.pointer.size, 0);
-    if (this.objectBytes > this.limitBytes) {
-      const largest = objects.reduce((a, b) => (b.pointer.size > a.pointer.size ? b : a));
+    this.objectBytes = counted.reduce((sum, object) => sum + object.pointer.size, 0);
+    if (carried + this.objectBytes > this.limitBytes) {
+      const largest = counted.reduce((a, b) => (b.pointer.size > a.pointer.size ? b : a));
       throw new ForgeError(
         'GITHUB_LFS_LIMIT',
-        `This commit's ${objects.length} Git LFS objects total ${gib(this.objectBytes)}, over this import's ${gib(this.limitBytes)} LFS limit (largest: ${largest.entries[0]!.path}, ${gib(largest.pointer.size)}). Nothing was downloaded and main was not published. Retry with a new operation and lfsLimitBytes up to 8 GiB, or lfsLimitBytes 0 to keep LFS pointers as committed bytes.`,
+        `This commit's ${counted.length + (carried ? ' new' : '')} Git LFS objects total ${gib(carried + this.objectBytes)}, over this import's ${gib(this.limitBytes)} LFS limit (largest: ${largest.entries[0]!.path}, ${gib(largest.pointer.size)}). ${carried ? `Earlier pages fetched ${gib(carried)}; this page was not downloaded and` : 'Nothing was downloaded and'} main was not published. ${(this.options.advice ?? defaultAdvice).limit}`,
       );
     }
     const bind = (object: (typeof objects)[number]) => {
@@ -119,7 +152,7 @@ export class LfsImport {
         if (reply?.download) return reply.download;
         throw new ForgeError(
           'GITHUB_LFS_OBJECT_MISSING',
-          `GitHub LFS has no object for ${object.entries[0]!.path} (${reply?.error?.message ?? 'not returned'}). Main was not published. Retry with a new operation and lfsLimitBytes 0 to keep LFS pointers as committed bytes.`,
+          `GitHub LFS has no object for ${object.entries[0]!.path} (${reply?.error?.message ?? 'not returned'}). Main was not published. ${(this.options.advice ?? defaultAdvice).missing}`,
         );
       };
       const small = page.filter(object => object.pointer.size <= objectChunkBytes);
@@ -136,6 +169,7 @@ export class LfsImport {
           );
           io.put(Buffer.concat(parts));
           this.fetched++;
+          this.fetchedBytes += object.pointer.size;
           bind(object);
         });
         await io.drain();
@@ -146,6 +180,7 @@ export class LfsImport {
           streamLfsObject(object.pointer, action(object), consume, request),
         );
         this.fetched++;
+        this.fetchedBytes += object.pointer.size;
         bind(object);
       }
     }

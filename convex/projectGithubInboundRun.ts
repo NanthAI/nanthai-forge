@@ -9,18 +9,16 @@ import { commitObjects } from './projectObjectCommit';
 import type { PreparedObject } from './projectObjects';
 import { githubRequest, type GithubRequest } from '../src/hosted-github-api';
 import { gitHash } from '../src/hosted-github-git';
-import {
-  applyInbound,
-  diffGithubTrees,
-  inboundBytes,
-  inboundConflicts,
-  type InboundChange,
-} from '../src/github-inbound';
+import { applyInbound, diffGithubTrees, inboundConflicts, type InboundChange } from '../src/github-inbound';
+import { bringInChanges } from '../src/github-inbound-bytes';
+import { isGitattributesPath } from '../src/github-lfs';
+import { lfsAttributeBytes } from '../src/github-lfs-import';
 import type { NativeFile } from '../src/native-state-format';
 import { digest } from '../src/portable-hash';
 import { ForgeError, invariant } from '../src/errors';
 
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
+const query = (name: string) => makeFunctionReference<'query'>(name);
 type Identity = { jobId: Id<'projectGithubMirrorJobs'>; step: number };
 type Pin = { sha256: string; size: number };
 export type InboundBegin = {
@@ -72,6 +70,23 @@ async function blob(api: GithubRequest, repository: string, sha: string) {
   invariant(gitHash('blob', bytes) === sha, 'GITHUB_SYNC_HASH', 'GitHub returned different blob bytes.');
   return bytes;
 }
+/** A `.gitattributes` file of GitHub's new tree this push did not change, as text; null when
+ * it is over the size Git LFS resolution reads. */
+async function attributesAt(api: GithubRequest, repository: string, commit: string, path: string) {
+  const encoded = path.split('/').map(encodeURIComponent).join('/');
+  const file = await api<{ content?: string; encoding?: string; sha: string; size: number }>(
+    `/repos/${repository}/contents/${encoded}?ref=${commit}`,
+  );
+  if (file.size > lfsAttributeBytes) return null;
+  invariant(
+    file.encoding === 'base64' && file.content,
+    'GITHUB_RESPONSE',
+    'GitHub returned an unexpected file encoding.',
+  );
+  const bytes = Buffer.from(file.content, 'base64');
+  invariant(gitHash('blob', bytes) === file.sha, 'GITHUB_SYNC_HASH', 'GitHub returned different file bytes.');
+  return bytes.toString('utf8');
+}
 /** Bring GitHub main in: diff GitHub's tree against the last mirror commit, store the changed
  * bytes in R2, build the Lane head State and submit it as a normal Forge landing. */
 export async function runInbound(
@@ -82,7 +97,8 @@ export async function runInbound(
 ) {
   if (loaded.phase === 'compose') return composeAndLand(ctx, input, loaded.owner, loaded.uploads ?? []);
   const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
-  const api = githubRequest(await mint(inboundReadPermissions));
+  const token = await mint(inboundReadPermissions);
+  const api = githubRequest(token);
   const prefix = `/repos/${loaded.repository}/git`;
   const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
   const commit = ref.object.sha;
@@ -110,25 +126,27 @@ export async function runInbound(
       'GITHUB_INBOUND_CONFLICT',
       `GitHub changed paths Forge also changed before this push was mirrored: ${conflicts.slice(0, 5).join(', ')}${conflicts.length > 5 ? ` (+${conflicts.length - 5})` : ''}. Resolve on Forge, then resume this job.`,
     );
-  // Bytes are read and stored one window at a time; only pins stay in memory.
-  const applied: { path: string; after: { mode: NativeFile['mode']; blob: string } | null }[] = [];
+  // Bytes are read and stored one window at a time; only pins stay in memory. Git LFS
+  // pointer files at LFS paths arrive as their objects (src/github-inbound-bytes.ts).
   const changed = diff.changes.filter(
-    (change): change is InboundChange & { after: object } => !!change.after,
+    (change): change is InboundChange & { after: NonNullable<InboundChange['after']> } => !!change.after,
   );
-  for (let i = 0; i < changed.length; i += window) {
-    const slice = changed.slice(i, i + window);
-    const bytes = await Promise.all(
-      slice.map(change =>
-        inboundBytes(change.after!.mode, change.after!.sha, () =>
-          blob(api, loaded.repository, change.after!.sha),
-        ),
-      ),
-    );
-    const pins = await store(ctx, input, loaded.owner, bytes);
-    slice.forEach((change, j) =>
-      applied.push({ path: change.path, after: { mode: change.after!.mode, blob: pins[j]!.sha256 } }),
-    );
-  }
+  const touched = new Set(diff.changes.map(change => change.path));
+  const applied = await bringInChanges(changed, {
+    repository: loaded.repository,
+    token,
+    blob: sha => blob(api, loaded.repository, sha),
+    unchangedAttributes: equivalent.files
+      .map(file => file.path)
+      .filter(path => isGitattributesPath(path) && !touched.has(path)),
+    attributes: path => attributesAt(api, loaded.repository, commit, path),
+    store: bytes => store(ctx, input, loaded.owner, bytes as Uint8Array[]),
+    stored: digests =>
+      ctx.runQuery(query('projectGithubInbound:storedObjects'), { ...input, digests }) as Promise<string[]>,
+    bindRecipes: async recipes => {
+      await ctx.runMutation(mutation('projectGithubInbound:bindRecipes'), { ...input, recipes });
+    },
+  });
   for (const change of diff.changes) if (!change.after) applied.push({ path: change.path, after: null });
   const at = new Date().toISOString();
   const lane = applyInbound(base as never, loaded.base.head, applied, head.message, at);

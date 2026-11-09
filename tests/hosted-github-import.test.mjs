@@ -25,7 +25,14 @@ for (const name of [
 const gitSha = bytes => createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
 function fixture(
   t,
-  { privateRepository = false, tooLarge = false, submodules = false, app = false, userLimit = null } = {},
+  {
+    privateRepository = false,
+    tooLarge = false,
+    submodules = false,
+    app = false,
+    userLimit = null,
+    lfs = null,
+  } = {},
 ) {
   const s = state([]);
   s.tables.projectGithubImports = new Map();
@@ -133,6 +140,15 @@ function fixture(
                   },
                 ]
               : []),
+            ...(lfs
+              ? lfs.files.map(([path, content]) => ({
+                  path,
+                  mode: '100644',
+                  type: 'blob',
+                  sha: gitSha(content),
+                  size: content.length,
+                }))
+              : []),
             {
               path: 'data.bin',
               mode: '100755',
@@ -144,6 +160,21 @@ function fixture(
         },
         options,
       );
+    if (new URL(url).hostname === 'github.com' && p === '/example/repo.git/info/lfs/objects/batch') {
+      lfs.counts.batch++;
+      const body = JSON.parse(options.body);
+      return Response.json({
+        objects: body.objects.map(({ oid, size }) => ({
+          oid,
+          size,
+          actions: { download: { href: `https://lfs.example.test/${oid}`, header: {} } },
+        })),
+      });
+    }
+    if (new URL(url).hostname === 'lfs.example.test') {
+      lfs.counts.download++;
+      return new Response(lfs.objects.get(p.slice(1)));
+    }
     if (p.includes('/git/blobs/')) {
       if (limited)
         return reply('{}', options, {
@@ -155,6 +186,8 @@ function fixture(
       if (app) assert.equal(options.headers.Authorization, 'Bearer ghs_synthetic');
       else if (privateRepository) assert.equal(options.headers.Authorization, 'Bearer ghu_synthetic');
       if (submodules && p.endsWith(gitSha(modulesBytes))) return reply(modulesBytes, options);
+      const listed = lfs?.files.find(([, content]) => p.endsWith(gitSha(content)));
+      if (listed) return reply(listed[1], options);
       assert(p.endsWith(gitSha(bytes)), 'never fetch a submodule commit as blob');
       return reply(bytes, options);
     }
@@ -580,4 +613,99 @@ test('hosted import retains both gitlinks and gitmodules and reports pointer cov
     ['vendor-a', 'vendor-b'],
   );
   assert.equal(state.files.find(f => f.path === '.gitmodules').mode, 'file');
+});
+
+const lfsPointer = bytes =>
+  Buffer.from(
+    `version https://git-lfs.github.com/spec/v1\noid sha256:${digest(bytes)}\nsize ${bytes.length}\n`,
+  );
+/** A paged-import repository whose root holds LFS-tracked pointers beside an untracked one. */
+function lfsRepo() {
+  const small = Buffer.alloc(4096, 5),
+    big = Buffer.alloc(2 * 1024 * 1024 + 5, 9),
+    untracked = Buffer.from('a pointer nobody tracks\n');
+  return {
+    small,
+    big,
+    untracked,
+    counts: { batch: 0, download: 0 },
+    objects: new Map([small, big].map(bytes => [digest(bytes), bytes])),
+    files: [
+      ['.gitattributes', Buffer.from('*.bin filter=lfs diff=lfs merge=lfs -text\n*.dat filter=lfs\n')],
+      ['asset.bin', lfsPointer(small)],
+      ['copy.bin', lfsPointer(small)],
+      ['big.dat', lfsPointer(big)],
+      ['notes.txt', lfsPointer(untracked)],
+    ],
+  };
+}
+async function finish(s, id) {
+  for (
+    let tick = 0;
+    tick < 12 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase);
+    tick++
+  )
+    await s.advance(id);
+  return s.tables.projectGithubImports.get(id);
+}
+test('a paged import binds Git LFS paths to their objects, once per oid, and keeps other pointers', async t => {
+  const lfs = lfsRepo(),
+    s = fixture(t, { lfs }),
+    id = await s.start();
+  const job = await finish(s, id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.deepEqual(lfs.counts, { batch: 1, download: 2 }, 'one batch; the shared oid is fetched once');
+  const project = s.tables.hostedProjects.get(job.projectId),
+    backup = s.tables.projectBackups.get(project.currentBackup);
+  const row = digestValue =>
+    [...s.tables.projectObjects.values()].find(
+      row => row.projectId === job.projectId && row.digest === digestValue,
+    );
+  const files = new Map(
+    JSON.parse((await storedBytes(s, row(backup.preview.head))).toString()).files.map(file => [
+      file.path,
+      file,
+    ]),
+  );
+  assert.equal(files.get('asset.bin').blob, digest(lfs.small), 'a pointer-only import fails here');
+  assert.equal(files.get('copy.bin').blob, digest(lfs.small));
+  assert.deepEqual(await storedBytes(s, row(digest(lfs.small))), lfs.small);
+  assert.equal(files.get('big.dat').blob, digest(lfs.big));
+  assert.ok(row(digest(lfs.big)).recipe, 'a large object is a chunk recipe under its oid');
+  assert.equal(
+    files.get('notes.txt').blob,
+    digest(lfsPointer(lfs.untracked)),
+    'untracked pointer text stays',
+  );
+  const { lfsCoverage } = await import(moduleUrl('../convex/projectGithubImportPublish.ts'));
+  assert.match(lfsCoverage(job), /hold their LFS object bytes/);
+});
+
+test('a paged import over the LFS limit fails with GITHUB_LFS_LIMIT and fetches nothing; 0 keeps pointers', async t => {
+  const lfs = lfsRepo(),
+    s = fixture(t, { lfs });
+  const refused = await finish(
+    s,
+    await modules.projectGithubImport.start._handler(s.ctx, {
+      operationId: randomUUID(),
+      url: 'example/repo',
+      lfsLimitBytes: 1024 * 1024,
+    }),
+  );
+  assert.equal(refused.phase, 'error');
+  assert.equal(refused.error.code, 'GITHUB_LFS_LIMIT');
+  assert.match(refused.error.message, /over this import's 1\.00 MiB LFS limit/);
+  assert.deepEqual(lfs.counts, { batch: 0, download: 0 });
+  const kept = await finish(
+    s,
+    await modules.projectGithubImport.start._handler(s.ctx, {
+      operationId: randomUUID(),
+      url: 'example/repo',
+      lfsLimitBytes: 0,
+    }),
+  );
+  assert.equal(kept.phase, 'ready');
+  assert.deepEqual(lfs.counts, { batch: 0, download: 0 });
+  const { lfsCoverage } = await import(moduleUrl('../convex/projectGithubImportPublish.ts'));
+  assert.match(lfsCoverage(kept), /pointers remain/);
 });

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { internalMutation, type MutationCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { isStored } from './projectObjectFields';
@@ -8,7 +8,7 @@ import { storageDigest, removeExclusive } from './projectStorage';
 import { r2Config, r2Key } from './r2';
 import { invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
-import { findObject, objectRow } from './projectObjectFind';
+import { findObject, findObjects, objectRow } from './projectObjectFind';
 export const objectPin = v.object({ digest: v.string(), size: v.number() });
 export const completion = v.object({
   id: v.id('projectObjects'),
@@ -163,5 +163,20 @@ export const complete = internalMutation({
     await activeOwnedProject(ctx, input.projectId, input.actor);
     await completeObjects(ctx, input.projectId, input.objects, input.recipes);
     return null;
+  },
+});
+/** Digests of this page that the project already stores (a batched LFS lookup; one
+ * point read each, no write). */
+export async function storedDigests(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digests: string[]) {
+  invariant(digests.length <= importPageFiles, 'INVALID_WORK_BACKUP', 'Split lookups into bounded pages.');
+  const rows = await findObjects(ctx, projectId, digests);
+  return digests.filter((_, i) => rows[i] && isStored(rows[i]!) && !rows[i]!.removed);
+}
+export const stored = internalQuery({
+  args: { ...identity, digests: v.array(v.string()) },
+  returns: v.array(v.string()),
+  handler: async (ctx, input) => {
+    const project = await activeOwnedProject(ctx, input.projectId, input.actor);
+    return storedDigests(ctx, project._id, input.digests);
   },
 });

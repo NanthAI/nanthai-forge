@@ -461,3 +461,133 @@ test('LFS pointers parse strictly and .gitattributes rules follow Git precedence
   assert.equal(lfs('with space.bin'), true);
   assert.equal(lfs('models/a/b.onnx'), true);
 });
+
+test('two-way: an inbound push with Git LFS pointers lands the real objects, once per oid, through the import resolver', async () => {
+  const { bringInChanges } = await import('../dist/github-inbound-bytes.js');
+  const { readObjectRecipe } = await import('../dist/object-chunks.js');
+  const small = Buffer.alloc(4096, 5),
+    big = Buffer.alloc(2 * 1024 * 1024 + 5, 9),
+    untracked = Buffer.from('a pointer nobody tracks\n');
+  const files = new Map([
+    ['README.md', Buffer.from('# plain\n')],
+    ['model.bin', formatLfsPointer({ oid: digest(small), size: small.length })],
+    ['copy.bin', formatLfsPointer({ oid: digest(small), size: small.length })],
+    ['assets/big.dat', formatLfsPointer({ oid: digest(big), size: big.length })],
+    ['docs/pointer.txt', formatLfsPointer({ oid: digest(untracked), size: untracked.length })],
+  ]);
+  const objects = new Map([small, big].map(bytes => [digest(bytes), bytes]));
+  const attributeText = '*.bin filter=lfs -text\nassets/** filter=lfs\n';
+  const run = (paths, extra = {}) => {
+    const seen = {
+      batch: 0,
+      download: 0,
+      attributes: 0,
+      stored: 0,
+      blobs: 0,
+      uploaded: new Map(),
+      recipes: [],
+    };
+    const known = extra.known ?? new Set();
+    const io = {
+      repository: 'o/r',
+      token: 'synthetic',
+      blob: async sha => {
+        seen.blobs++;
+        return [...files.values()].find(bytes => gitHash('blob', bytes) === sha);
+      },
+      unchangedAttributes: extra.attributes ?? ['.gitattributes'],
+      attributes: async () => {
+        seen.attributes++;
+        return attributeText;
+      },
+      store: async batch => {
+        for (const bytes of batch) seen.uploaded.set(digest(bytes), Buffer.from(bytes));
+        return batch.map(bytes => ({ sha256: digest(bytes), size: bytes.length }));
+      },
+      stored: async oids => {
+        seen.stored++;
+        return oids.filter(oid => known.has(oid));
+      },
+      bindRecipes: async recipes => seen.recipes.push(...recipes),
+      request: async (url, options = {}) => {
+        const { hostname, pathname } = new URL(url);
+        if (hostname === 'github.com') {
+          seen.batch++;
+          const body = JSON.parse(options.body);
+          return Response.json({
+            objects: body.objects.map(({ oid, size }) =>
+              objects.has(oid) && !extra.missing
+                ? {
+                    oid,
+                    size,
+                    actions: { download: { href: `https://lfs.example.test/${oid}`, header: {} } },
+                  }
+                : { oid, size, error: { code: 404, message: 'Object does not exist' } },
+            ),
+          });
+        }
+        seen.download++;
+        return new Response(objects.get(pathname.slice(1)));
+      },
+    };
+    const changes = paths.map(path => ({
+      path,
+      after: { mode: 'file', sha: gitHash('blob', files.get(path)) },
+    }));
+    return { seen, applied: bringInChanges(changes, io) };
+  };
+  const all = ['README.md', 'model.bin', 'copy.bin', 'assets/big.dat', 'docs/pointer.txt'];
+  const { seen, applied: pending } = run(all);
+  const applied = new Map((await pending).map(change => [change.path, change.after.blob]));
+  assert.equal(applied.get('README.md'), digest(files.get('README.md')));
+  assert.equal(applied.get('model.bin'), digest(small), 'a pointer-only inbound fails here');
+  assert.equal(applied.get('copy.bin'), digest(small));
+  assert.equal(applied.get('assets/big.dat'), digest(big));
+  assert.equal(
+    applied.get('docs/pointer.txt'),
+    digest(files.get('docs/pointer.txt')),
+    'untracked pointer stays',
+  );
+  assert.deepEqual([seen.batch, seen.download, seen.attributes], [1, 2, 1], 'one batch, one fetch per oid');
+  assert.deepEqual(seen.uploaded.get(digest(small)), small);
+  assert.equal(seen.recipes.length, 1, 'the large object is bound as a chunk recipe under its oid');
+  assert.equal(seen.recipes[0].digest, digest(big));
+  const chunks = [];
+  const read = async pin => seen.uploaded.get(pin.sha256);
+  for await (const chunk of readObjectRecipe(
+    JSON.parse(await read({ sha256: seen.recipes[0].recipeDigest })),
+    read,
+  ))
+    chunks.push(chunk);
+  assert.deepEqual(Buffer.concat(chunks), big);
+
+  // A push without pointers asks GitHub for nothing beyond its blobs.
+  const plain = run(['README.md']);
+  await plain.applied;
+  assert.deepEqual(
+    [plain.seen.batch, plain.seen.download, plain.seen.attributes, plain.seen.stored],
+    [0, 0, 0, 0],
+  );
+
+  // Objects the project already stores are bound, not fetched again.
+  const again = run(['model.bin'], { known: new Set([digest(small)]) });
+  assert.equal((await again.applied)[0].after.blob, digest(small));
+  assert.deepEqual([again.seen.batch, again.seen.download], [0, 0]);
+
+  // A changed .gitattributes is read from the push itself; an untracked path keeps the pointer.
+  files.set('.gitattributes', Buffer.from('*.dat filter=lfs\n'));
+  const switched = run(['.gitattributes', 'model.bin'], { attributes: [] });
+  assert.equal(
+    (await switched.applied).find(change => change.path === 'model.bin').after.blob,
+    digest(files.get('model.bin')),
+  );
+  assert.equal(switched.seen.attributes, 0);
+  assert.equal(switched.seen.batch, 0);
+
+  const missing = run(['model.bin'], { missing: true });
+  await assert.rejects(missing.applied, error => error.code === 'GITHUB_LFS_OBJECT_MISSING');
+  files.set('huge.bin', formatLfsPointer({ oid: 'a'.repeat(64), size: 2 * 1024 ** 3 }));
+  const huge = run(['huge.bin']);
+  await assert.rejects(huge.applied, error => error.code === 'GITHUB_LFS_LIMIT');
+  assert.equal(huge.seen.batch, 0, 'refused from the pointers before any LFS request');
+});

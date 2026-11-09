@@ -20,8 +20,12 @@ import {
   importPageMillis,
   importPageMetadataBytes,
   importPathKey,
-  type ImportProgress,
+  lfsAttributeFiles,
 } from '../src/github-import-pages';
+import { isGitattributesPath, parseLfsPointer } from '../src/github-lfs';
+import { lfsAttributeBytes } from '../src/github-lfs-import';
+import { pagedLfs, resolvePageLfs } from './projectGithubImportLfs';
+import type { ImportProgress } from '../src/github-import-pages';
 import { ImportUpload } from './projectGithubImportUpload';
 import { publishImport } from './projectGithubImportPublish';
 import { runArchiveImport } from './projectGithubImportArchive';
@@ -118,6 +122,21 @@ export const run = internalAction({
             });
           }
           for (const file of next.files) {
+            if (
+              progress.lfsLimitBytes !== 0 &&
+              isGitattributesPath(file.path) &&
+              file.size <= lfsAttributeBytes
+            ) {
+              progress.attributes = [
+                ...(progress.attributes ?? []),
+                { path: file.path, sha: file.sha, size: file.size },
+              ];
+              invariant(
+                progress.attributes.length <= lfsAttributeFiles,
+                'GITHUB_LFS_LIMIT',
+                `This repository has more than ${lfsAttributeFiles} .gitattributes files, over this import's Git LFS tracking limit. Main was not published. Retry with a new operation and lfsLimitBytes 0 to keep LFS pointers as committed bytes.`,
+              );
+            }
             invariant(
               !file.path
                 .toLowerCase()
@@ -182,13 +201,16 @@ export const run = internalAction({
               return { pin, bytes: Buffer.concat(parts) };
             })
           : null;
+        const lfs = progress.lfsLimitBytes === 0 ? null : pagedLfs(progress);
+        const held = new Map<string, { at: number; file: GithubSourceEntry }>();
+        const sizes: number[] = [];
         for (const [index, row] of entries.entries()) {
           const file: GithubSourceEntry = JSON.parse(row.value);
           if (fetched && !fetched[index]) break;
-          let pin;
+          let pin, content: Buffer | undefined;
           if (fetched) {
             pin = fetched[index]!.pin;
-            upload.put(fetched[index]!.bytes);
+            content = fetched[index]!.bytes;
           } else if (file.size <= objectChunkBytes) {
             const parts: Buffer[] = [];
             pin = await streamGithubSourceBlob(
@@ -200,7 +222,7 @@ export const run = internalAction({
               token,
               github,
             );
-            upload.put(Buffer.concat(parts));
+            content = Buffer.concat(parts);
           } else {
             const builder = new ObjectRecipeBuilder(upload.put);
             pin = await streamGithubSourceBlob(
@@ -217,18 +239,44 @@ export const run = internalAction({
             );
             upload.recipe(pin, builder.finish({ sha256: pin.blob, size: pin.size }).bytes);
           }
-          const value = JSON.stringify({
-            path: file.path,
-            ...pin,
-            mode: githubSourceMode(file.mode),
+          // A pointer-shaped file waits for the page's LFS resolution; its row is filled below.
+          const wait =
+            content !== undefined && !!lfs && !!parseLfsPointer(content) && lfs.hold(file, content);
+          if (content && !wait) upload.put(content);
+          if (wait) held.set(file.path, { at: imported.length, file });
+          const size = wait ? 0 : file.mode === '160000' ? 0 : pin.size;
+          imported.push({
+            part: 'imported',
+            key: row.key,
+            position: completed++,
+            value: wait ? '' : JSON.stringify({ path: file.path, ...pin, mode: githubSourceMode(file.mode) }),
           });
-          imported.push({ part: 'imported', key: row.key, position: completed++, value });
-          bytes += file.mode === '160000' ? 0 : pin.size;
+          sizes.push(size);
+          bytes += size;
           progress.after = row.key;
           // A full byte window stops this page; a large single file streams
           // through multiple bounded physical windows before its logical receipt.
           if (bytes - job.bytes >= importPageBytes || (!fetched && Date.now() - started >= importPageMillis))
             break;
+        }
+        if (lfs && held.size) {
+          const resolved = await resolvePageLfs(ctx, {
+            job,
+            progress,
+            lfs,
+            upload,
+            held,
+            imported,
+            sizes,
+            token: access.repository.private ? token : undefined,
+            github,
+            fetchAttribute: (entry, consume) =>
+              streamGithubSourceBlob(job.repository, entry, consume, token, github),
+            started,
+            actor: input.actor,
+          });
+          completed = job.completed + resolved.rows;
+          bytes = job.bytes + resolved.bytes;
         }
         await upload.drain(true);
         await ctx.runMutation(internal.projectGithubImportStore.advance, {
@@ -238,7 +286,7 @@ export const run = internalAction({
           completed,
           total: job.total,
           bytes,
-          totalBytes: job.totalBytes,
+          totalBytes: Math.max(job.totalBytes, bytes),
           discovering: false,
           entries: imported,
           ...upload.receipt(),

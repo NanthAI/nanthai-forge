@@ -146,9 +146,21 @@ another limit up to 8 GiB, or `0` to keep every pointer as committed bytes. The
 limit is checked from the pointers before anything is downloaded; over it, the
 import fails with `GITHUB_LFS_LIMIT`, naming the total, the limit and the largest
 object, and publishes no main. A pointer GitHub LFS has no object for fails with
-`GITHUB_LFS_OBJECT_MISSING` and names the path. A truncated recursive listing
-(protocol 2) keeps LFS pointers as committed bytes; the published coverage note
-says which rule applied.
+`GITHUB_LFS_OBJECT_MISSING` and names the path.
+
+A truncated recursive listing (protocol 2) resolves LFS the same way, page by page.
+The listing records every `.gitattributes` it sees (up to 1,000, else
+`GITHUB_LFS_LIMIT`; 1 MiB each) in the import cursor. A page that fetches a
+pointer-shaped file reads those files once, decides the page's LFS paths, and binds
+their objects before the page's receipt. The limit counts unique objects across
+pages: an oid already stored is neither fetched nor counted again, so a retried
+page can count a little less than the first attempt. The check runs per page, before
+that page's objects download, so earlier pages' objects may already be stored when it
+refuses; main is still not published. Pages without pointer-shaped files make no LFS
+call. The published coverage note says which rule applied.
+
+Two-way inbound sync resolves LFS pointers in pushed files the same way; see
+[Two-way sync](github-app.md#two-way-sync).
 
 When the project mirrors to GitHub, LFS paths are published back as LFS pointers
 plus objects; see [automatic main mirror](../workflows.md#automatic-main-mirror).

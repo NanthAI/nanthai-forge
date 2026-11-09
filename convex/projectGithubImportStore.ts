@@ -90,7 +90,7 @@ export const begin = internalMutation({
         input.rootTree && input.archive
           ? JSON.stringify(initialArchiveCursor(input.rootTree, input.lfsLimitBytes))
           : input.rootTree
-            ? JSON.stringify(initialImportProgress())
+            ? JSON.stringify(initialImportProgress(input.lfsLimitBytes))
             : input.cursor,
       ...(input.rootTree ? { protocol: input.archive ? (3 as const) : (2 as const) } : {}),
       step: 0,
