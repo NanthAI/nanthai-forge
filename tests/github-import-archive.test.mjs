@@ -157,19 +157,98 @@ async function serve(t, repo, counts) {
       count('blobs');
       return new Response(repo.bodies.get(path.split('/').at(-1)));
     }
+    if (u.hostname === 'github.com' && path === '/fixture/arch.git/info/lfs/objects/batch') {
+      count('lfsBatch');
+      assert.equal(options.headers?.Authorization, undefined, 'public LFS reads are anonymous');
+      const body = JSON.parse(options.body);
+      assert.equal(body.operation, 'download');
+      return Response.json({
+        objects: body.objects.map(({ oid, size }) =>
+          repo.lfs?.has(oid)
+            ? { oid, size, actions: { download: { href: `https://lfs.example.test/${oid}`, header: {} } } }
+            : { oid, size, error: { code: 404, message: 'Object does not exist' } },
+        ),
+      });
+    }
+    if (u.hostname === 'lfs.example.test') {
+      count('lfsDownload');
+      return new Response(repo.lfs.get(path.slice(1)));
+    }
     throw Error(`Unexpected synthetic request ${path}`);
   };
   return bucket;
 }
-async function importArchive(s) {
+async function importArchive(s, options = {}, expect = 'ready') {
   const id = await s.modules.projectGithubImport.start._handler(s.ctx, {
     operationId: randomUUID(),
     url: 'fixture/arch',
+    ...options,
   });
-  for (let i = 0; i < 5 && s.tables.projectGithubImports.get(id).phase !== 'ready'; i++) await s.worker(id);
+  for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
+    await s.worker(id);
   const job = s.tables.projectGithubImports.get(id);
-  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.equal(job.phase, expect, JSON.stringify(job.error));
   return job;
+}
+/** Exact accepted main State and a byte reader for its objects. */
+async function mainFiles(s, bucket, projectId) {
+  const read = async pin => {
+    const object = await findObject(s.ctx, projectId, pin.sha256);
+    const bytes = bucket.objects.get(bucket.key(object.r2Key));
+    return object.pack ? bytes.subarray(object.pack.offset, object.pack.offset + object.size) : bytes;
+  };
+  const bytesOf = async sha256 => {
+    const row = await findObject(s.ctx, projectId, sha256),
+      chunks = [];
+    if (!row.recipe) return Buffer.from(await read({ sha256 }));
+    for await (const chunk of readObjectRecipe(JSON.parse(await read({ sha256: row.recipe.digest })), read))
+      chunks.push(chunk);
+    return Buffer.concat(chunks);
+  };
+  const main = JSON.parse(await channels.current._handler(s.ctx, { projectId }));
+  const state = JSON.parse(await bytesOf(main.head));
+  return { files: new Map(state.files.map(file => [file.path, file])), bytesOf };
+}
+const pointer = bytes =>
+  Buffer.from(
+    `version https://git-lfs.github.com/spec/v1\noid sha256:${createHash('sha256').update(bytes).digest('hex')}\nsize ${bytes.length}\n`,
+  );
+/** GitHub's archive keeps LFS pointers (the default); objects live behind the batch API. */
+function lfsRepository() {
+  const model = Buffer.alloc(300 * 1024, 3),
+    big = Buffer.alloc(2 * 1024 * 1024 + 5, 9),
+    untracked = Buffer.from('an object nobody tracks\n');
+  const files = [
+    [
+      '.gitattributes',
+      Buffer.from(
+        '*.bin filter=lfs diff=lfs merge=lfs -text\nassets/** filter=lfs\nassets/keep.txt -filter\n',
+      ),
+    ],
+    ['model.bin', pointer(model)],
+    ['copy.bin', pointer(model)],
+    ['assets/big.dat', pointer(big)],
+    ['assets/keep.txt', pointer(untracked)],
+    ['docs/pointer-example.txt', pointer(untracked)],
+    ['README.md', Buffer.from('# LFS fixture\n')],
+  ];
+  const tree = [
+    { path: 'assets', mode: '040000', type: 'tree', sha: hex(2) },
+    { path: 'docs', mode: '040000', type: 'tree', sha: hex(3) },
+  ];
+  for (const [path, bytes] of files)
+    tree.push({ path, mode: '100644', type: 'blob', sha: gitSha(bytes), size: bytes.length });
+  const digestOf = bytes => createHash('sha256').update(bytes).digest('hex');
+  return {
+    tree,
+    archive: tarball(files.map(([path, bytes]) => ({ path, bytes }))),
+    bodies: new Map(),
+    files: files.length,
+    lfs: new Map([model, big].map(bytes => [digestOf(bytes), bytes])),
+    model,
+    big,
+    untracked,
+  };
 }
 const calls = s => [...s.calls.values()].reduce((a, b) => a + b, 0) + 1;
 
@@ -328,4 +407,51 @@ test('tar reader rejects corrupted headers and early ends', async () => {
   corrupt[1024 + 10] ^= 1;
   await assert.rejects(read(corrupt), /checksum/);
   await assert.rejects(read(raw.subarray(0, 1024 + 512 + 100)), /ended early/);
+});
+
+test('Git LFS paths import as their object bytes, fetched once per oid; other pointers keep their bytes', async t => {
+  const repo = lfsRepository(),
+    counts = {},
+    s = pagedFixture();
+  const bucket = await serve(t, repo, counts);
+  const job = await importArchive(s);
+  // One batch request; one download per unique oid (model.bin and copy.bin share one).
+  assert.deepEqual(counts, { trees: 2, tarball: 1, archive: 1, lfsBatch: 1, lfsDownload: 2 });
+  const digestOf = bytes => createHash('sha256').update(bytes).digest('hex');
+  const { files, bytesOf } = await mainFiles(s, bucket, job.projectId);
+  assert.equal(files.get('model.bin').blob, digestOf(repo.model), 'pointer-only import fails here');
+  assert.equal(files.get('copy.bin').blob, digestOf(repo.model));
+  assert.deepEqual(await bytesOf(files.get('model.bin').blob), repo.model);
+  // A large object streams through a chunk recipe under its oid.
+  assert.equal(files.get('assets/big.dat').blob, digestOf(repo.big));
+  assert.deepEqual(await bytesOf(files.get('assets/big.dat').blob), repo.big);
+  // -filter and untracked paths keep the committed pointer, as Git would.
+  assert.equal(files.get('assets/keep.txt').blob, digestOf(pointer(repo.untracked)));
+  assert.equal(files.get('docs/pointer-example.txt').blob, digestOf(pointer(repo.untracked)));
+  assert.equal(job.completed, repo.files);
+});
+
+test('Git LFS objects over the import limit refuse before any download; 0 keeps pointers', async t => {
+  const repo = lfsRepository(),
+    counts = {},
+    s = pagedFixture();
+  const bucket = await serve(t, repo, counts);
+  const refused = await importArchive(s, { lfsLimitBytes: 1024 * 1024 }, 'error');
+  assert.equal(refused.error.code, 'GITHUB_LFS_LIMIT');
+  assert.match(refused.error.message, /2 Git LFS objects total .* over this import's 1\.00 MiB LFS limit/);
+  assert.match(refused.error.message, /largest: assets\/big\.dat/);
+  assert.equal(counts.lfsBatch, undefined, 'nothing was requested from GitHub LFS');
+  await assert.rejects(
+    s.modules.projectGithubImport.start._handler(s.ctx, {
+      operationId: randomUUID(),
+      url: 'fixture/arch',
+      lfsLimitBytes: 9 * 1024 ** 3,
+    }),
+    /8 GiB/,
+  );
+  const kept = await importArchive(s, { lfsLimitBytes: 0 });
+  const { files } = await mainFiles(s, bucket, kept.projectId);
+  const digestOf = bytes => createHash('sha256').update(bytes).digest('hex');
+  assert.equal(files.get('model.bin').blob, digestOf(pointer(repo.model)));
+  assert.equal(counts.lfsBatch, undefined);
 });

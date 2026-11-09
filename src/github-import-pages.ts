@@ -13,6 +13,10 @@ export const initialImportProgress = (): ImportProgress => ({
   discovered: 1,
   after: '',
 });
+/** Unique Git LFS object bytes one import may fetch (deduplicated by oid), in
+ * line with stored history: 1 GiB by default, raisable by the importer to 8 GiB. */
+export const lfsImportDefaultBytes = 1024 ** 3;
+export const lfsImportMaxBytes = 8 * 1024 ** 3;
 /** Archive imports keep only the pinned root tree and run count: progress is the
  * content-addressed objects already stored, never a per-file inventory. */
 export const archiveCursorSchema = z
@@ -20,9 +24,16 @@ export const archiveCursorSchema = z
     schema: z.literal(3),
     tree: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
     runs: z.number().int().nonnegative(),
+    /** Unique Git LFS bytes this import may fetch; 0 keeps pointers. */
+    lfsLimitBytes: z.number().int().min(0).max(lfsImportMaxBytes).optional(),
   })
   .strict();
-export const initialArchiveCursor = (tree: string) => ({ schema: 3 as const, tree, runs: 0 });
+export const initialArchiveCursor = (tree: string, lfsLimitBytes?: number) => ({
+  schema: 3 as const,
+  tree,
+  runs: 0,
+  ...(lfsLimitBytes === undefined ? {} : { lfsLimitBytes }),
+});
 export function filePage<T extends { size: number }>(
   rows: T[],
   encode: (row: T) => unknown = row => row,

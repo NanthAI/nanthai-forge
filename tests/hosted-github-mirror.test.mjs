@@ -8,6 +8,8 @@ import { join } from 'node:path';
 import { prepareMirror, stepMirror } from '../dist/hosted-github-mirror.js';
 import { gitHash, gitTree, githubCommit } from '../dist/hosted-github-git.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
+import { formatLfsPointer, isLfsPath, lfsRules, parseLfsPointer } from '../dist/github-lfs.js';
+import { digest } from '../dist/hash.js';
 async function drain(f, initial) {
   let plan = initial ?? (await prepareMirror(f.seed, f.io));
   while (plan.phase !== 'done') {
@@ -356,4 +358,106 @@ test('two-way: the GitHub tree diff walks only changed directories and builds th
     inboundMessage({ commit: pinned, message: 'Merge pull request #1\n\nbody', repository: 'o/r' }),
     /^Merge pull request #1\n\nBrought in from GitHub o\/r main at a{40}\.\nGitHub-Commit: a{40}$/,
   );
+});
+
+test('Git LFS paths mirror as pointers from the Forge digest; GitHub LFS gets only objects it lacks', async () => {
+  const model = 'm'.repeat(4096),
+    added = 'n'.repeat(2048),
+    legacy = formatLfsPointer({ oid: 'c'.repeat(64), size: 99 }).toString();
+  const lfsFile = text => formatLfsPointer({ oid: digest(Buffer.from(text)), size: Buffer.byteLength(text) });
+  const attributes = '*.bin filter=lfs diff=lfs merge=lfs -text\n';
+  const f = mirrorFixture({
+    before: { '.gitattributes': attributes, 'model.bin': model, 'old.bin': legacy, 'a.txt': 'a' },
+    after: {
+      '.gitattributes': attributes,
+      'model.bin': model,
+      'old.bin': legacy,
+      'new.bin': added,
+      'a.txt': 'b',
+    },
+    verified: false,
+    githubBytes: (path, bytes) => (path === 'model.bin' ? lfsFile(model) : bytes),
+  });
+  const batches = [],
+    uploads = [];
+  f.io.lfs = {
+    batch: async objects => {
+      batches.push(objects);
+      return objects.map(object => ({
+        ...object,
+        upload: { href: 'https://lfs.example.test/u', header: {} },
+      }));
+    },
+    upload: async (object, bytes) => {
+      uploads.push({ oid: object.oid, bytes: bytes.toString() });
+    },
+  };
+  const plan = await drain(f);
+  const expected = gitTree(
+    f.states.get(f.head).files.map(file => {
+      const bytes = f.objects.get(file.blob);
+      return {
+        ...file,
+        sha: gitHash(
+          'blob',
+          file.path === 'model.bin' || file.path === 'new.bin' ? lfsFile(bytes.toString()) : bytes,
+        ),
+      };
+    }),
+  );
+  assert.equal(
+    plan.entry.tree,
+    expected,
+    'GitHub holds pointers; bootstrap matched without re-uploading model.bin',
+  );
+  assert.deepEqual(batches, [[{ oid: digest(Buffer.from(added)), size: 2048 }]]);
+  assert.deepEqual(uploads, [{ oid: digest(Buffer.from(added)), bytes: added }]);
+  assert(
+    !f.reads.includes(digest(Buffer.from(model))),
+    'an LFS object over 1 KiB is never read to hash its pointer',
+  );
+  assert.equal(
+    f.windows.filter(w => w.blobs).length,
+    2,
+    '.gitattributes rides the first object window: one bootstrap and one change window',
+  );
+  // Without LFS transport a new LFS object stops the mirror before any ref moves.
+  const g = mirrorFixture({
+    before: { '.gitattributes': attributes },
+    after: { '.gitattributes': attributes, 'new.bin': added },
+  });
+  await assert.rejects(drain(g), /GitHub LFS/);
+  assert.equal(g.remote(), g.root.commit);
+});
+test('LFS pointers parse strictly and .gitattributes rules follow Git precedence', () => {
+  const oid = 'a'.repeat(64);
+  assert.deepEqual(parseLfsPointer(formatLfsPointer({ oid, size: 12 })), { oid, size: 12 });
+  const ext = `version https://git-lfs.github.com/spec/v1\next-0-foo sha256:${'b'.repeat(64)}\noid sha256:${oid}\nsize 0\n`;
+  assert.deepEqual(parseLfsPointer(Buffer.from(ext)), { oid, size: 0 });
+  for (const bad of [
+    `version https://git-lfs.github.com/spec/v1\nsize 12\noid sha256:${oid}\n`,
+    `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 12`,
+    `version https://example.com/v9\noid sha256:${oid}\nsize 12\n`,
+    `version https://git-lfs.github.com/spec/v1\noid sha1:${'a'.repeat(40)}\nsize 12\n`,
+    `version https://git-lfs.github.com/spec/v1\noid sha256:${oid}\nsize 012\n`,
+  ])
+    assert.equal(parseLfsPointer(Buffer.from(bad)), null, bad);
+  const rules = lfsRules([
+    { path: 'game/.gitattributes', text: '*.png -filter\nlevels/**/*.dat filter=lfs\n' },
+    {
+      path: '.gitattributes',
+      text: '# comment\n[attr]binary -diff\n*.png filter=lfs\n/top.psd filter=lfs\nassets/ filter=lfs\n"with space.bin" filter=lfs\nmodels/** filter=lfs\n',
+    },
+  ]);
+  const lfs = path => isLfsPath(rules, path);
+  assert.equal(lfs('a/b/c.png'), true);
+  assert.equal(lfs('game/hero.png'), false, 'a deeper .gitattributes overrides');
+  assert.equal(lfs('game/levels/one.dat'), true);
+  assert.equal(lfs('game/levels/a/b/two.dat'), true);
+  assert.equal(lfs('levels/one.dat'), false);
+  assert.equal(lfs('top.psd'), true);
+  assert.equal(lfs('sub/top.psd'), false, 'a leading slash anchors');
+  assert.equal(lfs('assets/x.bin'), false, 'directory patterns never match files');
+  assert.equal(lfs('with space.bin'), true);
+  assert.equal(lfs('models/a/b.onnx'), true);
 });

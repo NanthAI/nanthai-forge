@@ -1059,6 +1059,8 @@ receive the trees in the Candidate artifact. Git runs with no inherited
 configuration, hooks, credential helper, filters, LFS smudge or prompts, and no
 repository code runs. The tree carries no `.git` metadata. Source verification
 checks the pointer bytes; the fetched tree is external content, as on GitHub.
+LFS files inside a fetched submodule stay pointers. LFS files of the project
+itself are ordinary source bytes in the Candidate ([Git LFS files](github-project-import.md#git-lfs-files)).
 
 **Private submodules.** A GitHub URL that cannot be read anonymously is fetched with a
 short-lived, read-only (`contents: read`) installation token limited to exactly that

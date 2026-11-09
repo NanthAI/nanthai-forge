@@ -45,8 +45,10 @@ remain outside coverage. See [hook settings and coverage](agents/workflow.md#ove
 4. Copy the project's URL for the CLI steps below.
 
 This imports the selected committed snapshot, including binary files, executable
-modes and symlink targets. Submodules remain commit pointers. Git history and
-external LFS objects are separate. A public upstream produces a public mirror;
+modes and symlink targets. Submodules remain commit pointers. Git LFS files hold
+their object bytes (up to 1 GiB of LFS objects per import by default; see
+[Git LFS files](operations/github-project-import.md#git-lfs-files)). Git history
+is separate. A public upstream produces a public mirror;
 a private upstream retains private visibility and needs current GitHub access.
 If the Forge GitHub App is installed for selected repositories only, a private
 repository outside that selection is refused with its name and a link to the

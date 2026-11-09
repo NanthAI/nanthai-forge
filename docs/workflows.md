@@ -588,6 +588,18 @@ advances its mapping without an empty commit. Native-owner and shadow projects
 keep the local worker described below; server bindings and a pending server
 cutover stop that Mac worker.
 
+Git LFS paths (`filter=lfs` in the target State's `.gitattributes`) are
+published as Git's clean filter would: GitHub's tree gets the LFS pointer, built
+from the Forge digest and size (the LFS oid) without reading the object, and
+content that already is a pointer passes through unchanged. Before a new pointer
+enters the tree, one GitHub LFS batch request per changed LFS file asks whether
+GitHub holds the object; Forge uploads it with the mirror's step token only when
+GitHub asks, so objects that came from an import are never re-sent. Uploads read
+the object once and are limited to 100 MiB per object; a larger new object stops
+the mirror with `GITHUB_LFS_UPLOAD_LIMIT` before any ref moves. The
+`.gitattributes` objects travel in the mirror's first source window, so a mirror
+makes no extra source query for them.
+
 Each pushed mirror commit that touches Convex paths starts `.github/workflows/convex-deploy.yml` (dev deploy). Its first job skips, ending green with a notice, any run whose commit has a newer deploy-path commit on `main`, so a drained mirror backlog deploys only the newest head.
 
 Messages retain trailer order, are capped at 1 KiB UTF-8, have controls stripped

@@ -20,6 +20,7 @@ import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format
 import { ForgeError, invariant } from '../src/errors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStorage } from './projectConvexSourceStorage';
+import { lfsBatch, uploadLfsObject } from '../src/github-lfs';
 import { runInbound } from './projectGithubInboundRun';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
@@ -115,10 +116,26 @@ export const step = internalAction({
       // GitHub call of an unverified bootstrap, which needs GitHub main to diff.
       const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
       let client: Promise<GithubRequest> | undefined;
-      const connect = () => (client ??= mint(mirrorPermissionsFor(plan)).then(token => githubRequest(token)));
+      let token = '';
+      const connect = () =>
+        (client ??= mint(mirrorPermissionsFor(plan)).then(minted => {
+          token = minted;
+          return githubRequest(minted);
+        }));
       const api: GithubRequest = async <T>(path: string, method?: string, body?: unknown): Promise<T> =>
         (await connect())<T>(path, method, body);
-      const io: MirrorIO = { ...mirrorSource(ctx, input), api };
+      // Git LFS paths only: the same step token authorizes GitHub's LFS batch API.
+      const lfs: MirrorIO['lfs'] = {
+        batch: async objects => {
+          await connect();
+          return lfsBatch(loaded.repository, 'upload', objects, token);
+        },
+        upload: async (object, bytes) => {
+          await connect();
+          await uploadLfsObject(object, bytes, token);
+        },
+      };
+      const io: MirrorIO = { ...mirrorSource(ctx, input), api, lfs };
       if (loaded.cursor) {
         plan = JSON.parse(Buffer.from(await durable.read(loaded.cursor)).toString('utf8'));
       } else plan = await prepareMirror(loaded.seed, io);

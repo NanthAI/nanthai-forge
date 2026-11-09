@@ -53,6 +53,7 @@ export const begin = internalMutation({
     at: v.string(),
     cursor: v.string(),
     rootTree: v.optional(v.string()),
+    lfsLimitBytes: v.optional(v.number()),
     /** A complete recursive listing was seen: stream the commit archive. */
     archive: v.optional(v.object({ total: v.number(), totalBytes: v.number(), submodules: v.number() })),
     visibility: v.union(v.literal('public'), v.literal('private')),
@@ -87,7 +88,7 @@ export const begin = internalMutation({
       at: input.at,
       cursor:
         input.rootTree && input.archive
-          ? JSON.stringify(initialArchiveCursor(input.rootTree))
+          ? JSON.stringify(initialArchiveCursor(input.rootTree, input.lfsLimitBytes))
           : input.rootTree
             ? JSON.stringify(initialImportProgress())
             : input.cursor,

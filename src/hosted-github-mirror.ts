@@ -6,7 +6,19 @@ import { gitlinkCommit } from './gitlink.js';
 import { isMissingObject, treeBlobPattern } from './hosted-github-retry.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { publicationExclusion, sourceExclusion } from './files.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
+import {
+  formatLfsPointer,
+  isGitattributesPath,
+  isLfsPath,
+  lfsMirrorUploadBytes,
+  lfsPointerMaxBytes,
+  lfsRules,
+  parseLfsPointer,
+  type LfsBatchObject,
+  type LfsPointer,
+  type LfsRule,
+} from './github-lfs.js';
 export const mirrorWindow = 100;
 export const mirrorBytes = 8 * 1024 * 1024;
 type GitFile = NativeFile & { sha: string };
@@ -42,6 +54,12 @@ export type MirrorPlan = {
    * GitHub tree that an older mirror wrote without them, used if GitHub's tree is that one. */
   legacy?: { changes: MirrorPlan['changes']; pending: NativeFile[] };
   entry: GithubSyncCommit | null;
+  /** `filter=lfs` rules of the baseline and target States, present only when
+   * either has any: those paths publish LFS pointers, as Git's clean filter would. */
+  lfs?: { baseline: LfsRule[]; target: LfsRule[] };
+  /** `.gitattributes` pins still to read; the first object window carries them,
+   * so a mirror makes no extra source query for them. */
+  lfsSources?: { baseline: string[]; target: string[] };
 };
 /** Paths a mirror commit's tree holds: every tracked path except Forge metadata
  * (`tracked`), or, for a commit an older mirror wrote, also without credential-looking
@@ -69,13 +87,99 @@ export type MirrorIO = {
   api: GithubRequest;
   states(ids: string[]): Promise<NativeState[]>;
   blobs(ids: string[]): Promise<{ size: number; read(): Promise<Buffer> }[]>;
+  /** GitHub LFS batch upload transport, used only for LFS paths. */
+  lfs?: {
+    batch(objects: LfsPointer[]): Promise<LfsBatchObject[]>;
+    upload(object: LfsBatchObject, bytes: Buffer): Promise<void>;
+  };
 };
+type MirrorObject = { size: number; read(): Promise<Buffer> };
+/** `.gitattributes` files of both States as `path\0blob` pins, when either has one. */
+function lfsPlan(baseline: NativeState, target: NativeState): Pick<MirrorPlan, 'lfsSources'> {
+  const pins = (state: NativeState) =>
+    state.files
+      .filter(file => file.mode === 'file' && isGitattributesPath(file.path))
+      .map(file => `${file.path}\0${file.blob}`);
+  const lfsSources = { baseline: pins(baseline), target: pins(target) };
+  return lfsSources.baseline.length || lfsSources.target.length ? { lfsSources } : {};
+}
+/** At most this many distinct `.gitattributes` blobs join the first window. */
+const attributeWindow = 50;
+async function resolveLfsRules(
+  plan: MirrorPlan,
+  objects: Map<string, MirrorObject>,
+  io: MirrorIO,
+): Promise<void> {
+  const sources = plan.lfsSources!;
+  const blobs = [...new Set([...sources.baseline, ...sources.target].map(pin => pin.split('\0')[1]!))];
+  const missing = blobs.filter(blob => !objects.has(blob));
+  for (let at = 0; at < missing.length; at += mirrorWindow) {
+    const window = missing.slice(at, at + mirrorWindow),
+      read = await io.blobs(window);
+    window.forEach((blob, i) => objects.set(blob, read[i]!));
+  }
+  const texts = new Map<string, string>();
+  for (const blob of blobs) {
+    const object = objects.get(blob)!;
+    texts.set(blob, object.size <= 1024 * 1024 ? (await object.read()).toString('utf8') : '');
+  }
+  const rules = (pins: string[]) =>
+    lfsRules(
+      pins.map(pin => {
+        const [path, blob] = pin.split('\0');
+        return { path: path!, text: texts.get(blob!)! };
+      }),
+    );
+  const lfs = { baseline: rules(sources.baseline), target: rules(sources.target) };
+  delete plan.lfsSources;
+  if (lfs.baseline.length || lfs.target.length) plan.lfs = lfs;
+}
+/** Git's clean filter for an LFS path: Forge keeps the object bytes and GitHub's
+ * tree keeps the pointer, derived from the Forge digest (the LFS oid) without
+ * reading the object. Content that already is a pointer passes through. Before a
+ * new pointer is published, GitHub LFS must hold its object; Forge uploads it
+ * when GitHub asks. Returns null for paths Git would store as ordinary blobs. */
+async function lfsContent(
+  file: NativeFile,
+  object: MirrorObject,
+  rules: LfsRule[] | undefined,
+  io: MirrorIO | null,
+): Promise<Buffer | null> {
+  if (!rules?.length || (file.mode !== 'file' && file.mode !== 'executable') || !isLfsPath(rules, file.path))
+    return null;
+  if (object.size < lfsPointerMaxBytes) {
+    const content = await object.read();
+    if (parseLfsPointer(content)) return content;
+  }
+  const pointer = { oid: file.blob, size: object.size };
+  if (!io) return formatLfsPointer(pointer);
+  invariant(io.lfs, 'GITHUB_LFS_UNAVAILABLE', 'This mirror cannot reach GitHub LFS; no ref was changed.');
+  const [reply] = await io.lfs.batch([pointer]);
+  invariant(reply, 'GITHUB_RESPONSE', 'GitHub LFS returned no answer for this object.');
+  if (reply.error)
+    throw new ForgeError(
+      'GITHUB_LFS_UPLOAD',
+      `GitHub LFS refused ${file.path} (${reply.error.message}). No ref was changed.`,
+    );
+  if (reply.upload) {
+    if (object.size > lfsMirrorUploadBytes)
+      throw new ForgeError(
+        'GITHUB_LFS_UPLOAD_LIMIT',
+        `${file.path} is a ${Math.ceil(object.size / 1024 ** 2)} MiB Git LFS object GitHub does not hold yet; Forge mirrors upload LFS objects up to 100 MiB. No ref was changed.`,
+      );
+    await io.lfs.upload(reply, await object.read());
+  }
+  return formatLfsPointer(pointer);
+}
 export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<MirrorPlan> {
   const prefix = `/repos/${seed.repository}/git`;
   if (seed.verified && seed.binding) {
     const [baseline, target] = await io.states([seed.binding.state, seed.state]);
     invariant(baseline && target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
-    return diffPlan(seed, seed.binding.commit, seed.binding.tree, baseline, target, false);
+    return {
+      ...diffPlan(seed, seed.binding.commit, seed.binding.tree, baseline, target, false),
+      ...lfsPlan(baseline, target),
+    };
   }
   const ref = await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
   const remote = ref.object.sha;
@@ -91,7 +195,10 @@ export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<Mir
     seed.binding?.state ?? commit.message.match(/^Forge-State: ([0-9a-f]{64})$/m)?.[1] ?? seed.previous;
   const [baseline, target] = await io.states([previous, seed.state]);
   invariant(baseline && target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
-  return diffPlan(seed, remote, commit.tree.sha, baseline, target, true);
+  return {
+    ...diffPlan(seed, remote, commit.tree.sha, baseline, target, true),
+    ...lfsPlan(baseline, target),
+  };
 }
 function diffPlan(
   seed: MirrorSeed,
@@ -171,7 +278,8 @@ async function createTree(plan: MirrorPlan, io: MirrorIO, prefix: string): Promi
     const objects = await io.blobs(sources.map(file => file!.blob));
     invariant(objects.length === named.length, 'SOURCE_UNAVAILABLE', 'Mirror blob window is incomplete.');
     for (let i = 0; i < named.length; i++) {
-      const content = await objects[i]!.read();
+      const content =
+        (await lfsContent(sources[i]!, objects[i]!, plan.lfs?.target, null)) ?? (await objects[i]!.read());
       invariant(
         gitHash('blob', content) === named[i],
         'GITHUB_SYNC_HASH',
@@ -202,15 +310,33 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
     bytes = 0;
   while (plan.phase !== 'done') {
     const files = plan.phase === 'bootstrap' ? plan.baseline : plan.pending;
-    const window = files.slice(plan.index, plan.index + mirrorWindow - count);
+    // Pending `.gitattributes` pins share this window's single source query.
+    const attributes = plan.lfsSources
+      ? [...new Set([...plan.lfsSources.baseline, ...plan.lfsSources.target].map(pin => pin.split('\0')[1]!))]
+      : [];
+    const carried = attributes.length <= attributeWindow ? attributes : [];
+    const window = files.slice(plan.index, plan.index + mirrorWindow - count - carried.length);
     if (window.length) {
-      const objects = await io.blobs(window.map(file => file.blob));
-      invariant(objects.length === window.length, 'SOURCE_UNAVAILABLE', 'Mirror blob window is incomplete.');
+      const read = await io.blobs([...window.map(file => file.blob), ...carried]);
+      invariant(
+        read.length === window.length + carried.length,
+        'SOURCE_UNAVAILABLE',
+        'Mirror blob window is incomplete.',
+      );
+      const objects = read.slice(0, window.length);
+      if (plan.lfsSources)
+        await resolveLfsRules(plan, new Map(carried.map((blob, i) => [blob, read[window.length + i]!])), io);
       for (let i = 0; i < window.length; i++) {
         const object = objects[i]!,
           file = window[i]!;
         if (count && bytes + object.size > mirrorBytes) return plan;
-        const content = await object.read();
+        const content =
+          (await lfsContent(
+            file,
+            object,
+            plan.phase === 'bootstrap' ? plan.lfs?.baseline : plan.lfs?.target,
+            plan.phase === 'bootstrap' ? null : io,
+          )) ?? (await object.read());
         const sha = file.mode === 'gitlink' ? gitlinkCommit(content) : gitHash('blob', content);
         if (plan.phase === 'bootstrap') plan.hashes.push({ ...file, sha });
         else {

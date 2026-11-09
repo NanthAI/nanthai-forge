@@ -9,6 +9,8 @@ export function mirrorFixture({
   verified = true,
   /** Which `before` paths GitHub main holds (an older mirror dropped some names). */
   onGithub = () => true,
+  /** The bytes GitHub's tree holds for a `before` path (an LFS pointer, say). */
+  githubBytes = (_path, bytes) => bytes,
 } = {}) {
   const objects = new Map(),
     states = new Map(),
@@ -45,7 +47,7 @@ export function mirrorFixture({
     .get(previous)
     .files.filter(file => onGithub(file.path))
     .map(file => {
-      const bytes = objects.get(file.blob),
+      const bytes = githubBytes(file.path, objects.get(file.blob)),
         sha = file.mode === 'gitlink' ? bytes.toString().trimEnd() : gitHash('blob', bytes);
       githubBlobs.set(sha, bytes);
       return { path: file.path, mode: file.mode, sha };

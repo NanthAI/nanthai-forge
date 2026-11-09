@@ -7,6 +7,7 @@ import type { Id, Doc } from './_generated/dataModel';
 import { githubInput } from '../src/github';
 import { beginGithubSource } from '../src/github-project-source';
 import { listGithubTree } from '../src/github-archive-source';
+import { lfsImportMaxBytes } from '../src/github-import-pages';
 import { importReadToken } from './githubAppToken';
 import { convexFetch } from './networkFetch';
 import { networkFetch } from '../src/network-fetch';
@@ -23,6 +24,8 @@ export const start = action({
     url: v.string(),
     ref: v.optional(v.string()),
     name: v.optional(v.string()),
+    /** Unique Git LFS bytes to fetch (default 1 GiB, at most 8 GiB); 0 keeps pointers. */
+    lfsLimitBytes: v.optional(v.number()),
   },
   returns: v.id('projectGithubImports'),
   handler: async (ctx, input): Promise<Id<'projectGithubImports'>> => {
@@ -34,6 +37,14 @@ export const start = action({
         'BAD_ARGUMENT',
         'Use an original operation UUID.',
       );
+      invariant(
+        input.lfsLimitBytes === undefined ||
+          (Number.isSafeInteger(input.lfsLimitBytes) &&
+            input.lfsLimitBytes >= 0 &&
+            input.lfsLimitBytes <= lfsImportMaxBytes),
+        'BAD_ARGUMENT',
+        'lfsLimitBytes is a whole number of bytes from 0 to 8 GiB.',
+      );
       const parsed = githubInput(input.url),
         ref = input.ref || parsed.ref;
       const request = JSON.stringify([
@@ -41,6 +52,8 @@ export const start = action({
         parsed.repository,
         ref ?? null,
         input.name?.trim() ?? null,
+        // Present only when chosen, so earlier requests keep their identity.
+        ...(input.lfsLimitBytes === undefined ? [] : [input.lfsLimitBytes]),
       ]);
       const key = { actor: user.subject, operationId: input.operationId, request };
       const existing: Doc<'projectGithubImports'> | null = await ctx.runQuery(
@@ -94,6 +107,7 @@ export const start = action({
             }
           : {}),
         ...key,
+        ...(input.lfsLimitBytes === undefined ? {} : { lfsLimitBytes: input.lfsLimitBytes }),
         name: input.name?.trim() || access.repository.full_name.split('/').at(-1)!,
         repository: source.repository,
         commit: source.commit,

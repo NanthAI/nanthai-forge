@@ -77,8 +77,8 @@ acquisition (protocol 2) instead; no partial tree is published.
 
 Committed regular files, executable modes, symlink targets, binaries, empty files
 and committed ignored paths are retained. Source names cannot overlap the
-existing `.git`/`.forge` metadata namespaces. Git history, external LFS objects
-and derived code analysis are separate. LFS pointers remain their committed bytes.
+existing `.git`/`.forge` metadata namespaces. Git history and derived code
+analysis are separate. [Git LFS files](#git-lfs-files) hold their object bytes.
 The Git blob endpoint acquisition boundary remains 100 MB per blob; large
 supported files stream through the existing bounded chunk recipes. This is a
 provider boundary, not a new repository quota.
@@ -119,6 +119,39 @@ and inventory rows and purges only that project's R2 prefix through the existing
 maintenance-controlled deletion chain. Removing one logical binding must not
 remove a pack used by other bindings. No new retention rule or automatic source
 expiry is introduced.
+
+## Git LFS files
+
+An archive import resolves Git LFS the way `git clone` smudges it. A committed
+file whose bytes are a valid LFS pointer, at a path that the commit's
+`.gitattributes` files mark `filter=lfs` (Git precedence: the last matching line
+wins and deeper files override shallower ones), is stored as its LFS object's
+bytes. Pointer-shaped files at other paths, or under `-filter`, keep their
+committed bytes. The worker asks GitHub's LFS batch API for download addresses,
+anonymously for a public repository and with the import's read token for a
+private one, streams each object once and verifies its SHA-256 and size against
+the pointer before binding it. An LFS oid is the SHA-256 of the file bytes, the
+same digest Forge stores, so an object shared by many paths, or already stored
+by an earlier run of the same import, is fetched and stored once. Objects travel
+through the same R2 packs and chunk recipes as other files; no Convex row is
+written per object or byte range.
+
+Lanes, checks, browser reads and source workers receive those bytes like any
+other file, so tests see the real assets instead of pointer text. LFS files
+inside submodules stay pointers, as submodules are fetched without LFS smudging.
+
+The limit is 1 GiB of unique LFS object bytes per import (each oid counted once),
+in line with stored Git history. Start the import with `lfsLimitBytes` to choose
+another limit up to 8 GiB, or `0` to keep every pointer as committed bytes. The
+limit is checked from the pointers before anything is downloaded; over it, the
+import fails with `GITHUB_LFS_LIMIT`, naming the total, the limit and the largest
+object, and publishes no main. A pointer GitHub LFS has no object for fails with
+`GITHUB_LFS_OBJECT_MISSING` and names the path. A truncated recursive listing
+(protocol 2) keeps LFS pointers as committed bytes; the published coverage note
+says which rule applied.
+
+When the project mirrors to GitHub, LFS paths are published back as LFS pointers
+plus objects; see [automatic main mirror](../workflows.md#automatic-main-mirror).
 
 ## Measurement
 

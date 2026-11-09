@@ -15,7 +15,7 @@ import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
-import { importPageFiles } from '../src/github-import-pages';
+import { importPageFiles, archiveCursorSchema } from '../src/github-import-pages';
 
 const stagedPageBytes = 2 * 1024 * 1024;
 /** ~35 KB rows: the web's 100-row record window stays a few MB at the archive limit. */
@@ -90,7 +90,7 @@ export async function publishImport(
       { path: `objects/${head}`, ...state },
     ],
     unavailable: [],
-    coverage: `Complete committed GitHub tree at ${job.commit}; original file bytes, executable bits and symlink targets. Git history, LFS target objects and analysis are separate.`,
+    coverage: `Complete committed GitHub tree at ${job.commit}; original file bytes, executable bits and symlink targets. ${lfsCoverage(job)} Git history and analysis are separate.`,
   });
   let blobs = 0;
   async function* manifestBytes() {
@@ -227,4 +227,12 @@ export async function publishImport(
     githubRequests: meter.counts,
   });
   metric('ready');
+}
+/** Archive imports bind Git LFS paths to their objects unless the importer chose
+ * pointers (limit 0); paged imports keep committed pointer bytes. */
+export function lfsCoverage(job: Pick<Doc<'projectGithubImports'>, 'protocol' | 'cursor'>) {
+  const archive = job.protocol === 3 ? archiveCursorSchema.safeParse(JSON.parse(job.cursor)) : null;
+  return archive?.success && archive.data.lfsLimitBytes !== 0
+    ? 'Git LFS paths (filter=lfs) hold their LFS object bytes.'
+    : 'Git LFS pointers remain their committed bytes.';
 }

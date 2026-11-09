@@ -21,11 +21,17 @@ import {
   githubArchiveFiles,
   gitBlobId,
 } from '../src/github-archive-source';
-import { archiveCursorSchema, importPathKey, importPageBytes } from '../src/github-import-pages';
+import {
+  archiveCursorSchema,
+  importPathKey,
+  importPageBytes,
+  lfsImportDefaultBytes,
+} from '../src/github-import-pages';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { mapExchange } from '../src/exchange-parallel';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
+import { LfsImport } from '../src/github-lfs-import';
 import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
 import { windowEntries } from './projectGithubImportCatalog';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
@@ -104,7 +110,8 @@ export async function runArchiveImport(
     completed: imported.size,
     total: listing.files.length,
     bytes,
-    totalBytes: listing.totalBytes,
+    // LFS objects replace their pointers' listed bytes once resolved.
+    totalBytes: Math.max(listing.totalBytes, bytes),
     submodules: listing.submodules,
   });
   const flush = () => saveWindow(upload.catalogReceipt());
@@ -137,6 +144,8 @@ export async function runArchiveImport(
     record(entry, pin);
     return true;
   };
+  // Pointer-shaped files wait until every .gitattributes is known (filter=lfs).
+  const lfs = new LfsImport(cursor.lfsLimitBytes ?? lfsImportDefaultBytes);
   let complete = true;
   const archive = await openGithubArchive(job.repository, job.commit, token, github);
   console.log(
@@ -144,7 +153,7 @@ export async function runArchiveImport(
   );
   for await (const file of githubArchiveFiles(archive, listed, objectChunkBytes)) {
     if (file.bytes) {
-      if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha) {
+      if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha && !lfs.hold(file.entry, file.bytes)) {
         const pin = upload.put(file.bytes);
         record(file.entry, { blob: pin.sha256, size: pin.size });
       }
@@ -156,7 +165,9 @@ export async function runArchiveImport(
     }
   }
   // Members the archive omitted or rewrote, and gitlink pointers, by Git object.
-  const missing = complete ? listing.files.filter(file => !imported.has(file.path)) : [];
+  const missing = complete
+    ? listing.files.filter(file => !imported.has(file.path) && !lfs.isHeld(file.path))
+    : [];
   for (const entry of missing.filter(file => file.mode === '160000')) {
     const pointer = Buffer.from(entry.sha);
     upload.put(pointer);
@@ -170,6 +181,7 @@ export async function runArchiveImport(
       record,
       drain,
       over,
+      hold: lfs.hold.bind(lfs),
     },
   );
   for (const entry of missing.filter(file => file.mode !== '160000' && file.size > objectChunkBytes)) {
@@ -179,10 +191,32 @@ export async function runArchiveImport(
     });
     invariant(matched, 'ARTIFACT_INTEGRITY', 'GitHub blob differs from the selected commit.');
   }
+  if (complete && !over())
+    await lfs.resolve({
+      repository: job.repository,
+      // Public repositories read LFS anonymously; private ones use the import token.
+      ...(access.repository.private ? { token } : {}),
+      stored: oid => stored.has(oid),
+      put: upload.put,
+      large: async (pointer, read) => {
+        const builder = new ObjectRecipeBuilder(upload.put);
+        await read(async part => {
+          for (let offset = 0; offset < part.length; offset += 64 * 1024) {
+            builder.update(part.subarray(offset, offset + 64 * 1024));
+            await drain();
+          }
+        });
+        const pin = { blob: pointer.oid, size: pointer.size };
+        upload.recipe(pin, builder.finish({ sha256: pin.blob, size: pin.size }).bytes);
+      },
+      record,
+      drain,
+      over,
+    });
   await drain(true);
   await flush();
   console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes })}`,
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes })}`,
   );
   if (imported.size < listing.files.length || over()) {
     // Progress is the stored objects themselves; a continuation skips them.
@@ -238,6 +272,8 @@ export async function stageFallbackBlobs(
     record: (entry: GithubSourceEntry, pin: { blob: string; size: number }) => void;
     drain: () => Promise<void>;
     over: () => boolean;
+    /** True when these verified bytes wait for LFS resolution instead. */
+    hold?: (entry: GithubSourceEntry, bytes: Buffer) => boolean;
   },
   concurrency = 8,
   pageFiles = 100,
@@ -257,7 +293,9 @@ export async function stageFallbackBlobs(
       const pin = await io.fetchBlob(entry, async part => {
         parts.push(part);
       });
-      io.upload.put(Buffer.concat(parts));
+      const bytes = Buffer.concat(parts);
+      if (io.hold?.(entry, bytes)) return;
+      io.upload.put(bytes);
       io.record(entry, pin);
     });
     at = end;
