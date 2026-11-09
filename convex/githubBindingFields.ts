@@ -9,6 +9,8 @@ export const githubBindingTables = {
     installationId: v.number(),
     boundBy: v.string(),
     boundAt: v.number(),
+    /** The connecting person's GitHub role then; only Admin can import the two-way ruleset. */
+    role: v.optional(v.union(v.literal('admin'), v.literal('maintain'))),
   })
     .index('by_repo', ['repoId'])
     .index('by_project_and_name', ['projectId', 'fullName'])

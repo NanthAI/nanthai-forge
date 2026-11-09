@@ -32,15 +32,17 @@ export async function githubMirrorStatus(
       ? await inboundLanding(ctx, project._id, inbound.submissionId)
       : null;
   const last = queue?.inbound ? inboundOutcomeSchema.parse(JSON.parse(queue.inbound)) : null;
-  const inboundDetail = inbound
-    ? settled?.phase === 'terminal-failed'
-      ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${inbound.laneId!.slice(0, 8)}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land that Lane to keep the change.`
-      : inbound.commit
-        ? `Bringing in GitHub ${inbound.commit.slice(0, 12)} as Lane ${inbound.laneId!.slice(0, 8)} (${inbound.changes ?? 0} changed paths).`
-        : 'Reading GitHub main for two-way sync.'
-    : last?.note
-      ? `GitHub ${last.commit.slice(0, 12)} did not land on Forge (Lane ${last.laneId.slice(0, 8)}${last.error ? `; ${last.error}` : ''}); the next publish takes it out on GitHub.`
-      : null;
+  const inboundDetail = inbound?.pull
+    ? `Checking GitHub PR #${inbound.pull.number} at ${inbound.pull.head.slice(0, 12)} for forge/verify.`
+    : inbound
+      ? settled?.phase === 'terminal-failed'
+        ? `GitHub ${inbound.commit!.slice(0, 12)} did not land on Forge (Lane ${inbound.laneId!.slice(0, 8)}; ${settled.error ?? 'failed'}). The next Forge landing publishes Forge main over it on GitHub; fix and land that Lane to keep the change.`
+        : inbound.commit
+          ? `Bringing in GitHub ${inbound.commit.slice(0, 12)} as Lane ${inbound.laneId!.slice(0, 8)} (${inbound.changes ?? 0} changed paths).`
+          : 'Reading GitHub main for two-way sync.'
+      : last?.note
+        ? `GitHub ${last.commit.slice(0, 12)} did not land on Forge (Lane ${last.laneId.slice(0, 8)}${last.error ? `; ${last.error}` : ''}); the next publish takes it out on GitHub.`
+        : null;
   const targetHead: string | null = main ? JSON.parse(main.selection).head : (job?.state ?? null);
   const lagging = targetHead === null ? null : targetHead !== mapping?.state;
   return {

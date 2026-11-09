@@ -556,6 +556,34 @@ test('signed GitHub HTTP delivery authenticates raw bytes and stores only a mini
       'Installation events refresh only named repositories, deduplicated, in 100-name pages.',
     );
     assert(pages.every(page => page.delivery === 'one' && page.event === 'installation_repositories'));
+    // Two-way PR checks: opened/synchronize/reopened into main pass PR number, head and fork only.
+    const pr = (action, base = 'main', from = 'someone/fork') =>
+      JSON.stringify({
+        action,
+        repository: { full_name: 'example/project' },
+        pull_request: {
+          number: 7,
+          title: 'untrusted private text',
+          head: { sha: 'c'.repeat(40), repo: { full_name: from } },
+          base: { ref: base, repo: { full_name: 'example/project' } },
+        },
+      });
+    const beforePr = received.length;
+    for (const [text, status] of [
+      [pr('synchronize'), 204],
+      [pr('opened', 'main', 'example/project'), 204],
+      [pr('closed'), 204],
+      [pr('opened', 'release'), 204],
+      [JSON.stringify({ action: 'opened', repository: { full_name: 'example/project' } }), 400],
+    ])
+      assert.equal(
+        (await route._handler(ctx, request(text, { 'x-github-event': 'pull_request' }))).status,
+        status,
+      );
+    assert.deepEqual(received.slice(beforePr), [
+      { repository: 'example/project', number: 7, head: 'c'.repeat(40), fork: true },
+      { repository: 'example/project', number: 7, head: 'c'.repeat(40), fork: false },
+    ]);
     assert.equal((await route._handler(ctx, request('{}', { 'x-github-event': 'ping' }))).status, 204);
     delete process.env.GITHUB_WEBHOOK_SECRET;
     assert.equal((await route._handler(ctx, request(body))).status, 401);

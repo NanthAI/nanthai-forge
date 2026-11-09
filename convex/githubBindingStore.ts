@@ -115,7 +115,12 @@ export const pin = internalMutation({
   },
 });
 export const complete = internalMutation({
-  args: { state: v.string(), repoId: v.number(), fullName: v.string() },
+  args: {
+    state: v.string(),
+    repoId: v.number(),
+    fullName: v.string(),
+    role: v.optional(v.union(v.literal('admin'), v.literal('maintain'))),
+  },
   returns: v.null(),
   handler: async (ctx, input) => {
     const op = await ctx.db
@@ -160,6 +165,7 @@ export const complete = internalMutation({
       installationId,
       boundBy: op.actor,
       boundAt: Date.now(),
+      ...(input.role ? { role: input.role } : {}),
     };
     if (prior) await ctx.db.replace(prior._id, binding);
     else await ctx.db.insert('projectGithubBindings', binding);

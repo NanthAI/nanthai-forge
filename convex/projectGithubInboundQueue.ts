@@ -160,7 +160,8 @@ export const twoWay = (project: Doc<'hostedProjects'> | null) => {
  * pushes coalesce. Sequence 0 sorts it before every queued publish. Runs at once when idle. */
 export async function ensureInbound(ctx: MutationCtx, project: Doc<'hostedProjects'>, queue: Queue) {
   const [first] = await queuedJobs(ctx, project._id, 1);
-  if (first?.inbound) return first._id;
+  // A queued push job sorts first (sequence 0); a pull request job (0.5) is not one.
+  if (first?.inbound && !first.pullKey) return first._id;
   const id = await ctx.db.insert('projectGithubMirrorJobs', {
     projectId: project._id,
     receiptId: `inbound:${crypto.randomUUID()}`,

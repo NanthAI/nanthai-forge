@@ -718,7 +718,7 @@ automatic worker resume. Reconcile explicitly; manual `github-sync --push` can r
 remote history has been resolved. Published source is undone by a compensating
 Lane, never by automatically rewinding GitHub.
 
-Two-way GitHub sync (incoming changes and conflict reconciliation) is planned, not built; see the [roadmap](roadmap.md#phase-5-one-authority-three-bets-then-private-alpha-in-progress).
+Two-way GitHub sync (`githubMirror.inbound: true`) brings pushes to GitHub `main` back in as Forge landings and gives every pull request into `main`, fork PRs included, a Forge check-only run whose result is the `forge/verify` commit status; a newer push to the PR supersedes the older run. With the ruleset that `nforge github connect` and `nforge github status` print, imported once by a repository admin, GitHub merges only after `forge/verify` passes and refuses direct pushes to `main`; status reports `protected` or names each missing rule. Details: [two-way sync](operations/github-app.md#two-way-sync).
 
 
 - **Publish:** in a clean Candidate, choose a repository and optional base. Forge pushes the Candidate's Git projection to `forge/publish/<operation-id>` and opens a PR using your local `gh` login. It never merges. "Check GitHub PR" records the provider's state. Acceptance is reported only after GitHub confirms the merge.

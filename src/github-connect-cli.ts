@@ -68,6 +68,22 @@ export async function waitForGithubConnection(
     }
   }
 }
+type ProtectionTransport = Pick<HostedAgentTransport, 'action'>;
+/** Two-way sync protection (A1): what GitHub enforces on main and, when a rule is missing, the
+ * ruleset to import once. Read-only; a failed read is reported in the result, never hidden. */
+export async function githubProtection(transport: ProtectionTransport, repository: string) {
+  try {
+    return await transport.action<Record<string, unknown>>('githubProtection:check', { repository });
+  } catch (error) {
+    const code = error instanceof ForgeError ? error.code : 'GITHUB_PROTECTION_UNAVAILABLE';
+    return {
+      repository,
+      protected: null,
+      error: code,
+      advice: `Forge could not read the rules on ${repository} main (${code}${error instanceof Error ? `: ${error.message}` : ''}). Run nforge github status again; until it reads them, Forge cannot say whether GitHub merges wait for forge/verify.`,
+    };
+  }
+}
 export async function githubConnectCli(args: string[]) {
   const { values, positionals } = parseArgs({
     args,
@@ -104,8 +120,20 @@ export async function githubConnectCli(args: string[]) {
     'Pass --url DEPLOYMENT with the hosted project ID, or use a hosted checkout path.',
   );
   const transport = new HostedAgentTransport(root, address);
-  if (command === 'status')
-    return transport.query('githubBindingStore:list', { cursor: values.cursor ?? null });
+  if (command === 'status') {
+    const listed = await transport.query<unknown>('githubBindingStore:list', {
+      cursor: values.cursor ?? null,
+    });
+    const bindings = typeof listed === 'string' ? JSON.parse(listed) : listed;
+    const policy = await transport.query<{ githubMirror?: { repo: string; inbound?: boolean } }>(
+      'projectAutonomy:read',
+      {},
+    );
+    // Two-way sync only: one read-only protection check of the mirrored repository.
+    return policy.githubMirror?.inbound
+      ? { ...bindings, protection: await githubProtection(transport, policy.githubMirror.repo) }
+      : bindings;
+  }
   const capabilities = await transport.dispatch('capabilities', {});
   const actor = z.object({ actor: z.string() }).parse(capabilities.result).actor;
   if (command === 'disconnect') {
@@ -175,8 +203,12 @@ export async function githubConnectCli(args: string[]) {
         'GITHUB_CONNECTION_FAILED',
         `GitHub connection failed (${completed.code}). Start a new operation to retry.`,
       );
-    if (completed.status === 'cancelled') process.exitCode = 130;
-    return completed;
+    if (completed.status === 'cancelled') {
+      process.exitCode = 130;
+      return completed;
+    }
+    // A1: the ruleset two-way sync relies on, checked at connect (read-only, Metadata read).
+    return { ...completed, protection: await githubProtection(transport, repository) };
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);

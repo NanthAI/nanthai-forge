@@ -36,6 +36,9 @@ test('mirror, check and import token requests each carry explicit minimal permis
   await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.actionsPermissions, request);
   await tokens.importReadToken('synthetic/repo', 42, request);
   await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.inboundReadPermissions, request);
+  // Two-way PR checks: read the head and post forge/verify; the final status writes statuses only.
+  await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.pullCheckPermissions, request);
+  await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.pullStatusPermissions, request);
   assert.deepEqual(
     requests.map(r => r.permissions),
     [
@@ -43,6 +46,8 @@ test('mirror, check and import token requests each carry explicit minimal permis
       { actions: 'write', contents: 'read' },
       { contents: 'read', metadata: 'read' },
       { contents: 'read' },
+      { contents: 'read', statuses: 'write' },
+      { statuses: 'write' },
     ],
   );
   assert(requests.every(r => !('repository_ids' in r) || r.repository_ids.length === 1));

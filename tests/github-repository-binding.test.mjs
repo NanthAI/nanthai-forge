@@ -236,6 +236,8 @@ test('admin or maintain and user installation membership are both required', asy
       },
     );
     assert.equal(result.repoId, 42);
+    // Only Admin can import the two-way ruleset; status names who must do it.
+    assert.equal(result.role, permissions.admin ? 'admin' : 'maintain');
     assert.equal(calls, 3);
   }
   await assert.rejects(
@@ -1006,4 +1008,64 @@ test('grant-scoped Actions tokens: no Convex call per mint; uninstall, removal a
   // The operator override keeps its own path (no scope read).
   process.env.FORGE_GITHUB_REPO_BINDINGS = `${f2.projectId}=synthetic/repo`;
   assert.equal(await scopeOf(f2, f2.projectId), null);
+});
+
+test('two-way protection: Forge prints the ruleset, reads what main enforces and names each missing rule', async () => {
+  const { forgeRuleset, protectionFindings, protectionAdvice } = await import('../dist/github-pull-check.js');
+  const { githubProtection } = await import('../dist/github-connect-cli.js');
+  const ruleset = forgeRuleset(5141309);
+  assert.deepEqual(ruleset.bypass_actors, [
+    { actor_id: 5141309, actor_type: 'Integration', bypass_mode: 'always' },
+  ]);
+  assert.deepEqual(ruleset.conditions.ref_name.include, ['refs/heads/main']);
+  assert.deepEqual(
+    ruleset.rules.map(rule => rule.type),
+    ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks'],
+  );
+  assert.deepEqual(ruleset.rules[3].parameters.required_status_checks, [
+    { context: 'forge/verify', integration_id: 5141309 },
+  ]);
+  // GET rules/branches/main of an imported ruleset (recorded shape, ids synthetic).
+  const enforced = ruleset.rules.map(rule => ({ ...rule, ruleset_id: 11, ruleset_source: 'o/r' }));
+  const full = protectionFindings(enforced, 5141309, [{ bypass_actors: ruleset.bypass_actors }]);
+  assert.deepEqual(full, { protected: true, missing: [], bypass: true });
+  assert.match(protectionAdvice('o/r', full, 'maintain'), /^o\/r main is protected/);
+  // Bypass actors are hidden from non-admin readers: unknown, never assumed.
+  assert.equal(protectionFindings(enforced, 5141309, [{}]).bypass, null);
+  assert.match(
+    protectionAdvice('o/r', protectionFindings(enforced, 5141309, [{}]), null),
+    /cannot see bypass actors/,
+  );
+  const otherApp = enforced.map(rule =>
+    rule.type === 'required_status_checks'
+      ? { ...rule, parameters: { required_status_checks: [{ context: 'forge/verify', integration_id: 1 }] } }
+      : rule,
+  );
+  const partial = protectionFindings(otherApp.slice(1), 5141309, [{ bypass_actors: [] }]);
+  assert.equal(partial.protected, false);
+  assert.deepEqual(partial.missing, [
+    'required status forge/verify from the Forge App',
+    'block deletion',
+    'the Forge App as bypass actor (Forge publishes main directly)',
+  ]);
+  const none = protectionFindings([], 5141309, []);
+  assert.equal(none.missing.length, 4);
+  const maintain = protectionAdvice('o/r', none, 'maintain');
+  assert.match(maintain, /Import a ruleset/);
+  assert.match(maintain, /gh api -X POST repos\/o\/r\/rulesets --input forge-ruleset.json/);
+  assert.match(maintain, /needs the repository Admin role .*you connected with Maintain.*send the ruleset/);
+  assert.doesNotMatch(protectionAdvice('o/r', none, 'admin'), /Admin role/);
+  // The CLI never hides a failed read: it reports the code and how to check again.
+  const failed = await githubProtection(
+    {
+      action: async () => {
+        const { ForgeError } = await import('../dist/errors.js');
+        throw new ForgeError('GITHUB_REPOSITORY_UNBOUND', 'Connect this repository.');
+      },
+    },
+    'o/r',
+  );
+  assert.equal(failed.protected, null);
+  assert.equal(failed.error, 'GITHUB_REPOSITORY_UNBOUND');
+  assert.match(failed.advice, /could not read the rules on o\/r main/);
 });

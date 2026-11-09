@@ -4,7 +4,9 @@ import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
-import { inboundReadPermissions, installationTokenMinter } from './githubAppToken';
+import { inboundReadPermissions, installationTokenMinter, pullCheckPermissions } from './githubAppToken';
+import { postPullStatus } from './projectGithubPullStatus';
+import type { PullJob } from '../src/github-pull-check';
 import { commitObjects } from './projectObjectCommit';
 import type { PreparedObject } from './projectObjects';
 import { githubRequest, type GithubRequest } from '../src/hosted-github-api';
@@ -30,6 +32,10 @@ export type InboundBegin = {
   uploads: { value: string; pin: Pin }[] | null;
   mapping: { commit: string; tree: string; state: string };
   base: { head: string; receiptId: string };
+  /** A pull request job: check this PR head instead of bringing GitHub main in. */
+  pull?: PullJob;
+  /** The Forge project page, for the pending forge/verify status. */
+  link?: string | null;
 };
 /** Objects per prepare window: one mutation and one commit round each, never per file. */
 const window = 99;
@@ -97,23 +103,51 @@ export async function runInbound(
 ) {
   if (loaded.phase === 'compose') return composeAndLand(ctx, input, loaded.owner, loaded.uploads ?? []);
   const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
-  const token = await mint(inboundReadPermissions);
+  const pull = loaded.pull;
+  const token = await mint(pull ? pullCheckPermissions : inboundReadPermissions);
   const api = githubRequest(token);
   const prefix = `/repos/${loaded.repository}/git`;
-  const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
-  const commit = ref.object.sha;
-  if (commit === loaded.mapping.commit) {
-    await ctx.runMutation(mutation('projectGithubInbound:adopt'), {
-      ...input,
-      commit,
-      tree: loaded.mapping.tree,
-    });
-    return;
+  let commit: string;
+  if (pull) {
+    commit = pull.head;
+    await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', loaded.link);
+  } else {
+    const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
+    commit = ref.object.sha;
+    if (commit === loaded.mapping.commit) {
+      await ctx.runMutation(mutation('projectGithubInbound:adopt'), {
+        ...input,
+        commit,
+        tree: loaded.mapping.tree,
+      });
+      return;
+    }
   }
   const head = await api<{ tree: { sha: string }; message: string }>(`${prefix}/commits/${commit}`);
-  const diff = await diffGithubTrees(api, loaded.repository, loaded.mapping.tree, head.tree.sha);
+  const before = pull
+    ? await pullBase(api, loaded.repository, loaded.mapping, commit)
+    : { tree: loaded.mapping.tree, behind: null };
+  const diff = await diffGithubTrees(api, loaded.repository, before.tree, head.tree.sha);
+  if (before.behind) {
+    // GitHub main moved since the PR branched: refuse paths both sides changed, never pick one.
+    const main = new Map(before.behind.map(change => [change.path, change.after?.sha ?? null]));
+    const both = diff.changes
+      .filter(change => main.has(change.path) && main.get(change.path) !== (change.after?.sha ?? null))
+      .map(change => change.path);
+    if (both.length)
+      throw new ForgeError(
+        'GITHUB_PULL_BEHIND',
+        `The PR and GitHub main both changed ${both.slice(0, 3).join(', ')}${both.length > 3 ? ` (+${both.length - 3})` : ''}; update the branch from main.`,
+      );
+  }
   if (!diff.changes.length) {
-    await ctx.runMutation(mutation('projectGithubInbound:adopt'), { ...input, commit, tree: head.tree.sha });
+    if (pull) await ctx.runMutation(mutation('projectGithubPull:unchanged'), input);
+    else
+      await ctx.runMutation(mutation('projectGithubInbound:adopt'), {
+        ...input,
+        commit,
+        tree: head.tree.sha,
+      });
     return;
   }
   const same = loaded.mapping.state === loaded.base.head;
@@ -167,6 +201,28 @@ export async function runInbound(
     }),
   );
   await composeAndLand(ctx, input, loaded.owner, reply.uploads);
+}
+/** The tree a PR's own changes start from: its merge base with the last mirrored GitHub main
+ * (1 compare read), plus what main changed since then when the PR is behind (tree reads per
+ * changed directory, as a push). A PR up to date with main diffs from main's tree directly. */
+async function pullBase(
+  api: GithubRequest,
+  repository: string,
+  mapping: { commit: string; tree: string },
+  commit: string,
+) {
+  const compared = await api<{ merge_base_commit?: { sha?: string; commit?: { tree?: { sha?: string } } } }>(
+    `/repos/${repository}/compare/${mapping.commit}...${commit}?per_page=1`,
+  );
+  const base = compared.merge_base_commit;
+  invariant(
+    typeof base?.sha === 'string' && typeof base.commit?.tree?.sha === 'string',
+    'GITHUB_RESPONSE',
+    'GitHub returned no merge base for this pull request.',
+  );
+  if (base.sha === mapping.commit) return { tree: mapping.tree, behind: null };
+  const tree = base.commit.tree.sha;
+  return { tree, behind: (await diffGithubTrees(api, repository, tree, mapping.tree)).changes };
 }
 async function composeAndLand(
   ctx: ActionCtx,

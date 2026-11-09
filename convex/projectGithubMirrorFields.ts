@@ -45,8 +45,15 @@ export const githubMirrorTables = {
     /** Two-way sync: this job brings GitHub main in as a Forge landing (src/github-inbound-job.ts
      * JSON) instead of publishing an accepted State. Sequence 0 runs it before queued publishes. */
     inbound: v.optional(v.string()),
+    /** A pull request job's PR number, so a newer head finds and supersedes older ones. */
+    pullKey: v.optional(v.string()),
+    /** The compose operation, then the check run, a pull request job waits on (one indexed
+     * read when either settles, never a poll). */
+    waitKey: v.optional(v.string()),
   })
     .index('by_project_and_state', ['projectId', 'state'])
+    .index('by_project_and_pull', ['projectId', 'pullKey'])
+    .index('by_project_and_wait', ['projectId', 'waitKey'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])
     .index('by_project_and_status_and_sequence', ['projectId', 'status', 'sequence']),
 };

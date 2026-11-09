@@ -13,7 +13,8 @@ import { invariant } from '../src/errors';
 import { mirrorMessage } from '../src/landing-message';
 import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
-import { inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
+import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
+import { settlePull } from './projectGithubPullQueue';
 import { effectivePolicy } from '../src/autonomy-policy';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
@@ -228,6 +229,12 @@ export const failed = internalMutation({
       : transient && failures < 5
         ? 60_000 * 2 ** (failures - 1)
         : null;
+    // A pull request job never holds the queue on a terminal failure: forge/verify says why.
+    if (delay === null && job.pullKey) {
+      await finish(ctx, job, queue, null, 'failed', { error: input.code, detail: input.detail });
+      await settlePull(ctx, (await ctx.db.get(job._id))!, 'error', `${input.code}: ${input.detail}`);
+      return null;
+    }
     // Advance the worker fence, retaining the exact cursor/seed. Duplicate or
     // late callbacks cannot spend another attempt or overwrite newer progress.
     const step = job.step + 1;

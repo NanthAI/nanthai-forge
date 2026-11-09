@@ -16,6 +16,10 @@ export const actionsPermissions: GithubAppPermissions = { actions: 'write', cont
 /** Two-way sync reads GitHub main's tree and changed blobs of the bound repository; it never
  * writes (the mirror publishes Forge main afterwards with its own token). */
 export const inboundReadPermissions: GithubAppPermissions = { contents: 'read' };
+/** A pull request check reads the PR head like an inbound push and posts the forge/verify
+ * commit status on it; it never writes source. The final status uses `pullStatusPermissions`. */
+export const pullCheckPermissions: GithubAppPermissions = { contents: 'read', statuses: 'write' };
+export const pullStatusPermissions: GithubAppPermissions = { statuses: 'write' };
 /** Submodule fetches read file contents of one other repository, nothing else. */
 export const submoduleReadPermissions: GithubAppPermissions = { contents: 'read' };
 /** Repositories one submodule-access request may name. */

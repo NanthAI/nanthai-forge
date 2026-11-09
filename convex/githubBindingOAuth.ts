@@ -153,7 +153,12 @@ export async function proveRepository(
       'GitHub repository proof is unavailable.',
     );
     if (listed.repositories.some(row => row.id === repo.id))
-      return { repoId: repo.id, fullName: repo.full_name };
+      // The role says who can import the two-way ruleset (Admin) or must send it to an admin.
+      return {
+        repoId: repo.id,
+        fullName: repo.full_name,
+        role: repo.permissions?.admin === true ? ('admin' as const) : ('maintain' as const),
+      };
     invariant(
       listed.repositories.length === 100,
       'GITHUB_REPOSITORY_PERMISSION',

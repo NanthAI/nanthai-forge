@@ -23,14 +23,17 @@ These are manual steps for the GitHub App owner and deployment operator:
    `CONVEX_SITE_URL` supplies the callback origin.
 4. Set the App webhook URL to
    `https://DEPLOYMENT.convex.site/github/webhook` and configure the matching
-   `GITHUB_WEBHOOK_SECRET`. Keep the existing workflow-run subscription. GitHub sends installation and
+   `GITHUB_WEBHOOK_SECRET`. Keep the existing workflow-run subscription, and
+   subscribe to **Push** and **Pull request** for [two-way sync](#two-way-sync). GitHub sends installation and
    installation-repository events to Apps automatically; there is no separate
    subscription checkbox for these events. See the
    [event reference](https://docs.github.com/en/webhooks/webhook-events-and-payloads#installation_repositories). Check deliveries for `installation` and
    `installation_repositories` when qualifying the setup.
 5. Install the App on the selected repositories and approve its permissions:
    Metadata read, Contents and Workflows write for mirroring, Actions write for
-   check dispatch.
+   check dispatch, and for two-way sync Commit statuses write (post `forge/verify`)
+   and Pull requests read (receive the `pull_request` event). The App never needs
+   Administration: Forge does not write rulesets (see [protection](#two-way-protection-the-ruleset-you-import-once)).
    The connecting GitHub user must have repository admin or maintain permission,
    and must be a GitHub account linked to the Forge account that runs connect.
 
@@ -49,7 +52,9 @@ nforge github status PROJECT_ID --url https://DEPLOYMENT.convex.cloud
 A hosted Lane checkout path can replace `PROJECT_ID` and its `--url` argument.
 Without `--repo`, connect uses the configured runner or mirror repository, then
 asks in an interactive terminal if neither exists. Only the Forge project owner
-can connect or disconnect repositories.
+can connect or disconnect repositories. After a completed connect, and in status
+on a two-way project, the result carries `protection` for `main`
+([two-way protection](#two-way-protection-the-ruleset-you-import-once)).
 
 Connect prints the authorize URL and retained operation UUID. Open the URL and
 complete GitHub authorization. The CLI waits on that operation through a reactive
@@ -157,7 +162,7 @@ The App never holds a standing credential. Each operation mints a short-lived
 installation token for one repository and discards it
 (`convex/githubAppToken.ts`, `installationToken`). GitHub caps a token at the
 permissions the installation accepted: Metadata read, Contents write, Workflows
-write, Actions write. The App's permission set is configured in GitHub's App settings, not in
+write, Actions write, Commit statuses write, Pull requests read. The App's permission set is configured in GitHub's App settings, not in
 this repository, so the table shows what Forge asks of each token.
 
 | Operation | Requested permissions | Trigger | Code |
@@ -169,6 +174,9 @@ this repository, so the table shows what Forge asks of each token.
 | Runner grant proof | `metadata: read`, one repository by name; reads its ID and one user's role | `configure-runner` without a stored binding or operator pair | `metadataProbeToken`; `githubRunnerGrants.ts` |
 | Mirror push | `contents: write` (Git data API, plus the Git LFS batch API for LFS paths; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
 | Two-way read | `contents: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
+| Two-way PR check | `contents: read`, `statuses: write`, one repository | A `pull_request` webhook (opened, synchronize, reopened) into `main` on a two-way project: reads the head, posts `forge/verify` pending | `pullCheckPermissions`; `projectGithubInboundRun.ts` |
+| PR check result | `statuses: write`, one repository | The PR head's check-only run ends, fails to start, or is superseded | `pullStatusPermissions`; `projectGithubPullStatus.ts` |
+| Protection read | `metadata: read`, one repository | `nforge github connect` and `nforge github status` on a two-way project | `githubProtection.ts` |
 
 The mirror is the only operation that writes source to GitHub. Check dispatch
 writes only Actions state (a workflow run); Forge checks themselves run with
@@ -255,16 +263,63 @@ ordinary Forge landing and passes the same checks and review rules.
 - **Cost:** idle is zero. One push costs a handful of Convex mutations plus one
   per 99 changed files, and GitHub calls grow with changed directories, not
   repository size.
-- **Keeping `main` from diverging** (branch protection that requires the Forge
-  check on GitHub) needs the App to hold Commit statuses and Administration write.
-  That setup is tracked as a follow-up; until then a direct push to GitHub `main`
-  is brought in, or published over with a note, as above.
+- **Pull requests:** a `pull_request` event (opened, synchronize, reopened) into
+  `main`, fork PRs included, queues one PR job (`projectGithubPullQueue:receive`, one
+  indexed read; a one-way project or a known head writes nothing). It reads the PR
+  head like a push, but diffs from its merge base with the last mirrored GitHub
+  `main`, so only the PR's own changes go into a Lane that Forge composes onto
+  current `main`. A PR behind `main` that changes a path `main` also changed fails
+  with `GITHUB_PULL_BEHIND` (update the branch). The job then leaves the mirror
+  queue and waits, by composition and then check run id, for a **check-only run**
+  on the Candidate: nothing lands. The PR's change comes in through the push
+  webhook once GitHub merges it. The Lane (agent `github-pull`) is abandoned when
+  the head settles.
+- **`forge/verify`:** pending when the job starts, then exactly one final commit
+  status on the head: success, failure (the check failed, or the PR does not
+  compose onto Forge `main`), or error (the job or check could not run, the check
+  ended cancelled or without a runner, no check is configured). It links to the
+  Lane when `FORGE_WEB_URL` is set. A newer head of the same PR supersedes the
+  older one: an unstarted job is dropped without a status; a checking one gets
+  error "Superseded" and its run is cancelled. A failed status write retries twice
+  (30 s, 60 s) and otherwise stays pending on GitHub, which keeps merging blocked.
+- **PR cost:** per head, 1 webhook mutation, the same GitHub reads and Convex calls
+  as an inbound push (plus 1 compare read, and tree reads for what `main` changed
+  when the PR is behind), the check-only run, about 4 small Convex calls to start
+  and settle it, and 2 status writes. Every composition and check-run completion
+  in the deployment reads one empty index range to find a waiting PR job. Idle is
+  zero; there is no polling.
+
+### Two-way protection: the ruleset you import once
+
+Two-way sync relies on GitHub merging only after `forge/verify` passes. Forge never
+writes the ruleset, so the App needs no Administration permission (creating a
+ruleset needs it for App and user tokens alike). Instead `nforge github connect`
+and `nforge github status` (on a two-way project) read the rules GitHub enforces on
+`main` (`GET rules/branches/main`, Metadata read, plus each ruleset's bypass list
+where GitHub shows it) and print `protection`: `protected: true`, or each missing
+rule, the ruleset JSON and the steps. A failed read is printed with its code, never
+treated as protected. Bypass actors are visible to repository admins only; when
+hidden, status says so instead of assuming them.
+
+A repository Admin (or organization owner) imports the ruleset once: save the
+printed `ruleset` as `forge-ruleset.json`, then GitHub **Settings > Rules >
+Rulesets > New ruleset > Import a ruleset**, or
+`gh api -X POST repos/OWNER/NAME/rulesets --input forge-ruleset.json`. Connect
+records whether the connecting person had Admin or Maintain; with Maintain, the
+advice says to send the file and steps to an admin. The ruleset, on
+`refs/heads/main`: required status `forge/verify` from the Forge App
+(`integration_id`), `deletion` and `non_fast_forward` blocked, a pull request
+required (no direct pushes; 0 approvals), and the Forge App as the only bypass
+actor (`always`), so the mirror still publishes Forge `main` directly. It differs
+from the one-way [mirror ruleset](#protected-main-on-the-mirror) on purpose: people
+merge PRs on a two-way repository, so `update` is not blocked; branches need not be
+up to date, because the check runs on the PR composed onto Forge `main`.
 
 ### Token guard
 
 Every installation token request names an explicit permissions object
-(`mirrorPermissions`, `actionsPermissions`, the import read set and the
-binding-discovery probe). `mintInstallationToken` refuses a request without one,
+(`mirrorPermissions`, `actionsPermissions`, the two-way read, PR check and status
+sets, the import read set and the binding-discovery probe). `mintInstallationToken` refuses a request without one,
 and `tests/github-token-permissions.test.mjs` asserts the request body for the
 mirror, check and import uses. GitHub refuses a tree that touches
 `.github/workflows/` without `workflows: write` (403 on `POST git/trees`), so the

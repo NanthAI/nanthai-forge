@@ -610,3 +610,159 @@ test('two-way: the inbound landing settles with the acceptance that landed it', 
     }
   }
 });
+const pullQueue = await import(moduleUrl('../convex/projectGithubPullQueue.ts'));
+const prHead = (f, head, number = 7) =>
+  f.run('pullReceive', pullQueue.receive._handler, {
+    repository: 'Synthetic/Mirror',
+    number,
+    head,
+    fork: true,
+  });
+const pullJobs = (f, number) => f.jobs().filter(job => job.pullKey === String(number));
+const pullOf = job => JSON.parse(job.inbound).pull;
+test('two-way PR: a head queues one check job; redelivery writes nothing; a newer head drops an unstarted one', async () => {
+  const f = await twoWayFixture();
+  const scheduled = f.scheduled.length;
+  await prHead(f, 'b'.repeat(40));
+  const [first] = pullJobs(f, 7);
+  assert.equal(first.sequence, 0.5, 'after an inbound push job (0), before publishes');
+  assert.deepEqual(JSON.parse(first.inbound), {
+    phase: 'pending',
+    pull: { number: 7, head: 'b'.repeat(40), fork: true },
+  });
+  assert.equal(f.queueRow().activeId, first._id);
+  assert.equal(f.scheduled.length, scheduled + 1, 'one wake, no poller');
+  assert.equal(f.scheduled.at(-1).name, 'projectGithubMirror:step');
+  await prHead(f, 'b'.repeat(40));
+  assert.equal(f.counts.at(-1).writes, 0, 'a redelivered head writes nothing');
+  assert(f.counts.at(-1).documents <= 4, `redelivery reads ${f.counts.at(-1).documents}`);
+  await prHead(f, 'd'.repeat(40), 8);
+  const [waiting] = pullJobs(f, 8);
+  assert.equal(waiting.status, 'queued');
+  await prHead(f, 'e'.repeat(40), 8);
+  const dropped = f.tables.projectGithubMirrorJobs.get(waiting._id);
+  assert.equal(dropped.status, 'done');
+  assert.equal(pullOf(dropped).outcome, 'superseded');
+  assert.equal(pullJobs(f, 8).length, 2);
+  assert.equal(f.scheduled.length, scheduled + 1, 'a dropped head posted nothing and woke nothing');
+  // A GitHub push still gets its own inbound job; a queued PR job is not one to coalesce into.
+  await f.receive('f'.repeat(40));
+  const push = f.jobs().filter(job => job.inbound && !job.pullKey);
+  assert.equal(push.length, 1);
+  assert.equal(push[0].sequence, 0);
+  const oneWay = await twoWayFixture(false);
+  const before = oneWay.scheduled.length;
+  await prHead(oneWay, 'b'.repeat(40));
+  assert.equal(oneWay.counts.at(-1).writes, 0);
+  assert.equal(oneWay.scheduled.length, before);
+});
+test('two-way PR: a terminal job failure releases the queue and settles forge/verify as error', async () => {
+  const f = await twoWayFixture();
+  await prHead(f, 'b'.repeat(40));
+  const receipt = f.receipt();
+  await f.enqueue(receipt);
+  const [job] = pullJobs(f, 7);
+  await f.run('mirrorFailed', store.failed._handler, {
+    jobId: job._id,
+    step: job.step,
+    code: 'GITHUB_PULL_BEHIND',
+    detail: 'The PR and GitHub main both changed src/a.ts; update the branch from main.',
+  });
+  const failed = f.tables.projectGithubMirrorJobs.get(job._id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(pullOf(failed).outcome, 'error');
+  const next = f.jobs().find(row => row.receiptId === receipt.id);
+  assert.equal(f.queueRow().activeId, next._id, 'publishes never wait behind a failed PR check');
+  const post = f.scheduled.find(row => row.name === 'projectGithubPullStatus:post');
+  assert.equal(post.args.state, 'error');
+  assert.equal(post.args.sha, 'b'.repeat(40));
+  assert.match(post.args.description, /^GITHUB_PULL_BEHIND: /);
+  assert(post.args.description.length <= 140);
+});
+test('two-way PR: the check run settles forge/verify once; a newer head supersedes a checking one', async () => {
+  const f = await twoWayFixture();
+  await prHead(f, 'b'.repeat(40));
+  const [job] = pullJobs(f, 7);
+  const { pullOperationId } = await import('../dist/github-pull-check.js');
+  const runId = randomUUID(),
+    composeOperationId = pullOperationId(),
+    checkOperationId = pullOperationId(),
+    laneId = randomUUID();
+  const run = (id, operationId = checkOperationId) => ({
+    projectId: f.projectId,
+    id,
+    status: 'passed',
+    request: { operationId },
+  });
+  const checking = waitKey =>
+    f.patch('projectGithubMirrorJobs', job._id, {
+      status: 'done',
+      waitKey,
+      inbound: JSON.stringify({
+        phase: 'checking',
+        pull: { number: 7, head: 'b'.repeat(40), fork: true, ...(waitKey === runId ? { runId } : {}) },
+        laneId,
+        composeOperationId,
+      }),
+    });
+  checking(composeOperationId);
+  await f.run('composeDone', ctx => pullQueue.notifyPullCompose(ctx, f.projectId, composeOperationId));
+  assert.deepEqual(f.scheduled.at(-1), {
+    name: 'projectGithubPull:start',
+    args: { jobId: job._id, key: composeOperationId },
+  });
+  checking(runId);
+  // Every other run (version 4 operation id) skips the lookup: zero reads.
+  await f.run('otherRun', ctx => pullQueue.notifyPullCheck(ctx, run(runId, randomUUID())));
+  assert.equal(f.counts.at(-1).documents, 0, 'a non-PR run reads nothing');
+  await f.run('otherCompose', ctx => pullQueue.notifyPullCompose(ctx, f.projectId, randomUUID()));
+  assert.equal(f.counts.at(-1).documents, 0, 'a non-PR composition reads nothing');
+  await f.run('otherPullRun', ctx => pullQueue.notifyPullCheck(ctx, run(randomUUID())));
+  assert.equal(f.counts.at(-1).writes, 0, 'an unknown PR run reads one empty index range');
+  await f.run('runDone', ctx => pullQueue.notifyPullCheck(ctx, run(runId)));
+  const settle = f.scheduled.at(-1);
+  assert.equal(settle.name, 'projectGithubPullQueue:settle');
+  assert.deepEqual(settle.args, {
+    jobId: job._id,
+    outcome: 'success',
+    description: 'Forge check passed.',
+    runId,
+  });
+  await f.run('settle', pullQueue.settle._handler, settle.args);
+  const posts = () => f.scheduled.filter(row => row.name === 'projectGithubPullStatus:post');
+  assert.deepEqual(
+    posts().map(row => [row.args.state, row.args.sha]),
+    [['success', 'b'.repeat(40)]],
+  );
+  assert(
+    f.scheduled.some(row => row.name === 'projectGithubPull:retire'),
+    'the PR Lane is retired',
+  );
+  const settled = f.tables.projectGithubMirrorJobs.get(job._id);
+  assert.equal(pullOf(settled).outcome, 'success');
+  assert.equal(settled.waitKey, undefined);
+  await f.run('settleAgain', pullQueue.settle._handler, settle.args);
+  assert.equal(posts().length, 1, 'one final status per head');
+  // A second PR still checking is superseded by its newer head: error status on the old head.
+  await prHead(f, 'c'.repeat(40), 9);
+  const [old] = pullJobs(f, 9);
+  f.patch('projectGithubMirrorJobs', old._id, {
+    status: 'done',
+    waitKey: runId,
+    inbound: JSON.stringify({
+      phase: 'checking',
+      pull: { number: 9, head: 'c'.repeat(40), fork: false, runId },
+      laneId,
+    }),
+  });
+  await prHead(f, 'd'.repeat(40), 9);
+  assert.equal(pullOf(f.tables.projectGithubMirrorJobs.get(old._id)).outcome, 'superseded');
+  assert.deepEqual(posts().at(-1).args, {
+    projectId: f.projectId,
+    repository: 'Synthetic/Mirror',
+    sha: 'c'.repeat(40),
+    state: 'error',
+    description: 'Superseded by a newer push to this pull request.',
+    link: null,
+  });
+});

@@ -3,6 +3,7 @@ import { batchComposeSchema, batchDroppedSchema } from '../src/hosted-landing-ba
 import { semanticPayload } from '../src/semantic-payload';
 import { semanticPlanSchema } from '../src/intent-semantic-conflict';
 import { notifyDesiredCompose } from './projectHostedLandingDesiredWake';
+import { notifyPullCompose } from './projectGithubPullQueue';
 import { z } from 'zod';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -84,6 +85,7 @@ export async function writeComposeState(
     const row = (await ctx.db.get(id))!;
     await notifyFinishCompose(ctx, row.projectId, row.operationId);
     await notifyDesiredCompose(ctx, row.projectId, row.operationId);
+    await notifyPullCompose(ctx, row.projectId, row.operationId);
   }
 }
 export function hostedComposeInput(state: ComposeState, at: string) {

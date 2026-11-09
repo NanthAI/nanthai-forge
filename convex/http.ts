@@ -8,6 +8,7 @@ import { httpAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { workerAuthorized } from '../src/worker-auth';
 import { githubWebhookAuthorized } from '../src/github-webhook';
+import { pullRequestEvent } from '../src/github-pull-check';
 import { INSTALLATION_EVENT_PAGE, installationRepositories } from './sync';
 
 const http = httpRouter();
@@ -51,6 +52,7 @@ http.route({
       !event ||
       ![
         'push',
+        'pull_request',
         'installation',
         'installation_repositories',
         'github_app_authorization',
@@ -62,6 +64,7 @@ http.route({
     if (!delivery) return new Response('Missing delivery ID', { status: 400 });
     let repository: string | undefined;
     let push: { ref: string; after: string } | undefined;
+    let pull: ReturnType<typeof pullRequestEvent> = null;
     let repositories: string[] = [];
     let invalidation: { installationId: number; removed: boolean; repoIds: number[] } | undefined;
     try {
@@ -74,7 +77,8 @@ http.route({
           throw new Error('Invalid repository');
         if (typeof payload.ref === 'string' && typeof payload.after === 'string' && payload.deleted !== true)
           push = { ref: payload.ref, after: payload.after };
-      } else if (typeof payload.action !== 'string') throw new Error('Missing action');
+      } else if (event === 'pull_request') pull = pullRequestEvent(payload);
+      else if (typeof payload.action !== 'string') throw new Error('Missing action');
       else if (event !== 'github_app_authorization') repositories = installationRepositories(payload);
       if (
         (event === 'installation' && payload.action === 'deleted') ||
@@ -102,6 +106,12 @@ http.route({
           delivery: `${delivery}:${offset}`,
           repoIds: invalidation.repoIds.slice(offset, offset + 100),
         });
+    }
+    // Two-way GitHub sync: a PR head into main gets a Forge check-only run and forge/verify.
+    if (event === 'pull_request') {
+      if (pull)
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubPullQueue:receive'), pull);
+      return new Response(null, { status: 204 });
     }
     if (event === 'workflow_run') {
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsWebhook:receive'), {

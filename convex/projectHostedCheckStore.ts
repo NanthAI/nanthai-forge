@@ -19,6 +19,7 @@ import {
 } from '../src/hosted-source-operation';
 import { hostedCheckRunSchema, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
+import { notifyPullCheck } from './projectGithubPullQueue';
 
 export type CheckIdentity = { projectId: Id<'hostedProjects'>; runId: string };
 export const checkSetting = (
@@ -137,6 +138,8 @@ export async function writeHostedCheck(
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
   await restoreShardReports(ctx, run);
   await onGateRunTerminal(ctx, run);
+  // Two-way sync: a pull request check-only run settles forge/verify (one indexed read).
+  await notifyPullCheck(ctx, run);
   await wakeExpiredLogs(ctx, run.projectId as Id<'hostedProjects'>);
   const row = await hostedOperationRow(
     ctx,

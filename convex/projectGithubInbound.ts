@@ -11,7 +11,6 @@ import { beginHostedOperation } from './projectHostedOperations';
 import { hostedComposeInput, loadCompose, type ComposeState } from './projectHostedComposeStore';
 import { submitHostedCompose } from './projectHostedComposeJobs';
 import { submitDesiredLanding } from './projectHostedLandingDesired';
-import { checkSetting } from './projectHostedCheckStore';
 import { prepareObjectTargets } from './projectObjects';
 import { completeObjects, recipePin, storedDigests } from './projectGithubImportBatch';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
@@ -23,6 +22,9 @@ import { savePin } from '../src/hosted-save';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
 import { inboundMessage, type InboundJob } from '../src/github-inbound-job';
 import { finish, parseInbound, twoWay } from './projectGithubInboundQueue';
+import { checkPull, checkRequest } from './projectGithubPull';
+import { projectLink } from './projectGithubPullQueue';
+import { pullMessage, pullOperationId } from '../src/github-pull-check';
 import { invariant } from '../src/errors';
 
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
@@ -58,6 +60,7 @@ export async function inboundBegin(
     uploads: inbound.uploads ?? null,
     mapping: { commit: mapping.commit, tree: mapping.tree, state: mapping.state },
     base: { head: receipt.candidate.head, receiptId: receipt.id },
+    ...(inbound.pull ? { pull: inbound.pull, link: await projectLink(ctx, project) } : {}),
   };
 }
 /** Upload targets for one window of at most 99 new objects, charged to the project owner. */
@@ -116,27 +119,6 @@ export const adopt = internalMutation({
     return null;
   },
 });
-/** The project's verify check, or its only check; null lets project policy decide. */
-async function checkRequest(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
-  const rows = await ctx.db
-    .query('projectHostedCheckSettings')
-    .withIndex('by_project_and_kind', q => q.eq('projectId', projectId).eq('kind', 'definition'))
-    .take(100);
-  const checks = rows.map(row => ({ key: row.key, value: JSON.parse(row.value) }));
-  const selected =
-    checks.find(row => row.value.name === 'verify') ?? (checks.length === 1 ? checks[0] : null);
-  if (!selected) return null;
-  const runner = await checkSetting(ctx, projectId, 'runner', 'runner');
-  if (!runner) return null;
-  const configuration = JSON.parse(runner.value);
-  return {
-    kind: 'request' as const,
-    checkId: selected.key,
-    expectedDefinition: selected.value.definition,
-    expectedConfiguration: runner.digest,
-    expectedEnvironment: configuration.environmentFingerprint,
-  };
-}
 const submitArgs = {
   ...identity,
   commit: v.string(),
@@ -169,19 +151,21 @@ export const submit = internalMutation({
     );
     const head = await saveObject(ctx, project._id, input.head);
     await saveObject(ctx, project._id, input.equivalent);
+    const pull = inbound.pull;
     const ids = {
       intent: crypto.randomUUID(),
       lane: crypto.randomUUID(),
-      compose: crypto.randomUUID(),
+      // A PR job's composition id is version 8: its completion finds the job (isPullOperation).
+      compose: pull ? pullOperationId() : crypto.randomUUID(),
       landing: crypto.randomUUID(),
     };
     const at = new Date().toISOString();
-    const message = inboundMessage({
-      commit: input.commit,
-      message: input.message,
-      repository: job.repository,
-    });
-    const outcome = `Bring in GitHub ${job.repository} main ${input.commit.slice(0, 12)}`;
+    const message = pull
+      ? pullMessage({ ...pull, message: input.message, repository: job.repository })
+      : inboundMessage({ commit: input.commit, message: input.message, repository: job.repository });
+    const outcome = pull
+      ? `Check GitHub ${job.repository} PR #${pull.number} at ${input.commit.slice(0, 12)}`
+      : `Bring in GitHub ${job.repository} main ${input.commit.slice(0, 12)}`;
     await writeHostedRecord(ctx, {
       projectId: project._id,
       actor,
@@ -207,7 +191,11 @@ export const submit = internalMutation({
       expectedVersion: null,
       // GitHub content is not the owner's own edit: protected paths still need owner review.
       ownerOnly: false,
-      overlap: { baseSequence: receipt.snapshot.revision, intent: outcome, agent: 'github-inbound' },
+      overlap: {
+        baseSequence: receipt.snapshot.revision,
+        intent: outcome,
+        agent: pull ? 'github-pull' : 'github-inbound',
+      },
       record: {
         kind: 'lane',
         id: ids.lane,
@@ -300,6 +288,7 @@ export const submit = internalMutation({
     uploads.push({ value, pin: savePin(JSON.parse(value)) });
     const next: InboundJob = {
       phase: 'compose',
+      ...(pull ? { pull } : {}),
       commit: input.commit,
       tree: input.tree,
       message: input.message.slice(0, 4000),
@@ -336,6 +325,7 @@ export const land = internalMutation({
         'Inbound metadata differs.',
       );
     const actor = project.owner;
+    if (inbound.pull) return checkPull(ctx, active, inbound);
     await submitHostedCompose(ctx, {
       projectId: project._id,
       actor,
