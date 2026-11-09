@@ -130,28 +130,42 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   anonymous) and an expiry 5 minutes ahead. It holds no password or token. The Worker
   forwards every request back to the backend's `gitw/` route, which checks the signature and
   then, on every request, the credential row (revoked, expired, scope) and current project
-  access, exactly like the direct route. A path segment `unpublished-landings` in the
-  redirect says hosted main is ahead of the newest Git commit (this path has no `remote:`
-  line). Lane refs are not listed on this route yet: a large project serves main only.
-- **Bytes.** On this route the backend speaks protocol v0 without side-band, so the pack is
-  raw bytes. For the final fetch it returns a byte plan instead of the pack: the ACK/NAK
-  line, the R2 object keys (whole chunks, or ranges that drop each pack's header and
-  trailer when several packs are joined) and the trailer. The Worker streams those objects
-  from its R2 bucket binding by native piping; its JavaScript never touches pack bytes, so a
-  clone fits the Workers Free CPU limit (10 ms). It holds no secret, reads only stored-object
-  keys the backend names, at most 900 per fetch, and never a key from the client. The SHA-1
-  trailer of a joined set is computed once by the backend (one read of the set's R2 bytes)
-  and cached on the history row; a single pack passes through byte-exact.
+  access, exactly like the direct route. The one exception is the protocol v2 capability
+  advertisement, fixed text with no repository data, which the Worker answers itself; the
+  ls-refs and fetch requests that follow are rechecked. A path segment
+  `unpublished-landings` in the redirect says hosted main is ahead of the newest Git commit
+  (a v2 fetch also prints the `remote:` line; v0 has no side-band for it). Lane refs are not
+  listed on this route yet: a large project serves main only.
+- **Bytes.** For the final fetch the backend returns a byte plan instead of the pack: the
+  reply's opening lines, the R2 object keys (whole chunks, or ranges that drop each pack's
+  header and trailer when several packs are joined) and the closing bytes. The Worker
+  streams those objects from its R2 bucket binding by native piping; its JavaScript never
+  touches pack bytes, so a clone fits the Workers Free CPU limit (10 ms). It holds no secret,
+  reads only stored-object keys the backend names, at most 900 per fetch, and never a key
+  from the client. The SHA-1 trailer of a joined set is computed once by the backend (one
+  read of the set's R2 bytes) and cached on the history row; a single pack passes through
+  byte-exact.
+- **Protocol v2 (Git's default).** v2 sends the pack in side-band pkt-lines, which the
+  Worker cannot write within its CPU limit, so each pack served over v2 gets a framed copy:
+  the same bytes as band-1 pkt-lines, written to R2 once by the backend on the pack's first
+  v2 fetch (one read of the pack, one action and one mutation; the copy is about 0.008%
+  larger and is deleted with the project). The first frame holds the 12-byte header and the
+  last the 20-byte trailer, so joined sets drop them by range as with raw chunks. Serving
+  v2 matters for speed: Git keeps a v2 clone's pack and indexes it, while a v0 smart-HTTP
+  clone of a pack under `transfer.unpackLimit` (100) objects explodes it into loose objects,
+  about 4x slower on large blobs. v0 clients (`protocol.version=0`) still get raw chunks.
 - **Caps.** Each served pack is counted before any byte flows, per project and for all
   projects per UTC day (`convex/gitServeWorkerStore.ts`): 1,000 packs and 20 GiB per
   project, 10,000 packs and 100 GiB in all. The ref listing checks the same counters before
   redirecting. Past a cap Git prints `GIT_BYTE_LIMIT` with the reset time. Usage rows older
   than 7 days are deleted when their scope is next written.
-- **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 2–4 Worker requests). R2
+- **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 3 Worker requests). R2
   egress is free; R2 reads are one per 32 MiB chunk, inside R2's included 10 million a month
   at the caps. Per large clone the backend makes 3 HTTP actions, 3 queries and 1 mutation
-  (plus 1 more mutation and one read of the pack the first time a joined set is served).
-  Nothing runs while no one clones.
+  (plus 1 more mutation and one read of the set the first time a joined set is served, and
+  1 action, 1 mutation, one read and one framed write of each pack the first time it is
+  served over v2). Framed copies add the size of the Worker-served history to R2 storage
+  ($0.015 per GB-month). Nothing runs while no one clones.
 
 ### Operating the Worker
 

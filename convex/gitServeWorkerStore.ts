@@ -2,6 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation, type QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
+import { historyChunk } from './projectHistoryFields';
 
 /** Daily caps on the Worker byte path (Issue 09367fb2): the Worker runs on Workers Free
  * (100,000 requests/day, R2 egress free); these keep R2 reads and backend calls bounded
@@ -82,5 +83,28 @@ export const setJoined = internalMutation({
       .unique();
     if (row) await ctx.db.patch(row._id, { joined });
     return null;
+  },
+});
+
+/** Records the framed copies of packs (by tip) for the v2 Worker path. Returns the tips
+ * whose pack row is gone, so the caller deletes those objects. */
+export const setFramed = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    packs: v.array(v.object({ tip: v.string(), framed: v.array(historyChunk) })),
+  },
+  returns: v.array(v.string()),
+  handler: async (ctx, { projectId, packs }) => {
+    const missing: string[] = [];
+    for (const { tip, framed } of packs) {
+      const row = await ctx.db
+        .query('projectHistoryPacks')
+        .withIndex('by_project_and_tip', q => q.eq('projectId', projectId).eq('tip', tip))
+        .take(1)
+        .then(rows => rows[0] ?? null);
+      if (row) await ctx.db.patch(row._id, { framed });
+      else missing.push(tip);
+    }
+    return missing;
   },
 });

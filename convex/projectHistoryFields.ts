@@ -59,6 +59,9 @@ export const historyTables = {
     /** Commits the host was told we already have. */
     haves: v.array(v.string()),
     chunks: v.array(historyChunk),
+    /** The same pack framed as side-band pkt-lines for Git protocol v2 on the Worker path,
+     * written once on its first v2 Worker fetch (src/git-worker-plan.ts PackFramer). */
+    framed: v.optional(v.array(historyChunk)),
     bytes: v.number(),
     objects: v.number(),
     packSha1: v.string(),

@@ -90,6 +90,7 @@ export async function loadHistory(ctx: QueryCtx, projectId: Id<'hostedProjects'>
     packs: packs.slice(0, historyPackPage).map(pack => ({
       tip: pack.tip,
       chunks: pack.chunks,
+      ...(pack.framed ? { framed: pack.framed } : {}),
       bytes: pack.bytes,
       objects: pack.objects,
       packSha1: pack.packSha1,
@@ -216,8 +217,9 @@ export const record = internalMutation({
   },
 });
 
-/** Which of these chunk digests a recorded pack of the project still pins; those are
- * never deleted by unrecorded-chunk cleanup. Bounded by historyPackPage rows. */
+/** Which of these chunk digests a recorded pack of the project still pins (its chunks or
+ * framed copy); those are never deleted by unrecorded-chunk cleanup. Bounded by
+ * historyPackPage rows. */
 export const referencedChunks = internalQuery({
   args: { projectId: v.id('hostedProjects'), sha256s: v.array(v.string()) },
   returns: v.array(v.string()),
@@ -229,7 +231,9 @@ export const referencedChunks = internalQuery({
       .take(historyPackPage + 1);
     return [
       ...new Set(
-        packs.flatMap(pack => pack.chunks.map(chunk => chunk.sha256)).filter(sha => wanted.has(sha)),
+        packs
+          .flatMap(pack => [...pack.chunks, ...(pack.framed ?? [])].map(chunk => chunk.sha256))
+          .filter(sha => wanted.has(sha)),
       ),
     ];
   },

@@ -83,3 +83,61 @@ export type BytePlan = {
   bytes: number;
 };
 export const planBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+
+/** Protocol v2 sends pack bytes as side-band pkt-lines (band 1), which the Worker cannot
+ * write within its CPU limit, so a pack served over v2 is framed once into its own R2 copy
+ * (Issue 7c36abfb). The first frame holds exactly the 12-byte pack header and the last
+ * exactly the 20-byte trailer: a joined set drops both by byte range, like raw packs. */
+export const framedHead = 4 + 1 + 12;
+export const framedTail = 4 + 1 + 20;
+/** Side-band data bytes per frame (a 65,520-byte pkt-line). */
+const frameData = 65515;
+export const framedBytes = (bytes: number) => {
+  const body = bytes - 32;
+  return framedHead + framedTail + body + Math.ceil(body / frameData) * 5;
+};
+/** Frames one pack's bytes, pushed in order in parts of any size, into band-1 pkt-lines.
+ * Holds one frame (at most 65,520 bytes) between pushes. */
+export class PackFramer {
+  private start = 0;
+  private filled = 0;
+  private frame = new Uint8Array(0);
+  constructor(private bytes: number) {
+    if (!Number.isSafeInteger(bytes) || bytes < 32) throw new Error('A Git pack is at least 32 bytes.');
+    this.open();
+  }
+  private open() {
+    const end =
+      this.start < 12
+        ? 12
+        : this.start >= this.bytes - 20
+          ? this.bytes
+          : Math.min(this.start + frameData, this.bytes - 20);
+    const size = end - this.start + 5;
+    this.frame = new Uint8Array(size);
+    for (let i = 0; i < 4; i++) this.frame[i] = size.toString(16).padStart(4, '0').charCodeAt(i);
+    this.frame[4] = 1;
+    this.filled = 0;
+  }
+  /** Complete frames for these bytes, in order. */
+  push(part: Uint8Array): Uint8Array[] {
+    const out: Uint8Array[] = [];
+    for (let at = 0; at < part.length;) {
+      if (this.start >= this.bytes) throw new Error('A stored pack is longer than its record.');
+      const take = Math.min(part.length - at, this.frame.length - 5 - this.filled);
+      this.frame.set(part.subarray(at, at + take), 5 + this.filled);
+      this.filled += take;
+      at += take;
+      if (this.filled === this.frame.length - 5) {
+        out.push(this.frame);
+        this.start += this.filled;
+        if (this.start < this.bytes) this.open();
+      }
+    }
+    return out;
+  }
+  /** Throws unless every byte of the pack was pushed. */
+  end() {
+    if (this.start !== this.bytes) throw new Error('A stored pack is shorter than its record.');
+  }
+}

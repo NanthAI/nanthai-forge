@@ -339,7 +339,7 @@ const sessionEnded = () =>
 export const serve = httpAction(async (ctx, request): Promise<Response> => {
   const url = new URL(request.url);
   const worker = workerConfig();
-  // Requests the Worker forwards: a signed session, v0 without side-band, byte plans.
+  // Requests the Worker forwards: a signed session; fetches answer with byte plans.
   const signed = url.pathname.startsWith('/gitw/') ? workerRoute(url.pathname, worker) : null;
   if (signed?.kind === 'unknown') return text(404, 'Repository not found.');
   if (signed?.kind === 'expired') return sessionEnded();
@@ -356,7 +356,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   const credential = session ? null : presentedCredential(request.headers.get('authorization'));
   if (credential === 'invalid')
     return unauthorized('Use a Forge login token (nforge login) as the password.');
-  const v2 = !session && /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
+  const v2 = /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
   const kind = route.service === 'info/refs' ? 'advertisement' : 'result';
   const gzipped = /gzip/i.test(request.headers.get('content-encoding') ?? '');
   let body = route.service === 'info/refs' ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
@@ -377,7 +377,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   let lanes = gzipped ? undefined : laneArgs();
   // Git sends no credentials while anonymous reads work (public projects). A listing that names
   // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is.
-  if (!credential && v2 && !gzipped && route.service === 'git-upload-pack') {
+  if (!credential && !session && v2 && !gzipped && route.service === 'git-upload-pack') {
     let named: string[] = [];
     try {
       const command = parseV2Request(body);
@@ -406,6 +406,9 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   const again = reload as () => Promise<Loaded>;
   try {
     if (route.service === 'info/refs') {
+      // The Worker answers the v2 advertisement itself (src/git-byte-worker.ts); this one serves
+      // a Worker that forwards it.
+      if (session && v2) return gitReply(kind, advertiseV2());
       if (session) return gitReply(kind, advertiseV0((await preparedRefs(ctx, loaded, again)).refs, false));
       let prepared: ReturnType<typeof servedRefs> | null = null;
       if (worker) {
@@ -424,24 +427,27 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       lanes = loaded.member ? laneArgs() : undefined;
       if (lanes) loaded = (await reload()) as Loaded;
     }
-    if (session) {
-      const reply = await workerFetch(
+    const ready = loaded as Loaded;
+    const served = (args: FetchArgs, version: 2 | 0) => {
+      if (!session) return fetchReply(ready, args, version);
+      const { packs, gap } = servedRefs(ready);
+      return workerFetch(
         ctx,
-        loaded.projectId,
-        servedRefs(loaded).packs,
-        loaded.history?.row.joined,
-        parseV0Request(body),
-      );
-      return reply.plan ?? gitReply(kind, reply.ack);
-    }
-    if (!v2) return fetchReply(loaded, parseV0Request(body), 0);
+        ready.projectId,
+        packs,
+        ready.history?.row.joined,
+        args,
+        version === 2 ? { gap } : null,
+      ).then(reply => reply.plan ?? gitReply(kind, reply.ack));
+    };
+    if (!v2) return await served(parseV0Request(body), 0);
     const command = parseV2Request(body);
     if (command.command === 'ls-refs')
       return gitReply(
         kind,
         lsRefs((await preparedRefs(ctx, loaded, again, namedLanes(command.args))).refs, command.args),
       );
-    if (command.command === 'fetch') return fetchReply(loaded, parseFetchArgs(command.args), 2);
+    if (command.command === 'fetch') return await served(parseFetchArgs(command.args), 2);
     throw new ForgeError('GIT_UNSUPPORTED', `Forge does not serve the Git "${command.command}" command.`);
   } catch (error) {
     const { code, message } = failure(error);

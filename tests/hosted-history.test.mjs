@@ -37,6 +37,7 @@ for (const name of [
   'gitServeLane',
   'gitServeLaneStore',
   'gitServeWorkerStore',
+  'gitServeFrame',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 
@@ -864,6 +865,30 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
     [true, true, true],
   );
   assert.deepEqual(chunkParts([40, 10], 12, 30), [{ chunk: 0, start: 12, end: 30, whole: false }]);
+  // v2 framed copies: header and trailer in frames of their own, full frames between, for any
+  // push sizes; equal to side-band framing of the three regions (Issue 7c36abfb).
+  const { PackFramer, framedBytes, framedHead, framedTail } = await import('../dist/git-worker-plan.js');
+  for (const size of [32, 33, 32 + 65515, 32 + 65516, 200_000]) {
+    const pack = Uint8Array.from({ length: size }, (_, i) => (i * 7) % 251);
+    const expected = Buffer.concat([
+      protocol.sideband(1, pack.subarray(0, 12)),
+      protocol.sideband(1, pack.subarray(12, size - 20)),
+      protocol.sideband(1, pack.subarray(size - 20)),
+    ]);
+    for (const step of [1, 7, 4096, size]) {
+      const framer = new PackFramer(size),
+        out = [];
+      for (let at = 0; at < size; at += step) out.push(...framer.push(pack.subarray(at, at + step)));
+      framer.end();
+      const framed = Buffer.concat(out);
+      assert.ok(framed.equals(expected), `framed ${size} in steps of ${step}`);
+      assert.equal(framed.length, framedBytes(size));
+      assert.equal(framed.subarray(0, framedHead).toString('latin1', 0, 5), '0011\x01');
+      assert.equal(framed.subarray(framed.length - framedTail).toString('latin1', 0, 5), '0019\x01');
+    }
+    assert.throws(() => new PackFramer(size).end(), /shorter/);
+    assert.throws(() => new PackFramer(size).push(new Uint8Array(size + 1)), /longer/);
+  }
   assert.throws(
     () => protocol.parseFetchArgs(['want ' + 'a'.repeat(40), 'ofs-delta', 'deepen 1']),
     e => e.code === 'GIT_UNSUPPORTED',
@@ -967,7 +992,7 @@ const withEnv = (t, values) => {
   });
 };
 
-test('clones over the response limit go through the Worker: capped, raw R2 bytes, joined trailer cached', async t => {
+test('clones over the response limit go through the Worker: v2 framed once, v0 raw, capped, joined trailer cached', async t => {
   const source = sourceRepository(t),
     f = fixture(t, source),
     { s } = f;
@@ -990,17 +1015,44 @@ test('clones over the response limit go through the Worker: capped, raw R2 bytes
   assert.match(String(cloned.stderr), /redirecting to http:\/\/127\.0\.0\.1:\d+\/gitw\//);
   assert.equal(log(join(work, 'one')), log(source.repo), 'same commits and ids as the source');
   await client(['fsck', '--full'], join(work, 'one'));
-  // Redirect (1 query), Worker ref listing (1 query), fetch (1 query + 1 reserve mutation).
-  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 });
+  // Protocol v2, as from GitHub: the clone keeps the pack (index-pack), even under
+  // transfer.unpackLimit objects, where a v0 clone explodes it into loose objects.
+  assert.equal(
+    git(join(work, 'one'), ['count-objects', '-v'])
+      .toString()
+      .match(/^packs: (\d+)/m)[1],
+    '1',
+  );
+  // Redirect (1 query), ls-refs (1 query), fetch (1 query + reserve); the Worker answers the
+  // v2 advertisement. Framing the pack once: 1 action + 1 mutation.
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 2, action: 1 });
   const [pack] = historyPacks(s, projectId);
+  assert.ok(pack.framed?.length, 'the framed copy is recorded on the pack row');
+  assert.deepEqual(
+    worker.reads,
+    pack.framed.map(chunk => ({ key: `v1/p/${projectId}/o/${chunk.sha256}` })),
+  );
+  const { v2Advertisement } = await import('../dist/git-byte-worker.js');
+  assert.equal(v2Advertisement, Buffer.from(protocol.advertiseV2()).toString('latin1'));
+  worker.reads.length = 0;
+  before = host.snapshot();
+  await client(['clone', '-q', url, join(work, 'again')]);
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 }, 'framed once');
+  // A v0 client gets the raw stored chunks, untouched.
+  worker.reads.length = 0;
+  before = host.snapshot();
+  await client(['-c', 'protocol.version=0', 'clone', '-q', url, join(work, 'v0')]);
+  assert.equal(log(join(work, 'v0')), log(source.repo));
+  await client(['fsck', '--full'], join(work, 'v0'));
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 });
   assert.deepEqual(
     worker.reads,
     pack.chunks.map(chunk => ({ key: `v1/p/${projectId}/o/${chunk.sha256}` })),
   );
   const usage = [...s.tables.gitWorkerUsage.values()];
   assert.deepEqual(usage.map(row => [row.scope, row.packs, row.bytes]).sort(), [
-    ['*', 1, pack.bytes],
-    [projectId, 1, pack.bytes],
+    ['*', 3, 3 * pack.bytes],
+    [projectId, 3, 3 * pack.bytes],
   ]);
 
   // A mirror move adds a catch-up pack; a fetch takes only it, a fresh clone joins both.
@@ -1023,7 +1075,7 @@ test('clones over the response limit go through the Worker: capped, raw R2 bytes
   before = host.snapshot();
   await client(['clone', '-q', url, join(work, 'three')]);
   assert.equal(log(join(work, 'three')), log(source.repo, tip));
-  assert.equal(host.since(before).mutation, 1, 'the cached trailer is reused');
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 }, 'cached trailer');
 
   // Caps are checked before the redirect; a forged or expired session is refused.
   const [row] = [...s.tables.gitWorkerUsage.values()].filter(row => row.scope === projectId);
@@ -1098,9 +1150,20 @@ test('a Worker session rechecks the credential and current access on every reque
   assert.equal((await host.handle(refs(sign('cred-owner', Date.now() - 1)))).status, 403, 'expired');
   const other = plan.signWorkerToken({ p: 'another', c: 'cred-owner', e: Date.now() + 60_000 }, key);
   assert.equal((await host.handle(refs(other))).status, 403, 'a session names one project');
+  // Protocol v2: the Worker answers the fixed advertisement; ls-refs rechecks like any request.
+  const lsRefs = token =>
+    host.handle(`/gitw/${token}/${projectId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: { 'git-protocol': 'version=2', 'content-type': 'application/x-git-upload-pack-request' },
+      body: Buffer.concat([protocol.pkt('command=ls-refs\n'), protocol.delimPkt, protocol.flushPkt]),
+    });
+  const listed = await lsRefs(sign('cred-owner'));
+  assert.match(Buffer.from(await listed.arrayBuffer()).toString('latin1'), new RegExp(`${source.head} HEAD`));
+  assert.equal((await lsRefs(sign(''))).status, 404, 'v2 anonymous session on a private project');
   const [credential] = [...s.tables.cliCredentials.values()];
   s.tables.cliCredentials.set(credential._id, { ...credential, revoked: true });
   assert.equal((await host.handle(refs(sign('cred-owner')))).status, 403, 'revocation applies at once');
+  assert.equal((await lsRefs(sign('cred-owner'))).status, 403, 'and to v2 requests');
 });
 
 // Lane refs (Issue 09367fb2 line 3): a member's fetch of refs/forge/lanes/<laneId> builds one

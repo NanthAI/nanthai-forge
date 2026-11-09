@@ -6,7 +6,10 @@
  * answers with a byte plan, the Worker streams the R2 objects it names from its bucket
  * binding by native piping: JavaScript never touches pack bytes, so a clone fits the
  * Workers Free CPU limit. The Worker holds no secret and reads only keys the backend
- * names (never one from the client), in the stored-object key space. */
+ * names (never one from the client), in the stored-object key space. It answers the Git
+ * protocol v2 capability advertisement itself: that reply is fixed text with no repository
+ * data, and every request that returns refs or bytes still goes to the backend, which
+ * rechecks the session and current access (one backend round trip fewer per clone). */
 
 type Env = {
   /** The Forge backend's HTTP actions origin, for example https://NAME.convex.site. */
@@ -28,6 +31,13 @@ const planType = 'application/x-forge-git-byte-plan';
 const maxParts = 900;
 const storedKey = /^v1\/p\/[A-Za-z0-9_-]{1,64}\/o\/[0-9a-f]{64}$/;
 const forwarded = ['content-type', 'content-encoding', 'accept', 'git-protocol', 'user-agent'];
+
+/** Equal to advertiseV2() in src/git-serve-protocol.ts (tests/hosted-history.test.mjs). */
+export const v2Advertisement = ['version 2', 'agent=forge/1', 'ls-refs', 'fetch', 'object-format=sha1']
+  .map(line => `${(line.length + 5).toString(16).padStart(4, '0')}${line}\n`)
+  .join('')
+  .concat('0000');
+const v2Request = /(^|[:\s])version=2($|[:\s])/;
 
 const plain = (status: number, text: string) =>
   new Response(`${text}\n`, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -76,6 +86,18 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/gitw/')) return plain(404, 'Repository not found.');
     if (request.method !== 'GET' && request.method !== 'POST') return plain(405, 'Method not allowed.');
+    if (
+      request.method === 'GET' &&
+      url.pathname.endsWith('/info/refs') &&
+      url.searchParams.get('service') === 'git-upload-pack' &&
+      v2Request.test(request.headers.get('git-protocol') ?? '')
+    )
+      return new Response(v2Advertisement, {
+        headers: {
+          'content-type': 'application/x-git-upload-pack-advertisement',
+          'cache-control': 'no-cache, max-age=0, must-revalidate',
+        },
+      });
     const headers = new Headers();
     for (const name of forwarded) {
       const value = request.headers.get(name);
