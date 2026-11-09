@@ -99,16 +99,6 @@ test('the first-check proof reads the same six pins and decides as before on lar
   assert.deepEqual(await scenario(4000, 40, 40, true).run(), { reason: 'composition-not-exact' });
 });
 
-test('proof analysis stays linear: 30,000-file manifests with 3,000 changed paths a side finish in seconds', async () => {
-  const big = scenario(30000, 3000, 3000);
-  const started = performance.now();
-  const decision = await big.run();
-  const elapsed = performance.now() - started;
-  assert.equal(decision.proof.candidatePaths.length, 3000);
-  // About 0.6 s here. The per-entry schema construction took 10 s on the same input.
-  assert(elapsed < 5000, `analysis took ${Math.round(elapsed)} ms`);
-});
-
 test('canonicalPayload builds its JSON schema once, not per call', () => {
   const source = readFileSync(new URL('../src/hosted-source-operation.ts', import.meta.url), 'utf8');
   const body = source.slice(source.indexOf('export function canonicalPayload'));

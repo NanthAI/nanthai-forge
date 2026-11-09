@@ -59,7 +59,9 @@ test('a caller finding anyone queued waits behind them even when a slot is free'
   const front = joinQueue(directory, { command: 'node' });
   let slot;
   const late = acquireHeavySlot(directory, 3).then(value => (slot = value));
-  await sleep(300);
+  // The caller joined the queue and ran its first attempt synchronously; let watcher callbacks drain once.
+  await until(() => queuedNames(directory).length === 2);
+  await new Promise(done => setImmediate(done));
   assert.equal(slot, undefined, 'the free slot belongs to the waiter in front');
   assert.equal(queuedNames(directory).length, 2);
   leaveQueue(directory, front);
@@ -72,23 +74,25 @@ test('twelve callers on three slots never exceed the limit, lose no wake-up and 
     started = [];
   let running = 0,
     peak = 0;
+  const open = [];
+  const gates = Array.from({ length: 12 }, () => new Promise(done => open.push(done)));
+  // Calls are made in id order, so arrival order is id order; each holder keeps its slot until its gate opens.
   const callers = Array.from({ length: 12 }, (_, id) =>
-    sleep(id * 3).then(async () => {
-      const slot = await acquireHeavySlot(directory, 3);
+    acquireHeavySlot(directory, 3).then(async slot => {
       started.push(id);
       peak = Math.max(peak, ++running);
-      await sleep(id % 3 === 0 ? 40 : 8);
+      await gates[id];
       running--;
       rmSync(slot, { recursive: true });
     }),
   );
+  // Three slots fill at once and the other nine wait: the limit is reached, never passed.
+  await until(() => running === 3 && queuedNames(directory).length === 9);
+  assert.equal(peak, 3);
+  for (const done of open) done();
   await Promise.all(callers);
-  assert(peak <= 3 && peak >= 2, `peak ${peak}`);
-  assert.deepEqual(
-    started,
-    [...started].sort((a, b) => a - b),
-  );
-  assert.equal(started.length, 12);
+  assert.equal(peak, 3, `peak ${peak}`);
+  assert.deepEqual(started, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
   assert.deepEqual(readdirSync(directory), []);
 });
 
@@ -115,7 +119,8 @@ test('a dead waiter never blocks those behind it, even when only the timer can n
   const reused = joinQueue(directory, { command: 'node' });
   writeFileSync(join(directory, reused.name), JSON.stringify({ startTime: 'Thu Jan  1 00:00:00 1970' }));
   const waiting = acquireHeavySlot(directory, 1, undefined, { tickMs: 50 });
-  await sleep(120);
+  // Only the timer can notice the dead tickets: wait until it has reaped them, leaving the live waiter alone.
+  await until(() => queuedNames(directory).length === 1);
   rmSync(held, { recursive: true });
   assert.equal(await waiting, join(directory, '1'));
   assert.deepEqual(readQueue(directory), []);
@@ -208,6 +213,8 @@ test('nforge heavy runs queued commands first come, first served and tells each 
   for (let id = 0; id < 4; id++) {
     callers.push(heavyProcess(directory, [process.execPath, '-e', printStart], settings));
     await until(() => queuedNames(directory).length === id + 1, 30_000);
+    // The caller has told us its position: freeing the slot earlier races its first queue read.
+    await until(() => callers[id].stderr.includes(`Queue position ${id + 1} of ${id + 1}`), 30_000);
   }
   rmSync(held, { recursive: true });
   await Promise.all(callers.map(caller => caller.exited));

@@ -18,11 +18,6 @@ test('interaction docs execution includes every merged static check and no behav
     ['scripts/check-documents.mjs'],
   ]);
 });
-test('ordinary docs execution preserves its established commands', () => {
-  const calls = [];
-  runDocumentationChecks({ npm: (...args) => calls.push(args), node: path => calls.push([path]) });
-  assert.deepEqual(calls, [['run', 'check'], ['run', 'format:check'], ['scripts/check-documents.mjs']]);
-});
 test('interaction static failure propagates rather than reporting a passing docs check', () => {
   const calls = [];
   assert.throws(

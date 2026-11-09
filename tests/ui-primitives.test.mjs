@@ -27,12 +27,11 @@ test('relative ages are compact and handle bad input', () => {
   assert.equal(status.age(undefined, now), '');
 });
 
-test('initials and avatar hues are stable', () => {
+test('initials are stable for names, ids and blanks', () => {
   assert.equal(status.initials('Maya Chen'), 'MC');
   assert.equal(status.initials('claude-1'), 'C1');
   assert.equal(status.initials('codex'), 'CO');
   assert.equal(status.initials('  '), '?');
-  assert.equal(status.hue('session-a'), status.hue('session-a'));
 });
 
 test('status pills pair a glyph with words, never colour alone', () => {

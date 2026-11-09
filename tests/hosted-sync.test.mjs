@@ -5,7 +5,6 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { transfers } from './hosted-compose-fixture.mjs';
 import { syncFixture, api, jobApi, code } from './hosted-sync-fixture.mjs';
-import { maxima } from './hosted-compose-fixture.mjs';
 const target = s => ({ kind: 'main', head: s.main.head, receiptId: s.main.receipt.id });
 // A Lane whose base names the same head under an earlier receipt: its sync is still up to date, but
 // publication rebases the record, so prepare cannot settle it and the source job runs.
@@ -416,10 +415,6 @@ test('save page records contain only schema-declared identity fields', async () 
       ['_creationTime', '_id', 'actor', 'digest', 'index', 'operationId', 'projectId'].sort(),
     );
 });
-test('metered sync maxima are bounded metadata-only transactions', t => {
-  t.diagnostic(JSON.stringify(maxima));
-});
-
 test('a conflict inside dependency composition resolves before original dependencies and the unmerged suffix', async () => {
   const s = await syncFixture();
   const a = await s.lane(s.state([s.file('a.txt', 'left\n'), s.hidden], [s.baseline.sha256])),

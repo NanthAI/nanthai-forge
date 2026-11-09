@@ -152,22 +152,25 @@ test('findings are capped and counted', () => {
   assert.match(secretScanNotice(result).at(-1), /; \+5 more\. /);
 });
 
-test('scan time of a typical changed-path set stays well under the landing budget', t => {
-  // 40 changed files of 20 KiB source each (above the dogfood median diff).
+test('a typical changed-path set is read once per path and scanned in one pass', () => {
+  // 40 changed files of 20 KiB source each (above the dogfood median diff), one path listed twice.
   const body = 'export const value = computeSomething(input, options);\n'.repeat(380);
   const entries = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`src/file-${i}.ts`, body]));
   const read = files(entries);
-  const times = [];
-  for (let i = 0; i < 20; i++) {
-    const started = performance.now();
-    scanSecretPaths(Object.keys(entries), read, { baseAllow: undefined });
-    times.push(performance.now() - started);
-  }
-  times.sort((a, b) => a - b);
-  const p95 = times[Math.floor(times.length * 0.95) - 1];
-  t.diagnostic(JSON.stringify({ files: 40, bytes: 40 * body.length, p95Ms: Number(p95.toFixed(2)) }));
-  // Generous ceiling for loaded CI machines; the measured value is reported in the diagnostic.
-  assert(p95 < 1000, `p95 ${p95} ms`);
+  const reads = [];
+  const result = scanSecretPaths(
+    [...Object.keys(entries), 'src/file-0.ts'],
+    path => (reads.push(path), read(path)),
+    {
+      baseAllow: undefined,
+    },
+  );
+  // A deterministic work bound instead of a wall-clock budget: bytes read grow only with the changed paths.
+  assert.equal(reads.length, 40);
+  assert.equal(new Set(reads).size, 40);
+  assert.equal(result.scannedFiles, 40);
+  assert.equal(result.skippedFiles, 0);
+  assert.deepEqual(result.findings, []);
 });
 
 test('machine runner: changed paths come from the base State; an unreadable base scans every file', () => {

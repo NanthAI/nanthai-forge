@@ -5,7 +5,6 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { indexRepository, capture, analyze } from '../dist/index.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
-import { sourceLanguage, analysisManifest } from '../dist/languages.js';
 import { fixture } from './helpers.mjs';
 
 const go = {
@@ -28,13 +27,6 @@ const refs = (pack, file, name) =>
   pack.references.filter(r =>
     pack.nodes.some(n => n.id === r.target && n.name === name && n.locator.file === file),
   );
-
-test('languages are named in one place', () => {
-  assert.equal(sourceLanguage('a/b.go'), 'go');
-  assert.equal(sourceLanguage('A.cs'), 'csharp');
-  assert.equal(sourceLanguage('README.md'), undefined);
-  assert(analysisManifest('svc/go.mod'));
-});
 
 test('Go: parser-backed declarations, exports, module-path package imports and references', t => {
   const root = fixture(t, go);

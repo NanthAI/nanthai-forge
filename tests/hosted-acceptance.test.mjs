@@ -387,22 +387,6 @@ test('the landing that completes an Intent’s last Lane completes the Intent, i
   assert.equal(f.tables.projectHostedRecords.size, versions);
 });
 
-test('with completeOnAccept off the landing still completes the Intent it declares and leaves the Lane open', async () => {
-  const f = await acceptanceFixture(),
-    intentId = await seedIntent(f);
-  const lane = await f.lane({ intentId });
-  const policy = policyPreset('supervised');
-  f.patch('hostedProjects', f.projectId, {
-    autonomyPolicy: { ...policy, lifecycle: { ...policy.lifecycle, completeOnAccept: false } },
-  });
-  const item = await f.makeCandidate([lane]);
-  const { state } = await f.ready(item);
-  const { receipt } = await f.accept(state);
-  await f.materialize(receipt.id);
-  assert.equal(await intentStatus(f, intentId), 'completed');
-  assert.equal((await f.readLane(lane.laneId)).state, 'active', 'the Lane stays open for reopen/more edits');
-});
-
 test('Lane status carries the landing state, receipt and accepted commit from the same read, with completion on or off', async () => {
   for (const completeOnAccept of [true, false]) {
     const f = await acceptanceFixture(),

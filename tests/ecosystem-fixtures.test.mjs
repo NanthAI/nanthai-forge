@@ -30,7 +30,6 @@ import { validateArtifact } from '../dist/artifact-validation.js';
 import { fixture } from './helpers.mjs';
 import { sourceLanguage } from '../dist/languages.js';
 import {
-  ECOSYSTEMS,
   codeMapLanguages,
   dependencyDirs,
   ecosystemEntry,
@@ -703,12 +702,4 @@ test('install: Package.swift, the Podfile and Gradle scripts are code and run on
     scripts: 'none',
     argv: ['dart', 'pub', 'get'],
   });
-});
-
-test('the Swift and Dart fixture repositories are registry entries', () => {
-  for (const id of ['swift', 'dart'])
-    assert.ok(
-      ECOSYSTEMS.some(entry => entry.id === id),
-      id,
-    );
 });

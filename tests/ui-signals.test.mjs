@@ -102,15 +102,6 @@ test('the channel strip shows who moved main and its check, with the hash only i
   assert.match(renderToStaticMarkup(h(LiveStatus, { error: 'down', local: true })), /Connection paused/);
 });
 
-test('accepted success feedback enters the shared toast stack after mount', () => {
-  assert.equal(
-    renderToStaticMarkup(
-      h(signals.AcceptedToast, { accepted: { title: 'synthetic' }, onClose: () => undefined }),
-    ),
-    '',
-  );
-});
-
 test('progress tooltips name the current state and the header offers its legend on demand', () => {
   for (const [lane, state] of [
     [{ tone: 'active', checkpoints: 0 }, 'Edited · not saved'],

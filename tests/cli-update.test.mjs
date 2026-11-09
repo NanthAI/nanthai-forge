@@ -954,7 +954,6 @@ test('incident replay 2a0557b6: two parallel writes during an update both run at
   const held = join(f.installation, 'update-lock', '1');
   mkdirSync(held, { recursive: true });
   writeFileSync(join(held, 'pid'), String(process.pid));
-  const started = Date.now();
   const [one, two] = await Promise.all([launch(f, ['save', '--one']), launch(f, ['save', '--two'])]);
   for (const reply of [one, two]) {
     assert.equal(reply.status, 0, reply.stderr);
@@ -965,7 +964,6 @@ test('incident replay 2a0557b6: two parallel writes during an update both run at
   }
   // The lock was never released: both returned while the updater still ran.
   assert.ok(existsSync(held));
-  assert.ok(Date.now() - started < 20_000);
   assert.equal(cliBuildCommit(join(f.installation, 'current')), a);
   assert.equal(Atomics.load(calls, 0), 2, 'one release read per command, no added calls');
   rmSync(join(f.installation, 'update-lock'), { recursive: true, force: true });

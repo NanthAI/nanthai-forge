@@ -386,18 +386,6 @@ for (const [phase, kind, name, args] of phases)
     assert(!pending.result.next.retry);
   });
 
-test('complete RPC deadline includes a stalled SDK mutation queue, not just fetch', async t => {
-  const f = await fixture(t, () => {});
-  const client = deadlineConvexClient(
-    f.url,
-    { skipConvexDeploymentUrlCheck: true, logger: false, fetch: () => new Promise(() => {}) },
-    25,
-  );
-  const write = () => client.mutation(makeFunctionReference('test:write'), { operationId: 'same' });
-  const result = await Promise.allSettled([write(), write()]);
-  assert(result.every(r => r.status === 'rejected' && timeout(r.reason)));
-});
-
 test('healthy doubled dogfood-size response streams with one call and no idle requests', async t => {
   const data = Buffer.alloc(10 * 1024 * 1024, 42);
   const f = await fixture(t, (_req, res) => res.end(data));

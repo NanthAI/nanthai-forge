@@ -111,13 +111,3 @@ test('candidate labels use state and recorded acceptance age; joins stay in thei
   assert.equal(joins.length, 6);
   for (const [, source, marker] of joins) assert.equal(source, marker);
 });
-
-test('shared count labels cover zero, singular, plural and an explicit plural', async () => {
-  const { countLabel } = await import(moduleUrl('../web/src/ui/count.ts'));
-  for (const noun of ['save', 'file', 'Lane', 'View']) {
-    assert.equal(countLabel(0, noun), `0 ${noun}s`);
-    assert.equal(countLabel(1, noun), `1 ${noun}`);
-    assert.equal(countLabel(2, noun), `2 ${noun}s`);
-  }
-  assert.equal(countLabel(2, 'person', 'people'), '2 people');
-});

@@ -5,7 +5,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { agentPeers, boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
@@ -118,44 +117,6 @@ test('take requires explicit foreign takeover, returns context, and crash recove
     error => error.code === 'WORK_OPERATION_CHANGED',
   );
 });
-test('no-overlap peers latency compared with pre-slice implementation', async t => {
-  const { agent, start } = fixture(t);
-  const mine = await start('mine', 'Mine', ['src/a.txt']);
-  for (let i = 0; i < 10; i++) await start(`peer-${i}`, `Peer ${i}`, ['src/b.txt']);
-  let baseline;
-  try {
-    baseline = (await import('../dist/agent-peers-baseline.js')).agentPeers;
-  } catch {
-    t.skip('Before/after benchmark unrun: baseline artifact absent.');
-    return;
-  }
-  const input = { laneId: mine.laneId, scope: { paths: ['src/a.txt'] } };
-  const measure = fn => {
-    const times = [];
-    for (let i = 0; i < 30; i++) {
-      const at = performance.now();
-      assert.deepEqual(fn(agent.work.store, input), { clear: true });
-      if (fn === agentPeers)
-        assert.deepEqual(duplicateStartWarnings(agent.work.store, mine.laneId, 'Mine'), []);
-      times.push(performance.now() - at);
-    }
-    return times.sort((a, b) => a - b)[28];
-  };
-  measure(baseline);
-  measure(agentPeers);
-  const before = measure(baseline),
-    after = measure(agentPeers);
-  t.diagnostic(
-    JSON.stringify({
-      fixture: '10 disjoint Lanes',
-      beforeP95Ms: before,
-      afterP95Ms: after,
-      addedP95Ms: after - before,
-    }),
-  );
-  assert.ok(after - before <= 150);
-});
-
 function syntheticRun(store, lane, { status = 'queued', old = true, head = lane.base } = {}) {
   const viewId = randomUUID(),
     runId = randomUUID();

@@ -371,13 +371,12 @@ test('priority and submitter fairness only change ordering and keep original age
   assert.equal(JSON.stringify(entries), before);
 });
 
-test('synthetic four-entry wall time uses the same runner and harness for serial versus batch', async t => {
+test('synthetic four-entry run counts use the same runner and harness for serial versus batch', async t => {
   const measure = async size => {
-    const f = await fixture(t, { delay: 80 });
+    const f = await fixture(t);
     for (let i = 0; i < 4; i++) await f.candidate(`perf-${i}.txt`, `${i}\n`, false);
     // Prepare identical pinned candidates; vary only how many are admitted per drain.
     const views = f.store.load().views.filter(view => view.inputs.length === 1);
-    const started = performance.now();
     for (let offset = 0; offset < views.length; offset += size) {
       for (const view of views.slice(offset, offset + size)) {
         const definition = f.store.load().checks[0];
@@ -398,10 +397,8 @@ test('synthetic four-entry wall time uses the same runner and harness for serial
       }
       await drainLandingBatches(f.work, 'main');
     }
-    const ms = performance.now() - started;
     assert.equal(f.store.load().landingEntries.length, 4);
     return {
-      ms: Math.round(ms),
       runs: f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id)).length,
     };
   };
@@ -410,7 +407,7 @@ test('synthetic four-entry wall time uses the same runner and harness for serial
   assert.equal(before.runs, 4);
   assert.equal(after.runs, 5, 'four singleton admission checks plus the combined gate');
   t.diagnostic(
-    `SYNTHETIC serial=${before.ms}ms (${before.runs} runs), batch=${after.ms}ms (${after.runs} runs including admission); fake Actions 80ms/check; no provider IO`,
+    `SYNTHETIC serial=${before.runs} runs, batch=${after.runs} runs including admission; no provider IO, no timers`,
   );
 });
 

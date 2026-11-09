@@ -438,7 +438,7 @@ test('incident replay (flaky board-claims): first writes spooled in the senderâ€
   });
 });
 
-test('real hook with claims on: one query, CPU p95 under 200 ms, claims batched by the detached sender', t => {
+test('real hook with claims on: one query per write, every path claimed once, claims batched by the detached sender', t => {
   const measured = runResourceWorker('./board-claims-budget-worker.mjs');
   t.diagnostic(JSON.stringify(measured));
   console.log(`hook with claims: ${JSON.stringify(measured)}`);

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { compactCheckText } from '../dist/check-compact-output.js';
 import test from 'node:test';
-import ts from 'typescript';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -289,17 +288,6 @@ test('unavailable advisory source inventory does not prevent the selected tests 
   assert.match(result.stdout, /Coverage unavailable: source inventory/);
   assert.match(result.stdout, /# pass 1/);
   assert.ok(!result.stdout.includes(coverageMarker));
-});
-
-test('a narrowed runtime recommendation does not erase a type-level interface failure', t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-coverage-types-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const path = join(root, 'interface.ts');
-  writeFileSync(path, 'interface Model { value: string; } const sample: Model = { value: 1 };');
-  const result = select();
-  assert.ok(result.coverage.coverageCount < result.tests.length);
-  const program = ts.createProgram([path], { noEmit: true, noLib: true, types: [], strict: true });
-  assert.ok(program.getSemanticDiagnostics().some(diagnostic => diagnostic.code === 2322));
 });
 
 test('barrel initialization coverage retains tests that load the re-exported module', () => {

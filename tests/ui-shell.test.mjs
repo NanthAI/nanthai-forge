@@ -13,6 +13,7 @@ test('every hosted project page belongs to exactly one destination', () => {
   assert.equal(route.hostedTab('lanes'), 'intents');
   assert.equal(route.hostedTab('delivery'), 'code');
   assert.equal(route.hostedTab('backups'), 'settings');
+  assert.equal(route.hostedTab('you'), 'settings');
   assert.equal(route.hostedTab(null), 'now');
 });
 

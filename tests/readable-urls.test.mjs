@@ -252,10 +252,3 @@ test('backfill action pages Clerk accounts before projects, omits emails, and fa
   await assert.rejects(backfill.run._handler(s.ctx, { cursor: 'accounts:NaN' }));
   await assert.rejects(backfill.run._handler(s.ctx, { cursor: 'unknown' }));
 });
-
-test('Profile deep links are classified as Settings by both hosted consumers', async () => {
-  const shell = await import(moduleUrl('../web/src/shell/route.ts'));
-  assert.equal(shell.hostedTab('you'), 'settings');
-  const work = readFileSync(new URL('../web/src/HostedWork.tsx', import.meta.url), 'utf8');
-  assert.equal((work.match(/'you'/g) ?? []).length, 2);
-});

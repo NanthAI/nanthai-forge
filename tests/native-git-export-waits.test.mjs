@@ -154,8 +154,7 @@ test(
     setInterval(() => {}, 1000);
   `,
     );
-    const started = performance.now(),
-      execution = runExport(f, { PATH: path, FORGE_GIT_TIMEOUT_MS: '11000' });
+    const execution = runExport(f, { PATH: path, FORGE_GIT_TIMEOUT_MS: '11000' });
     t.after(() => execution.child.kill('SIGKILL'));
     const result = await execution.done;
     assert.equal(result.code, 1);
@@ -163,7 +162,7 @@ test(
     assert.match(result.stderr, /WORK_GIT_TIMEOUT/);
     assert.match(result.stderr, /synthetic Git blocked/);
     assert.match(result.stderr, /signal=SIGKILL/);
-    assert.ok(performance.now() - started < 25000, 'the subprocess wait is bounded');
+    // The wait is bounded by the 11 s Git timeout and this test's own 30 s limit, not by an elapsed-time assertion.
     assert.equal(existsSync(f.target), false);
     const processes = JSON.parse(readFileSync(pids, 'utf8'));
     await until(() => processes.every(pid => !processAlive({ pid })));
