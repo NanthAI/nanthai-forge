@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { scrubText } from './client-error-text.js';
 import { failedErrorChars, failedErrors } from './check-file-summary.js';
@@ -138,7 +139,7 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
     phase === 'terminal-failed' ||
     error ||
     result.status === 'failed' ||
-    ['failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(result.run?.status ?? '')
+    checkUnsuccessful(result.run?.status ?? '')
   ) {
     failed = true;
     lines.push(
@@ -193,10 +194,7 @@ const pendingLabel = (reason: string | null | undefined) => pendingLabels[reason
 export function landTerminal(response: HostedAgentResponse) {
   const result = resultOf(response);
   if (result.terminal === true) return true;
-  if (result.phase === 'check')
-    return ['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(
-      result.run?.status ?? '',
-    );
+  if (result.phase === 'check') return checkTerminal(result.run?.status ?? '');
   if (result.submission?.observation) return result.submission.observation.state !== 'pending';
   return terminalPhases.has(landPhase(response) ?? '');
 }

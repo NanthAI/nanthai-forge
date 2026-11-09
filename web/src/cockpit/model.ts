@@ -8,6 +8,7 @@ export { latestRun } from './check-meaning';
 import type { Lane, WorkView, CheckRun } from '../../../src/work-types';
 import type { HostedChanges } from '../../../src/work-hosted-summary';
 import { attentionRank, type Tone } from '../ui/status';
+import { checkNeverRan, checkRunState } from '../../../src/check-run-state';
 
 /** The cockpit's view of one Lane: everything a row needs, derived only from recorded Work. */
 export type CockpitLane = {
@@ -211,8 +212,15 @@ export function cockpitLanes(work: CockpitWork, queue?: ReadonlyMap<string, Queu
       ({ tone, label, text: fact } = queue);
     } else if (run && ['interrupted', 'cancelled'].includes(run.status)) {
       tone = 'plain';
-      label = run.status === 'cancelled' ? 'Cancelled' : 'Interrupted';
+      label = checkRunState(run).label;
       fact = `Check ${run.status}`;
+    } else if (run && checkNeverRan(run.status)) {
+      // No runner (or no budget) took the check: the code was not judged (W1/W13), never "Working".
+      const view = checkRunState(run);
+      tone = 'plain';
+      label = view.label;
+      // The module's reason, e.g. "No runner was available", before its advice.
+      fact = `Check not run · ${view.nextStep.split(';')[0]!.toLowerCase()}`;
     } else if (meaning && 'laterViewId' in meaning) {
       tone = 'plain';
       label = 'Check failed';
@@ -238,6 +246,11 @@ export function cockpitLanes(work: CockpitWork, queue?: ReadonlyMap<string, Queu
       tone = 'passed';
       label = 'Ready';
       fact = 'Check passed on its latest Candidate';
+    } else if (lane.state === 'creating') {
+      // Start has not finished preparing the Lane yet (W1): not work in progress.
+      tone = 'waiting';
+      label = 'Starting';
+      fact = 'Preparing its workspace';
     } else if (lane.state === 'paused') {
       tone = 'waiting';
       label = 'Paused';

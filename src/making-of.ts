@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal } from './check-run-state.js';
 import { runCost, intentAccounting, type AccountingContext } from './train-accounting.js';
 import { z } from 'zod';
 import { PRESENCE } from './presence.js';
@@ -51,18 +52,10 @@ const span = (from: string | undefined, to: string | undefined) => {
     end = at(to);
   return start !== undefined && end !== undefined && end >= start ? end - start : undefined;
 };
-const terminal = new Set([
-  'passed',
-  'failed',
-  'cancelled',
-  'interrupted',
-  'runner-unavailable',
-  'runner-budget-exhausted',
-]);
 
 /** Queue and run time per check run. Missing timestamps leave the matching duration out. */
 export function runTiming(run: CheckRun) {
-  const ended = terminal.has(run.status) ? run.endedAt : undefined;
+  const ended = checkTerminal(run.status) ? run.endedAt : undefined;
   // New runs record queuedAt; startedAt moves forward when the command actually spawns.
   const spawned = run.childPid !== undefined;
   const queuedMs = run.queuedAt ? span(run.queuedAt, spawned ? run.startedAt : ended) : undefined;
@@ -183,9 +176,9 @@ export function deriveMakingOf(input: MakingOfInput) {
       note(run.endedAt);
       const timing = runTiming(run),
         start = at(run.queuedAt ?? run.startedAt),
-        end = terminal.has(run.status) ? at(run.endedAt) : undefined;
+        end = checkTerminal(run.status) ? at(run.endedAt) : undefined;
       if (start !== undefined && end !== undefined && end >= start) waiting.push([start, end]);
-      timings.push({ finished: terminal.has(run.status), ...timing });
+      timings.push({ finished: checkTerminal(run.status), ...timing });
       return {
         runId: run.id,
         viewId: run.viewId,

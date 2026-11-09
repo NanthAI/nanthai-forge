@@ -3,6 +3,7 @@ import type { HostedLandingState, HostedLandingAttempt } from '../../../src/host
 import type { HostedCheckRun } from '../../../src/hosted-check';
 import type { HostedAcceptance } from '../../../src/hosted-acceptance';
 import type { Tone } from '../ui/status';
+import { landingStateOf, type LandingStateName } from '../../../src/landing-state';
 export type LandingRead = {
   request: HostedLandingState;
   attempt: HostedLandingAttempt;
@@ -18,6 +19,8 @@ export type LandingState = {
   label: string;
   tone: Tone;
   pending: boolean;
+  /** The shared landing state (src/landing-state.ts); null before any submission. */
+  state: LandingStateName | null;
   kind:
     | 'ready'
     | 'pending'
@@ -29,63 +32,56 @@ export type LandingState = {
     | 'cancelled'
     | 'rejected';
 };
-export function landingState(read?: LandingRead | null, superseded = false): LandingState {
-  const observation = read?.request.observation;
-  if (observation?.state === 'landed')
-    return { title: 'Landed', label: 'Accepted', tone: 'passed', pending: false, kind: 'landed' };
-  if (superseded || observation?.state === 'superseded')
-    return { title: 'Not landed', label: 'Superseded', tone: 'stale', pending: false, kind: 'superseded' };
-  if (!read) return { title: 'Your decision', label: 'Ready', tone: 'passed', pending: false, kind: 'ready' };
-  if (observation?.state === 'pending') {
-    const reason = observation.pendingReason;
+const kinds = {
+  queued: 'pending',
+  checking: 'pending',
+  'waiting-for-runner': 'pending',
+  landing: 'pending',
+  'held-review': 'pending',
+  'held-dependency': 'pending',
+  'held-main-red': 'pending',
+  landed: 'landed',
+  conflict: 'conflict',
+  'check-failed': 'check',
+  'not-run': 'not-run',
+  cancelled: 'cancelled',
+  'stale-head': 'rejected',
+  rejected: 'rejected',
+  superseded: 'superseded',
+  unknown: 'rejected',
+} as const satisfies Record<LandingStateName, LandingState['kind']>;
+/** The review page's reading of a submission: words, tone and state from the shared landing derive.
+ * Before any submission the pill is green "Ready" only with a passing check on this Candidate
+ * (web W5): a failed or missing check says so, and the person can still decide. */
+export function landingState(
+  read?: LandingRead | null,
+  superseded = false,
+  checkStatus?: string | null,
+): LandingState {
+  if (superseded && read?.request.observation.state !== 'landed')
     return {
-      title: 'Landing',
-      label:
-        reason === 'pending-infra'
-          ? 'Check waiting for a runner'
-          : reason === 'checking'
-            ? 'Checking'
-            : reason === 'waiting-for-review'
-              ? 'Waiting for review'
-              : read.request.phase === 'ready'
-                ? 'Landing'
-                : 'Queued',
-      tone:
-        reason === 'pending-infra'
-          ? 'stale'
-          : reason !== 'waiting-for-review' && (reason === 'checking' || read.request.phase === 'ready')
-            ? 'running'
-            : 'waiting',
-      pending: true,
-      kind: 'pending',
+      title: 'Not landed',
+      label: 'Superseded',
+      tone: 'stale',
+      pending: false,
+      kind: 'superseded',
+      state: 'superseded',
     };
+  if (!read) {
+    const label =
+      checkStatus === 'passed' ? 'Ready' : checkStatus === 'failed' ? 'Check failed' : 'Needs a check';
+    const tone = checkStatus === 'passed' ? 'passed' : checkStatus === 'failed' ? 'failed' : 'waiting';
+    return { title: 'Your decision', label, tone, pending: false, kind: 'ready', state: null };
   }
-  const cause = observation?.cause;
-  const kind =
-    cause === 'conflict' || read.request.error?.code === 'COMPOSITION_CONFLICT'
-      ? 'conflict'
-      : cause === 'check-failed' || read.request.error?.code === 'CHECK_FAILED'
-        ? 'check'
-        : cause === 'infra' || read.request.error?.code === 'CHECK_NOT_PASSED'
-          ? 'not-run'
-          : read.request.error?.code === 'LANDING_CANCELLED'
-            ? 'cancelled'
-            : 'rejected';
+  const view = landingStateOf(read.request);
+  const kind = kinds[view.state];
   return {
-    title: 'Not landed',
-    label:
-      kind === 'conflict'
-        ? 'Conflict'
-        : kind === 'check'
-          ? 'Check failed'
-          : kind === 'not-run'
-            ? 'Not run'
-            : kind === 'cancelled'
-              ? 'Cancelled'
-              : 'Not landed',
-    tone: kind === 'conflict' ? 'conflict' : kind === 'check' ? 'failed' : 'stale',
-    pending: false,
+    title: kind === 'landed' ? 'Landed' : view.pending ? 'Landing' : 'Not landed',
+    label: view.label,
+    tone: view.tone,
+    pending: view.pending,
     kind,
+    state: view.state,
   };
 }
 export function mainAncestryGate(input: {

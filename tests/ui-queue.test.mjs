@@ -58,15 +58,15 @@ test('state table distinguishes waiting, review, infrastructure, unknown outcome
     [
       ['queued', 'Queued', 'waiting'],
       ['checking', 'Checking', 'running'],
-      ['review', 'Ready', 'passed'],
-      ['machine', 'Waiting', 'waiting'],
+      ['review', 'Waiting for review', 'passed'],
+      ['machine', 'Waiting for a runner', 'waiting'],
       ['failed', 'Check failed', 'failed'],
       ['infra', 'Not run', 'plain'],
       ['unknown', 'Not run', 'plain'],
-      ['later', 'Later save', 'stale'],
-      ['landed', 'Done', 'plain'],
+      ['later', 'Superseded', 'stale'],
+      ['landed', 'Landed', 'passed'],
       ['dirty', 'Working', 'active'],
-      ['dependency', 'Waiting', 'waiting'],
+      ['dependency', 'Waiting for parent', 'waiting'],
     ],
   );
   assert.match(facts.get('dirty').text, /2 saves since · not submitted$/);
@@ -93,6 +93,20 @@ test('state table distinguishes waiting, review, infrastructure, unknown outcome
     assert.equal(shared.get(lane.id).text, lane.queue.text);
   for (const id of ['infra', 'unknown', 'later', 'dirty'])
     assert.equal(nextStep(lanes.find(lane => lane.id === id)).tone, 'plain');
+});
+
+// Landing machine 1 / web W2 (Issue 68361cd5): a stale-head or rejected ending fell to the default
+// "Not run · Check didn't run · recovery pending" in the cockpit while the review page said
+// "Not landed". Both read the shared derive now, with its next step.
+test('W2: stale-head and rejected endings read Not landed in the cockpit, not Not run', () => {
+  for (const cause of ['stale-head', 'rejected']) {
+    const { status } = fixture();
+    const lane = status.lanes.find(item => item.laneId === 'infra');
+    lane.submission = { ...lane.submission, cause };
+    const fact = queueFacts(status).get('infra');
+    assert.deepEqual([fact.state, fact.label, fact.landingState], ['not-landed', 'Not landed', cause]);
+    assert.ok(fact.step.body);
+  }
 });
 
 test('owner last event changes only the existing strip and never marks a Lane failed', t => {
@@ -315,5 +329,5 @@ test('the landing observation exposes the stalled step and owner while retaining
   assert.match(fact.text, /15 minutes at review.*reviewer/);
   assert.equal(fact.tip, review.stall.message);
   assert.equal(fact.step.body, 'Review summary');
-  assert.equal(fact.label, 'Ready');
+  assert.equal(fact.label, 'Waiting for review');
 });

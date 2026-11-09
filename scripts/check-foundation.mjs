@@ -13,6 +13,7 @@ import { candidateStepFindings } from './check-candidate-steps.mjs';
 import { spdxFindings } from './check-spdx.mjs';
 import { envPrintFindings } from './check-env-print.mjs';
 import { readBaseline, scanSet, testSignalFindings } from './check-test-signal.mjs';
+import { statusListFindings } from './check-status-lists.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const errors = [];
@@ -56,6 +57,7 @@ for (const file of files) {
     if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));
     errors.push(...recoveryAdviceFindings(path, source));
     errors.push(...spdxFindings(path.split(sep).join('/'), source));
+    errors.push(...statusListFindings(path.split(sep).join('/'), source));
   }
   if (
     ['.md', '.sh', '.yml', '.yaml', '.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'].includes(

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkFailedOrInfrastructure } from './check-run-state.js';
 import { checkFileSummary } from './check-file-summary.js';
 import { providerLogUrl } from './check-log-policy.js';
 import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
@@ -62,10 +63,7 @@ export const runReceipt = (run: CheckRun) => ({
   reuse: run.reusedFrom ? 'reused' : 'disabled',
   ...(run.reusedFrom ? { reusedFrom: run.reusedFrom, diagnostic: run.details } : {}),
   humanReview: 'separate',
-  ...(run.status === 'failed' ||
-  run.status === 'interrupted' ||
-  run.status === 'runner-unavailable' ||
-  run.status === 'runner-budget-exhausted'
+  ...(checkFailedOrInfrastructure(run.status)
     ? { diagnostic: run.details.slice(0, 500), diagnosticTruncated: run.details.length > 500 }
     : {}),
   logs: {

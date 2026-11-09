@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkFailedOrInfrastructure } from './check-run-state.js';
 import { runDetails } from './work-detail-store.js';
 import { digest } from './hash.js';
 import { diagnosticCause } from './landing-observation.js';
@@ -101,8 +102,7 @@ export function landingRepairNotices(store: WorkStore, laneId?: string): Conflic
       }
     }
     for (const node of batch.diagnosis?.nodes ?? []) {
-      if (!['failed', 'interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(node.status))
-        continue;
+      if (!checkFailedOrInfrastructure(node.status)) continue;
       const run = tx.find('runs', node.runId)?.record;
       if (!run || run.viewId !== node.viewId || run.head !== node.head) continue;
       add(

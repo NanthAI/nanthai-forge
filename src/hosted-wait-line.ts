@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { landingHold } from './hosted-landing-hold.js';
+import { landingStateOf, type LandingRecord } from './landing-state.js';
 type Json = Record<string, unknown>;
 const obj = (value: unknown): Json => (value && typeof value === 'object' ? (value as Json) : {});
 const scalar = (value: unknown) => value === null || ['string', 'number', 'boolean'].includes(typeof value);
@@ -37,6 +38,9 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       error: error.code,
       // Held for a person or a dependency (5c59940b): the reason (protected paths) and next step.
       hold: landingHold(submission as Parameters<typeof landingHold>[0]) ?? undefined,
+      // The shared state name (src/landing-state.ts); the line stays compact, so the word and next
+      // step ride on the full reply (and a hold's next step on `hold`).
+      landingState: e.submission ? landingStateOf(submission as LandingRecord).state : undefined,
       terminal: e.terminal,
       ok: e.ok,
     });

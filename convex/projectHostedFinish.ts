@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { supersededOutcome } from '../src/landing-state';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
@@ -116,11 +117,6 @@ export const inputs = query({
         const lane = hostedLaneSchema.parse(JSON.parse(row.value));
         const observation = progress?.observation;
         invariant(observation, 'SOURCE_UNAVAILABLE', 'Historical attempt evidence is unavailable.');
-        invariant(
-          observation.state !== 'superseded',
-          'SOURCE_UNAVAILABLE',
-          'A stored outcome cannot erase the actual submission result.',
-        );
         entries.push({
           submissionId: state.id,
           operationId: state.operationId,
@@ -132,7 +128,16 @@ export const inputs = query({
           attemptId: attempt.id,
           error: progress?.error ?? null,
           acceptance: progress?.acceptance ?? null,
-          ...sourceSubmission({ ...observation, state: observation.state }, lane.head, pin.head),
+          // A superseded or withdrawn landing stores `superseded` as its outcome (B1): present it,
+          // never fail the page read.
+          ...(observation.state === 'superseded'
+            ? {
+                ...sourceSubmission(supersededOutcome, lane.head, pin.head),
+                state: 'superseded' as const,
+                terminal: true,
+                complete: false,
+              }
+            : sourceSubmission({ ...observation, state: observation.state }, lane.head, pin.head)),
         });
       }
       return canonicalPayload({

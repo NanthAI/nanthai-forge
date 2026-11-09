@@ -94,12 +94,18 @@ export function LandingProgress({
         <li className={run ? '' : 'pending'}>
           <span className="fx-gate-icon">
             <Glyph
-              name={run?.status === 'passed' ? 'passed' : state.tone === 'stale' ? 'stale' : 'running'}
+              name={
+                run?.status === 'passed'
+                  ? 'passed'
+                  : state.state === 'waiting-for-runner'
+                    ? 'stale'
+                    : 'running'
+              }
               size={11}
             />
           </span>
           <div>
-            <b>{state.label === 'Check waiting for a runner' ? state.label : 'Checking'}</b>
+            <b>{state.state === 'waiting-for-runner' ? state.label : 'Checking'}</b>
             {read.pendingAttempt && (
               <p>
                 main moved · recomposing <span className="fx-auto">auto</span>
@@ -113,7 +119,7 @@ export function LandingProgress({
             {run?.configuration.provider === 'github-actions' && run.configuration.publicLogs && (
               <p>Check logs are public in {run.configuration.repository}</p>
             )}
-            {state.tone === 'stale' && (
+            {state.state === 'waiting-for-runner' && (
               <>
                 <p>
                   {run?.configuration.provider === 'github-actions' ? 'GitHub-hosted · ' : ''}no runner has
@@ -124,6 +130,11 @@ export function LandingProgress({
             )}
             {request.observation.pendingReason === 'waiting-for-review' && (
               <p>{request.error?.message ?? 'Waiting for review'}</p>
+            )}
+            {state.state === 'held-main-red' && (
+              <p>
+                {state.label} · {request.error?.message ?? ''} Resumes by itself when main is green.
+              </p>
             )}
             {request.observation.pendingReason === 'waiting-for-dependency' && (
               <p>Waiting for the selected dependency to land</p>

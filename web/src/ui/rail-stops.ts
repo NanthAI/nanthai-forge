@@ -41,7 +41,7 @@ export function railStops(lane: RailInput): RailStops {
       segments: ['on', 'on', 'off', 'off'],
       title: 'edited, saved; check superseded by a later Candidate',
     };
-  if (lane.queue?.state === 'not-run' || lane.queue?.historical)
+  if (lane.queue?.state === 'not-run' || lane.queue?.state === 'not-landed' || lane.queue?.historical)
     return { segments: ['on', 'on', 'off', 'off'], title: 'edited, saved; check not run' };
   if (lane.runStatus && FAILED.has(lane.runStatus))
     return {

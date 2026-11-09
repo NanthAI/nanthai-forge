@@ -20,7 +20,7 @@ for (const name of variants)
       '02-accepting': '3 of 8 shards',
       '02b-behind': 'waits for Candidate 3',
       '02c-landing': 'Land on main',
-      '02d-runner': 'Check waiting for a runner',
+      '02d-runner': 'Waiting for a runner',
       '03-landed': 'Landed',
       '04-failed': 'verify failed · exit 1',
       '04b-conflict': 'Resolve in Lane',
@@ -60,12 +60,63 @@ test('all pending observation reasons and terminal causes share the header model
     const state = landingState(landingRead(reason));
     assert.equal(state.title, 'Landing');
     assert.equal(state.pending, true);
-    if (reason === 'pending-infra') assert.equal(state.tone, 'stale');
+    if (reason === 'pending-infra') assert.equal(state.state, 'waiting-for-runner');
   }
   assert.equal(landingState(landingRead('landing')).label, 'Landing');
   assert.equal(landingState(variantProps('04b-conflict').read).tone, 'conflict');
-  assert.equal(landingState(variantProps('04c-not-run').read).tone, 'stale');
-  assert.equal(landingState(variantProps('03-landed').read).label, 'Accepted');
+  assert.equal(landingState(variantProps('04c-not-run').read).kind, 'not-run');
+  assert.equal(landingState(variantProps('03-landed').read).label, 'Landed');
+});
+// Landing machine 1 B2 (Issue 68361cd5): a ready entry parked by the main-red gate (observation
+// queued + MAIN_RED) read "Landing" with a running tone while nothing moved.
+test('landing B2: a main-red hold reads as held with its next step, not Landing', () => {
+  const read = landingRead('landing');
+  read.request.error = {
+    code: 'MAIN_RED',
+    message: 'Main audit is red; contract acceptance resumes when main is green.',
+  };
+  const state = landingState(read);
+  assert.equal(state.state, 'held-main-red');
+  assert.equal(state.label, 'Held: main is red');
+  assert.notEqual(state.tone, 'running');
+  assert.equal(state.pending, true);
+  const html = render(h(LandingDecision, { ...variantProps('02c-landing'), read }));
+  assert.match(html, /Held: main is red/);
+});
+// Landing machine 1 (W2): stale-head and policy rejection used different words in the cockpit
+// ("Not run · recovery pending") and the review page ("Not landed"). Both now say "Not landed".
+test('landing W2: stale-head and rejected endings read Not landed on the review page and the cockpit', async () => {
+  const { landingStateOf } = await import('../dist/landing-state.js');
+  for (const [cause, code, state] of [
+    ['stale-head', 'LANDING_SUPERSEDED', 'stale-head'],
+    ['rejected', 'REVIEW_DECLINED', 'rejected'],
+  ]) {
+    const read = landingRead('checking');
+    read.request.phase = 'terminal-failed';
+    read.request.observation = { state: 'terminal-failed', pendingReason: null, cause };
+    read.request.error = { code, message: 'ended' };
+    assert.equal(landingState(read).label, 'Not landed');
+    assert.equal(landingStateOf(read.request).state, state);
+    // The projection shape the cockpit reads gives the same word and state.
+    const projected = landingStateOf({ state: 'terminal-failed', pendingReason: null, cause });
+    assert.deepEqual([projected.state, projected.label], [state, 'Not landed']);
+  }
+});
+// Web W5 (Issue 68361cd5): with no submission the review pill was a green "Ready" even when this
+// Candidate's own check failed or was missing.
+test('review pill W5: green Ready only with a passing check before any submission', () => {
+  assert.deepEqual(
+    ['passed', 'failed', null, 'running'].map(status => {
+      const state = landingState(null, false, status);
+      return [state.label, state.tone, state.kind];
+    }),
+    [
+      ['Ready', 'passed', 'ready'],
+      ['Check failed', 'failed', 'ready'],
+      ['Needs a check', 'waiting', 'ready'],
+      ['Needs a check', 'waiting', 'ready'],
+    ],
+  );
 });
 test('legacy review decision modules and their production callers are deleted', () => {
   for (const file of ['OwnerDecision.tsx', 'owner-decision-model.ts', 'RevertAcceptance.tsx'])

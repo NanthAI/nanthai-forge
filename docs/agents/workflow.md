@@ -1577,6 +1577,22 @@ order with `position:null` and `hold`, counts them in `held`, and never makes on
 predecessor; `yourLane` shows the hold. `status {laneId}` shows `local.landingHold`,
 the hold this machine's last `land` or `wait` saw (one local file, no call). A review
 hold does not time out and an agent cannot release it: tell the owner, or withdraw.
+A landing parked because main's full check is red (`MAIN_RED`) is the `main-red`
+hold: `land`/`wait` print `HELD: MAIN IS RED`, `queue` shows it with
+`position:null` (no queue position while held) and counts it in `held`. It resumes
+by itself when main is green again; nothing to do in the Lane, never withdraw.
+
+Every `land`, `wait` and `finish` reply, `queue` entry and native `wait`
+submission also carries `landingState {state,label,nextStep}` (additive; existing
+fields are unchanged); the compact wait line carries only the state name as
+`landingState`. `state` is one of `queued`, `checking`,
+`waiting-for-runner`, `landing`, `held-review`, `held-dependency`, `held-main-red`,
+`landed`, `conflict`, `check-failed`, `not-run`, `cancelled`, `stale-head`,
+`rejected`, `superseded` or `unknown`; `label` is the word the web shows for the
+same state (stale-head and rejected both read `Not landed`) and `nextStep` the same
+sentence. `finish {stage:"inputs"}` on a superseded or withdrawn landing returns its
+entry with `state:"superseded"` (outcome `terminal-failed`, cause `stale-head`)
+instead of failing.
 
 Every JSON event/summary has a `cursor`. Reconnect with the last cursor and same
 owner/targets to suppress unchanged observations; terminal states remain in the

@@ -4,7 +4,8 @@
  * protected-path landing sat in phase "ready" for 75+ min while every read said "queued to
  * land" and the queue dropped it, so the builder cancelled it as stranded. */
 export type LandingHold = {
-  kind: 'review' | 'dependency';
+  /** `main-red`: the gate parked a ready entry until main's full check is green (B2/B3). */
+  kind: 'review' | 'dependency' | 'main-red';
   /** The server's stored reason, verbatim (it names the protected paths). */
   reason: string;
   /** Protected paths named by the reason; null when the reason names none. */
@@ -23,6 +24,14 @@ const PATHS = /protected paths:? (.+?)\s*(?:;|$)/;
 /** Derived from the submission already in hand: no read, no call. */
 export function landingHold(state: HoldInput | null | undefined, laneId?: string): LandingHold | null {
   const reason = state?.observation?.state === 'pending' ? state.observation.pendingReason : undefined;
+  // Stored with a queued observation, so only the code says it is parked (inventory B3).
+  if (state?.observation?.state === 'pending' && state.error?.code === 'MAIN_RED')
+    return {
+      kind: 'main-red',
+      reason: state.error.message?.trim() || "Main's full check is red",
+      paths: null,
+      next: "Held while main's full check is red; it resumes by itself when main is green again (no queue position meanwhile). Nothing to do in this Lane: fixing main releases it. Keep waiting.",
+    };
   if (reason === 'waiting-for-review') {
     const stored = state?.error?.message?.trim() || 'Waiting for review by a person';
     const named = PATHS.exec(stored)?.[1];
@@ -49,8 +58,13 @@ export function landingHold(state: HoldInput | null | undefined, laneId?: string
   return null;
 }
 
+const holdWords = {
+  review: 'WAITING FOR REVIEW',
+  dependency: 'WAITING FOR DEPENDENCY',
+  'main-red': 'HELD: MAIN IS RED',
+} as const satisfies Record<LandingHold['kind'], string>;
 /** The two lines a waiting agent reads: what holds it (verbatim reason) and the next step. */
 export const holdLines = (hold: LandingHold) => [
-  `${hold.kind === 'review' ? 'WAITING FOR REVIEW' : 'WAITING FOR DEPENDENCY'}; not landed yet: ${hold.reason.replace(/\s+/g, ' ').slice(0, 900)}`,
+  `${holdWords[hold.kind]}; not landed yet: ${hold.reason.replace(/\s+/g, ' ').slice(0, 900)}`,
   hold.next,
 ];

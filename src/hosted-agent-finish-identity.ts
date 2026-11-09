@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal } from './check-run-state.js';
 import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
 import {
   assertNoConflictMarkers,
@@ -188,7 +189,7 @@ export async function selectHostedFinish(
     try {
       const observed = await observe(prior.operationId, run?.id);
       return observed.status
-        ? ['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted'].includes(observed.status)
+        ? checkTerminal(observed.status)
         : Boolean(observed.submission && observed.submission.observation?.state !== 'pending');
     } catch (error) {
       // A hosted read throws the server's code inside ConvexError data, not on the error itself.

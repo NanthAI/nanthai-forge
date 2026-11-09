@@ -180,3 +180,94 @@ test('replayed or non-authoritative empty lookups do not authorize recovery and 
   fake.dispatch = async () => ({ status: 'rejected' });
   assert.equal((await dispatchHostedCheck(store, fake, p.owner)).status, 'unknown');
 });
+
+// Checks machine 1 (Issue 68361cd5): stored `unknown` meant four things, all read as "still
+// checking": a lost dispatch reply, a refused (rate-limited) dispatch, a controller that could not
+// confirm after recovery, and a pass with shards still unreported. Each is its own state now,
+// never success, failure or running; runner-* results are "Not run".
+test('checks machine 1: every recorded run reads as one named state with a next step', async () => {
+  const { checkRunState, checkRunStatuses } = await import('../dist/check-run-state.js');
+  const rows = [
+    [{ status: 'unknown', actions: { outcome: 'unknown' }, executionId: null }, 'dispatch-unconfirmed'],
+    [{ status: 'unknown', actions: { outcome: 'rejected' }, executionId: null }, 'dispatch-refused'],
+    [{ status: 'unknown', executionId: null, recoveryUsed: true }, 'recovery-unconfirmed'],
+    [{ status: 'unknown', executionId: null, recoveryUsed: false }, 'dispatch-unconfirmed'],
+    [{ status: 'unknown', actions: { outcome: 'accepted' }, executionId: 'run-1' }, 'shards-unconfirmed'],
+    [{ status: 'running', actions: { outcome: 'accepted', verdictPending: true } }, 'awaiting-verdict'],
+    [{ status: 'running' }, 'running'],
+    [{ status: 'runner-unavailable' }, 'runner-unavailable'],
+    [{ status: 'runner-budget-exhausted' }, 'runner-budget-exhausted'],
+    [{ status: 'something-new' }, 'unknown'],
+  ];
+  const views = rows.map(([run]) => checkRunState(run));
+  assert.deepEqual(
+    views.map(view => view.state),
+    rows.map(([, state]) => state),
+  );
+  for (const view of views.slice(0, 5)) {
+    assert.equal(view.terminal, false);
+    assert.notEqual(view.tone, 'running');
+    assert.notEqual(view.tone, 'passed');
+    assert.notEqual(view.tone, 'failed');
+  }
+  // The four unknowns tell an agent four different things.
+  assert.equal(new Set(views.slice(0, 5).map(view => view.nextStep)).size, 4);
+  for (const status of ['runner-unavailable', 'runner-budget-exhausted'])
+    assert.deepEqual(
+      [checkRunState({ status }).label, checkRunState({ status }).terminal],
+      ['Not run', true],
+    );
+  for (const status of checkRunStatuses) assert.ok(checkRunState({ status }).nextStep);
+});
+
+// The predicates keep each caller's previous member list (no silent unification).
+test('checks machine 1: named predicates keep the hand-list memberships they replaced', async () => {
+  const m = await import('../dist/check-run-state.js');
+  const pick = predicate => m.checkRunStatuses.filter(predicate);
+  assert.deepEqual(pick(m.checkTerminal), [
+    'passed',
+    'failed',
+    'cancelled',
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+  ]);
+  assert.deepEqual(pick(m.checkActive), ['queued', 'preparing', 'running']);
+  assert.deepEqual(pick(m.checkInfrastructure), [
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+  ]);
+  assert.deepEqual(pick(m.checkNeverRan), ['runner-unavailable', 'runner-budget-exhausted']);
+  assert.deepEqual(pick(m.checkUnsuccessful), [
+    'failed',
+    'cancelled',
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+  ]);
+  assert.deepEqual(pick(m.checkFailedOrInfrastructure), [
+    'failed',
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+  ]);
+});
+
+// Build guard: a new hand-written runner-* status list outside src/check-run-state.ts fails check.
+test('checks machine 1: the status-list guard flags hand lists and passes writers', async () => {
+  const { statusListFindings } = await import('../scripts/check-status-lists.mjs');
+  assert.equal(
+    statusListFindings('src/x.ts', "if (['failed', 'runner-unavailable'].includes(run.status)) return;")
+      .length,
+    1,
+  );
+  assert.equal(
+    statusListFindings('web/src/x.ts', "const s = new Set(['runner-budget-exhausted']);").length,
+    1,
+  );
+  assert.equal(statusListFindings('convex/x.ts', "if (run.status === 'runner-unavailable') {}").length, 1);
+  assert.deepEqual(statusListFindings('convex/x.ts', "run.status = 'runner-unavailable';"), []);
+  assert.deepEqual(statusListFindings('src/check-run-state.ts', "new Set(['runner-unavailable'])"), []);
+  assert.deepEqual(statusListFindings('tests/x.mjs', "['runner-unavailable'].includes(s)"), []);
+});

@@ -114,7 +114,6 @@ export function HostedReview({
     story?.accepted.filter(move => move.channel === 'main' && move.head === view.head).at(-1) ??
     channels.find(move => move.viewId === view.id && move.channel === 'main' && move.head === view.head);
   const superseded = !acceptance && story?.status === 'superseded';
-  const decision = landingState(landing.read, superseded);
   const policy = useQuery(api.projectAutonomy.read, { projectId });
   const claims = useQuery(api.projectCoordinationReads.claims, { projectId });
   const overlaps = new Map<string, string[]>();
@@ -138,6 +137,8 @@ export function HostedReview({
         .sort((a, b) => a.startedAt.localeCompare(b.startedAt))
         .at(-1);
   const passed = run?.status === 'passed';
+  // The pill claims no more than the check gate below it (W5): green Ready needs a passing check.
+  const decision = landingState(landing.read, superseded, run?.status ?? null);
   const [feedbackSent, setFeedbackSent] = useState(false);
   const working = feedbackWorking(feedbackSent, view.inputs, lanes);
   const coordination = useCoordination(projectId);

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkNeverRan } from './check-run-state.js';
 import { localActor } from './work-actor.js';
 import { processAlive, processIdentity } from './local-process.js';
 import { randomUUID } from 'node:crypto';
@@ -25,9 +26,7 @@ function terminal(data: WorkData, run: PlaybookRun): PlaybookRun['status'] | und
   if (steps.some(s => s && !s.endedAt)) return;
   if (run.cancelRequested || steps.some(s => s?.status === 'cancelled')) return 'cancelled';
   if (steps.some(s => s?.status === 'interrupted')) return 'interrupted';
-  const unavailable = steps.find(
-    s => s?.status === 'runner-unavailable' || s?.status === 'runner-budget-exhausted',
-  );
+  const unavailable = steps.find(s => s && checkNeverRan(s.status));
   if (unavailable) return unavailable.status as PlaybookRun['status'];
   const failed = steps.some(s => s?.status === 'failed');
   if (failed && run.onFailure === 'stop') return 'failed';

@@ -2,6 +2,7 @@
 import { readLaneSubmissions } from './landing-submission-read.js';
 import { submissionOutcome, type Submission } from './landing-submission.js';
 import { finishChild } from './agent-finish-journal.js';
+import { landingStateField } from './landing-state.js';
 import { activeCheck, waitJson, type WaitEvent } from './agent-wait-run.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
@@ -125,6 +126,8 @@ export function waitSubmissions(
     }
     return {
       ...submission,
+      // The same state word and next step the web and hosted replies show (src/landing-state.ts).
+      landingState: landingStateField(submission),
       type: 'submission' as const,
       id: submission.submissionId,
       status: submission.state,

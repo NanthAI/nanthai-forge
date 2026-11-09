@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { providerLogUrl } from './check-log-policy.js';
+import { checkActive, checkInfrastructure } from './check-run-state.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { runWork } from './work-run.js';
 import { ForgeError } from './errors.js';
@@ -21,9 +22,8 @@ export type WaitEvent = {
   ok: boolean;
   [key: string]: unknown;
 };
-export const activeCheck = (status: string) => ['queued', 'preparing', 'running'].includes(status);
-export const infrastructure = (status: string) =>
-  ['interrupted', 'runner-unavailable', 'runner-budget-exhausted'].includes(status);
+export const activeCheck = checkActive;
+export const infrastructure = checkInfrastructure;
 export function waitJson(store: WorkStore, path: string): unknown {
   const bytes = readSource(store.directory, path, 4 * 1024 * 1024);
   if (!bytes) return undefined;

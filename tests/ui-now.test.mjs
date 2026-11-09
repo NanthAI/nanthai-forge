@@ -1000,6 +1000,60 @@ test('failed main audit stays in Needs you after completion and until a newer pa
   assert.equal(attention.mainCheckDecisions([failed, { ...running, status: 'passed' }]).length, 0);
 });
 
+// Web W13 (Issue 68361cd5): a later main run that never started (no runner, no budget) replaced
+// the red full check as "latest" and then dropped out, so the red result left Needs you.
+test('W13: a later runner-unavailable main run never hides an earlier red full check', () => {
+  const failed = {
+    id: 'red-main',
+    viewId: 'main-view',
+    status: 'failed',
+    startedAt: '2026-10-15T10:00:00Z',
+    endedAt: '2026-10-15T10:01:00Z',
+    mainCheck: { channel: 'main' },
+  };
+  for (const status of ['runner-unavailable', 'runner-budget-exhausted']) {
+    const later = { ...failed, id: `later-${status}`, status, startedAt: '2026-10-15T11:00:00Z' };
+    assert.deepEqual(
+      attention.mainCheckDecisions([failed, later]).map(item => item.runId),
+      ['red-main'],
+    );
+  }
+});
+
+// Web W1 (Issue 68361cd5): a Lane whose latest run never started read "Working · N saves", and a
+// Lane still being created read "Working · No saved changes yet".
+test('W1: runner-* runs read Not run and a creating Lane reads Starting, never Working', async () => {
+  const { cockpitLanes } = await import(moduleUrl('../web/src/cockpit/model.ts'));
+  const records = status => ({
+    intents: [{ id: 'i', outcome: 'Fix it' }],
+    lanes: [
+      { id: 'l', intentId: 'i', name: 'Fix it', head: 'h', base: 'b', state: 'active', checkpoints: [] },
+    ],
+    views: [
+      {
+        id: 'v',
+        intentId: 'i',
+        head: 'h',
+        base: 'b',
+        status: 'ready',
+        at: '2026-10-15T12:00:00Z',
+        inputs: [{ laneId: 'l', head: 'h' }],
+      },
+    ],
+    runs: [{ id: 'r', viewId: 'v', status }],
+  });
+  for (const status of ['runner-unavailable', 'runner-budget-exhausted']) {
+    const [lane] = cockpitLanes(records(status));
+    assert.deepEqual([lane.label, lane.tone], ['Not run', 'plain']);
+    assert.match(lane.fact, /^Check not run/);
+  }
+  const creating = records('passed');
+  creating.lanes[0].state = 'creating';
+  creating.runs = [];
+  const [lane] = cockpitLanes(creating);
+  assert.deepEqual([lane.label, lane.tone], ['Starting', 'waiting']);
+});
+
 test('Accepted today names pinned View dependencies without guessing mismatched heads', () => {
   const input = {
     moves: [

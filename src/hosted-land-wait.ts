@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal } from './check-run-state.js';
 import { shellQuote } from './agent-brief-render.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';
 import { preparingFinishSource, retryableFinishSource } from './hosted-agent-finish-result.js';
-
-const runDone = new Set(['passed', 'failed', 'cancelled', 'runner-unavailable', 'interrupted']);
 
 /** The single command that resumes the existing selected-target observer without
  * polling. Formatting adds no reads. Undefined once the outcome is final. */
@@ -19,7 +18,7 @@ export function landWaitContinuation(root: string, response: HostedAgentResponse
   if ((result as { syncRequired?: unknown }).syncRequired) return undefined;
   const wait =
     result.phase === 'check' && result.run?.id
-      ? runDone.has(result.run.status ?? '')
+      ? checkTerminal(result.run.status ?? '')
         ? null
         : { runId: result.run.id }
       : response.operationId &&

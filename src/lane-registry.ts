@@ -25,12 +25,12 @@ export const laneRegistryEntrySchema = z.object({
   agent: z.string().max(64).nullable().optional(),
   /** The Forge command this machine is running in the Lane now; a dead pid means it is stale. */
   running: z.object({ action: z.string(), pid: z.number(), since: z.number() }).nullable().optional(),
-  /** The landing hold (review or dependency) a wait or land on this machine last observed (5c59940b);
+  /** The landing hold (review, dependency or main-red) a wait or land on this machine last observed (5c59940b);
    * null once that landing was seen unheld or terminal. Advisory: the server state decides. */
   hold: z
     .object({
       operationId: z.string(),
-      kind: z.enum(['review', 'dependency']),
+      kind: z.enum(['review', 'dependency', 'main-red']),
       reason: z.string(),
       paths: z.array(z.string()).nullable(),
       next: z.string(),

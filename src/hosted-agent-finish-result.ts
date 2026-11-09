@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
+import { landingStateField, type LandingRecord } from './landing-state.js';
 import { shellQuote } from './agent-brief-render.js';
 import { operationWait } from './agent-operation-wait.js';
 import { landingHold } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 type Reply = Record<string, unknown>;
-const failedRuns = new Set(['failed', 'cancelled', 'runner-unavailable', 'interrupted']);
 
 /** A retryable compose child needs the retained public finish recovery. */
 export function retryableFinishSource(result: Reply) {
@@ -45,7 +46,7 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
     | { operationId?: string; error?: { code?: string }; observation?: { state?: string }; phase?: string }
     | undefined;
   const run = result.run as { id?: string; status?: string } | undefined;
-  if (result.phase === 'check' && run?.id && !['passed', ...failedRuns].includes(run.status ?? ''))
+  if (result.phase === 'check' && run?.id && !checkTerminal(run.status ?? ''))
     return { ...result, ...operationWait(root, { runId: run.id }) };
   // Main already took files this queued entry changes (f7539ebb): the recovery is the same Lane's
   // land --save, never another wait on this operation.
@@ -80,8 +81,29 @@ export function hostedObservationContinuation(root: string, result: Reply, opera
   };
 }
 
-/** Normalize only already-observed outcomes. No source, journal, transport or clock access. */
+/** Normalize only already-observed outcomes. No source, journal, transport or clock access. A
+ * normalized reply with a submission gains `landingState` {state, label, nextStep} (src/landing-state.ts). */
 export function normalizeHostedFinishResult(root: string, selection: Reply, result: Reply): Reply {
+  const normalized = normalizeObservedFinish(root, selection, result);
+  // A reply left untouched (a source step still being retried) keeps its identity: callers use it
+  // to tell source recovery from wait advice, and add the field themselves.
+  return normalized === result ? result : withFinishLandingState(selection, result, normalized);
+}
+/** Add `landingState` from `result.submission` to `reply` (default `result`); unchanged without one. */
+export function withFinishLandingState(selection: Reply, result: Reply, reply: Reply = result): Reply {
+  const submission = result.submission as LandingRecord | undefined;
+  if (!submission || typeof submission !== 'object') return reply;
+  const replay = result.replayParameters as { laneId?: unknown } | undefined;
+  const laneId =
+    typeof replay?.laneId === 'string'
+      ? replay.laneId
+      : typeof selection.laneId === 'string'
+        ? selection.laneId
+        : undefined;
+  return { ...reply, landingState: landingStateField(submission, laneId) };
+}
+/** Identity-preserving: returns `result` itself when nothing was observed to normalize. */
+export function normalizeObservedFinish(root: string, selection: Reply, result: Reply): Reply {
   const submission = result.submission as
     | { phase?: string; observation?: { state?: string }; error?: { code?: string } }
     | undefined;
@@ -91,7 +113,7 @@ export function normalizeHostedFinishResult(root: string, selection: Reply, resu
   const failed = submission
     ? state === 'terminal-failed'
     : run
-      ? failedRuns.has(run.status ?? '')
+      ? checkUnsuccessful(run.status ?? '')
       : progress?.status === 'failed' || progress?.outcome?.status === 'failed';
   const settled =
     result.phase === 'conflict' ||

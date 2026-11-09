@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkNeverRan } from './check-run-state.js';
 import { frictionId, appendFriction } from './friction.js';
 import { pageHashes, pageSize } from './work-records.js';
 import { digest } from './hash.js';
@@ -54,10 +55,7 @@ function appendAutomatic(tx: WorkRecordTransaction, event: FrictionCapture) {
 }
 function runOccurrence(run: CheckRun): Occurrence | undefined {
   const interrupted = run.status === 'interrupted';
-  const infrastructure =
-    run.status === 'runner-unavailable' ||
-    run.status === 'runner-budget-exhausted' ||
-    (run.status === 'failed' && !!run.error);
+  const infrastructure = checkNeverRan(run.status) || (run.status === 'failed' && !!run.error);
   if (!interrupted && !infrastructure) return;
   return {
     operationId: run.id,

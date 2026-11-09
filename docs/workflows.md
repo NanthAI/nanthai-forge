@@ -156,7 +156,8 @@ recovery never guesses and never loses code:
 
 While main is red no change lands on its first check (recheck reason
 `main-red`). A contract attempt ready during red main waits with `MAIN_RED` and
-releases the queue without polling. Full-gated fixes continue. Green main
+releases the queue without polling; readers show it as `Held: main is red` with
+no queue position. Full-gated fixes continue. Green main
 releases held attempts through the audit's event-driven wake. First-check and
 rechecked landings carry the same receipt and CAS; the receipt's `firstCheck`
 field says which path each took.

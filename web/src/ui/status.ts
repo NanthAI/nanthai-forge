@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PRESENCE, presenceState } from '../../../src/presence';
+import { checkRunState, checkRunStatuses } from '../../../src/check-run-state';
 /** Visual status vocabulary shared by every cockpit surface. Colour is always paired with a glyph. */
 export type Tone = 'active' | 'waiting' | 'stale' | 'conflict' | 'passed' | 'failed' | 'running' | 'plain';
 
@@ -97,16 +98,20 @@ export function shortHash(value: string | undefined, length = 7): string {
   return value ? value.slice(0, length) : '';
 }
 
-/** Only live check states animate. Terminal and unknown states remain static. */
+/** Only live check states animate. Terminal and unknown states remain static. Run statuses read
+ * through the shared check-run vocabulary; other words (a superseded record, a local report
+ * `error`) keep their capitalised word. */
 export function checkStatus(status: string): {
-  tone: 'passed' | 'failed' | 'running' | 'waiting' | 'plain';
-  glyph: 'passed' | 'failed' | 'running' | 'waiting' | 'plain';
+  tone: 'passed' | 'failed' | 'running' | 'waiting' | 'stale' | 'plain';
+  glyph: 'passed' | 'failed' | 'running' | 'waiting' | 'stale' | 'plain';
   label: string;
 } {
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
-  if (status === 'passed') return { tone: 'passed', glyph: 'passed', label };
-  if (status === 'failed') return { tone: 'failed', glyph: 'failed', label };
-  if (status === 'queued') return { tone: 'waiting', label: 'Queued', glyph: 'waiting' };
-  if (['preparing', 'running'].includes(status)) return { tone: 'running', glyph: 'running', label };
-  return { tone: 'plain', glyph: 'plain', label };
+  if (!(checkRunStatuses as readonly string[]).includes(status)) {
+    const label = status.charAt(0).toUpperCase() + status.slice(1);
+    return { tone: 'plain', glyph: 'plain', label };
+  }
+  const view = checkRunState({ status });
+  // Check runs never read as Working or Conflict; those tones belong to Lanes.
+  const tone = view.tone === 'active' || view.tone === 'conflict' ? 'plain' : view.tone;
+  return { tone, glyph: tone, label: view.label };
 }

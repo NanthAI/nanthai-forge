@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkActive, checkNeverRan } from './check-run-state.js';
 import { pendingActionsInfra } from './github-actions-infra.js';
 import { staleLandingResult } from './landing-stale.js';
 import { admitFinish } from './landing-admission.js';
@@ -327,10 +328,8 @@ class FinishRunner {
         phase: 'check',
         status: pendingActionsInfra(run) ? 'pending-infra' : run.status,
         ...(pendingActionsInfra(run) ? { code: run.error!.code, message: run.error!.message } : {}),
-        ...(['runner-unavailable', 'runner-budget-exhausted'].includes(run.status)
-          ? { retryable: true, message: run.details }
-          : {}),
-        terminal: !pendingActionsInfra(run) && !['queued', 'preparing', 'running'].includes(run.status),
+        ...(checkNeverRan(run.status) ? { retryable: true, message: run.details } : {}),
+        terminal: !pendingActionsInfra(run) && !checkActive(run.status),
         complete: run.status === 'passed',
       });
     return undefined;

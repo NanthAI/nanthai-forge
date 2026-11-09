@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkUnsuccessful } from '../../../src/check-run-state';
+import { landingStateOf, type LandingStateName } from '../../../src/landing-state';
 import { hostedHref } from './hosted-links';
 import { pendingStatus, type PendingData, type PendingStatus } from '../../../src/pending-status';
 import type { ConflictNotice } from '../../../src/agent-conflict-notice';
@@ -38,7 +40,10 @@ export type QueueFact = {
     | 'not-run'
     | 'later'
     | 'landed'
+    | 'not-landed'
     | 'working';
+  /** The shared landing state (src/landing-state.ts) this fact renders. */
+  landingState: LandingStateName;
   meta?: string;
   candidateMeta?: string;
   viewId?: string;
@@ -102,7 +107,10 @@ export function queueFacts(
         notice.evidence?.some(item => item.kind === 'check' && item.runId === run?.id),
     );
     const handoff = handoffs.get(lane.laneId) ?? lane.handoff;
+    // Words and tone come from the shared landing derive; this adapter adds times, links and steps.
+    const view = landingStateOf(submission);
     const fact: QueueFact = {
+      landingState: view.state,
       laneId: lane.laneId,
       head: lane.head,
       intentId: lane.intentId,
@@ -132,8 +140,8 @@ export function queueFacts(
     } else if (submission.state === 'superseded') {
       Object.assign(fact, {
         state: 'later',
-        tone: 'stale',
-        label: 'Later save',
+        tone: view.tone,
+        label: view.label,
         text: `Saved again after check ${run?.status ?? 'not recorded'} on ${short(submission.attemptHead)} · earlier outcome kept`,
         meta: `later save · ${short(submission.attemptHead)} kept`,
         candidateMeta: 'later save kept',
@@ -142,7 +150,8 @@ export function queueFacts(
     } else if (submission.state === 'landed') {
       Object.assign(fact, {
         state: 'landed',
-        label: 'Done',
+        tone: view.tone,
+        label: view.label,
         text: `Landed on main${entry?.move?.automatic ? ' · accepted by auto' : ''}`,
         meta: `landed ${clock(entry?.move?.at)} · ${short(submission.attemptHead)}`,
         candidateMeta: `landed ${clock(entry?.move?.at)}`,
@@ -156,8 +165,8 @@ export function queueFacts(
         case 'queued': {
           Object.assign(fact, {
             state: 'queued',
-            tone: 'waiting',
-            label: 'Queued',
+            tone: view.tone,
+            label: view.label,
             text: `In the landing queue${at ? ` · since ${clock(at)}` : ''}`,
             meta: at ? `queued ${clock(at)}` : undefined,
             candidateMeta: at ? `queued ${clock(at)}` : undefined,
@@ -174,8 +183,8 @@ export function queueFacts(
         case 'checking':
           Object.assign(fact, {
             state: 'checking',
-            tone: 'running',
-            label: 'Checking',
+            tone: view.tone,
+            label: view.label,
             text: `${check} running${run?.startedAt ? ` · started ${clock(run.startedAt)}` : ''}`,
             meta: `in check ${clock(run?.startedAt)}`,
             step: {
@@ -189,8 +198,10 @@ export function queueFacts(
         case 'waiting-for-review':
           Object.assign(fact, {
             state: 'review',
+            // Cockpit readers (attention, now, LaneRow, brief) key "ready for your review" on the
+            // passed tone; keep it until SM-B moves them off tone-as-key.
             tone: 'passed',
-            label: 'Ready',
+            label: view.label,
             text: `${check} passed · waiting for a person`,
             meta: at ? `queued ${clock(at)}` : undefined,
             step: {
@@ -204,8 +215,8 @@ export function queueFacts(
         case 'waiting-for-dependency':
           Object.assign(fact, {
             state: 'dependency',
-            tone: 'waiting',
-            label: 'Waiting',
+            tone: view.tone,
+            label: view.label,
             text: lane.stackParent
               ? `Waiting for parent Lane «${lane.stackParent.name}» to land`
               : (lane.stack?.summary ?? ''),
@@ -225,8 +236,8 @@ export function queueFacts(
         case 'pending-infra':
           Object.assign(fact, {
             state: 'machine',
-            tone: 'waiting',
-            label: 'Waiting',
+            tone: view.tone,
+            label: view.label,
             text: `Waiting for a machine${last}`,
             tip: 'No check machine has picked this up yet. Not a failure of the code.',
             step: {
@@ -262,8 +273,8 @@ export function queueFacts(
       Object.assign(fact, {
         state: 'failed',
         decisionSubtitle: `${check} failed${exit}${run?.endedAt ? ` · ${clock(run.endedAt)}` : ''}`,
-        tone: 'failed',
-        label: 'Check failed',
+        tone: view.tone,
+        label: view.label,
         meta: `in check ${clock(run?.startedAt)}${run?.endedAt ? ` · failed ${clock(run.endedAt)}` : ''}`,
         text: `${check} failed${exit} · nobody's on it`,
         step: {
@@ -289,9 +300,24 @@ export function queueFacts(
       const count = current?.conflicts.length;
       Object.assign(fact, {
         state: 'conflict',
-        tone: 'conflict',
-        label: 'Conflict',
+        tone: view.tone,
+        label: view.label,
         text: `Can't update from main${count ? ` · ${count} ${count === 1 ? 'file' : 'files'}` : ''}`,
+      });
+    } else if ((view.state === 'stale-head' || view.state === 'rejected') && entry?.status !== 'cancelled') {
+      // A cancelled check keeps its "Check didn't run" fact below.
+      // One word with the review page and the CLI: the landing ended without a check verdict.
+      Object.assign(fact, {
+        state: 'not-landed',
+        tone: view.tone,
+        label: view.label,
+        text:
+          view.state === 'stale-head'
+            ? 'Main or the Lane moved after submission · not landed'
+            : 'Not accepted · not landed',
+        tip: view.nextStep,
+        candidateMeta: 'not landed',
+        step: { tone: view.tone, glyph: 'stale', title: view.label, body: view.nextStep },
       });
     } else if (run && run.cause === 'unknown-outcome') {
       fact.text = `Check outcome not recorded${status.landingWorker.observedAt ? ` · last event ${clock(status.landingWorker.observedAt)}` : ''}`;
@@ -331,13 +357,7 @@ export function queueFacts(
           glyph: 'failed',
           text: `Check failed in the queue · ${item.run.check.name}${typeof item.run.exitCode === 'number' ? ` · exit ${item.run.exitCode}` : ''}`,
         });
-      if (
-        item.run &&
-        ['failed', 'interrupted', 'cancelled', 'runner-unavailable', 'runner-budget-exhausted'].includes(
-          item.run.status,
-        ) &&
-        item.run.cause !== 'check-failed'
-      )
+      if (item.run && checkUnsuccessful(item.run.status) && item.run.cause !== 'check-failed')
         fact.events.push({
           id: `run:${item.run.id}`,
           laneId: lane.laneId,

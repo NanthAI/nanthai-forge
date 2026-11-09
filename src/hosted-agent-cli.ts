@@ -15,6 +15,7 @@ import { markerIdentity } from './lane-prune.js';
 import { landExitsFailed, landSummary } from './hosted-land-summary.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 import { holdLines, landingHold } from './hosted-landing-hold.js';
+import { landingStateField } from './landing-state.js';
 import { learnFromLanding } from './preflight-learned.js';
 import { operationLine } from './hosted-land-wait.js';
 import { AGENT_WAIT_SECONDS, operationWait } from './agent-operation-wait.js';
@@ -237,7 +238,12 @@ export async function hostedAgentCli(
       };
       // A landing held for a person or a dependency says so on every unfinished return (5c59940b).
       const hold = submissions?.length === 1 ? landingHold(submissions[0]!.submission, laneId) : null;
-      const held = hold ? { hold } : {};
+      // The same state word and next step people see (src/landing-state.ts); additive.
+      const landing =
+        submissions?.length === 1
+          ? { landingState: landingStateField(submissions[0]!.submission, laneId) }
+          : {};
+      const held = hold ? { hold, ...landing } : landing;
       if (hold && status !== 'terminal') process.stderr.write(`${holdLines(hold).join('\n')}\n`);
       if (selectedWait.operationIds?.length === 1)
         recordLaneHold(laneId, selectedWait.operationIds[0]!, status === 'terminal' ? null : hold);
@@ -334,7 +340,7 @@ export async function hostedAgentCli(
           // A failed check of this checkout's landing teaches the next preflight its failing tests.
           if (submissions?.length === 1) learnFromLanding(root, entry);
         }
-      return { ...response, result: { ...response.result, ...selected } };
+      return { ...response, result: { ...response.result, ...selected, ...landing } };
     } finally {
       process.removeListener('SIGINT', stop);
       process.removeListener('SIGTERM', stop);

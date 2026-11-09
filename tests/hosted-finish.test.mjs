@@ -13,6 +13,7 @@ import {
   maxima,
 } from './hosted-finish-fixture.mjs';
 import { hostedFinishBackoff } from '../dist/hosted-finish.js';
+import { moduleUrl } from './convex-module.mjs';
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
   FORGE_SOURCE_PROVIDER: 'convex',
@@ -604,6 +605,51 @@ test('included-input status uses the native superseded state while retaining the
   assert.equal(page.entries[0].head, f.lane.head);
   assert.equal(page.entries[0].complete, false);
   assert.equal(page.nextIndex, null);
+});
+
+// Landing machine 1 B1 (Issue 68361cd5): a landing superseded during finish stores observation
+// `superseded`; reading its input page then threw SOURCE_UNAVAILABLE ("A stored outcome cannot
+// erase the actual submission result") instead of returning the entries.
+test('landing B1: input pages of a superseded landing read its entries instead of failing', async t => {
+  const f = await finishFixture(t),
+    { state } = await begin(f);
+  const store = await import(moduleUrl('../convex/projectHostedFinishStore.ts'));
+  const inputs = async attemptId =>
+    JSON.parse(
+      await f.tx('finishInputs', api.inputs, {
+        projectId: f.projectId,
+        submissionId: state.id,
+        attemptId,
+        index: 0,
+      }),
+    );
+  // The check passed and acceptance staged its input pages; a later save supersedes it before it lands.
+  await f.passChecks();
+  for (let step = 0; step < 20; step++) {
+    const current = (await f.current(state.id)).submission;
+    if ((await inputs(current.attemptId)).staged) break;
+    await f.execute();
+  }
+  assert.equal((await f.current(state.id)).submission.phase, 'ready');
+  await f.tx('supersedeFinish', {
+    _handler: ctx =>
+      store.failFinish(
+        ctx,
+        { projectId: f.projectId, submissionId: state.id },
+        'LANDING_SUPERSEDED',
+        'A later save replaced this landing.',
+      ),
+  });
+  const ended = (await f.current(state.id)).submission;
+  assert.equal(ended.observation.state, 'superseded');
+  const page = await inputs(ended.attemptId);
+  assert.equal(page.error, undefined, JSON.stringify(page));
+  assert.equal(page.entries.length, 1);
+  assert.deepEqual(
+    [page.entries[0].state, page.entries[0].outcome, page.entries[0].cause, page.entries[0].terminal],
+    ['superseded', 'terminal-failed', 'stale-head', true],
+  );
+  assert.equal(page.entries[0].complete, false);
 });
 
 for (const crash of ['before-source', 'after-source-callback', 'after-source-publish']) {

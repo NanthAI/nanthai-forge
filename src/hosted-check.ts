@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkTerminal } from './check-run-state.js';
 import { checkGateSchema } from './bet2-gate.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
@@ -301,5 +302,4 @@ export const hostedCheckRunSchema = z
 export type HostedCheckRun = z.infer<typeof hostedCheckRunSchema>;
 export type HostedCheckPlan = z.infer<typeof hostedCheckPlanSchema>;
 export const checkPin = (value: unknown) => digest(canonicalPayload(value));
-export const hostedCheckTerminal = (run: Pick<HostedCheckRun, 'status'>) =>
-  !['queued', 'preparing', 'dispatching', 'running', 'unknown'].includes(run.status);
+export const hostedCheckTerminal = (run: Pick<HostedCheckRun, 'status'>) => checkTerminal(run.status);

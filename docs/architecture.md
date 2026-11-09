@@ -1428,7 +1428,14 @@ run record. Terminal results cannot be rewritten.
 An overall provider success cannot pass a run until every selected shard has
 settled successfully with exit zero. Missing, running or failed shard evidence
 leaves that success unresolved under the same run. Failed, cancelled,
-interrupted, runner-unavailable and unknown outcomes remain distinct. Cancellation
+interrupted, runner-unavailable and unknown outcomes remain distinct. Every reader
+names a stored status through `src/check-run-state.ts` (a foundation check refuses
+new hand lists): runner-unavailable and runner-budget-exhausted read `Not run`
+(the code was not judged), and stored `unknown` resolves from the recorded facts to
+one of four states: `dispatch-unconfirmed` (dispatch reply lost),
+`dispatch-refused` (the provider refused or rate-limited it), `recovery-unconfirmed`
+(the controller could not confirm after recovery) and `shards-unconfirmed` (a pass
+before every shard reported), each with its own "can't confirm" next step. Cancellation
 makes an unneeded check locally terminal before or after dispatch reservation and
 refuses late evidence. Live landing consumers preserve their shared check. The
 provider-stop request is separate; local cancellation never claims remote compute

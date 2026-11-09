@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { normalizeHostedFinishResult } from './hosted-agent-finish-result.js';
+import { normalizeObservedFinish, withFinishLandingState } from './hosted-agent-finish-result.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 
@@ -26,12 +26,16 @@ export async function withSourceRecovery(
   command: object,
   value: unknown,
 ) {
-  if (action === 'finish' && value && typeof value === 'object') {
-    const normalized = normalizeHostedFinishResult(session.root, command as Reply, value as Reply);
-    if (normalized !== value) return normalized;
+  const finish = action === 'finish' && !!value && typeof value === 'object';
+  // Additive `landingState` on every finish reply that carries a submission (Issue 68361cd5).
+  const landing = (reply: unknown) =>
+    finish ? withFinishLandingState(command as Reply, value as Reply, reply as Reply) : reply;
+  if (finish) {
+    const normalized = normalizeObservedFinish(session.root, command as Reply, value as Reply);
+    if (normalized !== value) return landing(normalized);
   }
   const source = sourceReply(value);
-  if (!source) return value;
+  if (!source) return landing(value);
   const replay = { action, ...session.address, ...command, operationId: session.journal.operationId };
   const next = {
     action,
@@ -41,12 +45,12 @@ export async function withSourceRecovery(
         ? await session.journal.id('source-failure-next')
         : session.journal.operationId,
   };
-  return {
+  return landing({
     ...(value as object),
     status: source.status,
     ...(source.error ? { error: source.error, failedPhase: source.failedPhase ?? `source-${action}` } : {}),
     replay: { ...replay, command: hostedRecoveryCommand(session.root, action, replay) },
     next,
     command: hostedRecoveryCommand(session.root, action, { ...replay, operationId: next.operationId }),
-  };
+  });
 }

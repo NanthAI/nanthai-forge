@@ -14,6 +14,7 @@ import { hostedFinishSchema } from '../src/hosted-finish';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { landingHold } from '../src/hosted-landing-hold';
+import { landingStateField } from '../src/landing-state';
 import { invariant } from '../src/errors';
 import type { QueueStatusKey } from '../src/hosted-queue-status';
 import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
@@ -96,7 +97,9 @@ export const read = query({
           ? state.testFiles.failed.map(file => file.file)
           : (state.batchDiagnostic?.failedTests ?? []);
         entries.push({
-          position: key.position ?? null,
+          // A held entry has no queue position: main-red included (B3), whose directory key predates it.
+          position: hold ? null : (key.position ?? null),
+          landingState: landingStateField(state, laneId ?? undefined),
           submissionId: state.id,
           laneId,
           ...(lanes.length > 1 ? { moreLanes: true } : {}),
@@ -128,15 +131,18 @@ export const read = query({
           ...(hold ? { hold } : {}),
         });
       }
-      const held = queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length;
-      const total = queue?.status?.total ?? keys.length - held;
+      // The gate parks main-red entries without rewriting the directory, so the listed rows say so (B3).
+      const parked = entries.filter(entry => entry.hold?.kind === 'main-red').length;
+      const held = (queue?.status ? (queue.status.held ?? 0) : keys.filter(key => key.held).length) + parked;
+      const total = (queue?.status?.total ?? keys.length - held + parked) - parked;
       return JSON.stringify({
         total,
         ...(held ? { held } : {}),
         listed: entries.length,
         more: total + held > entries.length,
         train: queue?.train?.length ?? 0,
-        entries,
+        // Dispatch order first, then held entries.
+        entries: [...entries.filter(entry => !entry.hold), ...entries.filter(entry => entry.hold)],
       });
     } catch (error) {
       return report(error);

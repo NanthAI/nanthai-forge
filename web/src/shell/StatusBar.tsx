@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkRunState, checkRunStatuses } from '../../../src/check-run-state';
 import type { PendingStatus } from '../../../src/pending-status';
 import { serviceLastSeen } from '../cockpit/queue-model';
 import { ConnectionToast } from '../ui/Toast';
@@ -25,16 +26,17 @@ export function useNow(intervalMs = 15_000) {
   return now;
 }
 
-const checkWord = (status: string | undefined) =>
-  status === 'passed'
-    ? { tone: 'passed', glyph: 'passed', word: 'passing' }
-    : status === 'failed'
-      ? { tone: 'failed', glyph: 'failed', word: 'failing' }
-      : status === 'cancelled' || status === 'interrupted'
-        ? { tone: 'plain', glyph: 'plain', word: status.charAt(0).toUpperCase() + status.slice(1) }
-        : status === 'queued' || status === 'running' || status === 'preparing'
-          ? { tone: 'running', glyph: 'running', word: 'checking' }
-          : null;
+/** The strip's word for main's latest check, from the shared check-run vocabulary (W13): a
+ * runner-* result reads "not run", never nothing. */
+const checkWord = (status: string | undefined) => {
+  if (!status || !(checkRunStatuses as readonly string[]).includes(status)) return null;
+  const view = checkRunState({ status });
+  if (status === 'passed') return { tone: 'passed', glyph: 'passed', word: 'passing' };
+  if (status === 'failed') return { tone: 'failed', glyph: 'failed', word: 'failing' };
+  if (view.tone === 'running' || status === 'queued')
+    return { tone: 'running', glyph: 'running', word: 'checking' };
+  return { tone: 'plain', glyph: 'plain', word: view.label };
+};
 
 export type StripActor = { name: string; kind?: 'person' | 'agent' };
 

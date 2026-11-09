@@ -165,6 +165,56 @@ test('incident replay: a protected-path landing held for review stays listed in 
   assert.equal(marked.yourLane.entries[0].hold.kind, 'review');
 });
 
+// Landing machine 2 B3 (Issue 68361cd5): the main-red gate parks an entry (queued observation +
+// MAIN_RED, row patched without a directory rewrite). Readers listed it with a queue position and no
+// hold, and the wait line had no next step.
+test('landing B3: a main-red hold is listed as held with no position and names its next step', async t => {
+  Object.assign(process.env, synthetic);
+  t.after(() => {
+    for (const [k, v] of Object.entries(prior)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+  const f = await batchesFixture(t, { count: 0, batching: false });
+  await f.add(0);
+  const read = async () => JSON.parse(await f.c.run('queueView', view.read, { projectId: f.projectId }));
+  const before = await read();
+  assert.equal(before.entries.length, 1, JSON.stringify(before));
+  assert.equal(before.entries[0].position, 1);
+  const [row] = [...f.tables.projectHostedLandingRequests.values()];
+  const state = JSON.parse(row.value);
+  const parked = {
+    ...state,
+    observation: { state: 'pending', pendingReason: 'queued', cause: null },
+    error: {
+      code: 'MAIN_RED',
+      message: 'Main audit is red; contract acceptance resumes when main is green.',
+    },
+  };
+  f.patch('projectHostedLandingRequests', row._id, {
+    hold: 'main-red',
+    runnable: false,
+    value: JSON.stringify(parked),
+  });
+  const page = await read();
+  const [entry] = page.entries;
+  assert.equal(entry.position, null);
+  assert.equal(entry.hold.kind, 'main-red');
+  assert.match(entry.hold.next, /resumes by itself when main is green/);
+  assert.equal(entry.landingState.state, 'held-main-red');
+  assert.equal(page.held, (before.held ?? 0) + 1);
+  assert.equal(page.total, before.total - 1);
+  // The land summary and the compact wait line name the same hold and next step.
+  const lines = landSummary({ result: { submission: parked } });
+  assert.match(lines[0], /^HELD: MAIN IS RED; not landed yet: Main audit is red/);
+  assert.equal(lines[1], entry.hold.next);
+  const line = waitEventLine({ type: 'submission', submission: parked }).line;
+  assert.equal(line.hold.kind, 'main-red');
+  assert.equal(line.landingState, 'held-main-red');
+  assert.equal(line.hold.next, entry.hold.next);
+});
+
 test('status {laneId}: this machine remembers the last observed hold, and clears it once unheld', async t => {
   const state = mkdtempSync(join(tmpdir(), 'forge-hold-'));
   const previous = process.env.XDG_STATE_HOME;

@@ -61,7 +61,8 @@ export function CheckPanel({
   children?: ReactNode;
 }) {
   if (!run) return null;
-  const neutral = queue?.state === 'not-run' || queue?.historical;
+  // Stale-head and rejected endings were not judged either; they keep the pre-derive Not run word here.
+  const neutral = queue?.state === 'not-run' || queue?.state === 'not-landed' || queue?.historical;
   const state = neutral ? { tone: 'plain' as const, label: 'Not run' } : checkStatus(run.status);
   const tests = !neutral && summary ? failingTests(summary) : [];
   return (

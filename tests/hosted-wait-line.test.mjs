@@ -54,6 +54,7 @@ test('a queued wake becomes one short line with the decision facts', () => {
       position: 7,
       ahead: 6,
       total: 8,
+      landingState: 'queued',
       terminal: false,
       ok: false,
       version: undefined,

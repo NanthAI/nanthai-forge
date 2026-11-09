@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { waitTrainEvents } from './agent-wait-train.js';
 import { waitSubmissions, submissionTarget } from './agent-wait-submission.js';
 import { invariant } from './errors.js';
+import { checkUnsuccessful } from './check-run-state.js';
 import { finishChild } from './agent-finish-journal.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { activeCheck, infrastructure, waitJson, waitRun, type WaitEvent } from './agent-wait-run.js';
@@ -47,14 +48,11 @@ const success = (status: string) =>
 /** Statuses that end an entry unsuccessfully. A status in none of the three lists is `unknown`:
  * not terminal, not ok, with a diagnostic (SM-C M5), never a guessed failure. */
 const failure = (status: string) =>
+  // Check-run endings come from the shared module (failed, cancelled, interrupted, runner-*).
+  checkUnsuccessful(status) ||
   [
-    'failed',
-    'cancelled',
     'conflict',
     'rejected',
-    'interrupted',
-    'runner-unavailable',
-    'runner-budget-exhausted',
     'timed-out',
     'retry-exhausted',
     'sync-required',

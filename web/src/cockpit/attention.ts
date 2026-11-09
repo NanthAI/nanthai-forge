@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkNeverRan, checkTerminal } from '../../../src/check-run-state';
 import { queueFacts, type QueueFact } from './queue-model';
 import { displayLaneName } from '../../../src/lane-name';
 import type { CockpitWork } from './model';
@@ -304,7 +305,9 @@ export function groupDecisions(items: readonly DecisionItem[]): DecisionItem[] {
 export function mainCheckDecisions(runs: CockpitWork['runs']): DecisionItem[] {
   const latest = new Map<string, CockpitWork['runs'][number]>();
   for (const run of runs)
-    if (run.mainCheck && !['queued', 'preparing', 'running'].includes(run.status)) {
+    // Only a run with a verdict replaces an earlier one: a later run that never started (no runner,
+    // no budget) must not hide a red full check (W13). A newer pass or failure does.
+    if (run.mainCheck && checkTerminal(run.status) && !checkNeverRan(run.status)) {
       const previous = latest.get(run.mainCheck.channel);
       if (!previous || (run.startedAt ?? '') >= (previous.startedAt ?? ''))
         latest.set(run.mainCheck.channel, run);
