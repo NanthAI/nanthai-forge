@@ -264,10 +264,13 @@ export function candidateAccessNotes(input: {
   user: string;
   env: NodeJS.ProcessEnv;
   paths: CandidatePaths;
+  /** Files Forge writes for the command to read or run (FORGE_CHECK_PACKAGES, Issue bf111983). */
+  inputs?: readonly string[];
   exists?: (path: string) => boolean;
 }) {
   const exists = input.exists ?? existsSync;
   const home = resolve(input.env.HOME ?? '/');
+  const inputs = (input.inputs ?? []).map(path => resolve(path));
   const own = [...input.paths.writable, ...(input.paths.copies ?? [])].map(path => resolve(path));
   const seen = [...own, ...input.paths.readable.map(path => resolve(path))];
   const found = new Map<string, boolean>();
@@ -316,6 +319,13 @@ export function candidateAccessNotes(input: {
       for (const [path, permission] of found) {
         if (notes.length >= 3) break;
         if (own.some(root => within(path, root))) continue;
+        if (inputs.some(root => within(path, root))) {
+          // Forge's own input: the Candidate may read and run it, so a denial is Forge's fault.
+          notes.push(
+            `Forge: ${show(path)} is a check input Forge wrote for the Candidate user ${input.user} to read and run, not change; if it could not be read or run, that is a Forge fault, not the project's.`,
+          );
+          continue;
+        }
         if (within(path, home) && home !== '/' && !seen.some(root => within(path, root))) {
           if (exists(path))
             notes.push(

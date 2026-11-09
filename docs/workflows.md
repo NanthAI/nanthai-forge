@@ -373,6 +373,12 @@ its check declares more. Either way it receives the changed paths:
   Without the variable (a full run, or a change the graph cannot place) the script goes on with its
   full steps; steps before the line (lint, build) still run every time.
 
+  Both files sit in a fresh folder in the job's temp folder (`$RUNNER_TEMP/forge-packages-…`),
+  owned by the supervisor (folder `0711`, list `0644`, runner `0755`) and handed to the
+  [Candidate user](operations/github-actions-checks.md#what-actions-evidence-attests) read-only:
+  it reads the list and runs the runner but cannot change either, and Forge removes the folder
+  after the command.
+
 Declare the contract with `selection` in the check definition; it changes the definition digest:
 
 ```sh

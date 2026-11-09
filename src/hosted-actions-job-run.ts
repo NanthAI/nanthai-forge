@@ -127,6 +127,8 @@ async function executeActiveActionsJob(
             script: join(import.meta.dirname, '../scripts/check-packages-run.mjs'),
           },
           run.check,
+          // The job's temp folder, beside the plan: handed to the Candidate user read-only below.
+          resolve(dirname(planPath)),
         );
       } catch {
         packages = null;
@@ -205,7 +207,8 @@ async function executeActiveActionsJob(
       planPath,
       join(dirname(planPath), 'forge-actions-state.json'),
       ...(sourceCache ? [sourceCache] : []),
-      ...(packages ? [packages.path] : []),
+      // The packages list and runner: the Candidate reads and runs them, never changes them.
+      ...(packages ? [packages.folder] : []),
       ...toolchainReadable(process.env, home),
     ],
     // What the declared toolchains write into their own installs: private copies (src/ecosystems.ts).
@@ -217,7 +220,12 @@ async function executeActiveActionsJob(
   };
   const access =
     isolation.mode === 'user'
-      ? candidateAccessNotes({ user: isolation.user, env: process.env, paths })
+      ? candidateAccessNotes({
+          user: isolation.user,
+          env: process.env,
+          paths,
+          inputs: packages ? [packages.folder] : [],
+        })
       : undefined;
   /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
   const spawnPart = (part?: string) => {

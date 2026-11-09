@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { buildPackageGraph, type PackageGraph } from './package-graph.js';
@@ -63,6 +63,10 @@ export function checkoutPackageGraph(directory: string): PackageGraph {
   });
 }
 
+/** Modes of the packages folder, list and runner: readable (and the runner executable) by the
+ * Candidate user, writable only by the supervisor that owns them. */
+export const packagesModes = { folder: 0o711, list: 0o644, run: 0o755 } as const;
+
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 
 /** For a scoped configured command (docs/workflows.md#check-command-scope): writes the affected
@@ -70,13 +74,18 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
  * Nothing for a full run or a changes file without paths. `remove()` deletes the file.
  * With `runner` (Node and scripts/check-packages-run.mjs) and a runnable scoped selection it also
  * writes `run`, an executable for `FORGE_CHECK_PACKAGES_RUN` that runs those commands in the
- * checkout, so a repository's own CI script opts in with one line. */
+ * checkout, so a repository's own CI script opts in with one line.
+ * Both live in a new folder in `parent`, owned by the supervisor (Issue bf111983): the hosted
+ * command runs as the Candidate user, which must read the list and run the runner but never change
+ * them, so the folder is 0711 (enter, not list), the list 0644, the runner 0755; nothing is group- or
+ * world-writable, and modes are set explicitly so the supervisor's umask cannot narrow them. */
 export function writeCheckPackages(
   directory: string,
   changes: { mode?: unknown; paths?: unknown; mainPaths?: unknown; members?: unknown } | undefined,
   runner?: { node: string; script: string },
   check?: { executable: string; args: readonly string[] },
-): { path: string; run: string | null; remove: () => void } | null {
+  parent = tmpdir(),
+): { folder: string; path: string; run: string | null; remove: () => void } | null {
   if (changes?.mode !== 'scoped' || !Array.isArray(changes.paths)) return null;
   const strings = (list: unknown[]) => list.filter((path): path is string => typeof path === 'string');
   const changed = strings(changes.paths);
@@ -98,7 +107,8 @@ export function writeCheckPackages(
     : Array.isArray(changes.mainPaths)
       ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths), flags)
       : checkoutPackageSelection(directory, changed, flags);
-  const folder = mkdtempSync(join(tmpdir(), 'forge-packages-'));
+  const folder = mkdtempSync(join(parent, 'forge-packages-'));
+  chmodSync(folder, packagesModes.folder);
   const path = join(folder, 'packages.json');
   writeFileSync(
     path,
@@ -114,18 +124,20 @@ export function writeCheckPackages(
         ...(flagsFrom ? { flagsFrom } : {}),
       })),
     }),
-    { mode: 0o600, flag: 'wx' },
+    { mode: packagesModes.list, flag: 'wx' },
   );
+  chmodSync(path, packagesModes.list);
   let run: string | null = null;
   if (runner && selection.scope === 'scoped' && selection.commands.length) {
     run = join(folder, 'run');
     writeFileSync(
       run,
       `#!/bin/sh\nexec ${[runner.node, runner.script, path, directory].map(shellQuote).join(' ')}\n`,
-      { mode: 0o700, flag: 'wx' },
+      { mode: packagesModes.run, flag: 'wx' },
     );
+    chmodSync(run, packagesModes.run);
   }
-  return { path, run, remove: () => rmSync(folder, { recursive: true, force: true }) };
+  return { folder, path, run, remove: () => rmSync(folder, { recursive: true, force: true }) };
 }
 
 /** A scoped main-race recheck's package selection (src/package-intersection.ts) in a checkout. */

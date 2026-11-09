@@ -827,6 +827,19 @@ test('a failed Candidate command names the path and the user it could not use', 
   assert.deepEqual(dart.notes(), [
     'Forge: $RUNNER_TOOL_CACHE/flutter/stable-x64/flutter/packages/flutter_tools/.dart_tool is not writable for the Candidate user forge-check: it belongs to the runner (a toolchain or a system folder), which project code may read but not change.',
   ]);
+
+  // Issue bf111983: a denial on Forge's own check input (the packages runner) names it as Forge's fault,
+  // not as a toolchain folder the project may not change.
+  const input = candidateAccessNotes({
+    user: CANDIDATE_USER,
+    env,
+    paths: { writable: ['/srv/ci-home/work/r/r'], readable: ['/srv/ci-home/work/_temp/forge-packages-x'] },
+    inputs: ['/srv/ci-home/work/_temp/forge-packages-x'],
+  });
+  input.accept('ci/check.sh: 3: exec: /srv/ci-home/work/_temp/forge-packages-x/run: Permission denied\n');
+  assert.deepEqual(input.notes(), [
+    "Forge: $RUNNER_TEMP/forge-packages-x/run is a check input Forge wrote for the Candidate user forge-check to read and run, not change; if it could not be read or run, that is a Forge fault, not the project's.",
+  ]);
 });
 
 test("a pass needs the CI provider's success; any other conclusion never passes", () => {

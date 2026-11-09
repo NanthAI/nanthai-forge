@@ -4,8 +4,17 @@
 // package graph selects a minority of testable packages; Forge ships the per-ecosystem runner.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { actionsGateSelection } from '../dist/hosted-actions-job-plan.js';
@@ -22,7 +31,7 @@ import {
 import { gateFor } from '../dist/contract-gate-policy.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { selectionFallback } from '../dist/fallback-reasons.js';
-import { writeCheckPackages } from '../dist/package-graph-checkout.js';
+import { packagesModes, writeCheckPackages } from '../dist/package-graph-checkout.js';
 import { commandCheckInputs } from '../scripts/check-command-env.mjs';
 import { noTestsCollected, packageRunCommands, runPackageCommands } from '../scripts/check-packages-run.mjs';
 
@@ -369,6 +378,100 @@ test('the one-line opt-in runs the affected package commands and reports a scope
   assert.match(full, /FULL-SUITE/);
   fullInputs.finish(true);
 });
+
+// Issue bf111983: hosted checks run the command as the Candidate user (src/candidate-user.ts), another
+// uid than the supervisor that writes the packages list and runner. Both must be readable (the runner
+// also runnable) by that uid and writable by no one but the supervisor.
+function scopedWorkspace(t) {
+  const files = new Map([
+    ['package.json', JSON.stringify({ private: true, workspaces: ['packages/*'] })],
+    ['package-lock.json', '{}'],
+    ...['a', 'b', 'c'].map(name => [
+      `packages/${name}/package.json`,
+      JSON.stringify({ name, scripts: { test: 'node --test' } }),
+    ]),
+  ]);
+  const root = checkout(files);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const selected = actionsGateSelection(run(ci(), gate), ['packages/a/package.json'], files, false);
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  return { root, changes: selected.changes };
+}
+const runner = {
+  node: process.execPath,
+  script: join(import.meta.dirname, '../scripts/check-packages-run.mjs'),
+};
+const posix = process.platform === 'win32' ? 'POSIX file modes and users only' : false;
+
+test(
+  'Issue bf111983: the packages folder, list and runner are Candidate-readable, supervisor-owned and never group- or world-writable',
+  { skip: posix },
+  t => {
+    const { root, changes } = scopedWorkspace(t);
+    const parent = mkdtempSync(join(tmpdir(), 'forge-packages-parent-'));
+    t.after(() => rmSync(parent, { recursive: true, force: true }));
+    // A strict supervisor umask must not narrow the modes back to the runner user alone.
+    const umask = process.umask(0o077);
+    let packages;
+    try {
+      packages = writeCheckPackages(root, changes, runner, undefined, parent);
+    } finally {
+      process.umask(umask);
+    }
+    t.after(() => packages.remove());
+    assert.equal(dirname(packages.folder), parent, 'written where the caller hands it in');
+    assert.equal(packages.path, join(packages.folder, 'packages.json'));
+    assert.equal(packages.run, join(packages.folder, 'run'));
+    assert.deepEqual(packagesModes, { folder: 0o711, list: 0o644, run: 0o755 });
+    const mode = path => statSync(path).mode & 0o777;
+    assert.equal(mode(packages.folder), 0o711, 'enter, not list');
+    assert.equal(mode(packages.path), 0o644);
+    assert.equal(mode(packages.run), 0o755);
+    for (const path of [packages.folder, packages.path, packages.run]) {
+      assert.equal(statSync(path).uid, process.getuid(), `${path} belongs to the supervisor`);
+      assert.equal(statSync(path).mode & 0o022, 0, `${path} is not group- or world-writable`);
+    }
+    packages.remove();
+    assert.equal(existsSync(packages.folder), false, 'removed after the command');
+  },
+);
+
+// A second uid (nobody, through passwordless sudo) reads the list and runs the runner, but cannot
+// change either or add to their folder. The old 0700 folder fails this on the first check.
+const asOther = () => {
+  if (posix) return posix;
+  const probe = spawnSync('sudo', ['-n', '-u', 'nobody', 'true'], { stdio: 'ignore', timeout: 10_000 });
+  return probe.status === 0 ? false : 'needs passwordless sudo to run as a second uid (nobody)';
+};
+test(
+  'Issue bf111983: a second uid reads and runs the packages runner but cannot change it',
+  { skip: asOther() },
+  t => {
+    const { root, changes } = scopedWorkspace(t);
+    // /tmp, not the per-user temp folder: on macOS that folder is closed to other users.
+    const parent = mkdtempSync('/tmp/forge-packages-parent-');
+    chmodSync(parent, 0o755);
+    t.after(() => rmSync(parent, { recursive: true, force: true }));
+    const packages = writeCheckPackages(root, changes, runner, undefined, parent);
+    t.after(() => packages.remove());
+    const probe = [
+      'r=""',
+      'test -r "$1" && r="${r}read-list "',
+      'test -r "$2" && test -x "$2" && r="${r}run "',
+      'test -w "$1" && r="${r}write-list "',
+      'test -w "$2" && r="${r}write-run "',
+      '(: > "$3/added") 2>/dev/null && r="${r}write-folder "',
+      'ls "$3" >/dev/null 2>&1 && r="${r}list-folder "',
+      'echo "$r"',
+    ].join('\n');
+    const seen = execFileSync(
+      'sudo',
+      ['-n', '-u', 'nobody', 'sh', '-c', probe, 'probe', packages.path, packages.run, packages.folder],
+      { encoding: 'utf8' },
+    );
+    assert.equal(seen.trim(), 'read-list run');
+  },
+);
 
 test('configure-check and check-settings propose the scope only for an undeclared configured command', () => {
   const proposal = commandScopeProposal(ci(null));
