@@ -331,6 +331,8 @@ check waited at least a minute before it settled: `attempt`, `from`, `to`, `seco
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
 
+Paging rule for time-window reads (`landings`, `overlap-answers`): a page returns every row up to its limit or byte budget, or a `nextCursor` naming the next row; it is never silently short. The cursor is `TIME` or `TIME:SKIP`, so rows sharing one stored instant (a batch) neither repeat nor stall a page, and a window of any length pages to every row once. `metrics` pages follow the platform `isDone`/`continueCursor` pair instead.
+
 `status {runId,summary:true}` (`projectHostedCheckRead:summary`) is the bounded read of one
 check run: the same single run-row read as `status`, but the reply is counts, failed and
 flaky file names (failed ones with a clipped first error, at most 40 each, the rest counted

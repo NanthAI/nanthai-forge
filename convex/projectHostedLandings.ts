@@ -10,6 +10,7 @@ import { finishRow } from './projectHostedFinishWake';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
+import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import { landingAcceptedBySchema, receiptAcceptedBy } from '../src/landing-accepted-by';
 import {
   LANDINGS_ATTEMPTS,
@@ -190,33 +191,29 @@ export const read = query({
         'BAD_ARGUMENT',
         'Use a finite window [from,to).',
       );
-      const resume = input.cursor ? Number(input.cursor) : from;
-      invariant(
-        Number.isFinite(resume) && resume >= from && resume < to,
-        'BAD_ARGUMENT',
-        'The cursor does not belong to this window.',
-      );
+      const { resume, skip } = readCreationCursor(input.cursor, from, to);
       const limit = Math.max(
         1,
         Math.min(LANDINGS_MAX_LIMIT, Math.floor(input.limit ?? LANDINGS_DEFAULT_LIMIT)),
       );
-      const receipts = await ctx.db
+      const fetched = await ctx.db
         .query('projectHostedAcceptances')
         .withIndex('by_project', q =>
           q.eq('projectId', input.projectId).gte('_creationTime', resume).lt('_creationTime', to),
         )
         .order('asc')
-        .take(limit + 1);
+        .take(skip + limit + 1);
+      const receipts = fetched.slice(skip);
       const rows: Awaited<ReturnType<typeof evidence>>['row'][] = [];
       let read = 0,
         output = 0,
-        next: number | null = null;
+        next: string | null = null;
       for (const [index, receipt] of receipts.entries()) {
         if (
           index >= limit ||
           (rows.length && (read >= LANDINGS_READ_BYTES || output >= LANDINGS_OUTPUT_BYTES))
         ) {
-          next = receipt._creationTime;
+          next = nextCreationCursor(fetched, skip + index);
           break;
         }
         const found = await evidence(
@@ -233,7 +230,7 @@ export const read = query({
         schema: 1,
         window: { from: input.from, to: input.to },
         landings: rows,
-        nextCursor: next === null ? null : String(next),
+        nextCursor: next,
         bytesRead: read,
       });
     } catch (error) {

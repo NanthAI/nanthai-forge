@@ -6,6 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { recordCaller } from './projectHostedFrictionStore';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { nextCreationCursor, readCreationCursor } from './creationTimeCursor';
 import {
   OVERLAP_ANSWER_CLEANUP_BATCH,
   OVERLAP_ANSWER_RETENTION_MS,
@@ -43,7 +44,7 @@ export async function pruneExpiredOverlapAnswers(
 
 /** Bounded read of stored overlap answers by Lane and/or by creation-time window [from,to), oldest first.
  * One query per page from the creation-time indexes, no writes. A page ends at `limit` rows, 56 KB of reply or
- * 800 KB read; `nextCursor` is the creation time of the next row. Rows older than the retention value are
+ * 800 KB read; `nextCursor` names the next row (creationTimeCursor.ts). Rows older than the retention value are
  * never returned, so the 90 days hold even before cleanup has reached them. */
 export const read = query({
   args: {
@@ -73,18 +74,13 @@ export const read = query({
         'Use a finite window [from,to).',
       );
       const start = Math.max(from, floor);
-      const resume = input.cursor ? Number(input.cursor) : start;
-      invariant(
-        Number.isFinite(resume) && resume >= start && resume < to,
-        'BAD_ARGUMENT',
-        'The cursor does not belong to this window.',
-      );
+      const { resume, skip } = readCreationCursor(input.cursor, start, to);
       const limit = Math.max(
         1,
         Math.min(OVERLAP_ANSWERS_MAX_LIMIT, Math.floor(input.limit ?? OVERLAP_ANSWERS_DEFAULT_LIMIT)),
       );
       const { laneId } = input;
-      const rows = await (
+      const fetched = await (
         laneId === undefined
           ? ctx.db
               .query('projectHostedOverlapAcks')
@@ -102,17 +98,18 @@ export const read = query({
               )
       )
         .order('asc')
-        .take(limit + 1);
+        .take(skip + limit + 1);
+      const rows = fetched.slice(skip);
       const answers: unknown[] = [];
       let read = 0,
         output = 0,
-        next: number | null = null;
+        next: string | null = null;
       for (const [index, row] of rows.entries()) {
         if (
           index >= limit ||
           (answers.length && (read >= OVERLAP_ANSWERS_READ_BYTES || output >= OVERLAP_ANSWERS_OUTPUT_BYTES))
         ) {
-          next = row._creationTime;
+          next = nextCreationCursor(fetched, skip + index);
           break;
         }
         read += row.value.length;
@@ -135,7 +132,7 @@ export const read = query({
         },
         retentionDays: OVERLAP_ANSWER_RETENTION_MS / 86_400_000,
         answers,
-        nextCursor: next === null ? null : String(next),
+        nextCursor: next,
         bytesRead: read,
       });
     } catch (error) {

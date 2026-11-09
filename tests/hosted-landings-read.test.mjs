@@ -97,6 +97,7 @@ function fixture() {
       admitted = true,
       pad = 0,
       revert,
+      created = minute(at),
     } = {},
   ) => {
     const sub = id('sub', n),
@@ -170,7 +171,7 @@ function fixture() {
           ...(landedOn === base ? { firstCheck: { landedOn: 'admission-run', mainMoved: false } } : {}),
         }),
       },
-      minute(at),
+      created,
     );
   };
   return { tables, meter, read, landing };
@@ -375,4 +376,48 @@ test('replay 19328518: the receipt read shows the first compose, the hold after 
   assert.equal(older.recomposeCount, 1, 'check bindings are not recomposes');
   assert.deepEqual(older.heldAfterCheck, []);
   assert.equal(older.firstComposeStartedAt, null, 'no stored compose start is never invented');
+});
+
+/** Issue 9c0ba6e1: a 5-day paged read returned 418 of 448 landings. Rows in bursts with hours of
+ * gap, creation times with fractions (as stored) and several receipts sharing one instant (a batch
+ * written by one mutation) must page to every row exactly once, whatever the page size. */
+test('landings: a window of many pages with uneven bursts, fractional and tied times returns every row once', async () => {
+  const f = fixture();
+  const times = [];
+  let n = 0;
+  for (const [startMinute, burst, step] of [
+    [1, 40, 0.0003],
+    [90, 3, 0],
+    [400, 1, 0],
+    [401, 25, 0],
+    [3000, 31, 0.25],
+    [3100, 12, 0],
+    [5000, 2, 0],
+  ])
+    for (let i = 0; i < burst; i++) {
+      n++;
+      // A burst of tied times: every fourth receipt shares the previous one's instant.
+      const created = minute(startMinute) + (i - (i % 4 === 3 ? 1 : 0)) * step * 60000;
+      times.push(created);
+      f.landing(n, { at: startMinute, created, pad: n % 17 === 0 ? 120 * 1024 : 0 });
+    }
+  const wanted = Array.from({ length: n }, (_, i) => id('receipt', i + 1));
+  for (const limit of [1, 7, 20, 30, undefined]) {
+    const seen = [];
+    let cursor,
+      pages = 0;
+    do {
+      const page = await f.read({
+        from: iso(minute(0)),
+        to: iso(minute(6000)),
+        ...(limit ? { limit } : {}),
+        ...(cursor ? { cursor } : {}),
+      });
+      assert(page.landings, `page ${pages} (limit ${limit}) returned ${page.raw.slice(0, 120)}`);
+      seen.push(...page.landings.map(row => row.receiptId));
+      cursor = page.nextCursor;
+      assert(++pages < 400, `limit ${limit} never ended`);
+    } while (cursor);
+    assert.deepEqual(seen.toSorted(), wanted.toSorted(), `limit ${limit}: every landing exactly once`);
+  }
 });
