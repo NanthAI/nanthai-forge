@@ -60,6 +60,10 @@ export const receive = internalMutation({
       'EVIDENCE_CHANGED',
       'Webhook selected another Actions execution.',
     );
+    // The dispatch response's run id is the binding. A webhook may bind only after the dispatch was
+    // observed without one; earlier (or after a rejection) it is ignored, so a run another actor
+    // titled `forge-check/<runId>` cannot take the binding.
+    if (!run.executionId && !run.actions.dispatchedWithoutId) return null;
     if (hostedCheckTerminal(run)) {
       if (run.status === 'cancelled' && payload.action !== 'completed' && !run.executionId) {
         run.executionId = String(workflow.id);

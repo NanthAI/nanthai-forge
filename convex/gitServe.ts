@@ -50,9 +50,14 @@ type ProjectRoute = { projectId?: string; handle?: string; slug?: string };
 export function gitRoute(pathname: string) {
   const match = /^\/git\/(.+?)\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(pathname);
   if (!match) return null;
-  const parts = decodeURIComponent(match[1]!)
-    .replace(/\.git$/, '')
-    .split('/');
+  // A malformed percent-encoding is a missing repository (404), never a thrown error.
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(match[1]!);
+  } catch {
+    return null;
+  }
+  const parts = decoded.replace(/\.git$/, '').split('/');
   if (parts.some(part => !part || part.length > 128) || parts.length > 2) return null;
   const project: ProjectRoute =
     parts.length === 1 ? { projectId: parts[0]! } : { handle: parts[0]!, slug: parts[1]! };

@@ -312,6 +312,35 @@ test('concurrent dispatch reservation and lost reply send one GitHub dispatch wi
   await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null)) });
   assert.equal((await s.call(sessions, 'session', s.input())).executionId, '123');
 });
+test('the webhook binds an execution only after the dispatch was observed without a run id', async t => {
+  const s = await fixture(t);
+  const reserved = await s.call(direct, 'reserve', s.id);
+  // Before the dispatch is observed a same-titled run from another actor binds nothing.
+  await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null, { id: 999 })) });
+  assert.equal((await s.status(s.run.id)).executionId, null);
+  // A dispatch that returned an id keeps it; a different webhook run is refused.
+  await s.call(direct, 'observe', {
+    ...s.id,
+    fence: reserved.fence,
+    outcome: 'accepted',
+    executionId: '123',
+  });
+  assert.equal((await s.status(s.run.id)).actions.dispatchedWithoutId, undefined);
+  await assert.rejects(
+    s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'requested', null, { id: 999 })) }),
+    code('EVIDENCE_CHANGED'),
+  );
+  assert.equal((await s.status(s.run.id)).executionId, '123');
+  // A dispatch accepted without an id (no run details) lets the webhook bind.
+  const bare = await fixture(t);
+  const second = await bare.call(direct, 'reserve', bare.id);
+  await bare.call(direct, 'observe', { ...bare.id, fence: second.fence, outcome: 'accepted' });
+  assert.equal((await bare.status(bare.run.id)).actions.dispatchedWithoutId, true);
+  await bare.call(webhooks, 'receive', {
+    payload: JSON.stringify(webhook(bare, 'requested', null, { id: 321 })),
+  });
+  assert.equal((await bare.status(bare.run.id)).executionId, '321');
+});
 test('dispatch retains custom and array runner labels, and self-hosted OIDC completes the session', async t => {
   variables(t, {
     GITHUB_APP_ID: '12345',
@@ -1348,7 +1377,9 @@ test('a first JWT cannot adopt an unacknowledged execution; cancellation after a
 });
 test('workflow_run uses the existing HMAC webhook boundary', async t => {
   const s = await fixture(t);
-  await s.reserve();
+  const reserved = await s.reserve();
+  // A lost dispatch reply: the dispatch carries no run id, so the webhook may bind.
+  await s.call(direct, 'observe', { ...s.id, fence: reserved.fence, outcome: 'unknown', failure: 'timeout' });
   variables(t, { GITHUB_WEBHOOK_SECRET: 'synthetic-webhook-key' });
   const { createHmac } = await import('node:crypto');
   const { default: http } = await import(moduleUrl('../convex/http.ts'));
@@ -1369,7 +1400,7 @@ test('workflow_run uses the existing HMAC webhook boundary', async t => {
       }),
     );
   assert.equal((await send('sha256=wrong')).status, 401);
-  assert.equal((await s.status(s.run.id)).status, 'dispatching');
+  assert.equal((await s.status(s.run.id)).status, 'unknown');
   assert.equal((await send(signature)).status, 204);
   assert.equal((await s.status(s.run.id)).status, 'cancelled');
 });

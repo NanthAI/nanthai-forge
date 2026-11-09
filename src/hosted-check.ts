@@ -249,6 +249,9 @@ export const hostedCheckRunSchema = z
         /** The plan started the optional source-pack job, which the run's conclusion waits for
          * (friction 0064c3b2). Recorded only: every pass reads the required jobs' conclusions. */
         packRefresh: z.literal(true).optional(),
+        /** The dispatch was observed and returned no run id (lost reply or no details). Only then may
+         * the workflow_run webhook bind the execution; otherwise the dispatch response's id is used. */
+        dispatchedWithoutId: z.literal(true).optional(),
       })
       .strict()
       .optional(),

@@ -753,6 +753,15 @@ test('stock git clones and fetches a public project from Forge with GitHub commi
   assert.match(named, new RegExp(`^${tip}\tHEAD`));
   const unknown = await host.handle('/git/nobody/nothing.git/info/refs?service=git-upload-pack');
   assert.equal(unknown.status, 401);
+  // A malformed percent-encoded path answers 404 without throwing; a valid encoding still routes.
+  for (const bad of ['%E0%A4%A', '%', 'a/%zz'])
+    assert.equal(gitServe.gitRoute(`/git/${bad}/info/refs`), null);
+  const malformed = await host.handle('/git/%E0%A4%A/info/refs?service=git-upload-pack');
+  assert.equal(malformed.status, 404);
+  assert.deepEqual(gitServe.gitRoute('/git/Synthetic%2DOwner/synthetic.git/info/refs')?.project, {
+    handle: 'Synthetic-Owner',
+    slug: 'synthetic',
+  });
   assert.match(unknown.headers.get('www-authenticate'), /^Basic /);
 });
 

@@ -56,8 +56,12 @@ export async function preparePack(
     return null;
   invariant(!found || found.size === proposal.size, 'INVALID_WORK_BACKUP', 'Pack size differs.');
   const packMembers = layout.map(({ digest, size }) => ({ digest, size }));
+  // A pending pack row is never re-laid out: another client may hold its PUT target and its commit
+  // reads back the members it was prepared with. Different member boundaries upload as singles.
+  const same = !!found && JSON.stringify(found.packMembers) === JSON.stringify(packMembers);
+  if (found && !same) return null;
   // A retry of the same pack was charged when it was first prepared.
-  if (found && JSON.stringify(found.packMembers) === JSON.stringify(packMembers)) reserved.length = 0;
+  if (same) reserved.length = 0;
   let id: Id<'projectObjects'>;
   if (!found)
     id = await ctx.db.insert('projectObjects', {

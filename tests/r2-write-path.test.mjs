@@ -363,6 +363,39 @@ test('a planted bad pack member fails closed and binds nothing; a later honest u
   assert.ok(fake.requests.some(r => r.method === 'GET'));
 });
 
+test('a pending pack row is never re-laid out by a second client with other member boundaries', async t => {
+  const { s } = await setup(t),
+    exchange = client(s),
+    first = await buildUploadPack(lazy(['abc', 'def']), [0, 1]),
+    second = await buildUploadPack(lazy(['ab', 'cdef']), [0, 1]);
+  assert.equal(first.proposal.digest, second.proposal.digest, 'same pack bytes, other member boundaries');
+  const prepared = await objects.prepareBatch._handler(s.ctx, {
+    projectId: 'project',
+    objects: ['abc', 'def'].map(pinOf),
+    pack: first.proposal,
+  });
+  assert.ok(prepared[0].target && prepared[0].pack);
+  const pending = rows(s).map(row => structuredClone(row));
+  // The second client gets single uploads and the pending pack row is untouched.
+  const singles = await objects.prepareBatch._handler(s.ctx, {
+    projectId: 'project',
+    objects: ['ab', 'cdef'].map(pinOf),
+    pack: second.proposal,
+  });
+  assert.ok(singles.every(row => row.target && !row.pack));
+  assert.deepEqual(
+    rows(s).find(row => row.digest === first.proposal.digest),
+    pending.find(row => row.digest === first.proposal.digest),
+  );
+  // The first client's own commit still binds its members from the pack it uploaded.
+  await putR2(prepared[0].target, Buffer.from(first.bytes));
+  await commit.commitBatch._handler(s.ctx, { objects: [{ id: prepared[0].id }] });
+  const bytes = await exchange.downloadBatch(
+    ['abc', 'def'].map(value => ({ sha256: digest(value), size: 3 })),
+  );
+  assert.deepEqual(bytes.map(String), ['abc', 'def']);
+});
+
 test('a pack with a stored member falls back to per-object uploads, and a retried pack is charged once', async t => {
   const { s, fake } = await setup(t),
     exchange = client(s);

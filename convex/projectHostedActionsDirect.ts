@@ -210,6 +210,8 @@ export const observe = internalMutation({
       await recordRepositoryVisibility(ctx, run.configuration.repository, input.visibility);
     if (hostedCheckTerminal(run) && run.status !== 'cancelled') return null;
     run.actions.outcome = input.outcome;
+    if (!input.executionId && !run.executionId && input.outcome !== 'rejected')
+      run.actions.dispatchedWithoutId = true;
     if (input.failure) run.actions.failure = input.failure.slice(0, 80);
     if (
       run.status !== 'cancelled' &&
