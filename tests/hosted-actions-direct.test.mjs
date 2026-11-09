@@ -625,7 +625,8 @@ test("passing shard results alone never pass: the provider's conclusion decides 
     assert.equal(held.status, 'running');
     assert.equal(held.actions.verdictPending, true);
     const confirm = s.scheduled.find(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
-    assert.equal(confirm.delay, 5 * 60_000, 'one fallback read, scheduled once');
+    assert.equal(confirm.delay, 10_000, 'one fallback jobs read, scheduled once');
+    assert.equal(confirm.input.jobs, true);
     assert.equal(held.actions.confirm, confirm.id);
     const settled = await s.conclude(conclusion);
     assert.equal(settled.status, status, conclusion);
@@ -636,7 +637,7 @@ test("passing shard results alone never pass: the provider's conclusion decides 
     assert.equal((await s.status(s.run.id)).status, status);
   }
 });
-test('a lost completed event: at most two bounded reads of the run, then only the watchdog', async t => {
+test('a lost completed event: two jobs reads, at most two bounded reads of the run, then only the watchdog', async t => {
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -644,6 +645,10 @@ test('a lost completed event: at most two bounded reads of the run, then only th
   const ctx = s => ({
     runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input),
   });
+  const running = {
+    total_count: 1,
+    jobs: [{ name: 'hosted-plan', status: 'in_progress', conclusion: null }],
+  };
   for (const answers of [
     ['completed:success'],
     ['in_progress', 'completed:failure'],
@@ -656,18 +661,22 @@ test('a lost completed event: at most two bounded reads of the run, then only th
       if (url.endsWith('/installation')) return Response.json({ id: 9 });
       if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
       reads.push(url);
-      const [state, conclusion = null] = answers[reads.length - 1].split(':');
+      // A job still running in both jobs reads (a long post-step), then the run reads.
+      if (url.endsWith('/jobs?per_page=100')) return Response.json(running);
+      const [state, conclusion = null] = answers[reads.length - 3].split(':');
       return Response.json({ status: state, conclusion });
     });
     await passAll(s);
-    for (let attempt = 0; attempt < answers.length; attempt++) {
+    const delays = [10_000, 30_000, 5 * 60_000, 30 * 60_000];
+    for (let attempt = 0; attempt < answers.length + 2; attempt++) {
       const pending = s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
       assert.equal(pending.length, attempt + 1);
-      assert.equal(pending.at(-1).delay, [5, 30][attempt] * 60_000);
+      assert.equal(pending.at(-1).delay, delays[attempt]);
+      assert.equal(pending.at(-1).input.jobs, attempt < 2 ? true : undefined);
       await verdicts.confirm._handler(ctx(s), pending.at(-1).input);
     }
-    assert.equal(reads.length, answers.length);
-    assert.ok(reads.every(url => url.endsWith(`/repos/${repository}/actions/runs/123`)));
+    assert.equal(reads.length, answers.length + 2);
+    assert.ok(reads.slice(2).every(url => url.endsWith(`/repos/${repository}/actions/runs/123`)));
     const run = await s.status(s.run.id);
     const expected = {
       'completed:success': 'passed',
@@ -677,12 +686,71 @@ test('a lost completed event: at most two bounded reads of the run, then only th
     assert.equal(run.status, expected[answers.at(-1)]);
     assert.equal(
       s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm')).length,
-      answers.length,
-      'no third read: the 12 h watchdog is the backstop',
+      answers.length + 2,
+      'no further read: the 12 h watchdog is the backstop',
     );
   }
 });
-test('friction 0064c3b2: a pass with the optional pack job settles on the required jobs, never on the pack job', async t => {
+test('Issue 03a749a5 replay: a pass with no pack job whose completed event is lost settles within 10 s of its result', async t => {
+  // The dart resolution run of 2026-11-09: one hosted-plan job ran the whole check, the plan
+  // started no pack job, GitHub concluded success 3 s after the result, and the signed event never
+  // settled it. Forge waited for its 5 min run read: the landing committed 297 s after GitHub.
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const job = (name, conclusion) => ({ name, status: 'completed', conclusion });
+  const incidentJobs = [
+    job('hosted-plan', 'success'),
+    job('forge-shard-${{ matrix.shard }}', 'skipped'),
+    job('forge-static', 'skipped'),
+    job(OPTIONAL_PACK_JOB, 'skipped'),
+    job('forge-hosted-${{ matrix.shard }}', 'skipped'),
+  ];
+  for (const event of ['lost', 'first']) {
+    const s = await fixture(t);
+    bindRepository(t, s.id.projectId, repository);
+    const urls = [],
+      mutations = [];
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      urls.push(url);
+      return Response.json({ total_count: incidentJobs.length, jobs: incidentJobs });
+    });
+    const held = await passAll(s);
+    assert.equal(held.actions.packRefresh, undefined, 'the plan started no pack job');
+    const reads = () => s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+    assert.equal(reads().length, 1, 'one timer, as before: no new timer in the common path');
+    const [read] = reads();
+    assert.ok(read.delay <= 10_000, `the result-to-settle gap is ${read.delay} ms, at most 10 s`);
+    if (event === 'first') {
+      // The common path: the event arrives first and cancels the read, so it adds no call.
+      assert.equal((await s.conclude('success')).status, 'passed');
+      assert.ok(s.cancelled.includes(read.id));
+      assert.equal(urls.length, 0);
+      continue;
+    }
+    await verdicts.confirm._handler(
+      {
+        runMutation: (ref, input) => {
+          mutations.push(getFunctionName(ref));
+          return s.call(verdicts, getFunctionName(ref).split(':')[1], input);
+        },
+      },
+      read.input,
+    );
+    const settled = await s.status(s.run.id);
+    assert.equal(settled.status, 'passed', 'the read settles the pass the lost event would have');
+    assert.equal(settled.actions.confirm, null, 'and leaves no further read');
+    assert.deepEqual(urls, [`https://api.github.com/repos/${repository}/actions/runs/123/jobs?per_page=100`]);
+    assert.deepEqual(mutations, ['projectHostedActionsVerdict:confirmed'], 'one action and one mutation');
+    assert.equal(reads().length, 1);
+    // The event arriving late changes nothing.
+    assert.equal((await s.conclude('failure')).status, 'passed');
+  }
+});
+test('friction 0064c3b2: a pass settles on the required jobs, never on the optional pack job', async t => {
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
@@ -691,7 +759,7 @@ test('friction 0064c3b2: a pass with the optional pack job settles on the requir
   const plan = (status, conclusion) => job('hosted-plan', status, conclusion);
   const pack = job(OPTIONAL_PACK_JOB, 'in_progress');
   const skipped = [job('forge-static', 'completed', 'skipped'), job('forge-shard', 'completed', 'skipped')];
-  for (const [answers, expected, reads] of [
+  for (const [answers, expected, reads, packRefresh] of [
     // The job that posted the last result completed; the pack job is still running: pass now.
     [[[plan('completed', 'success'), ...skipped, pack]], 'passed', 1],
     [
@@ -712,7 +780,17 @@ test('friction 0064c3b2: a pass with the optional pack job settles on the requir
       'running',
       2,
     ],
-  ]) {
+  ].flatMap(row => [
+    [...row, true],
+    // No pack job started: its page lists the job skipped, and the read decides the same way.
+    [
+      row[0].map(page =>
+        page.map(item => (item === pack ? job(OPTIONAL_PACK_JOB, 'completed', 'skipped') : item)),
+      ),
+      ...row.slice(1),
+      false,
+    ],
+  ])) {
     const s = await fixture(t);
     bindRepository(t, s.id.projectId, repository);
     const urls = [],
@@ -732,7 +810,8 @@ test('friction 0064c3b2: a pass with the optional pack job settles on the requir
       runQuery: async () => null,
     };
     await s.bind();
-    await s.prepare(null, undefined, { packRefresh: true });
+    // With or without the pack job: every held pass reads its jobs (Issue 03a749a5).
+    await s.prepare(null, undefined, packRefresh ? { packRefresh: true } : {});
     for (const index of [0, 1])
       await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index, exitCode: 0 }) });
     const confirms = () =>

@@ -13,12 +13,14 @@ import { signHostedCheckCallback } from '../src/hosted-check-evidence';
 import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { providerVerdict, requiredJobsConclusion } from '../src/hosted-check-verdict';
 
-/** A lost `workflow_run` event gets one read of the run's conclusion this long after the last
- * shard result, and one more if the run was still going; the 12 h watchdog stays the backstop. */
+/** Still unsettled after the jobs reads below: one read of the run's conclusion this long after
+ * the last shard result, and one more if the run was still going; the 12 h watchdog stays the backstop. */
 export const verdictConfirmMs = [5 * 60_000, 30 * 60_000] as const;
-/** A run whose plan started the optional source-pack job: reads of the required jobs' conclusions
- * this long after the last shard result (the job that posted it completes a few seconds later),
- * then the reads above. The run's own conclusion would wait for the pack job (friction 0064c3b2). */
+/** Every held pass: reads of the required jobs' conclusions this long after the last shard result
+ * (the job that posted it completes a few seconds later), then the reads above. The run's signed
+ * `workflow_run` event usually settles it first and cancels the read, so the common path adds no
+ * call; a lost or late event costs seconds, not the 5 min run read (Issue 03a749a5). The jobs read
+ * also never waits for the optional pack job (friction 0064c3b2). */
 export const verdictJobsMs = [10_000, 30_000] as const;
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 /** What a jobs read needs, resolved in the scheduling transaction (no pendingConfirm call). */
@@ -32,12 +34,7 @@ async function jobsRead(
   projectId: LoadedHostedCheck['row']['projectId'],
   run: HostedCheckRun,
 ) {
-  if (
-    run.actions?.packRefresh !== true ||
-    run.configuration.provider !== 'github-actions' ||
-    !run.executionId
-  )
-    return null;
+  if (run.configuration.provider !== 'github-actions' || !run.executionId) return null;
   const { repository } = run.configuration;
   return {
     jobs: true as const,
@@ -81,7 +78,7 @@ export async function completeFromResults(
 export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck) {
   const { row, run } = loaded;
   run.actions!.verdictPending = true;
-  // Only a run with the pack job reads its jobs: every other pass settles on the run's event.
+  // Not only runs with the pack job: one lost provider event must never cost minutes (Issue 03a749a5).
   const jobs = await jobsRead(ctx, row.projectId, run);
   run.actions!.confirm = await ctx.scheduler.runAfter(
     jobs ? verdictJobsMs[0] : verdictConfirmMs[0],

@@ -73,18 +73,20 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
 - **A pass needs the provider's own success.** Supervisor results say which tests ran, failed or
   flaked, and a failing result fails the check at once. When every shard has reported passing, the run
   waits for the CI provider's own record that the run succeeded: on GitHub, the signed
-  `workflow_run` completed event Forge already receives (no extra call). If that event is lost, one
-  scheduled read of the run follows 5 minutes later, and once more at 30 minutes if the run was still
-  going; after that the 12-hour watchdog settles it. Any conclusion other than success (failure,
-  timeout, cancelled) never passes; it ends the run as `runner-unavailable` (or `cancelled`) with
-  that reason, and the retry policy decides what follows. The rule is `src/hosted-check-verdict.ts`.
-  When the plan starts the optional source-pack job (`Refresh optional Forge source pack`,
-  continue-on-error, so the run's conclusion never depends on it but still waits for it), the plan
-  call says so (capability `checks.packVerdict`; an older server never sees the field) and the pass instead reads GitHub's job list for the run 10 s after the last shard
-  result (again at 30 s if a job is still running, then the reads above). Every job except the pack
-  job must have completed as success or skipped; another conclusion settles as above. That is one
-  action and one mutation per such run, and only for such runs; the pass no longer waits 25-55 s
-  for the pack job.
+  `workflow_run` completed event Forge already receives (no extra call), which usually arrives a few
+  seconds after the last result. GitHub never redelivers a lost event, so the pass also schedules one
+  read of GitHub's job list for the run 10 s after the last shard result (again at 30 s if a job is
+  still running); the event cancels it when it arrives first. Every job except the optional
+  source-pack job (`Refresh optional Forge source pack`, continue-on-error, so the run's conclusion
+  never depends on it but still waits for it) must have completed as success or skipped. If both
+  jobs reads find a job still running, one read of the run follows 5 minutes after the last result,
+  and once more at 30 minutes; after that the 12-hour watchdog settles it. A lost event therefore
+  costs about 10 s and one action and one mutation, never the 5 minutes it once did (Issue 03a749a5),
+  and a pass never waits for the pack job. Any conclusion other than success (failure, timeout,
+  cancelled) never passes; it ends the run as `runner-unavailable` (or `cancelled`) with that
+  reason, and the retry policy decides what follows. The rule is `src/hosted-check-verdict.ts`. The
+  plan call still says when it starts the pack job (capability `checks.packVerdict`; an older server
+  never sees the field).
   A new adapter supplies the same record from a channel the job cannot write: a signed provider event
   or a provider API read with the adapter's own credential.
 - **Outputs come from the planning step only.** It reads the Candidate as data and runs none of its

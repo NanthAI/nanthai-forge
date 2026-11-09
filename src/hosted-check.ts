@@ -243,11 +243,11 @@ export const hostedCheckRunSchema = z
         /** Why the dispatch call failed: HTTP status or error class, never a body or credential. */
         failure: z.string().max(80).optional(),
         /** Every shard reported passing; the pass waits for the provider's own conclusion
-         * (src/hosted-check-verdict.ts), and `confirm` is the one scheduled read if its event is lost. */
+         * (src/hosted-check-verdict.ts), and `confirm` is the next scheduled read if its event is lost. */
         verdictPending: z.literal(true).optional(),
         confirm: z.string().nullable().optional(),
-        /** The plan started the optional source-pack job, which the run's conclusion waits for:
-         * a pass reads the required jobs' conclusions instead (friction 0064c3b2). */
+        /** The plan started the optional source-pack job, which the run's conclusion waits for
+         * (friction 0064c3b2). Recorded only: every pass reads the required jobs' conclusions. */
         packRefresh: z.literal(true).optional(),
       })
       .strict()
