@@ -158,6 +158,7 @@ const dataHomes = new Set([
   'GOCACHE',
   'NUGET_PACKAGES',
   'GRADLE_USER_HOME',
+  'PUB_CACHE',
 ]);
 
 /** Toolchain folders under the runner's home that a Candidate child reads: PATH entries,

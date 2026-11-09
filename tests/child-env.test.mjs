@@ -507,7 +507,7 @@ test('a launch passes exactly the child env and the allow-listed paths, moving o
 test('toolchain folders under the home are readable; data homes and other paths are not', t => {
   const home = mkdtempSync(join(tmpdir(), 'forge-home-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
-  for (const dir of ['.cargo/bin', '.rustup', 'go/bin', 'sdk/jdk'])
+  for (const dir of ['.cargo/bin', '.rustup', 'go/bin', 'sdk/jdk', '.pub-cache'])
     mkdirSync(join(home, dir), { recursive: true });
   const env = {
     HOME: home,
@@ -515,6 +515,8 @@ test('toolchain folders under the home are readable; data homes and other paths 
     JAVA_HOME: join(home, 'sdk/jdk'),
     GOPATH: join(home, 'go'),
     CARGO_HOME: join(home, '.cargo'),
+    // A data home the Candidate writes (its own fresh one), never bound read-only from the runner.
+    PUB_CACHE: join(home, '.pub-cache'),
   };
   assert.deepEqual(toolchainReadable(env), [
     join(home, '.cargo/bin'),

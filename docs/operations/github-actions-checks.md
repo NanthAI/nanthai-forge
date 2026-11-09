@@ -1281,7 +1281,7 @@ receives these locations, when the runner image or a setup step sets them: `JAVA
 `Python3_ROOT_DIR`, `PKG_CONFIG_PATH`, `LD_LIBRARY_PATH`, `DOTNET_ROOT`, `NUGET_PACKAGES`,
 `CARGO_HOME`, `RUSTUP_HOME`, `ANDROID_HOME`, `ANDROID_SDK_ROOT`, `ANDROID_NDK`,
 `ANDROID_NDK_HOME`, `ANDROID_NDK_ROOT`, `ANDROID_NDK_LATEST_HOME`, `GRADLE_HOME`,
-`GRADLE_USER_HOME`, `MAVEN_HOME`, `M2_HOME`, `CONDA`, `VCPKG_INSTALLATION_ROOT` and
+`GRADLE_USER_HOME`, `MAVEN_HOME`, `M2_HOME`, `CONDA`, `VCPKG_INSTALLATION_ROOT`, `PUB_CACHE` and
 `setup-beam`'s `INSTALL_DIR_FOR_<TOOL>` (`toolchainEnvAllow` in `scripts/child-env.mjs`). The same applies to `actions.setup`. No
 name containing `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `AUTH` or `KEY` passes,
 whatever pattern it matches. Forge's standard check keeps its exact environment.

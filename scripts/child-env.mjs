@@ -78,6 +78,9 @@ export const toolchainEnvNames = [
   'M2_HOME',
   'CONDA',
   'VCPKG_INSTALLATION_ROOT',
+  // flutter-action exports it; without it the flutter tool unpacks and deletes the SDK's own
+  // .pub-preload-cache on first run, which the Candidate user may not delete.
+  'PUB_CACHE',
 ];
 /** Versioned image locations such as JAVA_HOME_21_X64 or GOROOT_1_23_X64, and setup-beam's install
  * roots (INSTALL_DIR_FOR_OTP, INSTALL_DIR_FOR_ELIXIR, ...). */

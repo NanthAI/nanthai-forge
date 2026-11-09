@@ -402,6 +402,7 @@ test('toolchain locations pass to configured commands; credential names never do
     CARGO_HOME: '/opt/cargo',
     pythonLocation: '/opt/python',
     INSTALL_DIR_FOR_OTP: '/opt/otp',
+    PUB_CACHE: '/srv/ci-home/.pub-cache',
     GITHUB_TOKEN: 'synthetic',
     ACTIONS_RUNTIME_TOKEN: 'synthetic',
     ACTIONS_ID_TOKEN_REQUEST_TOKEN: 'synthetic',
@@ -418,6 +419,7 @@ test('toolchain locations pass to configured commands; credential names never do
     'INSTALL_DIR_FOR_OTP',
     'JAVA_HOME',
     'JAVA_HOME_21_X64',
+    'PUB_CACHE',
     'pythonLocation',
   ]);
   for (const name of toolchainEnvNames)
