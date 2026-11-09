@@ -60,7 +60,7 @@ import {
 } from './versions.mjs';
 import { benchRootOrExit } from './bench-root.mjs';
 import { productCli } from './cli-install.mjs';
-import { drainBatch } from './drain.mjs';
+import { drainBatch, landingPathQueue } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
@@ -103,6 +103,18 @@ export async function batchGuard(start, end, { unpinned = false, exec } = {}) {
   const { changes, convexFiles } = await voidingChanges(start, end, { unpinned, ...(exec ? { exec } : {}) });
   if (!end.freeze) changes.push('freeze file missing at batch end');
   return Object.assign(changes, { convexFiles });
+}
+
+/** A start wait for the batch record (exit plan "Quiet rule and deploys", lead acdbee8b):
+ * consecutive waits of the same shape merge into one entry (first, last, polls). */
+export function recordWait(list, line, at = new Date().toISOString()) {
+  const shape = line.replace(/\d+(\.\d+)?%?/g, '#');
+  const last = list.at(-1);
+  if (last?.shape === shape) {
+    last.last = at;
+    last.polls++;
+  } else list.push({ first: at, last: at, polls: 1, shape, line });
+  return list;
 }
 
 /** Freeze file written by a bench process whose pid is gone (left by a kill -9). */
@@ -224,16 +236,33 @@ async function main() {
         }
       }, 0);
 
-  /** Under the hold, wait until no Convex deploy is queued or running on nanthai-forge (the
-   * quiet rule; drain.mjs; nothing is cancelled). Dogfood landings keep going. */
-  const drain = key =>
+  // Queued dogfood landings that change landing-path convex/ (lead acdbee8b); each
+  // submission's changed paths are read once per driver run.
+  const landingCache = new Map();
+  const queuedLandingPath = () =>
+    config.dogfood?.projectId
+      ? landingPathQueue(
+          {
+            cli: config.forge.cli,
+            url: config.dogfood.url ?? config.forge.url,
+            projectId: config.dogfood.projectId,
+            root: join(B, '.dogfood-anchor'),
+          },
+          { cache: landingCache },
+        )
+      : Promise.reject(Error('config.dogfood.projectId is missing'));
+
+  /** Under the hold, wait until no Convex deploy is queued or running on nanthai-forge and no
+   * queued or checking dogfood landing changes landing-path convex/ (the quiet rule; drain.mjs;
+   * nothing is cancelled). Other dogfood landings keep going. */
+  const drain = (key, sayWait = say) =>
     drainBatch({
       key,
       runs: () => deployInFlight(config),
-      queue: async () => [],
+      queue: queuedLandingPath,
       deadlineMs: DRAIN_MS,
       pauseMs: Math.min(60_000, RETRY_MS),
-      say,
+      say: sayWait,
       wait,
     });
 
@@ -244,6 +273,16 @@ async function main() {
     const need = b.cells.reduce((sum, c) => sum + diskNeed(c.arm, b.N, dry).needGb, 0) + 15;
     const free = diskFreeGb();
     if (free < need) r.push(`disk ${free.toFixed(1)} GB free < ${need.toFixed(1)} GB for the batch`);
+    // The quiet rule, checked before the hold and again under it (drain): no deploy in flight,
+    // no queued landing that changes landing-path convex/ (lead acdbee8b).
+    const deploys = await deployInFlight(config).catch(e => [{ name: `unreadable: ${e.message}` }]);
+    if (deploys.length)
+      r.push(
+        `${deploys.length} Convex deploy run(s) in flight (${deploys.map(x => x.workflowName ?? x.name).join(', ')})`,
+      );
+    const queued = await queuedLandingPath().catch(e => [`queue unreadable: ${e.message}`]);
+    if (queued.length)
+      r.push(`${queued.length} queued landing(s) change landing-path convex/ (${queued.join('; ')})`);
     if (forgeSpend() >= BUDGET_USD)
       r.push(`STOP Forge Convex spend $${forgeSpend().toFixed(2)} >= $${BUDGET_USD}`);
     return r;
@@ -288,6 +327,12 @@ async function main() {
 
   async function runBatch(b, attempt) {
     const dir = join(batchRoot, `${b.key}${suffix}-a${attempt}`);
+    // What this attempt's start waited on, for batch.json (lead acdbee8b).
+    const startWaits = [];
+    const sayWait = line => {
+      recordWait(startWaits, line);
+      say(line);
+    };
     for (;;) {
       const refusals = await batchRefusals(b);
       if (refusals.some(r => r.startsWith('STOP'))) {
@@ -295,24 +340,24 @@ async function main() {
         process.exit(2);
       }
       if (refusals.length) {
-        say(`WAIT ${b.key}: ${refusals.join('; ')}; retry in ${RETRY_MS / 60_000} min`);
+        sayWait(`WAIT ${b.key}: ${refusals.join('; ')}; retry in ${RETRY_MS / 60_000} min`);
         await wait(RETRY_MS);
         continue;
       }
       // Hold first (new dogfood finishes wait), then let landings already submitted drain, so
       // a busy main cannot starve the batch.
       if (existsSync(FREEZE) && !readFileSync(FREEZE, 'utf8').includes(`pid ${process.pid}`)) {
-        say(`WAIT ${b.key}: freeze held by someone else (${readFileSync(FREEZE, 'utf8').trim()})`);
+        sayWait(`WAIT ${b.key}: freeze held by someone else (${readFileSync(FREEZE, 'utf8').trim()})`);
         await wait(RETRY_MS);
         continue;
       }
       const hold = benchHoldText(config, `bench driver batch ${b.key} pid ${process.pid}`);
       writeFileSync(FREEZE, hold);
       holding = true;
-      const drained = await drain(b.key);
+      const drained = await drain(b.key, sayWait);
       if (!drained) {
         release();
-        say(
+        sayWait(
           `WAIT ${b.key}: a Convex deploy was still in flight after ${DRAIN_MS / 60_000} min under the hold; released, retry`,
         );
         await wait(RETRY_MS);
@@ -330,7 +375,7 @@ async function main() {
           cli.installation,
         ]).catch(() => {});
         renameSync(`${FREEZE}.batch`, FREEZE);
-        if (!(await drain(b.key))) {
+        if (!(await drain(b.key, sayWait))) {
           release();
           continue;
         }
@@ -339,7 +384,9 @@ async function main() {
       const sp = snapshotProblems(start, { requireFreeze: true });
       if (sp.length) {
         release();
-        say(`WAIT ${b.key}: under the hold ${sp.join('; ')}; released, retry in ${RETRY_MS / 60_000} min`);
+        sayWait(
+          `WAIT ${b.key}: under the hold ${sp.join('; ')}; released, retry in ${RETRY_MS / 60_000} min`,
+        );
         await wait(RETRY_MS);
         continue;
       }
@@ -415,6 +462,8 @@ async function main() {
           convexFiles: changes.convexFiles,
           fakeVersionChange: fakeChange || undefined,
         },
+        // What the start waited on (deploys, landing-path landings, disk, usage, freeze).
+        startWaits: startWaits.map(({ shape, ...w }) => w),
         // Every Convex deploy run that overlapped the batch (lead 2026-11-09: void only cells that
         // overlap a deploy which changed the landing path; such a change voids via `changes`).
         deploys: await deploysDuring(config, start.at, end.at),

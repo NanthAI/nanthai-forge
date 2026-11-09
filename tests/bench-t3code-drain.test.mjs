@@ -3,7 +3,8 @@
 // were admitted before the hold, reads only, and never cancels or alters them.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { drainBatch, hostedQueueEntries } from '../scripts/bench-t3code/drain.mjs';
+import { drainBatch, hostedQueueEntries, landingPathQueue } from '../scripts/bench-t3code/drain.mjs';
+import { recordWait } from '../scripts/bench-t3code/drive.mjs';
 
 const harness = ({ runs = [[]], queues = [[]] } = {}) => {
   let clock = 0,
@@ -105,5 +106,98 @@ test('hostedQueueEntries reads one queue page and counts unlisted entries', asyn
       stdout: '{"result":{}}\n',
     })),
     /no entries/,
+  );
+});
+
+// Lead acdbee8b: a batch start waits while a queued or checking dogfood landing changes
+// landing-path convex/ files; src/, tests/, docs/ and off-path convex/ landings do not.
+test('landingPathQueue blocks on landing-path convex/ landings only, reading each submission once', async () => {
+  const diffs = {
+    'lane-on': ['convex/projectHostedActionsVerdict.ts', 'src/a.ts'],
+    'lane-off': ['convex/gitServe.ts', 'docs/git-serving.md'],
+    'lane-src': ['src/agent-preflight.ts', 'tests/x.test.mjs', 'docs/a.md'],
+    'lane-board': ['convex/projectBoardView.ts'],
+  };
+  const calls = [];
+  const exec = async (node, args) => {
+    const [, , , action, body] = args;
+    const b = JSON.parse(body);
+    calls.push([action, b.laneId ?? null]);
+    assert.equal(b.url, 'u');
+    assert.equal(b.projectId, 'p');
+    const reply =
+      action === 'queue'
+        ? {
+            total: 6,
+            entries: [
+              { phase: 'checking', laneId: 'lane-on', submissionId: 's1' },
+              { phase: 'queued', laneId: 'lane-off', submissionId: 's2' },
+              { laneId: 'lane-src', submissionId: 's3' },
+              { phase: 'checking', laneId: 'lane-board', submissionId: 's4' },
+              { phase: 'queued', laneId: 'lane-gone', submissionId: 's5' },
+            ],
+          }
+        : diffs[b.laneId]
+          ? { items: diffs[b.laneId].map(path => ({ path })), truncated: false, nextCursor: null }
+          : null;
+    return {
+      stdout: 'note\n' + JSON.stringify(reply ? { result: reply } : { error: { code: 'NOT_FOUND' } }) + '\n',
+    };
+  };
+  const root = (await import('node:os')).tmpdir() + '/bench-landing-path-anchor';
+  const cache = new Map();
+  const labels = await landingPathQueue({ cli: '/cli.mjs', url: 'u', projectId: 'p', root }, { cache, exec });
+  assert.deepEqual(labels, [
+    'checking lane-on changes convex/projectHostedActionsVerdict.ts',
+    'checking lane-boa changes convex/projectBoardView.ts',
+    'queued lane-gon (changed paths unreadable: diff reply: NOT_FOUND; counts)',
+    'queued (not listed; counts)',
+  ]);
+  assert.equal(calls.filter(([a]) => a === 'diff').length, 5);
+  calls.length = 0;
+  await landingPathQueue({ cli: '/cli.mjs', url: 'u', projectId: 'p', root }, { cache, exec });
+  assert.deepEqual(
+    calls.filter(([a]) => a === 'diff').map(([, lane]) => lane),
+    ['lane-gone'],
+    'readable submissions are read once; an unreadable one is retried',
+  );
+});
+
+test('landingPathQueue counts a truncated diff and throws on an unreadable queue', async () => {
+  const root = (await import('node:os')).tmpdir() + '/bench-landing-path-anchor';
+  const exec = async (node, args) => ({
+    stdout:
+      JSON.stringify({
+        result:
+          args[3] === 'queue'
+            ? { total: 1, entries: [{ laneId: 'lane-big', submissionId: 's' }] }
+            : { items: [{ path: 'src/a.ts' }], truncated: true },
+      }) + '\n',
+  });
+  assert.deepEqual(await landingPathQueue({ cli: 'c', url: 'u', projectId: 'p', root }, { exec }), [
+    'queued lane-big (changed paths unreadable: diff truncated; counts)',
+  ]);
+  await assert.rejects(
+    landingPathQueue(
+      { cli: 'c', url: 'u', projectId: 'p', root },
+      { exec: async () => ({ stdout: '{}\n' }) },
+    ),
+    /queue reply/,
+  );
+  const empty = async () => ({ stdout: JSON.stringify({ result: { total: 0, entries: [] } }) + '\n' });
+  assert.deepEqual(await landingPathQueue({ cli: 'c', url: 'u', projectId: 'p', root }, { exec: empty }), []);
+});
+
+test('recordWait merges repeated waits of one shape and keeps distinct ones', () => {
+  const list = [];
+  recordWait(list, 'WAIT n10-r1: 1 Convex deploy run(s) in flight', '2026-11-09T14:00:00Z');
+  recordWait(list, 'WAIT n10-r1: 1 Convex deploy run(s) in flight', '2026-11-09T14:05:00Z');
+  recordWait(list, 'WAIT n10-r1: 2 queued landing(s) change landing-path convex/', '2026-11-09T14:10:00Z');
+  assert.deepEqual(
+    list.map(({ first, last, polls }) => [first, last, polls]),
+    [
+      ['2026-11-09T14:00:00Z', '2026-11-09T14:05:00Z', 2],
+      ['2026-11-09T14:10:00Z', '2026-11-09T14:10:00Z', 1],
+    ],
   );
 });

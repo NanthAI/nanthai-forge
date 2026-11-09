@@ -114,6 +114,7 @@ console.log(
         runner: b.runner ?? null,
         cells: (b.cells ?? []).map(c => c.cellId),
         voided: b.voided ?? [],
+        startWaits: b.startWaits ?? [],
       })),
       runnersByArm: Object.fromEntries(
         ['forge', 'github'].map(arm => [

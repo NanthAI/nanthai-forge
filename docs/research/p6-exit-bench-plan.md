@@ -79,6 +79,15 @@ runs; the bench project has its own queue, and dogfood checks run on another rep
   timeout stays: a deploy still in flight then releases the hold and retries. The driver still
   brings the held CLI to main first, and the start record must still have the CLI at main and the
   deployed `convex/` equal to the CLI commit's.
+- **Batch start, queued landing-path landings (lead acdbee8b, after batch n10-r1 a1 voided):**
+  the hold keeps out only new submissions. A landing already queued at the start still lands
+  during the batch, and its deploy follows. So a batch also waits while any queued or checking
+  nanthai-forge landing changes `convex/` files on the landing path (the off-path list below; a
+  landing whose changed paths cannot be read counts). The driver reads the queue once, then each
+  submission's changed paths once (`drain.mjs landingPathQueue`). It checks before taking the hold
+  and again under it. Landings that change only `src/`, `tests/`, docs or off-path `convex/` files
+  do not block. What each start waited on is recorded in `batch.json startWaits`, and the summary
+  lists it per batch.
 - **During a batch:** the CLI stays held by `.freeze`, as before. GitHub main and the deploy head
   moving are **recorded, not voids** (`versions.moved`), with every deploy run that overlapped the
   batch and each cell (`deploys`: id, head, start, end, status). A change in **`forge-check.yml`**
@@ -312,3 +321,10 @@ existed when it was decided.
   `convex/projectBoard` and `convex/projectBriefing` from the proposed off-path list, and asked
   that the report list every recorded, non-voiding deploy with its files. Prompted by the dry
   run on harness 5b707970, which voided on an off-path deploy and on one action at two refs.
+- 2026-11-09, lead acdbee8b on cf376b87 (amends 8eab6c1c): the batch start also waits while a
+  queued or checking dogfood landing changes landing-path `convex/` files, checked before and
+  under the hold, and the batch record logs what the start waited on. Prompted by scored batch
+  n10-r1 a1: a landing queued before its hold landed during it, and its deploy (42625208565,
+  `convex/projectHostedActionsVerdict.ts`) voided both cells. Those two cells are reported as
+  "voided, start-gate gap, fixed by" this change's receipt. They do not count toward the 1-in-4
+  void line.
