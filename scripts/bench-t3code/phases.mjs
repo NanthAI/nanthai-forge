@@ -172,9 +172,11 @@ export function callKinds(call) {
     const w = words.map(String);
     if (!w.length) continue;
     const name = w[0].split('/').at(-1);
-    const help = w.includes('--help') || w.includes('-h');
+    let help = w.includes('--help') || w.includes('-h');
     if (name === 'nforge') {
       const verb = ['agent', 'x'].includes(w[1]) ? w[3] : w[1];
+      // Docs pages quote error codes and conflict markers; reading them is help, not a result.
+      if (verb === 'docs') help = true;
       k.source = true;
       k.forge.push({ verb, help });
       if (help) k.other++;
@@ -214,6 +216,7 @@ export const TRIGGERS = [
   ['rebase-failed', /could not apply [0-9a-f]{7,}|Resolve all conflicts manually/],
   ['push-rejected', /! \[rejected\]|Updates were rejected|failed to push some refs/],
 ];
+const CANCELLED = /\bLANDING_CANCELLED\b/;
 // Historical evidence (a timeline event, a failed run's line) is shown again on every later
 // read; it counts once. Conflicts are current state and count each time they are reported.
 const ONCE = new Set(['queue-removed', 'check-failed']);
@@ -252,6 +255,14 @@ function joinCalls(turns, rows) {
 export function classify(turns, { rows = null } = {}) {
   for (const turn of turns) for (const call of turn.calls) call.kinds = callKinds(call);
   const joined = rows ? joinCalls(turns, rows) : null;
+  // A relay row records how its command ended. A command that keeps running (a Codex exec
+  // session resumed by write_stdin/wait) shows that end only on a later read, so its codes count
+  // in the last turn that reads the command, not the turn that started it (polls in between are
+  // waiting, not rework).
+  const lastRead = new Map();
+  turns.forEach((turn, i) => {
+    for (const call of turn.calls) lastRead.set(call.owner ?? call, i);
+  });
   const totals = Object.fromEntries(PHASES.map(p => [p, { turns: 0, ...zero() }]));
   const events = { publishes: 0, attempts: 0, reworkEpisodes: 0, resyncs: 0, triggers: [] };
   const seen = new Set();
@@ -279,19 +290,25 @@ export function classify(turns, { rows = null } = {}) {
     for (const k of USAGE_KEYS) t[k] += turn.usage[k];
     // What this turn's commands returned decides the next turn's phase.
     if (state !== 'coding' && state !== 'done') {
-      const found = [];
+      const found = [],
+        counted = new Set();
       for (const c of calls) {
         const from = c.kinds.source ? c : (c.owner ?? c);
         if (!from.kinds.source || from.kinds.forge.some(f => f.help)) continue;
         for (const [kind, re] of TRIGGERS)
           for (const line of c.result.split('\n')) {
             if (!re.test(line)) continue;
+            // A cancelled or conflicted landing ends terminal-failed too; it is not a failed check.
+            if (kind === 'check-failed' && (CANCELLED.test(line) || TRIGGERS[0][1].test(line))) continue;
             const key = `${kind}\u0000${line.trim()}`;
             if (ONCE.has(kind) && seen.has(key)) continue;
             seen.add(key);
             found.push(kind);
           }
-        for (const r of c.rows ?? []) {
+        const ended = c.owner ?? c;
+        if (lastRead.get(ended) !== i || counted.has(ended)) continue;
+        counted.add(ended);
+        for (const r of ended.rows ?? []) {
           for (const code of r.errorCodes ?? []) if (CODE_TRIGGERS[code]) found.push(CODE_TRIGGERS[code]);
           if (r.conflictMarkers) found.push('conflict');
         }

@@ -202,8 +202,11 @@ export function assertNoConflictMarkers(
 /** Generated drafts can match their checkout baseline and bypass ordinary dirty
  * capture. Revisit only their retained conflict paths, with a 64 KiB buffer. */
 export function precheckPendingConflicts(root: string, laneId: string) {
+  assertNoConflictMarkers(root, laneId, markedPendingPaths(root, laneId), true);
+}
+/** Retained conflict paths that still hold markers (each scanned with one 64 KiB buffer). */
+export function markedPendingPaths(root: string, laneId: string) {
   const paths = pendingConflictPaths(root, laneId);
-  if (!paths.length) return;
   const marked: string[] = [],
     scratch = Buffer.allocUnsafe(64 * 1024);
   for (const path of paths) {
@@ -222,5 +225,15 @@ export function precheckPendingConflicts(root: string, laneId: string) {
     }
     if (conflictMarkersFound(scan)) marked.push(path);
   }
-  assertNoConflictMarkers(root, laneId, marked, true);
+  return marked;
+}
+/** A new landing of the conflicted origin Lane from the folder that became its resolution, after
+ * every conflict path was edited free of markers but before resolve ran, would land the origin's
+ * pre-resolution head and re-fail the same conflict after a full queue wait (friction 41fc0c29).
+ * Refuse locally and name the one resolve command. Unedited markers keep the server path (a
+ * main-moved retry can compose cleanly; an abandoned resolution gets a fresh sync). */
+export function refuseUnsavedResolution(root: string, originLaneId: string) {
+  const here = inPlaceResolution(root, originLaneId);
+  if (!here || here.resolved || !here.paths.length || markedPendingPaths(root, here.laneId).length) return;
+  requireResolution(root, here.laneId);
 }

@@ -166,8 +166,12 @@ and the results of the source commands before it:
   `sleep`);
 - `done`: after acceptance (a `LANDED` receipt, a merged pull request).
 
-Help output and non-source commands (file reads, local tests) never start rework; a timeline
-event or failed-run line shown again on a later read counts once. In the Forge arm the relay's
+Help output, docs pages (`nforge docs`) and non-source commands (file reads, local tests) never
+start rework; a timeline event or failed-run line shown again on a later read counts once. A
+landing the agent cancels itself, or one that ended in a conflict, is not a failed check. A
+relay-logged code of a command that keeps running (a Codex exec session the agent polls) counts
+in the turn that reads the command's end, not the turn that started it: polls before then are
+waiting. In the Forge arm the relay's
 call log is joined to the session's `nforge` commands by order and verb, so structured error
 codes count even when the agent printed only part of a receipt; the join coverage is reported
 per task. Per cell (`result.rework`, `rework.mjs`): per landing, the median of rework cached

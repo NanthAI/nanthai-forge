@@ -12,7 +12,7 @@ import { capturedNotSaved, type NotSaved } from './save-not-saved.js';
 import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-agent-source.js';
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
-import { inPlaceResolution } from './hosted-conflict-precheck.js';
+import { inPlaceResolution, refuseUnsavedResolution } from './hosted-conflict-precheck.js';
 import { agentSourceOutcome, checkLogsKey, checkSelection } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
@@ -202,6 +202,17 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.finish.parse(context?.command ?? input);
   const replayed = await replayFinish(session);
   if (replayed) return replayed;
+  // A new landing of the origin Lane after an edited, unsaved in-place resolution: refuse before
+  // any hosted call (41fc0c29). An operation that already ran keeps following its own recovery.
+  if (
+    session.journal.get('finish-work-started') === undefined &&
+    command.laneId &&
+    !command.candidateId &&
+    !command.inputs &&
+    session.marker()?.selection.laneId !== command.laneId
+  )
+    refuseUnsavedResolution(session.root, command.laneId);
+  await session.journal.retain('finish-work-started', () => true);
   const checked = await reuseCheckedFinish(session, command);
   if (checked) {
     command.candidateId = checked.candidateId;

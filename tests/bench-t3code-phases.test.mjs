@@ -272,6 +272,74 @@ test('Codex rollout: exec sessions resumed by write_stdin, cells resumed by wait
   assert.equal(r.landedAtTurn, 5);
 });
 
+test("a long command's relay codes count when the agent reads its end, not at its start (30845e65)", () => {
+  // Codex starts `land`, then polls its exec session; the relay row (the command's final outcome)
+  // joins to the starting call. Polls before the conflict is shown are waiting, not rework.
+  const at = i => new Date(Date.UTC(2026, 10, 8, 13, 0, i)).toISOString();
+  let i = 0;
+  const item = payload => ({ timestamp: at(++i), type: 'response_item', payload });
+  const record = cached => ({
+    timestamp: at(++i),
+    type: 'token_usage_record',
+    payload: { usage: { input_tokens: cached + 1, cached_input_tokens: cached, output_tokens: 1 } },
+  });
+  const call = (id, input) => item({ type: 'custom_tool_call', name: 'exec', call_id: id, input });
+  const out = (id, output) => item({ type: 'custom_tool_call_output', call_id: id, output });
+  const poll = id => call(id, 'text(await tools.write_stdin({session_id:7,chars:""}));');
+  const entries = [
+    { timestamp: at(0), type: 'session_meta', payload: { id: 's' } },
+    call('c1', `text(await tools.exec_command({cmd:${JSON.stringify("nforge agent . land --save '{}'")}}));`),
+    record(100),
+    out('c1', JSON.stringify({ session_id: 7, output: '' })),
+    poll('c2'),
+    record(200),
+    out('c2', 'Queued, position 2 of 2'),
+    poll('c3'),
+    record(300),
+    out('c3', 'terminal-failed COMPOSITION_CONFLICT'),
+    call('c4', `text(await tools.exec_command({cmd:${JSON.stringify("nforge agent . sync '{}'")}}));`),
+    record(400),
+    out('c4', 'synced'),
+  ];
+  const rows = [
+    { task: 't', startedAt: '1', args: ['land', '--save', '{}'], errorCodes: ['COMPOSITION_CONFLICT'] },
+    { task: 't', startedAt: '2', args: ['sync', '{}'], errorCodes: [] },
+  ];
+  const r = classify(sessionTurns(entries), { rows });
+  assert.deepEqual(r.phases, ['landing', 'waiting', 'waiting', 'rework']);
+  assert.deepEqual(r.events.triggers, [{ turn: 2, kinds: ['conflict'] }]);
+  assert.equal(r.totals.rework.cachedInput, 400);
+});
+
+test('a self-cancelled or conflicted landing is not a failed check; docs pages are not results', () => {
+  const cancelled =
+    '{"phase":"terminal-failed","error":{"code":"LANDING_CANCELLED","message":"The hosted landing request was cancelled."}}';
+  const r = classify(
+    sessionTurns([
+      ...claudeTurn(land, 'SUBMITTED'),
+      ...claudeTurn(`nforge agent . cancel '{}'`, cancelled),
+      ...claudeTurn(
+        'nforge docs agents/workflow',
+        'Failure cause is `check-failed`; CHECK_FAILED, <<<<<<< lane',
+      ),
+      ...claudeTurn(land, 'LANDED receipt r1'),
+    ]),
+  );
+  assert.equal(r.events.reworkEpisodes, 0, 'a self-cancel and a docs page are not triggers');
+  assert.equal(r.landedAtTurn, 3);
+  const conflicted = classify(
+    sessionTurns([
+      ...claudeTurn(land, '{"phase":"terminal-failed","error":{"code":"COMPOSITION_CONFLICT"}}'),
+      ...claudeTurn('git diff', 'diff'),
+    ]),
+  );
+  assert.deepEqual(
+    conflicted.events.triggers,
+    [{ turn: 0, kinds: ['conflict'] }],
+    'a conflict, not a failed check',
+  );
+});
+
 test('sessionPhases reads a retained transcript or stream-json output', () => {
   const dir = mkdtempSync(join(tmpdir(), 'phases-'));
   try {

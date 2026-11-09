@@ -35,6 +35,7 @@ import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
 import { withLandWaitMetrics } from './land-wait-metrics.js';
 import { backgroundWake, wakeContinuation } from './agent-wake.js';
+import { landEditedResolution } from './hosted-land-resolution.js';
 
 export { landPhase, landSummary };
 
@@ -81,6 +82,15 @@ export async function submitHostedLand(
   const deadline = (Number.isFinite(invokedAt) ? invokedAt : Date.now()) + landBudgetSeconds() * 1000;
   // A save or check-only compose that waits for its own outcome inside finish stops at this deadline.
   transport.waitUntil ??= deadline;
+  // An edited, unsaved resolution in this folder: save it (resolve) and land the resolution Lane.
+  const chained = await landEditedResolution(
+    hostedAgentRoot(root),
+    command,
+    (action, body) => hostedAgentCli(root, action, body, address, transport),
+    line => process.stderr.write(`${line}\n`),
+  );
+  if (chained && 'response' in chained) return chained.response as HostedAgentResponse;
+  if (chained) command = chained.finish;
   let response = (await hostedAgentCli(root, 'finish', command, address, transport)) as HostedAgentResponse;
   // The first receipt already carries the operation id and any overlap notice: show them now, not at exit.
   announce(transport.root ?? root, command, response, wake);
