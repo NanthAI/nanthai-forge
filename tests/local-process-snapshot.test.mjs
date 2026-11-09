@@ -7,9 +7,11 @@ import { syncBuiltinESMExports } from 'node:module';
 import {
   processIdentity,
   processesAlive,
+  stopProcessTree,
   WINDOWS_START_SCRIPT,
   windowsPowerShell,
   windowsStartArgs,
+  windowsTaskkill,
 } from '../dist/local-process.js';
 import { LAUNCHER_WINDOWS_START_SCRIPT } from '../dist/cli-launcher.js';
 
@@ -97,4 +99,65 @@ test('Windows start identity loads no PowerShell module and the launcher reads i
     '[System.Diagnostics.Process]::GetProcessById(42).StartTime.ToFileTimeUtc()',
   ]);
   assert.equal(windowsPowerShell('D:\\Win'), 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+});
+
+const alive = pid => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+};
+
+// Descendant cleanup (Issue 1444471f): a check command's own children stop with it on every platform.
+// Windows has no process groups, so this runs taskkill /T on the windows-latest smoke.
+test('stopping a check command also stops the descendants it started (1444471f)', async t => {
+  const child = spawn(
+    process.execPath,
+    [
+      '-e',
+      "const c=require('node:child_process').spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)",
+    ],
+    { detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true },
+  );
+  let grandchild;
+  t.after(() => {
+    child.kill('SIGKILL');
+    if (grandchild && alive(grandchild)) process.kill(grandchild, 'SIGKILL');
+  });
+  const [line] = await once(child.stdout, 'data');
+  grandchild = Number(String(line).trim());
+  assert(Number.isInteger(grandchild) && alive(grandchild), 'the descendant runs');
+  const exited = once(child, 'exit');
+  stopProcessTree(child);
+  await exited;
+  for (let i = 0; i < 100 && alive(grandchild); i++) await new Promise(done => setTimeout(done, 100));
+  assert.equal(alive(grandchild), false, 'the descendant stopped with its command');
+});
+
+test('Windows never signals the PID of a command that already exited (1444471f)', () => {
+  const original = childProcess.execFileSync;
+  let tools = 0,
+    kills = 0;
+  childProcess.execFileSync = () => {
+    tools++;
+  };
+  syncBuiltinESMExports();
+  try {
+    // Windows may hand an exited command's PID to an unrelated process.
+    stopProcessTree({ pid: 4242, exitCode: 0, signalCode: null, kill: () => kills++ }, 'SIGKILL', 'win32');
+    stopProcessTree(
+      { pid: 4242, exitCode: null, signalCode: 'SIGTERM', kill: () => kills++ },
+      'SIGKILL',
+      'win32',
+    );
+    assert.deepEqual([tools, kills], [0, 0]);
+    stopProcessTree({ pid: 4242, exitCode: null, signalCode: null, kill: () => kills++ }, 'SIGKILL', 'win32');
+    assert.deepEqual([tools, kills], [1, 0]);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+  }
+  assert.equal(windowsTaskkill('D:\\Win'), 'D:\\Win\\System32\\taskkill.exe');
 });

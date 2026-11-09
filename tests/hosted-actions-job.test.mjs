@@ -38,6 +38,7 @@ import { executeActionsJob, isolateCandidates } from '../dist/hosted-actions-job
 import { directRequestSchema } from '../dist/hosted-actions-direct.js';
 import { savePin } from '../dist/hosted-save.js';
 import { digest } from '../dist/hash.js';
+import { checkPin } from '../dist/hosted-check.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
 import { createSourcePack } from '../dist/source-pack-archive.js';
 import { refreshSourcePack, sourcePackFileBytes } from '../dist/source-pack.js';
@@ -1573,6 +1574,50 @@ for (const scenario of [
     assert.equal(s.calls.filter(command => command.kind === 'result').length, 1);
     assert.equal(s.calls.filter(command => command.kind === 'session').length, 2);
   });
+
+// Reuse never changes the verdict (Issue 1444471f): one Candidate checked twice through the same declared
+// setup and cache folder, first cold (the setup fills an empty cache), then warm (it finds the entry),
+// reports the same plan and result; the setup cases above fail any setup that changes source.
+test('a warm cache reports the same plan and result as the cold run of one Candidate (1444471f)', async t => {
+  const previousCache = process.env.FORGE_SOURCE_CACHE_DIR;
+  const cache = mkdtempSync(join(tmpdir(), 'forge-reuse-cache-'));
+  process.env.FORGE_SOURCE_CACHE_DIR = cache;
+  t.after(() => {
+    if (previousCache === undefined) delete process.env.FORGE_SOURCE_CACHE_DIR;
+    else process.env.FORGE_SOURCE_CACHE_DIR = previousCache;
+    rmSync(cache, { recursive: true, force: true });
+  });
+  t.mock.method(globalThis, 'fetch', async () => new Response(null, { status: 200 }));
+  t.mock.method(process.stdout, 'write', () => true);
+  t.mock.method(process.stderr, 'write', () => true);
+  const setup = `const fs=require('node:fs'); fs.appendFileSync('uses', fs.existsSync('entry') ? 'warm\\n' : 'cold\\n'); fs.writeFileSync('entry','cache');`;
+  const arms = [];
+  for (let i = 0; i < 2; i++) {
+    const s = fixture(t),
+      candidate = join(s.directory, 'candidate'),
+      path = join(s.directory, 'plan.json');
+    s.run.check.actions = { setup: { executable: process.execPath, args: ['--eval', setup] } };
+    const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+    writeFileSync(path, JSON.stringify(prepared.recipe));
+    writeFileSync(join(s.directory, 'forge-actions-state.json'), prepared.stateBytes);
+    const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+      process.execPath,
+      '--eval',
+      'process.exitCode = 0',
+    ]);
+    const { exitCode, contractReports } = s.calls.find(command => command.kind === 'result').result;
+    arms.push({
+      exit,
+      exitCode,
+      contractReports,
+      head: prepared.recipe.head,
+      plan: checkPin(prepared.recipe),
+    });
+  }
+  assert.equal(readFileSync(join(cache, 'uses'), 'utf8'), 'cold\nwarm\n');
+  assert.deepEqual(arms[1], arms[0]);
+  assert.equal(arms[0].exit, 0);
+});
 
 // The restore and install bounds (friction d99fcf3a) are checked by tests/action-pins.test.mjs.
 const unbounded = text =>

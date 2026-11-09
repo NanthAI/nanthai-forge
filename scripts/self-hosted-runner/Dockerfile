@@ -3,6 +3,8 @@ FROM node:24.22.1-bookworm-slim AS build
 WORKDIR /opt/forge
 COPY package.json package-lock.json tsconfig.json ./
 COPY src ./src
+# build:core generates the typed Convex API inventory from these modules (scripts/prepare-convex-api.mjs).
+COPY convex ./convex
 COPY scripts ./scripts
 RUN npm ci --ignore-scripts && npm run build:core
 

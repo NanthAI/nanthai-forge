@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError } from './errors.js';
+import { stopProcessTree } from './local-process.js';
 import { durableReplace } from './native-durability.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { landedOperations } from './landed-operations.js';
@@ -142,11 +143,7 @@ function runChild(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      try {
-        if (child.pid) process.kill(-child.pid, 'SIGKILL');
-      } catch {
-        /* already gone */
-      }
+      stopProcessTree(child);
       if (failure) reject(failure);
     };
     const timer = setTimeout(

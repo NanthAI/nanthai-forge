@@ -1,7 +1,7 @@
 # Self-hosted check runner
 
-A project can run checks on its own Linux host, VM, container or macOS machine
-without GitHub. The provider is `self-hosted`, with a stable UUID `machineId`,
+A project can run checks on its own Linux host, VM, container, macOS or Windows
+machine without GitHub ([qualified platforms](#qualified-platforms)). The provider is `self-hosted`, with a stable UUID `machineId`,
 pinned `runtime` and `environmentFingerprint`, `platform: {os, arch}` using Node
 names (for example `linux/x64` or `darwin/arm64`), and optional `labels: string[]`.
 Labels describe the selected machine for project routing; this release selects
@@ -84,6 +84,54 @@ temp directory; `FORGE_LOCAL_CHECK_LOG_DIR` can select a persistent private moun
 The historical directory name and seven-day local log behavior are unchanged.
 A container is an execution environment, not an additional Forge sandbox.
 
+## Qualified platforms
+
+Qualification is the self-hosted runner's exact-source check of one fixed commit
+(`self-hosted runner checks one fixed commit exactly on this platform` in
+`tests/hosted-mac-runner.test.mjs`), run on the real OS with no OS mocks against the
+in-process backend fixture: the runner fetches the State and its objects, refuses
+bytes that differ from their digests (`INVALID_NATIVE_SOURCE`), installs the checkout
+and runs a command that verifies every path, byte, executable mode and the link, then
+returns its signed result. The fixed commit has the same State digest everywhere. The
+landing queue's runner contract (`runner contract on …` in
+`tests/hosted-landing-prequeue.test.mjs`) passes on the GitHub Actions and the
+self-hosted adapter.
+
+| Platform | Where it runs | Exact-source check | Runner contract |
+| --- | --- | --- | --- |
+| Linux x64 | GitHub-hosted `ubuntu-latest`, in every landing check | passes | passes |
+| Linux container (arm64) | the recipe image above with the test files added, on Docker | passes | passes |
+| macOS arm64 | a developer machine (`npm test`) | passes | passes |
+| Windows x64 | GitHub-hosted `windows-latest`, `scripts/cli-platform-smoke.mjs` on every CLI change | passes | passes |
+
+Not run: Linux arm64 outside a container, macOS x64, Windows arm64, and a live
+registration against a deployment from a Linux host, container or Windows machine.
+
+### Windows
+
+Start the runner with the same commands from PowerShell. Windows differs in three
+places:
+
+- **Private modes and ACLs.** Windows ignores Unix mode bits, so the owner-only modes
+  the runner requests (0700 folders, 0600 files, and the legacy key file's mode check)
+  protect nothing there. Each check runs in a new folder under the OS temp folder,
+  which inherits the user profile's ACL; a test on `windows-latest` checks that this
+  ACL has no Everyone, Users or Authenticated Users entry. The runner neither sets nor
+  checks ACLs: if `TEMP`/`TMP`, `FORGE_RUNNER_STATE_DIR` or `FORGE_LOCAL_CHECK_LOG_DIR`
+  point at a shared folder, whoever that folder admits can read check source and logs.
+  No error is shown.
+- **Symlink privileges.** Without Developer Mode or administrator rights Windows
+  refuses to create links (`EPERM`). The runner then writes a source link as a regular
+  file holding its target, as Git does with `core.symlinks=false`, so the check command
+  sees a file where Linux and macOS see a link. No error is shown; elsewhere a refused
+  link fails the run with `EPERM`.
+- **Descendant cleanup.** Windows has no process groups. On cancel, lease loss or
+  when the result is in, the runner ends a still-running command with `taskkill /T /F`,
+  which stops every process the command started. A process the command left running
+  after the command itself exited is not found (its PID may already belong to another
+  process) and keeps running; no error is shown. Stop such background processes in
+  the check command itself.
+
 ## Toolchains and caches in checks
 
 Checks run with a private HOME, so tools that keep state under HOME would start
@@ -152,9 +200,8 @@ for additive rollout; new writers always record platform. Legacy `mac` means
 Darwin with unrecorded architecture. Historic digests, the runtime pin, signature
 domains, `macEvidence` receipt field/tag and structured error codes remain intact.
 The same owner/revocation and exact-Candidate acceptance checks apply on Linux.
-Windows is unqualified: execution has an existing Windows child-kill branch,
-but private Unix modes, symlink privileges and descendant cleanup need a real
-Windows qualification before claiming parity. No new platform block is applied.
+Windows runs the same execution path with the limits listed under
+[Windows](#windows). No platform is blocked.
 
 
 ## Optional Actions cache preparation

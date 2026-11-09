@@ -3,7 +3,9 @@
 // (dist/cli-entry.js) against a fresh native owner, then optionally against a
 // hosted dev project when FORGE_SMOKE_PROJECT_URL and a login are present.
 // It edits a CRLF file and a path with a space, renames a file by case only,
-// marks a file executable and adds a symlink, then checks the accepted bytes.
+// marks a file executable and adds a symlink, then checks the accepted bytes. It then runs the
+// self-hosted runner's exact-source check of one fixed commit on this OS and the runner contract
+// test on both adapters (Issue 1444471f).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -199,8 +201,45 @@ function native() {
   rmSync(base, { recursive: true, force: true, maxRetries: 5 });
 }
 
+/** The self-hosted runner checks one fixed commit on this OS against the in-process backend fixture
+ * (tests/hosted-mac-runner.test.mjs, no OS mocks; its qualification line names date, OS and outcome),
+ * and the landing queue's runner contract passes on GitHub Actions and the self-hosted adapter. */
+function selfHostedCheck() {
+  const started = Date.now();
+  const reply = spawnSync(
+    process.execPath,
+    [
+      '--import',
+      './tests/check-runtime.mjs',
+      '--test',
+      '--test-name-pattern=1444471f',
+      '--test-name-pattern=^runner contract on',
+      'tests/hosted-mac-runner.test.mjs',
+      'tests/hosted-landing-prequeue.test.mjs',
+    ],
+    {
+      cwd: fileURLToPath(new URL('..', import.meta.url)),
+      env,
+      encoding: 'utf8',
+      maxBuffer: 64 * 1024 * 1024,
+      timeout: 300_000,
+    },
+  );
+  report.steps.push({
+    args: ['self-hosted', 'exact-source'],
+    status: reply.status,
+    ms: Date.now() - started,
+  });
+  report.selfHosted = /qualification [^\n]*/.exec(reply.stdout ?? '')?.[0] ?? null;
+  if (reply.status !== 0)
+    throw new Error(
+      `self-hosted exact-source check exited ${reply.status}: ${`${reply.stdout ?? ''}${reply.stderr ?? ''}`.slice(-4000) || reply.error}`,
+    );
+}
+
 try {
   native();
+  selfHostedCheck();
   report.ok = true;
 } catch (error) {
   report.ok = false;

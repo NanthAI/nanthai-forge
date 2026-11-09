@@ -38,7 +38,13 @@ import { automaticCleanup } from './work-auto-clean.js';
 import { readPolicy } from './work-autonomy.js';
 import { CheckQueue, foregroundQueued } from './check-queue.js';
 import { diskGuard } from './disk-guard.js';
-import { processAlive, processIdentity, processStartTime, processGroupAlive } from './local-process.js';
+import {
+  processAlive,
+  processIdentity,
+  processStartTime,
+  processGroupAlive,
+  stopProcessTree,
+} from './local-process.js';
 import { spawn } from 'node:child_process';
 import { finalizeDeadRunCancellation } from './work-run-cancellation.js';
 import { recoverRecordRuns } from './work-record-runs.js';
@@ -345,12 +351,8 @@ async function launchLocal(
   process.on('SIGHUP', onSignal);
   const stop = (signal: NodeJS.Signals) => {
     if (!child?.pid) return;
-    try {
-      if (process.platform === 'win32') child.kill(signal);
-      else process.kill(-child.pid, signal);
-    } catch {
-      /* Exited groups are reconciled by the child's close event; never signal an unrelated stored PID. */
-    }
+    // Exited groups are reconciled by the child's close event; never signal an unrelated stored PID.
+    stopProcessTree(child, signal);
   };
   const finish = async (
     code: number | null,

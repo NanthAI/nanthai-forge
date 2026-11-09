@@ -10,7 +10,8 @@ import { keepHostedEditsPatch } from './hosted-abandon-patch.js';
 import { saveRequestSchema } from './hosted-save.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { captureHostedSave } from './hosted-save-capture.js';
-import { readHostedLaneCheckout, hostedLaneCheckoutMarkerSchema } from './hosted-lane-checkout-marker.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { advanceMarkerMetadata } from './hosted-marker-advance.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
@@ -18,7 +19,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedLifecycleRequestSchema, hostedLifecycleResultSchema } from './hosted-lifecycle.js';
 import { invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
+import { finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import type { ConvexExchange } from './exchange-client.js';
 const commandSchema = z
@@ -290,32 +291,9 @@ export async function transitionHostedLane(
     );
     result = await transition();
   }
-  // Only metadata advances. Dirty/newer local bytes and sparse materialization
-  // stay untouched; a lost reply or old replay cannot rewind a later baseline.
-  if (result.lane && request.target.kind === 'lane') {
-    const target = request.target,
-      lane = result.lane;
-    workLocked(lock, () => {
-      settlePendingCheckoutDelta(root);
-      const marker = readHostedLaneCheckout(root);
-      if (!marker || marker.selection.laneId !== target.laneId) return;
-      const selection = marker.selection;
-      // Same source (head and sourceVersion) with older Lane versions: only metadata moved (acceptance, a pin, this
-      // transition), so the marker advances. A newer source or a later marker is never rewound or overwritten.
-      if (
-        selection.head !== lane.head ||
-        selection.sourceVersion !== lane.sourceVersion ||
-        selection.version >= lane.version ||
-        selection.lifecycleVersion >= lane.lifecycleVersion
-      )
-        return;
-      const next = hostedLaneCheckoutMarkerSchema.parse({
-        ...marker,
-        selection: { ...selection, ...lane },
-      });
-      durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(next));
-    });
-  }
+  // Only metadata advances (src/hosted-marker-advance.ts); a lost reply or old replay cannot rewind a later baseline.
+  if (result.lane && request.target.kind === 'lane')
+    advanceMarkerMetadata(root, request.target.laneId, result.lane);
   if (result.status === 'pending' && childProgress)
     return {
       phase: 'save' as const,

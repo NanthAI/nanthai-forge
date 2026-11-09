@@ -42,6 +42,7 @@ import {
   SECRET_SCAN_ALLOW_FILE,
 } from './secret-scan.js';
 import type { OutputRoot } from './hosted-check-output.js';
+import { stopProcessTree } from './local-process.js';
 
 export type MacExecutionTransport = CheckoutObjectTransport & {
   upload(pin: { sha256: string; size: number }, bytes: Buffer): Promise<unknown>;
@@ -295,12 +296,7 @@ export async function executeHostedMacCheck(
         const kill = () => {
           if (killed) return;
           killed = true;
-          try {
-            if (child.pid && process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL');
-            else child.kill('SIGKILL');
-          } catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
-          }
+          stopProcessTree(child);
         };
         const exit = new Promise<number | null>((resolve, reject) => {
           child.once('error', reject);

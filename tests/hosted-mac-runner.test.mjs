@@ -3,9 +3,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate as immediate } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { windowsPowerShell } from '../dist/local-process.js';
 import { writeFile } from 'node:fs/promises';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -23,7 +25,7 @@ const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
 const outputApi = await import(moduleUrl('../convex/projectHostedOutputApi.ts'));
 const secret = 'synthetic-mac-fixed-collector';
 
-async function fixture(t, actualEnvironment = false, provider = 'mac') {
+async function fixture(t, actualEnvironment = false, provider = 'mac', source = {}) {
   const localLogs = mkdtempSync(join(tmpdir(), 'forge-mac-log-test-'));
   const oldLogs = process.env.FORGE_LOCAL_CHECK_LOG_DIR;
   process.env.FORGE_LOCAL_CHECK_LOG_DIR = localLogs;
@@ -44,7 +46,7 @@ async function fixture(t, actualEnvironment = false, provider = 'mac') {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  const f = await checksFixture(),
+  const f = await checksFixture(null, source),
     scheduled = [];
   f.decorateContext(ctx => {
     ctx.scheduler = {
@@ -530,6 +532,193 @@ for (const provider of ['mac', 'self-hosted'])
         );
       }
     });
+
+// Exact-source qualification (Issue 1444471f): the self-hosted runner checks one fixed commit on this
+// real platform, with no OS mocks: bytes, executable modes, a link and the exact path set, then the
+// command's verdict. The Linux landing check, the runner container and windows-latest (through
+// scripts/cli-platform-smoke.mjs) run it; docs/operations/self-hosted-runner.md#qualified-platforms.
+const fixedCommit = [
+  ['README.md', 'Fixed commit for the self-hosted runner qualification.\n', 'file'],
+  ['src/lib/value.txt', 'first line\r\nsecond line\r\n', 'file'],
+  ['bin/run check.sh', '#!/bin/sh\nexit 0\n', 'executable'],
+  ['value-link', 'src/lib/value.txt', 'symlink'],
+];
+const exactSourceCheck = `
+const { createHash } = require('node:crypto'), fs = require('node:fs'), path = require('node:path');
+const expected = JSON.parse(process.argv[1]), win = process.platform === 'win32';
+const walk = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+  const rel = path.join(dir, entry.name);
+  return entry.isDirectory() ? walk(rel) : [rel.split(path.sep).join('/')];
+});
+const actual = walk('.').sort(), wanted = expected.map(([p]) => p).sort();
+if (JSON.stringify(actual) !== JSON.stringify(wanted)) throw new Error('paths ' + JSON.stringify(actual));
+for (const [p, sha256, mode, target] of expected) {
+  const stat = fs.lstatSync(p);
+  if (mode === 'symlink') {
+    const ok = stat.isSymbolicLink() ? fs.readlinkSync(p) === target : win && fs.readFileSync(p, 'utf8') === target;
+    if (!ok) throw new Error('link ' + p);
+    continue;
+  }
+  if (createHash('sha256').update(fs.readFileSync(p)).digest('hex') !== sha256) throw new Error('bytes ' + p);
+  if (!win && Boolean(stat.mode & 0o111) !== (mode === 'executable')) throw new Error('mode ' + p);
+}
+console.log('exact source verified: ' + expected.length + ' entries on ' + process.platform + '/' + process.arch);
+`;
+async function exactSourceRun(t, files, serve = bytes => bytes) {
+  const blobs = new Map(files.map(([, text]) => [digest(Buffer.from(text)), Buffer.from(text)]));
+  const stateFiles = files
+    .map(([path, text, mode]) => ({ path, blob: digest(Buffer.from(text)), mode }))
+    .sort((a, b) => (a.path < b.path ? -1 : 1));
+  const f = await fixture(t, true, 'self-hosted', { stateFiles });
+  const expected = files.map(([path, text, mode]) => [path, digest(Buffer.from(text)), mode, text]);
+  const definition = await f.configure(
+    {
+      kind: 'definition',
+      checkId: f.checkId,
+      command: {
+        name: 'exact-source',
+        executable: process.execPath,
+        args: ['-e', exactSourceCheck, JSON.stringify(expected)],
+        environmentLabel: 'clean',
+      },
+    },
+    f.definition.digest,
+  );
+  const run = (await f.claim((await f.enqueue({ expectedDefinition: definition.digest })).id)).run;
+  const state = f.objectBytes?.get(run.request.expectedHead);
+  const bytesOf = sha256 => (sha256 === run.request.expectedHead ? state : serve(blobs.get(sha256), sha256));
+  const transport = {
+    objects: async ids => ids.map(sha256 => ({ sha256, size: bytesOf(sha256).length })),
+    downloadToFile: async (pin, path) => writeFile(path, bytesOf(pin.sha256)),
+    upload: async (_, bytes) => f.put(bytes),
+    callback: async (callback, signature) =>
+      JSON.parse(
+        await f.call('macCallback', worker.callback, {
+          projectId: f.projectId,
+          callback: JSON.stringify(callback),
+          signature,
+        }),
+      ),
+    output: {
+      prepare: async message => {
+        const object =
+          message.body.kind === 'chunk'
+            ? message.body.chunk.object
+            : (await import('../dist/hosted-check-output.js')).outputRootObject(message.body.root);
+        return {
+          object,
+          target: { kind: 'r2', url: `https://synthetic.invalid/${object.sha256}`, headers: {} },
+        };
+      },
+      put: async () => ({ status: 200 }),
+      commit: async (message, signature) =>
+        JSON.parse(
+          await f.call('macOutput', outputApi.apply, {
+            projectId: f.projectId,
+            message: JSON.stringify(message),
+            signature,
+            caller: 'owner',
+          }),
+        ),
+    },
+  };
+  await f.heartbeat(run);
+  const started = performance.now();
+  const stop = new AbortController();
+  let failure = null;
+  await runHostedMacWorker(
+    {
+      sessionId: f.address.sessionId,
+      key: f.key,
+      work: update => {
+        update([run.id]);
+        return () => {};
+      },
+      watch: () => () => {},
+      control: f.control,
+      heartbeat: async (callback, signature) =>
+        JSON.parse(
+          await f.call('heartbeat', worker.heartbeat, {
+            projectId: f.projectId,
+            callback: JSON.stringify(callback),
+            signature,
+          }),
+        ),
+      execute: async (owned, signal, control) => {
+        try {
+          await executeHostedMacCheck(owned, signal, control, transport, f.key);
+        } catch (error) {
+          failure = error;
+        }
+        stop.abort();
+      },
+      close: async () => {},
+    },
+    stop.signal,
+  );
+  return { f, run, failure, wallMs: Math.round(performance.now() - started) };
+}
+
+test('self-hosted runner checks one fixed commit exactly on this platform (1444471f)', async t => {
+  const { f, run, failure, wallMs } = await exactSourceRun(t, fixedCommit);
+  assert.equal(failure, null);
+  const completed = await f.status(run.id);
+  assert.equal(completed.status, 'passed');
+  assert.equal(completed.configuration.provider, 'self-hosted');
+  assert.deepEqual(completed.configuration.platform, { os: process.platform, arch: process.arch });
+  assert.equal(completed.plan.head, run.request.expectedHead);
+  assert.equal(completed.macEvidence.machineId, f.configuration.machineId);
+  const logs = readdirSync(f.localLogs, { recursive: true }).filter(name => String(name).endsWith('.log'));
+  assert(
+    logs.some(name =>
+      readFileSync(join(f.localLogs, name), 'utf8').includes(
+        `exact source verified: 4 entries on ${process.platform}`,
+      ),
+    ),
+  );
+  t.diagnostic(
+    `qualification ${new Date().toISOString()} ${process.platform}/${process.arch} node ${process.version}` +
+      ` container=${existsSync('/.dockerenv')} head ${run.request.expectedHead.slice(0, 12)}: passed in ${wallMs}ms`,
+  );
+});
+
+test('self-hosted runner refuses served bytes that differ from the fixed commit (1444471f)', async t => {
+  const tampered = digest(Buffer.from(fixedCommit[0][1]));
+  const { f, run, failure } = await exactSourceRun(t, fixedCommit, (bytes, sha256) =>
+    sha256 === tampered ? Buffer.from(`${bytes}tampered ${randomUUID()}\n`) : bytes,
+  );
+  assert.equal(failure?.code, 'INVALID_NATIVE_SOURCE');
+  assert.notEqual((await f.status(run.id)).status, 'passed');
+});
+
+// Windows ignores Unix mode bits; the runner's private check root (mkdtemp under the OS temp folder,
+// as executeHostedMacCheck makes it) is private through the ACL it inherits from the user profile.
+test(
+  'Windows check root inherits an ACL with no Everyone, Users or Authenticated Users entry (1444471f)',
+  { skip: process.platform !== 'win32' },
+  t => {
+    const root = mkdtempSync(join(tmpdir(), 'forge-machine-check-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const script =
+      `[System.IO.Directory]::GetAccessControl('${root.replaceAll("'", "''")}')` +
+      '.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])' +
+      ' | ForEach-Object { $_.IdentityReference.Value }';
+    const sids = execFileSync(windowsPowerShell(), ['-NoProfile', '-NonInteractive', '-Command', script], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    })
+      .split(/\s+/)
+      .filter(Boolean);
+    assert(sids.length > 0, 'the folder has access rules');
+    // Everyone, Authenticated Users, Interactive, Users and Guests.
+    const broad = ['S-1-1-0', 'S-1-5-11', 'S-1-5-4', 'S-1-5-32-545', 'S-1-5-32-546'];
+    assert.deepEqual(
+      sids.filter(sid => broad.includes(sid)),
+      [],
+    );
+    t.diagnostic(`check root ACL SIDs: ${[...new Set(sids)].join(' ')}`);
+  },
+);
 
 test('active renewal is signed, cancel stops the live process through its subscription, then idle stops calling', async t => {
   const f = await fixture(t),

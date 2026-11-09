@@ -21,7 +21,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
 import { ConvexError } from 'convex/values';
-import { lifecycleFixture } from './hosted-lane-lifecycle-fixture.mjs';
+import { lifecycleFixture, lanes } from './hosted-lane-lifecycle-fixture.mjs';
 import { api } from './hosted-saves-fixture.mjs';
 import { executeHostedAgent } from '../dist/hosted-agent-actions.js';
 import { HostedAgentJournal } from '../dist/hosted-agent-journal.js';
@@ -123,7 +123,8 @@ async function fixture(t) {
       JSON.parse(await f.call('progress', api.progress, { projectId: f.projectId, operationId })),
     );
   };
-  const syncPrepares = [];
+  const syncPrepares = [],
+    selects = [];
   const session = (action, command, overrides = {}) => ({
     root,
     address: { url: address.url, projectId: f.projectId },
@@ -134,22 +135,27 @@ async function fixture(t) {
     waitSource,
     waitUntil: Date.now() + 540_000,
     main: async () => ({ head: digest('main'), receipt: { id: randomUUID() } }),
-    query: async name => assert.fail(`unexpected query ${name}`),
+    query: async (name, args) => {
+      assert.equal(name, 'projectHostedLanes:select', `unexpected query ${name}`);
+      selects.push(name);
+      return JSON.parse(await f.call('select', lanes.select, { ...args, projectId: f.projectId }));
+    },
     // The real prepare refuses pins that differ from the server Lane, inside one transaction.
     mutation: async (name, args) => {
       assert.equal(name, 'projectHostedSync:prepare');
       const request = JSON.parse(args.request);
       syncPrepares.push(request);
       const lane = await f.read(f.laneId);
-      if (request.expected.head !== lane.head || request.expected.version !== lane.version)
-        throw new ConvexError({ code: 'WORK_STALE', message: 'Select the exact saved Lane pins.' });
+      for (const key of ['head', 'version', 'sourceVersion', 'lifecycleVersion'])
+        if (request.expected[key] !== lane[key])
+          throw new ConvexError({ code: 'WORK_STALE', message: 'Select the exact saved Lane pins.' });
       return {
         terminal: { outcome: { status: 'failed', error: { code: 'SYNC_FIXTURE', message: 'stop' } } },
       };
     },
     ...overrides,
   });
-  return { ...f, root, exchange, calls, waits, waitSource, session, syncPrepares, complete, done };
+  return { ...f, root, exchange, calls, waits, waitSource, session, syncPrepares, selects, complete, done };
 }
 const marker = s => readHostedLaneCheckout(s.root).selection;
 
@@ -416,8 +422,57 @@ test('a sync still refused after rebuilding names the save that fixes it and lea
     return true;
   });
   assert.equal(s.syncPrepares.length, 2, 'refused, rebuilt once, refused');
+  assert.equal(s.selects.length, 1, 'one bounded Lane read, only after the rebuild was refused');
+  assert.equal(marker(s).version, s.expected.version, 'a newer saved head is never adopted without a save');
   assert.equal(sync.journal.get(`sync:${sync.journal.operationId}`), undefined, 'no stale request retained');
   assert.equal(existsSync(join(`${s.root}.forge-client`, 'sync-handoff.json')), false, 'no handoff for land');
+});
+
+test('incident replay f98f0f4b / b344b920: a retained sync replayed after the Lane was reopened from another root adopts the lifecycle pins', async t => {
+  const s = await fixture(t);
+  const command = { ontoMain: true };
+  const first = s.session('sync', command);
+  const operationId = first.journal.operationId;
+  // The request retained from this checkout (pins v0), then interrupted before it completed.
+  await first.journal.retain(`sync:${operationId}`, () => ({
+    kind: 'sync',
+    ontoMain: true,
+    operationId,
+    authorityEpoch: 1,
+    laneId: s.laneId,
+    expected: s.expected,
+    target: { kind: 'main', head: digest('main'), receiptId: randomUUID() },
+  }));
+  // Acceptance completed the Lane and a reopen from another root made it active again: the server
+  // moved version and lifecycleVersion; head and sourceVersion (the saved source) did not.
+  await s.changeLane(s.laneId, { lifecycleVersion: s.expected.lifecycleVersion + 1 });
+  const server = await s.changeLane(s.laneId, { lifecycleVersion: s.expected.lifecycleVersion + 2 });
+  assert.equal(marker(s).lifecycleVersion, s.expected.lifecycleVersion, 'the incident state: marker behind');
+  // The identical replay (same operation id) pins fresh instead of failing WORK_STALE on every retry.
+  const calls = s.calls.length;
+  const result = await executeHostedAgent(s.session('sync', command, { operationId }), 'sync', command);
+  assert.equal(result.outcome.status, 'failed', 'the adopted pins reached the fixture sync');
+  assert.deepEqual(
+    s.syncPrepares.map(r => [r.operationId, r.expected.version, r.expected.lifecycleVersion]),
+    [
+      [operationId, s.expected.version, s.expected.lifecycleVersion],
+      [operationId, s.expected.version, s.expected.lifecycleVersion],
+      [operationId, server.version, server.lifecycleVersion],
+    ],
+    'the stale request, the marker rebuild, then the server pins on the same operation',
+  );
+  assert.equal(s.selects.length, 1, 'one bounded Lane read');
+  assert.equal(s.calls.length, calls, 'no other call');
+  const advanced = marker(s);
+  assert.deepEqual(
+    [advanced.version, advanced.lifecycleVersion, advanced.head, advanced.sourceVersion],
+    [server.version, server.lifecycleVersion, s.expected.head, s.expected.sourceVersion],
+    'only the metadata advanced',
+  );
+  // A healthy replay afterwards asks for no read.
+  s.selects.length = 0;
+  await executeHostedAgent(s.session('sync', command, { operationId }), 'sync', command);
+  assert.equal(s.selects.length, 0);
 });
 
 test('identical sync after the Lane moved starts fresh; matching pins or a pending install still replay', t => {

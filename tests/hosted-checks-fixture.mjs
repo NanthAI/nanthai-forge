@@ -23,8 +23,9 @@ export const command = {
   args: ['scripts/forge-check.mjs'],
   environmentLabel: 'clean',
 };
-/** `candidateFields` adds fields to the seeded Candidate (for example its governance paths). */
-export async function checksFixture(source = null, { candidateFields = {} } = {}) {
+/** `candidateFields` adds fields to the seeded Candidate (for example its governance paths);
+ * `stateFiles` gives the seeded State its file entries (blobs are the caller's to serve). */
+export async function checksFixture(source = null, { candidateFields = {}, stateFiles = [] } = {}) {
   const s = source?.store ?? lanesFixture();
   const traffic = { acceptedCalls: 0, acceptedArgumentBytes: 0 };
   const projectId =
@@ -108,7 +109,7 @@ export async function checksFixture(source = null, { candidateFields = {} } = {}
         schema: 1,
         kind: 'forge-source-state',
         parents: [],
-        files: [],
+        files: stateFiles,
         message: 'synthetic check source',
         at: '2026-01-01T00:00:00.000Z',
       }),

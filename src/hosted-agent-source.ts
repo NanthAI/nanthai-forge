@@ -18,6 +18,7 @@ import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { parseHostedResponse } from './hosted-response.js';
+import { advanceMarkerMetadata } from './hosted-marker-advance.js';
 import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
@@ -229,6 +230,14 @@ export async function syncAgentSource(
   operationId: string,
   refreshPins?: () => Promise<void>,
 ) {
+  const stale = (): never => {
+    session.journal.forget(`sync:${operationId}`);
+    const selection = session.marker()?.selection;
+    throw new SyncPinsStale(
+      session.root,
+      `The Lane moved past this checkout's binding${selection ? ` (head ${selection.head.slice(0, 12)}, version ${selection.version})` : ''}. Nothing was synced. Run save in this checkout (it brings the binding to the Lane's current version, keeping your edits), then retry this same sync; it rebuilds its pins.`,
+    );
+  };
   try {
     return await syncAgentSourceOnce(session, command, operationId);
   } catch (error) {
@@ -241,13 +250,25 @@ export async function syncAgentSource(
     } catch (again) {
       if (!(again instanceof PrepareRefused)) throw again;
       session.journal.forget(`sync:${operationId}`);
-      const selection = session.marker()?.selection;
-      throw new SyncPinsStale(
-        session.root,
-        `The Lane moved past this checkout's binding${selection ? ` (head ${selection.head.slice(0, 12)}, version ${selection.version})` : ''}. Nothing was synced. Run save in this checkout (it brings the binding to the Lane's current version, keeping your edits), then retry this same sync; it rebuilds its pins.`,
-      );
+      // Still refused with this checkout's own pins. When only Lane metadata moved elsewhere (acceptance,
+      // a pin, a reopen from another root: same head and sourceVersion), the marker follows the server
+      // once (one bounded Lane read, only on this refused path) and the same operation is rebuilt. A
+      // newer saved head may need a rebase of local edits, which only save does: name that step.
+      if (!(await adoptServerMetadata(session, command.laneId))) return stale();
+      try {
+        return await syncAgentSourceOnce(session, command, operationId);
+      } catch (third) {
+        if (!(third instanceof PrepareRefused)) throw third;
+        return stale();
+      }
     }
   }
+}
+async function adoptServerMetadata(session: HostedAgentSession, laneId?: string) {
+  const marker = session.marker();
+  if (!marker || (laneId && laneId !== marker.selection.laneId)) return false;
+  const server = await selectAgentLane(session, marker.selection.laneId);
+  return advanceMarkerMetadata(session.root, marker.selection.laneId, server);
 }
 async function syncAgentSourceOnce(
   session: HostedAgentSession,

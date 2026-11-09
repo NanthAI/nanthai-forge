@@ -1434,6 +1434,10 @@ receipt; a save still running at the deadline returns `IN_PROGRESS` with its `wa
 A new `save` or `save --sync` first settles (waits for) a save this checkout left unfinished. A sync whose retained
 request the server refuses as `WORK_STALE` (no operation began) is rebuilt once from
 current pins; an identical later sync after the Lane moved starts a fresh operation.
+When the rebuild is refused too because only Lane metadata moved elsewhere (acceptance, a pin or a reopen from
+another root: same saved head and sourceVersion), the checkout binding follows the server once (one Lane read, only
+on this refused path) and the same operation is rebuilt, so a retained sync needs no `save` or `open` first. A newer
+saved head still ends with the one `save` that rebases local edits.
 A hosted `start`, `sync` onto main or `land --save` request that pins the main it observed,
 and that the server refuses as `CHANNEL_CHANGED` because main moved first (no operation
 began), is rebuilt on the current main under the same operation, up to 3 tries per call;
