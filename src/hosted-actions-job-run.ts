@@ -22,6 +22,14 @@ import { secretScanFailureCommand, type SecretScanResult } from './secret-scan.j
 import { junitDirEnv } from './junit-report.js';
 import { junitDirectory, mergeJunitReports, readJunitReports } from './junit-report-files.js';
 import { writeCheckPackages } from './package-graph-checkout.js';
+/** A failing command that names the pinned plan refusal's code and message. */
+export function planErrorCommand(executable: string, error: { code: string; message: string }) {
+  return [
+    executable,
+    '--eval',
+    `console.error(${JSON.stringify(`${error.code}: ${error.message}`)}); process.exitCode = 1;`,
+  ];
+}
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
 /** Credentials remain in the fixed supervisor; the project receives a clean env.
@@ -68,8 +76,10 @@ async function executeActiveActionsJob(
   let sourceCache: string | undefined,
     setupFailed = false,
     packages: ReturnType<typeof writeCheckPackages> = null;
+  // A plan refusal the Candidate decided fails every job at once with its code; no setup or project code runs.
+  const planError = recipe.selection?.planError as { code: string; message: string } | undefined;
   try {
-    sourceCache = await setupActionsJob(run, directory, planPath);
+    sourceCache = planError ? undefined : await setupActionsJob(run, directory, planPath);
     invariant(
       savePin(JSON.parse(readFileSync(planPath, 'utf8'))).sha256 === run.plan.manifest.sha256,
       'EVIDENCE_CHANGED',
@@ -120,6 +130,10 @@ async function executeActiveActionsJob(
     | undefined;
   if (shard === 'static' && secretScan?.findings?.length)
     command = secretScanFailureCommand(process.execPath, secretScan);
+  if (planError) {
+    setupFailed = true;
+    command = planErrorCommand(process.execPath, planError);
+  }
   let tail = Buffer.alloc(0);
   const reports = new ContractTimingReader({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
   const redactor = new HostedOutputRedactor({ secrets: [], paths: [directory, process.env.HOME ?? ''] });
@@ -172,6 +186,8 @@ async function executeActiveActionsJob(
     console.log(line);
     observe(Buffer.from(`${line}\n`));
   };
+  if (shard === 'static')
+    for (const line of (recipe.selection?.notes as string[] | undefined) ?? []) note(line);
   let exitCode: number;
   let yielded: string[] | undefined;
   lap('setupMs');

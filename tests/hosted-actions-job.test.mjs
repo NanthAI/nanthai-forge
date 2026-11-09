@@ -4,7 +4,16 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import { syncBuiltinESMExports } from 'node:module';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync, lstatSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  lstatSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -639,6 +648,43 @@ test('the planner materializes a pinned submodule into the Candidate unless the 
     if (optOut) assert.equal(readFileSync(join(candidate, 'vendor/lib'), 'utf8'), submodule.commit);
     else assert.equal(readFileSync(join(candidate, 'vendor/lib/lib.c'), 'utf8'), 'int lib;\n');
   }
+});
+test('Actions: unmapped gitlinks check as empty directories; a refused URL fails every job with its code', async t => {
+  // No `.gitmodules` URL (the t3code bench shape): the plan passes and the check output says so.
+  const s = fixture(t);
+  s.run.request.expectedHead = s.state([
+    // No lockfile: the configured command runs without an npm install.
+    ...s.files.filter(file => file.path !== 'package-lock.json'),
+    s.entry('.repos/alchemy/submodules/distilled', 'a'.repeat(40), 'gitlink'),
+    s.entry('floci', 'b'.repeat(40), 'gitlink'),
+  ]).sha256;
+  const { prepared, exit } = await preparedExit(s);
+  assert.equal(exit, 0);
+  assert.equal(prepared.recipe.selection.planError, undefined);
+  assert.match(prepared.recipe.selection.notes[0], /^submodules: 2 without a URL in \.gitmodules left/);
+  assert.deepEqual(readdirSync(join(s.directory, 'candidate', 'floci')), []);
+  const passed = s.calls.find(call => call.kind === 'result');
+  assert.equal(passed.result.exitCode, 0);
+  if (passed.logBytes)
+    assert.match(Buffer.from(passed.logBytes, 'base64').toString('utf8'), /submodules: 2 without a URL/);
+  // A URL that exists but cannot be used: the plan is recorded and every job fails with the code.
+  const refused = fixture(t);
+  refused.run.request.expectedHead = refused.state([
+    ...refused.files,
+    refused.entry(
+      '.gitmodules',
+      '[submodule "x"]\n\tpath = vendor/x\n\turl = git@gitlab.example.invalid:org/x.git\n',
+    ),
+    refused.entry('vendor/x', 'c'.repeat(40), 'gitlink'),
+  ]).sha256;
+  const failed = await preparedExit(refused);
+  assert.equal(failed.exit, 1);
+  assert.equal(failed.prepared.recipe.selection.planError.code, 'SUBMODULE_NOT_MATERIALIZED');
+  assert.match(failed.prepared.recipe.selection.planError.message, /vendor\/x .*url-unsupported/);
+  assert.equal(refused.calls.filter(call => call.kind === 'plan').length, 1);
+  const { result } = refused.calls.find(call => call.kind === 'result');
+  assert.equal(result.exitCode, 1);
+  assert.match(result.log.failureSummary, /SUBMODULE_NOT_MATERIALIZED: Submodule vendor\/x/);
 });
 test('a docs-only change shards the tests that read the changed document and keeps the docs scope', async t => {
   const s = fixture(t, { reader: true }),

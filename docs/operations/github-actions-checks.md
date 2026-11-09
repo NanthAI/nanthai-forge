@@ -1054,14 +1054,18 @@ which includes the one settings read) and two or three GitHub API calls (install
 lookup, mint; the project lookup and binding proof are added once per call). A request
 naming only refused repositories makes no GitHub call.
 
-Any other URL (SSH to another host, `http:`, `file:`, credentials, missing), a
+A gitlink with no URL in `.gitmodules` has nothing to fetch: it becomes an empty
+directory, as in GitHub's default checkout, and the check output carries one
+`submodules: N without a URL in .gitmodules left as empty directories` line.
+Any other URL (SSH to another host, `http:`, `file:`, credentials), a
 relative URL without a project repository, an unreachable commit, a private repository
 the owner has not allowed, a repository outside the installation or a runner without
 `git` refuses with
-`SUBMODULE_NOT_MATERIALIZED`, naming path, commit, URL and reason. On the
-self-hosted runner the check fails with that line before the command runs; on
-Actions the plan job fails with it. Machine runners do not fetch private submodules
-yet. A check that does not need submodule content sets
+`SUBMODULE_NOT_MATERIALIZED`, naming path, commit, URL and reason. The check fails
+with that line before any project code runs: on the self-hosted runner before the
+command; on Actions the plan pins the refusal (`selection.planError`), so every job
+fails at once with the code and the check settles failed, not runner-unavailable.
+Machine runners do not fetch private submodules yet. A check that does not need submodule content sets
 `"submodules": false` in its definition (part of its digest) to keep the pointer
 files.
 

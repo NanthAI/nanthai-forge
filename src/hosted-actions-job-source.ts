@@ -12,7 +12,11 @@ import { invariant, type ForgeError } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { mapExchange } from './exchange-parallel.js';
 import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
-import { materializeSubmodules, type SubmoduleAccess } from './submodule-materialize.js';
+import {
+  materializeSubmodules,
+  type SubmoduleAccess,
+  type MaterializedSubmodule,
+} from './submodule-materialize.js';
 import { actionsSubmoduleAccessCapability } from './hosted-actions-capabilities.js';
 import { submoduleAccessReplySchema } from './hosted-actions-direct.js';
 
@@ -214,20 +218,31 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   }
   // After verification: the pointer bytes are Forge source, the fetched trees are not.
   // Shards receive them in the Candidate artifact, so each commit is fetched once per run.
-  const submodules =
-    run.check.submodules === false
-      ? []
-      : await timed('submodulesMs', () =>
-          materializeSubmodules(directory, state.files, blob => readFile(join(cache, blob)), {
-            cache: join(dirname(cache), 'forge-submodules'),
-            // Relative `.gitmodules` URLs resolve against the project's GitHub repository.
-            ...(run.configuration.provider === 'github-actions'
-              ? { origin: `https://github.com/${run.configuration.repository}` }
-              : {}),
-            access: submoduleAccess(client),
-            log: line => console.log(line),
-          }),
-        );
+  // A refusal is a fact of this Candidate's `.gitmodules`: it is pinned in the plan and fails
+  // the check with its code before project code runs, never a failed plan step.
+  let submodules: MaterializedSubmodule[] = [],
+    planError: PlanError | undefined;
+  const notes: string[] = [];
+  if (run.check.submodules !== false)
+    submodules = await timed('submodulesMs', () =>
+      materializeSubmodules(directory, state.files, blob => readFile(join(cache, blob)), {
+        cache: join(dirname(cache), 'forge-submodules'),
+        // Relative `.gitmodules` URLs resolve against the project's GitHub repository.
+        ...(run.configuration.provider === 'github-actions'
+          ? { origin: `https://github.com/${run.configuration.repository}` }
+          : {}),
+        access: submoduleAccess(client),
+        log: line => {
+          console.log(line);
+          if (line.includes('without a URL in .gitmodules')) notes.push(line);
+        },
+      }).catch(error => {
+        planError = candidatePlanError(error);
+        if (!planError) throw error;
+        console.log(`${planError.code}: ${planError.message}`);
+        return [];
+      }),
+    );
   const old = new Map(packed?.files.map(file => [file.path, file]) ?? []);
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const changed = [...new Set([...old.keys(), ...inventory.keys()])].filter(path => {
@@ -270,7 +285,18 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     connection,
     reader,
     submodules,
+    notes,
+    planError,
   };
+}
+export type PlanError = { code: string; message: string };
+/** Errors the Candidate's own bytes decide, the same on every runner and retry. */
+const candidatePlanErrors = new Set(['SUBMODULE_NOT_MATERIALIZED', 'INVALID_GITLINK', 'UNSAFE_PATH']);
+export function candidatePlanError(error: unknown): PlanError | undefined {
+  const { code, message } = (error ?? {}) as Partial<ForgeError>;
+  return typeof code === 'string' && candidatePlanErrors.has(code)
+    ? { code, message: String(message ?? '').slice(0, 2000) }
+    : undefined;
 }
 /** Read tokens for private repositories of the project's App installation, through the OIDC
  * session. Absent on a server without the capability, so those submodules refuse as before. */

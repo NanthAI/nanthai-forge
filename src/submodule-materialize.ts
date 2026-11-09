@@ -138,7 +138,9 @@ const fileUrlsForTests = () => inTestProcess() && process.env.FORGE_TEST_SUBMODU
 /** Replace each gitlink's pointer file in a check workspace with the pinned
  * commit's tree, recursively. Git runs with no inherited config, hooks,
  * credential helper, filters or prompts; no repository code runs. Refuses as
- * a whole (SUBMODULE_NOT_MATERIALIZED) before writing when any URL is unusable. */
+ * a whole (SUBMODULE_NOT_MATERIALIZED) before writing when any URL is unusable.
+ * A gitlink with no `.gitmodules` URL has nothing to fetch: it becomes an empty
+ * directory with one notice line, as in GitHub's default checkout. */
 export async function materializeSubmodules(
   directory: string,
   files: readonly NativeFile[],
@@ -171,9 +173,11 @@ export async function materializeSubmodules(
     });
   const fetcher = new SubmoduleFetcher(options);
   const done: MaterializedSubmodule[] = [];
+  const unmapped: string[] = [];
   try {
     // Top level: vet every URL first, so an unusable one refuses before any fetch.
     const refusals = pending.flatMap(item => {
+      if (item.url === null) return [];
       const target = vetted(item);
       return 'url' in target
         ? []
@@ -182,6 +186,11 @@ export async function materializeSubmodules(
     if (refusals.length) throw submoduleRefusal(refusals);
     while (pending.length) {
       const item = pending.shift()!;
+      if (item.url === null) {
+        await workspaceTarget(directory, item.path);
+        unmapped.push(item.path);
+        continue;
+      }
       if (done.length >= submoduleCountLimit || item.depth >= submoduleDepthLimit)
         throw submoduleRefusal([{ path: item.path, commit: item.commit, url: item.url, reason: 'limit' }]);
       const target = vetted(item);
@@ -216,10 +225,17 @@ export async function materializeSubmodules(
   } finally {
     await fetcher.dispose();
   }
+  if (unmapped.length) options.log?.(unmappedNotice(unmapped));
   options.log?.(
     `submodules: ${done.length} materialized (${done.filter(item => item.fetched).length} fetched, ${done.filter(item => !item.fetched).length} cached) in ${((performance.now() - started) / 1000).toFixed(1)}s`,
   );
   return done;
+}
+
+/** One line for every gitlink left empty because `.gitmodules` names no URL for it. */
+export function unmappedNotice(paths: readonly string[]) {
+  const shown = paths.slice(0, 5).join(', ');
+  return `submodules: ${paths.length} without a URL in .gitmodules left as empty directories, as in GitHub's default checkout: ${shown}${paths.length > 5 ? ` and ${paths.length - 5} more` : ''}`;
 }
 
 export function vetted(item: { url: string | null; origin: string | undefined }) {

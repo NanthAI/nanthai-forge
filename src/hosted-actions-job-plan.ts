@@ -160,6 +160,10 @@ export async function prepareActionsJob(
     ...('changes' in selected ? { changes: selected.changes } : {}),
     // A package-graph first check's minority share, recorded on the run (src/graph-first-check.ts).
     ...('graph' in selected && selected.graph ? { graph: selected.graph } : {}),
+    // A Candidate-decided refusal (src/hosted-actions-job-source.ts): every job fails with its code
+    // before project code runs. Notes are lines every job prints into the check output.
+    ...(source.planError ? { planError: source.planError } : {}),
+    ...(source.notes.length ? { notes: source.notes } : {}),
     // Pinned in the plan so the static job fails on it. Value-free: path, line, kind, fingerprint.
     ...(secrets.findings.length || secrets.allowed || secrets.allowChanges
       ? {

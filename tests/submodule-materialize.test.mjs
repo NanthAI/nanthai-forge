@@ -2,7 +2,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, lstatSync, existsSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  lstatSync,
+  existsSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -62,7 +71,9 @@ function upstreams(t) {
     },
     [{ path: 'deps/inner', commit: inner.commit }],
   );
-  return { root, inner, lib };
+  // A gitlink with no `.gitmodules` entry inside a fetched submodule.
+  const ghosts = repo('ghosts', { 'g.c': 'int g;\n' }, [{ path: 'deps/ghost', commit: inner.commit }]);
+  return { root, inner, lib, ghosts };
 }
 
 /** A check workspace as the runners install it: pointer file plus `.gitmodules`. */
@@ -205,4 +216,59 @@ test('a fixture with no gitlinks runs no Git; opting out keeps the definition di
   assert.equal(off.submodules, false);
   assert.notEqual(off.definition, plain.definition);
   assert(lstatSync(s.directory).isDirectory());
+});
+
+test('gitlinks with no .gitmodules URL become empty directories with one notice, as on GitHub; mapped ones still materialize', async t => {
+  process.env.FORGE_TEST_SUBMODULE_FILE_URLS = '1';
+  t.after(() => delete process.env.FORGE_TEST_SUBMODULE_FILE_URLS);
+  const { root, lib, ghosts } = upstreams(t);
+  const unmapped = [
+    { path: '.repos/alchemy/submodules/distilled', commit: 'a'.repeat(40) },
+    { path: 'floci', commit: 'b'.repeat(40) },
+  ];
+  // Two unmapped links and nothing else: no Git runs and nothing is fetched (the cache does not exist).
+  const only = workspace(t, '', unmapped),
+    onlyLines = [];
+  assert.deepEqual(
+    await materializeSubmodules(only.directory, only.files, only.read, {
+      cache: '/nonexistent',
+      log: line => onlyLines.push(line),
+    }),
+    [],
+  );
+  for (const link of unmapped) {
+    assert(lstatSync(join(only.directory, link.path)).isDirectory(), link.path);
+    assert.deepEqual(readdirSync(join(only.directory, link.path)), []);
+  }
+  assert.equal(
+    onlyLines[0],
+    "submodules: 2 without a URL in .gitmodules left as empty directories, as in GitHub's default checkout: .repos/alchemy/submodules/distilled, floci",
+  );
+  await verifySourceTree({ files: only.files }, only.directory);
+
+  // Beside mapped links (and an unmapped one nested in a fetched tree), the check still passes.
+  const modules = `[submodule "core"]\n\tpath = vendor/core\n\turl = ${lib.url}\n[submodule "g"]\n\tpath = vendor/g\n\turl = ${ghosts.url}\n[submodule "named-only"]\n\tpath = floci\n`;
+  const s = workspace(t, modules, [
+    { path: 'vendor/core', commit: lib.commit },
+    { path: 'vendor/g', commit: ghosts.commit },
+    ...unmapped,
+  ]);
+  const lines = [];
+  const result = await checkSubmodules(s.directory, s.files, s.read, {
+    cache: join(root, 'cache'),
+    log: line => lines.push(line),
+  });
+  assert.equal(result.refusal, null);
+  assert.deepEqual(
+    result.materialized.map(item => item.path),
+    ['vendor/core', 'vendor/g', 'vendor/core/deps/inner'],
+  );
+  assert.equal(readFileSync(join(s.directory, 'vendor/g/g.c'), 'utf8'), 'int g;\n');
+  assert.deepEqual(readdirSync(join(s.directory, 'vendor/g/deps/ghost')), []);
+  assert.match(
+    lines[0],
+    /^submodules: 3 without a URL in \.gitmodules left as empty directories.*: \.repos\/alchemy\/submodules\/distilled, floci, vendor\/g\/deps\/ghost$/,
+  );
+  assert.match(lines[1], /^submodules: 3 materialized/);
+  await verifySourceTree({ files: s.files }, s.directory);
 });
