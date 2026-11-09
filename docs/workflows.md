@@ -643,8 +643,10 @@ identity, or retain that identity in the imported `githubSync` mapping. Hosted
 mirrors reuse that mapping's entry format in indexed `projectGithubMirrorJobs`
 rows and retain the latest mapping in `projectGithubMirrors`. Bootstrap uses the
 pushed native mapping, or the remote commit's `Forge-State` trailer (falling
-back to the first landing's previous State), and verifies the complete exported
-Git tree before trusting it. `GITHUB_SYNC_BOOTSTRAP_TREE` reports a mismatch;
+back to the import State when GitHub `main` is still the imported commit, then to
+the first landing's previous State), and verifies the complete exported
+Git tree before trusting it. A mirror turned on after landings therefore catches
+GitHub up in its first job with no hand push. `GITHUB_SYNC_BOOTSTRAP_TREE` reports a mismatch;
 `GITHUB_SYNC_CHANGED` reports unexpected GitHub main movement. Neither forces
 or reconciles external GitHub history automatically.
 
@@ -708,7 +710,9 @@ stops future attempts; a request already sent to GitHub can still finish.
 Undo published source through a compensating Lane;
 published history is retained.
 
-Enable on the native owner through CLI or the agent MCP `set-policy` action:
+`nforge github connect` turns the mirror on in the owner's one GitHub authorization
+(`--no-mirror` connects only; see [GitHub App](operations/github-app.md#connect-and-inspect)).
+To change it later on the native owner, through CLI or the agent MCP `set-policy` action:
 
 ```sh
 nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"OWNER/NAME","autoPush":true,"laneRefs":false}}'

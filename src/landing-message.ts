@@ -50,6 +50,12 @@ export function mirrorMessage(input: {
   ].join('\n');
 }
 
+/** A note after the subject paragraph of a mirror message, ahead of the Forge trailers. */
+export function noteMessage(message: string, note: string) {
+  const split = message.indexOf('\n\n');
+  return split < 0 ? `${message}\n\n${note}` : `${message.slice(0, split)}\n\n${note}${message.slice(split)}`;
+}
+
 const trailerLine = /^[A-Za-z][A-Za-z0-9-]*: \S/;
 /** Trailers (last paragraph of `Key: value` lines) of a finish message that a mirror commit message lacks. */
 export function lostTrailers(finishMessage: string, commitMessage: string) {

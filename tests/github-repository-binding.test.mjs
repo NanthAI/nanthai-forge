@@ -74,8 +74,10 @@ function fixture(t) {
     state = randomUUID(),
     repository = 'synthetic/repo',
     githubAccounts = [linkedAccount],
+    mirror,
   } = {}) {
     await call('start', {
+      ...(mirror === undefined ? {} : { mirror }),
       operationId,
       state,
       repository,
@@ -163,6 +165,71 @@ function github(
   t.mock.method(globalThis, 'fetch', request);
   return { calls, request };
 }
+/** Incident d4eb053e: connect used to leave the mirror off and a second owner approval turned it on. */
+async function connectWithMirror(f, mirror, repoId = 42) {
+  const op = await f.start({ mirror, repository: 'synthetic/repo' });
+  await f.proving(op.state);
+  const result = await f.s.call('complete', store.complete, {
+    state: op.state,
+    repoId,
+    fullName: 'Synthetic/Repo',
+  });
+  return { op, result, project: f.s.tables.hostedProjects.get(f.projectId) };
+}
+test('the owner approval of a connect also turns the mirror on, both ways, and the status says so', async t => {
+  const f = fixture(t);
+  const { op, result, project } = await connectWithMirror(f, true);
+  assert.equal(result, 'enabled');
+  assert.deepEqual(project.autonomyPolicy.githubMirror, {
+    repo: 'Synthetic/Repo',
+    autoPush: true,
+    laneRefs: false,
+    inbound: true,
+  });
+  assert.equal(f.s.tables.projectGithubMirrors.size, 1, 'the queue row exists before any landing');
+  assert.deepEqual(
+    [...f.s.tables.projectPolicyChanges.values()].map(row => row.rule),
+    ['owner-approved'],
+  );
+  assert.equal(JSON.parse(await f.call('status', { operationId: op.operationId })).mirror, 'enabled');
+});
+test('connecting without the mirror request, or with a mirror already on, leaves the policy alone', async t => {
+  const plain = fixture(t);
+  assert.equal((await connectWithMirror(plain, undefined)).result, null);
+  assert.equal(plain.s.tables.hostedProjects.get(plain.projectId).autonomyPolicy.githubMirror, undefined);
+  const other = fixture(t);
+  const existing = { repo: 'elsewhere/repo', autoPush: true, laneRefs: false };
+  other.s.patch('hostedProjects', other.projectId, {
+    autonomyPolicy: { ...policyPreset('supervised'), githubMirror: existing },
+  });
+  const { result, project } = await connectWithMirror(other, true);
+  assert.equal(result, 'kept');
+  assert.deepEqual(project.autonomyPolicy.githubMirror, existing);
+  assert.equal(other.s.tables.projectPolicyChanges.size, 0);
+});
+test('a stranger cannot start a connect that turns the mirror on', async t => {
+  const f = fixture(t);
+  await assert.rejects(
+    f.s.call(
+      'start',
+      store.start,
+      {
+        projectId: f.projectId,
+        mirror: true,
+        operationId: randomUUID(),
+        state: randomUUID(),
+        repository: 'synthetic/repo',
+        githubAccounts: [linkedAccount],
+        verifier: 'synthetic-verifier',
+        authorizeUrl: 'https://github.com/login/oauth/authorize',
+      },
+      'stranger',
+    ),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  assert.equal(f.s.tables.githubBindingOperations.size, 0);
+  assert.equal(f.s.tables.hostedProjects.get(f.projectId).autonomyPolicy.githubMirror, undefined);
+});
 test('only the Forge owner starts a connection; original operation replays exactly', async t => {
   const f = fixture(t);
   const op = await f.start();

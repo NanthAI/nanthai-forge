@@ -15,6 +15,8 @@ const statusSchema = z.object({
   status: z.enum(['waiting', 'processing', 'completed', 'failed']),
   repoId: z.number().nullable(),
   code: z.string().nullable(),
+  /** What connect did about the mirror (absent from older servers). */
+  mirror: z.enum(['enabled', 'kept']).nullable().optional(),
 });
 /** One reactive observation of the existing connection operation, no polling or
  * scheduler. Closing the command closes the subscription and its connection. */
@@ -95,13 +97,14 @@ export async function githubConnectCli(args: string[]) {
       'operation-id': { type: 'string' },
       'repo-id': { type: 'string' },
       cursor: { type: 'string' },
+      'no-mirror': { type: 'boolean' },
       help: { type: 'boolean' },
     },
   });
   if (values.help)
     return {
       usage:
-        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR]',
+        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR] [--no-mirror]',
     };
   const [command, project] = positionals;
   invariant(
@@ -189,6 +192,7 @@ export async function githubConnectCli(args: string[]) {
       projectId: address.projectId,
       operationId: journal.operationId,
       repository,
+      ...(values['no-mirror'] ? { mirror: false } : {}),
     },
   );
   const started = z
@@ -210,8 +214,19 @@ export async function githubConnectCli(args: string[]) {
       process.exitCode = 130;
       return completed;
     }
+    // The owner's authorization also turned the mirror on unless --no-mirror; say so, and how to undo.
+    const mirror =
+      completed.mirror === 'enabled'
+        ? {
+            mirror: `on: Forge publishes accepted main to ${repository} and brings GitHub pushes and pull requests back in. Turn it off: nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"${repository}","autoPush":false,"laneRefs":false}}'`,
+          }
+        : completed.mirror === 'kept'
+          ? {
+              mirror: 'unchanged: this project already has a GitHub mirror setting, connect did not touch it',
+            }
+          : { mirror: 'off: connected without the mirror (--no-mirror or an older server)' };
     // A1: the ruleset two-way sync relies on, checked at connect (read-only, Metadata read).
-    return { ...completed, protection: await githubProtection(transport, repository) };
+    return { ...completed, ...mirror, protection: await githubProtection(transport, repository) };
   } finally {
     process.removeListener('SIGINT', stop);
     process.removeListener('SIGTERM', stop);

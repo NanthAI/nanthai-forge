@@ -166,6 +166,32 @@ async function writePolicy(
     rule: input.rule,
   };
 }
+/** `nforge github connect`: the owner's GitHub authorization of the repository is also the approval
+ * to mirror Forge main there (publish and two-way sync), the owner-approved edit a second set-policy
+ * would have asked for. A mirror that is already on, for any repository, is left as it is. */
+export async function enableConnectedMirror(
+  ctx: MutationCtx,
+  input: { projectId: Id<'hostedProjects'>; actor: string; repo: string; operationId: string },
+) {
+  const project = await activeOwnedProject(ctx, input.projectId, input.actor);
+  const previous = effectivePolicy(project);
+  if (previous.githubMirror?.autoPush) return 'kept' as const;
+  await requireStoredRepositoryBinding(ctx, input.projectId, input.repo);
+  const command = policyWriteSchema.parse({
+    action: 'set-policy',
+    operationId: input.operationId,
+    githubMirror: { repo: input.repo, autoPush: true, laneRefs: false, inbound: true },
+  });
+  await writePolicy(ctx, project, {
+    actor: input.actor,
+    command,
+    request: JSON.stringify(command),
+    previous,
+    policy: editedPolicy(previous, command),
+    rule: 'owner-approved',
+  });
+  return 'enabled' as const;
+}
 export const set = mutation({
   args: { projectId: v.id('hostedProjects'), command: v.string() },
   returns: v.object({

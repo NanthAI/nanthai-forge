@@ -57,6 +57,16 @@ can connect or disconnect repositories. After a completed connect, and in status
 on a two-way project, the result carries `protection` for `main`
 ([two-way protection](#two-way-protection-the-ruleset-you-import-once)).
 
+One approval does both jobs: the owner's authorization of the repository also turns
+the mirror on for it (`githubMirror` with `autoPush` and `inbound`, written in the
+callback's own transaction as an owner-approved policy edit), so no second
+`set-policy` approval follows. `--no-mirror` at connect connects only. A mirror that
+is already on (any repository) is left as it is; the result's `mirror` field says
+`on`, `unchanged` or `off`, with the one command that turns it off. The approval is
+the GitHub authorization by an account linked to the owner, which the callback
+checks; starting connect writes no policy, and a failed or unfinished authorization
+leaves the mirror off.
+
 Connect prints the authorize URL and retained operation UUID. Open the URL and
 complete GitHub authorization; an account that already authorized the App sees
 no screen, because GitHub redirects straight back. The CLI waits on that operation through a reactive
@@ -215,17 +225,28 @@ All of these must hold:
   (`publicationExclusion`, `src/files.ts`). Credentials are caught by content: the
   landing secret scan, and the save check for new files. A mirror commit written
   before this rule dropped such names; the next mirror commit adds them back.
+- **First job after landings without a mirror:** with no mapping yet, the job
+  verifies GitHub `main` against a Forge State (the State in its `Forge-State`
+  trailer; else, when `main` is still the commit the project was imported from, the
+  import State; else the State before the landing) and, on a match, publishes the
+  current State as one fast-forward commit whose message notes the catch-up. Later
+  jobs use the recorded mapping. A repository that was not imported and has no
+  `Forge-State` trailer needs its `main` to equal the State before the first
+  mirrored landing.
 - **Refusals:** the push stops, changes no ref and retains the job when GitHub
   `main` is not the mirror's recorded parent (`GITHUB_SYNC_CHANGED`) or its tree
-  differs from the matching State (`GITHUB_SYNC_BOOTSTRAP_TREE`). GitHub's own
+  matches none of those States (`GITHUB_SYNC_BOOTSTRAP_TREE`). Both messages say
+  that Forge never rewrites GitHub history and name the choice: land GitHub's
+  change in Forge, or reset GitHub `main` yourself; the owner then runs
+  `nforge github resume`. GitHub's own
   branch protection on `main` also applies to the `PATCH`; a block surfaces as a
   retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
   repository does not test.
 
 ### Two-way sync
 
-Opt in per project with `githubMirror.inbound: true` (needs `autoPush: true`),
-for example `set-policy {"githubMirror":{"repo":"owner/name","autoPush":true,"laneRefs":false,"inbound":true}}`.
+`nforge github connect` turns this on with the mirror. To change it later, set
+`githubMirror.inbound` (needs `autoPush: true`) with `set-policy {"githubMirror":{"repo":"owner/name","autoPush":true,"laneRefs":false,"inbound":true}}`.
 Forge still owns `main`: a change merged or pushed on GitHub comes back in as an
 ordinary Forge landing and passes the same checks and review rules. Setting the
 policy creates the project's mirror queue row (one indexed read, one insert), so the

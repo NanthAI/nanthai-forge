@@ -10,7 +10,7 @@ import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
 import { githubSyncCommitSchema, githubSyncSchema } from '../src/github-sync-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
-import { mirrorMessage } from '../src/landing-message';
+import { mirrorMessage, noteMessage } from '../src/landing-message';
 import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { finish, inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
@@ -88,12 +88,15 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
   const note =
     outcome?.note &&
     `This publish takes GitHub commit ${outcome.commit.slice(0, 12)} out of main: it did not land on Forge (Lane ${outcome.laneId.slice(0, 8)}). Fix and land that Lane to bring it back.`;
-  const split = published.indexOf('\n\n');
-  const message = !note
-    ? published
-    : split < 0
-      ? `${published}\n\n${note}`
-      : `${published.slice(0, split)}\n\n${note}${published.slice(split)}`;
+  const message = note ? noteMessage(published, note) : published;
+  // No mapping yet: the import row (one indexed read, first job only) says which GitHub commit
+  // and Forge State the project began from, so a mirror turned on after landings can catch up.
+  const imported = binding
+    ? null
+    : await ctx.db
+        .query('projectGithubImports')
+        .withIndex('by_project', q => q.eq('projectId', job.projectId))
+        .first();
   const value = {
     cursor: null,
     repository: job.repository,
@@ -109,6 +112,9 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
       binding,
       verified: !!queue.mapping,
       identity: { name, email },
+      ...(imported?.publication
+        ? { import: { commit: imported.commit, state: imported.publication.head } }
+        : {}),
     },
   };
   // Pin mutable Intent prose and configured identity before any GitHub IO.

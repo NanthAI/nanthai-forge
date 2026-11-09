@@ -42,6 +42,11 @@ export const githubBindingTables = {
     revision: v.optional(v.number()),
     repoId: v.optional(v.number()),
     code: v.optional(v.string()),
+    /** The connect asks for the GitHub mirror (publish and two-way) on this repository; the owner's
+     * authorization is its approval. Absent on operations started without it. */
+    mirror: v.optional(v.boolean()),
+    /** What `complete` did about it: turned on, or left alone because a mirror was already set. */
+    mirrorResult: v.optional(v.union(v.literal('enabled'), v.literal('kept'))),
   })
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_state', ['state']),

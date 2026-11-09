@@ -11,6 +11,11 @@ export function mirrorFixture({
   onGithub = () => true,
   /** The bytes GitHub's tree holds for a `before` path (an LFS pointer, say). */
   githubBytes = (_path, bytes) => bytes,
+  /** Files of a State landed after `before` while the mirror was off: GitHub main still holds
+   * `before`, and this is the State before the job's landing. */
+  between = null,
+  /** GitHub main is the project's import commit: no Forge-State trailer, named by the seed. */
+  imported = false,
 } = {}) {
   const objects = new Map(),
     states = new Map(),
@@ -41,10 +46,11 @@ export function mirrorFixture({
     states.set(head, value);
     return head;
   };
-  const previous = state(before),
+  const github = state(before),
+    previous = between ? state(between) : github,
     head = state(after);
   const base = states
-    .get(previous)
+    .get(github)
     .files.filter(file => onGithub(file.path))
     .map(file => {
       const bytes = githubBytes(file.path, objects.get(file.blob)),
@@ -58,10 +64,10 @@ export function mirrorFixture({
     operationId: randomUUID(),
     acceptanceId: randomUUID(),
     viewId: randomUUID(),
-    state: previous,
+    state: github,
     parent: '0'.repeat(40),
     tree: baseTree,
-    message: `base\n\nForge-State: ${previous}`,
+    message: imported ? 'base' : `base\n\nForge-State: ${github}`,
     author: identity,
     committer: identity,
     seconds: 1767225600,
@@ -82,6 +88,7 @@ export function mirrorFixture({
     binding: verified ? root : null,
     verified,
     identity,
+    ...(imported ? { import: { commit: root.commit, state: github } } : {}),
   };
   const api = async (path, method = 'GET', body) => {
     calls.push({ path, method, body });

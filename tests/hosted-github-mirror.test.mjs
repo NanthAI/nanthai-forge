@@ -113,6 +113,41 @@ test('bootstrap mismatch refuses before any GitHub write', async () => {
   await assert.rejects(drain(f), e => e.code === 'GITHUB_SYNC_BOOTSTRAP_TREE');
   assert(f.calls.every(c => c.method === 'GET'));
 });
+test('a mirror turned on after landings catches GitHub main up from the import State in one commit', async () => {
+  const f = mirrorFixture({
+    verified: false,
+    imported: true,
+    before: { a: '1', b: 'x' },
+    between: { a: '2', b: 'x' },
+    after: { a: '2', b: 'y', c: 'z' },
+  });
+  const plan = await drain(f);
+  assert.equal(plan.entry.tree, f.expected(), 'GitHub holds exactly the current Forge main');
+  assert.equal(plan.entry.parent, f.root.commit, 'a fast-forward of the import commit');
+  assert.equal(f.remote(), plan.entry.commit);
+  assert.match(
+    plan.entry.message,
+    /^An accepted outcome\n\nForge mirror catch-up: .*including landings made before the mirror was on\.\n\nForge-State: /,
+  );
+  assert(
+    f.calls.every(c => c.method === 'GET' || !c.path.endsWith('/refs/heads/main') || c.body.force === false),
+  );
+});
+test('GitHub main that moved on its own stops with a next step and pushes nothing', async () => {
+  const f = mirrorFixture({
+    verified: false,
+    imported: true,
+    before: { a: '1' },
+    between: { a: '2' },
+    after: { a: '3' },
+  });
+  f.commits.get(f.remote()).tree = 'f'.repeat(40);
+  await assert.rejects(
+    drain(f),
+    e => e.code === 'GITHUB_SYNC_BOOTSTRAP_TREE' && /reset GitHub main yourself/.test(e.message),
+  );
+  assert(f.calls.every(c => c.method === 'GET'));
+});
 test('unexpected remote head refuses without updating the ref', async () => {
   const f = mirrorFixture();
   f.move('e'.repeat(40));

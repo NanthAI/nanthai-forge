@@ -65,14 +65,21 @@ export async function linkedGithubAccounts(subject: string, request: typeof fetc
   return [...new Set(ids)].slice(0, 10);
 }
 export const connect = action({
-  args: { projectId: v.id('hostedProjects'), operationId: v.string(), repository: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    repository: v.string(),
+    /** Default on: the owner's authorization also turns the GitHub mirror on. `false` connects only. */
+    mirror: v.optional(v.boolean()),
+  },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
     try {
       const repository = input.repository.toLowerCase();
+      const { mirror, ...identity } = input;
       const replay: string | null = await ctx.runQuery(
         makeFunctionReference<'query'>('githubBindingStore:authorize'),
-        { ...input, repository },
+        { ...identity, repository },
       );
       if (replay) return replay;
       assertRepositoryName(repository);
@@ -98,7 +105,8 @@ export const connect = action({
         code_challenge_method: 'S256',
       }).toString();
       return await ctx.runMutation(mutation('start'), {
-        ...input,
+        ...identity,
+        mirror: mirror !== false,
         repository,
         githubAccounts,
         state,
@@ -210,8 +218,15 @@ export const callback = httpAction(async (ctx, request) => {
       await ctx.runMutation(mutation('pin'), { state, installationId: installation.id });
       return installation.id;
     });
-    await ctx.runMutation(mutation('complete'), { state, ...proof });
-    return new Response('GitHub repository connected. You can return to Forge.', { headers });
+    const mirror = await ctx.runMutation(mutation('complete'), { state, ...proof });
+    return new Response(
+      `GitHub repository connected.${
+        mirror === 'enabled'
+          ? ' Forge now mirrors main to it, both ways. To stop: nforge set-policy with githubMirror autoPush false.'
+          : ''
+      } You can return to Forge.`,
+      { headers },
+    );
   } catch (error) {
     const data = error instanceof ConvexError ? error.data : null;
     const structured = data && typeof data === 'object' && 'code' in data ? data.code : null;

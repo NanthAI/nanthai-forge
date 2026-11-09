@@ -4,6 +4,7 @@ import { internalMutation, internalQuery } from './server';
 import { mutation, query, type QueryCtx, type MutationCtx } from './cliServer';
 import { accessibleProject, activeOwnedProject } from './projectAuthority';
 import { bindingInstallation } from './githubBindingAccess';
+import { enableConnectedMirror } from './projectAutonomy';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { z } from 'zod';
@@ -23,6 +24,7 @@ export const start = internalMutation({
     state: v.string(),
     verifier: v.string(),
     authorizeUrl: v.string(),
+    mirror: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -121,7 +123,7 @@ export const complete = internalMutation({
     fullName: v.string(),
     role: v.optional(v.union(v.literal('admin'), v.literal('maintain'))),
   },
-  returns: v.null(),
+  returns: v.union(v.literal('enabled'), v.literal('kept'), v.null()),
   handler: async (ctx, input) => {
     const op = await ctx.db
       .query('githubBindingOperations')
@@ -169,8 +171,22 @@ export const complete = internalMutation({
     };
     if (prior) await ctx.db.replace(prior._id, binding);
     else await ctx.db.insert('projectGithubBindings', binding);
-    await ctx.db.patch(op._id, { status: 'completed', repoId: input.repoId, verifier: '' });
-    return null;
+    // The same transaction: one owner approval connects the repository and turns the mirror on.
+    const mirrorResult = op.mirror
+      ? await enableConnectedMirror(ctx, {
+          projectId: op.projectId,
+          actor: op.actor,
+          repo: input.fullName,
+          operationId: op.operationId,
+        })
+      : null;
+    await ctx.db.patch(op._id, {
+      status: 'completed',
+      repoId: input.repoId,
+      verifier: '',
+      ...(mirrorResult ? { mirrorResult } : {}),
+    });
+    return mirrorResult;
   },
 });
 export const fail = internalMutation({
@@ -204,6 +220,7 @@ export const status = query({
         status: op.status,
         repoId: op.repoId ?? null,
         code: op.code ?? null,
+        mirror: op.mirrorResult ?? null,
       });
     } catch (error) {
       return report(error);

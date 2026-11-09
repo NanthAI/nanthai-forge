@@ -35,7 +35,7 @@ Usage:
   nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
   nforge repo candidate [ROOT] [--json [fields]]
   nforge queue list|cancel OPERATION|prioritize OPERATION
-  nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID]
+  nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
   nforge host ROOT [--deployment URL] [--name NAME] [--visibility private|public] [--status | --new]
   nforge login [DEPLOYMENT_URL] [--name NAME] [--scope cli|coordination]

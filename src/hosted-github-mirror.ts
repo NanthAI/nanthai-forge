@@ -7,6 +7,7 @@ import { isMissingObject, treeBlobPattern } from './hosted-github-retry.js';
 import { gitHash, gitTree, gitMode, githubCommit } from './hosted-github-git.js';
 import { publicationExclusion, sourceExclusion } from './files.js';
 import { ForgeError, invariant } from './errors.js';
+import { noteMessage } from './landing-message.js';
 import {
   formatLfsPointer,
   isGitattributesPath,
@@ -34,6 +35,10 @@ export type MirrorSeed = {
   binding: GithubSyncCommit | null;
   verified: boolean;
   identity: { name: string; email: string };
+  /** The GitHub commit the project was imported from and the Forge State made from it, present
+   * only when no mapping exists yet. GitHub main still at that commit is a lagging mirror, not a
+   * foreign change: the first job catches it up from that State (its tree is still verified). */
+  import?: { commit: string; state: string };
 };
 export type MirrorPlan = {
   seed: MirrorSeed;
@@ -187,16 +192,31 @@ export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<Mir
   invariant(
     !seed.binding || seed.binding.commit === remote,
     'GITHUB_SYNC_CHANGED',
-    'GitHub main moved away from the retained Forge mirror mapping. No ref was changed.',
+    'GitHub main moved away from the retained Forge mirror mapping. No ref was changed; Forge never rewrites GitHub history.',
   );
-  // A retained Mac mapping is preferred. Otherwise a public Forge-State trailer
-  // names the candidate baseline; its exact source tree is still verified below.
+  // A retained Mac mapping is preferred. Otherwise a public Forge-State trailer names the
+  // candidate baseline; failing that, GitHub main still at the import commit means the project
+  // landed before the mirror was on and the import State is the baseline. The exact source tree
+  // is verified below in every case.
   const previous =
-    seed.binding?.state ?? commit.message.match(/^Forge-State: ([0-9a-f]{64})$/m)?.[1] ?? seed.previous;
+    seed.binding?.state ??
+    commit.message.match(/^Forge-State: ([0-9a-f]{64})$/m)?.[1] ??
+    (seed.import?.commit === remote ? seed.import.state : seed.previous);
   const [baseline, target] = await io.states([previous, seed.state]);
   invariant(baseline && target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
+  // Landings between that State and this one never reached GitHub: say so in the commit.
+  const published =
+    previous === seed.previous
+      ? seed
+      : {
+          ...seed,
+          message: noteMessage(
+            seed.message,
+            `Forge mirror catch-up: GitHub main was at Forge State ${previous.slice(0, 12)}; this commit brings it to State ${seed.state.slice(0, 12)}, including landings made before the mirror was on.`,
+          ),
+        };
   return {
-    ...diffPlan(seed, remote, commit.tree.sha, baseline, target, true),
+    ...diffPlan(published, remote, commit.tree.sha, baseline, target, true),
     ...lfsPlan(baseline, target),
   };
 }
@@ -373,7 +393,7 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         invariant(
           plan.legacy && gitTree(plan.hashes.filter(published('legacy'))) === plan.baseTree,
           'GITHUB_SYNC_BOOTSTRAP_TREE',
-          'GitHub main tree differs from its matching Forge State. No mapping was trusted and no ref was changed.',
+          "GitHub main matches no Forge State this mirror can check (the State in its Forge-State trailer, the import State, or the State before this landing). Nothing was pushed and no ref was changed; Forge never rewrites GitHub history. Decide which side is right: to keep GitHub's content, land those changes in Forge; to keep Forge's, reset GitHub main yourself.",
         );
         // An older mirror left tracked credential-looking names out: publish them now.
         plan.changes = plan.legacy.changes;
