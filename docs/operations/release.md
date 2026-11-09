@@ -22,6 +22,7 @@ before updating `scripts/schema-compat/released.json`; see
 In the same Lane, run `npm run build:core && npm run response:snapshot` to refresh
 `scripts/response-compat/released.json`, the reply contract released CLIs accept; it
 refuses undeclared breaking reply changes ([hosted reply compatibility](../development.md#hosted-reply-compatibility)).
+`main.json` (current main) is refreshed by any Lane that changes a reply schema, not at release.
 
 ## Configure once per release
 

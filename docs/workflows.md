@@ -422,7 +422,7 @@ This project declares three:
 | --- | --- | --- | --- |
 | convex runtime imports | `tests/convex-runtime-imports.test.mjs` | `src/**`, `convex/**`, `scripts/check-convex-*.mjs`, `package.json` | about 2 s |
 | hot storage invariant | `tests/hot-storage-invariant.test.mjs` | `convex/**` | about 1 s |
-| agent response contract | `tests/hosted-response-contract.test.mjs` | hosted contract and response sources, `scripts/response-compat*`, `convex/projectHostedAgent*.ts` | about 1 s |
+| agent response contract | `tests/hosted-response-contract.test.mjs` | hosted contract and response sources, `scripts/response-compat*` (release and main baselines), `convex/projectHostedAgent*.ts` | about 1 s |
 
 The hosted check stays the full run. See [parallel work defaults](parallel-work-defaults.md#preflight) for the rest of the selection rule.
 

@@ -393,12 +393,18 @@ retypes, makes optional or adds enum values to a field without a contract featur
 - New CLI, older server: a reply field the CLI adds must be optional or take a `.default()`
   (the server it talks to may not have deployed yet), or sit behind a feature.
 - Guard: `tests/hosted-response-contract.test.mjs` (part of the landing check's full run)
-  compares the Candidate's reply schemas with `scripts/response-compat/released.json`, the
-  released CLI's contract, and parses the Candidate server's capability reply with that
-  released contract. It does not see a field added and then changed between two releases
-  (main builds run in between), which is why outcome reads degrade as above. A failure names the field; declare a feature-gated change in
-  `scripts/response-compat/declared.json` with the printed `path` and `change`. Refresh the
-  baseline at release with `npm run build:core && npm run response:snapshot`.
+  compares the Candidate's reply schemas with two baselines and parses the Candidate server's
+  capability reply with the released contract. `scripts/response-compat/released.json` is the
+  released CLI's contract; `scripts/response-compat/main.json` is the contract of the current
+  main, so a field added and then made required, renamed or retyped between two main builds
+  (Issue ee1d6711: `acceptedBy.handle` became `actor`) fails too. A failure names the field
+  path and the fix: make a newly required field optional, or keep the old field alongside the
+  new one. Declare a deliberate feature-gated change in `scripts/response-compat/declared.json`
+  with the printed `path` and `change`. A change to any reply schema also needs
+  `npm run build:core && npm run response:main` in the same Lane (it refuses an undeclared
+  break, then rewrites `main.json`); the test fails on a stale file. Refresh the release
+  baseline at release with `npm run build:core && npm run response:snapshot`. Outcome reads
+  (above) still degrade for CLIs older than either baseline.
 
 CLIs built before this rule parse replies strictly, so any added field still breaks them;
 they recover when the updater installs a current build.

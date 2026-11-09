@@ -19,8 +19,10 @@ import { effectiveAgentDefaultsSchema } from '../dist/agent-parallel-defaults.js
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 import {
   checkResponseCompatibility,
+  replyBreakMessage,
   responseIssues,
   responseSchemas,
+  responseSnapshot,
   responseSnapshotPath,
 } from '../scripts/response-compat.mjs';
 const { capabilities } = await import(moduleUrl('../convex/projectHostedAgent.ts'));
@@ -144,6 +146,78 @@ test('landing guard: Candidate reply contracts stay compatible with the released
     `A released CLI would reject replies this Candidate allows. Keep the old reply shape for clients that do not advertise a new contract feature (src/hosted-contract-features.ts), then declare the change in scripts/response-compat/declared.json with its feature name: ${JSON.stringify(undeclared.map(({ path, change }) => ({ path, change, reason: 'feature-gated: NAME' })))}`,
   );
   assert(issues.length >= undeclared.length);
+});
+
+test('landing guard: Candidate reply contracts stay compatible with the previous main build', async () => {
+  const { main } = await checkResponseCompatibility(new URL('..', import.meta.url).pathname);
+  assert.deepEqual(
+    main.undeclared.map(issue => `${issue.path}: ${issue.detail}`),
+    [],
+    replyBreakMessage(main.undeclared),
+  );
+  assert.equal(
+    main.stale,
+    false,
+    'scripts/response-compat/main.json (the main reply contract) differs from this Candidate: run npm run build:core && npm run response:main and save',
+  );
+});
+
+test('incident replay 71ef0a66: the a4f1e07f -> ff527aa0 acceptedBy rename fails the main guard', async () => {
+  // a4f1e07f (main) required acceptedBy.handle; ff527aa0 renamed it to the optional actor. A CLI built
+  // from a4f1e07f rejected every landed reply, and no release had carried either shape.
+  const root = new URL('..', import.meta.url).pathname;
+  const current = await responseSnapshot(root);
+  const id = 'hosted-landing#hostedLandingStateSchema';
+  const a4f1e07f = z
+    .object({
+      kind: z.enum(['person', 'auto']),
+      handle: z.string().min(1),
+      at: z.iso.datetime(),
+      note: z.string(),
+    })
+    .strict();
+  const acceptance = hostedLandingStateSchema.shape.acceptance
+    .unwrap()
+    .extend({ acceptedBy: a4f1e07f.optional() })
+    .strict();
+  const base = {
+    ...current,
+    schemas: {
+      ...current.schemas,
+      [id]: z.toJSONSchema(hostedLandingStateSchema.extend({ acceptance: acceptance.optional() }), {
+        io: 'input',
+        unrepresentable: 'any',
+      }),
+    },
+  };
+  const issues = responseIssues(base, current, 'CLIs built from the previous main');
+  assert.deepEqual(
+    issues.map(issue => `${issue.path}:${issue.kind}`),
+    [`${id}.acceptance.acceptedBy.handle:field-required`],
+  );
+  const message = replyBreakMessage(issues);
+  assert.match(message, /acceptance\.acceptedBy\.handle \(field-required\)/);
+  assert.match(message, /previous main/);
+  assert.match(message, /for a renamed, removed or retyped field, keep the old field alongside/);
+  // The fix the message names: keep the old field alongside the new optional one. Then the guard passes.
+  const alongside = {
+    ...current,
+    schemas: {
+      ...current.schemas,
+      [id]: z.toJSONSchema(
+        hostedLandingStateSchema.extend({
+          acceptance: acceptance
+            .extend({ acceptedBy: a4f1e07f.extend({ actor: z.string().min(1).optional() }).optional() })
+            .optional(),
+        }),
+        { io: 'input', unrepresentable: 'any' },
+      ),
+    },
+  };
+  assert.deepEqual(
+    responseIssues(base, alongside).map(issue => issue.path),
+    [],
+  );
 });
 
 test('response compatibility: additive changes pass; narrowing changes fail', () => {

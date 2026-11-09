@@ -139,7 +139,8 @@
     "check:schema": "node scripts/check-schema-compat.mjs",
     "check:brief": "node scripts/check-brief.mjs",
     "schema:snapshot": "node scripts/refresh-schema-snapshot.mjs",
-    "response:snapshot": "node scripts/refresh-response-snapshot.mjs"
+    "response:snapshot": "node scripts/refresh-response-snapshot.mjs",
+    "response:main": "node scripts/refresh-response-snapshot.mjs --main"
   },
   "dependencies": {
     "@clerk/react": "6.17.3",

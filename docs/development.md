@@ -59,9 +59,15 @@ The initial baseline comes from the installed CLI release's matching schemas.
 Hosted replies follow the other direction: released CLIs must accept what a newer
 server sends. `tests/hosted-response-contract.test.mjs` compares the exported reply
 schemas listed in `scripts/response-compat.mjs` with
-`scripts/response-compat/released.json`; unknown keys are ignored (the CLI's reply
+`scripts/response-compat/released.json` (the released CLI) and with
+`scripts/response-compat/main.json` (the contract of the current main, which agents'
+always-main CLIs run between releases); unknown keys are ignored (the CLI's reply
 boundary drops them), while new required fields, new enum values and narrowed types
-fail. Rule and declaration steps: [server replies](operations/cli-update.md#server-replies-cli-behind-the-deploy).
+fail, naming the field path and the fix. `main.json` is a committed snapshot that must equal the
+Candidate's contract: a Lane that changes a reply schema runs
+`npm run build:core && npm run response:main`, which refuses an undeclared break against the
+previous `main.json` and then rewrites it; a Lane that forgot fails the check on the field
+(break) or on a stale file. It needs no hosted call and adds about 0.1 s. Rule and declaration steps: [server replies](operations/cli-update.md#server-replies-cli-behind-the-deploy).
 
 The extractor supports explicit Zod declarations, shapes, imports, unions and
 standard scalar validators. Unknown expressions fail explicitly. Arbitrary

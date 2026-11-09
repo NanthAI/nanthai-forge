@@ -11,6 +11,8 @@ import { z } from 'zod';
 import { compareSnapshots, undeclaredChanges } from './schema-compat.mjs';
 
 export const responseSnapshotPath = 'scripts/response-compat/released.json';
+/** The reply contract of the current main, kept equal to the source by `npm run response:main`. */
+export const responseMainPath = 'scripts/response-compat/main.json';
 export const responseDeclaredPath = 'scripts/response-compat/declared.json';
 /** Exported reply schemas the CLI parses through parseHostedResponse ([dist module, export]). */
 export const responseSchemas = [
@@ -51,10 +53,10 @@ const open = value =>
         )
       : value;
 
-/** Changes that would make a released CLI reject a reply the candidate contract allows. */
-export function responseIssues(released, current) {
-  if (released?.unknownKeys !== 'strip')
-    throw new Error('Released response snapshot must say unknownKeys: strip');
+/** Changes that would make an older CLI reject a reply the candidate contract allows.
+ * `who` names the baseline: the released CLI, or a CLI built from the previous main. */
+export function responseIssues(released, current, who = 'released CLIs') {
+  if (released?.unknownKeys !== 'strip') throw new Error('Response snapshot must say unknownKeys: strip');
   // Reversed on purpose: the RELEASED schema must accept everything the CURRENT one allows.
   return compareSnapshots(open(current), open(released))
     .filter(
@@ -63,7 +65,7 @@ export function responseIssues(released, current) {
     )
     .map(issue => ({
       ...issue,
-      detail: `released CLIs would reject this reply: ${reasons[issue.kind] ?? issue.detail}`,
+      detail: `${who} would reject this reply: ${reasons[issue.kind] ?? issue.detail}`,
     }));
 }
 const reasons = {
@@ -74,8 +76,50 @@ const reasons = {
   'constraint-changed': 'a format, pattern or combinator changed',
 };
 
+const sorted = value =>
+  Array.isArray(value)
+    ? value.map(sorted)
+    : value && typeof value === 'object'
+      ? Object.fromEntries(
+          Object.keys(value)
+            .sort()
+            .map(key => [key, sorted(value[key])]),
+        )
+      : value;
+const same = (a, b) => JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
+export const mainBaseline = 'CLIs built from the previous main';
+
+/** The message a failing reply-contract landing check prints: each field path and the fix. */
+export function replyBreakMessage(undeclared, baseline = mainBaseline) {
+  const fix = JSON.stringify(
+    undeclared.map(({ path, change }) => ({ path, change, reason: 'feature-gated: NAME' })),
+  );
+  return (
+    `${baseline} would reject replies this Candidate allows: ` +
+    `${undeclared.map(issue => `${issue.path} (${issue.kind})`).join('; ')}. ` +
+    `Fix: make a field you newly require optional; for a renamed, removed or retyped field, keep the old ` +
+    `field alongside the new one (or answer the old shape unless the client advertises a feature of ` +
+    `src/hosted-contract-features.ts), ` +
+    `then declare a deliberate change in scripts/response-compat/declared.json: ${fix}`
+  );
+}
+
+/** Candidate vs the release baseline and the current-main baseline. `main.stale` is true when
+ * main.json no longer equals the Candidate's own contract (run `npm run response:main`). */
 export async function checkResponseCompatibility(root) {
   const read = path => JSON.parse(readFileSync(resolve(root, path), 'utf8'));
-  const issues = responseIssues(read(responseSnapshotPath), await responseSnapshot(root));
-  return { issues, undeclared: undeclaredChanges(issues, read(responseDeclaredPath)) };
+  const current = await responseSnapshot(root);
+  const declared = read(responseDeclaredPath);
+  const issues = responseIssues(read(responseSnapshotPath), current);
+  const main = read(responseMainPath);
+  const mainIssues = responseIssues(main, current, mainBaseline);
+  return {
+    issues,
+    undeclared: undeclaredChanges(issues, declared),
+    main: {
+      issues: mainIssues,
+      undeclared: undeclaredChanges(mainIssues, declared),
+      stale: !same(main.schemas, current.schemas),
+    },
+  };
 }
