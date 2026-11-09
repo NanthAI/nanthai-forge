@@ -28,7 +28,10 @@ export type SourceCalculation = {
   kind: 'merge' | 'conflict' | 'markers' | 'docs';
   item: NativeMergeConflict;
   order: NativeInsertionOrder;
+  /** The right side's marker label. */
   channel: string;
+  /** Both marker labels, left first, when the left side is not the Lane (a landing resolution). */
+  labels?: [string, string];
   /** Compose only: a merged file the syntax gate covers that fails to parse although both sides do is a conflict. */
   syntax?: true;
 };
@@ -41,6 +44,8 @@ export type SourceCalculationResult = {
   reason?: string;
 };
 export class SourceCalculationsPending extends Error {}
+const labelsOf = (request: SourceCalculation): [string, string] =>
+  request.labels ?? ['lane', request.channel];
 /** Replay the native algorithm on compact outcomes, including recursive virtual
  * bases. No body from an acknowledged calculation is read during assembly. */
 export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMergeSource) {
@@ -54,12 +59,15 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
     order: NativeInsertionOrder,
     channel = 'target',
     syntax = false,
+    labels?: [string, string],
   ) => {
-    const key = canonicalPayload({ kind, item, order, channel, ...(syntax ? { syntax: true } : {}) }),
+    // Sync keys keep their shape (no `labels`), so journaled sync calculations replay unchanged.
+    const extra = { ...(labels ? { labels } : {}), ...(syntax ? { syntax: true as const } : {}) },
+      key = canonicalPayload({ kind, item, order, channel, ...extra }),
       prior = c.calculations?.[key];
     if (prior?.reason) reasons.set(item.path, prior.reason);
     if (prior) return prior;
-    pending.set(key, { key, kind, item, order, channel, ...(syntax ? { syntax: true as const } : {}) });
+    pending.set(key, { key, kind, item, order, channel, ...extra });
     if (pending.size >= 100) throw new SourceCalculationsPending();
     return null;
   };
@@ -84,8 +92,15 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
   };
   // The Markdown docs rule's bytes (native-docs-resolve) are a calculation like a text merge.
   source.docsContent = (item, order) => request('docs', item, order)?.blob ?? null;
-  source.conflictContent = (item, channel) => {
-    const result = request('conflict', item, 'right-first', channel);
+  source.conflictContent = (item, [left, right]) => {
+    const result = request(
+      'conflict',
+      item,
+      'right-first',
+      right,
+      false,
+      left === 'lane' ? undefined : [left, right],
+    );
     return {
       kind: result?.kind ?? 'binary',
       ...(result?.blob
@@ -226,13 +241,13 @@ export async function calculateSourceFiles(
     } else {
       const marked = await sourceCall(
         'merge-markers',
-        async () => markNativeTextConflicts(base, left, right, ['lane', request.channel], request.order),
+        async () => markNativeTextConflicts(base, left, right, labelsOf(request), request.order),
         { size: base.length + left.length + right.length, objects: required.length },
       );
       if (marked) {
         kind = 'text';
         // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
-        bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, ['lane', request.channel]);
+        bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, labelsOf(request));
       }
     }
     const pin = bytes

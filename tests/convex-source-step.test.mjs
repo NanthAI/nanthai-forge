@@ -383,6 +383,68 @@ test('bounded dependency-first composition and conflict manifests match the fixe
   }
 });
 
+// Issue 949888b8: journaled conflict calculations label a landing resolution's halves as the
+// fixed worker does: main's bytes under `main`, the Lane's under `lane`.
+test('incident 949888b8: a journaled landing-resolution draft labels main and lane like the fixed worker', async () => {
+  const x = fixture(),
+    file = (path, text, mode = 'file') => ({ path, mode, blob: x.put(text).sha256 }),
+    base = x.state([file('t', 'a\nbase\nc\n'), file('w', 'one\ntwo\n'), file('b', 'base\0')]);
+  const main = x.state(
+      [file('t', 'a\nMAIN\nc\n'), file('w', 'ONE\ntwo\n', 'executable'), file('b', 'main\0')],
+      [base.sha256],
+    ),
+    lane = x.state(
+      [file('t', 'a\nLANE\nc\n'), file('w', 'one\nTWO\n', 'symlink'), file('b', 'lane\0')],
+      [base.sha256],
+    );
+  const inputs = buildComposePages([
+      {
+        laneId: randomUUID(),
+        head: lane.sha256,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: { object: lane, recipe: null },
+      },
+    ]),
+    dependencies = buildComposePages([]);
+  for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+  const composed = await buildHostedSourceState(
+    x.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: main.sha256, receiptId: 'main' },
+      main: { object: main, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    }),
+    x.io,
+  );
+  const conflicts = JSON.parse(x.objects.get(composed.output.sha256)).result.conflicts;
+  const input = x.json({
+    schema: 1,
+    kind: 'forge-hosted-sync-input',
+    algorithm: 'forge-native-sync-v1',
+    work: { mode: 'resolution', candidateId: randomUUID(), conflicts },
+    message: 'merge',
+    at,
+  });
+  const expected = await buildHostedSourceState(input, x.io),
+    actual = await drain(x, input, true);
+  assert.equal(actual.cursor.head, expected.head);
+  assert.deepEqual(actual.cursor.output, expected.output);
+  const draft = JSON.parse(
+    x.objects.get(JSON.parse(x.objects.get(expected.output.sha256)).result.state.sha256),
+  );
+  const bytes = path => x.objects.get(draft.files.find(f => f.path === path).blob).toString();
+  assert.equal(bytes('t'), 'a\n<<<<<<< main\nMAIN\n=======\nLANE\n>>>>>>> lane\nc\n');
+  assert.equal(bytes('w'), '<<<<<<< main\nONE\ntwo\n=======\none\nTWO\n>>>>>>> lane\n');
+  assert.equal(bytes('b'), 'main\0');
+});
+
 test('32,000-object progress reuses compressed immutable sections instead of rewriting them per step', async t => {
   const c = initialSourceStep({ sha256: 'a'.repeat(64), size: 1 }),
     objects = new Map();

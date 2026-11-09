@@ -111,7 +111,7 @@ export class NativeSource {
   ) => string | null;
   conflictContent?: (
     item: NativeMergeConflict,
-    channel: string,
+    labels: [left: string, right: string],
   ) => { file?: NativeFile; kind: 'text' | 'binary' };
   /** The Markdown docs rule's bytes for one conflict (native-docs-resolve), as a blob or null. */
   docsContent?: (item: NativeMergeConflict, order: NativeInsertionOrder) => string | null;

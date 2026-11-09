@@ -367,7 +367,7 @@ export function agentSync(
           }),
         };
       }
-      const plan = conflictPlan(source, lane.head, target, command.channel, stack?.before.head),
+      const plan = conflictPlan(source, lane.head, target, ['lane', command.channel], stack?.before.head),
         retained = new Set([...from, ...source.state(target).files].map(file => file.blob)),
         files = plan.files.map(file =>
           file.blob && !retained.has(file.blob) ? { ...file, bytes: source.object(file.blob) } : file,

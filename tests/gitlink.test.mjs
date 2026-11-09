@@ -137,7 +137,7 @@ test('opposing pointer updates conflict atomically and resolution drafts retain 
     left = state('b', [base]),
     right = state('c', [base]);
   assert.deepEqual(source.compose(left, right, 'merge', at).conflicts, ['lib']);
-  const draft = conflictPlan(source, left, right, 'main');
+  const draft = conflictPlan(source, left, right, ['lane', 'main']);
   assert.deepEqual(draft.conflicts, [{ path: 'lib', kind: 'binary' }]);
   assert.equal(draft.files[0].blob, source.state(left).files[0].blob);
   assert.equal(draft.files[0].bytes, undefined, 'never place text conflict markers inside a commit SHA');

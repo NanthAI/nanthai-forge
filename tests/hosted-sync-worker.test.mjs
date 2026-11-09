@@ -8,6 +8,8 @@ import { composeFixture } from './hosted-compose-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { conflictPlan } from '../dist/agent-sync.js';
 import { resolveDocsComposition } from '../dist/native-docs-resolve.js';
+import { buildComposePages } from '../dist/hosted-compose.js';
+import { saveBytes } from '../dist/hosted-save.js';
 const at = '2026-01-01T00:00:00.000Z',
   message = 'Native sync parity';
 const plan = (left, right) => ({
@@ -30,7 +32,7 @@ async function parity(t, s, left, right) {
     assert.equal(result.status, merged.head === left.sha256 ? 'up-to-date' : 'merged');
     assert.equal(result.state.sha256, merged.head);
   } else {
-    const pending = conflictPlan(source, left.sha256, right.sha256, 'target');
+    const pending = conflictPlan(source, left.sha256, right.sha256, ['lane', 'target']);
     const files = pending.files.map(file => ({
       path: file.path,
       mode: file.mode,
@@ -111,6 +113,114 @@ for (const recursive of [false, true])
       assert.equal(result.status, 'conflict');
     });
   }
+// Issue 949888b8: a landing conflict merges the Lane (right) into main (left), so each draft label
+// must name the side whose bytes it holds: main's half under `main`, the Lane's half under `lane`.
+// A Lane sync merges main (right) into the Lane (left): `lane` above, `target` below.
+async function landingDraft(s, main, lane) {
+  const inputs = buildComposePages([
+      {
+        laneId: '00000000-0000-4000-8000-0000000000aa',
+        head: lane.sha256,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: { object: lane, recipe: null },
+      },
+    ]),
+    dependencies = buildComposePages([]);
+  for (const p of [...inputs.pages, ...dependencies.pages]) s.put(saveBytes(p.value));
+  const composed = JSON.parse(
+    (
+      await s.compute({
+        schema: 1,
+        kind: 'forge-hosted-compose-input',
+        base: { head: main.sha256, receiptId: 'main-0' },
+        main: { object: main, recipe: null },
+        inputs: inputs.manifest,
+        dependencies: dependencies.manifest,
+        algorithm: 'forge-native-compose-v1',
+        message,
+        at,
+      })
+    ).manifest,
+  ).result;
+  assert.equal(composed.status, 'conflict');
+  const page = JSON.parse(s.objects.get(composed.conflicts.sha256));
+  assert.deepEqual([page.left, page.right], [main.sha256, lane.sha256], 'compose orientation: main left');
+  const draft = JSON.parse(
+    (
+      await s.compute({
+        ...plan(main, lane),
+        work: {
+          mode: 'resolution',
+          candidateId: '00000000-0000-4000-8000-000000000001',
+          conflicts: composed.conflicts,
+        },
+      })
+    ).manifest,
+  ).result;
+  assert.equal(draft.status, 'conflict');
+  return draft;
+}
+const draftFile = (s, result, path) => {
+  const file = JSON.parse(s.objects.get(result.state.sha256)).files.find(f => f.path === path);
+  return { ...file, bytes: s.objects.get(file.blob) };
+};
+test('incident 949888b8: landing-conflict drafts label main as main and the Lane as lane; sync drafts keep lane/target', async t => {
+  const s = await composeFixture();
+  const root = s.state(
+    [
+      s.file('text.txt', 'a\nbase\nc\n'),
+      s.file('whole.txt', 'one\ntwo\nthree\n'),
+      s.file('blob.bin', 'base\0'),
+      s.hidden,
+    ],
+    [s.baseline.sha256],
+  );
+  // text: same line edited; whole: disjoint text edits that merge, but a clashing mode change,
+  // so the draft holds both whole sides; blob: binary edited on both sides.
+  const main = s.state(
+      [
+        s.file('text.txt', 'a\nMAIN\nc\n'),
+        s.file('whole.txt', 'ONE-main\ntwo\nthree\n', 'executable'),
+        s.file('blob.bin', 'main\0'),
+        s.hidden,
+      ],
+      [root.sha256],
+    ),
+    lane = s.state(
+      [
+        s.file('text.txt', 'a\nLANE\nc\n'),
+        s.file('whole.txt', 'one\ntwo\nTHREE-lane\n', 'symlink'),
+        s.file('blob.bin', 'lane\0'),
+        s.hidden,
+      ],
+      [root.sha256],
+    );
+  const landing = await landingDraft(s, main, lane);
+  assert.equal(
+    draftFile(s, landing, 'text.txt').bytes.toString(),
+    'a\n<<<<<<< main\nMAIN\n=======\nLANE\n>>>>>>> lane\nc\n',
+  );
+  assert.equal(
+    draftFile(s, landing, 'whole.txt').bytes.toString(),
+    '<<<<<<< main\nONE-main\ntwo\nthree\n=======\none\ntwo\nTHREE-lane\n>>>>>>> lane\n',
+  );
+  // A binary landing conflict holds main's bytes unchanged, as CONFLICT_SIDE_REQUIRED names it.
+  assert.equal(draftFile(s, landing, 'blob.bin').bytes.toString(), 'main\0');
+  // Contrast: a Lane sync of the same edits merges main into the Lane, so the Lane is above.
+  const { result: sync } = await parity(t, s, lane, main);
+  assert.equal(sync.status, 'conflict');
+  assert.equal(
+    draftFile(s, sync, 'text.txt').bytes.toString(),
+    'a\n<<<<<<< lane\nLANE\n=======\nMAIN\n>>>>>>> target\nc\n',
+  );
+  assert.equal(
+    draftFile(s, sync, 'whole.txt').bytes.toString(),
+    '<<<<<<< lane\none\ntwo\nTHREE-lane\n=======\nONE-main\ntwo\nthree\n>>>>>>> target\n',
+  );
+  assert.equal(draftFile(s, sync, 'blob.bin').bytes.toString(), 'lane\0');
+});
 // Issue 561996ac: a Lane sync whose only conflict is Markdown docs takes native finish's rule.
 test('a Markdown-only sync conflict merges with the docs rule, byte-identical to native finish', async t => {
   const s = await composeFixture(),

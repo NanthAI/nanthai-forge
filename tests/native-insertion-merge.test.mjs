@@ -272,7 +272,7 @@ test('Lane sync orders main before Lane and replays the same resolution receipt'
   assert.deepEqual(result.resolutions, [{ path: 'file.mjs', baseLine: 3, resolved: 'both-insertions' }]);
   assert.deepEqual(agentSync(agent.work.store, command, { target }).result, result);
   assert.match(source.state(result.head).message, /both-insertions/);
-  assert.deepEqual(conflictPlan(source, checkpoint.head, target, 'main').conflicts, []);
+  assert.deepEqual(conflictPlan(source, checkpoint.head, target, ['lane', 'main']).conflicts, []);
 });
 
 test('a later unresolved hunk prevents publication of speculative resolution notes', () => {

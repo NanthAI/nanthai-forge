@@ -38,7 +38,7 @@ test('criss-cross bases compose recursively, deterministically, retaining origin
   assert.deepEqual(source.mergeFiles(l, r), source.mergeFiles(l, r));
   assert.deepEqual(source.mergeFiles(l, r).files, source.mergeFiles(r, l).files);
   [root, a, b, l, r].forEach((id, i) => assert.deepEqual(source.object(id), originals[i]));
-  assert.deepEqual(conflictPlan(source, l, r, 'main').conflicts, []);
+  assert.deepEqual(conflictPlan(source, l, r, ['lane', 'main']).conflicts, []);
 });
 
 test('stacked Lane syncs after its parent lands following independent syncs (60174476 shape)', t => {
@@ -52,7 +52,7 @@ test('stacked Lane syncs after its parent lands following independent syncs (601
   const after = source.compose(synced, landed, 'sync landed parent', at);
   assert.deepEqual(after.conflicts, []);
   assert.equal(text(after.head), 'A\nb\nC\nd\ne\nf\nG\n');
-  assert.deepEqual(conflictPlan(source, synced, landed, 'main').conflicts, []);
+  assert.deepEqual(conflictPlan(source, synced, landed, ['lane', 'main']).conflicts, []);
 });
 
 test('three stacked handovers survive independent main syncs and sequential landings', t => {
@@ -95,7 +95,7 @@ for (const kind of ['text', 'binary', 'mode', 'delete', 'path']) {
     const merged = source.compose(l, r, 'merge', at);
     assert.equal(merged.head, undefined);
     assert(merged.conflicts.includes('f'));
-    assert(conflictPlan(source, l, r, 'main').conflicts.some(c => c.path === 'f'));
+    assert(conflictPlan(source, l, r, ['lane', 'main']).conflicts.some(c => c.path === 'f'));
     assert.deepEqual(source.compose(l, r, 'merge', at), merged);
     const agreed = state(xs, [b, a], 'agreed');
     assert.deepEqual(source.compose(l, agreed, 'resolved', at).conflicts, []);
@@ -185,10 +185,10 @@ test('file/subtree virtual-base clashes cannot silently delete opposing head res
   assert.equal(merged.head, undefined);
   assert.deepEqual(merged.conflicts, ['f', 'f/child']);
   assert.deepEqual(
-    [...new Set(conflictPlan(source, left, right, 'main').conflicts.map(c => c.path))],
+    [...new Set(conflictPlan(source, left, right, ['lane', 'main']).conflicts.map(c => c.path))],
     ['f', 'f/child'],
   );
-  assert.deepEqual(conflictPlan(source, left, right, 'main').files, source.state(left).files);
+  assert.deepEqual(conflictPlan(source, left, right, ['lane', 'main']).files, source.state(left).files);
 });
 
 test('shared bases with independent roots use an empty virtual ancestor without fabricating source history', t => {

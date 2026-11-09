@@ -25,7 +25,8 @@ test('incident replay: two Lanes change the same lines, one lands, the other fin
   const conflict = result.result.recovery.conflict;
   assert.deepEqual(conflict.paths, ['a.txt']);
   assert.match(conflict.command, / resolve /);
-  assert.match(conflict.files[0].content, /<<<<<<< lane/);
+  // Issue 949888b8: main (holding the first Lane's lines) is labelled main, the finishing Lane lane.
+  assert.equal(conflict.files[0].content, '<<<<<<< main\nours\n=======\npeer\n>>>>>>> lane\nb\nc\n');
   assert.equal((await f.readLane(peer.laneId)).head, peer.head, 'original Lane remains intact');
   writeFileSync(join(conflict.root, 'a.txt'), 'chosen\nb\nc\n');
   // An already-saved edit must still complete resolution with no fake edit.
@@ -266,7 +267,10 @@ test('a durable asynchronous finish automatically syncs its terminal conflict on
   assert.equal(recovered.operationId, preparing.operationId);
   assert.equal(recovered.result.submission.error.code, 'COMPOSITION_CONFLICT');
   assert.deepEqual(recovered.result.recovery.conflict.paths, ['a.txt']);
-  assert.match(recovered.result.recovery.conflict.files[0].content, /<<<<<<< lane/);
+  assert.equal(
+    recovered.result.recovery.conflict.files[0].content,
+    '<<<<<<< main\ntheirs\n=======\nours\n>>>>>>> lane\nb\nc\n',
+  );
   assert.match(recovered.result.recovery.conflict.command, / resolve /);
 });
 

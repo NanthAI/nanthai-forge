@@ -24,6 +24,7 @@ const calculation = z
     item: conflict,
     order: z.enum(['left-first', 'right-first']),
     channel: z.string(),
+    labels: z.tuple([z.string(), z.string()]).optional(),
     syntax: z.literal(true).optional(),
   })
   .strict();

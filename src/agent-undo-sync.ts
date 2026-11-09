@@ -87,7 +87,7 @@ export function agentUndoSync(store: WorkStore, command: UndoSync) {
                     source,
                     lane.head,
                     conflict.parent,
-                    conflict.channel,
+                    ['lane', conflict.channel],
                     conflict.stack?.before.head,
                   ).files.map(file => ({
                     path: file.path,

@@ -178,7 +178,8 @@ export async function buildHostedSyncState(
           source,
           left,
           right,
-          'target',
+          // A landing resolution merges the Lane (right) into main (left); a sync the reverse.
+          work.mode === 'resolution' ? ['main', 'lane'] : ['lane', 'target'],
           work.mode === 'sync' ? work.stackBase?.object.sha256 : undefined,
         ),
       );

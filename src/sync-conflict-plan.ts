@@ -6,12 +6,14 @@ import type { Lane } from './work-types.js';
 // Kept apart from agent-sync.ts: the hosted source worker imports this, and agent-sync's own
 // imports (local workspace, records, GitHub, checks) must stay out of the worker bundle.
 type Conflict = NonNullable<Lane['pendingMerge']>['conflicts'][number];
-/** Working files for a conflicted sync: merged files, marker hunks for text, Lane version otherwise. */
+/** Working files for a conflicted merge of `right` into `left`: merged files, marker hunks for
+ * text, the left version otherwise. `labels` name the side each hunk half holds, left first:
+ * a Lane sync is ['lane', channel]; a landing resolution merges the Lane into main, ['main', 'lane']. */
 export function conflictPlan(
   source: NativeSource,
   laneHead: string,
   target: string,
-  channel: string,
+  labels: [left: string, right: string],
   base?: string,
 ) {
   const merged = source.mergeFiles(
@@ -35,25 +37,25 @@ export function conflictPlan(
       continue;
     }
     if (source.conflictContent) {
-      const result = source.conflictContent(item, channel);
+      const result = source.conflictContent(item, labels);
       if (result.file) files.push(result.file);
       conflicts.push({ path: item.path, kind: result.kind });
       continue;
     }
     const left = read(item.left),
       right = read(item.right),
-      marked = markNativeTextConflicts(read(item.base), left, right, ['lane', channel], 'right-first');
+      marked = markNativeTextConflicts(read(item.base), left, right, labels, 'right-first');
     if (!marked) {
       if (item.left) files.push(item.left);
       conflicts.push({ path: item.path, kind: 'binary' });
       continue;
     }
     // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
-    const bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, ['lane', channel])!;
+    const bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, labels)!;
     files.push({ path: item.path, mode: item.left?.mode ?? item.right?.mode ?? 'file', bytes });
     conflicts.push({ path: item.path, kind: 'text' });
   }
-  // A file/directory clash keeps the Lane's side of that subtree.
+  // A file/directory clash keeps the left side of that subtree (the Lane's, in a sync).
   const lane = source.state(laneHead).files;
   let result = files;
   for (const path of overlappingPaths(files as NativeFile[])) {
