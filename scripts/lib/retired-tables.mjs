@@ -7,8 +7,6 @@ import { failure } from './hosted-durability-compare.mjs';
 // Phase 5 B1.9: tables whose writers B1.6-B1.8 deleted. `indexes` counts declared indexes
 // (each deleted row also removes one entry per index plus the creation-time index).
 export const RETIRED_TABLES = {
-  ownerAcceptanceMachines: { indexes: 1 },
-  ownerAcceptanceRequests: { indexes: 3 },
   projectPublicationAttempts: { indexes: 2 },
   projectPublications: { indexes: 2 },
   projectPublicationPages: { indexes: 2 },

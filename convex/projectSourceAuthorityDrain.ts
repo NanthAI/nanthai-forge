@@ -12,11 +12,6 @@ export async function requireHostedOwnerDrained(
   drain?: { revision: number; fingerprint: string },
 ) {
   const blockers: { kind: string; id: string; status: string }[] = [];
-  const requested = await ctx.db
-    .query('ownerAcceptanceRequests')
-    .withIndex('by_project_state', q => q.eq('projectId', project._id).eq('state', 'requested'))
-    .take(100);
-  blockers.push(...requested.map(r => ({ kind: 'owner-acceptance', id: r.operationId, status: r.state })));
   const generation = await selectedGeneration(ctx, project);
   if (generation) {
     for (const [collection, statuses] of [

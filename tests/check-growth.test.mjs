@@ -11,6 +11,7 @@ import {
   glossaryTerms,
   growthFindings,
   initialBaseline,
+  unreferencedExportNames,
   updateBaseline,
 } from '../scripts/check-growth.mjs';
 
@@ -103,7 +104,43 @@ test('glossaryTerms: distinct bold terms of docs/concepts.md, case-folded', () =
   assert.deepEqual([...glossaryTerms(doc)].sort(), ['lane', 'state']);
 });
 
-const start = { tables: 10, errorCodes: 20, agentActions: 30, cliCommands: 40, glossaryTerms: 5 };
+test('unreferencedExports: an export no other file mentions counts; entry points and Convex public functions do not', () => {
+  const lib = {
+    path: 'src/lib.ts',
+    text: [
+      'export function used() {}',
+      'export type Orphan = string;',
+      'export const alsoDead = 1;',
+      'export const twice = 1;',
+    ].join('\n'),
+  };
+  const convex = {
+    path: 'convex/f.ts',
+    text: [
+      'export const entry = mutation({',
+      '  args: {},',
+      '});',
+      'export const helper = internalQuery({',
+    ].join('\n'),
+  };
+  const entry = { path: 'src/index.ts', text: 'export const publicApi = 1;' };
+  const user = { path: 'src/user.ts', text: "import { used } from './lib'; use(used);" };
+  const test = { path: 'tests/x.test.mjs', text: 'twice();' };
+  assert.deepEqual([...unreferencedExportNames([lib, convex, entry, user], [test])].sort(), [
+    'Orphan',
+    'alsoDead',
+    'helper',
+  ]);
+});
+
+const start = {
+  tables: 10,
+  errorCodes: 20,
+  agentActions: 30,
+  cliCommands: 40,
+  glossaryTerms: 5,
+  unreferencedExports: 7,
+};
 
 test('a count above the baseline with no recorded reason fails and names the update command', () => {
   const baseline = initialBaseline(start, '2026-11-09');

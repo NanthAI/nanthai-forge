@@ -55,7 +55,6 @@ test('browser person accept lands through hosted queue with no owner machine or 
   const submitted = await client.accept(id, f.candidate.id);
   assert.equal(submitted.request.agent, false);
   assert.equal(submitted.request.finish.reviewedSource.intentId, f.candidate.intentId);
-  assert.equal(f.tables.ownerAcceptanceRequests?.size ?? 0, 0);
   await f.drain();
   assert.equal((await f.current(submitted.id)).submission.phase, 'landed');
   assert.equal(f.tables.projectHostedAcceptances.size, 1);

@@ -92,7 +92,7 @@ export function checkApproval(record, plan, { deployedAt, now = new Date() }) {
     throw failure('APPROVAL_BACKUPS_INSUFFICIENT');
 }
 
-const skipFiles = new Set(['schema.ts', 'ownerAcceptanceFields.ts', 'projectPublicationFields.ts']);
+const skipFiles = new Set(['schema.ts', 'projectPublicationFields.ts']);
 async function* sources(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     if (entry.name === '_generated' || entry.name === 'node_modules') continue;

@@ -133,7 +133,7 @@ if (errors.length) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms) is above its baseline.`,
+    `Foundation checks passed: ${files.length} files; JSON parses, Markdown links resolve, license inventory is current, no machine-specific home paths, SPDX headers lead every source file, nothing prints environment values, no test file adds a real sleep, elapsed-time assert or docs read above its baseline, no growth count (tables, error codes, agent actions, CLI commands, glossary terms, unreferenced exports) is above its baseline.`,
   );
   console.log(
     'Application behavior, external URLs and authenticated/local runtime integration are not tested by this command.',

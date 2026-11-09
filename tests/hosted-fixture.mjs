@@ -119,7 +119,6 @@ function indexFields(table, index) {
 
 export function state(jobs = [job()], { keysetPaging = false } = {}) {
   const tables = {
-    ownerAcceptanceMachines: new Map(),
     forgeAccounts: new Map(),
     accountHandles: new Map(),
     projectSlugs: new Map(),

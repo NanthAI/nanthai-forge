@@ -84,39 +84,6 @@ for (const sameOperation of [false, true])
     assert.deepEqual(s.tables.hostedProjects.get(s.projectId).sourceAuthority, server);
   });
 
-test('authority transition requires retained owner requests to be settled before cutover', async () => {
-  const s = setup();
-  const input = {
-    projectId: s.projectId,
-    ownerId: s.tables.hostedProjects.get(s.projectId).key,
-    operationId: randomUUID(),
-    receipt: JSON.stringify({ status: 'rejected', reason: 'synthetic' }),
-  };
-  const request = {
-    viewId: 'view',
-    head: 'a'.repeat(64),
-    expectedMain: null,
-    actorKind: 'person',
-    channel: 'main',
-    requester: 'owner',
-    createdAt: 1,
-    receipt: null,
-    state: 'requested',
-  };
-  const requestId = s.insert('ownerAcceptanceRequests', { ...input, ...request });
-  const another = { ...input, operationId: randomUUID() };
-  const completed = s.insert('ownerAcceptanceRequests', { ...another, ...request });
-  s.patch('ownerAcceptanceRequests', completed, { state: 'rejected', receipt: another.receipt });
-  assert.equal(s.tables.ownerAcceptanceRequests.get(completed).state, 'rejected');
-  await assert.rejects(s.transition(), code('SOURCE_AUTHORITY_DRAIN_REQUIRED'));
-  s.patch('ownerAcceptanceRequests', requestId, { state: 'rejected', receipt: input.receipt });
-  await s.transition();
-  assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
-  await s.transition(server, 'native-owner');
-
-  assert.equal(s.tables.ownerAcceptanceRequests.get(requestId).state, 'rejected');
-});
-
 test('legacy final append transaction fences an authority switch', async () => {
   const s = setup();
   await s.transition();

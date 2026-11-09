@@ -57,10 +57,8 @@ function fake(tables = {}) {
   };
 }
 const dogfoodShape = () => ({
-  ownerAcceptanceMachines: rowsFor('ownerAcceptanceMachines', 11),
-  ownerAcceptanceRequests: rowsFor('ownerAcceptanceRequests', 19, 1400),
-  projectPublicationAttempts: [],
-  projectPublications: [],
+  projectPublicationAttempts: rowsFor('projectPublicationAttempts', 11),
+  projectPublications: rowsFor('projectPublications', 19, 1400),
   projectPublicationPages: [],
   projectReturnSupersessions: rowsFor('projectReturnSupersessions', 2),
   hostedProjects: [
@@ -82,22 +80,22 @@ async function temporary(fn) {
 test('inventory counts retired rows and bytes, and reports live-field usage without touching it', async () => {
   const source = fake(dogfoodShape());
   const result = await inventory(source);
-  assert.equal(result.tables.ownerAcceptanceMachines.rows, 11);
-  assert.equal(result.tables.ownerAcceptanceRequests.rows, 19);
-  assert.ok(result.tables.ownerAcceptanceRequests.bytes > 19 * 1400);
-  assert.equal(result.tables.projectPublications.rows, 0);
+  assert.equal(result.tables.projectPublicationAttempts.rows, 11);
+  assert.equal(result.tables.projectPublications.rows, 19);
+  assert.ok(result.tables.projectPublications.bytes > 19 * 1400);
+  assert.equal(result.tables.projectPublicationPages.rows, 0);
   const usage = Object.fromEntries(result.fields.map(f => [`${f.table}.${f.path}`, f.rows]));
   assert.equal(usage['hostedProjects.exchangeCleanupDone'], 2);
   assert.equal(usage['hostedProjects.work.intentMigration'], 1);
   assert.equal(usage['projectBackups.ownerDerived'], 1);
   assert.equal(usage['projectBackups.metadataPublication'], 0);
-  // 6 retired tables + one read each for hostedProjects and projectBackups.
-  assert.equal(source.calls.data, 8);
+  // 4 retired tables + one read each for hostedProjects and projectBackups.
+  assert.equal(source.calls.data, 6);
   assert.deepEqual(source.calls.imports, []);
 });
 
 test('a full page is reported as truncated, never exported as complete', async () => {
-  const source = fake({ ownerAcceptanceMachines: rowsFor('ownerAcceptanceMachines', 5) });
+  const source = fake({ projectPublicationAttempts: rowsFor('projectPublicationAttempts', 5) });
   await temporary(async directory => {
     await assert.rejects(
       exportTables(source, join(directory, 'out'), { deployment: 'dev-a', cap: 5 }),
@@ -115,9 +113,9 @@ test('export is private, checksummed, one read per table and never overwrites', 
       now: new Date('2026-11-01T00:00:00Z'),
     });
     assert.equal(source.calls.data, Object.keys(RETIRED_TABLES).length);
-    assert.equal(manifest.tables.ownerAcceptanceRequests.rows, 19);
+    assert.equal(manifest.tables.projectPublications.rows, 19);
     assert.equal(manifest.deploymentDigest, sha256('dev-a'));
-    assert.equal((await stat(join(out, 'ownerAcceptanceRequests.jsonl'))).mode & 0o077, 0);
+    assert.equal((await stat(join(out, 'projectPublications.jsonl'))).mode & 0o077, 0);
     assert.equal(sha256(await readFile(join(out, 'manifest.json'), 'utf8')), manifestSha256);
     assert.equal((await verifyExport(out)).manifestSha256, manifestSha256);
     await assert.rejects(
@@ -135,8 +133,8 @@ test('restore round trip: an export of the source rebuilds identical rows in an 
     await exportTables(source, directory + '/out', { deployment: 'dev-a' });
     const scratch = fake();
     const result = await restoreTables(scratch, directory + '/out', { deployment: 'scratch-b' });
-    assert.equal(result.restored.ownerAcceptanceRequests, 19);
-    assert.equal(result.restored.projectPublications, 0);
+    assert.equal(result.restored.projectPublications, 19);
+    assert.equal(result.restored.projectPublicationPages, 0);
     for (const table of Object.keys(RETIRED_TABLES))
       assert.deepEqual(scratch.store.get(table) ?? [], source.store.get(table), table);
     // Empty tables are not imported: 3 populated tables, 1 import each.
@@ -180,16 +178,16 @@ test('purge dry run reports tables, calls and I/O, measures the call budget and 
     await exportTables(source, out, { deployment: 'dev-a' });
     source.calls.data = 0;
     // A row created after the export must be flagged, not silently covered.
-    source.store.get('ownerAcceptanceMachines').push({ _id: 'late', _creationTime: 9_999 });
+    source.store.get('projectPublicationAttempts').push({ _id: 'late', _creationTime: 9_999 });
     const plan = await purgePlan(source, out, { deployedAt });
     assert.equal(source.calls.data, Object.keys(RETIRED_TABLES).length);
     assert.equal(plan.totals.rows, 11 + 1 + 19 + 2);
-    assert.equal(plan.tables.ownerAcceptanceMachines.unexportedRows, 1);
-    assert.equal(plan.tables.ownerAcceptanceRequests.unexportedRows, 0);
+    assert.equal(plan.tables.projectPublicationAttempts.unexportedRows, 1);
+    assert.equal(plan.tables.projectPublications.unexportedRows, 0);
     assert.equal(plan.cost.userFunctionCalls, 0);
-    assert.equal(plan.cost.cliRequests, 6 + 3 * 2);
+    assert.equal(plan.cost.cliRequests, 4 + 3 * 2);
     assert.equal(plan.cost.documentsDeleted, plan.totals.rows);
-    assert.equal(plan.cost.indexEntriesDeleted, 12 * 2 + 19 * 4 + 2 * 2);
+    assert.equal(plan.cost.indexEntriesDeleted, 12 * 3 + 19 * 3 + 2 * 2);
     assert.equal(plan.cost.basis, 'estimate');
     assert.equal(plan.eligibility.known, true);
     assert.deepEqual(source.calls.imports, []);
@@ -260,7 +258,7 @@ test('purge --execute is refused without a matching approval record, then execut
     source.calls.data = 0;
     const result = await execute({ ...command, now }, source);
     assert.deepEqual(result.after, { rows: 0, bytes: 0 });
-    assert.equal(source.calls.data, 9); // Six plan reads, three populated-table verification reads.
+    assert.equal(source.calls.data, 7); // Four plan reads, three populated-table verification reads.
     assert.equal(source.calls.imports.length, 3);
     assert.deepEqual((await execute({ ...command, now }, source)).after, result.after);
     assert.equal(source.calls.imports.length, 3); // A replay adds no writes.
@@ -290,7 +288,7 @@ test('purge rejects changed rows, wrong deployment and changed replay inputs bef
       now: new Date('2026-11-10T13:00:00Z'),
     };
     await assert.rejects(execute({ ...command, deployment: 'other' }, source), { code: 'APPROVAL_MISMATCH' });
-    source.store.get('ownerAcceptanceRequests')[0].body = 'changed same ID';
+    source.store.get('projectPublications')[0].body = 'changed same ID';
     await assert.rejects(execute(command, source), { code: 'PURGE_INVENTORY_CHANGED' });
     assert.equal(source.calls.imports.length, 0);
   });

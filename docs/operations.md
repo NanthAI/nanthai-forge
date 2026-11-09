@@ -808,7 +808,7 @@ starts an acceptance listener. The former `ownerAcceptance`, `ownerLifecycle`,
 `projectOwnerSync:publish` and `projectWorkActions:acceptChannel` RPCs return
 `CLI_UPGRADE_REQUIRED` with the matching release and original-operation recovery
 instructions. The old `host --listen`, `--sync-agent` and auto-sync switches return
-the same error. Stored request/machine tables remain for backup recovery and B1.9.
+the same error. The request/machine tables are gone from the schema.
 
 Local activity updates presence only; it starts no hosted metadata sender, retry
 timer or owner subscription. Hosted CLI/MCP source and lifecycle operations use
@@ -1162,8 +1162,8 @@ their operation and immutable input States in `hosted-submissions` and return
 `pending-handover` until hosted capability discovery reports server authority.
 Editing and saving remain available. Replay the original transition after its
 reported blockers settle. The transition retains its drained owner revision;
-the hosted transaction compares it with the seeded checkpoint and checks current
-owner-acceptance requests and nonterminal indexed entries/batches before changing
+the hosted transaction compares it with the seeded checkpoint and checks nonterminal
+indexed entries/batches before changing
 the epoch. These indexed predicates participate in the same OCC transaction as
 the switch. Completed transition replays retain their original receipt.
 

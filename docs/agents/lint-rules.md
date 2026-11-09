@@ -34,7 +34,7 @@ This page lists the guards and says where the next one goes.
 | Action pins | check script `check-action-pins.mjs` | workflow `uses:` lines not pinned to a commit SHA | `tests/action-pins.test.mjs` |
 | Candidate steps | check script `check-candidate-steps.mjs` | in a check job: a step after the check step, an `id` or token on it, a cache save after it or off the default branch, an unbounded cache restore or `npm ci` | `tests/action-pins.test.mjs` |
 | Test signal | check script `check-test-signal.mjs`, ratchet | new real sleeps or timer waits, elapsed-time asserts and reads of `docs/` text in tests: they flake on a loaded runner or fail on prose edits and guard no behaviour (ffbec6ef; t3code cut 43% of its tests as low-signal) | `tests/check-test-signal.test.mjs` |
-| Growth guard | check script `check-growth.mjs`, ratchet | Convex tables, public error codes, agent actions, CLI commands and glossary terms piling up: friction became a slice and a guard, and nothing was removed (ed28fc6b; design review 2026-11-09) | `tests/check-growth.test.mjs` |
+| Growth guard | check script `check-growth.mjs`, ratchet | Convex tables, public error codes, agent actions, CLI commands, glossary terms and unreferenced exports piling up: friction became a slice and a guard, and nothing was removed (ed28fc6b; design review 2026-11-09) | `tests/check-growth.test.mjs` |
 | Token permissions | test | a GitHub App token permission change broke one path class the mirror pushes (708b6943: contents-only token got 403 on a `.github/workflows/` tree). A permission change must be tested against every path class | `tests/hosted-github-mirror-retry.test.mjs`, `tests/github-token-permissions.test.mjs` |
 | Forge-only rules | test | product code keys a fast path on Forge's own check, layout or npm lockfile (audit 1bb0d8e6: first-check reuse only for `scripts/forge-check.mjs`, 05df5aed). An ecosystem lockfile, folder or extension list outside the [ecosystem registry](ecosystems.md) fails too (9c0ece48). Hits are listed in [Forge-only rules](../forge-only-rules.md) | `tests/forge-only-rules.test.mjs` |
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
@@ -76,7 +76,7 @@ baseline or the script, scans all of them. Counting is per source line.
 
 The rule: every brief and every landing note names what the change removes or merges, or says why nothing can
 go. The ratchet `scripts/check-growth.mjs` runs in `npm run check` (static, no project code, no Convex call,
-well under 2 s) and counts:
+under 3 s) and counts:
 
 | Count | Counts |
 | --- | --- |
@@ -85,6 +85,7 @@ well under 2 s) and counts:
 | `agentActions` | agent action names in `src/agent-verbs.ts`: the lifecycle verbs, each mode flag's action, board modes, named reads and operator actions |
 | `cliCommands` | top-level commands dispatched in `src/cli.ts` |
 | `glossaryTerms` | public glossary terms: the distinct bold terms in `docs/concepts.md` |
+| `unreferencedExports` | exported names (function, const, class, enum, type, interface) in `src/`, `web/src/`, `convex/` and `netlify/` that no other file mentions as a word (`src`, `web/src`, `convex`, `netlify`, `tests`, `scripts`, `evals`; a comment or string counts as a mention, so it undercounts). Public entry points are excluded: Convex `query`/`mutation`/`action`/`httpAction` functions and `src/index.ts`, `src/query.ts`, `src/cli-entry.ts`. Unused `internal*` Convex functions count |
 
 The check fails when a count is above [`tests/growth-baseline.json`](../../tests/growth-baseline.json), and when
 a baseline is above its phase start plus its recorded rises (a hand edit). The baseline moves only through the

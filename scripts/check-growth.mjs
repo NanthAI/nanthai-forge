@@ -22,6 +22,12 @@
 //   cliCommands    top-level commands dispatched in src/cli.ts (`args[0] === 'x'`, `command === 'x'`,
 //                  `['a','b'].includes(args[0])` and `case 'x':`)
 //   glossaryTerms  public glossary terms: the distinct bold terms in docs/concepts.md
+//   unreferencedExports  exported names (function, const, class, enum, type, interface) declared in src/,
+//                  web/src/, convex/ or netlify/ whose name appears nowhere else as a word in src, web/src,
+//                  convex, netlify, tests, scripts or evals (comments and strings count as a mention, and a
+//                  name that is common elsewhere is never flagged, so this undercounts). Public entry points
+//                  are not counted: Convex query/mutation/action/httpAction functions (clients call them by
+//                  address) and the package entry files src/index.ts, src/query.ts and src/cli-entry.ts.
 //
 // The baseline moves only through --update. A rise is recorded in its `reasons` ledger with the reason
 // (what the change removes or merges, or why nothing can go); the check fails when a count is above the
@@ -31,13 +37,21 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GROWTH_BASELINE = 'tests/growth-baseline.json';
-export const KINDS = ['tables', 'errorCodes', 'agentActions', 'cliCommands', 'glossaryTerms'];
+export const KINDS = [
+  'tables',
+  'errorCodes',
+  'agentActions',
+  'cliCommands',
+  'glossaryTerms',
+  'unreferencedExports',
+];
 const LABEL = {
   tables: 'Convex tables',
   errorCodes: 'public error codes',
   agentActions: 'agent actions',
   cliCommands: 'CLI commands',
   glossaryTerms: 'glossary terms',
+  unreferencedExports: 'unreferenced exports',
 };
 const MIN_REASON = 12;
 
@@ -109,6 +123,58 @@ function sourceFiles(dir, root) {
   });
 }
 
+const EXPORT_DECL =
+  /^export\s+(?:declare\s+)?(?:async\s+)?(?:abstract\s+)?(?:function\*?|const|let|var|class|enum|type|interface)\s+([A-Za-z_$][\w$]*)([^\n]*)/gm;
+const PUBLIC_FUNCTION =
+  /^\s*=\s*(?:query|mutation|action|httpAction|sourceMutation|receiptMutation|withFinishReads)\s*[(<]/;
+const ENTRY_FILES = new Set(['src/index.ts', 'src/query.ts', 'src/cli-entry.ts']);
+
+/**
+ * Names exported by `exporters` ({ path, text }) that no file in `exporters` or `others` mentions again.
+ * A name declared twice still counts once; any further mention (even in a comment) keeps it.
+ */
+export function unreferencedExportNames(exporters, others = []) {
+  const declared = new Map();
+  for (const { path, text } of exporters) {
+    if (ENTRY_FILES.has(path)) continue;
+    for (const match of text.matchAll(EXPORT_DECL)) {
+      if (path.startsWith('convex/') && PUBLIC_FUNCTION.test(match[2])) continue;
+      declared.set(match[1], (declared.get(match[1]) ?? 0) + 1);
+    }
+  }
+  const seen = new Map([...declared.keys()].map(name => [name, 0]));
+  for (const { text } of [...exporters, ...others])
+    for (const word of text.split(/[^\w$]+/)) {
+      const count = seen.get(word);
+      if (count !== undefined) seen.set(word, count + 1);
+    }
+  return new Set([...declared].filter(([name, sites]) => seen.get(name) <= sites).map(([name]) => name));
+}
+
+const scanSkip = new Set([...skip, 'dist', '.git', '.forge']);
+function scanFiles(dir, root, pattern) {
+  const base = resolve(root, dir);
+  if (!existsSync(base)) return [];
+  return readdirSync(base, { withFileTypes: true }).flatMap(entry => {
+    if (scanSkip.has(entry.name)) return [];
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return scanFiles(path, root, pattern);
+    return pattern.test(entry.name) && !/\.d\.[cm]?ts$/.test(entry.name) ? [path] : [];
+  });
+}
+
+function countUnreferencedExports(root) {
+  const read = path => ({ path, text: readFileSync(resolve(root, path), 'utf8') });
+  const exporters = ['src', 'web/src', 'convex', 'netlify']
+    .flatMap(dir => scanFiles(dir, root, /\.(?:ts|tsx|mts)$/))
+    .filter(path => !/\.test\./.test(path))
+    .map(read);
+  const others = ['tests', 'scripts', 'evals']
+    .flatMap(dir => scanFiles(dir, root, /\.(?:[cm]?js|[cm]?ts|tsx)$/))
+    .map(read);
+  return unreferencedExportNames(exporters, others).size;
+}
+
 /** Current counts from the repository at `root`. */
 export function currentCounts(root = '.') {
   const read = path => readFileSync(resolve(root, path), 'utf8');
@@ -120,6 +186,7 @@ export function currentCounts(root = '.') {
     agentActions: agentActionNames(read('src/agent-verbs.ts')).size,
     cliCommands: cliCommandNames(read('src/cli.ts')).size,
     glossaryTerms: glossaryTerms(read('docs/concepts.md')).size,
+    unreferencedExports: countUnreferencedExports(root),
   };
 }
 

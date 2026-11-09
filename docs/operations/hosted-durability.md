@@ -447,9 +447,11 @@ No real database-only restore or bucket drill has been run by this implementatio
 
 ## Retired Convex tables (B1.9)
 
-The Bet 1 deletions left six tables with no writers: `ownerAcceptanceMachines`,
-`ownerAcceptanceRequests`, `projectPublicationAttempts`, `projectPublications`,
-`projectPublicationPages` and `projectReturnSupersessions`. Their definitions stay in
+The Bet 1 deletions left four tables with no writers: `projectPublicationAttempts`,
+`projectPublications`, `projectPublicationPages` and `projectReturnSupersessions`.
+(`ownerAcceptanceMachines` and `ownerAcceptanceRequests` were empty on dev, so their
+definitions, reader and purge entries were removed from the schema; a Route A restore of
+an older backup that still holds them must skip those two tables.) Their definitions stay in
 the schema until the rows are exported and purged, because schema push and a Route A
 restore of an older weekly backup still contain them. The optional fields
 `exchangeCleanupCursor`, `exchangeCleanupDone`, `work.intentMigration`,
@@ -468,7 +470,7 @@ node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --
 - `restore` imports only into an empty deployment other than the source and then proves
   every row came back. The weekly backup also holds these tables, so a restore of any
   retained backup is a second copy.
-- `purge` is a dry run. It reports the six retired tables, their live rows and JSON
+- `purge` is a dry run. It reports the four retired tables, their live rows and JSON
   bytes, export coverage, estimated calls/I/O and source readers that still require
   the table definitions. The optional live fields above remain report-only.
 - `--execute --approval FILE --operation-id UUID` replaces only populated retired
@@ -481,9 +483,9 @@ node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --
   private operation receipt next to the approval reconciles an unknown import outcome;
   replay the same operation ID and original inputs. A changed export, deployment or
   live row stops the operation. There is no automatic retry or automatic undo.
-- At 32 rows / 31,466 JSON bytes across three populated tables, execution uses 12
-  Convex CLI requests (six reads, three replacements, three readbacks), zero
-  application function calls, and deletes 32 documents / 102 index entries. Provider
+- Execution uses one Convex CLI read per retired table plus a replacement and a
+  readback per populated table, zero application function calls, and deletes each
+  row with one entry per index plus its creation-time entry. Provider
   internal requests and billed I/O are not exposed; the estimated DB reads are
   62,932 JSON bytes. Idle costs zero calls. Peak retained row memory is O(export +
   one bounded table page); a full 20,000-row page remains explicitly incomplete.

@@ -14,7 +14,6 @@ import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
-import { ownerAcceptanceTables } from './ownerAcceptanceFields';
 import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
@@ -555,7 +554,6 @@ export default defineSchema({
   projectSlugs: defineTable({ owner: v.string(), slug: v.string(), projectId: v.id('hostedProjects') })
     .index('by_owner_and_slug', ['owner', 'slug'])
     .index('by_project', ['projectId']),
-  ...ownerAcceptanceTables,
   ...sourceAuthorityTables,
   ...autonomyTables,
   ...briefTables,

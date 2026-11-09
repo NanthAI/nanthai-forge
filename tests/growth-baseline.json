@@ -7,14 +7,16 @@
     "errorCodes": 501,
     "agentActions": 88,
     "cliCommands": 53,
-    "glossaryTerms": 34
+    "glossaryTerms": 34,
+    "unreferencedExports": 22
   },
   "counts": {
-    "tables": 181,
+    "tables": 179,
     "errorCodes": 500,
     "agentActions": 88,
     "cliCommands": 53,
-    "glossaryTerms": 27
+    "glossaryTerms": 27,
+    "unreferencedExports": 22
   },
   "reasons": []
 }
