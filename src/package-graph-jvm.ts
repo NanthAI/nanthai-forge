@@ -26,6 +26,32 @@ const accessor = (path: string) =>
     .join('.')}`;
 
 const join = (dir: string, file: string) => (dir ? `${dir}/${file}` : file);
+
+/** Plugins Gradle and the Kotlin/Android toolchains ship: they add no repository project edges. */
+const CORE_PLUGIN =
+  /^(?:java(?:-library|-platform|-gradle-plugin|-test-fixtures)?|application|groovy|scala|antlr|base|distribution|war|ear|idea|eclipse|jacoco|checkstyle|pmd|codenarc|signing|(?:maven|ivy)-publish|version-catalog|jvm-test-suite|(?:test|jacoco)-report-aggregation|project-report|build-dashboard|kotlin-dsl|(?:org\.gradle|org\.jetbrains\.kotlin|com\.android)\..+)$/;
+/** Plugin ids a build file applies (`id("…")`, `id '…'`, `apply plugin: '…'`); version-catalog aliases
+ * and `kotlin("…")` name published plugins. */
+const appliedPlugins = (source: string) => [
+  ...[...source.matchAll(/\bid\s*\(?\s*["']([^"'$]+)["']/g)].map(match => match[1]!),
+  ...[...source.matchAll(/\bapply\s*\(?\s*plugin\s*[:=]\s*["']([^"'$]+)["']/g)].map(match => match[1]!),
+];
+/** A script plugin a build file applies from the repository (`apply from: 'gradle/x.gradle'`). */
+const appliedScript = (source: string) =>
+  [...source.matchAll(/\bapply\s*\(?\s*from\s*[:=]\s*["']?([^"')\s]+)/g)]
+    .map(match => match[1]!)
+    .find(path => !/^https?:/.test(path));
+/** The project folder of a test source path (`DIR/src/test…/`). */
+const TEST_SOURCE = /^(?:(.*)\/)?src\/(?:test|androidTest|integrationTest)\w*\//;
+/** A build file that applies the Kotlin Multiplatform plugin (`kotlin("multiplatform")`, its id or a
+ * catalog alias), not only declares it (`apply false`). */
+const multiplatform = (source: string) =>
+  source.split('\n').some(line => /multiplatform/i.test(line) && !/\bapply\s*\(?\s*false\b/.test(line));
+/** A project's source set folders (`DIR/src/NAME/`). */
+const SOURCE_SET = /^(?:(.*)\/)?src\/([A-Za-z]\w*)\//;
+/** Source sets `:p:test` covers: `test` and its variants (Android `testDebug`), fixtures, and Android
+ * instrumented tests (`androidTest`, which need a device and run under no test task). */
+const PLAIN_TEST = /^(?:test|androidTest|testFixtures)\w*$/;
 const quoted = (text: string) => [...text.matchAll(/["']([^"'$]+)["']/g)].map(match => match[1]!);
 
 type GradleBuild = {
@@ -91,10 +117,16 @@ function gradleBuild(settings: string, present: Set<string>, read: ManifestReade
 /** Gradle: every settings.gradle(.kts) outside build/, src/ and buildSrc/ is the root of its own build
  * (a subfolder `android/` build included). A project depends on every `project(":x")` or `projects.x`
  * accessor its build file names, on any project its build's root build file names, on its build's
- * own folder, and on every package of a build its settings `includeBuild`. Anything that moves a
+ * own folder, and on every package of a build its settings `includeBuild`. Edges Forge does not read
+ * mark a project unresolved: a script it applies from the repository (`apply from:`), or a plugin
+ * that is not a Gradle/Kotlin/Android one while the build has its own plugin sources (buildSrc/ or
+ * an included build, where convention plugins add project dependencies); the root build file's
+ * `subprojects`/`allprojects` blocks count for every project. A project with test sources but no
+ * build file of its own is configured from elsewhere (hidden tests). Anything that moves a
  * project folder (`projectDir`, `includeFlat`) or a settings file Forge cannot read makes the layout
  * unknown. Tests run in the build's folder as `./gradlew :a:test` (or `gradle` without the wrapper);
- * a single-project build runs `test`. */
+ * a single-project build runs `test`. A Kotlin Multiplatform project runs `:a:allTests`; a project
+ * with another test source set (`src/integrationTest`) that `test` does not run has no command. */
 export function gradleGraph(paths: string[], read: ManifestReader): EcosystemResult {
   const present = new Set(paths);
   const settingsFiles = new Map<string, string>();
@@ -124,6 +156,43 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
       owner.set(pkg.dir, build);
     }
   const byDir = new Map(builds.map(build => [build.dir, build]));
+  let tests: Map<string, string> | undefined;
+  const testSources = () => {
+    if (!tests) {
+      tests = new Map();
+      for (const path of paths) {
+        const match = TEST_SOURCE.exec(path);
+        if (match && !tests.has(match[1] ?? '')) tests.set(match[1] ?? '', path);
+      }
+    }
+    return tests;
+  };
+  let sets: Map<string, Set<string>> | undefined;
+  const sourceSets = (dir: string) => {
+    if (!sets) {
+      sets = new Map();
+      for (const path of paths) {
+        const match = SOURCE_SET.exec(path);
+        if (match) sets.set(match[1] ?? '', (sets.get(match[1] ?? '') ?? new Set()).add(match[2]!));
+      }
+    }
+    return sets.get(dir) ?? new Set<string>();
+  };
+  /** The task that runs one project's tests: `allTests` for Kotlin Multiplatform, `test` otherwise;
+   * null when the project has test sources `test` does not run and Forge cannot name their task.
+   * With only Gradle/Kotlin/Android plugins the build file says it all (Multiplatform applied, or a
+   * test suite it names); a plugin from elsewhere may apply either, so the folders decide: a
+   * `commonMain`/`commonTest` source set is Multiplatform, another test source set is unnamed. */
+  const wholeTasks = new Map<string, string | null>();
+  const wholeTask = (pkg: GraphPackage, source: string) => {
+    if (multiplatform(source)) return 'allTests';
+    const own = sourceSets(pkg.dir);
+    const extra = [...own].filter(name => /Test$/.test(name) && !PLAIN_TEST.test(name));
+    if (appliedPlugins(source).every(id => CORE_PLUGIN.test(id)))
+      return extra.some(name => new RegExp(`\\b${name}\\b`).test(source)) ? null : 'test';
+    if (own.has('commonMain') || own.has('commonTest')) return 'allTests';
+    return extra.length ? null : 'test';
+  };
   const all = (build: GradleBuild) => [...(build.root ? [build.root] : []), ...build.projects.values()];
   for (const build of builds) {
     const references = (source: string) => {
@@ -134,10 +203,29 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
       return found;
     };
     const rootBuild = GRADLE_BUILD.map(file => join(build.dir, file)).find(file => present.has(file));
-    const shared = rootBuild ? references(uncomment(read(rootBuild) ?? '')) : new Set<string>();
+    const rootText = rootBuild ? uncomment(read(rootBuild) ?? '') : '';
+    const shared = references(rootText);
     const included = build.includes.flatMap(dir => (byDir.get(dir) ? all(byDir.get(dir)!) : []));
+    const pluginSources =
+      build.includes.length > 0 || paths.some(path => path.startsWith(join(build.dir, 'buildSrc/')));
+    /** Why a build file may add project edges Forge does not read. */
+    const hidden = (file: string, source: string) => {
+      const script = appliedScript(source);
+      if (script) return `${file} applies ${script}, which Forge does not read`;
+      const plugin = pluginSources && appliedPlugins(source).find(id => !CORE_PLUGIN.test(id));
+      return plugin
+        ? `${file} applies plugin ${plugin}, which may come from the build's own plugin sources (buildSrc/ or includeBuild) that Forge does not read`
+        : undefined;
+    };
+    const everywhere =
+      rootBuild && /\b(?:subprojects|allprojects)\b/.test(rootText) ? hidden(rootBuild, rootText) : undefined;
     for (const pkg of build.projects.values()) {
       const source = pkg.manifest === build.settings ? '' : uncomment(read(pkg.manifest) ?? '');
+      const unresolved = everywhere ?? (source ? hidden(pkg.manifest, source) : undefined);
+      wholeTasks.set(pkg.dir, wholeTask(pkg, source));
+      if (unresolved) pkg.unresolved = unresolved;
+      const test = pkg.testable ? undefined : testSources().get(pkg.dir);
+      if (test) pkg.hiddenTests = test;
       if (
         /\bprojects\.[A-Za-z]/.test(source) &&
         ![...build.projects.keys()].some(path => source.includes(accessor(path)))
@@ -156,7 +244,10 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
         ]),
       ].sort();
     }
-    if (build.root) build.root.dependsOn = [...new Set(included.map(packageKey))].sort();
+    if (build.root) {
+      build.root.dependsOn = [...new Set(included.map(packageKey))].sort();
+      wholeTasks.set(build.root.dir, wholeTask(build.root, rootText));
+    }
   }
   return {
     ecosystem: 'gradle',
@@ -164,8 +255,15 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
     commands(selected, _changed, narrowed) {
       const groups = new Map<GradleBuild, GraphPackage[]>();
       const tool = (build: GradleBuild) => (present.has(join(build.dir, 'gradlew')) ? './gradlew' : 'gradle');
-      const task = (build: GradleBuild, pkg: GraphPackage, name = 'test') =>
+      const task = (build: GradleBuild, pkg: GraphPackage, name: string) =>
         pkg.dir === build.root?.dir ? name : `${pkg.name}:${name}`;
+      const unnamed = selected.find(
+        pkg => !narrowed?.has(packageKey(pkg)) && wholeTasks.get(pkg.dir) === null,
+      );
+      if (unnamed)
+        return {
+          refusal: `${unnamed.name} has test source sets ${[...sourceSets(unnamed.dir)].filter(name => /Test$/.test(name)).join(', ')} that its test task does not run, and Forge cannot name the task that does`,
+        };
       // A narrowed project (src/module-selection.ts) runs only the test classes that reach the change.
       const targeted: PackageCommand[] = [];
       for (const pkg of selected) {
@@ -202,7 +300,10 @@ export function gradleGraph(paths: string[], read: ManifestReader): EcosystemRes
           .map(([build, pkgs]) => ({
             ecosystem: 'gradle' as const,
             cwd: build.dir,
-            argv: [tool(build), ...pkgs.map(pkg => task(build, pkg)).sort()],
+            argv: [
+              tool(build),
+              ...pkgs.map(pkg => task(build, pkg, wholeTasks.get(pkg.dir) ?? 'test')).sort(),
+            ],
             packages: pkgs.map(packageKey),
           })),
         ...targeted,
@@ -226,15 +327,23 @@ function relative(from: string, to: string) {
   while (same < a.length && same < b.length && a[same] === b[same]) same++;
   return [...a.slice(same).map(() => '..'), ...b.slice(same)].join('/') || '.';
 }
-const moduleList = (xml: string) =>
+const modulesOf = (xml: string) =>
   [
-    ...(/<modules>([\s\S]*?)<\/modules>/.exec(outside(xml, ['profiles']))?.[1] ?? '').matchAll(
-      /<module>\s*([^<]+?)\s*<\/module>/g,
-    ),
+    ...(/<modules>([\s\S]*?)<\/modules>/.exec(xml)?.[1] ?? '').matchAll(/<module>\s*([^<]+?)\s*<\/module>/g),
   ].map(module => module[1]!.replace(/\/pom\.xml$/, ''));
+const moduleList = (xml: string) => modulesOf(outside(xml, ['profiles']));
+/** Modules a `<profile>` adds to the reactor, with the profile id. */
+const profileModules = (xml: string) =>
+  [
+    ...(/<profiles>([\s\S]*?)<\/profiles>/.exec(xml)?.[1] ?? '').matchAll(/<profile>([\s\S]*?)<\/profile>/g),
+  ].flatMap(profile => {
+    const id = tag(outside(profile[1]!, ['modules', 'build', 'dependencies', 'activation']), 'id') ?? '?';
+    return modulesOf(profile[1]!).map(module => ({ module, id }));
+  });
 
 /** Maven: every pom.xml that no other pom lists as a module is the root of its own build (a
- * subfolder `server/` build included), and its `<modules>` (recursively) are the projects. A module
+ * subfolder `server/` build included), and its `<modules>` (recursively) are the projects, those a
+ * `<profile>` adds included (the default build leaves them out, so selecting one runs full). A module
  * depends on modules named by its `<dependency>` and `<parent>` coordinates. Tests run in the build's
  * folder as `mvn -pl a,b -am test` (also making the modules they need, with `./mvnw` when the wrapper
  * is present), or `mvn test` when the build's own root pom is selected. */
@@ -249,14 +358,16 @@ export function mavenGraph(paths: string[], read: ManifestReader): EcosystemResu
     if (raw === undefined) return { ecosystem: 'maven', refusal: `${pom} is unreadable` };
     const xml = raw.replace(/<!--[\s\S]*?-->/g, '');
     texts.set(pom, xml);
-    for (const module of moduleList(xml)) {
+    for (const module of [...moduleList(xml), ...profileModules(xml).map(item => item.module)]) {
       const child = joinPath(dirname(pom), module);
       if (child !== null && child !== dirname(pom)) listed.add(child);
     }
   }
   type Module = { pkg: GraphPackage; xml: string; group?: string; build: string };
   const modules = new Map<string, Module>();
-  const visit = (dir: string, declared: boolean, build: string): string | null => {
+  /** Modules only a profile adds, with the profile id. */
+  const profileOnly = new Map<string, string>();
+  const visit = (dir: string, declared: boolean, build: string, profile?: string): string | null => {
     const manifest = dir ? `${dir}/pom.xml` : 'pom.xml';
     const xml = texts.get(manifest);
     if (xml === undefined) return `${manifest} is unreadable`;
@@ -278,13 +389,18 @@ export function mavenGraph(paths: string[], read: ManifestReader): EcosystemResu
       build,
       ...(group ? { group } : {}),
     });
-    for (const module of moduleList(xml)) {
+    if (profile) profileOnly.set(dir, profile);
+    const children = [
+      ...moduleList(xml).map(module => ({ module, id: profile })),
+      ...profileModules(xml).map(item => ({ module: item.module, id: profile ?? item.id })),
+    ];
+    for (const { module, id } of children) {
       const child = joinPath(dir, module);
       if (child === null) return `${manifest} names a module outside the repository`;
       if (!present.has(child ? `${child}/pom.xml` : 'pom.xml'))
         return `${manifest} names missing module ${child}`;
       if (!modules.has(child)) {
-        const failed = visit(child, true, build);
+        const failed = visit(child, true, build, id);
         if (failed) return failed;
       }
     }
@@ -317,6 +433,11 @@ export function mavenGraph(paths: string[], read: ManifestReader): EcosystemResu
       const groups = new Map<string, GraphPackage[]>();
       const targeted: PackageCommand[] = [];
       const mvn = (build: string) => (present.has(build ? `${build}/mvnw` : 'mvnw') ? './mvnw' : 'mvn');
+      const optional = selected.find(pkg => profileOnly.has(pkg.dir));
+      if (optional)
+        return {
+          refusal: `${optional.manifest} is a module only profile ${profileOnly.get(optional.dir)} adds; the default build leaves it out`,
+        };
       for (const pkg of selected) {
         const build = modules.get(pkg.dir)!.build;
         // A narrowed module (src/module-selection.ts) runs only the test classes that reach the change;

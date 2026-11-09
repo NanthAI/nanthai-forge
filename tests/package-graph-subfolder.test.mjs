@@ -44,27 +44,65 @@ test('a subfolder Gradle build and standalone npm packages are one package per b
     'js:server',
     'js:web',
   ]);
+  // Two ecosystems and no declared edges between them: a JS change may be consumed by the Gradle
+  // build (and the reverse), so every package of the other ecosystem that has tests runs too.
+  const mixed = select(polyglot, ['web/src/a.ts']);
+  assert.deepEqual(names(mixed), [
+    'gradle:android/app:dependent',
+    'gradle:android/core:dependent',
+    'js:web:changed',
+  ]);
+  assert.match(
+    mixed.reason,
+    /widened to 2 package\(s\) no edge names: gradle:android\/app \(a gradle package may consume a js change/,
+  );
+  assert.deepEqual(commands(select(polyglot, ['android/core/src/main/kotlin/Core.kt'])), [
+    'android ./gradlew :app:test :core:test',
+    'server pnpm run test',
+    'web npm run test',
+  ]);
+});
+
+test('forge.json packages.edges declares the edges between ecosystems; none declared keeps them apart', () => {
+  const declared = { ...polyglot, 'forge.json': JSON.stringify({ packages: { edges: [] } }) };
+  const select = (tree, changed) => packageSelection(graphOf(tree), changed);
   // A change in one standalone package selects only it, run in its folder with its own manager.
-  const web = select(polyglot, ['web/src/a.ts']);
+  const web = select(declared, ['web/src/a.ts']);
   assert.equal(web.scope, 'scoped', web.reason);
   assert.deepEqual(names(web), ['js:web:changed']);
   assert.deepEqual(commands(web), ['web npm run test']);
-  assert.deepEqual(commands(select(polyglot, ['server/src/b.js'])), ['server pnpm run test']);
+  assert.deepEqual(commands(select(declared, ['server/src/b.js'])), ['server pnpm run test']);
   // Gradle projects run in their build's folder, with that folder's wrapper.
-  const core = select(polyglot, ['android/core/src/main/kotlin/Core.kt']);
+  const core = select(declared, ['android/core/src/main/kotlin/Core.kt']);
   assert.deepEqual(names(core), ['gradle:android/app:dependent', 'gradle:android/core:changed']);
   assert.deepEqual(commands(core), ['android ./gradlew :app:test :core:test']);
-  assert.deepEqual(commands(select(polyglot, ['android/app/src/main/kotlin/App.kt'])), [
+  assert.deepEqual(commands(select(declared, ['android/app/src/main/kotlin/App.kt'])), [
     'android ./gradlew :app:test',
   ]);
   // The build's own files (version catalog, root build file) select every project of that build.
-  assert.deepEqual(commands(select(polyglot, ['android/gradle/libs.versions.toml'])), [
+  assert.deepEqual(commands(select(declared, ['android/gradle/libs.versions.toml'])), [
     'android ./gradlew :app:test :core:test',
   ]);
   // Repository-root files still select a full run.
-  assert.equal(select(polyglot, ['Makefile']).scope, 'full');
-  assert.equal(select(polyglot, ['package.json']).scope, 'full');
-  assert.equal(select(polyglot, ['web/src/a.ts', 'Makefile']).scope, 'full');
+  assert.equal(select(declared, ['Makefile']).scope, 'full');
+  assert.equal(select(declared, ['package.json']).scope, 'full');
+  assert.equal(select(declared, ['web/src/a.ts', 'Makefile']).scope, 'full');
+  // A declared edge links them: the Gradle app consumes the web build.
+  const linked = {
+    ...polyglot,
+    'forge.json': JSON.stringify({ packages: { edges: [{ from: 'gradle:android/app', to: 'js:web' }] } }),
+  };
+  assert.deepEqual(names(select(linked, ['web/src/a.ts'])), [
+    'gradle:android/app:dependent',
+    'js:web:changed',
+  ]);
+  // An edge naming no package makes the graph unknown: a typo never narrows a run.
+  const typo = graphOf({
+    ...polyglot,
+    'forge.json': JSON.stringify({ packages: { edges: [{ from: 'gradle:android/ap', to: 'js:web' }] } }),
+  });
+  assert.equal(typo.status, 'unknown');
+  assert.match(typo.reason, /forge\.json packages\.edges: .* names no package/);
 });
 
 test('a root package with tests may read the packages inside it: a change there selects full', () => {
@@ -77,7 +115,9 @@ test('a root package with tests may read the packages inside it: a change there 
   assert.match(web.reason, /root package tools \(js\) is affected/);
   // Without a lockfile the root package.json is not a package; the subfolder packages still are.
   const unlocked = Object.fromEntries(
-    Object.entries(tested).filter(([path]) => path !== 'package-lock.json'),
+    Object.entries({ ...tested, 'forge.json': JSON.stringify({ packages: { edges: [] } }) }).filter(
+      ([path]) => path !== 'package-lock.json',
+    ),
   );
   assert.deepEqual(commands(select(unlocked, ['web/src/a.ts'])), ['web npm run test']);
 });

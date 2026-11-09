@@ -23,7 +23,7 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
     path => basename(path) === 'go.mod' && !/(?:^|\/)(?:vendor|testdata)\//.test(path),
   );
   if (!manifests.length) return null;
-  const modules: { pkg: GraphPackage; module: string; requires: string[] }[] = [];
+  const modules: { pkg: GraphPackage; module: string; requires: string[]; replaces: string[] }[] = [];
   for (const manifest of manifests) {
     const text = read(manifest);
     const module = text && /^\s*module\s+("?)([^\s"]+)\1/m.exec(text)?.[2];
@@ -45,15 +45,52 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
       },
       module,
       requires: requires.map(path => path.replace(/^"|"$/g, '')),
+      replaces: localReplaces(body).flatMap(target => joinPath(dirname(manifest), target) ?? []),
     });
   }
   const byModule = new Map(modules.map(item => [item.module, item.pkg]));
-  for (const item of modules)
+  const byDir = new Map(modules.map(item => [item.pkg.dir, item.pkg]));
+  // go.work: its `use` folders (and local replaces) are one workspace.
+  const workspaces: GraphPackage[][] = [];
+  for (const work of paths.filter(
+    path => basename(path) === 'go.work' && !/(?:^|\/)(?:vendor|testdata)\//.test(path),
+  )) {
+    const text = read(work);
+    if (text === undefined) return { ecosystem: 'go', refusal: `${work} is unreadable` };
+    const body = text.replace(/\/\/.*$/gm, '');
+    const uses = [
+      ...[...body.matchAll(/^\s*use\s*\(([\s\S]*?)\)/gm)].flatMap(block => block[1]!.split('\n')),
+      ...[...body.matchAll(/^\s*use\s+([^(\s][^\n]*)$/gm)].map(line => line[1]!),
+    ]
+      .map(line => line.trim().replace(/^"|"$/g, ''))
+      .filter(Boolean);
+    const members: GraphPackage[] = [];
+    for (const use of [...uses, ...localReplaces(body)]) {
+      const dir = joinPath(dirname(work), use);
+      const pkg = dir === null ? undefined : byDir.get(dir);
+      if (pkg) members.push(pkg);
+      else if (dir !== null)
+        for (const other of modules)
+          other.pkg.unresolved ??= `${work} uses ${use}, which has no go.mod Forge read`;
+    }
+    workspaces.push(members);
+  }
+  for (const item of modules) {
     item.pkg.dependsOn = [
-      ...new Set(
-        item.requires.flatMap(path => (byModule.get(path) ? [packageKey(byModule.get(path)!)] : [])),
-      ),
-    ].filter(key => key !== packageKey(item.pkg));
+      ...new Set([
+        ...item.requires.flatMap(path => (byModule.get(path) ? [packageKey(byModule.get(path)!)] : [])),
+        ...item.replaces.flatMap(dir => (byDir.get(dir) ? [packageKey(byDir.get(dir)!)] : [])),
+        ...workspaces
+          .filter(members => members.includes(item.pkg))
+          .flatMap(members => members.map(packageKey)),
+      ]),
+    ]
+      .filter(key => key !== packageKey(item.pkg))
+      .sort();
+    const missing = item.replaces.find(dir => !byDir.has(dir));
+    if (missing !== undefined)
+      item.pkg.unresolved ??= `${item.pkg.manifest} replaces a module with ${missing || '.'}, which has no go.mod Forge read`;
+  }
   const moduleOf = (path: string) =>
     modules
       .map(item => item.pkg)
@@ -117,6 +154,21 @@ export function goGraph(paths: string[], read: ManifestReader): EcosystemResult 
   };
 }
 
+/** `replace` directives of a go.mod or go.work body that point at a local folder (`=> ./x`, `=> ../x`).
+ * A module also depends on the module in the folder it replaces another with; a local replace to a
+ * folder with no module Forge read marks it unresolved. Modules a go.work `use`s are main modules of
+ * one workspace that may import each other without a `require`, so each depends on every other. */
+function localReplaces(body: string) {
+  const lines = [
+    ...[...body.matchAll(/^\s*replace\s*\(([\s\S]*?)\)/gm)].flatMap(block => block[1]!.split('\n')),
+    ...[...body.matchAll(/^\s*replace\s+([^(\n][^\n]*)$/gm)].map(line => line[1]!),
+  ];
+  return lines.flatMap(line => {
+    const target = /=>\s*("?)([^\s"]+)\1/.exec(line)?.[2];
+    return target && /^\.\.?(?:\/|$)/.test(target) ? [target] : [];
+  });
+}
+
 const DEPENDENCY_TABLES = ['dependencies', 'dev-dependencies', 'build-dependencies'];
 /** Every dependency table of a Cargo manifest, target-specific ones included. */
 function cargoDependencies(manifest: TomlTable): [string, TomlValue][] {
@@ -128,7 +180,10 @@ function cargoDependencies(manifest: TomlTable): [string, TomlValue][] {
  * `[workspace]` whose `members` globs include it (`exclude` honoured), and runs as `cargo test -p
  * NAME` there; a crate outside every workspace runs `cargo test` in its folder. Edges come from
  * `path` dependencies (direct or through `[workspace.dependencies]`) and from dependencies named like
- * an in-repository crate. */
+ * an in-repository crate. A crate with its own `[workspace]` that an enclosing workspace `exclude`s
+ * is a separate workspace (declared). A root crate runs as `-p NAME`, so a root selected as a
+ * dependent is one more package. A `path` dependency or `[patch]` path inside the repository with no crate
+ * Forge read marks the crate (for a patch, every crate) unresolved. */
 export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResult {
   const manifests = paths.filter(path => basename(path) === 'Cargo.toml' && !/(?:^|\/)target\//.test(path));
   if (!manifests.length) return null;
@@ -158,6 +213,18 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
         );
       })
       .sort((a, b) => b.root.length - a.root.length)[0];
+  /** A crate with its own `[workspace]` that an enclosing workspace `exclude`s is a separate workspace
+   * the parent declares, not a crate it may build. */
+  const excluded = (dir: string) =>
+    workspaces.some(([manifest, toml]) => {
+      const root = dirname(manifest);
+      if (root === dir || (root && !dir.startsWith(`${root}/`))) return false;
+      const relative = root ? dir.slice(root.length + 1) : dir;
+      // Cargo excludes a path and everything below it.
+      return tomlStrings(tomlGet(toml, 'workspace', 'exclude'))
+        .map(glob => glob.replace(/\/$/, ''))
+        .some(glob => globRegExp(glob).test(relative) || relative.startsWith(`${glob}/`));
+    });
   const crates: { pkg: GraphPackage; toml: TomlTable; workspace?: { root: string; toml: TomlTable } }[] = [];
   for (const [manifest, toml] of parsed) {
     if (tomlGet(toml, 'package') === undefined) continue;
@@ -173,7 +240,9 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
         manifest,
         dependsOn: [],
         testable: true,
-        declared: !!workspace && workspace.root !== dir,
+        declared:
+          !!workspace &&
+          (workspace.root !== dir || (tomlGet(toml, 'workspace') !== undefined && excluded(dir))),
       },
       toml,
       ...(workspace ? { workspace } : {}),
@@ -200,13 +269,25 @@ export function cargoGraph(paths: string[], read: ManifestReader): EcosystemResu
         (local !== null && byDir.get(local)) ||
         byName.get(typeof spec.package === 'string' ? spec.package : key);
       if (target && target !== crate.pkg) edges.add(packageKey(target));
+      if (local !== null && !byDir.has(local))
+        crate.pkg.unresolved ??= `${crate.pkg.manifest} depends on ${key} at ${local || '.'}, which has no crate Forge read`;
     }
     crate.pkg.dependsOn = [...edges].sort();
   }
+  for (const [manifest, toml] of parsed)
+    for (const source of Object.values(tomlTable(toml.patch)))
+      for (const [key, value] of Object.entries(tomlTable(source))) {
+        const path = tomlTable(value).path;
+        const local = typeof path === 'string' ? joinPath(dirname(manifest), path) : null;
+        if (local !== null && !byDir.has(local))
+          for (const crate of crates)
+            crate.pkg.unresolved ??= `${manifest} patches ${key} with ${local || '.'}, which has no crate Forge read`;
+      }
   const rootOf = new Map(crates.map(crate => [packageKey(crate.pkg), crate.workspace?.root ?? null]));
   return {
     ecosystem: 'cargo',
     packages: crates.map(crate => crate.pkg),
+    rootScoped: true,
     commands(selected, _changed, narrowed) {
       const groups = new Map<string, GraphPackage[]>();
       const standalone: PackageCommand[] = [];

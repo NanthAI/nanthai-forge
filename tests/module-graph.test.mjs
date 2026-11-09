@@ -358,7 +358,8 @@ test('Kotlin (Gradle): top-level functions, facades and imports; other test sour
   });
   // commonTest runs under every target's task and androidTest needs a device: no task Forge can name.
   assert.match(kmp.modules.nodes.get('lib/src/commonTest/kotlin/q/CommonUtilTest.kt').whole, /commonTest/);
-  assert.equal(kmp.select(['lib/src/commonMain/kotlin/q/Util.kt']).command, 'gradle :lib:test');
+  // The whole project runs the task Kotlin Multiplatform declares for all its targets.
+  assert.equal(kmp.select(['lib/src/commonMain/kotlin/q/Util.kt']).command, 'gradle :lib:allTests');
   // Without the commonTest class, a change reaches only target test sets with a declared target.
   const targets = {
     'settings.gradle.kts': 'include(":lib")\n',
@@ -395,7 +396,7 @@ test('Kotlin (Gradle): top-level functions, facades and imports; other test sour
   );
   assert.equal(
     renamed.select(['lib/src/jvmTest/kotlin/q/UtilTest.kt']).command,
-    'gradle :lib:test',
+    'gradle :lib:allTests',
     'jvm is renamed, so jvmTest names no declared target',
   );
   const plain = head({ ...targets, 'lib/build.gradle.kts': 'plugins { kotlin("jvm") }\n' });

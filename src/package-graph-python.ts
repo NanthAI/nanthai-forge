@@ -43,6 +43,34 @@ function ini(text: string) {
 
 type Found = { pkg: GraphPackage; requires: string[]; sources: string[]; pytest: boolean };
 
+/** Tool tables that configure a build even without `[build-system]`. */
+const BUILD_TOOL =
+  /^(?:maturin|setuptools.*|scikit-build.*|hatch|flit.*|pdm|poetry|meson-python|pybind11|cython.*)$/i;
+/** How a pyproject builds: `virtual` builds nothing (uv `package = false`, Poetry `package-mode =
+ * false`, or no build system, build tool table or setup file), `crate` is the folder of the Cargo
+ * crate a maturin build compiles. */
+function buildOf(toml: TomlTable, dir: string, present: Set<string>) {
+  const uvPackage = tomlGet(toml, 'tool', 'uv', 'package');
+  const at = (file: string) => present.has(dir ? `${dir}/${file}` : file);
+  const virtual =
+    uvPackage === false ||
+    tomlGet(toml, 'tool', 'poetry', 'package-mode') === false ||
+    (uvPackage !== true &&
+      toml['build-system'] === undefined &&
+      !Object.keys(tomlTable(toml.tool)).some(name => BUILD_TOOL.test(name)) &&
+      !at('setup.py') &&
+      !at('setup.cfg'));
+  if (virtual) return { virtual: true as const };
+  if (
+    tomlGet(toml, 'build-system', 'build-backend') !== 'maturin' &&
+    tomlGet(toml, 'tool', 'maturin') === undefined
+  )
+    return {};
+  const manifestPath = tomlGet(toml, 'tool', 'maturin', 'manifest-path');
+  const crate = typeof manifestPath === 'string' ? joinPath(dir, manifestPath) : joinPath(dir, 'Cargo.toml');
+  return crate === null ? {} : { crate: dirname(crate) };
+}
+
 function fromPyproject(manifest: string, toml: TomlTable): Found | { name: undefined; pytest: boolean } {
   const project = tomlTable(toml.project);
   const poetry = tomlTable(tomlGet(toml, 'tool', 'poetry'));
@@ -59,7 +87,13 @@ function fromPyproject(manifest: string, toml: TomlTable): Found | { name: undef
     ),
   ].flatMap(spec => requirement(spec) ?? []);
   const dir = dirname(manifest);
-  const sources = Object.values(tomlTable(tomlGet(toml, 'tool', 'uv', 'sources'))).flatMap(source => {
+  // uv sources and Poetry dependencies with a local `path`.
+  const sources = [
+    ...Object.values(tomlTable(tomlGet(toml, 'tool', 'uv', 'sources'))),
+    ...[tomlTable(poetry.dependencies), tomlTable(poetry['dev-dependencies']), ...groups].flatMap(
+      Object.values,
+    ),
+  ].flatMap(source => {
     const path = tomlTable(source).path;
     const resolved = typeof path === 'string' ? joinPath(dir, path) : null;
     return resolved === null ? [] : [resolved];
@@ -115,7 +149,12 @@ function unittestCommand(
 /** Python: a folder with pyproject.toml (`[project]` or `[tool.poetry]`) or setup.cfg (`[metadata]`)
  * is a package, src layouts included (the folder owns everything below it). Edges come from
  * requirements naming an in-repository package (dependencies, optional and dependency groups, Poetry
- * groups, setup.cfg install_requires/extras) and `[tool.uv.sources]` paths. setup.py is code and is
+ * groups, setup.cfg install_requires/extras) and local paths (`[tool.uv.sources]`, Poetry `path`).
+ * Those paths, uv workspace members and the crate a maturin build compiles are its claims: a package
+ * of another ecosystem there is an edge, a folder with no package marks it unresolved. A project that
+ * builds nothing (uv `package = false`, Poetry `package-mode = false`, or no build system and no setup
+ * file) is virtual: it owns only files no nested package claims. Virtual and maturin projects name
+ * their inputs from other ecosystems (no cross-ecosystem widening). setup.py is code and is
  * never read, so a package declared only there makes the layout unknown. uv workspace members are
  * declared. Tests run with pytest when the project declares it (dependency, `[tool.pytest]`,
  * pytest.ini or conftest.py), through the lockfile's tool (uv, Poetry, PDM) or `python -m pytest`. */
@@ -125,6 +164,9 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
   const present = new Set(paths);
   const byDir = new Map<string, Found>();
   const members: string[] = [];
+  /** Per pyproject folder: its uv workspace member globs and how it builds. */
+  const memberGlobsOf = new Map<string, RegExp[]>();
+  const builds = new Map<string, ReturnType<typeof buildOf>>();
   let pytest = paths.some(path => ['pytest.ini', 'conftest.py'].includes(basename(path)) && !SKIP.test(path));
   const configOnly = new Set<string>();
   for (const manifest of manifests.filter(path => basename(path) !== 'setup.py')) {
@@ -139,8 +181,12 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
       } catch (error) {
         return { ecosystem: 'python', refusal: `${manifest}: ${(error as Error).message}` };
       }
-      for (const glob of tomlStrings(tomlGet(toml, 'tool', 'uv', 'workspace', 'members')))
-        members.push(dir ? `${dir}/${glob}` : glob);
+      const own = tomlStrings(tomlGet(toml, 'tool', 'uv', 'workspace', 'members')).map(glob =>
+        dir ? `${dir}/${glob}` : glob,
+      );
+      members.push(...own);
+      memberGlobsOf.set(dir, own.map(globRegExp));
+      builds.set(dir, buildOf(toml, dir, present));
       found = fromPyproject(manifest, toml);
     } else {
       const cfg = ini(text);
@@ -195,6 +241,20 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
       if (target && target !== item.pkg) edges.add(packageKey(target));
     }
     item.pkg.dependsOn = [...edges].sort();
+    // Folders it declares (sources, members, the crate maturin builds): the graph links a package of
+    // another ecosystem there and marks a folder with no package unresolved (src/package-graph.ts).
+    const build = builds.get(item.pkg.dir) ?? {};
+    const globs = memberGlobsOf.get(item.pkg.dir) ?? [];
+    const claims = [
+      ...item.sources,
+      ...('crate' in build && build.crate !== undefined ? [build.crate] : []),
+      ...found
+        .filter(other => other !== item && globs.some(glob => glob.test(other.pkg.dir)))
+        .map(other => other.pkg.dir),
+    ].filter(dir => dir !== item.pkg.dir || 'crate' in build);
+    if (claims.length) item.pkg.claims = [...new Set(claims)].sort();
+    if ('virtual' in build) item.pkg.virtual = true;
+    if ('virtual' in build || 'crate' in build) item.pkg.foreignDeclared = true;
   }
   const tool = (dir: string) => {
     const at = (file: string) => present.has(dir ? `${dir}/${file}` : file);

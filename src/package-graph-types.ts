@@ -18,6 +18,22 @@ export type GraphPackage = {
   declared: boolean;
   /** A Go package folder that owns only test files: nothing imports it, so it has no dependents. */
   leaf?: true;
+  /** Why this package may depend on something the graph cannot name (a reference it cannot place, a
+   * convention plugin or imported build file it does not read). Every change then selects it. */
+  unresolved?: string;
+  /** A test file below this package that no per-package command runs (it has none of its own): the
+   * repository runs it some other way, so selecting this package makes the selection full. */
+  hiddenTests?: string;
+  /** Builds nothing from its folder (a Python project with uv `package = false`, or no build system):
+   * it reads a nested package's files only through a dependency it declares (`claims`), so it owns
+   * only the files no nested package claims. */
+  virtual?: true;
+  /** Folders the manifest names as its dependencies or members (paths, workspace members, the crate
+   * a maturin build compiles). A package of another ecosystem there is an edge; none is unresolved. */
+  claims?: string[];
+  /** Its manifest names every input it takes from another ecosystem (`claims`), so a change there
+   * reaches it through edges, not through the cross-ecosystem widening. */
+  foreignDeclared?: true;
 };
 
 /** One argv to run in `cwd` (relative to the repository root) for the named package keys. */
@@ -28,6 +44,9 @@ export type EcosystemGraph = {
   packages: GraphPackage[];
   /** A finer owner for one changed path than its enclosing package (Go test-only folders). */
   leafOwner?: (path: string) => GraphPackage | undefined;
+  /** The root package's command tests that package only (`cargo test -p NAME`), so a root selected
+   * only as a dependent is one more package, not a full run. */
+  rootScoped?: true;
   /** The commands that test `selected` (non-empty, testable, all of this ecosystem), or why there is
    * no unambiguous default command. `changed` are the changed paths, for test-only narrowing.
    * `narrowed` maps a package key to the only test units to run for it (src/module-selection.ts):

@@ -155,9 +155,11 @@ nforge x ROOT configure-check '{"command":{"name":"verify","executable":"bash","
 
 From v3 (Issue 5cfcca4b), a package manifest or lockfile inside a package is
 **placed**: the checked run pins its manifest package graph in the selection
-(`packagePlacement`, rule `package-placement-v1`: each package's ecosystem, folder
-and dependencies, at most 128 KiB; `src/package-placement.ts`). Its reach is that
-package plus every package that depends on it. The change lands on its first check
+(`packagePlacement`, rule `package-placement-v2`: each package's ecosystem, folder
+and dependencies, the packages with references the graph cannot place, and whether
+forge.json declares the cross-ecosystem edges, at most 128 KiB; `src/package-placement.ts`).
+Its reach is that package plus every package that depends on it, widened like the
+package graph's selection (unresolved packages, other ecosystems). The change lands on its first check
 when the other side's paths all lie outside that reach (a path outside every package
 counts only when it is Markdown or under `docs/`); the proof records `placedRisk`
 (each placed path and its reach). Root and workspace files (`pnpm-workspace.yaml`,

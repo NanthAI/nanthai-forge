@@ -12,34 +12,111 @@ import {
 } from './package-graph-types.js';
 
 const DOTNET = /\.(?:cs|fs|vb)proj$/;
-export const dotnetManifest = (path: string) => DOTNET.test(path) && !/(?:^|\/)(?:bin|obj)\//.test(path);
+const BUILD_OUTPUT = /(?:^|\/)(?:bin|obj)\//;
+export const dotnetManifest = (path: string) => DOTNET.test(path) && !BUILD_OUTPUT.test(path);
+/** MSBuild files a project can import (Directory.Build.props, shared .props/.targets): read for the
+ * project references they add. */
+export const dotnetImport = (path: string) => /\.(?:props|targets)$/i.test(path) && !BUILD_OUTPUT.test(path);
 const TEST_PACKAGES =
   /Include\s*=\s*["'](?:Microsoft\.NET\.Test\.Sdk|xunit(?:\.v3)?|NUnit|MSTest(?:\.TestFramework|\.Sdk)?|TUnit)["']/i;
+/** Imports rooted in the SDK or tool folders: outside the repository, nothing to read. */
+const SDK_IMPORT =
+  /^\$\((?:MSBuild(?:Extensions|Tools|Bin|SDKs|FrameworkTools|UserExtensions)Path\w*|VSToolsPath|NuGetPackageRoot)\)/i;
+/** Walks up to a Directory.Build file, which Forge reads for every enclosing folder anyway. */
+const FILE_ABOVE = /GetPathOfFileAbove|GetDirectoryNameOfFileAbove/;
 
-/** .NET: every project file is a package; edges are `<ProjectReference Include="…">` paths. Test
- * projects (Microsoft.NET.Test.Sdk, xunit, NUnit, MSTest, TUnit, `<IsTestProject>true`, or named
- * `*Tests`/`*Test`) run as `dotnet test PROJECT`; other projects have nothing to run themselves. */
+type Scan = { references: string[]; unresolved?: string } | { refusal: string };
+
+/** .NET: every project file is a package; edges are `<ProjectReference Include="…">` paths in the
+ * project, in every Directory.Build.props/.targets of an enclosing folder and in the in-repository
+ * files they `<Import>`. MSBuild paths are case-insensitive, and a wildcard reference names every
+ * project it matches. A reference or import Forge cannot place marks the project unresolved (every
+ * change selects it). Test projects (Microsoft.NET.Test.Sdk, xunit, NUnit, MSTest, TUnit,
+ * `<IsTestProject>true`, or named `*Tests`/`*Test`) run as `dotnet test PROJECT`; other projects have
+ * nothing to run themselves. */
 export function dotnetGraph(paths: string[], read: ManifestReader): EcosystemResult {
   const manifests = paths.filter(dotnetManifest);
   if (!manifests.length) return null;
+  const folded = new Map<string, string[]>();
+  for (const path of paths.filter(path => dotnetManifest(path) || dotnetImport(path)))
+    folded.set(path.toLowerCase(), [...(folded.get(path.toLowerCase()) ?? []), path]);
+  /** Repository files a (possibly wildcard) MSBuild path names, case-insensitively. */
+  const resolve = (target: string, kind: (path: string) => boolean) => {
+    if (!/[*?]/.test(target)) return (folded.get(target.toLowerCase()) ?? []).filter(kind);
+    const glob = globRegExp(target.toLowerCase());
+    return [...folded].flatMap(([lower, found]) => (glob.test(lower) ? found.filter(kind) : []));
+  };
+  const imports = paths.filter(path => /^directory\.build\.(?:props|targets)$/i.test(basename(path)));
+  const texts = new Map<string, string | undefined>();
+  const text = (path: string) => {
+    if (!texts.has(path)) texts.set(path, read(path)?.replace(/<!--[\s\S]*?-->/g, ''));
+    return texts.get(path);
+  };
+  /** MSBuild's own location properties expanded; undefined: computed some other way; null: outside
+   * the repository. */
+  const expand = (value: string, fileDir: string, projectDir: string) => {
+    const known = /^\$\((MSBuildThisFileDirectory|MSBuildProjectDirectory)\)[\\/]?/i.exec(value);
+    const base = !known ? projectDir : /ThisFile/i.test(known[1]!) ? fileDir : projectDir;
+    const rest = known ? value.slice(known[0].length) : value;
+    return rest.includes('$(') ? undefined : joinPath(base, rest);
+  };
+  const scan = (file: string, project: string, seen: Set<string>): Scan => {
+    const body = text(file);
+    if (body === undefined) return { refusal: `${file} is unreadable` };
+    const projectDir = dirname(project);
+    const references: string[] = [];
+    let unresolved: string | undefined;
+    for (const match of body.matchAll(/<ProjectReference\b[^>]*\bInclude\s*=\s*["']([^"']+)["']/g)) {
+      for (const include of match[1]!
+        .split(';')
+        .map(item => item.trim())
+        .filter(Boolean)) {
+        const target = expand(include, dirname(file), projectDir);
+        if (target === undefined) return { refusal: `${file} references a computed project path` };
+        if (target === null) return { refusal: `${file} references a project outside the repository` };
+        const found = resolve(target, dotnetManifest);
+        if (found.length) references.push(...found);
+        else unresolved ??= `${file} references ${target}, which is no project Forge read`;
+      }
+    }
+    for (const match of body.matchAll(/<Import\b[^>]*\bProject\s*=\s*["']([^"']+)["']/g)) {
+      const value = match[1]!.trim();
+      if (SDK_IMPORT.test(value) || FILE_ABOVE.test(value)) continue;
+      const target = expand(value, dirname(file), dirname(file));
+      if (target === undefined) {
+        unresolved ??= `${file} imports a computed path (${value.slice(0, 80)})`;
+        continue;
+      }
+      if (target === null) continue;
+      // A file not in the repository holds no repository reference (a missing optional import).
+      for (const found of resolve(target, dotnetImport)) {
+        if (seen.has(found)) continue;
+        seen.add(found);
+        const inner = scan(found, project, seen);
+        if ('refusal' in inner) return inner;
+        references.push(...inner.references);
+        unresolved ??= inner.unresolved;
+      }
+    }
+    return { references, ...(unresolved ? { unresolved } : {}) };
+  };
   const projects = new Map<string, { pkg: GraphPackage; references: string[] }>();
   for (const manifest of manifests) {
-    const text = read(manifest)?.replace(/<!--[\s\S]*?-->/g, '');
-    if (text === undefined) return { ecosystem: 'dotnet', refusal: `${manifest} is unreadable` };
-    const references: string[] = [];
-    for (const match of text.matchAll(/<ProjectReference\b[^>]*\bInclude\s*=\s*["']([^"']+)["']/g)) {
-      if (match[1]!.includes('$('))
-        return { ecosystem: 'dotnet', refusal: `${manifest} references a computed project path` };
-      const target = joinPath(dirname(manifest), match[1]!);
-      if (target === null)
-        return { ecosystem: 'dotnet', refusal: `${manifest} references a project outside the repository` };
-      references.push(target);
-    }
+    const own = text(manifest);
+    if (own === undefined) return { ecosystem: 'dotnet', refusal: `${manifest} is unreadable` };
+    // Every Directory.Build file of an enclosing folder (MSBuild reads the nearest; over-select).
+    const enclosing = imports.filter(path => !dirname(path) || manifest.startsWith(`${dirname(path)}/`));
+    const seen = new Set([manifest, ...enclosing]);
+    const scans = [manifest, ...enclosing].map(file => scan(file, manifest, seen));
+    const refused = scans.find(item => 'refusal' in item);
+    if (refused && 'refusal' in refused) return { ecosystem: 'dotnet', refusal: refused.refusal };
+    const found = scans as Extract<Scan, { references: string[] }>[];
     const name = basename(manifest).replace(DOTNET, '');
     const testable =
-      TEST_PACKAGES.test(text) ||
-      /<IsTestProject>\s*true\s*<\/IsTestProject>/i.test(text) ||
+      TEST_PACKAGES.test(own) ||
+      /<IsTestProject>\s*true\s*<\/IsTestProject>/i.test(own) ||
       /[.]?Tests?$/.test(name);
+    const unresolved = found.find(item => item.unresolved)?.unresolved;
     projects.set(manifest, {
       pkg: {
         ecosystem: 'dotnet',
@@ -49,8 +126,9 @@ export function dotnetGraph(paths: string[], read: ManifestReader): EcosystemRes
         dependsOn: [],
         testable,
         declared: false,
+        ...(unresolved ? { unresolved } : {}),
       },
-      references,
+      references: found.flatMap(item => item.references),
     });
   }
   for (const project of projects.values())
@@ -60,7 +138,9 @@ export function dotnetGraph(paths: string[], read: ManifestReader): EcosystemRes
           projects.get(target) ? [packageKey(projects.get(target)!.pkg)] : [],
         ),
       ),
-    ].sort();
+    ]
+      .filter(key => key !== packageKey(project.pkg))
+      .sort();
   return {
     ecosystem: 'dotnet',
     packages: [...projects.values()].map(project => project.pkg),
@@ -82,6 +162,8 @@ const record = (value: unknown): value is Record<string, unknown> =>
 const strings = (value: unknown) =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 const NO_TEST = /^echo "Error: no test specified" && exit 1$/;
+/** A JS/TS test file by the names test runners pick up by default. */
+const JS_TEST = /(?:(?:^|\/)(?:__tests__|__specs?__|tests?|specs?)\/.*|\.(?:test|spec)s?)\.[cm]?[jt]sx?$/;
 
 /** The workspace globs of pnpm-workspace.yaml's `packages:` list (a plain YAML sequence). */
 function pnpmGlobs(text: string) {
@@ -128,7 +210,8 @@ function managerOf(manifest: Record<string, unknown>, dir: string, present: Set<
 /** JS/TS packages: the root package.json `workspaces` (or pnpm-workspace.yaml `packages`) list the
  * workspace packages; any other package.json with its own lockfile (`web/`, `server/`, the root of a
  * repository without workspaces) is a standalone package. Edges are dependencies (any kind) named
- * like an in-repository package, or `file:`/`link:` paths to one. A package with a `test` script runs
+ * like an in-repository package, or `file:`/`link:` paths to one; a path or `workspace:` dependency
+ * that names no package Forge read marks the package unresolved. A package with a `test` script runs
  * it through its package manager: `pnpm --filter ./DIR run test`, `npm run test --workspace=DIR`,
  * `yarn workspace NAME run test` for workspace packages, `npm run test` in its own folder otherwise. */
 export function jsWorkspaceGraph(paths: string[], read: ManifestReader): EcosystemResult {
@@ -199,15 +282,27 @@ export function jsWorkspaceGraph(paths: string[], read: ManifestReader): Ecosyst
     for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
       const deps = record(item.manifest[field]) ? item.manifest[field] : {};
       for (const [name, spec] of Object.entries(deps)) {
-        const local =
-          typeof spec === 'string' && /^(?:file|link|portal):/.test(spec)
-            ? joinPath(item.pkg.dir, spec.replace(/^\w+:/, ''))
-            : null;
+        const path =
+          typeof spec === 'string'
+            ? (/^(?:file|link|portal):(.*)$/.exec(spec)?.[1] ?? /^workspace:([./].*)$/.exec(spec)?.[1])
+            : undefined;
+        const local = path === undefined ? null : joinPath(item.pkg.dir, path);
         const target = (local !== null && packages.get(local)?.pkg) || byName.get(name);
         if (target && target !== item.pkg) edges.add(packageKey(target));
+        // A path inside the repository, or a workspace dependency, that no package Forge read owns.
+        else if (!target && ((path !== undefined && local !== null) || String(spec).startsWith('workspace:')))
+          item.pkg.unresolved ??= `${item.pkg.manifest} depends on ${name} (${String(spec).slice(0, 60)}), which is no package Forge read`;
       }
     }
     item.pkg.dependsOn = [...edges].sort();
+  }
+  // A package without a test script whose folder holds test files: something else runs them.
+  for (const path of paths) {
+    if (!JS_TEST.test(path) || /(?:^|\/)node_modules\//.test(path)) continue;
+    let dir = dirname(path);
+    while (dir && !packages.has(dir)) dir = dirname(dir);
+    const owner = packages.get(dir)?.pkg;
+    if (owner && !owner.testable) owner.hiddenTests ??= path;
   }
   const tool = managerOf(root, '', present);
   const workspaceCommands = (selected: GraphPackage[]): PackageCommand[] | { refusal: string } => {

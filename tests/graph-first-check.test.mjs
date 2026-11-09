@@ -47,7 +47,6 @@ const run = (check, gate) => ({
 // tests use their package, so the module graph (src/module-graph.ts) narrows the runner to them.
 const repos = {
   go: new Map([
-    ['go.work', 'go 1.22\nuse (\n  ./core\n  ./a\n  ./b\n  ./c\n)\n'],
     ['core/go.mod', 'module example.com/core\n\ngo 1.22\n'],
     ['core/core.go', 'package core\n'],
     ...['a', 'b', 'c'].flatMap(name => [

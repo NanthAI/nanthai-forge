@@ -98,6 +98,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/semantic-check-command.ts` | `node-test` | 1 | Forge's layout runs union tests with Node's runner | their runner's command, or `SEMANTIC_TESTS_UNAVAILABLE` |
 | `src/test-script-runner.ts` | `node-test` | 1 | recognises `node --test` in a package.json test script | the same inference for vitest and jest |
 | `src/test-script-runner.ts` | `js-extension` | 1 | a JS test-script path argument names a file, not a folder | the same |
+| `src/package-graph-dotnet-js.ts` | `js-extension` | 1 | JS/TS test file names: a JS package with tests but no `test` script makes the package graph's selection full | each ecosystem's own test sources (Gradle `src/test`) |
 | `src/package-graph-dotnet-js.ts` | `npm-lockfile` | 1 | npm's lockfile among the JS workspace's lockfiles in the package graph | pnpm, Yarn and Bun lockfiles beside it |
 | `src/project-test-runner.ts` | `node-test` | 2 | recognises `node --test` in any project's test script | the same inference for vitest and jest |
 | `src/heavy-slots.ts` | `node-test` | 1 | `nforge heavy` refuses an unscoped `node --test` | the same guard for any project |
@@ -149,7 +150,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-graph.ts` | `package-json-config` | 1 | names package.json among every ecosystem's manifests | the same |
 | `src/project-test-runner.ts` | `package-json-config` | 1 | names where a runner was declared (`forge.json` or package.json) | `forge.json` |
 | `src/project-config.ts` | `package-json-config` | 2 | package.json `forge.preflight` is the fallback after a neutral `forge.json` (slice F, e89be958) | `forge.json` |
-| `src/package-graph-jvm.ts` | `build-folders` | 2 | Maven's `<build>` XML tag, not a folder | — |
+| `src/package-graph-jvm.ts` | `build-folders` | 3 | Maven's `<build>` XML tag, not a folder | — |
 | `src/package-graph-python.ts` | `build-folders` | 1 | the Python package finder skips Python build and virtualenv folders | each ecosystem skips its own |
 
 ## BYOCI parity

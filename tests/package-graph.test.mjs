@@ -40,7 +40,6 @@ const commands = selection => selection.commands.map(command => [command.cwd, ..
 const names = selection => selection.packages.map(pkg => `${pkg.dir}:${pkg.why}`);
 
 const go = {
-  'go.work': 'go 1.23\nuse (\n  ./lib\n  ./svc\n  ./tools\n)\n',
   'lib/go.mod': 'module example.com/lib\n\ngo 1.23\n',
   'lib/sum/sum.go': 'package sum\n',
   'lib/sum/sum_test.go': 'package sum\n',

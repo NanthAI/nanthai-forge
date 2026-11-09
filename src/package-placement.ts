@@ -20,7 +20,9 @@ import {
   type FirstCheckRiskRule,
 } from './first-check-risk.js';
 
-export const PACKAGE_PLACEMENT_RULE = 'package-placement-v1';
+/** v2: the pin also names unresolved packages and declared cross-ecosystem edges, so placement widens
+ * like the selector (src/package-graph.ts widenedPackages); a v1 pin lacks them and is not trusted. */
+export const PACKAGE_PLACEMENT_RULE = 'package-placement-v2';
 /** A larger graph is not pinned (the proof then keeps every manifest global). */
 export const PACKAGE_PLACEMENT_MAX_BYTES = 128 * 1024;
 const ECOSYSTEMS = ['go', 'cargo', 'python', 'gradle', 'maven', 'dotnet', 'js'] as const;
@@ -33,7 +35,13 @@ const entry = z.tuple([
   z.array(z.number().int().nonnegative()),
 ]);
 const pinSchema = z
-  .object({ rule: z.literal(PACKAGE_PLACEMENT_RULE), packages: z.array(entry).max(4096) })
+  .object({
+    rule: z.literal(PACKAGE_PLACEMENT_RULE),
+    packages: z.array(entry).max(4096),
+    /** Indexes of packages with a reference the graph cannot place (every change reaches them). */
+    unresolved: z.array(z.number().int().nonnegative()).max(4096),
+    crossEcosystem: z.literal('declared').optional(),
+  })
   .strict();
 export type PackagePlacement = z.infer<typeof pinSchema>;
 type Graph = Extract<PackageGraph, { status: 'available' }>;
@@ -51,6 +59,8 @@ export function packagePlacement(graph: PackageGraph): PackagePlacement | undefi
       pkg.testable ? 1 : 0,
       pkg.dependsOn.map(key => index.get(key)).filter((i): i is number => i !== undefined),
     ]),
+    unresolved: graph.packages.flatMap((pkg, i) => (pkg.unresolved ? [i] : [])),
+    ...(graph.crossEcosystem ? { crossEcosystem: graph.crossEcosystem } : {}),
   };
   // TextEncoder, not Buffer: proof validation runs in the Convex V8 runtime too.
   return new TextEncoder().encode(JSON.stringify(pin)).length <= PACKAGE_PLACEMENT_MAX_BYTES
@@ -63,7 +73,11 @@ export function pinnedPackagePlacement(selection: Record<string, unknown> | null
   const parsed = pinSchema.safeParse(selection?.packagePlacement);
   if (!parsed.success) return undefined;
   const rows = parsed.data.packages;
-  if (rows.some(row => row[4].some(i => i >= rows.length))) return undefined;
+  if (
+    rows.some(row => row[4].some(i => i >= rows.length)) ||
+    parsed.data.unresolved.some(i => i >= rows.length)
+  )
+    return undefined;
   const packages: GraphPackage[] = rows.map(([ecosystem, dir, declared, testable]) => ({
     ecosystem: ecosystem as Ecosystem,
     dir,
@@ -74,7 +88,13 @@ export function pinnedPackagePlacement(selection: Record<string, unknown> | null
     testable: testable === 1,
   }));
   rows.forEach((row, i) => (packages[i]!.dependsOn = row[4].map(j => packageKey(packages[j]!))));
-  return { status: 'available', ecosystems: [], packages };
+  for (const i of parsed.data.unresolved) packages[i]!.unresolved = 'pinned as unresolved';
+  return {
+    status: 'available',
+    ecosystems: [],
+    packages,
+    ...(parsed.data.crossEcosystem ? { crossEcosystem: parsed.data.crossEcosystem } : {}),
+  };
 }
 
 /** Manifest and lockfile names that configure a whole workspace wherever they sit. */

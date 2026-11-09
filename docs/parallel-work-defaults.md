@@ -225,7 +225,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 
 - **Project file `forge.json`.** Project settings for any language live in one JSON object at
   the repository root: `{"preflight": {"tests": {…}, "static": […], "guards": […]}}`, each
-  described below, and `{"install": {"scripts": true}}` (see [shareDependencies](#sharedependencies)). A JS project may instead keep the same `preflight` object under `forge` in
+  described below, `{"install": {"scripts": true}}` (see [shareDependencies](#sharedependencies))
+  and `{"packages": {"edges": […]}}` (the package graph's edges between ecosystems, below). A JS project may instead keep the same `preflight` object under `forge` in
   `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
   is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
   it does not know are ignored.
@@ -282,14 +283,21 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `tests/x.rs`), when the project's runner runs that file.
 - **Package graph, any ecosystem.** From manifests alone (never running repository code) Forge maps
   each changed path to its owning package and selects it plus every package that depends on it:
-  Go modules (`go.mod`; a module requiring another depends on it; a change to `_test.go` files only
-  runs that package folder, and a `testdata/` file, which other packages' tests may read by a
-  relative path, runs its whole module and the modules that require it), Rust crates (Cargo workspace `members`/`exclude`, `path`
-  and `[workspace.dependencies]` edges), Python packages (`pyproject.toml` `[project]`/Poetry or
-  `setup.cfg`, src layouts, requirement names and `[tool.uv.sources]` paths; `setup.py` is code and is
-  never read), Gradle projects (`settings.gradle(.kts)` `include`, `project(":x")` and `projects.x`
-  edges), Maven modules (`<modules>`, dependency and parent coordinates), .NET projects
-  (`<ProjectReference>`) and JS/TS packages (`workspaces` or `pnpm-workspace.yaml` members, and any
+  Go modules (`go.mod`; a module requiring another or replacing it with a local folder depends on
+  it; modules a `go.work` uses depend on each other, since workspace modules import each other
+  without a `require`; a change to `_test.go` files only runs that package folder, and a `testdata/`
+  file, which other packages' tests may read by a relative path, runs its whole module and the
+  modules that require it), Rust crates (Cargo workspace `members`/`exclude`, where a crate with its own `[workspace]`
+  that the parent excludes is a separate workspace; `path` and `[workspace.dependencies]` edges), Python packages (`pyproject.toml` `[project]`/Poetry or
+  `setup.cfg`, src layouts, requirement names, local paths (`[tool.uv.sources]`, Poetry `path`) and the crate a
+  maturin build compiles, an edge to a package of any ecosystem there; a project that builds nothing,
+  uv `package = false`, Poetry `package-mode = false` or no build system, owns only the files no
+  nested package claims, and reads a nested package only through a path, workspace member or
+  maturin crate it declares; `setup.py` is code and is never read), Gradle projects (`settings.gradle(.kts)` `include`, `project(":x")` and `projects.x`
+  edges), Maven modules (`<modules>`, also those a `<profile>` adds; dependency and parent
+  coordinates), .NET projects (`<ProjectReference>`, matched case-insensitively and by wildcard, in
+  the project, every enclosing `Directory.Build.props`/`.targets` and the repository files they
+  `<Import>`) and JS/TS packages (`workspaces` or `pnpm-workspace.yaml` members, and any
   other `package.json` with its own lockfile, such as `web/` and `server/` packages that are not a
   workspace). Every `settings.gradle(.kts)` outside `build/`, `src/` and `buildSrc/` roots its own
   Gradle build (an `android/` build included): its projects live below that folder, the folder's
@@ -298,8 +306,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   build. With no other
   runner, each ecosystem's own command runs the selection when it is unambiguous: `go test ./...`
   (or `go test ./pkg`) in the module, `cargo test -p NAME`, pytest through the lockfile's tool (uv,
-  Poetry, PDM) or `python -m pytest`, `gradle :mod:test` (in the build's folder; `test` for a
-  single-project build), `mvn -pl mods -am test` (in the build's folder; a wrapper the tree commits,
+  Poetry, PDM) or `python -m pytest`, `gradle :mod:test` (`:mod:allTests` for Kotlin Multiplatform; in the build's folder; `test`
+  for a single-project build), `mvn -pl mods -am test` (in the build's folder; a wrapper the tree commits,
   `./gradlew` or `./mvnw`, runs instead only when the project declares `"preflight": {"wrappers": true}`
   in `forge.json`, and the plan's advisory names an undeclared one), `dotnet test PROJECT` for
   test projects, `pnpm --filter ./DIR run test` / `npm run test --workspace=DIR` /
@@ -307,17 +315,35 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   manager) in a standalone package's folder, for packages with a `test` script.
   The selection is full, with the reason, when a changed path is outside every package (a root
   file, a lockfile, CI config), the root package is affected and the module graph below cannot
-  narrow it, a manifest cannot be read, the layout
+  narrow it (a root package reached only as a dependent is one more package where its command
+  tests just that package, Cargo's `-p`), a manifest cannot be read, the layout
   is computed (Gradle `projectDir`, a `setup.py`-only package), more than 2,000 manifests exist, or
-  no unambiguous command exists (Python without pytest declared and without unittest modules, Bun workspaces). Repository docs
+  no unambiguous command exists (Python without pytest declared and without unittest modules, Bun workspaces), a selected package
+  has test files but no test command of its own (a JS package without a `test` script whose tests
+  the root runs, a Gradle project without its own build file, a Gradle test source set such as
+  `src/integrationTest` that `test` does not run), or a selected Maven module is one only a profile
+  adds. When unsure the graph widens, never narrows: a package with a reference it
+  cannot place (a `path`, `file:`, `workspace:`, local `replace`, `<ProjectReference>` or
+  `<Import>` target that is no package it read, a Gradle `apply from:` script, or a plugin that is
+  not a Gradle/Kotlin/Android one in a build with `buildSrc/` or an included build, where convention
+  plugins add project dependencies) is selected by every change, with its dependents and the reason.
+  Repository docs
   outside every package change nothing. Docs means prose (`src/prose-paths.ts`, one rule for every
   selector): Markdown, MDX, reStructuredText, AsciiDoc, and `.txt` only with a prose name (`README`,
   `LICENSE`, `NOTICE`, `CHANGELOG`, …) or under `docs/`; `requirements.txt`, `CMakeLists.txt` and
   any file under a fixture, `testdata` or snapshot folder are inputs, never docs. A package found only by its manifest inside another
-  package's folder also selects the enclosing package, unless that package has no tests and nothing
-  depends on it. When the manifests place no package, the reason names them and why (a Gradle build
-  file with no settings file, a `package.json` with neither workspaces nor its own lockfile). Edges between ecosystems (a JS package that
-  builds a Rust crate by path) are not seen. The graph is cached per head; the `tests` read reads
+  package's folder, or inside a package of another ecosystem, also selects the enclosing package,
+  unless that package has no tests and nothing depends on it. When the manifests place no package,
+  the reason names them and why (a Gradle build file with no settings file, a `package.json` with
+  neither workspaces nor its own lockfile). Manifests do not show edges between ecosystems (a
+  Python or JS package that builds a Rust crate, a Go server embedding a JS build), so in a
+  repository with more than one ecosystem a change also selects every package with tests of the
+  other ecosystems, unless its manifest names them (a maturin build's crate, a Python project that
+  builds nothing) or `forge.json` declares them:
+  `{"packages": {"edges": [{"from": "python:py", "to": "cargo:crates/core"}]}}` (`from` depends on
+  `to`; packages as `ecosystem:folder`, `.` for the root). A declared list, even an empty one, is
+  the complete set of cross-ecosystem edges; an edge naming no package makes the graph unknown
+  (full). The graph is cached per head; the `tests` read reads
   manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
   A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`, with a
   runner for it in `FORGE_CHECK_PACKAGES_RUN`, and an Intent without a contract can get a scoped

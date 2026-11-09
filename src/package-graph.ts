@@ -6,7 +6,8 @@ import type { ModuleGraph } from './module-graph-types.js';
 import { cargoGraph, goGraph } from './package-graph-go-rust.js';
 import { pythonGraph, pythonManifest } from './package-graph-python.js';
 import { gradleGraph, jvmManifest, mavenGraph } from './package-graph-jvm.js';
-import { dotnetGraph, dotnetManifest, jsWorkspaceGraph } from './package-graph-dotnet-js.js';
+import { dotnetGraph, dotnetImport, dotnetManifest, jsWorkspaceGraph } from './package-graph-dotnet-js.js';
+import { parseForgeJson } from './project-config.js';
 import {
   basename,
   packageKey,
@@ -21,7 +22,10 @@ export type { Ecosystem, GraphPackage, PackageCommand } from './package-graph-ty
  * Maven, .NET, JS/TS workspaces). It reads manifests only, never runs repository code, and is a
  * selector, not an independence proof: a changed path maps to its owning package, which runs with
  * every package that depends on it. Anything it cannot place (a root file, an unreadable manifest,
- * no unambiguous test command) makes the selection full, with the reason. */
+ * no unambiguous test command) makes the selection full, with the reason. When unsure it widens,
+ * never narrows: a package with a reference the graph cannot place is selected by every change, and
+ * in a repository with more than one ecosystem a change selects every package of the others unless
+ * forge.json declares the cross-ecosystem edges (`packages.edges`). */
 
 /** At most this many manifests are read for one head; more means an unknown (full) layout. */
 export const PACKAGE_GRAPH_MAX_MANIFESTS = 2000;
@@ -36,20 +40,65 @@ export function packageManifestPath(path: string) {
   const name = basename(path);
   return (
     name === 'go.mod' ||
+    name === 'go.work' ||
+    path === 'forge.json' ||
     name === 'Cargo.toml' ||
     name === 'package.json' ||
     name === 'pnpm-workspace.yaml' ||
     (pythonManifest(path) && name !== 'setup.py') ||
     jvmManifest(path) ||
-    dotnetManifest(path)
+    dotnetManifest(path) ||
+    dotnetImport(path)
   );
 }
 export const packageManifestPaths = (allPaths: Iterable<string>) =>
   [...allPaths].filter(packageManifestPath).sort();
 
 export type PackageGraph =
-  | { status: 'available'; ecosystems: EcosystemGraph[]; packages: GraphPackage[] }
+  | {
+      status: 'available';
+      ecosystems: EcosystemGraph[];
+      packages: GraphPackage[];
+      /** `declared`: forge.json `packages.edges` lists every edge between ecosystems. */
+      crossEcosystem?: 'declared';
+    }
   | { status: 'unknown'; reason: string };
+
+/** forge.json `packages.edges`: a list of `{from, to}` package names (`python:.`, `cargo:crates/core`);
+ * `from` depends on `to`. Declaring the list (even empty) says it holds every edge between ecosystems; each edge must
+ * name a package of the graph, or the graph is unknown (a typo never narrows a run). */
+function declaredEdges(packages: GraphPackage[], read: ManifestReader): string | null | 'declared' {
+  const config = parseForgeJson(read('forge.json'))?.packages;
+  if (!config || typeof config !== 'object' || !('edges' in config)) return null;
+  const edges = (config as { edges: unknown }).edges;
+  if (!Array.isArray(edges)) return 'forge.json packages.edges must be a list of {from, to}';
+  const byKey = new Map(packages.map(pkg => [label(pkg), pkg]));
+  for (const edge of edges) {
+    const { from, to } = (edge ?? {}) as { from?: unknown; to?: unknown };
+    const source = typeof from === 'string' ? byKey.get(from) : undefined;
+    const target = typeof to === 'string' ? byKey.get(to) : undefined;
+    if (!source || !target)
+      return `forge.json packages.edges: ${JSON.stringify(edge).slice(0, 120)} names no package (use ecosystem:dir, . for the root)`;
+    if (source !== target) source.dependsOn = [...new Set([...source.dependsOn, packageKey(target)])].sort();
+  }
+  return 'declared';
+}
+
+/** A folder a manifest claims (`GraphPackage.claims`) resolves to its own ecosystem's package there
+ * (the reader's edge), else to every package of another ecosystem there (an edge across ecosystems),
+ * else the claiming package is unresolved. */
+function linkClaims(packages: GraphPackage[]) {
+  const byDir = new Map<string, GraphPackage[]>();
+  for (const pkg of packages) byDir.set(pkg.dir, [...(byDir.get(pkg.dir) ?? []), pkg]);
+  for (const pkg of packages)
+    for (const dir of pkg.claims ?? []) {
+      const there = (byDir.get(dir) ?? []).filter(other => other !== pkg);
+      if (there.some(other => other.ecosystem === pkg.ecosystem)) continue;
+      if (!there.length)
+        pkg.unresolved ??= `${pkg.manifest} takes a dependency from ${dir || '.'}, which has no package Forge read`;
+      else pkg.dependsOn = [...new Set([...pkg.dependsOn, ...there.map(packageKey)])].sort();
+    }
+}
 
 const READERS = [goGraph, cargoGraph, pythonGraph, gradleGraph, mavenGraph, dotnetGraph, jsWorkspaceGraph];
 
@@ -87,6 +136,18 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
   } catch (error) {
     return { status: 'unknown', reason: (error as Error).message.slice(0, 200) };
   }
+  linkClaims(ecosystems.flatMap(item => item.packages));
+  let declared: string | null | 'declared' = null;
+  if (paths.includes('forge.json') && ecosystems.length)
+    try {
+      declared = declaredEdges(
+        ecosystems.flatMap(item => item.packages),
+        bounded,
+      );
+    } catch (error) {
+      return { status: 'unknown', reason: (error as Error).message.slice(0, 200) };
+    }
+  if (declared && declared !== 'declared') return { status: 'unknown', reason: declared };
   if (!ecosystems.length)
     return {
       status: 'unknown',
@@ -97,7 +158,12 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
           )
         : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json)',
     };
-  return { status: 'available', ecosystems, packages: ecosystems.flatMap(item => item.packages) };
+  return {
+    status: 'available',
+    ecosystems,
+    packages: ecosystems.flatMap(item => item.packages),
+    ...(declared === 'declared' ? { crossEcosystem: 'declared' as const } : {}),
+  };
 }
 
 /** Graph cache per head: the key covers every path and every manifest's content id, so a hit is the
@@ -132,21 +198,65 @@ const label = (pkg: GraphPackage) => `${pkg.ecosystem}:${pkg.dir || '.'}`;
 const within = (dir: string, path: string) => !dir || path.startsWith(`${dir}/`);
 
 /** The packages that own `path`: its deepest enclosing package(s) and, for a package found only by its
- * manifest inside another one, the enclosing packages too (their tests, or packages that depend on
- * them, may read it; one with neither has nothing that could). Empty: outside every package. */
+ * manifest inside another one or for an enclosing package of another ecosystem (a JS or Python
+ * package that builds the crate inside it), the enclosing packages too: their tests, or packages that
+ * depend on them, may read it; one with neither has nothing that could. An enclosing package that
+ * builds nothing (`virtual`) reads a nested package only through a dependency it declares on it.
+ * Empty: outside every package. */
 export function enclosingPackages(graph: Extract<PackageGraph, { status: 'available' }>, path: string) {
   const enclosing = graph.packages.filter(pkg => within(pkg.dir, path));
   const deepest = Math.max(-1, ...enclosing.map(pkg => pkg.dir.length));
   const owning = enclosing.filter(pkg => pkg.dir.length === deepest);
-  if (!owning.some(pkg => !pkg.declared)) return owning;
+  const ecosystems = new Set(owning.map(pkg => pkg.ecosystem));
+  const undeclared = owning.some(pkg => !pkg.declared);
+  const declares = (pkg: GraphPackage) =>
+    owning.some(owner => pkg.dependsOn.includes(packageKey(owner)) || pkg.claims?.includes(owner.dir));
+  const outer = enclosing.filter(
+    pkg =>
+      pkg.dir.length < deepest &&
+      (undeclared || !ecosystems.has(pkg.ecosystem)) &&
+      (!pkg.virtual || declares(pkg)),
+  );
+  if (!outer.length) return owning;
   const depended = new Set(graph.packages.flatMap(pkg => pkg.dependsOn));
   return [
     ...owning,
-    ...enclosing.filter(pkg => pkg.dir.length < deepest && (pkg.testable || depended.has(packageKey(pkg)))),
+    ...outer.filter(pkg => pkg.testable || pkg.hiddenTests || depended.has(packageKey(pkg))),
   ];
 }
 
-/** Reverse-dependent query: `keys` plus every package that depends on one of them, transitively. */
+const ecosystemOf = (key: string) => key.slice(0, key.indexOf(':'));
+/** Packages a non-empty change may reach although no edge names them, with why: every package with
+ * a reference the graph cannot place, and (unless forge.json declares the cross-ecosystem edges) in
+ * a repository with more than one ecosystem every package of an ecosystem the change is not in that
+ * has tests (each one is widened on its own, so one without tests adds nothing) and whose manifest
+ * does not name its inputs from other ecosystems (`foreignDeclared`). */
+export function widenedPackages(
+  graph: Extract<PackageGraph, { status: 'available' }>,
+  keys: Iterable<string>,
+): Map<string, string> {
+  const changed = new Set([...keys].map(ecosystemOf));
+  const widened = new Map<string, string>();
+  if (!changed.size) return widened;
+  const mixed =
+    graph.crossEcosystem !== 'declared' && new Set(graph.packages.map(pkg => pkg.ecosystem)).size > 1;
+  for (const pkg of graph.packages)
+    if (pkg.unresolved) widened.set(packageKey(pkg), pkg.unresolved);
+    else if (
+      mixed &&
+      !changed.has(pkg.ecosystem) &&
+      !pkg.foreignDeclared &&
+      (pkg.testable || pkg.hiddenTests)
+    )
+      widened.set(
+        packageKey(pkg),
+        `a ${pkg.ecosystem} package may consume a ${[...changed].sort().join('/')} change (no forge.json packages.edges)`,
+      );
+  return widened;
+}
+
+/** Reverse-dependent query: `keys` plus every package that depends on one of them, transitively,
+ * widened by `widenedPackages`. */
 export function withDependents(
   graph: Extract<PackageGraph, { status: 'available' }>,
   keys: Iterable<string>,
@@ -155,6 +265,7 @@ export function withDependents(
   for (const pkg of graph.packages)
     for (const key of pkg.dependsOn) dependents.set(key, [...(dependents.get(key) ?? []), packageKey(pkg)]);
   const selected = new Set(keys);
+  for (const key of widenedPackages(graph, selected).keys()) selected.add(key);
   const queue = [...selected];
   while (queue.length)
     for (const key of dependents.get(queue.shift()!) ?? [])
@@ -215,7 +326,20 @@ export function packageSelection(
         )
       : undefined;
   const narrowed = narrowing?.units ?? new Map<string, string[]>();
-  const root = [...selected.values()].find(pkg => !pkg.dir && !narrowed.has(packageKey(pkg)));
+  const hidden = [...selected.values()].find(pkg => !pkg.testable && pkg.hiddenTests);
+  if (hidden)
+    return full(
+      `${label(hidden)} has test files (${hidden.hiddenTests}) but no test command of its own, so the repository runs them another way`,
+    );
+  // A root package the change reaches only as a dependent is one more package where its command
+  // tests just that package (Cargo `-p`); a root that encloses a changed path stays full.
+  const scopedRoot = new Set(graph.ecosystems.filter(item => item.rootScoped).map(item => item.ecosystem));
+  const root = [...selected.values()].find(
+    pkg =>
+      !pkg.dir &&
+      !narrowed.has(packageKey(pkg)) &&
+      (owners.has(packageKey(pkg)) || !scopedRoot.has(pkg.ecosystem)),
+  );
   if (root)
     return full(
       `root package ${root.name} (${root.ecosystem}) is affected` +
@@ -242,11 +366,18 @@ export function packageSelection(
       why: owners.has(packageKey(pkg)) ? ('changed' as const) : ('dependent' as const),
     }))
     .sort((a, b) => `${a.ecosystem}:${a.dir}`.localeCompare(`${b.ecosystem}:${b.dir}`));
+  const widened = [...widenedPackages(graph, owners.keys())].filter(([key]) => !owners.has(key));
   const names = [...selected.values()].map(label).sort();
   const shown = names.length > 8 ? `${names.slice(0, 8).join(', ')}, …` : names.join(', ');
   const reason =
     `package graph (${graph.ecosystems.map(item => item.ecosystem).join(', ')}): ${owners.size} changed and ` +
     `${selected.size - owners.size} dependent package(s) of ${graph.packages.length} (${shown})` +
+    (widened.length
+      ? `; widened to ${widened.length} package(s) no edge names: ${widened
+          .slice(0, 3)
+          .map(([key, why]) => `${key.replace(/:$/, ':.')} (${why})`)
+          .join(', ')}${widened.length > 3 ? ', …' : ''}`
+      : '') +
     (narrowed.size
       ? `; module graph: ${[...narrowed].map(([key, units]) => `${key.replace(/:$/, ':.')} runs ${units.length} test unit(s) that reach the change`).join(', ')}`
       : '') +

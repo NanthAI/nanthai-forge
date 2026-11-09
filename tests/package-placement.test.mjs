@@ -43,7 +43,6 @@ const cargo = {
   'crates/tool/src/main.rs': '',
 };
 const go = {
-  'go.work': 'go 1.23\nuse (\n  ./lib\n  ./svc\n  ./tools\n)\n',
   'lib/go.mod': 'module example.com/lib\n\ngo 1.23\n',
   'lib/sum.go': 'package lib\n',
   'svc/go.mod':
