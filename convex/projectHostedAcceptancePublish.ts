@@ -22,6 +22,7 @@ import { hostedMainV2Schema } from '../src/hosted-main';
 import {
   hostedAcceptanceSchema,
   firstCheckField,
+  orderWaitsField,
   firstCheckReceipt,
   landingCompletion,
 } from '../src/hosted-acceptance';
@@ -301,6 +302,7 @@ export async function publishAcceptance(
     authorityEpoch: attempt.authorityEpoch,
     previous: attempt.main,
     candidate: attempt.candidate,
+    ...orderWaitsField(row.orderWaits),
     actor,
     ...(row.agentRun ? { agentRun: row.agentRun } : {}),
     policyDigest: attempt.policyDigest,

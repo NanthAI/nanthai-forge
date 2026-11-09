@@ -34,6 +34,7 @@ import { hostedRecordSchema } from '../src/hosted-records';
 import {
   hostedAcceptanceSchema,
   firstCheckField,
+  orderWaitsField,
   firstCheckReceipt,
   landingCompletion,
 } from '../src/hosted-acceptance';
@@ -323,6 +324,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
           scoped: run.plan?.scoped,
         }),
       ),
+      ...orderWaitsField(member.row.orderWaits),
       actor: member.attempt.actor,
       ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),
       policyDigest: member.attempt.policyDigest,

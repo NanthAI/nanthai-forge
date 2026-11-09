@@ -88,7 +88,10 @@ export async function batchesFixture(
   const entries = [];
   // `member` overrides one Lane record or landing request (a resolution Lane, an explicit null message).
   const add = async (i, member = {}) => {
-    const memberPath = memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`);
+    // A member path may be a list: the change edits each of those files (same text).
+    const [memberPath, ...alsoPaths] = [
+      memberPaths?.[i] ?? (conflict && i < 2 ? 'collision' : `member-${i}`),
+    ].flat();
     const files = [
       ...JSON.parse(f.c.objects.get(f.c.baseline.sha256)).files,
       ...Array.from({ length: Math.max(0, fileCount - 2) }, (_, k) => f.c.file(`fixture/${k}`, 'shared')),
@@ -98,6 +101,7 @@ export async function batchesFixture(
           index ? `member ${i} additional ${index}` : (memberContents?.[i] ?? `member ${i}`),
         ),
       ),
+      ...alsoPaths.map(path => f.c.file(path, memberContents?.[i] ?? `member ${i}`)),
     ];
     // A member file that edits a baseline file replaces it.
     const pin = f.c.state([...new Map(files.map(file => [file.path, file])).values()], [f.c.baseline.sha256]);

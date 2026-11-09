@@ -10,6 +10,7 @@ import {
   FIRST_CHECK_RISK_RULE,
   firstCheckRisk,
   globalRiskBetween,
+  sharedSequenceFolders,
 } from '../dist/first-check-risk.js';
 import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import { unrelatedChanges } from '../dist/landing-overtake.js';
@@ -149,7 +150,7 @@ test('a proof keeps the rule it was decided under: v3 receipts stay valid, v4 re
     checkEntries: [],
     riskRule,
   });
-  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v4');
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v5')), false);
   assert.equal(validCrossHeadProof(proof('first-check-risk-v3')), true);
   assert.equal(validCrossHeadProof(proof('first-check-risk-v4')), false);
   // A placed v3 proof is re-checked under v3, not under the newer list.
@@ -162,4 +163,43 @@ test('a proof keeps the rule it was decided under: v3 receipts stay valid, v4 re
   assert.equal(validCrossHeadProof(placed('first-check-risk-v3')), true);
   assert.equal(validCrossHeadProof(placed('first-check-risk-v4')), false);
   assert.equal(validCrossHeadProof(placed('first-check-risk-v2')), false);
+});
+
+// Hermeticity (Issue c6b81429): a folder tests read as a whole (snapshots, fixtures, golden files,
+// test data) is risk when both sides changed a file in the same one, like a migrations folder.
+test('v5: both sides changing the same fixture or snapshot folder is risk; apart they stay reusable', () => {
+  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v5');
+  for (const [a, b, folder] of [
+    ['tests/fixtures/a.json', 'tests/fixtures/b.json', 'tests/fixtures'],
+    ['src/__snapshots__/a.test.ts.snap', 'src/__snapshots__/b.test.ts.snap', 'src/__snapshots__'],
+    ['pkg/a/testdata/x.golden', 'pkg/a/testdata/y.golden', 'pkg/a/testdata'],
+    ['spec/fixtures/files/a.csv', 'spec/fixtures/users.yml', 'spec/fixtures'],
+    ['test/cassettes/a.yml', 'test/cassettes/b.yml', 'test/cassettes'],
+    ['tests/golden/a.txt', 'tests/golden/b.txt', 'tests/golden'],
+  ]) {
+    assert.deepEqual(sharedSequenceFolders([a], [b]), [folder], a);
+    assert.equal(globalRiskBetween([a], [b]), true, a);
+    assert.equal(unrelatedChanges([a], [b], []), false, `overtaking ${a}`);
+    assert.equal(globalRiskBetween([a], [b], [], 'first-check-risk-v4'), false, `v4 ${a}`);
+  }
+  // Different folders, or a fixture on one side only, keep the change reusable.
+  assert.equal(globalRiskBetween(['pkg/a/testdata/x.json'], ['pkg/b/testdata/y.json']), false);
+  assert.equal(globalRiskBetween(['tests/fixtures/a.json'], ['src/cart.ts']), false);
+  assert.equal(globalRiskBetween(['src/fixture-loader.ts'], ['src/fixtures.ts']), false);
+  // Migrations keep their own rule inside a fixtures folder.
+  assert.deepEqual(
+    sharedSequenceFolders(['tests/fixtures/migrations/1.sql'], ['tests/fixtures/migrations/2.sql']),
+    ['tests/fixtures/migrations'],
+  );
+  // A v4 proof stays valid under v4; v5 refuses the same pair.
+  const proof = riskRule => ({
+    algorithm: 'clean-disjoint-v2',
+    candidatePaths: ['tests/fixtures/a.json'],
+    mainPaths: ['tests/fixtures/b.json'],
+    docsOverlap: [],
+    checkEntries: [],
+    riskRule,
+  });
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v4')), true);
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v5')), false);
 });

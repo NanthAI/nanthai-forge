@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { unsealedBy } from '../src/landing-overtake';
 export { landingAttemptRow, loadLandingAttempt } from './projectHostedLandingAttemptRead';
 import { landingAttemptRow, loadLandingAttempt, pinsFor } from './projectHostedLandingAttemptRead';
 import { holdsLandingOrder, landingPriorityState } from './projectHostedLandingOrder';
@@ -219,8 +220,16 @@ export async function writeLanding(
     !cohortHeld(row, state, runnable) &&
     holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   const deciding = decidingSince(row, state, attempt, orderLive);
+  // Graph-sealed order (c6b81429): a main-race attempt whose pass cannot be carried across a moved
+  // main (a scoped re-check, or a proof no dependent change refused) stops independent entries
+  // overtaking this one for free. Set once, from the attempt already loaded, in this one write.
+  const unsealed =
+    row.unsealed === undefined && (attempt.recheckReason !== undefined || attempt.recheck)
+      ? unsealedBy({ reason: attempt.recheckReason, scoped: Boolean(attempt.recheck) })
+      : null;
   await ctx.db.patch(row._id, {
     ...(alarm && alarm.id === row._id ? { alarm: alarm.alarm } : {}),
+    ...(unsealed ? { unsealed } : {}),
     attemptId: state.attemptId,
     pipelineRetiredAttemptId:
       previous.attemptId === state.attemptId ? row.pipelineRetiredAttemptId : undefined,

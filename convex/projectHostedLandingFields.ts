@@ -196,6 +196,20 @@ export const hostedLandingTables = {
     orderWaited: v.optional(v.literal(true)),
     /** The check generation a newer passed entry overtook (`overtakeMark`); later ones hold order. */
     overtaken: v.optional(v.string()),
+    /** Why this entry's pass cannot be carried across a moved main (scoped re-check, or a proof
+     * refused for a reason no dependent change caused); set once, it stops graph-sealed overtakes. */
+    unsealed: v.optional(v.string()),
+    /** Each older submission this passed entry waited for, why, and whether the two changes'
+     * footprints overlapped (receipt `orderWaits`, Issue c6b81429). At most HOSTED_ORDER_WAITS. */
+    orderWaits: v.optional(
+      v.array(
+        v.object({
+          submissionId: v.string(),
+          held: v.string(),
+          footprints: v.union(v.literal('overlap'), v.literal('disjoint'), v.literal('unknown')),
+        }),
+      ),
+    ),
     phase,
     runId: v.union(v.string(), v.null()),
     /** Last delivered event of the current run, independent of queue phase. */

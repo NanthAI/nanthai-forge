@@ -3,7 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-const { overtakeOlder, overtakeMark } = await import(moduleUrl('../src/landing-overtake.ts'));
+const { overtakeOlder, overtakeMark, sealedOlder, unsealedBy } = await import(
+  moduleUrl('../src/landing-overtake.ts')
+);
+const { recordOrderWait, HOSTED_ORDER_WAITS } = await import(
+  moduleUrl('../convex/projectHostedLandingOrder.ts')
+);
 const env = {
   ...synthetic,
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -150,4 +155,188 @@ test('incident replay 7d98c7da: N parallel non-overlapping landings do not wait 
     `the older entry re-checks at most once more (${runsOf.get(slow).size} runs)`,
   );
   assert(!overtookRecheck, "the older entry's later recheck holds strict order");
+});
+
+test('sealedOlder: an independent older entry never holds, unless its pass cannot carry', () => {
+  const target = { phase: 'checking', parked: false, combined: false, proofs: true };
+  assert.equal(sealedOlder(target), true, 'checking, any generation');
+  assert.equal(sealedOlder({ ...target, phase: 'queued' }), true);
+  assert.equal(sealedOlder({ ...target, phase: 'ready', parked: true }), true, 'Ready but parked');
+  assert.equal(sealedOlder({ ...target, phase: 'ready' }), false, 'a Ready entry about to land');
+  assert.equal(sealedOlder({ ...target, priority: 'urgent' }), false);
+  assert.equal(sealedOlder({ ...target, combined: true }), false, 'a combined group never carries');
+  assert.equal(sealedOlder({ ...target, proofs: false }), false, 'policy keeps exact rechecks');
+  assert.equal(sealedOlder({ ...target, unsealed: 'audit-debt' }), false, 'its pass cannot carry');
+});
+
+test('unsealedBy: only refusals no dependent change caused, and scoped re-checks, unseal', () => {
+  for (const reason of [
+    'path-overlap',
+    'global-risk',
+    'tested-doc',
+    'composition-not-exact',
+    'text-conflict',
+  ])
+    assert.equal(unsealedBy({ reason, scoped: false }), null, reason);
+  for (const reason of ['audit-debt', 'checked-not-full', 'reuse-policy', 'source-unavailable', 'main-red'])
+    assert.equal(unsealedBy({ reason, scoped: false }), reason, reason);
+  assert.equal(unsealedBy({ reason: undefined, scoped: false }), 'not-eligible');
+  assert.equal(unsealedBy({ reason: 'path-overlap', scoped: true }), 'scoped-recheck');
+});
+
+test('recordOrderWait: one row per new wait, bounded', () => {
+  const wait = (id, held = 'dependent') => ({ row: { submissionId: id }, held, footprints: 'overlap' });
+  let list = recordOrderWait(undefined, wait('a'));
+  assert.deepEqual(list, [{ submissionId: 'a', held: 'dependent', footprints: 'overlap' }]);
+  assert.equal(recordOrderWait(list, wait('a')), list, 'a repeat of the latest wait');
+  list = recordOrderWait(list, wait('a', 'accepting'));
+  assert.equal(list.length, 2);
+  for (let i = 0; i < 20; i++) list = recordOrderWait(list, wait(`x${i}`));
+  assert.equal(list.length, HOSTED_ORDER_WAITS);
+});
+
+const receipts = f =>
+  [...f.tables.projectHostedAcceptances.values()]
+    .map(r => JSON.parse(r.value))
+    .sort((a, b) => a.snapshot.revision - b.snapshot.revision);
+
+/** Drive a wave of pre-queue-checked landings to the end. `duration(index, nth)` is the ticks the
+ * nth check of entry `index` takes; `pick` chooses which due task runs next (scheduling order is not
+ * fixed in a real deployment). Returns landing ticks, run counts and receipts by entry. */
+async function drive(t, { memberPaths, memberContents, duration, pick = tasks => tasks[0] }) {
+  const f = await batchesFixture(t, {
+    batchMaxSize: null,
+    admissionCheck: 'default',
+    memberPaths,
+    memberContents,
+    fileCount: 2,
+    count: memberPaths.length,
+  });
+  f.rawChecks.setPlanSelection(JSON.stringify({ scope: 'full', tests: [] }));
+  const ids = f.entries.map(e => e.state.id);
+  const rows = () => [...f.tables.projectHostedLandingRequests.values()];
+  const runOwner = run =>
+    [...f.tables.projectHostedLandingAttempts.values()].find(
+      row => JSON.parse(row.value).check?.runId === run.id,
+    )?.submissionId;
+  const owner = run =>
+    rows().find(r => r.admission?.runId === run.id || r.runId === run.id)?.submissionId ?? runOwner(run);
+  const due = new Map(),
+    landedAt = new Map(),
+    runsOf = new Map(ids.map(id => [id, new Set()]));
+  for (let tick = 0; states(f).some(s => s.phase !== 'landed' && s.phase !== 'terminal-failed'); tick++) {
+    assert(tick < 20000, JSON.stringify(states(f).map(s => [s.sequence, s.phase])));
+    for (const run of f.runs().filter(run => run.status === 'queued' && run.gate?.mode !== 'audit')) {
+      const id = owner(run);
+      runsOf.get(id)?.add(run.id);
+      if (!due.has(run.id)) due.set(run.id, tick + duration(ids.indexOf(id), runsOf.get(id)?.size ?? 1));
+      if (due.get(run.id) <= tick) await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+    }
+    const tasks = f.pending().filter(t => !/MainAudit:start|LandingStall/.test(t.name));
+    if (!tasks.length) {
+      if (f.runs().some(run => run.status === 'queued' && run.gate?.mode !== 'audit')) continue;
+      break;
+    }
+    const before = new Set(
+      states(f)
+        .filter(s => s.phase === 'landed')
+        .map(s => s.id),
+    );
+    await f.execute(pick(tasks, ids));
+    for (const s of states(f)) if (s.phase === 'landed' && !before.has(s.id)) landedAt.set(s.id, tick);
+  }
+  const byId = new Map(receipts(f).map(r => [r.submissionId, r]));
+  const result = {
+    ids,
+    landedAt: ids.map(id => landedAt.get(id)),
+    runs: ids.map(id => runsOf.get(id)?.size ?? 0),
+    orderWaits: ids.map(id => byId.get(id)?.orderWaits ?? []),
+  };
+  t.diagnostic(JSON.stringify({ ...result, ids: undefined, firstCheck: f.reuseDecisions }));
+  assert(
+    states(f).every(s => s.phase === 'landed'),
+    JSON.stringify(states(f).map(s => [s.sequence, s.phase])),
+  );
+  return result;
+}
+/** An entry's waits that are order holds against an independent entry. Waiting for an older passed
+ * entry that is taking main (`accepting`) is the one acceptance slot, not order. */
+const independentWaits = waits => waits.filter(w => w.footprints !== 'overlap' && w.held !== 'accepting');
+
+const N = 6,
+  O_LANE = 20,
+  LANE = 300,
+  SLOW = 1000;
+/** Graph-sealed landing (D1, Issue c6b81429; core-claim 7d98c7da, dogfood 2026-11-08: a READY
+ * entry held 4 passed landings behind an older entry that recomposed 3 times). An older change O
+ * re-checks in the queue (SLOW ticks) after main moved under it. A passed change R depends on O,
+ * so it parks behind O as a Ready entry. N newer changes independent of both then pass their Lane
+ * checks. Before the fix they waited behind the parked Ready entry (a Ready entry was never
+ * overtaken), so they waited out O's whole re-check (tick ~1180); graph-sealed order lets them take
+ * main at once, and neither O nor R re-checks because of them. `pick` varies which due task runs
+ * first among tasks due together. */
+async function sealedReplay(t, { R_LANE, pick }) {
+  const r = await drive(t, {
+    memberPaths: [
+      'src/shared.ts',
+      ['src/shared.ts', 'src/o.ts'],
+      'src/o.ts',
+      ...Array.from({ length: N }, (_, i) => `src/p${i}.ts`),
+    ],
+    memberContents: ['shared', 'shared', 'shared'],
+    duration: (i, nth) => (i === 0 ? 0 : nth > 1 ? SLOW : i === 1 ? O_LANE : i === 2 ? R_LANE : LANE),
+    ...(pick ? { pick } : {}),
+  });
+  const [, older, dependent] = r.ids,
+    fast = r.ids.slice(3);
+  assert(r.runs[1] > 1, 'the older change re-checked in the queue');
+  assert(r.landedAt[2] > r.landedAt[1], 'the dependent change landed after the one it depends on');
+  const fastLanded = Math.max(...r.landedAt.slice(3));
+  assert(fastLanded < LANE + SLOW / 4, `independent landings reached main by tick ${fastLanded}`);
+  for (const i of fast.keys()) {
+    assert.equal(r.runs[i + 3], 1, 'each independent landing ran only its Lane check');
+    assert.deepEqual(independentWaits(r.orderWaits[i + 3]), [], 'no order wait against an independent entry');
+    for (const w of r.orderWaits[i + 3].filter(w => w.held === 'accepting'))
+      assert(fast.includes(w.submissionId), 'only behind another independent entry taking main');
+  }
+  // The older and dependent changes re-check only for each other, never for the independent ones.
+  assert(r.runs[1] <= 3, `older runs ${r.runs[1]}`);
+  assert(r.runs[2] <= 2, `dependent runs ${r.runs[2]}`);
+  assert(
+    r.orderWaits[2].some(
+      w => w.submissionId === older && w.held === 'dependent' && w.footprints === 'overlap',
+    ),
+    JSON.stringify(r.orderWaits[2]),
+  );
+  void dependent;
+}
+test('incident replay c6b81429: independent landings never wait behind a dependent pair', t =>
+  sealedReplay(t, { R_LANE: 150 }));
+// Among tasks due at the same time, run the newest submission's first (scheduling order is free).
+const newestFirst = (tasks, ids) => {
+  const sub = task => ids.indexOf(JSON.stringify(task.args ?? null).match(/"submissionId":"([^"]+)"/)?.[1]);
+  const due = tasks.filter(task => task.scheduledTime === tasks[0].scheduledTime);
+  return due.reduce((a, b) => (sub(b) > sub(a) ? b : a));
+};
+test('incident replay c6b81429: same-tick passes, newest submission first', t =>
+  sealedReplay(t, { R_LANE: LANE, pick: newestFirst }));
+
+/** Guard for `accepting`: a passed entry R whose main moved stays Ready while its first-check proof
+ * is analysed, so newer independent entries that pass then wait for it to take main. When the proof
+ * is refused (R depends on the change that moved main) R re-checks, and those waits end with its
+ * recompose: they never last R's re-check. */
+test('c6b81429: an accepting wait ends when that entry re-checks instead', async t => {
+  const r = await drive(t, {
+    memberPaths: ['src/shared.ts', 'src/shared.ts', ...Array.from({ length: 3 }, (_, i) => `src/p${i}.ts`)],
+    memberContents: ['shared', 'shared'],
+    duration: (i, nth) => (i === 0 ? 0 : nth > 1 ? SLOW : i === 1 ? 150 : 152),
+  });
+  assert.equal(r.runs[1], 2, 'R re-checked for the change that moved main');
+  const fastLanded = Math.max(...r.landedAt.slice(2));
+  assert(fastLanded < 152 + SLOW / 4, `independent landings reached main by tick ${fastLanded}`);
+  for (const waits of r.orderWaits.slice(2))
+    assert.deepEqual(
+      waits.filter(w => w.submissionId === r.ids[1]),
+      waits.filter(w => w.submissionId === r.ids[1] && w.held === 'accepting'),
+    );
 });

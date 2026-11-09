@@ -5,6 +5,7 @@ import type { HostedLandingState } from '../src/hosted-landing';
 import { readHostedRecord } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { ForgeError } from '../src/errors';
+import { effectivePolicy } from '../src/autonomy-policy';
 
 /** The net changed paths the compose worker signed on this entry's Candidate
  * (`governance.paths`), or null when they are not retained or unreadable: unknown
@@ -44,7 +45,14 @@ export async function overtakingSide(
   const project = await ctx.db.get(row.projectId);
   if (!project?.checkEntries) return null;
   const paths = await landingChangedPaths(ctx, row, state);
+  const { acceptance } = effectivePolicy(project);
   return paths
-    ? { paths, checkEntries: [...project.checkEntries, ...(project.globalRiskPaths ?? [])] }
+    ? {
+        paths,
+        checkEntries: [...project.checkEntries, ...(project.globalRiskPaths ?? [])],
+        // A passed check may carry across heads (the first-check proof), so an independent
+        // older entry is graph-sealed (src/landing-overtake.ts sealedOlder).
+        proofs: acceptance.hostedCrossHeadReuse !== false && acceptance.mode === 'auto-on-pass',
+      }
     : null;
 }

@@ -155,7 +155,11 @@ test("Forge's own files keep their v1 decisions under first-check-risk-v2", () =
       firstCheckRisk(path, entries, 'first-check-risk-v1'),
       path,
     );
-  assert.equal(sharedSequenceFolders(own, own).length, 0, 'no sequence folder in Forge');
+  assert.equal(
+    sharedSequenceFolders(own, own, 'first-check-risk-v4').length,
+    0,
+    'no sequence folder in Forge',
+  );
 });
 
 test('a non-Forge repository keeps its own scripts/test-*.ts reusable', () => {

@@ -23,7 +23,7 @@ import {
   type LandingRow,
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
-import { olderLandingAhead } from './projectHostedLandingOrder';
+import { olderLandingAhead, recordOrderWait } from './projectHostedLandingOrder';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
@@ -356,14 +356,21 @@ export async function claimReadyLanding(
   // Submission order: an older live entry takes main first. The waiter keeps its
   // passed proof and no timer while parked: the older entry owns progress, and
   // its exit from the order wakes this one and arms its stall alarm in the same
-  // transaction (incident c329d191: that single wake drive can be lost). An older
-  // entry that has not given up its place yet is overtaken once (7d98c7da).
+  // transaction (incident c329d191: that single wake drive can be lost). An independent
+  // older entry whose pass can carry never holds it (c6b81429); an unrelated one that has
+  // not given up its place yet is overtaken once (7d98c7da). Each new wait is recorded
+  // for the receipt (`orderWaits`).
   const spent: LandingRow[] = [];
   const ahead = await olderLandingAhead(ctx, row, state, now, spent);
   if (ahead) {
     if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
-    if (row.orderWait !== ahead.row.submissionId || row.alarm)
-      await ctx.db.patch(row._id, { orderWait: ahead.row.submissionId, alarm: null });
+    const parked = row.orderWait !== ahead.row.submissionId;
+    if (parked || row.alarm)
+      await ctx.db.patch(row._id, {
+        orderWait: ahead.row.submissionId,
+        alarm: null,
+        ...(parked ? { orderWaits: recordOrderWait(row.orderWaits, ahead) } : {}),
+      });
     if (!ahead.row.orderWaited) await ctx.db.patch(ahead.row._id, { orderWaited: true });
     return { waitingFor: ahead.row.submissionId, until: ahead.until, ahead: ahead.row };
   }

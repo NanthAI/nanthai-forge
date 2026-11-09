@@ -54,6 +54,22 @@ export const hostedAcceptanceSchema = z
           .strict(),
       ])
       .optional(),
+    /** Each older submission this landing waited for after its check passed, why (`held`) and whether
+     * the two changes' footprints overlapped (Issue c6b81429). Under graph-sealed order a `disjoint`
+     * wait has a named cause: urgent, a Ready entry about to land, or one whose pass cannot carry. */
+    orderWaits: z
+      .array(
+        z
+          .object({
+            submissionId: z.string().min(1).max(64),
+            held: z.string().min(1).max(32),
+            footprints: z.enum(['overlap', 'disjoint', 'unknown']),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(8)
+      .optional(),
     actor: hostedLandingAttemptSchema.shape.actor,
     /** The agent run that submitted the landing (session slug, d730121f); shown as `handle/slug`.
      * Absent on older receipts, on person landings and from CLIs that predate it. */
@@ -136,3 +152,6 @@ export function firstCheckReceipt(
 }
 export const firstCheckField = (value: HostedAcceptance['firstCheck']) =>
   value ? { firstCheck: value } : {};
+/** Receipt `orderWaits` from the landing row's server-only list (no read). */
+export const orderWaitsField = (waits: HostedAcceptance['orderWaits'] | undefined) =>
+  waits?.length ? { orderWaits: waits.slice(0, 8) } : {};

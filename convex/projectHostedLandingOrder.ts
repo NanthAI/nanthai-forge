@@ -10,7 +10,7 @@ import { effectivePolicy } from '../src/autonomy-policy';
 import { HOSTED_TRAIN_HOLD_MS } from '../src/hosted-landing-batch';
 import { stackedBehind } from './projectHostedLandingSuffix';
 import { batchRow, batchSchema } from './projectHostedLandingBatchState';
-import { overtakeOlder, unrelatedChanges } from '../src/landing-overtake';
+import { overtakeOlder, sealedOlder, unrelatedChanges } from '../src/landing-overtake';
 import { landingChangedPaths, overtakingSide } from './projectHostedLandingOvertake';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
@@ -80,16 +80,31 @@ export function holdsLandingOrder(row: Pick<LandingRow, 'phase' | 'hold'>, state
     state.observation.pendingReason !== 'waiting-for-dependency'
   );
 }
+/** Why an older entry holds a passed newer one (receipt `orderWaits`, Issue c6b81429). */
+export type OrderHeld =
+  | 'dependent'
+  | 'unknown-paths'
+  // The older entry passed and is taking main: acceptance is one at a time, not an order hold.
+  | 'accepting'
+  | 'urgent'
+  | 'overtaken'
+  | 'unsealed'
+  | 'no-proof'
+  | 'combined'
+  | 'composing';
 /** The oldest submission that must take main before this one, or null. One
  * indexed window per accept attempt. Urgent entries wait only for older urgent
- * ones; batch members never wait for their own batch. A passed solo entry takes
- * main ahead of an older one it is unrelated to that has not given up its place
- * yet (`overtakeOlder`, Issue 7d98c7da); entries it overtakes at a cost are pushed
+ * ones; batch members never wait for their own batch. A passed solo entry never
+ * waits for an older one it is independent of while that one's pass can carry
+ * across a moved main (graph-sealed, `sealedOlder`, Issue c6b81429); otherwise it
+ * takes main ahead of an unrelated one that has not given up its place yet
+ * (`overtakeOlder`, Issue 7d98c7da) and entries it overtakes at a cost are pushed
  * to `spent` for the caller to mark when it takes main. A combined group, or one
  * checked on a predecessor group's predicted head, overtakes nothing. A queued entry no dispatcher owns (its compose
  * or cohort still preparing) holds its place for the train hold only, as the
  * train does: a dead compose never stops the queue. `until` names the one wake
- * the waiter needs when that hold ends. */
+ * the waiter needs when that hold ends; `held` and `footprints` say why it waits
+ * (footprints are read for a new wait only, so a re-check of the same wait reads nothing). */
 export async function olderLandingAhead(
   ctx: QueryCtx | MutationCtx,
   row: LandingRow,
@@ -104,6 +119,7 @@ export async function olderLandingAhead(
     solo && state.batchId ? await batchRow(ctx, { projectId: row.projectId, batchId: state.batchId }) : null;
   const canOvertake = solo && !(batch && batchSchema.parse(JSON.parse(batch.value)).predecessor);
   let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
+  const side = async () => (mine === undefined ? (mine = await overtakingSide(ctx, row, state)) : mine);
   const older = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
@@ -123,6 +139,8 @@ export async function olderLandingAhead(
     // Only an entry that entered the queue late (pre-queue Lane check, refused proof)
     // can be stacked behind a younger group; others cost no extra read.
     if (other.admission?.full && (await stackedBehind(ctx, row, state, value))) continue;
+    let held: OrderHeld = 'combined';
+    let independent: boolean | null | undefined;
     if (canOvertake) {
       const overtake = overtakeOlder({
         phase: other.phase as 'queued' | 'checking' | 'ready',
@@ -134,28 +152,100 @@ export async function olderLandingAhead(
         ),
         ...(other.overtaken !== undefined ? { overtaken: other.overtaken } : {}),
       });
-      // Paths are read only for an entry the rule would skip: one Candidate read each.
-      if (overtake !== 'hold') {
-        if (mine === undefined) mine = await overtakingSide(ctx, row, state);
-        if (
-          mine &&
-          unrelatedChanges(mine.paths, await landingChangedPaths(ctx, other, value), mine.checkEntries)
-        ) {
+      const target = {
+        phase: other.phase as 'queued' | 'checking' | 'ready',
+        priority: other.priority,
+        parked: Boolean(other.orderWait),
+        // A combined group's pass never carries across heads (one shared exact recheck).
+        combined: Boolean(value.batchId && !value.batchSolo),
+        ...(other.unsealed !== undefined ? { unsealed: other.unsealed } : {}),
+      };
+      // Paths are read only for an entry a rule could skip: one Candidate read each.
+      if (overtake !== 'hold' || sealedOlder({ ...target, proofs: true })) {
+        const me = await side();
+        independent = me
+          ? unrelatedChanges(me.paths, await landingChangedPaths(ctx, other, value), me.checkEntries)
+          : null;
+        if (independent && me && sealedOlder({ ...target, proofs: me.proofs })) continue;
+        if (independent && overtake !== 'hold') {
           if (overtake === 'spend') spent!.push(other);
           continue;
         }
-      }
+        held =
+          independent === null
+            ? 'unknown-paths'
+            : !independent
+              ? 'dependent'
+              : me && !me.proofs
+                ? 'no-proof'
+                : 'unsealed';
+      } else
+        held =
+          other.priority === 'urgent'
+            ? 'urgent'
+            : other.phase === 'ready'
+              ? 'accepting'
+              : other.unsealed !== undefined
+                ? 'unsealed'
+                : 'overtaken';
     }
-    if (other.phase !== 'queued' || other.runnable) return { row: other, state: value, until: null };
+    const wait = async () => ({
+      row: other,
+      state: value,
+      held,
+      // The receipt says whether the two footprints overlapped; read once, for a new wait.
+      footprints:
+        independent === undefined && row.orderWait !== other.submissionId && spent
+          ? await footprintsOf(ctx, other, value, side)
+          : footprintLabel(independent),
+    });
+    if (other.phase !== 'queued' || other.runnable) return { ...(await wait()), until: null };
     const until =
       Math.max(
         Date.parse(value.at),
         Date.parse(value.timing?.composeStartedAt ?? value.at),
         Date.parse(value.timing?.selectedAt ?? value.at),
       ) + HOSTED_TRAIN_HOLD_MS;
-    if (until > now) return { row: other, state: value, until };
+    if (until > now) return { ...(await wait()), held: 'composing' as OrderHeld, until };
   }
   return null;
+}
+/** Order waits a receipt records; later ones are dropped (the first ones explain the wait). */
+export const HOSTED_ORDER_WAITS = 8;
+/** The row's order-wait list with one more wait (repeats of the latest are not added). */
+export function recordOrderWait(
+  waits: LandingRow['orderWaits'],
+  ahead: {
+    row: Pick<LandingRow, 'submissionId'>;
+    held: OrderHeld;
+    footprints: 'overlap' | 'disjoint' | 'unknown';
+  },
+) {
+  const list = waits ?? [];
+  const last = list[list.length - 1];
+  if (
+    list.length >= HOSTED_ORDER_WAITS ||
+    (last?.submissionId === ahead.row.submissionId && last.held === ahead.held)
+  )
+    return list;
+  return [...list, { submissionId: ahead.row.submissionId, held: ahead.held, footprints: ahead.footprints }];
+}
+const footprintLabel = (independent: boolean | null | undefined) =>
+  independent === true
+    ? ('disjoint' as const)
+    : independent === false
+      ? ('overlap' as const)
+      : ('unknown' as const);
+async function footprintsOf(
+  ctx: QueryCtx | MutationCtx,
+  other: LandingRow,
+  value: HostedLandingState,
+  side: () => Promise<Awaited<ReturnType<typeof overtakingSide>>>,
+) {
+  const me = await side();
+  return footprintLabel(
+    me ? unrelatedChanges(me.paths, await landingChangedPaths(ctx, other, value), me.checkEntries) : null,
+  );
 }
 /** A passed entry parked behind an older live submission (claimReadyLanding sets the
  * server-only `orderWait`). Readers name it so the wait has a visible reason (19328518:

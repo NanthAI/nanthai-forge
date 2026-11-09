@@ -560,19 +560,39 @@ still queued, checking or passed; an urgent one waits only for older urgent ones
 An older entry gives up its place when it fails, stalls, is held for red main, or
 waits for review or a dependency.
 
-A passed solo submission does not wait for an older entry it is unrelated to: when
+A passed solo submission does not wait for an older entry it is independent of: when
 neither change's paths equal, contain or sit inside the other's (the Candidates'
-stored changed paths) and together they touch no [global-risk file](../pre-queue-checks.md#global-risk-files),
-it takes main first (core-claim incident `7d98c7da`, 2026-11-08: passed landings
-waited 17-40 min behind unrelated rechecks). The older entry keeps its check: on
-moved main it lands on that pass through the first-check rule when it qualifies,
-otherwise it re-checks. Each entry gives up its place this way for one check
-generation only (`overtaken` on the row); its next check holds strict order, so it
-re-checks at most once because newer entries overtook it. Passed and urgent entries
-are never overtaken; combined groups and groups checked on a predecessor's predicted
-head overtake nothing. The decision reads the claiming entry's project row and
-Candidate once and one Candidate per skipped entry, in the claim transaction; no call
-is added and an idle queue costs nothing. Related entries keep strict order.
+stored changed paths) and together they touch no [global-risk file](../pre-queue-checks.md#global-risk-files)
+or shared test folder, it takes main first (core-claim incident `7d98c7da`, 2026-11-08:
+passed landings waited 17-40 min behind unrelated rechecks). The older entry keeps its
+check: on moved main it lands on that pass through the first-check rule, which applies
+the same test, so an independent landing never makes it re-check.
+
+**Graph-sealed order** (Issue `c6b81429`): an independent older entry never holds a
+passed newer one, for any number of its check generations, including a Ready entry
+that is itself parked behind an older submission. N independent landings therefore
+reach main in about one check wall plus serial acceptance, however many dependent
+entries are re-checking ahead of them. It is not sealed, and the bounded rule below
+decides, when the older entry is urgent, is a Ready entry about to take main (the one
+acceptance slot), is a member of a combined group, belongs to a project whose policy
+keeps exact rechecks (`hostedCrossHeadReuse:false` or acceptance other than
+`auto-on-pass`), or is **unsealed**: its re-check is scoped, or a proof of its pass was
+refused for a reason no dependent change causes (audit debt, a scoped first check,
+reuse policy). `unsealed` is set on the row once, in the write that installs that
+attempt, and kept. The bounded rule: such an entry gives up its place to an unrelated
+newer one for one check generation only (`overtaken` on the row); its next check holds
+strict order, so it re-checks at most once because newer entries overtook it (at most
+twice when a sealed guess was wrong). Combined groups and groups checked on a
+predecessor's predicted head overtake nothing; dependent entries keep strict order.
+
+The decision reads the claiming entry's project row and Candidate once and one Candidate
+per skipped entry, in the claim transaction; no call is added and an idle queue costs
+nothing. Each new wait is recorded on the row and copied to the receipt as `orderWaits`
+(at most 8): the older `submissionId`, `held` (`dependent`, `unknown-paths`,
+`accepting`, `urgent`, `overtaken`, `unsealed`, `no-proof`, `combined`, `composing`)
+and `footprints` (`overlap`, `disjoint` or `unknown`). `landings` lists it. A
+`disjoint` wait always names its cause; `accepting` is the acceptance slot, not order.
+Recording reads the two Candidates only when the holder was not already compared.
 
 The waiter keeps its passed check and owns no
 timer or stall alarm: the older entry keeps its own alarm, and when it gives up its

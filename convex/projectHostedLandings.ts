@@ -152,6 +152,8 @@ async function evidence(
       // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
       heldAfterCheck: heldAfterCheck(attempts, progress),
+      // Older submissions it waited for after its check passed, and whether footprints overlapped (c6b81429).
+      orderWaits: receipt.orderWaits ?? null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
     },

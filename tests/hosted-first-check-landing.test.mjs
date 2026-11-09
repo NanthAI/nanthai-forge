@@ -193,7 +193,7 @@ test('replay: an in-package manifest change lands on its first check beside an i
   });
   assert.deepEqual(f.reuseDecisions, ['proof']);
   const proof = receipts(f)[1].crossHeadProof;
-  assert.equal(proof.riskRule, 'first-check-risk-v4');
+  assert.equal(proof.riskRule, FIRST_CHECK_RISK_RULE);
   assert.deepEqual(proof.placedRisk, [{ path: 'packages/c/package.json', reach: ['js:packages/c'] }]);
   assert.equal(runCount(f), 2, 'no recheck (before: global-risk and a third run)');
   // A dependent package on the other side, or no pinned graph, keeps the recheck.

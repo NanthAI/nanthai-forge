@@ -40,6 +40,55 @@ export function overtakeOlder(target: OvertakeTarget): 'hold' | 'free' | 'spend'
   return 'spend';
 }
 
+/** The older entry as graph-sealed landing (D1, Issue c6b81429) sees it. */
+export type SealedTarget = Pick<OvertakeTarget, 'phase' | 'priority'> & {
+  /** A Ready entry parked behind an older submission (`orderWait`): it is not about to land. */
+  parked: boolean;
+  /** A member of a combined group: its shared pass never carries across heads. */
+  combined: boolean;
+  /** Why this entry's pass cannot be carried across a moved main (`unsealed` on the row), if known. */
+  unsealed?: string;
+  /** The project lets a passed check carry across heads (first-check proof). */
+  proofs: boolean;
+};
+
+/** Graph-sealed landing order (D1, Issue c6b81429). An older entry whose changes are independent of
+ * a passed newer one (`unrelatedChanges`: the same test the first-check proof applies) loses nothing
+ * when the newer one takes main first: its own pass lands across that main move through the proof,
+ * so it never re-checks for it. Such an entry never holds the newer one, for any number of its check
+ * generations and including a Ready entry that is itself parked behind an older submission, so N
+ * independent landings reach main in about one check wall. Not sealed (the bounded `overtakeOlder`
+ * rule decides): urgent entries, a Ready entry about to land, combined-group members, a project whose policy keeps exact
+ * rechecks, and an entry whose pass cannot be carried (`unsealed`: its re-check is scoped, or a proof
+ * was refused for a reason other than a dependent change). `unsealed` is set once and kept, so a wrong
+ * guess costs that entry at most one re-check before strict order protects it again. Pure. */
+export function sealedOlder(target: SealedTarget) {
+  return (
+    target.proofs &&
+    !target.combined &&
+    target.priority !== 'urgent' &&
+    target.unsealed === undefined &&
+    (target.phase !== 'ready' || target.parked)
+  );
+}
+
+/** Proof refusals caused by a change the other side depends on (paths, risk files, a text merge).
+ * An independent newer landing never causes one; any other refusal means the entry's pass cannot be
+ * carried at all, so it stops being sealed (`unsealed`). */
+const DEPENDENT_REFUSALS = new Set([
+  'path-overlap',
+  'global-risk',
+  'tested-doc',
+  'composition-not-exact',
+  'text-conflict',
+]);
+export const unsealedBy = (input: { reason: string | undefined; scoped: boolean }) =>
+  input.scoped
+    ? 'scoped-recheck'
+    : DEPENDENT_REFUSALS.has(input.reason ?? '')
+      ? null
+      : (input.reason ?? 'not-eligible');
+
 /** Two changes are unrelated when neither's paths equal, contain or sit inside the
  * other's and together they touch no global-risk file (the first-check rule's own
  * tests, `clean-disjoint` without the Markdown allowance). Only an unrelated older
