@@ -19,6 +19,7 @@ import { workLocked } from './work-lock.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
+import { diskShapeMatches } from './source-links.js';
 
 type Exchange = ConstructorParameters<typeof ConvexLaneTransport>[0];
 const shell = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -44,13 +45,7 @@ function onDisk(root: string, path: string, file: NativeFile | undefined) {
     : stat.isFile() && stat.nlink === 1
       ? readFileSync(absolute)
       : null;
-  return Boolean(
-    bytes &&
-    digest(bytes) === file.blob &&
-    (stat.isSymbolicLink()
-      ? file.mode === 'symlink'
-      : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
-  );
+  return Boolean(bytes && digest(bytes) === file.blob && diskShapeMatches(stat, file.mode));
 }
 
 /** Move a checkout whose server Lane moved underneath it (a save that completed

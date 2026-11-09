@@ -53,6 +53,7 @@ import {
 import { createWork } from './work-create.js';
 import { restoreWorkFormat } from './work-restore-format.js';
 import { stageRecords, publishRecords } from './work-records.js';
+import { publishDirectory } from './native-durability.js';
 
 export function exportNativeWork(
   store: WorkStore,
@@ -397,17 +398,7 @@ async function restoreDirectory(
     if (interrupted) data.revision++;
     if (interrupted) new WorkStore(materialized).save(data);
     beforePublish?.(materialized);
-    mkdirSync(destination, { mode: 0o700 });
-    try {
-      renameSync(materialized, destination);
-    } catch (error) {
-      try {
-        rmdirSync(destination);
-      } catch {
-        /* Preserve concurrent files. */
-      }
-      throw error;
-    }
+    publishDirectory(materialized, destination);
     return {
       root: destination,
       head: manifest.head,

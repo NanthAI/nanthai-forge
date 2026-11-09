@@ -283,3 +283,62 @@ test('checkpoint rejects a failed object-directory flush and the original operat
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('Windows keeps recorded executable modes and flushes through writable handles (89460350)', async t => {
+  const { regularFileMode, executableBitMatches, gitFileMode } = await import(moduleUrl('file-mode'));
+  // Windows stores no executable bit: the recorded mode carries over, a new file is plain.
+  assert.equal(regularFileMode(0o666, 'executable', 'win32'), 'executable');
+  assert.equal(regularFileMode(0o666, 'file', 'win32'), 'file');
+  assert.equal(regularFileMode(0o666, undefined, 'win32'), 'file');
+  assert.equal(executableBitMatches(0o666, 'executable', 'win32'), true);
+  assert.equal(gitFileMode(0o666, '100755', 'win32'), '100755');
+  // macOS and Linux read the bit from disk, so a chmod is a real change.
+  assert.equal(regularFileMode(0o644, 'executable', 'linux'), 'file');
+  assert.equal(regularFileMode(0o755, 'file', 'darwin'), 'executable');
+  assert.equal(executableBitMatches(0o644, 'executable', 'linux'), false);
+  assert.equal(gitFileMode(0o755, '100644', 'linux'), '100755');
+
+  const { fileFlushFlags, syncFile, syncDirectory } = await import(moduleUrl('native-durability'));
+  assert.equal(fileFlushFlags(), process.platform === 'win32' ? 'r+' : 'r');
+  const directory = mkdtempSync(join(tmpdir(), 'forge-flush-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  writeFileSync(join(directory, 'file.txt'), 'bytes\n');
+  syncFile(join(directory, 'file.txt'));
+  syncDirectory(directory);
+});
+
+test('Windows without link rights writes a source link as its target file and reads it back (89460350)', async t => {
+  const { writeSourceLink, diskMode, diskShapeMatches, linkFallback } = await import(
+    moduleUrl('source-links')
+  );
+  const { ownerOnly } = await import(moduleUrl('file-mode'));
+  const directory = mkdtempSync(join(tmpdir(), 'forge-link-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const original = fs.symlinkSync;
+  fs.symlinkSync = () => {
+    throw Object.assign(new Error('EPERM: operation not permitted, symlink'), { code: 'EPERM' });
+  };
+  syncBuiltinESMExports();
+  try {
+    assert.equal(writeSourceLink('target.txt', join(directory, 'link'), 'win32'), false);
+    assert.equal(readFileSync(join(directory, 'link'), 'utf8'), 'target.txt');
+    // Elsewhere a refused link is a real failure, never a silent file.
+    assert.throws(() => writeSourceLink('target.txt', join(directory, 'other'), 'linux'), { code: 'EPERM' });
+  } finally {
+    fs.symlinkSync = original;
+    syncBuiltinESMExports();
+  }
+  const file = fs.lstatSync(join(directory, 'link'));
+  assert.equal(linkFallback(file, 'symlink', 'win32'), true);
+  assert.equal(diskMode(file, 'symlink', 'win32'), 'symlink');
+  assert.equal(diskShapeMatches(file, 'symlink', 'win32'), true);
+  // On macOS and Linux a file where a link was recorded is a real change.
+  assert.equal(diskMode(file, 'symlink', 'linux'), 'file');
+  assert.equal(diskShapeMatches(file, 'symlink', 'darwin'), false);
+  // A submodule kept as its pointer file matches its gitlink record, as before the helper.
+  assert.equal(diskShapeMatches(file, 'gitlink', 'linux'), true);
+  assert.equal(diskShapeMatches(file, 'gitlink', 'win32'), true);
+  assert.equal(ownerOnly(0o666, 'win32'), true);
+  assert.equal(ownerOnly(0o644, 'linux'), false);
+  assert.equal(ownerOnly(0o600, 'linux'), true);
+});

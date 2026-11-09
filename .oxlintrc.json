@@ -80,6 +80,18 @@
         "forge/no-convex-collect": "error",
         "forge/convex-bounded-query": "error"
       }
+    },
+    {
+      "files": [
+        "src/**/*.ts"
+      ],
+      "rules": {
+        "forge/no-readonly-fsync": "error",
+        "forge/native-path-separator": "error",
+        "forge/no-raw-mode-bits": "error",
+        "forge/raw-symlink": "error",
+        "forge/rename-over-directory": "error"
+      }
     }
   ]
 }

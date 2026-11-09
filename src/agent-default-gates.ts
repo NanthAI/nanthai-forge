@@ -12,6 +12,7 @@ import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from 
 import { answerId, hostedOverlapNotice } from './hosted-overlap-notice.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
+import { diskMode } from './source-links.js';
 
 type Advice = Awaited<ReturnType<typeof readHostedOverlapAdvice>>;
 const command = (root: string, verb: string, body: Record<string, unknown>) =>
@@ -229,7 +230,7 @@ function savedBytes(
     const absolute = join(root, path),
       stat = lstatSync(absolute);
     if (!stat.isFile()) return false;
-    const mode = stat.mode & 0o111 ? 'executable' : 'file';
+    const mode = diskMode(stat, old.mode as 'file' | 'executable' | 'symlink');
     if (mode !== old.mode) return false;
     if (indexedBlob(index, path, stat, old.blob)) return true;
     if (budget.files <= 0 || budget.bytes < stat.size) return false;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, readFileSync, renameSync, lstatSync, realpathSync, rmdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { serverRecoveryAuthority } from './recovery-authority.js';
@@ -20,7 +20,7 @@ import { foldHostedRecoveryCache } from './recovery-hosted.js';
 import { hostedRecoverySchema, type HostedRecovery } from './recovery-hosted-protocol.js';
 import { writeRecoveryState } from './recovery-state.js';
 import { validateRunnerRecovery } from './recovery-runner-cache.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory, publishDirectory } from './native-durability.js';
 import { runnerRecoveryTransport, type RunnerRecoveryTransport } from './recovery-runner-transport.js';
 import { parseHostedResponse } from './hosted-response.js';
 
@@ -204,18 +204,8 @@ export async function recoverRunner(target: string, input: unknown, supplied?: R
         configuration: progress.configuration,
       });
       const publishStart = performance.now();
-      // Reserve before rename: a concurrent unrelated destination cannot be replaced.
-      mkdirSync(root, { mode: 0o700 });
-      try {
-        renameSync(stage, root);
-      } catch (error) {
-        try {
-          rmdirSync(root);
-        } catch {
-          /* Preserve concurrent files. */
-        }
-        throw error;
-      }
+      // A concurrent unrelated destination cannot be replaced.
+      publishDirectory(stage, root);
       syncDirectory(parent);
       recoveryRunnerTestHooks.afterPublish?.();
       progress.timings.publish = Math.round(performance.now() - publishStart);

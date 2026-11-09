@@ -16,6 +16,7 @@ import { codeFileName } from './code-files.js';
 
 export { safeRelative } from './safe-relative.js';
 import { safeRelative } from './safe-relative.js';
+import { ownerOnly } from './file-mode.js';
 /** Same canonical path checks, with Node's faster native resolver on macOS. */
 export function sourceRealpath(path: string) {
   return process.platform === 'darwin' && systemRealpath.native
@@ -242,7 +243,7 @@ export async function fingerprintPrivateFile(
   try {
     const before = fstatSync(fd);
     invariant(
-      before.isFile() && before.nlink === 1 && !(before.mode & 0o077),
+      before.isFile() && before.nlink === 1 && ownerOnly(before.mode),
       code,
       'The retained file must be an owner-only regular file.',
     );

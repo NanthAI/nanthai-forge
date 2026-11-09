@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join, resolve } from 'node:path';
+import { delimiter, join, resolve, sep } from 'node:path';
 import { toolchainEnvNames, toolchainEnvPattern } from '../scripts/child-env.mjs';
 
 /** The system user a hosted check's Candidate children run as on Linux (Issue 432164bf). */
@@ -155,7 +155,7 @@ const dataHomes = new Set([
 export function toolchainReadable(env: NodeJS.ProcessEnv, home = env.HOME ?? '') {
   if (!home) return [];
   const root = resolve(home);
-  const under = (path: string) => path.startsWith(`${root}/`);
+  const under = (path: string) => path.startsWith(`${root}${sep}`);
   const out = new Set<string>();
   for (const entry of (env.PATH ?? '').split(delimiter))
     if (entry && under(resolve(entry))) out.add(resolve(entry));

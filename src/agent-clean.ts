@@ -15,7 +15,7 @@ import { processBlocker, workingProcesses } from './clean-processes.js';
 import { processGroupAlive } from './local-process.js';
 import { lstatSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { hostname } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, join, sep } from 'node:path';
 import { z } from 'zod';
 import { NativeSource, nativeOwner, nativePaths } from './native-source.js';
 import { nativeObjects } from './native-objects.js';
@@ -356,7 +356,7 @@ function remove(store: WorkStore, item: Item): string | undefined {
     }
   }
   // Re-check immediately before deleting: inside the owner's Work directory, and not a link.
-  const inside = (path: string) => path.startsWith(store.directory + '/');
+  const inside = (path: string) => path.startsWith(store.directory + sep);
   const logFile = item.kind === 'check-retention' && item.path.endsWith('.log');
   let regularLog = false;
   if (logFile) {

@@ -10,12 +10,12 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
-  symlinkSync,
 } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { readSource } from './files.js';
 import { invariant } from './errors.js';
+import { writeSourceLink } from './source-links.js';
 
 /** One operation owns these buffers and byte-only templates. Every workspace is
  * complete and independently writable. Cloning is optional and never reads
@@ -69,7 +69,7 @@ export class NativeWorkspaceFiles {
 
   write(id: string, path: string, kind: 'file' | 'executable' | 'symlink' | 'gitlink') {
     if (kind === 'symlink') {
-      symlinkSync(this.small.get(id) ?? this.read(id), path);
+      writeSourceLink(this.small.get(id) ?? this.read(id), path);
       return;
     }
     const template = this.prepared.get(id),

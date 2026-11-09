@@ -19,6 +19,7 @@ import {
 } from './submodule-materialize.js';
 import { actionsSubmoduleAccessCapability } from './hosted-actions-capabilities.js';
 import { submoduleAccessReplySchema } from './hosted-actions-direct.js';
+import { executableBitMatches } from './file-mode.js';
 
 /** Parallel R2 GETs per descriptor window when the pack is absent or for the delta. */
 export const actionsReadConcurrency = 16;
@@ -199,6 +200,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         if (file.mode !== 'symlink') continue;
         const path = join(directory, file.path);
         await ensureDirectory(path);
+        // oxlint-disable-next-line forge/raw-symlink -- hosted Actions jobs run on Linux runners.
         await symlink(readFileSync(join(cache, file.blob), 'utf8'), path);
       }
     });
@@ -328,7 +330,7 @@ export async function verifySourceTree(state: NativeState, directory: string) {
         ? (invariant(info.isSymbolicLink(), 'SOURCE_HASH_MISMATCH', 'Expected source link.'),
           digest(await readlink(path)))
         : (invariant(
-            info.isFile() && Boolean(info.mode & 0o111) === (file.mode === 'executable'),
+            info.isFile() && executableBitMatches(info.mode, file.mode),
             'SOURCE_HASH_MISMATCH',
             'Source mode differs.',
           ),

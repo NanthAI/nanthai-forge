@@ -3,7 +3,6 @@ import {
   closeSync,
   constants,
   fstatSync,
-  fsyncSync,
   openSync,
   readSync,
   existsSync,
@@ -17,6 +16,7 @@ import { NativeSource } from './native-source.js';
 import { receiptSchema } from './work-run-receipt.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
+import { syncDirectory, syncReadOnlyDescriptor } from './native-durability.js';
 /** Validate and flush retained evidence before authorizing removal of its disposable copy. */
 export function checkCleanupBlocker(store: WorkStore, run: CheckRun, directory: string) {
   if (run.error?.code === 'DISK_LOW')
@@ -49,7 +49,7 @@ export function checkCleanupBlocker(store: WorkStore, run: CheckRun, directory: 
           if (info.size !== artifact.size || hash.digest('hex') !== artifact.sha256)
             throw new Error('Artifact changed');
         }
-        fsyncSync(fd);
+        syncReadOnlyDescriptor(fd);
       } finally {
         closeSync(fd);
       }
@@ -58,23 +58,13 @@ export function checkCleanupBlocker(store: WorkStore, run: CheckRun, directory: 
       const folder = join(directory, 'artifacts');
       if (!lstatSync(folder).isDirectory() || realpathSync(folder) !== folder)
         return 'Retained artifact directory changed.';
-      const fd = openSync(folder, 'r');
-      try {
-        fsyncSync(fd);
-      } finally {
-        closeSync(fd);
-      }
+      syncDirectory(folder);
     }
     for (const item of receipt.artifacts ?? []) {
       if (item.status === 'retained') flush(join(directory, 'artifacts', item.filename), item);
     }
     for (const leaf of ['stdout.log', 'stderr.log', 'result.json']) flush(join(directory, leaf));
-    const fd = openSync(directory, 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    syncDirectory(directory);
     const source = new NativeSource(store.root),
       workspace = join(directory, 'workspace');
     for (const file of source.state(run.head).files) source.object(file.blob);

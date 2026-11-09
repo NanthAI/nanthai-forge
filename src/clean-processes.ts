@@ -2,6 +2,7 @@
 import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync } from 'node:child_process';
 import { readdirSync, readlinkSync, statSync } from 'node:fs';
+import { sep } from 'node:path';
 /** Observe local working directories once per cleanup. Unknown coverage retains copies. */
 export function workingProcesses(): { paths: string[]; unknown: boolean } {
   try {
@@ -45,7 +46,7 @@ export function workingProcesses(): { paths: string[]; unknown: boolean } {
   return { paths: [], unknown: true };
 }
 export function processBlocker(path: string, observed: ReturnType<typeof workingProcesses>) {
-  if (observed.paths.some(cwd => cwd === path || cwd.startsWith(path + '/')))
+  if (observed.paths.some(cwd => cwd === path || cwd.startsWith(path + sep)))
     return 'A local process is working in this directory.';
   return observed.unknown ? 'Local process coverage is unavailable.' : undefined;
 }

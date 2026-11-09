@@ -34,7 +34,8 @@ function kernelStart(pid: number): string | undefined {
     }
     const options = {
       encoding: 'utf8' as const,
-      timeout: 1000,
+      // Windows PowerShell starts in about 0.2 s on a warm runner and over 1 s when cold.
+      timeout: process.platform === 'win32' ? 5000 : 1000,
       stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'],
       env: {
         LC_ALL: 'C',
@@ -45,17 +46,25 @@ function kernelStart(pid: number): string | undefined {
           : {}),
       },
     };
-    return process.platform === 'win32'
-      ? execFileSync(
-          'powershell.exe',
-          ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid}).StartTime.ToFileTimeUtc()`],
-          options,
-        ).trim()
-      : darwinStart(pid, options);
+    if (process.platform !== 'win32') return darwinStart(pid, options);
+    const start = execFileSync(
+      `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        LAUNCHER_WINDOWS_START_SCRIPT.replace('PID', String(pid)),
+      ],
+      options,
+    ).trim();
+    return /^\d+$/.test(start) ? start : undefined;
   } catch {
     return undefined;
   }
 }
+/** Byte-identical to WINDOWS_START_SCRIPT in local-process.ts: loads no PowerShell module. */
+export const LAUNCHER_WINDOWS_START_SCRIPT =
+  '[System.Diagnostics.Process]::GetProcessById(PID).StartTime.ToFileTimeUtc()';
 /** Byte-identical to DARWIN_KERNEL_READER in local-process.ts (this file imports only Node). */
 export const LAUNCHER_KERNEL_READER =
   'my $m=shift;for my $i(@ARGV){my $k=pack("i4",1,14,$m,$i);my $l=pack("Q",0);' +

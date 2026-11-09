@@ -25,6 +25,7 @@ import { workLocked } from './work-lock.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedLaneSelection } from './hosted-lane.js';
 import type { HostedAgentAddress, hostedAgentCommandSchemas } from './hosted-agent-contract.js';
+import { diskMode } from './source-links.js';
 
 type Command = z.infer<typeof hostedAgentCommandSchemas.finish>;
 const selectionSchema = z.object({
@@ -105,9 +106,7 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
       ? 'symlink'
       : stat.isDirectory() || before?.mode === 'gitlink'
         ? 'gitlink'
-        : stat.mode & 0o111
-          ? 'executable'
-          : 'file';
+        : diskMode(stat, before?.mode);
     const baseline = files.get(path)?.blob;
     let blob: string;
     // The same blob the bytes would hash to: the stat index vouches only for unchanged baseline files.

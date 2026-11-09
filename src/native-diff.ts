@@ -58,7 +58,7 @@ export function nativeDiff(
       if (!liveRoot) selected = source.object(file.after.blob);
       else {
         try {
-          const { bytes, mode } = nativeFile(liveRoot, file.path);
+          const { bytes, mode } = nativeFile(liveRoot, file.path, file.after.mode);
           if (!bytes || digest(bytes) !== file.after.blob || mode !== file.after.mode)
             throw Error('Changed captured source');
           selected = bytes;

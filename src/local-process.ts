@@ -31,6 +31,20 @@ export const DARWIN_KERNEL_READER =
   'syscall(202,$k,4,$b,$l,0,0)==0 or die;$n=unpack("Q",$l);$n%648==0 or die;' +
   'for(my $o=0;$o<$n;$o+=648){my $s=unpack("q",substr($b,$o,8));$s>0 or die;' +
   'printf "%d %d %d\\n",unpack("i",substr($b,$o+40,4)),$s,unpack("C",substr($b,$o+36,1))}}';
+/** Windows PowerShell 5.1 ships with every supported Windows. Absolute path: no PATH lookup.
+ * The .NET call loads no module: `Get-Process` autoloads one and hangs when PSModulePath is
+ * absent, which the minimal child environment omits. Same FILETIME value as Get-Process.
+ * Kept byte-identical in cli-launcher.ts (standalone); tests/local-process-snapshot pins both. */
+export const WINDOWS_START_SCRIPT =
+  '[System.Diagnostics.Process]::GetProcessById(PID).StartTime.ToFileTimeUtc()';
+export const windowsPowerShell = (root = process.env.SystemRoot || 'C:\\Windows') =>
+  `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+export const windowsStartArgs = (pid: number) => [
+  '-NoProfile',
+  '-NonInteractive',
+  '-Command',
+  WINDOWS_START_SCRIPT.replace('PID', String(pid)),
+];
 const SZOMB = 5;
 function kernelRows(mode: 1 | 2, ids: number[]): { pid: number; observation: Observation }[] {
   const rows = execFileSync(
@@ -73,12 +87,8 @@ function inspect(pid: number): { startTime: string; zombie: boolean } | undefine
       return { startTime: fields[19]!, zombie: fields[0] === 'Z' };
     }
     if (process.platform === 'win32') {
-      const startTime = execFileSync(
-        'powershell.exe',
-        ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid}).StartTime.ToFileTimeUtc()`],
-        options,
-      ).trim();
-      return startTime ? { startTime, zombie: false } : undefined;
+      const startTime = execFileSync(windowsPowerShell(), windowsStartArgs(pid), options).trim();
+      return /^\d+$/.test(startTime) ? { startTime, zombie: false } : undefined;
     }
     return observeDarwin<Observation | undefined>(
       () => {

@@ -17,6 +17,7 @@ import { digest } from './hash.js';
 import { processAlive, processStartTime } from './local-process.js';
 import { DAY_MS, LOCAL_LOG_DAYS } from './check-log-policy.js';
 import { invariant } from './errors.js';
+import { ownerOnly } from './file-mode.js';
 /** Hosted Mac runners keep full local pipes outside disposable source/runtime.
  * Event-driven pruning touches only completed, private run-log directories. */
 export function localMacLogFiles(
@@ -30,7 +31,7 @@ export function localMacLogFiles(
   const base = realpathSync(root),
     info = lstatSync(root);
   invariant(
-    !info.isSymbolicLink() && info.isDirectory() && (info.mode & 0o077) === 0,
+    !info.isSymbolicLink() && info.isDirectory() && ownerOnly(info.mode),
     'UNSAFE_PATH',
     'Local check logs require a private directory.',
   );

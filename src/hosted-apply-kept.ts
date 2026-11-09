@@ -8,7 +8,6 @@ import {
   renameSync,
   rmSync,
   rmdirSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -20,6 +19,7 @@ import { syncDirectory, syncFile } from './native-durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
 import type { NativeFile } from './native-state-format.js';
+import { diskShapeMatches, writeSourceLink } from './source-links.js';
 
 /** Local changes an explicit recover-apply set aside are kept this long after the apply is confirmed. */
 export const KEPT_APPLY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -61,7 +61,7 @@ function copyOne(live: string, destination: string): string {
   mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
   if (stat.isSymbolicLink()) {
     const target = readlinkSync(live, { encoding: 'buffer' });
-    symlinkSync(readlinkSync(live), destination);
+    writeSourceLink(readlinkSync(live), destination);
     return digest(target);
   }
   invariant(
@@ -177,15 +177,7 @@ export function liveState(root: string, entry: KeptEntry, file: NativeFile | und
       : null;
   const seen = bytes ? digest(bytes) : null;
   if (seen && entry.digest && seen === entry.digest) return 'kept';
-  if (
-    seen &&
-    file &&
-    seen === file.blob &&
-    (stat.isSymbolicLink()
-      ? file.mode === 'symlink'
-      : Boolean(stat.mode & 0o111) === (file.mode === 'executable'))
-  )
-    return 'baseline';
+  if (seen && file && seen === file.blob && diskShapeMatches(stat, file.mode)) return 'baseline';
   return 'other';
 }
 

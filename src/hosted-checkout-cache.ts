@@ -12,6 +12,7 @@ import type { SourcePackDownload } from './source-pack.js';
 import { downloadSourcePack, unpackSourcePackObjects } from './source-pack-archive.js';
 import { cloneFile, machineObjectsDirectory, rememberObject } from './machine-object-store.js';
 import { neverIndex } from './forge-disk.js';
+import { ownerOnly } from './file-mode.js';
 import { aheadOf, runDownloadWindows } from './checkout-download-schedule.js';
 export interface CheckoutObjectTransport {
   readonly objectPageSize?: number;
@@ -135,7 +136,7 @@ export class HostedCheckoutCache {
       // links. Refetch it instead of turning cache damage into a denied open.
       if (
         this.objects === this.machine &&
-        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || Boolean(stat.mode & 0o077))
+        (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !ownerOnly(stat.mode))
       )
         return false;
       invariant(

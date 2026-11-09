@@ -27,6 +27,7 @@ export function checkToolFence(executables: string[], environment: CheckEnvironm
             const locator = realpathSync(path),
               stat = statSync(locator);
             observed.push([path, locator, peersFileStamp(locator)]);
+            // oxlint-disable-next-line forge/no-raw-mode-bits -- PATH lookup: Windows runs a file by extension.
             if (stat.isFile() && (process.platform === 'win32' || stat.mode & 0o111)) break;
           } catch {
             observed.push([path, 'unavailable']);

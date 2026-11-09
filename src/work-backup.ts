@@ -14,8 +14,6 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
-  renameSync,
-  rmdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -48,6 +46,7 @@ import {
   workSourcePins,
 } from './work-archive-metadata.js';
 import { type WorkData } from './work-types.js';
+import { publishDirectory } from './native-durability.js';
 
 const code = 'INVALID_WORK_BACKUP';
 const coverage =
@@ -474,18 +473,13 @@ async function restoreDirectory(input: string, destination: string) {
       { mode: 0o600, flag: 'wx' },
     );
     try {
-      mkdirSync(target, { mode: 0o700 });
-    } catch {
-      invariant(false, 'RESTORE_TARGET_EXISTS', 'Restore destination appeared; existing work is preserved.');
-    }
-    try {
-      renameSync(scratch, target);
+      publishDirectory(scratch, target);
     } catch (error) {
-      try {
-        rmdirSync(target);
-      } catch {
-        /* Preserve any concurrently added files. */
-      }
+      invariant(
+        !existsSync(target),
+        'RESTORE_TARGET_EXISTS',
+        'Restore destination appeared; existing work is preserved.',
+      );
       throw error;
     }
   } catch (error) {

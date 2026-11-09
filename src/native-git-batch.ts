@@ -133,8 +133,14 @@ export function batchObjectWriter(
       // New blobs must be loose: the persistent mktree process cannot discover
       // packs written after its first request. --literally does not prevent
       // packing on Git 2.52. Cover every Buffer length in this worker only.
+      // Git for Windows parses this as a 32-bit unsigned long and refuses anything larger.
       worker = batch([
-        ...(kind === 'blob' ? ['-c', `core.bigFileThreshold=${Number.MAX_SAFE_INTEGER}`] : []),
+        ...(kind === 'blob'
+          ? [
+              '-c',
+              `core.bigFileThreshold=${process.platform === 'win32' ? 0xffffffff : Number.MAX_SAFE_INTEGER}`,
+            ]
+          : []),
         'hash-object',
         '-t',
         kind,

@@ -1,15 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  existsSync,
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  rmSync,
-  statSync,
-  symlinkSync,
-} from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliRuntimePaths, type CliRuntimeUser } from './cli-runtime-processes.js';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +14,7 @@ import {
 } from './cli-launcher.js';
 import { canonicalRoot } from './root-paths.js';
 import { ForgeError } from './errors.js';
+import { linkDirectory } from './source-links.js';
 
 export const cliPackageRoot = (url = import.meta.url) => dirname(dirname(fileURLToPath(url)));
 export function cliInstallation(root = cliPackageRoot()): string | null {
@@ -76,7 +68,7 @@ export function withCliLock<T>(installation: string, run: () => T, waitMs = CLI_
 export function selectCliBuild(installation: string, build: string, pointer = 'current') {
   const next = join(installation, `${pointer}-${randomUUID()}`);
   try {
-    symlinkSync(build, next, 'dir');
+    linkDirectory(build, next);
     renameSync(next, join(installation, pointer));
     syncDirectory(installation);
   } finally {
@@ -161,7 +153,7 @@ export function pruneCliBuilds(
     if (!legacyUsers || ambiguous) return false;
     if (
       legacyUsers.some(user =>
-        canonicalRoot(typeof user === 'string' ? user : user.path).startsWith(build.path + '/'),
+        canonicalRoot(typeof user === 'string' ? user : user.path).startsWith(build.path + sep),
       )
     )
       return false;

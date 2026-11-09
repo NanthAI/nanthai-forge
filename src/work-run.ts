@@ -15,7 +15,7 @@ import { prepareRunRegistration } from './work-run-preparation.js';
 import { retryWorkPhase } from './work-retry.js';
 import { launchDetachedCheck, hasDetachedCheckRequest } from './check-controller.js';
 import { detachedChecksRequired } from './check-execution-context.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace, syncDirectory } from './native-durability.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { localActor } from './work-actor.js';
 import {
@@ -518,12 +518,7 @@ async function launchLocal(
         closeSync(fd);
       }
       renameSync(temp, join(path, 'result.json'));
-      const parent = openSync(path, 'r');
-      try {
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
-      }
+      syncDirectory(path);
       receiptSchema.parse(JSON.parse(readSource(path, 'result.json', 4 * 1024 * 1024)!.toString('utf8')));
       try {
         cleanup?.();

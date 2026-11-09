@@ -1,15 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  readlinkSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { linkInstall } from './dependency-link.js';
+import { linkDirectory } from './source-links.js';
 
 /** A Lane's `node_modules` that Forge linked, and the key of the install it points at.
  * Cheap to read: one lstat, plus one readlink or one small marker file. */
@@ -105,7 +98,7 @@ function retire(root: string, link: ForgeLink): (() => void) | string {
     const target = readlinkSync(modules[0]!);
     rmSync(modules[0]!, { force: true });
     return () => {
-      if (!stat(modules[0]!)) symlinkSync(target, modules[0]!, 'dir');
+      if (!stat(modules[0]!)) linkDirectory(target, modules[0]!);
     };
   }
   const present = modules.filter(path => stat(path));

@@ -61,6 +61,7 @@ import {
   writeCheckoutStatIndex,
   type CheckoutStatIndex,
 } from './checkout-stat-index.js';
+import { diskMode } from './source-links.js';
 
 /** Small files hash in memory; only changed bytes ever reach the save staging. */
 const memoryLimit = 1024 * 1024;
@@ -84,9 +85,7 @@ function captureFile(
     ? 'symlink'
     : submodule || previous?.mode === 'gitlink'
       ? 'gitlink'
-      : stat.mode & 0o111
-        ? 'executable'
-        : 'file';
+      : diskMode(stat, previous?.mode);
   // An unchanged file (same lstat as when its baseline blob was last read) is not read again.
   if (!submodule && previous && previous.mode === mode && indexedBlob(index, path, stat, previous.blob))
     return {

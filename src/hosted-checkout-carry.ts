@@ -6,6 +6,7 @@ import { ForgeError } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
 import type { CheckoutDelta } from './hosted-checkout-delta.js';
+import { diskMode } from './source-links.js';
 
 /* A sync applied in place moves only the paths its delta names. Unsaved changes anywhere else stay
  * exactly where they are under the new baseline, as Git carries them through a pull. A change that
@@ -65,13 +66,7 @@ function changeObstruction(
     expectedDigest: file?.blob ?? null,
     observedDigest: bytes ? digest(bytes) : null,
     expectedMode: file?.mode ?? null,
-    observedMode: stat.isSymbolicLink()
-      ? 'symlink'
-      : stat.isFile()
-        ? stat.mode & 0o111
-          ? 'executable'
-          : 'file'
-        : 'other',
+    observedMode: stat.isSymbolicLink() ? 'symlink' : stat.isFile() ? diskMode(stat, file?.mode) : 'other',
   };
 }
 /** Every local change that an in-place apply would move, replace or build on. */

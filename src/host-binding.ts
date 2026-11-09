@@ -25,6 +25,7 @@ import { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
 import { agentSyncSchema, compactAgentSync } from './agent-sync-state.js';
 import { reportedTokensSchema } from './making-of.js';
+import { syncDirectory } from './native-durability.js';
 const binding = z.object({
   projectId: z.string(),
   deployment: z.url(),
@@ -221,12 +222,7 @@ function writeChanged(store: WorkStore, name: string, value: unknown) {
     closeSync(fd);
   }
   renameSync(temporary, path);
-  const directory = openSync(store.directory, 'r');
-  try {
-    fsyncSync(directory);
-  } finally {
-    closeSync(directory);
-  }
+  syncDirectory(store.directory);
 }
 
 export function requireHostedBinding(store: WorkStore): HostedBinding {

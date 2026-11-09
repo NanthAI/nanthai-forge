@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { invariant } from './errors.js';
+import { syncDirectory } from './native-durability.js';
 // One rename publishes a complete retry payload. A partial staging directory is
 // never interpreted as a committed request, and concurrent originals cannot be replaced.
 export function commitExchangeDirectory(directory: string, files: Record<string, string | Buffer>) {
@@ -27,12 +28,7 @@ export function commitExchangeDirectory(directory: string, files: Record<string,
         closeSync(fd);
       }
     }
-    let fd = openSync(temporary, 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    syncDirectory(temporary);
     try {
       renameSync(temporary, directory);
     } catch (error) {
@@ -47,12 +43,7 @@ export function commitExchangeDirectory(directory: string, files: Record<string,
         'A concurrent exchange retained different original bytes.',
       );
     }
-    fd = openSync(parent, 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    syncDirectory(parent);
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

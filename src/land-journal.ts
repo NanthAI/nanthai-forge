@@ -24,6 +24,7 @@ import type { WorkStore } from './work-store.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandCommand } from './land-schema.js';
 import type { WorkView } from './work-types.js';
+import { syncDirectory } from './native-durability.js';
 export type SingleLandingAttempt = {
   attempt: number;
   viewId?: string;
@@ -290,11 +291,6 @@ export function saveLandJournal(store: WorkStore, path: string, state: State) {
     closeSync(file);
   }
   renameSync(temporary, path);
-  const directory = openSync(join(path, '..'), 'r');
-  try {
-    fsyncSync(directory);
-  } finally {
-    closeSync(directory);
-  }
+  syncDirectory(join(path, '..'));
   wakeLandingWorker(store);
 }

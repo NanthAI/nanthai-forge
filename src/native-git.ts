@@ -7,7 +7,6 @@ import {
   readFileSync,
   realpathSync,
   renameSync,
-  rmdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -30,6 +29,7 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 
 import { createWork } from './work-create.js';
+import { publishDirectory } from './native-durability.js';
 
 const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export function filesFromGit(root: string, head: string, source: NativeSource): NativeFile[] {
@@ -108,17 +108,7 @@ function publish(output: string, destination: string) {
     'RESTORE_TARGET_EXISTS',
     'Destination appeared during transfer; concurrent files are retained.',
   );
-  mkdirSync(destination, { mode: 0o700 });
-  try {
-    renameSync(output, destination);
-  } catch (error) {
-    try {
-      rmdirSync(destination);
-    } catch {
-      /* Preserve concurrent files. */
-    }
-    throw error;
-  }
+  publishDirectory(output, destination);
 }
 export async function importNativeGit(input: string, commit: string, target: string) {
   invariant(

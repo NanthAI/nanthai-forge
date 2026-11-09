@@ -14,6 +14,7 @@ import { readSyncJournal } from './native-sync-journal.js';
 import { syncWorkspace } from './native-sync-workspace.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
+import { diskMode } from './source-links.js';
 
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const journalSchema = z.object({ head: hash, target: hash.optional(), revision: z.number() });
@@ -100,7 +101,7 @@ function currentFiles(root: string, from: NativeFile[], to: NativeFile[]) {
     );
     const bytes = readSource(root, path, Number.MAX_SAFE_INTEGER);
     invariant(bytes, 'OWNER_ROOT_DIRTY', `Owner path cannot be read safely: ${path}`);
-    current.push({ path, blob: digest(bytes), mode: found.mode & 0o111 ? 'executable' : 'file' });
+    current.push({ path, blob: digest(bytes), mode: diskMode(found, old.get(path)?.mode) });
   }
   return current;
 }

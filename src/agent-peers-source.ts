@@ -226,6 +226,7 @@ export class PeersSource extends NativeSource {
     };
     const selected = (file: string) => !scope || scope.some(item => pathsOverlap(file, item));
     const files = saved.filter(file => !selected(file.path));
+    const savedModes = new Map(saved.map(file => [file.path, file.mode]));
     for (const file of [...new Set(paths)].filter(selected).sort()) {
       try {
         if (this.store.native) checkParents(file);
@@ -243,7 +244,7 @@ export class PeersSource extends NativeSource {
           continue;
         }
         changed = true;
-        const { bytes, mode } = nativeFile(path, file);
+        const { bytes, mode } = nativeFile(path, file, savedModes.get(file));
         const blob = this.store.native
           ? digest(bytes)
           : createHash(lane.head.length === 64 ? 'sha256' : 'sha1')

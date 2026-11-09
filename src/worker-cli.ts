@@ -16,6 +16,7 @@ import { executeHostedMacCheck } from './hosted-mac-execute.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import type { OutputTransport } from './hosted-output-transfer.js';
+import { ownerOnly } from './file-mode.js';
 
 /** Legacy fallback for a deployment that does not yet issue machine keys at
  * registration: FORGE_HOSTED_CHECK_KEY_<id>, or an owner-only file named by
@@ -38,7 +39,7 @@ export function hostedCheckKey(keyId: string, env: NodeJS.ProcessEnv = process.e
   }
   invariant(
     stat.isFile() &&
-      (stat.mode & 0o077) === 0 &&
+      ownerOnly(stat.mode) &&
       (typeof process.getuid !== 'function' || stat.uid === process.getuid()),
     'RUNNER_UNAVAILABLE',
     'The collector key file must be a regular file you own with mode 600.',

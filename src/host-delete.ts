@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { networkTimeout } from './network-fetch.js';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, renameSync, openSync, fsyncSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { makeFunctionReference } from 'convex/server';
@@ -17,6 +17,7 @@ import { coordinationClient, type CoordinationTransport } from './coordination-c
 import { readHostState, updateHostState, retirePendingHost } from './host-binding.js';
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
+import { syncDirectory } from './native-durability.js';
 
 type Project = {
   id: string;
@@ -137,12 +138,7 @@ export async function deleteHostedProject(
     const temporary = `${path}.${randomUUID()}`;
     writeFileSync(temporary, JSON.stringify(request) + '\n', { mode: 0o600, flag: 'wx', flush: true });
     renameSync(temporary, path);
-    const directory = openSync(local.directory, 'r');
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    syncDirectory(local.directory);
   };
   const readProject = async (): Promise<Project> => {
     let cursor: string | null = null;

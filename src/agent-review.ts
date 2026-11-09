@@ -14,6 +14,7 @@ import { digest } from './hash.js';
 import { readSource, safeRelative } from './files.js';
 import { invariant } from './errors.js';
 import { contextualHunks } from './review-hunks.js';
+import { gitFileMode } from './file-mode.js';
 
 export const agentReviewSchema = z
   .object({
@@ -276,7 +277,7 @@ function readReview(
           after = {
             hash: digest(bytes),
             hashKind: 'sha256',
-            mode: lstatSync(join(path, file)).mode & 0o111 ? '100755' : '100644',
+            mode: gitFileMode(lstatSync(join(path, file)).mode, before?.mode),
           };
         }
         changes.push({ path: file, status: status(before, after), before, after });
@@ -289,7 +290,7 @@ function readReview(
             after: File = {
               hash: digest(bytes),
               hashKind: 'sha256',
-              mode: lstatSync(join(path, file)).mode & 0o111 ? '100755' : '100644',
+              mode: gitFileMode(lstatSync(join(path, file)).mode, existing?.before?.mode),
             };
           if (existing) {
             existing.after = after;
@@ -335,7 +336,7 @@ function readReview(
         invariant(
           after &&
             digest(after) === change.after.hash &&
-            (lstatSync(join(path, change.path)).mode & 0o111 ? '100755' : '100644') === change.after.mode,
+            gitFileMode(lstatSync(join(path, change.path)).mode, change.before?.mode) === change.after.mode,
           'SOURCE_CHANGED',
           'Live Git source changed after capture.',
         );

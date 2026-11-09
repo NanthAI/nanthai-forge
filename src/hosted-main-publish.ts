@@ -8,7 +8,6 @@ import {
   readdirSync,
   rmSync,
   rmdirSync,
-  symlinkSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
@@ -18,6 +17,7 @@ import { digest } from './hash.js';
 import { nativeFile } from './native-file.js';
 import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
+import { writeSourceLink } from './source-links.js';
 const file = z.object({ path: z.string().refine(safeRelative), blob: z.string(), mode: z.string() });
 const journalSchema = z.object({
   before: z.array(file),
@@ -28,7 +28,7 @@ const journalSchema = z.object({
 function matches(root: string, expected: { path: string; blob: string; mode: string }) {
   try {
     if (lstatSync(join(root, expected.path)).isDirectory()) return false;
-    const actual = nativeFile(root, expected.path);
+    const actual = nativeFile(root, expected.path, expected.mode as Parameters<typeof nativeFile>[2]);
     return digest(actual.bytes) === expected.blob && actual?.mode === expected.mode;
   } catch (error) {
     if (['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '')) return false;
@@ -44,7 +44,7 @@ function sameInode(left: string, right: string) {
 function publishFile(from: string, to: string) {
   // Both files live on the checkout volume. A hard link publishes the independent
   // staged inode without overwriting a concurrently occupied destination.
-  if (lstatSync(from).isSymbolicLink()) symlinkSync(readlinkSync(from, { encoding: 'buffer' }), to);
+  if (lstatSync(from).isSymbolicLink()) writeSourceLink(readlinkSync(from, { encoding: 'buffer' }), to);
   else linkSync(from, to);
   syncDirectory(dirname(to));
   rmSync(from);

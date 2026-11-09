@@ -12,7 +12,6 @@ import {
   chmodSync,
   fsyncSync,
   type Stats,
-  symlinkSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -23,6 +22,7 @@ import { safeRelative } from './files.js';
 import { nativeFile } from './native-file.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+import { writeSourceLink } from './source-links.js';
 export type SyncTarget = { path: string; mode: NativeFile['mode']; blob?: string; bytes?: Buffer };
 type Target = SyncTarget;
 function stat(path: string): Stats | undefined {
@@ -110,7 +110,7 @@ export function syncWorkspace(
     if (current.has(file.path)) continue;
     const found = stat(join(root, file.path));
     if (!found || (!found.isFile() && !found.isSymbolicLink())) continue;
-    const { bytes, mode } = nativeFile(root, file.path);
+    const { bytes, mode } = nativeFile(root, file.path, file.mode);
     current.set(file.path, `${digest(bytes)}:${mode}`);
   }
   const paths = [...new Set([...current.keys(), ...before.keys(), ...after.keys()])];
@@ -151,7 +151,7 @@ export function syncWorkspace(
     // Staging stays on the workspace filesystem, excluded from source capture.
     const temporary = join(root, '.forge', `sync-content-${randomUUID()}.tmp`);
     if (file.mode === 'symlink') {
-      symlinkSync(file.bytes ?? source.object(file.blob!), temporary);
+      writeSourceLink(file.bytes ?? source.object(file.blob!), temporary);
     } else {
       const fd = openSync(temporary, 'wx', file.mode === 'executable' ? 0o700 : 0o600);
       try {

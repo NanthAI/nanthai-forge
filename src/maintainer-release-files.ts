@@ -4,6 +4,7 @@ import { dirname } from 'node:path';
 import { lstatSync, readlinkSync } from 'node:fs';
 import { invariant } from './errors.js';
 import { randomUUID, createHash } from 'node:crypto';
+import { syncDirectory } from './native-durability.js';
 
 export const releaseHash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
 export function releaseWrite(path: string, bytes: string | Buffer, mode = 0o600) {
@@ -16,12 +17,7 @@ export function releaseWrite(path: string, bytes: string | Buffer, mode = 0o600)
     closeSync(fd);
   }
   renameSync(temporary, path);
-  const directory = openSync(dirname(path), 'r');
-  try {
-    fsyncSync(directory);
-  } finally {
-    closeSync(directory);
-  }
+  syncDirectory(dirname(path));
 }
 export const releaseJson = (path: string): unknown => JSON.parse(readFileSync(path, 'utf8'));
 export const releaseSave = (path: string, value: unknown) => releaseWrite(path, JSON.stringify(value) + '\n');

@@ -8,6 +8,7 @@ import { invariant } from './errors.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { retryWorkPhase } from './work-retry.js';
 import type { WorkService } from './work.js';
+import { syncDirectory } from './native-durability.js';
 
 const schema = z.object({
   schema: z.literal(1),
@@ -43,12 +44,7 @@ export async function claimLandingDriver(work: WorkService, channel: string): Pr
         closeSync(file);
       }
       renameSync(temporary, path);
-      const parent = openSync(dirname(path), 'r');
-      try {
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
-      }
+      syncDirectory(dirname(path));
       return {
         generation: current.generation,
         // Invoke under the SAME short Work lock as the mutable publication.

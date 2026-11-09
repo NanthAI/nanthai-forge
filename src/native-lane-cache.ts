@@ -32,7 +32,7 @@ function verifyTree(root: string, files: NativeFile[]) {
       } else {
         const file = expected.get(path);
         invariant(file, 'INVALID_NATIVE_SOURCE', 'Cached source contains an unexpected path.');
-        const actual = nativeFile(root, path);
+        const actual = nativeFile(root, path, file.mode);
         invariant(
           actual.mode === file.mode && digest(actual.bytes) === file.blob,
           'INVALID_NATIVE_SOURCE',

@@ -47,11 +47,13 @@ function run(root: string, args: string[], input?: string, acceptNoMatch = false
 export function verifyRoot(root: string): void {
   if (nativeOwner(root)) return;
   const top = run(root, ['rev-parse', '--show-toplevel']).trim();
-  invariant(
-    realpathSync(top) === root,
-    'NOT_REPOSITORY_ROOT',
-    'Pass the Git worktree root, not a subdirectory.',
-  );
+  // Windows Git prints the long path with forward slashes while Forge may hold an 8.3 short
+  // name (NAME~1): only the native resolver expands both to one spelling.
+  const same =
+    process.platform === 'win32'
+      ? realpathSync.native(top) === realpathSync.native(root)
+      : realpathSync(top) === root;
+  invariant(same, 'NOT_REPOSITORY_ROOT', 'Pass the Git worktree root, not a subdirectory.');
 }
 export function gitHead(root: string): string | null {
   if (nativeOwner(root)) return null;

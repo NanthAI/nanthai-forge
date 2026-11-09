@@ -8,6 +8,7 @@ import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { nativePaths } from './source-paths.js';
 import { indexedBlob, readCheckoutStatIndex, statIndexRefresh } from './checkout-stat-index.js';
 import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
+import { diskMode } from './source-links.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
 /** True when the checkout differs from its saved baseline, or when that cannot be established
@@ -40,9 +41,7 @@ export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {
         ? 'symlink'
         : old.mode === 'gitlink'
           ? 'gitlink'
-          : stat.mode & 0o111
-            ? 'executable'
-            : 'file';
+          : diskMode(stat, old.mode);
       if (mode === old.mode && indexedBlob(index, path, stat, old.blob)) {
         refresh.kept(path, stat, old.blob);
         continue;

@@ -49,6 +49,7 @@ function toolFile(executable: string, environment: CheckEnvironment) {
       if (!isAbsolute(path)) return; // Relative PATH entries depend on the detached workspace; do not substitute this process's cwd.
       const locator = realpathSync(path),
         info = statSync(locator);
+      // oxlint-disable-next-line forge/no-raw-mode-bits -- PATH lookup: Windows runs a file by extension.
       if (!info.isFile() || (process.platform !== 'win32' && !(info.mode & 0o111))) continue;
       fd = openSync(locator, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
       const before = fstatSync(fd),

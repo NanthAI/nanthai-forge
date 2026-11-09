@@ -35,6 +35,28 @@ Hooks never deny edits, fail open within one second and cache each path/session.
 Hosted notices use one bounded saved-path query; unsaved edits and shell writes
 remain outside coverage. See [hook settings and coverage](agents/workflow.md#overlap-before-the-first-write).
 
+### On Windows
+
+The same commands run in PowerShell or `cmd` with Node 24.22.1+ and Git for Windows.
+`scripts/cli-platform-smoke.mjs` checks the core loop on GitHub's `windows-latest`
+runner. Forge paths always use `/`. Differences from macOS and Linux:
+
+- **Executable files.** Windows stores no executable bit. A file keeps the mode it was
+  recorded with, so editing a script never drops it, but a new file cannot be marked
+  executable from Windows (as in Git with `core.fileMode=false`).
+- **Symlinks.** Without Developer Mode or administrator rights Windows refuses symlinks.
+  Forge then writes a recorded link as a file holding its target, as Git does with
+  `core.symlinks=false`, and reads that file back as the link: editing the file changes
+  the link target. Dependency folders use junctions, which need no rights.
+- **Line endings.** Bytes are stored exactly; Forge never converts CRLF or LF. Configure
+  your editor for the project's line endings.
+- **Letter case.** Most Windows folders ignore case: a case-only rename saves as a rename,
+  but two paths that differ only in case cannot both be checked out.
+- **Private files.** Forge's owner-only checks use the user profile's access list, which
+  its folders inherit, instead of permission bits.
+- Each command reads its process start time through Windows PowerShell 5.1, which adds
+  about 0.2 s.
+
 ## Import from GitHub in the app
 
 1. Sign in to the development app and open **Projects → New project**.

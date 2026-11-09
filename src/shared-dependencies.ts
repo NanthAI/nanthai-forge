@@ -9,7 +9,6 @@ import {
   readdirSync,
   renameSync,
   rmSync,
-  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -38,6 +37,7 @@ import { acquireHeavySlot, heavySlotDirectory } from './heavy-slots.js';
 import { heavySlots, readClientSettings } from './client-settings.js';
 import { installRegistryHosts, type RegistryHosts } from './install-registry-hosts.js';
 import { sharedDownloadCache } from './install-download-cache.js';
+import { linkDirectory } from './source-links.js';
 
 export { npmInstaller };
 export type DependencyInstaller = (
@@ -406,7 +406,7 @@ export async function shareDependencies(
   // npm workspaces link siblings inside the root node_modules; they must reach the Lane's source too.
   const npmFolders = other ? [] : (workspaceDirectories(readFileSync(join(root, pm.lockfile))) ?? []);
   if (other || npmFolders.length) linkInstall(entry, root, other ? folders : npmFolders);
-  else symlinkSync(path, join(root, 'node_modules'), 'dir');
+  else linkDirectory(path, join(root, 'node_modules'));
   const fingerprint = dependencyKey(root);
   if (fingerprint) recordLink(root, { fingerprint, entry, folders: other ? folders : npmFolders });
   const skippedScripts = runScripts ? undefined : skippedInstallScripts(root, rebuild);

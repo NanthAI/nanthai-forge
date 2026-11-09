@@ -24,6 +24,7 @@ import { readSource } from './files.js';
 import { assertCurrentWorkFormat } from './work-format.js';
 import { invariant } from './errors.js';
 import { indexBuild, recordKeys, validateIndex, type IndexIO } from './work-record-index.js';
+import { syncDirectory } from './native-durability.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const collectionSchema = z.object({
   count: z.number().safe().nonnegative(),
@@ -258,14 +259,6 @@ function readRecordFields(directory: string, manifest: RecordManifest): Record<s
         : manifest.fields[key],
     ]),
   );
-}
-function syncDirectory(directory: string) {
-  const fd = openSync(directory, 'r');
-  try {
-    fsyncSync(fd);
-  } finally {
-    closeSync(fd);
-  }
 }
 export function recordIO(
   directory: string,

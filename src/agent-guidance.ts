@@ -1,21 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
-import {
-  existsSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-  lstatSync,
-  openSync,
-  fsyncSync,
-  closeSync,
-} from 'node:fs';
+import { existsSync, readFileSync, renameSync, writeFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { userInfo } from 'node:os';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import { guidanceInputSchema } from './agent-guidance-schema.js';
+import { syncDirectory, syncFile } from './native-durability.js';
 export { guidanceInputSchema } from './agent-guidance-schema.js';
 const configSchema = z.object({
   project: z.string().max(4000).default(''),
@@ -75,19 +67,9 @@ export function setLocalGuidance(store: WorkStore, input: unknown, actor = userI
     const path = join(store.directory, 'agent-guidance.json'),
       temporary = `${path}.${randomUUID()}.tmp`;
     writeFileSync(temporary, JSON.stringify(config), { mode: 0o600, flag: 'wx' });
-    const fd = openSync(temporary, 'r');
-    try {
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
-    }
+    syncFile(temporary);
     renameSync(temporary, path);
-    const dir = openSync(store.directory, 'r');
-    try {
-      fsyncSync(dir);
-    } finally {
-      closeSync(dir);
-    }
+    syncDirectory(store.directory);
     return command;
   });
 }

@@ -13,6 +13,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ForgeError, invariant } from './errors.js';
 import { refuseRealUserState } from './test-isolation.js';
+import { ownerOnly } from './file-mode.js';
 export type SavedCredential = {
   token: string;
   credentialId: string;
@@ -52,7 +53,7 @@ export function readAuth(): Store {
   const info = lstatSync(file);
   invariant(
     info.isFile() &&
-      (process.platform === 'win32' || ((info.mode & 0o077) === 0 && info.uid === process.getuid?.())),
+      (process.platform === 'win32' || (ownerOnly(info.mode) && info.uid === process.getuid?.())),
     'AUTH_FILE_PERMISSIONS',
     'Forge credentials must be in a user-owned 0600 regular file.',
   );

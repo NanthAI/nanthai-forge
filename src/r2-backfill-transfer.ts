@@ -2,12 +2,12 @@
 import { networkFetch } from './network-fetch.js';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, renameSync, rmSync } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { Transform, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { BackfillPin, BackfillTarget } from './r2-backfill-types.js';
 import { invariant, ForgeError } from './errors.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory, syncFileAsync } from './native-durability.js';
 
 async function verifyFile(path: string, pin: BackfillPin) {
   const hash = createHash('sha256');
@@ -58,14 +58,9 @@ export async function spoolBackfill(url: string, path: string, pin: BackfillPin)
       'BLOB_DIGEST_MISMATCH',
       'Backfill source differs from its digest; the row was not flipped.',
     );
-    const file = await open(temp, 'r');
-    try {
-      await file.sync();
-    } finally {
-      await file.close();
-    }
+    await syncFileAsync(temp);
     renameSync(temp, path);
-    syncDirectory(path.substring(0, path.lastIndexOf('/')));
+    syncDirectory(dirname(path));
   } catch (error) {
     rmSync(temp, { force: true });
     throw error instanceof ForgeError

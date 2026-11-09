@@ -7,6 +7,7 @@ import type { NativeFile } from './native-state-format.js';
 import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
 import { durableReplace } from './native-durability.js';
+import { diskShapeMatches } from './source-links.js';
 
 /** One pending in-place apply per client cache; the work lock serializes writers. */
 export const deltaJournalName = 'delta-apply.json';
@@ -214,13 +215,7 @@ export function deltaMatches(path: string, file: DeltaPin) {
     : stat.isFile() && stat.nlink === 1
       ? readFileSync(path)
       : null;
-  return Boolean(
-    bytes &&
-    digest(bytes) === file.blob &&
-    (stat.isSymbolicLink()
-      ? file.mode === 'symlink'
-      : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
-  );
+  return Boolean(bytes && digest(bytes) === file.blob && diskShapeMatches(stat, file.mode));
 }
 /** Every path whose current bytes move aside, pinned to the bytes the caller verified there:
  * removed files and incoming paths a file or link already holds (its prior blob, or the incoming

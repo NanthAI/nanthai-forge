@@ -5,7 +5,6 @@ import {
   readdirSync,
   copyFileSync,
   chmodSync,
-  symlinkSync,
   constants,
   realpathSync,
   existsSync,
@@ -19,8 +18,9 @@ import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { foldedCollisions, type NameFolding, type NativeFile } from './native-state-format.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { fileFlushFlags, syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
+import { writeSourceLink } from './source-links.js';
 
 /** Unlike existsSync, a dangling symlink still occupies a checkout path. */
 export function checkoutPathExists(path: string) {
@@ -44,7 +44,7 @@ export function installHostedFile(stage: string, objects: string, file: NativeFi
       'INVALID_NATIVE_SOURCE',
       'Source link target is invalid.',
     );
-    symlinkSync(bytes, target);
+    writeSourceLink(bytes, target);
   } else {
     // A clone shares blocks until edited (APFS/Btrfs); other filesystems copy.
     copyFileSync(source, target, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
@@ -167,7 +167,7 @@ export async function flushHostedFiles(stage: string, files: NativeFile[]) {
     16,
     async file => {
       const target = join(stage, file.path);
-      const handle = await checkoutIo(() => open(target, 'r'), 'durability');
+      const handle = await checkoutIo(() => open(target, fileFlushFlags()), 'durability');
       try {
         await checkoutIo(() => handle.sync(), 'durability');
       } finally {
@@ -206,6 +206,7 @@ export async function flushHostedCheckoutFiles(directory: string, files?: readon
   await mapExchange(directories, 16, async path => {
     const handle = await checkoutIo(() => open(path, 'r'), 'durability');
     try {
+      // oxlint-disable-next-line forge/no-readonly-fsync -- POSIX directory fsync; Windows returned above.
       await checkoutIo(() => handle.sync(), 'durability');
     } finally {
       await checkoutIo(() => handle.close(), 'durability');

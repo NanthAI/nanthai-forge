@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { invariant } from './errors.js';
 import { checkEnvCaches, checkEnvHomes, checkEnvToolchains } from './ecosystems.js';
 import { digest } from './hash.js';
+import { linkDirectory } from './source-links.js';
 
 /**
  * Transient, per-run settings that keep non-npm ecosystems working and warm inside the
@@ -83,6 +84,6 @@ export function prepareEcosystemHomes(ecosystem: ReturnType<typeof ecosystemChec
   for (const directory of ecosystem.directories) mkdirSync(directory, { recursive: true, mode: 0o700 });
   for (const { target, link } of ecosystem.links) {
     rmSync(link, { recursive: true, force: true });
-    symlinkSync(target, link, 'dir');
+    linkDirectory(target, link);
   }
 }

@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { mkdirBelow } from './mkdir-below.js';
 import { processAlive } from './local-process.js';
 import type { WorkStore } from './work-store.js';
+import { syncDirectory } from './native-durability.js';
 const schema = z.object({
   schema: z.literal(1),
   id: z.uuid(),
@@ -52,12 +53,7 @@ export function saveLandingWorkerState(store: WorkStore, state: LandingWorkerSta
     closeSync(file);
   }
   renameSync(temporary, path);
-  const parent = openSync(directory, 'r');
-  try {
-    fsyncSync(parent);
-  } finally {
-    closeSync(parent);
-  }
+  syncDirectory(directory);
 }
 /** A last event time plus current kernel identity, never a periodic heartbeat. */
 export function readLandingWorkerStatus(store: WorkStore) {

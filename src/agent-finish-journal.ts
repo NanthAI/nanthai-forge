@@ -24,6 +24,7 @@ import { invariant } from './errors.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
 import type { LandingPosition } from './landing-queue.js';
+import { syncDirectory } from './native-durability.js';
 
 const fields = z.record(z.string(), z.unknown());
 const attemptSchema = z.object({
@@ -123,12 +124,7 @@ export class FinishJournal {
       closeSync(file);
     }
     renameSync(temporary, this.path);
-    const directory = openSync(join(this.path, '..'), 'r');
-    try {
-      fsyncSync(directory);
-    } finally {
-      closeSync(directory);
-    }
+    syncDirectory(join(this.path, '..'));
     wakeLandingWorker(this.store);
   }
 }

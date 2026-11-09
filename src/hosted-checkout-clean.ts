@@ -8,6 +8,7 @@ import { captureExclusion, readSource } from './files.js';
 import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
+import { diskShapeMatches, diskMode } from './source-links.js';
 
 export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
 
@@ -129,12 +130,7 @@ export function cleanHostedCheckout(
           : null;
       const observedDigest = bytes ? digest(bytes) : null;
       const matches = Boolean(
-        file &&
-        bytes &&
-        observedDigest === file.blob &&
-        (stat.isSymbolicLink()
-          ? file.mode === 'symlink'
-          : file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable')),
+        file && bytes && observedDigest === file.blob && diskShapeMatches(stat, file.mode),
       );
       if (!matches && options.collect) {
         options.collect.push({ path, kind: saved ? 'edited' : 'extra' });
@@ -156,9 +152,7 @@ export function cleanHostedCheckout(
               observedMode: stat.isSymbolicLink()
                 ? 'symlink'
                 : stat.isFile()
-                  ? stat.mode & 0o111
-                    ? 'executable'
-                    : 'file'
+                  ? diskMode(stat, file?.mode)
                   : 'other',
             },
           },

@@ -191,7 +191,7 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
       return { path, blob: hit.blob, mode: hit.mode };
     }
     reread++;
-    const observed = nativeFile(root, path);
+    const observed = nativeFile(root, path, headModes.get(path));
     const { bytes } = observed;
     const mode = headModes.get(path) === 'gitlink' && observed.mode === 'file' ? 'gitlink' : observed.mode;
     if (mode === 'gitlink') gitlinkCommit(bytes);

@@ -14,7 +14,7 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { nativePaths } from './source-paths.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 export { nativePaths } from './source-paths.js';
@@ -64,7 +64,7 @@ export function nativeOwner(root: string): string | null {
   const marker = markerSchema.parse(JSON.parse(bytes.toString('utf8')));
   const owner = realpathSync(resolve(root, marker.owner));
   invariant(
-    owner === root || root.startsWith(join(owner, '.forge', 'work') + '/'),
+    owner === root || root.startsWith(join(owner, '.forge', 'work') + sep),
     'INVALID_NATIVE_SOURCE',
     'Native workspace must belong to its retained Work owner.',
   );
@@ -246,7 +246,7 @@ export class NativeSource {
       baseline.map(file => file.path),
       excluded,
     ).map(path => {
-      const observed = nativeFile(root, path);
+      const observed = nativeFile(root, path, baselineModes.get(path));
       const { bytes } = observed;
       const mode =
         baselineModes.get(path) === 'gitlink' && observed.mode === 'file' ? 'gitlink' : observed.mode;
@@ -333,7 +333,7 @@ export class NativeSource {
           // for rematerialization even if a derived clone is lost on restart.
           else if (
             !lstatSync(path).isSymbolicLink() &&
-            (clone?.method !== 'clone' || path.startsWith(join(destination, '.forge') + '/'))
+            (clone?.method !== 'clone' || path.startsWith(join(destination, '.forge') + sep))
           )
             syncFile(path);
         }

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, opendir, link, unlink, open } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, opendir, link, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { syncDirectoryAsync } from './native-durability.js';
 import {
   outputStreamId,
   outputChunkSchema,
@@ -40,12 +41,7 @@ export class HostedActionsOutputSpool {
           'Replay the original retained output record.',
         );
       }
-      const directory = await open(this.directory, 'r');
-      try {
-        await directory.sync();
-      } finally {
-        await directory.close();
-      }
+      await syncDirectoryAsync(this.directory);
     } finally {
       await unlink(temporary).catch(() => undefined);
     }

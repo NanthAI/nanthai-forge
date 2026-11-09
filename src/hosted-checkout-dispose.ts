@@ -8,7 +8,6 @@ import {
   readlinkSync,
   renameSync,
   rmdirSync,
-  symlinkSync,
   unlinkSync,
   type Stats,
 } from 'node:fs';
@@ -21,13 +20,11 @@ import { durableReplace, syncDirectory } from './native-durability.js';
 import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';
 import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
+import { diskShapeMatches, writeSourceLink } from './source-links.js';
 
 /** Forge-owned names inside `.forge`; anything else there is kept like any other local file. */
 const metadata = (markerName: string) => new Set([markerName, 'cache-use.json']);
-const shaped = (stat: Stats, file: NativeFile) =>
-  stat.isSymbolicLink()
-    ? file.mode === 'symlink'
-    : stat.isFile() && file.mode !== 'symlink' && Boolean(stat.mode & 0o111) === (file.mode === 'executable');
+const shaped = (stat: Stats, file: NativeFile) => diskShapeMatches(stat, file.mode);
 
 /** Retire the prior checkout directory after a whole-checkout publication.
  *
@@ -63,7 +60,7 @@ export function disposePriorCheckout(input: {
   /** Put moved bytes that differ back at their path without replacing anything recreated there. */
   const restore = (moved: string, at: string, stat: Stats) => {
     try {
-      if (stat.isSymbolicLink()) symlinkSync(readlinkSync(moved, { encoding: 'buffer' }), at);
+      if (stat.isSymbolicLink()) writeSourceLink(readlinkSync(moved, { encoding: 'buffer' }), at);
       else linkSync(moved, at);
     } catch {
       return false; // Recreated meanwhile, or no hard links here: the bytes stay aside, held.

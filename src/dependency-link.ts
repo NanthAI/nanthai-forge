@@ -11,6 +11,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { linkDirectory } from './source-links.js';
 
 const real = (path: string) => {
   try {
@@ -111,8 +112,11 @@ export function linkInstall(entry: string, root: string, folders: string[]): voi
       } else if (stat.isSymbolicLink()) {
         const workspace = laneSide(resolveLoose(source));
         if (workspace && laneFolders.has(workspace)) linked.push(workspace);
+        // oxlint-disable-next-line forge/raw-symlink -- recreates a link npm itself made in the cache.
         symlinkSync(workspace ? relative(dirname(target), workspace) : source, target);
-      } else symlinkSync(source, target, stat.isDirectory() ? 'dir' : 'file');
+      } else if (stat.isDirectory()) linkDirectory(source, target);
+      // oxlint-disable-next-line forge/raw-symlink -- a cached package file; Windows npm installs use copies.
+      else symlinkSync(source, target, 'file');
     }
   };
   const addBins = (modules: string, linked: string[]) => {
@@ -121,6 +125,7 @@ export function linkInstall(entry: string, root: string, folders: string[]): voi
       for (const [name, file] of declaredBins(folder)) {
         if (exists(join(bins, name))) continue;
         mkdirSync(bins, { recursive: true });
+        // oxlint-disable-next-line forge/raw-symlink -- POSIX .bin link; npm on Windows writes .cmd shims.
         symlinkSync(relative(bins, join(folder, file)), join(bins, name));
       }
   };
@@ -128,7 +133,7 @@ export function linkInstall(entry: string, root: string, folders: string[]): voi
     const from = join(entry, folder, 'node_modules'),
       to = join(root, folder, 'node_modules');
     if (!exists(from) || exists(to) || !exists(join(root, folder))) continue;
-    if (!folders.length) symlinkSync(from, to, 'dir');
+    if (!folders.length) linkDirectory(from, to);
     else {
       const linked: string[] = [];
       overlay(from, to, linked);

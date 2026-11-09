@@ -17,6 +17,7 @@ import {
   verifyCliRelease,
 } from './cli-release-trust.js';
 import { releaseVerifyOutcome, verifyCliReleases } from './cli-release-verify.js';
+import { ownerOnly } from './file-mode.js';
 
 /** `nforge cli release-key --out FILE`: a new Ed25519 key, PKCS#8 PEM, mode 0600, never overwritten. */
 export function cliReleaseKey(out: string) {
@@ -40,7 +41,7 @@ export async function cliReleaseSign(
   releaseNumber?: number,
 ) {
   invariant(
-    (statSync(keyFile).mode & 0o077) === 0,
+    ownerOnly(statSync(keyFile).mode),
     'CLI_RELEASE_KEY_EXPOSED',
     'The release key file must be readable by its owner only (chmod 600).',
   );
