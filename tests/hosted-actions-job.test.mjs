@@ -1866,10 +1866,18 @@ test('single execution uses the planning runner; distributed jobs and pack artif
   const plan = workflow.split('  hosted-plan:')[1].split('  hosted-check:')[0];
   assert.match(
     plan,
-    /if: steps.plan.outputs.single_shard != ''\n\s+timeout-minutes: 90\n\s+run: node control\/scripts\/hosted-actions-job.mjs run/,
+    /if: steps.plan.outputs.single_shard != ''\n\s+timeout-minutes: \$\{\{ fromJSON\(inputs.timeout_minutes \|\| vars.FORGE_CHECK_TIMEOUT_MINUTES \|\| 90\) \}\}\n\s+run: node control\/scripts\/hosted-actions-job.mjs run/,
   );
   assert.match(plan, /FORGE_ACTIONS_SHARD: \$\{\{ steps.plan.outputs.single_shard \}\}/);
-  assert.match(plan, /timeout-minutes: 120/);
+  assert.match(
+    plan,
+    /timeout-minutes: \$\{\{ fromJSON\(inputs.timeout_minutes \|\| vars.FORGE_CHECK_TIMEOUT_MINUTES \|\| 120\) \}\}/,
+  );
+  // A hung shard must be boundable per project: both hosted jobs and the single-shard step read the one input.
+  assert.equal(
+    (workflow.match(/inputs\.timeout_minutes \|\| vars\.FORGE_CHECK_TIMEOUT_MINUTES/g) ?? []).length,
+    3,
+  );
   assert.match(plan, /id: plan\n\s+timeout-minutes: 30/);
   assert.equal(
     (

@@ -548,6 +548,10 @@ Metadata read, and the Workflow run event. Its webhook remains `/github/webhook`
 The checked-in workflow branches on `deployment`. Empty deployment preserves the
 native/BYOCI `plan` input and export jobs. Convex dispatches on `main` with
 `runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
+A hung shard is bounded by `timeout_minutes` (shard jobs and the single-shard step; the planning
+job's whole budget when set), else by the repository variable `FORGE_CHECK_TIMEOUT_MINUTES`, else the
+unchanged defaults (shards 90, planning job 120). Forge's own repository sets the variable to 30; its
+slowest shard in the last 549 was 13.3 min.
 The fixed workflow checkout verifies and materializes the pinned Candidate using
 hash/size-checked storage downloads, including recipe-backed content, in windows
 of at most 400 descriptors. Three pages overlap resolution, verified streaming

@@ -24,6 +24,11 @@ on:
         required: false
         default: ''
         type: string
+      timeout_minutes:
+        description: Shard timeout in minutes (the planning job adds 30). Empty uses repository variable FORGE_CHECK_TIMEOUT_MINUTES, else 90.
+        required: false
+        default: ''
+        type: string
 permissions:
   contents: read
 jobs:
@@ -65,8 +70,8 @@ jobs:
   hosted-plan:
     if: ${{ inputs.deployment != '' }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
-    # Preserve the previous plan (30 min) plus execution (90 min) allowance.
-    timeout-minutes: 120
+    # Default: the plan (30 min) plus execution (90 min) allowance. A set timeout bounds the whole job.
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || vars.FORGE_CHECK_TIMEOUT_MINUTES || 120) }}
     permissions:
       contents: read
       id-token: write
@@ -308,7 +313,7 @@ jobs:
           path: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').paths }}
           key: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').key }}
       - if: steps.plan.outputs.single_shard != ''
-        timeout-minutes: 90
+        timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || vars.FORGE_CHECK_TIMEOUT_MINUTES || 90) }}
         run: node control/scripts/hosted-actions-job.mjs run
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
@@ -322,7 +327,7 @@ jobs:
     name: forge-hosted-${{ matrix.shard }}
     runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
     # Shards are planned for 3-8 min of tests; project checks may be longer, never 6 h.
-    timeout-minutes: 90
+    timeout-minutes: ${{ fromJSON(inputs.timeout_minutes || vars.FORGE_CHECK_TIMEOUT_MINUTES || 90) }}
     permissions:
       contents: read
       id-token: write
