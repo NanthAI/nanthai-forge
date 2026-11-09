@@ -531,7 +531,7 @@ npm install --prefix ./forge-tools --ignore-scripts --offline .forge/packages/na
 ./forge-tools/node_modules/.bin/nforge init-native ./my-project
 ```
 
-`package:local` stages only the package whitelist, bundles locked production dependencies and runs `npm pack --ignore-scripts`. The package stays private (no registry publish) and runs no lifecycle scripts. Linux and Windows execution of the packed CLI is untested; `node scripts/cli-platform-smoke.mjs` runs the built source CLI's core loop on any platform (Windows differences: [quickstart](quickstart.md#on-windows)).
+`package:local` stages only the package whitelist, bundles locked production dependencies and runs `npm pack --ignore-scripts`. The package stays private (no registry publish) and runs no lifecycle scripts. Linux and Windows execution of the packed CLI is untested; `node scripts/cli-platform-smoke.mjs` runs the built source CLI's core loop on any platform, and `.github/workflows/windows-cli.yml` runs it with the Windows platform tests on GitHub's free windows-latest runner when CLI code changes (Windows differences: [quickstart](quickstart.md#on-windows)).
 
 When you add, move or delete a doc under `docs/`, add, move or delete its manifest under `scripts/package-documents/` (see Targeted test preparation). `package.json` ships `docs/`, and `smoke:package` fails on any listed file that is missing or any unlisted one that is present. Keep `docs/vendor-notices/` byte-exact because tests pin their hashes.
 

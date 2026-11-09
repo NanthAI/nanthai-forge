@@ -1,0 +1,51 @@
+name: Windows CLI smoke
+
+# The CLI core loop on a free GitHub-hosted Windows runner (Issue 89460350): install, start,
+# edit a CRLF file and a path with a space, save, land, pull, plus the Windows platform tests.
+# Runs only when CLI code or this smoke changes; a few minutes per run, no secrets.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'scripts/cli-platform-smoke.mjs'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/windows-cli.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer main replaces an older run.
+concurrency:
+  group: ${{ github.workflow }}-newest-main
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run build:core
+      - run: npm link --ignore-scripts
+      - name: nforge from PowerShell
+        run: nforge --version
+      - name: nforge from cmd
+        shell: cmd
+        run: nforge --version
+      - name: Core-loop smoke
+        run: node scripts/cli-platform-smoke.mjs
+      - name: Windows platform tests
+        if: always()
+        run: |
+          node --test tests/local-process-snapshot.test.mjs tests/lint-rules.test.mjs
+          node --test --test-name-pattern=89460350 tests/source-durability.test.mjs
