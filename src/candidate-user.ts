@@ -247,12 +247,17 @@ const accessError =
   /permission denied|EACCES|EPERM|EROFS|read-only file system|not permitted|not found|no such file/i;
 const permissionError = /permission denied|EACCES|EPERM|EROFS|read-only file system|not permitted/i;
 const absolutePath = /(?:^|[\s'"`(=:])(\/[^\s'"`:,;()]+)/g;
+/** A path relative to the working folder that climbs out of it (Dart prints these). */
+const climbingPath = /(?:^|[\s'"`(=:])(?:\.\.\/)+([^\s'"`:,;()]+)/g;
 
 /**
- * Reads a Candidate's raw output for access errors on absolute paths and, after a failed command,
+ * Reads a Candidate's raw output for access errors on paths and, after a failed command,
  * names each path (at most three) and why the Candidate user cannot use it: the runner's file that
  * project code may not change, or a folder of the runner's home it cannot see. Paths are shown
  * relative to $RUNNER_TEMP, $RUNNER_TOOL_CACHE or $HOME, so the masked retained log keeps them.
+ * A relative path that climbs out of the working folder (`../../opt/…`, as Dart prints them) counts
+ * when its `../` chain reaches the root: the rest is then the absolute path, and is kept only when a
+ * folder two levels or more below the root exists for it.
  * Bounded: lines up to 4 KiB, at most 8 paths remembered.
  */
 export function candidateAccessNotes(input: {
@@ -279,13 +284,23 @@ export function candidateAccessNotes(input: {
     const root = roots.find(([, location]) => within(path, location));
     return root ? `${root[0]}${path.slice(root[1].length)}` : path;
   };
+  /** Whether some folder of this absolute path, at least two levels below the root, exists. */
+  const anchored = (path: string) => {
+    for (let at = path; dirname(at) !== at && dirname(dirname(at)) !== dirname(at); at = dirname(at))
+      if (exists(at)) return true;
+    return false;
+  };
   const line = (text: string) => {
     if (found.size >= 8 || !accessError.test(text)) return;
     const permission = permissionError.test(text);
-    for (const match of text.matchAll(absolutePath)) {
-      const path = resolve(match[1]!.replace(/[.'"`]+$/, ''));
+    const add = (path: string) => {
       if (!found.has(path)) found.set(path, permission);
       else if (permission) found.set(path, true);
+    };
+    for (const match of text.matchAll(absolutePath)) add(resolve(match[1]!.replace(/[.'"`]+$/, '')));
+    for (const match of text.matchAll(climbingPath)) {
+      const path = resolve('/', match[1]!.replace(/[.'"`]+$/, ''));
+      if (anchored(path)) add(path);
     }
   };
   return {

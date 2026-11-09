@@ -811,6 +811,22 @@ test('a failed Candidate command names the path and the user it could not use', 
     "Forge: $RUNNER_TEMP/.setup-beam/otp/erts-15.2/bin/erlexec exists for the runner but is not visible to the Candidate user forge-check: only the checkout, restored caches and toolchain folders of the runner's home are.",
   ]);
   // The Candidate's own checkout is its business, and the readable bin folder is visible.
+
+  // Dart prints the path relative to the working folder (live Flutter run, 2026-11-09): the ../ chain
+  // climbs to the root, so the rest is the path. A chain that ends higher up names no folder.
+  const dart = candidateAccessNotes({
+    user: CANDIDATE_USER,
+    env,
+    paths: { writable: ['/srv/ci-home/work/r/r'], readable: [] },
+    exists: path => path === '/opt/hostedtoolcache' || path === '/opt',
+  });
+  dart.accept(
+    "Creation failed, path = '../../../../../../../opt/hostedtoolcache/flutter/stable-x64/flutter/packages/flutter_tools/.dart_tool' (OS Error: Permission denied, errno = 13)\n",
+  );
+  dart.accept("EACCES: permission denied, mkdir '../../.mix/archives'\n");
+  assert.deepEqual(dart.notes(), [
+    'Forge: $RUNNER_TOOL_CACHE/flutter/stable-x64/flutter/packages/flutter_tools/.dart_tool is not writable for the Candidate user forge-check: it belongs to the runner (a toolchain or a system folder), which project code may read but not change.',
+  ]);
 });
 
 test("a pass needs the CI provider's success; any other conclusion never passes", () => {
