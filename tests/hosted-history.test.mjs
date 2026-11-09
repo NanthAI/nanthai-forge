@@ -2004,8 +2004,11 @@ test('an unmirrored project serves its landings as Git commits on the imported h
 // Incident (Issue 3bd4a8e9, 2026-11-09): on an imported project with no mirror, a member's Lane
 // fetch answered GIT_HISTORY_PREPARING forever, because Lane refs waited for a mirror commit.
 test('an unmirrored project lists and serves Lane refs on the imported and Forge-built main commits', async t => {
-  const source = sourceRepository(t),
-    f = fixture(t, source),
+  const source = sourceRepository(t);
+  // One large file (live, 2026-11-09: 11 files, 135 MB): too few files for the count threshold,
+  // so a first Lane build read all of them; it lists the parent tree from the pack instead.
+  source.head = commit(source.repo, { 'data/large.bin': Buffer.alloc(5 << 20, 'large\n') }, 'Add large');
+  const f = fixture(t, source),
     { s } = f;
   for (const table of [
     'projectHostedChannels',
@@ -2054,10 +2057,19 @@ test('an unmirrored project lists and serves Lane refs on the imported and Forge
   // A Lane on the imported main, before any landing: its parent is the imported commit.
   const onImport = lane(imported, { 'src/lane.go': 'package main // on import\n' }, 'Lane on import');
   await client([...strict, 'clone', '-q', remote(owner), repo]);
+  const metrics = [];
+  const log = console.log;
+  console.log = (...args) =>
+    String(args[0]).startsWith('FORGE_GIT_LANE_METRIC ')
+      ? metrics.push(JSON.parse(String(args[0]).slice(22)))
+      : log(...args);
+  t.after(() => (console.log = log));
   await client(
     [...strict, 'fetch', '-q', 'origin', `refs/forge/lanes/${onImport}:refs/remotes/origin/a`],
     repo,
   );
+  assert.equal(metrics[0].listing, 1, 'the parent tree came from the pack');
+  assert.ok(metrics[0].readBytes < 1 << 20, `read ${metrics[0].readBytes} bytes, not the large file`);
   assert.equal(rev('origin/a^'), source.head, 'built on the imported commit');
   assert.equal(changed('origin/main...origin/a'), 'src/lane.go\n');
 

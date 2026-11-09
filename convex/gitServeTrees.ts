@@ -45,6 +45,9 @@ export type TreeStep = {
 };
 const window = 100,
   parallel = 16;
+/** Base bytes missing from the alias object past which a build lists the parent commit's tree
+ * from the history packs instead of reading the files, however few they are. */
+export const listingBytes = 4 * 1024 * 1024;
 /** Tree bytes one pack scan keeps; past it the scan gives up. */
 export const treeBudget = 128 * 1024 * 1024;
 
@@ -304,6 +307,14 @@ export class TreeWork {
   }
   /** An alias answers a file when it has what that file's entry uses: the gitlink commit, the
    * size of an LFS path, else the blob id (aliases taken from a tree listing have no size). */
+  /** Whether these source objects hold more than `limit` bytes: one query per 100 ids, before
+   * their bytes are read (a few large files cost as much to read as many small ones). */
+  private async bytesOver(blobs: string[], limit: number) {
+    let bytes = 0;
+    for (let at = 0; at < blobs.length && bytes <= limit; at += window)
+      for (const object of await this.source.blobs(blobs.slice(at, at + window))) bytes += object.size;
+    return bytes > limit;
+  }
   private unknown(files: NativeFile[], lfs: LfsRule[]) {
     const answers = (file: NativeFile) => {
       const alias = this.aliases.get(file.blob);
@@ -342,7 +353,13 @@ export class TreeWork {
     const rules = await this.rules(files);
     const missing = this.unknown(files, rules);
     let listing = options.listing ?? null;
-    if (!listing && options.scan && missing.length > (options.threshold ?? 0)) listing = await options.scan();
+    if (
+      !listing &&
+      options.scan &&
+      missing.length &&
+      (missing.length > (options.threshold ?? 0) || (await this.bytesOver(missing, listingBytes)))
+    )
+      listing = await options.scan();
     if (
       listing &&
       !(

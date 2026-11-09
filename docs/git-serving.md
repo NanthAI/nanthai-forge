@@ -139,8 +139,9 @@ per 100 source objects it reads, one record mutation, and R2 PUTs for the Lane p
 commit, plus the trees and blobs its parent lacks), the pack's side-band framed copy (for
 protocol v2 on the Worker path) and an alias object (SHA-256 to Git blob id for the base and
 head). It reads the bytes of the files the Lane changed. File Git ids
-come from the alias object; when it lacks more than 32 of the base's (a project's first
-build, or a base far from the last one built), the build lists the parent commit's tree from
+come from the alias object; when it lacks more than 32 of the base's, or base files holding
+over 4 MiB (one size query first; a project's first build, or a base far from the last one
+built), the build lists the parent commit's tree from
 the history packs instead of reading every file: from each pack's tree index (its trees only,
 whole or as deltas: 1.65 MB for this repository's 25 MB import pack), else by scanning the
 pack (every object inflated; about 10 s of a 14 s first build in a Convex action here). A

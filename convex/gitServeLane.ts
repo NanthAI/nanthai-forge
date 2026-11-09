@@ -32,7 +32,7 @@ import {
  * alias object, else from the parent commit's trees in the stored history packs (Issue
  * 3bd4a8e9); bytes are read only for blobs the Lane changed and blobs neither knows. */
 /** Base blobs missing from the alias object past which the parent's trees are read from the
- * history packs instead of the files. */
+ * history packs instead of the files (as are fewer that hold over `listingBytes`). */
 export const listingThreshold = 32;
 type Plan = {
   status: 'build';
