@@ -36,6 +36,8 @@ for (const name of [
   'gitServeInflate',
   'gitServeLane',
   'gitServeLaneStore',
+  'gitServeMain',
+  'gitServeMainStore',
   'gitServeWorkerStore',
   'gitServeFrame',
 ])
@@ -1605,3 +1607,162 @@ test('a first Lane build lists the parent tree from the history packs and reads 
   assert.deepEqual([metrics[2].listing, metrics[2].packScanned, metrics[2].readBlobs], [0, 0, 3]);
   assert.equal(s.tables.projectGitLaneCommits.size, 1);
 });
+
+// Forge-built main commits (Issue 3bd4a8e9 line 3): an imported project without a mirror serves
+// its landings as Git commits on top of the imported history, built on the first Git request.
+const { hostedAcceptanceSchema } = await import('../dist/hosted-acceptance.js');
+let landingSequence = 0;
+function land(s, projectId, previous, state, message, extra = {}) {
+  landingSequence++;
+  const id = crypto.randomUUID();
+  const hash = 'a'.repeat(64);
+  const receipt = hostedAcceptanceSchema.parse({
+    schema: 1,
+    id,
+    projectId,
+    channel: 'main',
+    submissionId: crypto.randomUUID(),
+    operationId: crypto.randomUUID(),
+    attemptId: crypto.randomUUID(),
+    at: new Date(Date.UTC(2026, 10, 9, 8, landingSequence)).toISOString(),
+    authorityEpoch: 1,
+    previous: { head: previous, receiptId: crypto.randomUUID() },
+    candidate: {
+      id: crypto.randomUUID(),
+      digest: hash,
+      head: state,
+      inputs: { sha256: hash, size: 1 },
+      dependencies: { sha256: hash, size: 1 },
+      algorithm: 'synthetic',
+    },
+    message,
+    actor: { id: 'owner', kind: 'person' },
+    agentRun: 'quiet-otter',
+    policyDigest: hash,
+    check: null,
+    snapshot: { id, previousId: 'main-0', revision: landingSequence },
+    completion: { root: hash, pages: 0, lanes: 0, enabled: false },
+    automatic: false,
+    undo: { kind: 'revert', receiptId: id },
+    ...extra,
+  });
+  s.ctx.db.insert('projectHostedAcceptances', {
+    projectId,
+    receiptId: id,
+    submissionId: receipt.submissionId,
+    attemptId: receipt.attemptId,
+    sequence: landingSequence,
+    value: JSON.stringify(receipt),
+  });
+  setMain(s, projectId, state);
+  return id;
+}
+function setMain(s, projectId, head) {
+  for (const [key, row] of s.tables.projectHostedChannels)
+    if (row.projectId === projectId) s.tables.projectHostedChannels.delete(key);
+  s.ctx.db.insert('projectHostedChannels', {
+    projectId,
+    name: 'main',
+    operationId: crypto.randomUUID(),
+    selection: JSON.stringify({
+      schema: 2,
+      projectId,
+      snapshotId: 'seed',
+      sourceRevision: 0,
+      channel: 'main',
+      head,
+      authority: { mode: 'server', epoch: 1 },
+      receipt: { id: 'main-0', kind: 'server', previousHead: null, previousReceiptId: null },
+    }),
+  });
+}
+
+test('an unmirrored project serves its landings as Git commits on the imported history, built once', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  for (const table of ['projectHostedChannels', 'projectHostedAcceptances']) s.tables[table] ??= new Map();
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const imported = storeState(s, projectId, source.repo, source.head);
+  historyRow(s, projectId).importState = imported;
+  s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  setMain(s, projectId, imported);
+  const host = await gitHost(t, s);
+  const remote = `${host.base}/git/${projectId}.git`;
+  const work = scratch(t, 'forge-git-main-');
+
+  // Two landings: an edit, then a new file plus restoring an imported-era file (no duplicate).
+  const first = storeState(s, projectId, source.repo, source.head, {
+    'src/app.go': 'package main // landed\n',
+  });
+  land(s, projectId, imported, first, 'Edit app on Forge');
+  const old = git(source.repo, ['show', `${source.head}~5:src/app.go`]).toString();
+  const second = storeState(s, projectId, source.repo, source.head, {
+    'src/app.go': old,
+    'src/forge.go': 'package forge\n',
+  });
+  land(s, projectId, first, second, 'Add forge.go, restore app');
+  let before = host.snapshot();
+  const one = join(work, 'one');
+  const cloned = await client(['-c', 'transfer.fsckObjects=true', 'clone', url(host, projectId), one]);
+  assert.doesNotMatch(cloned.stderr, /not yet published/, 'no gap once built');
+  const built = host.since(before);
+  assert.equal(built.action, 1, 'one build');
+  const subjects = log(one).trim().split('\n');
+  assert.match(subjects[0], / Add forge\.go, restore app$/);
+  assert.match(subjects[1], / Edit app on Forge$/);
+  assert.equal(git(one, ['rev-parse', 'HEAD~2']).toString().trim(), source.head, 'on the imported history');
+  assert.equal(git(one, ['show', 'HEAD:src/app.go']).toString(), old);
+  assert.equal(git(one, ['show', 'HEAD~1:src/app.go']).toString(), 'package main // landed\n');
+  assert.equal(git(one, ['diff', '--name-only', 'HEAD~2', 'HEAD']).toString(), 'src/app.go\nsrc/forge.go\n');
+  // The restored blob is in the imported pack already: the Forge pack never repeats it (the strict
+  // clone above rejects duplicates).
+  const forgePack = historyPacks(s, projectId).find(row => row.source === 'forge');
+  assert.equal(forgePack.objects, 2 + 3 + 3, 'two commits; root+src trees twice less one; two new blobs');
+  const commitText = git(one, ['cat-file', 'commit', 'HEAD']).toString();
+  assert.match(commitText, /^author synthetic-owner\/quiet-otter <synthetic-owner@users\.noreply\.forge> /m);
+  assert.match(commitText, new RegExp(`Forge-State: ${second}\n`));
+  await client(['fsck', '--full', '--strict'], one);
+  const tip = git(one, ['rev-parse', 'HEAD']).toString().trim();
+
+  // Cached: the next clone builds nothing and gets the same ids.
+  before = host.snapshot();
+  const two = join(work, 'two');
+  await client(['clone', '-q', url(host, projectId), two]);
+  const cached = host.since(before);
+  assert.deepEqual([cached.action, cached.mutation], [0, 0]);
+  assert.equal(git(two, ['rev-parse', 'HEAD']).toString().trim(), tip, 'stable ids');
+
+  // A later landing adds one commit on the last; old ids never change, small packs merge.
+  const packsBefore = historyPacks(s, projectId).length;
+  for (let i = 0; i < 4; i++) {
+    const next = storeState(s, projectId, source.repo, source.head, {
+      'src/app.go': old,
+      'src/forge.go': `package forge // ${i}\n`,
+    });
+    land(
+      s,
+      projectId,
+      s.tables.projectHostedAcceptances.size ? lastState(s, projectId) : second,
+      next,
+      `Step ${i}`,
+    );
+    await client(['-c', 'transfer.fsckObjects=true', 'fetch', '-q', 'origin'], one);
+  }
+  assert.equal(git(one, ['rev-parse', 'origin/main~4']).toString().trim(), tip);
+  assert.ok(historyPacks(s, projectId).length <= packsBefore + 2, 'Forge packs merge geometrically');
+  const three = join(work, 'three');
+  await client(['-c', 'transfer.fsckObjects=true', 'clone', '-q', url(host, projectId), three]);
+  assert.equal(
+    git(three, ['rev-list', '--count', 'HEAD']).toString().trim(),
+    String(Number(git(source.repo, ['rev-list', '--count', 'HEAD']).toString()) + 6),
+  );
+  await client(['fsck', '--full', '--strict'], three);
+});
+const url = (host, projectId) => `${host.base}/git/${projectId}.git`;
+function lastState(s, projectId) {
+  const rows = [...s.tables.projectHostedAcceptances.values()].filter(row => row.projectId === projectId);
+  return JSON.parse(rows.at(-1).value).candidate.head;
+}

@@ -57,6 +57,8 @@ const packView = v.object({
   objects: v.number(),
   packSha1: v.string(),
   at: v.number(),
+  /** Forge packs (Issue 3bd4a8e9): the main State their tip commit is. */
+  state: v.optional(v.string()),
 });
 /** Everything one history read or import run needs, in one query. `actor` set:
  * current read access is checked first. */
@@ -95,6 +97,7 @@ export async function loadHistory(ctx: QueryCtx, projectId: Id<'hostedProjects'>
       objects: pack.objects,
       packSha1: pack.packSha1,
       at: pack.at,
+      ...(pack.main ? { state: pack.main.state } : {}),
     })),
     morePacks: packs.length > historyPackPage,
     mirror: await mirrorMapping(ctx, projectId),
@@ -217,8 +220,8 @@ export const record = internalMutation({
   },
 });
 
-/** Which of these chunk digests a recorded pack of the project still pins (its chunks or
- * framed copy); those are never deleted by unrecorded-chunk cleanup. Bounded by
+/** Which of these chunk digests a recorded pack of the project still pins (its chunks,
+ * framed copy, object set or main listing); those are never deleted by unrecorded-chunk cleanup. Bounded by
  * historyPackPage rows. */
 export const referencedChunks = internalQuery({
   args: { projectId: v.id('hostedProjects'), sha256s: v.array(v.string()) },
@@ -232,7 +235,14 @@ export const referencedChunks = internalQuery({
     return [
       ...new Set(
         packs
-          .flatMap(pack => [...pack.chunks, ...(pack.framed ?? [])].map(chunk => chunk.sha256))
+          .flatMap(pack =>
+            [
+              ...pack.chunks,
+              ...(pack.framed ?? []),
+              ...(pack.objectSet ? [pack.objectSet] : []),
+              ...(pack.main ? [pack.main.listing] : []),
+            ].map(chunk => chunk.sha256),
+          )
           .filter(sha => wanted.has(sha)),
       ),
     ];

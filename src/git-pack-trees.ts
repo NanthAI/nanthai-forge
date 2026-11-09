@@ -9,7 +9,8 @@ import { gitHash } from './hosted-github-git.js';
  * (whole, or deltas against a tree) are kept. Commits and blobs are skipped. */
 export type TreeListing = Map<string, { mode: string; sha: string }>;
 
-const tree = 2,
+const commit = 1,
+  tree = 2,
   ofsDelta = 6,
   refDelta = 7;
 export class PackTrees {
@@ -26,10 +27,21 @@ export class PackTrees {
   private at = 0; // pack offset of buffer[0]
   private left = -1; // objects still to read in this pack; -1 before its header
   private treeAt = new Map<number, string>(); // pack offset -> tree id, this pack only
+  /** With `objects`, every tree id and every id a tree names (blobs, subtrees, gitlinks): the
+   * objects stored history holds, so a new pack never repeats one. With `commit`, that commit's
+   * bytes when the scan meets it whole. */
+  readonly objects: Set<string> | null;
+  commit: Buffer | null = null;
   constructor(
     private readonly budget: number,
-    private readonly cacheBytes = 16 * 1024 * 1024,
-  ) {}
+    options: { objects?: boolean; commit?: string; cacheBytes?: number } = {},
+  ) {
+    this.objects = options.objects ? new Set() : null;
+    this.wanted = options.commit ?? null;
+    this.cacheBytes = options.cacheBytes ?? 16 * 1024 * 1024;
+  }
+  private readonly wanted: string | null;
+  private readonly cacheBytes: number;
 
   get size() {
     return this.entries.size;
@@ -154,6 +166,10 @@ export class PackTrees {
       }
       const id = gitHash('tree', bytes);
       if (!this.entries.has(id)) {
+        if (this.objects) {
+          this.objects.add(id);
+          if (!this.collect(bytes)) return 'bad';
+        }
         // A delta whose result is already kept whole is dropped; deltas never form a cycle
         // because a base is always an earlier, already-kept tree.
         this.entries.set(id, { data: inflated.buffer, base: base ?? null });
@@ -161,9 +177,40 @@ export class PackTrees {
         if (base !== undefined) this.remember(id, bytes);
       }
       this.treeAt.set(offset, id);
-    }
+    } else if (
+      type === commit &&
+      this.wanted &&
+      !this.commit &&
+      gitHash('commit', inflated.buffer) === this.wanted
+    )
+      this.commit = inflated.buffer;
     return next;
   }
+  private collect(bytes: Buffer) {
+    for (let at = 0; at < bytes.length;) {
+      const nul = bytes.indexOf(0, at);
+      if (nul < 0 || nul + 21 > bytes.length) return false;
+      const id = bytes.toString('hex', nul + 1, nul + 21);
+      if (!this.objects!.has(id)) {
+        this.objects!.add(id);
+        this.kept += 64;
+      }
+      at = nul + 21;
+    }
+    return true;
+  }
+}
+
+/** The tree id a commit object names. */
+export const commitTree = (bytes: Buffer) =>
+  /^tree ([0-9a-f]{40})\n/.exec(bytes.toString('latin1', 0, 46))?.[1] ?? null;
+/** An object id set as sorted raw 20-byte ids (an R2 object), and back. */
+export function objectSetBytes(ids: Iterable<string>) {
+  return Buffer.concat([...new Set(ids)].sort().map(id => Buffer.from(id, 'hex')));
+}
+export function readObjectSet(bytes: Buffer, into = new Set<string>()) {
+  for (let at = 0; at + 20 <= bytes.length; at += 20) into.add(bytes.toString('hex', at, at + 20));
+  return into;
 }
 
 /** Every blob, executable, symlink and gitlink path under `root`, or null when a tree is

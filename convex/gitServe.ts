@@ -93,7 +93,7 @@ const gitReply = (kind: 'advertisement' | 'result', body: BodyInit) =>
 
 /** A stored pack's bytes; history packs also carry their Git pack name. */
 type PackBytes = { tip: string; bytes: number; objects: number; chunks: { sha256: string; size: number }[] };
-type Pack = PackBytes & { packSha1: string };
+type Pack = PackBytes & { packSha1: string; state?: string };
 type LaneArgs = { list: boolean; named: string[]; commits: string[] };
 type LaneRow = { laneId: string; commit: string; pack: PackBytes | null };
 type Loaded = {
@@ -147,7 +147,10 @@ export function servedRefs(loaded: Loaded) {
   const main = mirrored(loaded);
   const covered = main && packs.some(pack => pack.tip === main.commit);
   const tip = covered ? main.commit : packs.at(-1)!.tip;
-  const tipState = covered ? main.state : packs.length === 1 ? row.importState : null;
+  // Forge-built main commits (Issue 3bd4a8e9) name the State their tip is.
+  const tipState = covered
+    ? main.state
+    : (packs.at(-1)!.state ?? (packs.length === 1 ? row.importState : null));
   const gap =
     loaded.mainHead && tipState !== loaded.mainHead
       ? `Forge main (State ${loaded.mainHead.slice(0, 12)}) has landings not yet published as Git commits; refs/heads/main is ${tip.slice(0, 12)}, the newest published one.`
@@ -192,6 +195,21 @@ async function preparedRefs(
   ) {
     await ctx.runAction(internal.projectHistoryImport.catchUp, { projectId: loaded.projectId });
     loaded = await reload();
+  }
+  // No mirror: main's landings after the stored history become Forge-built commits, built by
+  // the first listing after they land (one build per main move; others wait for its lease).
+  if (
+    loaded.history?.row.status === 'ready' &&
+    !main &&
+    (loaded.history.row.catchUp?.until ?? 0) <= Date.now()
+  ) {
+    const { gap } = servedRefs(loaded);
+    if (gap) {
+      const failed = await ctx.runAction(internal.gitServeMain.build, { projectId: loaded.projectId });
+      if (failed)
+        console.warn(`FORGE_GIT_MAIN_FAILED ${JSON.stringify({ projectId: loaded.projectId, ...failed })}`);
+      loaded = await reload();
+    }
   }
   const missing = loaded.member
     ? named.filter(laneId => !loaded.lanes.some(lane => lane.laneId === laneId))

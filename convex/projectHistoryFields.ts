@@ -65,7 +65,17 @@ export const historyTables = {
     bytes: v.number(),
     objects: v.number(),
     packSha1: v.string(),
-    source: v.union(v.literal('import'), v.literal('catch-up')),
+    /** `forge`: commits Forge built for main's landings on an unmirrored project (Issue
+     * 3bd4a8e9), whole objects only, none already in an earlier pack. */
+    source: v.union(v.literal('import'), v.literal('catch-up'), v.literal('forge')),
+    /** Sorted raw ids of the pack's trees and the ids they name (R2), so a Forge pack never
+     * repeats an object stored history holds; written by the first Forge build that needs it. */
+    objectSet: v.optional(historyChunk),
+    /** Forge packs: the tip commit's State, tree and tree listing (R2), and the last landing
+     * (acceptance sequence) it covers. */
+    main: v.optional(
+      v.object({ state: v.string(), tree: v.string(), sequence: v.number(), listing: historyChunk }),
+    ),
     at: v.number(),
   })
     .index('by_project', ['projectId'])

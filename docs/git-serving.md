@@ -81,6 +81,27 @@ The packs are the project's stored Git history: the Git host's own pack bytes in
   (one fetch per mirror move, not per clone; a two-minute lease stops repeated fetches).
 - A project with neither returns `GIT_HISTORY_UNAVAILABLE`.
 
+### Main landings without a mirror
+
+On an imported project whose main has no GitHub mirror, Forge makes main's landings Git
+commits itself, on top of the imported history: one commit per landing, oldest first, built
+on the first ref listing after the landings (nothing runs at landing time). Each commit's
+tree is the landing's State published as the mirror would; its parent is the previous
+landing's commit (the import commit for the first); its author is the lander's public Forge
+handle (`handle/agent-run` for an agent) at `<handle>@users.noreply.forge`, at the landing
+time; its message is the landing message with `Forge-State:`, `Forge-Acceptance:` and
+`Forge-View:` trailers. A built commit is stored and never rebuilt, so its id is stable.
+
+A build reads only the files the landings changed: the first lists the import commit's tree
+from the stored pack, later ones the previous build's tree listing. Its pack holds the new
+commits, trees and blobs and never an object stored history already has (each pack row keeps
+its object set), so strict clones (`transfer.fsckObjects`) accept the joined pack. Small
+Forge packs merge into the next one while at most twice its size, so a project keeps about
+log2(builds) Forge packs. One request builds per main move (a two-minute lease); others list
+the stored refs with the `remote:` gap line meanwhile. A build covers at most 100 landings;
+a longer backlog continues on the next listing. Forge packs count toward the history limit.
+Projects whose history came from a mirror get main's commits from that mirror instead.
+
 A clone streams every stored pack from R2 as one pack: a single pack passes through
 byte-exact, several are joined under a new header and SHA-1 trailer. A fetch sends the
 packs after the newest stored tip the client already has. The client's `index-pack`
@@ -114,6 +135,13 @@ scan that finds no such tree, or keeps more than 128 MiB of trees, falls back to
 the files. Later fetches of the same head read the cached row. A Lane fetch sends history after the newest stored commit the client has,
 plus the Lane pack. Into a repository without main, that history can repeat an object of
 the Lane pack, which `transfer.fsckObjects` rejects; fetch main first.
+
+The first listing after landings on a project without a mirror adds one build action: one
+plan query (the landings, at most 100 receipt rows, and the pack rows), one lease mutation,
+one query per 100 source objects it reads, one record mutation, R2 GETs for each pack's
+object set (or, the first time, the pack itself) and the previous tree listing, and R2 PUTs
+for the new pack, its object set and tree listing. A listing with no new landing adds
+nothing.
 
 A Convex HTTP response is at most 100 MiB. Without the large-pack Worker, a fetch whose pack
 is larger returns `GIT_PACK_TOO_LARGE` with its size.

@@ -46,8 +46,23 @@ export function treeObjects(files: readonly GitEntry[]) {
   return { root: write(root), trees };
 }
 
-/** The commit is a pure function of its inputs, so the same saved head always gets the
- * same id. Trailers name the Lane and State it came from. */
+/** A commit with one parent, author = committer at `at` (UTC). A pure function of its inputs,
+ * so the same inputs always get the same id. */
+export function commitBytes(input: {
+  tree: string;
+  parent: string;
+  author: { name: string; email: string };
+  at: string;
+  message: string;
+}) {
+  const seconds = Math.floor(Date.parse(input.at) / 1000);
+  invariant(Number.isSafeInteger(seconds), 'GIT_LANE_TREE', 'The source has an invalid time.');
+  const person = `${input.author.name} <${input.author.email}> ${seconds} +0000`;
+  return Buffer.from(
+    `tree ${input.tree}\nparent ${input.parent}\nauthor ${person}\ncommitter ${person}\n\n${input.message}\n`,
+  );
+}
+/** A Lane's commit for its saved head; trailers name the Lane and State it came from. */
 export function laneCommitBytes(input: {
   tree: string;
   parent: string;
@@ -57,13 +72,11 @@ export function laneCommitBytes(input: {
   laneId: string;
   state: string;
 }) {
-  const seconds = Math.floor(Date.parse(input.at) / 1000);
-  invariant(Number.isSafeInteger(seconds), 'GIT_LANE_TREE', 'The saved head has an invalid time.');
-  const person = `${input.author.name} <${input.author.email}> ${seconds} +0000`;
   const message = input.message.trimEnd() || 'Lane save';
-  return Buffer.from(
-    `tree ${input.tree}\nparent ${input.parent}\nauthor ${person}\ncommitter ${person}\n\n${message}\n\nForge-Lane: ${input.laneId}\nForge-State: ${input.state}\n`,
-  );
+  return commitBytes({
+    ...input,
+    message: `${message}\n\nForge-Lane: ${input.laneId}\nForge-State: ${input.state}`,
+  });
 }
 
 const typeCode = { commit: 1, tree: 2, blob: 3 } as const;
@@ -88,5 +101,18 @@ export function writePack(objects: readonly PackObject[]) {
     parts.push(Buffer.from(head), deflateSync(object.bytes));
   }
   const body = Buffer.concat(parts);
+  return Buffer.concat([body, createHash('sha1').update(body).digest()]);
+}
+
+/** Packs of whole objects (no deltas), with no object in two of them, as one pack. */
+export function joinPacks(packs: readonly Buffer[]) {
+  const header = Buffer.alloc(12);
+  header.write('PACK', 0, 'latin1');
+  header.writeUInt32BE(2, 4);
+  header.writeUInt32BE(
+    packs.reduce((sum, pack) => sum + pack.readUInt32BE(8), 0),
+    8,
+  );
+  const body = Buffer.concat([header, ...packs.map(pack => pack.subarray(12, pack.length - 20))]);
   return Buffer.concat([body, createHash('sha1').update(body).digest()]);
 }
