@@ -681,6 +681,29 @@ test('the declaration scanner masks strings and comments and never reads functio
   assert.equal(scanBraces('class A {', 'swift').ok, false);
 });
 
+test('install: Package.swift, the Podfile and Gradle scripts are code and run only when everything is allowed; pub get runs none', () => {
+  const read = () => undefined;
+  for (const manager of ['swiftpm', 'cocoapods', 'gradle']) {
+    assert.match(ecosystemInstall(manager, read, { machine: true }).refusal, /installScripts:true/, manager);
+    assert.equal(
+      ecosystemInstall(manager, read, { startFlag: true, machine: false }).scripts,
+      'all',
+      manager,
+    );
+  }
+  assert.deepEqual(ecosystemInstall('swiftpm', read, { startFlag: true, machine: false }).argv, [
+    'swift',
+    'package',
+    'resolve',
+  ]);
+  assert.deepEqual(ecosystemInstall('pub', read, { machine: false }), {
+    manager: 'pub',
+    requested: null,
+    scripts: 'none',
+    argv: ['dart', 'pub', 'get'],
+  });
+});
+
 test('the Swift and Dart fixture repositories are registry entries', () => {
   for (const id of ['swift', 'dart'])
     assert.ok(

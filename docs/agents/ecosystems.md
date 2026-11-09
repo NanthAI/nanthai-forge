@@ -170,3 +170,9 @@ SwiftPM package plugins (`.plugin(`, `plugins:`), Gradle build scripts, script p
 They run only inside the repository's own declared check, in the check environment, like any build
 script the check command runs; nothing runs them elsewhere, and a change to them makes the first
 check risky.
+
+Their registry `install` (`src/ecosystem-install.ts`) follows the same install-script policy as
+Bundler and Mix: `swift package resolve`, `pod install` and `gradle dependencies` run repository code
+(the manifest is a program), so they run only when start passes `installScripts:true` or this
+machine's installScripts setting accepts forge.json `install.scripts`. `dart pub get` runs no package
+scripts and needs no permission.

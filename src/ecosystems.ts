@@ -337,7 +337,18 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
   {
     id: 'jvm',
     code: 'java|kts?|scala',
-    managers: [{ name: 'maven' }, { name: 'gradle', unpinned: ['gradle.lockfile'] }],
+    managers: [
+      { name: 'maven' },
+      {
+        name: 'gradle',
+        unpinned: ['gradle.lockfile'],
+        install: {
+          argv: ['gradle', 'dependencies'],
+          manifestIsCode: true,
+          runs: 'the build and settings scripts (Groovy or Kotlin code), buildSrc and applied plugins',
+        },
+      },
+    ],
     // Gradle's project cache, Kotlin 2's project folder and the Android native build folder.
     regenerableDirs: ['.gradle', '.kotlin', '.cxx'],
     actions: {
@@ -399,9 +410,26 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     id: 'swift',
     code: 'swift',
     managers: [
-      { name: 'swiftpm', manifests: ['Package.swift'], lockfiles: ['Package.resolved'] },
+      {
+        name: 'swiftpm',
+        manifests: ['Package.swift'],
+        lockfiles: ['Package.resolved'],
+        install: {
+          argv: ['swift', 'package', 'resolve'],
+          manifestIsCode: true,
+          runs: 'Package.swift (Swift code SwiftPM compiles and runs); package plugins run when the check builds',
+        },
+      },
       // Xcode projects (`*.xcodeproj`) are patterned names: src/package-graph-swift.ts reads them.
-      { name: 'cocoapods', unpinned: ['Podfile.lock'] },
+      {
+        name: 'cocoapods',
+        unpinned: ['Podfile.lock'],
+        install: {
+          argv: ['pod', 'install'],
+          manifestIsCode: true,
+          runs: 'the Podfile (Ruby code), its hooks and pod prepare_command scripts',
+        },
+      },
     ],
     regenerableDirs: ['.build', '.swiftpm', 'DerivedData', 'Pods'],
     nonSourceDirs: ['DerivedData', 'Pods', 'Carthage'],
@@ -445,7 +473,15 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
   {
     id: 'dart',
     code: 'dart',
-    managers: [{ name: 'pub', manifests: ['pubspec.yaml'], lockfiles: ['pubspec.lock'] }],
+    managers: [
+      {
+        name: 'pub',
+        manifests: ['pubspec.yaml'],
+        lockfiles: ['pubspec.lock'],
+        // pubspec.yaml is data and pub runs no package scripts; build hooks run when the check builds.
+        install: { argv: ['dart', 'pub', 'get'], runs: 'no package scripts' },
+      },
+    ],
     regenerableDirs: ['.dart_tool'],
     actions: {
       // Flutter apps and packages (`sdk: flutter`) take Flutter, which bundles its own Dart.
