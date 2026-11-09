@@ -438,7 +438,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   of hub modules (`wide`); then *recent* failers; then tests that watch a distinctive name in a changed source (any import distance);
   then `near` consumers (two modules between). There is no file count. Mandatory, learned and direct
   tests are protected: the time budget never trims them (`local.protected`; `protectedOverBudget`
-  says when they alone exceed it), and only the run's wall-time cap stops one.
+  says when they alone exceed it), and only the run's wall-time cap stops one, which makes the
+  run NOT COMPLETE (below).
   A *direct* test runs a changed module: it loads it itself or through test fixtures (a helper
   under `tests/` adds no distance), or loads a module that imports it or dispatches it in process
   (*fixture-reached*: a fixture that loads `convex/a.ts` runs what `a.ts` imports for every test
@@ -505,7 +506,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   file once the budget is spent (the first file always runs), and so ends within the budget plus
   about one file. Files it did not start are `stopped` in the receipt (`stoppedForTime` counts them)
   and join the deferred set; `stoppedRerun` is `preflight '{"laneId":"…","retry":true}'`, which
-  plans exactly those files (passes are reused, no filler). A failure ends the run the same way (`stoppedForFailure`): the rest
+  plans exactly those files (passes are reused, no filler). When a stopped file is must-run
+  (changed, learned or direct), the run is **NOT COMPLETE**: not passed (`passed: false`) and not
+  failed (`exitCode: 0`). `incomplete` counts those files (`mustRun`, listed first in `stopped`)
+  and gives the one command that finishes them, `finish`:
+  `preflight '{"laneId":"…","retry":true,"trim":false}'`, the stopped files with no wall-time cap,
+  priced in `estimateMinutes` at this run's speed. `land --save` reports it as
+  `status: "incomplete"` with the same count and command; it advises and never refuses, since the
+  landing check runs those files. A protected tier that fits the budget changes nothing. A failure ends the run the same way (`stoppedForFailure`): the rest
   is not started, passes are kept, fix and run again. A cut trims the farthest
   tier first, never leaves a nearer consumer out while a farther one runs, and never touches
   protected tests. The plan's `local.summary` and the receipt

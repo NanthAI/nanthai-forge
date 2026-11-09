@@ -83,6 +83,19 @@ export function finishGates(
         ...(receipt.exitCode ? { exitCode: receipt.exitCode } : {}),
         at: receipt.at,
       };
+    // Must-run files the budget did not start: never shown as a pass, never refused as a failure
+    // (the landing check runs them); the receipt's one command finishes them first.
+    else if (sameSource && receipt?.incomplete)
+      advisories.preflight = {
+        status: 'incomplete',
+        tests: receipt.tests,
+        mustRunNotRun: receipt.incomplete.mustRun,
+        finish: receipt.incomplete.finish,
+        estimateMinutes: receipt.incomplete.estimateMinutes,
+        reason: `NOT COMPLETE: ${receipt.incomplete.mustRun} must-run test file(s) did not run locally; only the landing check runs them unless you finish them first.`,
+        deferredTests: receipt.deferredTests ?? 0,
+        at: receipt.at,
+      };
     else if (sameSource && receipt?.passed)
       advisories.preflight = {
         status: 'passed',

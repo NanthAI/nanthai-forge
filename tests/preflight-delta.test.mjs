@@ -292,11 +292,22 @@ test('direct tests are never trimmed by an estimate; the wall-time cap names the
   // other starts; the receipt names the stopped file with a rerun of just those.
   plan.local.budgetSeconds = 0;
   const receipt = f.run(plan);
-  assert.equal(receipt.passed, true);
+  // A stopped must-run file is never a pass (ec7960f9): NOT COMPLETE, with the one finish command.
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.exitCode, 0);
+  assert.deepEqual(receipt.incomplete, {
+    mustRun: 1,
+    finish: `nforge agent '${f.root}' preflight '{"laneId":"${laneId}","retry":true,"trim":false}'`,
+    estimateMinutes: 1,
+  });
   assert.equal(receipt.tests, 1);
   assert.equal(receipt.stoppedForTime, 1);
   assert.deepEqual(receipt.stopped, [last]);
   assert.match(receipt.stoppedRerun, /preflight '\{"laneId":"[0-9a-f-]+","retry":true\}'/);
+  // The finish command plans exactly the stopped files with no wall-time cap.
+  const finish = f.plan([], { trim: false, only: receipt.stopped });
+  assert.deepEqual(finish.tests, [last]);
+  assert.equal(finish.local.trim, false);
   // That rerun plans exactly the stopped files; the passed one is reused, nothing else is added.
   const rerun = f.plan([], { budgetSeconds: 180, trim: true, only: receipt.stopped });
   assert.deepEqual(rerun.tests, [last]);

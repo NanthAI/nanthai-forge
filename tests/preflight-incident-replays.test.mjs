@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Incident replays on the real Forge inventory (Issue c14f4065): each case is a preflight that let a
-// landing check fail or ran far more than the change needed. Selection only (a local graph read).
+// landing check fail or ran far more than the change needed. Selection only (a local graph read), plus
+// the pure run verdict where a case needs it.
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -12,6 +13,7 @@ import {
   sourceFiles,
 } from '../scripts/test-impact.mjs';
 import { scanReaders } from '../scripts/test-tree-scanners.mjs';
+import { incompletePreflight, mustRunNotRun, preflightVerdict } from '../dist/agent-preflight-incomplete.js';
 
 const files = sourceFiles(new URL('..', import.meta.url).pathname);
 // None of these paths is a script, so every case parses the same graph: one parse serves them all.
@@ -177,7 +179,36 @@ test('e5e6fca8: the four files a wide source change broke are selected and prote
   const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 180, secondsPerFile: 4 });
   assert.equal(fit.protectedOverBudget, true);
   for (const test of failed) assert.ok(fit.tests.includes(test), `${test} is never trimmed`);
-  t.diagnostic(`direct ${direct.length}; ${failed.map(test => direct.indexOf(test)).join(' ')}`);
+  // The run's 180 s wall clock at 4 s per file starts the first 45 planned files and stops the rest.
+  // Those stopped must-run files make the run NOT COMPLETE, never a pass (ec7960f9).
+  const kept = new Set(fit.tests);
+  const tierTests = Object.fromEntries(
+    plan.tiers.map(item => [item.tier, item.tests.filter(x => kept.has(x))]),
+  );
+  const notRun = fit.tests.slice(180 / 4);
+  const missed = mustRunNotRun(tierTests, notRun);
+  for (const test of failed) assert.ok(missed.includes(test), `${test} is counted as must-run, not run`);
+  const incomplete = incompletePreflight({
+    root: '/lane',
+    laneId: 'L',
+    tierTests,
+    notRun,
+    secondsPerFile: 4,
+  });
+  assert.equal(incomplete.mustRun, missed.length);
+  assert.equal(
+    incomplete.finish,
+    `nforge agent '/lane' preflight '{"laneId":"L","retry":true,"trim":false}'`,
+  );
+  assert.equal(preflightVerdict({ passed: false, incomplete }), 'NOT COMPLETE');
+  // When the protected tier fits, nothing changes: no must-run file was stopped.
+  assert.equal(
+    incompletePreflight({ root: '/lane', laneId: 'L', tierTests, notRun: [], secondsPerFile: 4 }),
+    undefined,
+  );
+  t.diagnostic(
+    `direct ${direct.length}; ${failed.map(test => direct.indexOf(test)).join(' ')}; must-run not run ${missed.length}`,
+  );
 });
 
 test('de6620eb: a new literal in a scanned source file selects the repo-wide guard', () => {

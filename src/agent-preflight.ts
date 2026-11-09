@@ -38,6 +38,7 @@ import {
 } from './agent-preflight-static.js';
 import type { NativeFile } from './native-state-format.js';
 import { sourceTree } from './source-tree.js';
+import { incompletePreflight, preflightVerdict } from './agent-preflight-incomplete.js';
 import {
   deltaPaths,
   preflightDefinition,
@@ -169,6 +170,16 @@ export const preflightReceiptSchema = z
     skipped: z.array(z.string()).optional(),
     /** The one command that runs exactly the skipped files (passed ones are reused). */
     rerun: z.string().optional(),
+    /** Must-run files the budget did not start: the run is NOT COMPLETE (passed is false, nothing
+     * failed), with the one command that finishes them. */
+    incomplete: z
+      .object({
+        mustRun: z.number().int().positive(),
+        finish: z.string(),
+        estimateMinutes: z.number().int().positive(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PreflightReceipt = z.infer<typeof preflightReceiptSchema>;
@@ -1104,7 +1115,7 @@ function localSelection(input: {
   const over = !input.trim
     ? ' trim:false: every ranked local tier runs, no time budget.'
     : fit.protectedOverBudget
-      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first, closest first, and the wall clock stops the rest by name.`
+      ? ` Protected tests (changed, learned, direct) alone exceed the ${budgetSeconds} s budget: they run first, closest first; the wall clock stops the rest by name, and the run is then NOT COMPLETE with one command to finish them.`
       : '';
   const skippedNote = input.trimmedTests.length
     ? ` ${input.trimmedTests.length} trimmed file(s) are named in trimmedTests${input.rerun ? `; run them: ${input.rerun}` : ''}.`
@@ -1195,6 +1206,8 @@ export function runPreflight(
   let buildMs: number | undefined;
   let testMs: number | undefined;
   let peakRssMb: number | null = null;
+  // Seconds per test file this run observed; prices the finish command of an incomplete run.
+  let secondsPerFile = plan.local?.secondsPerFile ?? PREFLIGHT_SECONDS_PER_FILE;
   let staticResults: StaticCheckResult[] = [];
   // Every repository-declared command (static checks, the build, package commands, the runner) runs
   // in one clean environment per run, as checks do: private HOME/XDG/temp and npm config, allowlisted
@@ -1378,6 +1391,7 @@ export function runPreflight(
             spent += runGroup(group);
             if (ran) observed = spent / 1000 / ran;
           }
+          secondsPerFile = observed;
           testMs = Date.now() - testStarted;
         } finally {
           rmSync(directory, { recursive: true, force: true });
@@ -1410,6 +1424,11 @@ export function runPreflight(
   const skippedFiles = [...(plan.local?.trimmedTests ?? []), ...notRun].sort();
   const rerun = skippedFiles.length ? (plan.local?.rerun ?? rerunCommand(root, laneId)) : undefined;
   const stoppedRerun = notRun.length ? stoppedCommand(root, laneId) : undefined;
+  // A clean run that left must-run files unstarted proved nothing about them: NOT COMPLETE.
+  const incomplete =
+    exitCode === 0 && !environment
+      ? incompletePreflight({ root, laneId, tierTests: plan.local?.tierTests, notRun, secondsPerFile })
+      : undefined;
   const receipt: PreflightReceipt = {
     schema: 1,
     laneId,
@@ -1449,13 +1468,16 @@ export function runPreflight(
     ...(peakRssMb !== null ? { peakRssMb } : {}),
     selection: plan.deferredTests?.length || skipped ? 'local' : plan.scope,
     exitCode,
-    passed: exitCode === 0 && !environment,
+    passed: exitCode === 0 && !environment && !incomplete,
+    ...(incomplete ? { incomplete } : {}),
     ...(environment ? { environment, exitCode: exitCode || null } : {}),
     durationMs: Date.now() - started,
     at: new Date().toISOString(),
   };
   writePreflightReceipt(root, receipt);
   process.stderr.write(`${runSummary(receipt, plan)}\n`);
+  // An incomplete run is still a clean timing sample; only a pass seeds the fallback estimate.
+  if (receipt.incomplete && receipt.tests > 0) recordTiming(root, receipt);
   if (receipt.passed && receipt.tests > 0) {
     recordTiming(root, receipt);
     const path = join(retainedRootSibling(root, '.forge-client'), 'agent', 'preflight-estimate.json');
@@ -1480,12 +1502,15 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
     receipt.peakRssMb !== undefined ? `peak RSS ${receipt.peakRssMb} MB` : 'peak RSS unmeasured',
   ].filter(Boolean);
   const deferred = receipt.deferredTests ?? 0;
-  const stopped = receipt.stoppedForTime
-    ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
-      ` (receipt.stopped names them${
-        receipt.stopped && receipt.stopped.length <= SKIPPED_NAMED ? `: ${receipt.stopped.join(' ')}` : ''
-      }); run just those: ${receipt.stoppedRerun}.`
-    : '';
+  const stopped = receipt.incomplete
+    ? ` Not passed, not failed: ${receipt.incomplete.mustRun} must-run test file(s) (changed, learned or direct) did not start in the ${receipt.budgetSeconds} s local budget` +
+      ` (receipt.stopped names them, first). Finish them (about ${receipt.incomplete.estimateMinutes} min): ${receipt.incomplete.finish}; otherwise only the landing check runs them.`
+    : receipt.stoppedForTime
+      ? ` The ${receipt.budgetSeconds} s local budget ran out, so ${receipt.stoppedForTime} planned test file(s) were not started` +
+        ` (receipt.stopped names them${
+          receipt.stopped && receipt.stopped.length <= SKIPPED_NAMED ? `: ${receipt.stopped.join(' ')}` : ''
+        }); run just those: ${receipt.stoppedRerun}.`
+      : '';
   const failedFirst = receipt.stoppedForFailure
     ? ` ${receipt.stoppedForFailure} planned test file(s) were not started because an earlier group failed; fix it and run preflight again (passed files are reused).`
     : '';
@@ -1504,7 +1529,7 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
     ? ` Slowest: ${receipt.slowest.map(item => `${item.file} ${seconds(item.ms)}`).join(', ')}.`
     : '';
   return (
-    `preflight: ${receipt.passed ? 'passed' : 'FAILED'}, ${receipt.tests} test file(s) in ${seconds(receipt.durationMs)} (${timing.join(', ')}).` +
+    `preflight: ${preflightVerdict(receipt)}, ${receipt.tests} test file(s) in ${seconds(receipt.durationMs)} (${timing.join(', ')}).` +
     checks +
     untouched +
     stopped +

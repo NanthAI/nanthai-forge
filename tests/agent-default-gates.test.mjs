@@ -134,6 +134,30 @@ test('preflight: a failing run is recorded, and finish says the last run failed'
   );
 });
 
+test('preflight: must-run files the budget stopped make the run NOT COMPLETE, shown on land, never a pass (ec7960f9)', t => {
+  const body = "import test from 'node:test';\nimport { n } from '../src/a.ts';\ntest('t', () => n);\n";
+  const root = repo(t, {
+    'src/a.ts': 'export const n = 1;\n',
+    'tests/a.test.mjs': body,
+    'tests/b.test.mjs': body,
+  });
+  const changed = advice({ paths: ['src/a.ts'] });
+  const plan = preflightPlan(root, changed.changedPaths);
+  assert.equal(plan.local.protected, 2, 'both tests run the changed module: direct, must-run');
+  // The wall clock is spent after the first file: the second, must-run, never starts.
+  plan.local.budgetSeconds = 0;
+  const receipt = runPreflight(root, lane.laneId, lane.head, plan);
+  assert.equal(receipt.exitCode, 0, 'nothing failed');
+  assert.equal(receipt.passed, false, 'not a pass');
+  assert.equal(receipt.incomplete.mustRun, 1);
+  assert.match(receipt.incomplete.finish, /preflight '\{"laneId":"[0-9a-f-]+","retry":true,"trim":false\}'/);
+  const gate = finishGates(root, defaults({}), lane, changed).preflight;
+  assert.equal(gate.status, 'incomplete', 'require advises: the landing check runs them');
+  assert.equal(gate.mustRunNotRun, 1);
+  assert.equal(gate.finish, receipt.incomplete.finish);
+  assert.match(gate.reason, /^NOT COMPLETE: 1 must-run test file/);
+});
+
 test('ack answers every pending notice with ids that replay exactly', () => {
   const pending = advice({
     notices: [notice('a.ts', 'n1'), notice('b.ts', 'n2')],
