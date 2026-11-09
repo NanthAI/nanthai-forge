@@ -10,6 +10,12 @@ import { positionIn } from './structural-positions.js';
 import { goUnmodelledBinding, goVisibleFrom } from './structural-go.js';
 import { csharpAnalysis, CSHARP_PROVIDER } from './structural-csharp.js';
 import {
+  SCANNED_LANGUAGES,
+  SCANNED_PROVIDERS,
+  scannedAnalysis,
+  type ScannedLanguage,
+} from './structural-scanned.js';
+import {
   children,
   declarationFor,
   publicDeclaration,
@@ -70,6 +76,7 @@ export const STRUCTURAL_PROVIDERS = [
     ],
   },
   CSHARP_PROVIDER,
+  ...SCANNED_PROVIDERS,
 ];
 export function structuralAnalysis(
   snapshot: Snapshot,
@@ -93,10 +100,21 @@ export function structuralAnalysis(
   const retainedPaths = new Set<string>();
   const visibleFrom = new Map<string, number>();
   const csharp: { file: string; text: string }[] = [];
+  const scanned: { file: string; text: string; language: ScannedLanguage }[] = [];
   for (const [file, text] of snapshot.content) {
     const language = sourceLanguage(file);
     if (language === 'csharp') csharp.push({ file, text });
-    if (!language || language === 'typescript' || language === 'javascript' || language === 'csharp')
+    else if (language && SCANNED_LANGUAGES.has(language))
+      scanned.push({ file, text, language: language as ScannedLanguage });
+    if (
+      !language ||
+      language === 'typescript' ||
+      language === 'javascript' ||
+      language === 'csharp' ||
+      language === 'ruby' ||
+      language === 'php' ||
+      language === 'elixir'
+    )
       continue;
     retainedPaths.add(file);
     const retained = session?.structuralTrees?.get(file);
@@ -202,10 +220,11 @@ export function structuralAnalysis(
   const resolved = structuralImports(files, snapshot);
   issues.push(...resolved.issues);
   references.push(...resolved.references);
-  const scanned = csharpAnalysis(csharp, snapshot);
-  nodes.push(...scanned.nodes);
-  resolved.imports.push(...scanned.imports);
-  issues.push(...scanned.issues);
+  for (const result of [csharpAnalysis(csharp, snapshot), scannedAnalysis(scanned, snapshot)]) {
+    nodes.push(...result.nodes);
+    resolved.imports.push(...result.imports);
+    issues.push(...result.issues);
+  }
   for (const { file, node, scope, locator } of pending) {
     const name = file.text.slice(node.from, node.to);
     let current: Scope | null = scope,

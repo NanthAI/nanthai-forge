@@ -1,0 +1,5 @@
+source "https://rubygems.org"
+
+gem "util", path: "gems/util"
+gem "shop", path: "gems/shop"
+gem "rake", "~> 13.0"

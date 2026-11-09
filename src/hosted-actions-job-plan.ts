@@ -13,7 +13,9 @@ import { hostedActionsRecipeSchema } from './hosted-actions.js';
 import { actionsDeclaration } from './actions-toolchains.js';
 import {
   ACTIONS_WORKFLOW_OUTDATED,
+  actionsToolUnsupported,
   declaredStepsInstalled,
+  hostedUnsupportedTools,
   hostedDepsCache,
   hostedToolchains,
 } from './actions-toolchains-hosted.js';
@@ -249,6 +251,8 @@ export async function prepareActionsJob(
     'ACTIONS_WORKFLOW_OUTDATED',
     ACTIONS_WORKFLOW_OUTDATED,
   );
+  const unsupported = hostedUnsupportedTools(recipe.actions);
+  invariant(!unsupported.length, 'ACTIONS_TOOL_UNSUPPORTED', actionsToolUnsupported(unsupported));
   const lock = inventory.get(projectLockfile(path => inventory.has(path)) ?? '');
   lap('selectMs');
   const planned = (await client.call({

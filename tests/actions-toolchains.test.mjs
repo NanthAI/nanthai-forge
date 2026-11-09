@@ -63,6 +63,13 @@ const toolchainCases = [
   // Zig and CMake declare a version only (their actions read no Candidate file).
   ['zig', { tool: 'zig', version: '0.14.0' }, undefined],
   ['cmake', { tool: 'cmake', version: '3.31.6' }, undefined],
+  [
+    'elixir',
+    { tool: 'elixir', version: '1.17', otpVersion: '27' },
+    { tool: 'elixir', versionFile: '.tool-versions' },
+  ],
+  ['ruby', { tool: 'ruby', version: '3.3' }, { tool: 'ruby', versionFile: 'app/.ruby-version' }],
+  ['php', { tool: 'php', version: '8.3' }, { tool: 'php', versionFile: '.php-version' }],
 ];
 test('generated workflow snapshot per toolchain, by version and from a file', () => {
   assert.deepEqual(
@@ -254,7 +261,11 @@ test('hosted fixed-workflow steps read the pinned plan outputs and pin every act
 
 test('schema literals match the tool and preset lists they stand for', () => {
   assert.deepEqual([...CACHE_PRESET_NAMES], Object.keys(CACHE_PRESETS));
-  const tools = ACTIONS_TOOLS.map(tool => ({ tool, version: '1' }));
+  const tools = ACTIONS_TOOLS.map(tool => ({
+    tool,
+    version: '1',
+    ...(tool === 'elixir' ? { otpVersion: '27' } : {}),
+  }));
   assert.equal(actionsToolchainsSchema.safeParse(tools).success, true);
   assert.equal(actionsCacheSchema.safeParse({ presets: [...CACHE_PRESET_NAMES] }).success, true);
 });
@@ -273,6 +284,10 @@ test('the declaration is a fixed allowlist: unsafe or unknown values never reach
     [{ tool: 'go', version: '1.23', distribution: 'temurin' }],
     [{ tool: 'java', version: '21', distribution: 'unknown' }],
     [{ tool: 'rust', versionFile: 'Cargo.toml' }],
+    [{ tool: 'elixir', version: '1.17' }],
+    [{ tool: 'go', version: '1.23', otpVersion: '27' }],
+    [{ tool: 'elixir', versionFile: 'mix.exs' }],
+    [{ tool: 'ruby', versionFile: 'Gemfile' }],
     [{ tool: 'go', version: '1.23', extra: true }],
     [
       { tool: 'go', version: '1.23' },

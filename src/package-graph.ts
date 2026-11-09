@@ -9,6 +9,8 @@ import { cargoGraph, goGraph } from './package-graph-go-rust.js';
 import { pythonGraph, pythonManifest } from './package-graph-python.js';
 import { gradleGraph, jvmManifest, mavenGraph } from './package-graph-jvm.js';
 import { dotnetGraph, dotnetImport, dotnetManifest, jsWorkspaceGraph } from './package-graph-dotnet-js.js';
+import { mixGraph } from './package-graph-mix.js';
+import { bundlerGraph, composerGraph, gemspecManifest } from './package-graph-ruby-php.js';
 import { parseForgeJson } from './project-config.js';
 import {
   basename,
@@ -21,7 +23,7 @@ import {
 export type { Ecosystem, GraphPackage, PackageCommand } from './package-graph-types.js';
 
 /** Manifest-level package graph for affected tests in any ecosystem (Go, Rust, Python, Gradle,
- * Maven, .NET, JS/TS workspaces). It reads manifests only, never runs repository code, and is a
+ * Maven, .NET, JS/TS workspaces, Mix, Bundler, Composer). It reads manifests only, never runs repository code, and is a
  * selector, not an independence proof: a changed path maps to its owning package, which runs with
  * every package that depends on it. Anything it cannot place (a root file, an unreadable manifest,
  * no unambiguous test command) makes the selection full, with the reason. When unsure it widens,
@@ -49,7 +51,8 @@ export function packageManifestPath(path: string) {
     (pythonManifest(path) && name !== 'setup.py') ||
     jvmManifest(path) ||
     dotnetManifest(path) ||
-    dotnetImport(path)
+    dotnetImport(path) ||
+    gemspecManifest(path)
   );
 }
 export const packageManifestPaths = (allPaths: Iterable<string>) =>
@@ -101,7 +104,18 @@ function linkClaims(packages: GraphPackage[]) {
     }
 }
 
-const READERS = [goGraph, cargoGraph, pythonGraph, gradleGraph, mavenGraph, dotnetGraph, jsWorkspaceGraph];
+const READERS = [
+  goGraph,
+  cargoGraph,
+  pythonGraph,
+  gradleGraph,
+  mavenGraph,
+  dotnetGraph,
+  jsWorkspaceGraph,
+  mixGraph,
+  bundlerGraph,
+  composerGraph,
+];
 
 /** The graph of one head: `allPaths` are its file paths, `read` returns a manifest's text. */
 export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestReader): PackageGraph {
@@ -157,7 +171,7 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
             0,
             400,
           )
-        : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json)',
+        : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json, mix.exs, Gemfile, *.gemspec, composer.json)',
     };
   return {
     status: 'available',

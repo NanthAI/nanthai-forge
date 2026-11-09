@@ -21,7 +21,7 @@ Adding an ecosystem means adding **one entry and one fixture repository**:
 | --- | --- |
 | `id` | docs and fixture names |
 | `code` | source-file extensions (`exs?`): test-name stems, JUnit code labels, the credential-name capture rule |
-| `managers[]` | `name`, exact `manifests` (package graph), `lockfiles` (identify the manager and pin check plans, first present wins), `pinOnly`, and `unpinned` (recognised as dependency state, not pinned yet) |
+| `managers[]` | `name`, exact `manifests` (package graph), `lockfiles` (identify the manager and pin check plans, first present wins), `pinOnly`, `unpinned` (recognised as dependency state, not pinned yet) and `install` (the install argv without scripts or plugins, the flags that keep them off, and `manifestIsCode` when the manifest is a program; `src/ecosystem-install.ts`) |
 | `regenerableDirs` | Lane cleanup reclaims them only when ignored |
 | `dependencyDirs` | installs and tool caches: hard-linked files there are not source |
 | `buildDirs` | build output that Lane cleanup always reclaims |
@@ -44,7 +44,12 @@ Some fields name code that lives in a module of its own. A new value there needs
 - A new `mergeGate` grammar: a lazily loaded parser in `src/native-merge-syntax-other.ts`. It must
   load on compose only and never enter the Convex bundle.
 - A new `importFixup` language: a reader in `READERS` in `src/native-import-languages.ts`.
-- A new `moduleGraph` or `codeMap` language: its reader (`src/module-graph-*.ts`, the analysers).
+- A new `moduleGraph` or `codeMap` language: its reader (`src/module-graph-*.ts`, the analysers). With no
+  bundled grammar, a declaration scanner (`src/structural-scan-*.ts`, registered in
+  `src/structural-scanned.ts`) reads declaration headers and import lines with comments and literals
+  masked, as Ruby, PHP and Elixir do.
+- A new `install`: its repository allowlist reader in `MANAGER_REQUESTS` of `src/ecosystem-install.ts`
+  when the manager keeps one (Composer `config.allow-plugins`).
 - A package-graph reader: `src/package-graph-*.ts` and `READERS` in `src/package-graph.ts`. The
   reader owns the test command and its patterned manifest names.
 - A new cache preset: add its name to `CACHE_PRESET_NAMES` and raise the `.max()` beside it in
@@ -71,6 +76,13 @@ Some fields name code that lives in a module of its own. A new value there needs
 | Go | none | yes |
 | C# | none | yes |
 | Kotlin, Scala, Swift, Dart, Elixir, Ruby, PHP, C/C++, Zig, Delphi | none | none |
+
+Ruby, PHP and Elixir have a code map (declaration scanners) and a package graph: Mix umbrella apps
+with `in_umbrella` and `path` deps (`mix test` per app), Bundler Gemfile `path` gems and gemspec
+dependencies (`bundle exec rspec`, or `bundle exec rake test` beside a Rakefile), and Composer
+packages by `require` names with `path` repositories checked (`vendor/bin/phpunit` or
+`vendor/bin/pest` where the dependencies are installed). Their fixtures live in
+`tests/fixtures/ecosystems/` and `tests/ecosystem-fixtures.test.mjs` tests them.
 
 "None" means a text merge is accepted on the check's evidence alone. An entry adds a gate when a
 small grammar exists.

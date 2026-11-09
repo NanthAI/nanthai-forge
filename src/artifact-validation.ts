@@ -2,7 +2,11 @@
 import { invariant } from './errors.js';
 import { identity, graphIdentity } from './hash.js';
 import { safeRelative } from './files.js';
+import { codeMapLanguages } from './ecosystems.js';
 import type { GraphPack, Locator } from './types.js';
+
+/** Analysed languages from the ecosystem registry (src/ecosystems.ts): a pack lists each once. */
+const LANGUAGES: ReadonlySet<string> = new Set(codeMapLanguages().map(([, language]) => language));
 
 const record = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -78,14 +82,12 @@ export function validateArtifact(input: unknown): GraphPack {
   if (
     multi &&
     (!Array.isArray(a.languages) ||
-      ![5, 7].includes(a.languages.length) ||
+      a.languages.length < 5 ||
       new Set(a.languages.map(v => (record(v) ? v.language : ''))).size !== a.languages.length ||
       !a.languages.every(
         v =>
           record(v) &&
-          ['typescript', 'javascript', 'python', 'java', 'rust', 'go', 'csharp'].includes(
-            String(v.language),
-          ) &&
+          LANGUAGES.has(String(v.language)) &&
           text(v.parser) &&
           text(v.version) &&
           Array.isArray(v.relationships) &&

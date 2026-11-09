@@ -13,7 +13,17 @@ export type MergeGrammar = 'typescript' | 'python' | 'java' | 'rust' | 'json';
 /** Readers of the duplicate-import fix-up (src/native-import-merge.ts, src/native-import-languages.ts). */
 export type ImportFixupLanguage = 'javascript' | 'python' | 'java' | 'rust' | 'go' | 'csharp';
 /** Analysed languages of the code map and code graph (src/languages.ts). */
-export type SourceLanguage = 'typescript' | 'javascript' | 'python' | 'java' | 'rust' | 'go' | 'csharp';
+export type SourceLanguage =
+  | 'typescript'
+  | 'javascript'
+  | 'python'
+  | 'java'
+  | 'rust'
+  | 'go'
+  | 'csharp'
+  | 'ruby'
+  | 'php'
+  | 'elixir';
 /** Readers of the module graph (src/module-graph.ts). */
 export type ModuleGraphLanguage = 'python' | 'go' | 'rust' | 'java' | 'kotlin';
 
@@ -33,6 +43,19 @@ export type EcosystemManager = {
   /** Lockfiles recognised as dependency state (preflight learning skips them) that check plans do
    * not pin yet (`gradle.lockfile`; Issue 721cd45c). */
   unpinned?: readonly string[];
+  /** How Forge installs this manager's dependencies (src/ecosystem-install.ts). `argv` runs no
+   * dependency install script or plugin; `scriptFlags` are the words of `argv` that keep them off.
+   * `manifestIsCode`: the manifest itself is a program (Gemfile, mix.exs), so any install runs
+   * repository code and needs `installScripts` for everything. `runs` names what scripts would do.
+   * `allowlisted`: the words of `scriptFlags` dropped when the manager's own allowlist is accepted
+   * (Composer itself enforces `config.allow-plugins`). */
+  install?: {
+    argv: readonly string[];
+    scriptFlags?: readonly string[];
+    allowlisted?: readonly string[];
+    manifestIsCode?: true;
+    runs: string;
+  };
 };
 
 /** One GitHub Actions dependency-cache preset: download caches only, never build output. */
@@ -235,8 +258,79 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     codeMap: [{ extensions: 'py', language: 'python' }],
     moduleGraph: [{ extensions: 'py', language: 'python' }],
   },
-  { id: 'ruby', code: 'rb', managers: [{ name: 'bundler', lockfiles: ['Gemfile.lock'] }] },
-  { id: 'php', code: 'php', managers: [{ name: 'composer', lockfiles: ['composer.lock'] }] },
+  {
+    id: 'ruby',
+    code: 'rb',
+    managers: [
+      {
+        name: 'bundler',
+        manifests: ['Gemfile'],
+        lockfiles: ['Gemfile.lock'],
+        install: {
+          argv: ['bundle', 'install'],
+          manifestIsCode: true,
+          runs: 'the Gemfile (Ruby code) and gem native extension builds',
+        },
+      },
+    ],
+    regenerableDirs: ['vendor'],
+    nonSourceDirs: ['vendor'],
+    actions: {
+      tool: 'ruby',
+      // Restored only: resolving a Gemfile runs it (Ruby code), so no seed is Candidate-free.
+      cache: { bundler: { paths: ['~/.bundle/cache'], lockfiles: ['**/Gemfile.lock'] } },
+    },
+    checkEnv: {
+      caches: [['BUNDLE_USER_CACHE', 'check-bundle-cache']],
+      toolchains: [['RBENV_ROOT', ['.rbenv']]],
+    },
+    codeMap: [{ extensions: 'rb', language: 'ruby' }],
+  },
+  {
+    id: 'php',
+    code: 'php',
+    managers: [
+      {
+        name: 'composer',
+        manifests: ['composer.json'],
+        lockfiles: ['composer.lock'],
+        install: {
+          argv: ['composer', 'install', '--no-interaction', '--no-scripts', '--no-plugins'],
+          scriptFlags: ['--no-scripts', '--no-plugins'],
+          allowlisted: ['--no-plugins'],
+          runs: 'composer scripts and plugins',
+        },
+      },
+    ],
+    regenerableDirs: ['vendor'],
+    nonSourceDirs: ['vendor'],
+    actions: {
+      tool: 'php',
+      cache: {
+        composer: {
+          paths: ['~/.cache/composer'],
+          lockfiles: ['**/composer.lock'],
+          // composer.json is data: with scripts and plugins off, nothing from the repository runs.
+          seed: {
+            lockfile: 'composer.lock',
+            manifests: ['composer.json'],
+            command: [
+              'composer',
+              'install',
+              '--no-interaction',
+              '--no-scripts',
+              '--no-plugins',
+              '--no-autoloader',
+              '--no-progress',
+              '--ignore-platform-reqs',
+            ],
+          },
+        },
+      },
+    },
+    checkEnv: { caches: [['COMPOSER_CACHE_DIR', 'check-composer-cache']] },
+    codeMap: [{ extensions: 'php', language: 'php' }],
+  },
   {
     id: 'jvm',
     code: 'java|kts?|scala',
@@ -289,7 +383,32 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     codeMap: [{ extensions: 'cs', language: 'csharp' }],
   },
   { id: 'swift', code: 'swift' },
-  { id: 'elixir', code: 'exs?' },
+  {
+    id: 'elixir',
+    code: 'exs?',
+    managers: [
+      {
+        name: 'mix',
+        manifests: ['mix.exs'],
+        lockfiles: ['mix.lock'],
+        install: {
+          argv: ['mix', 'deps.get'],
+          manifestIsCode: true,
+          runs: 'mix.exs (Elixir code) and dependency build steps',
+        },
+      },
+    ],
+    regenerableDirs: ['_build', 'deps'],
+    nonSourceDirs: ['_build', 'deps'],
+    actions: {
+      tool: 'elixir',
+      // Restored only: resolving mix.exs runs it (Elixir code), so no seed is Candidate-free.
+      cache: { hex: { paths: ['~/.hex/packages'], lockfiles: ['**/mix.lock'] } },
+    },
+    // Hex's own home holds its API key, so it is never shared; Mix's home holds installed archives.
+    checkEnv: { toolchains: [['MIX_HOME', ['.mix']]] },
+    codeMap: [{ extensions: 'exs?', language: 'elixir' }],
+  },
   { id: 'dart', code: 'dart' },
   {
     // C and C++ (Issue 345ebcb9). No package graph: the build file is a manifest Forge does not read, so

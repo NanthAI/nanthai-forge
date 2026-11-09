@@ -7,7 +7,18 @@ import { safeRelative } from './safe-relative.js';
  * (docs/operations/github-actions-checks.md#toolchains-and-dependency-cache). Only these
  * pinned actions, one per tool, and these cache presets exist; nothing else can be declared.
  * Values are validated here, so generated YAML never carries an expression or a quote. */
-export const ACTIONS_TOOLS = ['go', 'python', 'java', 'dotnet', 'rust', 'zig', 'cmake'] as const;
+export const ACTIONS_TOOLS = [
+  'go',
+  'python',
+  'java',
+  'dotnet',
+  'rust',
+  'zig',
+  'cmake',
+  'elixir',
+  'ruby',
+  'php',
+] as const;
 export type ActionsTool = (typeof ACTIONS_TOOLS)[number];
 /** Full commit SHAs of released tags at least two weeks old when pinned. */
 export const TOOLCHAIN_ACTIONS: Record<Exclude<ActionsTool, 'rust'>, string> = {
@@ -17,9 +28,20 @@ export const TOOLCHAIN_ACTIONS: Record<Exclude<ActionsTool, 'rust'>, string> = {
   dotnet: 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0',
   zig: 'mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1',
   cmake: 'lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2',
+  elixir: 'erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1',
+  // Never `bundler-cache`: it runs `bundle install`, which runs the Gemfile and builds extensions.
+  ruby: 'ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0',
+  php: 'shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0',
 };
 /** Tools whose setup step takes a `version` only (no version file the action reads from the Candidate). */
 export const VERSION_ONLY_TOOLS: readonly ActionsTool[] = ['zig', 'cmake'];
+/** Version files the setup action reads by name (setup-ruby from its working directory; setup-beam
+ * with `version-type: strict`). */
+const VERSION_FILES: Partial<Record<ActionsTool, readonly string[]>> = {
+  elixir: ['.tool-versions', 'mise.toml'],
+  ruby: ['.ruby-version', '.tool-versions', 'mise.toml'],
+};
+const fileName = (file: string) => file.slice(file.lastIndexOf('/') + 1);
 const CACHE_SHA = '0057852bfaa89a56745cba8c7296529d2fc39830 # v4';
 export const JAVA_DISTRIBUTIONS = [
   'temurin',
@@ -50,6 +72,9 @@ export const CACHE_PRESET_NAMES = [
   'zig',
   'vcpkg',
   'conan',
+  'hex',
+  'bundler',
+  'composer',
 ] as const;
 export type CachePreset = (typeof CACHE_PRESET_NAMES)[number];
 const registeredPresets = cachePresets();
@@ -91,6 +116,8 @@ export const actionsToolchainSchema = z
     version: version.optional(),
     versionFile: versionFile.optional(),
     distribution: z.enum(JAVA_DISTRIBUTIONS).optional(),
+    /** Erlang/OTP beside an Elixir `version` (setup-beam installs both). */
+    otpVersion: version.optional(),
   })
   .strict()
   .refine(t => (t.version === undefined) !== (t.versionFile === undefined), {
@@ -102,6 +129,19 @@ export const actionsToolchainSchema = z
   .refine(t => !VERSION_ONLY_TOOLS.includes(t.tool) || t.version !== undefined, {
     message: 'Zig and CMake declare a version; they read no version file.',
   })
+  .refine(t => (t.tool === 'elixir' && t.version !== undefined) === (t.otpVersion !== undefined), {
+    message: 'Elixir by version also takes otpVersion; only elixir takes one.',
+  })
+  .refine(
+    t =>
+      t.versionFile === undefined ||
+      !VERSION_FILES[t.tool] ||
+      VERSION_FILES[t.tool]!.includes(fileName(t.versionFile)),
+    {
+      message:
+        'Elixir reads .tool-versions or mise.toml; Ruby reads .ruby-version, .tool-versions or mise.toml.',
+    },
+  )
   .refine(
     t =>
       t.tool !== 'rust' ||
@@ -112,14 +152,14 @@ export const actionsToolchainSchema = z
 export const actionsToolchainsSchema = z
   .array(actionsToolchainSchema)
   .min(1)
-  .max(7) // ACTIONS_TOOLS.length; schema snapshots read literals only
+  .max(10) // ACTIONS_TOOLS.length; schema snapshots read literals only
   .refine(list => unique(list.map(t => t.tool)), { message: 'Declare each tool once.' });
 export const actionsCacheSchema = z
   .object({
     presets: z
       .array(z.enum(presetNames))
       .min(1)
-      .max(14) // CACHE_PRESET_NAMES.length
+      .max(17) // CACHE_PRESET_NAMES.length
       .refine(unique, { message: 'Declare each preset once.' }),
     lockfiles: z
       .array(lockfileGlob)
@@ -158,7 +198,7 @@ export const cacheLockfiles = (cache: ActionsCache) =>
 export const cacheKeyPrefix = (cache: ActionsCache) => `forge-deps-v1-${cache.presets.join('+')}`;
 
 const q = (value: string) => JSON.stringify(value);
-const rustDirectory = (file: string) => (file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.');
+const fileDirectory = (file: string) => (file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.');
 
 /** Literal steps for a workflow committed with the check's source (the export path):
  * values are inlined, so the Candidate checkout supplies version files and lockfiles. */
@@ -169,7 +209,7 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
     if (t.tool === 'rust') {
       text += t.version
         ? `      - run: rustup toolchain install --profile minimal ${q(t.version)} && rustup default ${q(t.version)}\n`
-        : `      - run: rustup toolchain install\n        working-directory: ${q(rustDirectory(t.versionFile!))}\n`;
+        : `      - run: rustup toolchain install\n        working-directory: ${q(fileDirectory(t.versionFile!))}\n`;
       continue;
     }
     text += `      - uses: ${TOOLCHAIN_ACTIONS[t.tool]}\n        with:\n`;
@@ -179,6 +219,21 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
       text += t.version
         ? `          python-version: ${q(t.version)}\n`
         : `          python-version-file: ${q(t.versionFile!)}\n`;
+    else if (t.tool === 'elixir')
+      text += t.version
+        ? `          elixir-version: ${q(t.version)}\n          otp-version: ${q(t.otpVersion!)}\n`
+        : `          version-file: ${q(t.versionFile!)}\n          version-type: strict\n`;
+    else if (t.tool === 'ruby')
+      text += t.version
+        ? `          ruby-version: ${q(t.version)}\n`
+        : `          ruby-version: ${q(fileName(t.versionFile!))}\n          working-directory: ${q(fileDirectory(t.versionFile!))}\n`;
+    // An empty token: setup-php otherwise writes the workflow token into Composer's auth.json, which
+    // the check's repository code could read.
+    else if (t.tool === 'php')
+      text +=
+        (t.version
+          ? `          php-version: ${q(t.version)}\n`
+          : `          php-version-file: ${q(t.versionFile!)}\n`) + `          github-token: ''\n`;
     else if (t.tool === 'java')
       text +=
         `          distribution: ${q(t.distribution ?? 'temurin')}\n` +
@@ -209,8 +264,8 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
  * runs no repository code. Forge copies just the named manifest files beside each lockfile into an
  * empty temporary folder (no repository configuration such as .npmrc or .pnpmfile.cjs comes along)
  * and runs a download-only command there. Presets with no such command (cargo, uv, poetry, maven,
- * gradle, nuget, yarn: resolution there can run repository code or configured programs) are
- * restored only, never seeded. */
+ * gradle, nuget, yarn, hex, bundler: resolution there can run repository code or configured programs)
+ * are restored only, never seeded. */
 export const CACHE_SEEDS: Partial<
   Record<CachePreset, { lockfile: string; manifests: readonly string[]; command: readonly string[] }>
 > = Object.fromEntries(

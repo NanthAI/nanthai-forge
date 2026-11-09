@@ -11,7 +11,7 @@
  */
 import { z } from 'zod';
 import { enclosingPackages, withDependents, type PackageGraph } from './package-graph.js';
-import { packageKey, type Ecosystem, type GraphPackage } from './package-graph-types.js';
+import { PACKAGE_ECOSYSTEMS, packageKey, type Ecosystem, type GraphPackage } from './package-graph-types.js';
 import { documentationPath } from './prose-paths.js';
 import {
   firstCheckRisk,
@@ -25,10 +25,9 @@ import {
 export const PACKAGE_PLACEMENT_RULE = 'package-placement-v2';
 /** A larger graph is not pinned (the proof then keeps every manifest global). */
 export const PACKAGE_PLACEMENT_MAX_BYTES = 128 * 1024;
-const ECOSYSTEMS = ['go', 'cargo', 'python', 'gradle', 'maven', 'dotnet', 'js'] as const;
 /** One package: ecosystem, folder, declared (0|1), testable (0|1), indexes of the packages it depends on. */
 const entry = z.tuple([
-  z.enum(ECOSYSTEMS),
+  z.enum(PACKAGE_ECOSYSTEMS),
   z.string(),
   z.union([z.literal(0), z.literal(1)]),
   z.union([z.literal(0), z.literal(1)]),

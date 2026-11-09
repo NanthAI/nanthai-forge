@@ -159,6 +159,12 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   `bun pm trust` or `yarn rebuild NAME…`). An explicit `installScripts:false` on `start` wins over the
   setting. When scripts run, `start` prints one line saying which and why. Each mode (none, allowlisted,
   all) is cached apart, so a Lane that did not accept scripts never links an install that ran them.
+- Other ecosystems follow the same rule wherever Forge forms their install (`src/ecosystem-install.ts`,
+  the Actions seed). Composer installs with `--no-scripts --no-plugins`; an accepted Composer
+  `config.allow-plugins` request drops only `--no-plugins` (Composer enforces its own list), and only
+  "everything" runs composer scripts. A Gemfile and a mix.exs are themselves code, and `bundle install`
+  builds gem native extensions, so Forge forms `bundle install` or `mix deps.get` only when everything
+  is allowed, and otherwise says why. `start` installs JavaScript dependencies only.
 - Workspaces: the workspace folders the lockfile records (npm `packages`, pnpm `importers`, Yarn Berry
   `@workspace:` entries, `bun.lock` `workspaces`; Yarn classic and `bun.lockb` use the `workspaces`
   field of `package.json`) are copied to the install stage with their `package.json`, and their manifests

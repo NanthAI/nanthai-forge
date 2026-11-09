@@ -1177,9 +1177,16 @@ reading every check:
   | `rust` | `rustup toolchain install` (rustup 1.28 or later, preinstalled on GitHub images) | `rust-toolchain.toml`, `rust-toolchain` |
   | `zig` | `mlugg/setup-zig` v2.2.1, its own cache off | none: `version` only |
   | `cmake` | `lukka/get-cmake` v4.4.2 (CMake and Ninja), its own cache off | none: `version` only |
+  | `elixir` | `erlef/setup-beam` v1.24.1; a `version` (Elixir) also takes `otpVersion`; a file is read strictly | `.tool-versions`, `mise.toml` |
+  | `ruby` | `ruby/setup-ruby` v1.335.0, read from the file's folder; never `bundler-cache` (it runs `bundle install`) | `.ruby-version`, `.tool-versions`, `mise.toml` |
+  | `php` | `shivammathur/setup-php` 2.40.0 with an empty `github-token`, so no token lands in Composer's `auth.json` | `.php-version` |
+
+  `elixir`, `ruby` and `php` run in an exported workflow. The fixed App/OIDC `forge-check.yml`
+  has no steps for them yet, so planning a check that declares one fails with
+  `ACTIONS_TOOL_UNSUPPORTED`, naming the tools, instead of running without them.
 
 - **`actionsCache`**: `presets` from `go`, `cargo`, `pip`, `uv`, `poetry`, `maven`, `gradle`, `nuget`,
-  `npm`, `pnpm`, `yarn`, `zig`, `vcpkg` and `conan`. One entry holds the presets' download caches under the runner's home
+  `npm`, `pnpm`, `yarn`, `zig`, `vcpkg`, `conan`, `hex`, `bundler` and `composer`. One entry holds the presets' download caches under the runner's home
   directory, never build output or Candidate source. Its key is the presets, the runner OS and
   architecture and a hash of the lockfiles: each preset's defaults (for example `**/go.sum`,
   `**/Cargo.lock`), or the `lockfiles` globs the declaration lists instead. Entries use the free
@@ -1206,9 +1213,11 @@ Candidate user too. A seed that fails skips that lockfile and never fails the ch
 | `pnpm` | `pnpm fetch --ignore-scripts --ignore-pnpmfile` beside `pnpm-lock.yaml` |
 | `pip` | `pip download --only-binary=:all:` of each `requirements*.txt` (wheels only, so no build code runs) |
 | `zig` | `zig build --fetch` beside `build.zig.zon` and `build.zig` (fetches and hash-checks; never compiles `build.zig`) |
+| `composer` | `composer install --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs` beside `composer.lock` and `composer.json` |
 
-The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`, `vcpkg`, `conan`) are restored only:
-their resolvers can run repository code or configured programs, so Forge does not seed them yet, and
+The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`, `vcpkg`, `conan`, `hex`,
+`bundler`) are restored only: their resolvers can run repository code or configured programs (a
+Gemfile and a mix.exs are code), so Forge does not seed them yet, and
 a check that declares them downloads its own dependencies on every run. Every other check restores
 read-only. Lane code never writes an entry that another Lane restores.
 

@@ -1,6 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Shared shapes of the manifest-level package graph (src/package-graph.ts). */
-export type Ecosystem = 'go' | 'cargo' | 'python' | 'gradle' | 'maven' | 'dotnet' | 'js';
+/** Every package-graph ecosystem; the placement pin (src/package-placement.ts) validates against it. */
+export const PACKAGE_ECOSYSTEMS = [
+  'go',
+  'cargo',
+  'python',
+  'gradle',
+  'maven',
+  'dotnet',
+  'js',
+  'mix',
+  'bundler',
+  'composer',
+] as const;
+export type Ecosystem = (typeof PACKAGE_ECOSYSTEMS)[number];
 
 export type GraphPackage = {
   ecosystem: Ecosystem;

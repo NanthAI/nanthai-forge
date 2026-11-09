@@ -1,0 +1,8 @@
+{
+  "name": "acme/shop",
+  "repositories": [{ "type": "path", "url": "packages/*" }],
+  "require": { "acme/billing": "*" },
+  "require-dev": { "phpunit/phpunit": "^11.0" },
+  "scripts": { "post-install-cmd": ["php -r \"touch('scripts-ran');\""] },
+  "config": { "allow-plugins": { "acme/installer": true, "other/plugin": false } }
+}

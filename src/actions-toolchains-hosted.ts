@@ -24,10 +24,23 @@ export type HostedDepsCache =
   | { key: string; paths: string; save: boolean; seed: string }
   | Record<string, never>;
 
+/** Tools the fixed workflow has steps for (Zig and CMake through their own blocks, below). Elixir,
+ * Ruby and PHP run in an exported workflow; on the App/OIDC path planning refuses them by name
+ * instead of running without them. */
+export const HOSTED_TOOLS = ['go', 'python', 'java', 'dotnet', 'rust', 'zig', 'cmake'] as const;
+const hosted = (tool: string): tool is (typeof HOSTED_TOOLS)[number] =>
+  (HOSTED_TOOLS as readonly string[]).includes(tool);
+/** Declared tools the fixed workflow cannot set up. */
+export const hostedUnsupportedTools = (declaration: ActionsDeclaration | undefined) =>
+  (declaration?.toolchains ?? []).map(t => t.tool).filter(tool => !hosted(tool));
+export const actionsToolUnsupported = (tools: string[]) =>
+  `This check declares the ${tools.join(', ')} toolchain, which the fixed App/OIDC forge-check.yml cannot set up yet; export the workflow (docs/operations/github-actions-checks.md#toolchains-and-dependency-cache) or install the tool in the check command.`;
+
 /** Version files are relative to the Candidate directory; the workflow adds its path. */
 export function hostedToolchains(declaration: ActionsDeclaration | undefined): HostedToolchains {
   const out: HostedToolchains = {};
   for (const t of declaration?.toolchains ?? []) {
+    if (!hosted(t.tool)) continue;
     if (t.tool === 'rust') {
       const file = t.versionFile ?? '';
       out.rust = {
