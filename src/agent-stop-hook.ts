@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMainModule } from '../scripts/main-module.mjs';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import {
   clearTurnBlocked,
   markTurnBlocked,
@@ -8,12 +8,19 @@ import {
   settleTurnWork,
   type TurnWork,
 } from './agent-turn-work.js';
+import { LANDING_DROP_MS } from './landing-stall.js';
 import { WAKE_BUDGET_SECONDS } from './agent-wake.js';
 
 /** A ledger entry observed this recently needs no hosted confirmation. */
 export const TURN_WORK_WARM_MS = 30_000;
+/** A dead observer whose last observation is older than the landing queue's own maximum
+ * life (a pending landing with no progress is dropped after this long) cannot be live
+ * work any more: the entry is pruned. */
+export const TURN_WORK_STALE_MS = LANDING_DROP_MS;
 const PROBE_DEADLINE_MS = 2500;
-export type TurnWorkProbe = (work: TurnWork) => Promise<'running' | 'terminal'>;
+/** `unknown`: the probe could not confirm either way (no address, error, deadline). */
+export type TurnWorkState = 'running' | 'terminal' | 'unknown';
+export type TurnWorkProbe = (work: TurnWork) => Promise<TurnWorkState>;
 type StopInput = { session_id?: unknown; hook_event_name?: unknown };
 
 export function turnEndMessage(work: Pick<TurnWork, 'id' | 'kind' | 'wake'>, watched = false) {
@@ -37,7 +44,9 @@ const alive = (pid: number) => {
 /** Claude Code Stop / Codex Stop hook. Blocks only the first stop attempt while this
  * session owns unfinished Forge work; the next attempt is always allowed. Cost: one
  * local ledger read; at most one hosted query, only when no live or recent observation
- * exists; nothing while idle. Any failure allows the stop. */
+ * exists; nothing while idle. Stale entries (dead observer past the queue's maximum
+ * life, or a root that no longer exists) are pruned with the same local read. Any
+ * failure, and any state the probe cannot confirm, allows the stop. */
 export async function turnEndDecision(
   input: StopInput,
   options: { now?: number; probe?: TurnWorkProbe } = {},
@@ -52,11 +61,17 @@ export async function turnEndDecision(
   }
   // A live observer the owner trusts to wake the agent (turn end never ends its task):
   // stopping now costs nothing, the observer's exit re-invokes the agent on settle.
+  const now = options.now ?? Date.now();
+  const stale = ledger.work.filter(work => staleTurnWork(work, now));
+  if (stale.length)
+    settleTurnWork(
+      stale.map(work => work.id),
+      session,
+    );
   const unwatched = ledger.work.filter(
-    work => !(work.wake === 'trusted' && work.pid !== null && alive(work.pid)),
+    work => !stale.includes(work) && !(work.wake === 'trusted' && work.pid !== null && alive(work.pid)),
   );
   if (!unwatched.length) return {};
-  const now = options.now ?? Date.now();
   let selected =
     unwatched.find(work => work.pid !== null && alive(work.pid)) ??
     unwatched.find(work => now - work.observedAt < TURN_WORK_WARM_MS);
@@ -64,10 +79,9 @@ export async function turnEndDecision(
     // Cold cache: confirm only the most recent entry with one hosted query.
     const candidate = unwatched[0]!;
     const state = await withDeadline((options.probe ?? hostedTurnWorkProbe)(candidate));
-    if (state === 'terminal') {
-      settleTurnWork([candidate.id], session);
-      return {};
-    }
+    if (state === 'terminal') settleTurnWork([candidate.id], session);
+    // Never block on a state nobody confirmed.
+    if (state !== 'running') return {};
     selected = candidate;
   }
   // Block only when the second attempt is guaranteed to pass.
@@ -77,17 +91,23 @@ export async function turnEndDecision(
     reason: turnEndMessage(selected, selected.pid !== null && alive(selected.pid)),
   };
 }
-async function withDeadline(probe: Promise<'running' | 'terminal'>) {
+/** No live observer and no observation inside the queue's maximum life, or a root that
+ * is gone: nothing here can be confirmed or waited on. */
+function staleTurnWork(work: TurnWork, now: number) {
+  if (!existsSync(work.root)) return true;
+  return (work.pid === null || !alive(work.pid)) && now - work.observedAt > TURN_WORK_STALE_MS;
+}
+async function withDeadline(probe: Promise<TurnWorkState>): Promise<TurnWorkState> {
   let timer: NodeJS.Timeout | undefined;
   try {
     return await Promise.race([
       probe,
-      new Promise<'running'>(done => {
-        timer = setTimeout(() => done('running'), PROBE_DEADLINE_MS);
+      new Promise<'unknown'>(done => {
+        timer = setTimeout(() => done('unknown'), PROBE_DEADLINE_MS);
       }),
     ]);
   } catch {
-    return 'running' as const;
+    return 'unknown';
   } finally {
     clearTimeout(timer);
   }
@@ -95,10 +115,11 @@ async function withDeadline(probe: Promise<'running' | 'terminal'>) {
 
 /** Exactly one HTTP query: the selected run's status, or the submission's current state
  * (nextVersion past the end returns no history events). */
-export async function hostedTurnWorkProbe(work: TurnWork): Promise<'running' | 'terminal'> {
+export async function hostedTurnWorkProbe(work: TurnWork): Promise<TurnWorkState> {
+  if (!existsSync(work.root)) return 'unknown';
   const { hostedAgentAddress } = await import('./hosted-agent-cli.js');
   const address = hostedAgentAddress(work.root, {});
-  if (!address) return 'running';
+  if (!address) return 'unknown';
   const { ConvexExchange } = await import('./exchange-client.js');
   const { makeFunctionReference } = await import('convex/server');
   const exchange = new ConvexExchange(address.url, process.env.FORGE_AUTH_TOKEN, address.projectId, '', null);
@@ -111,7 +132,8 @@ export async function hostedTurnWorkProbe(work: TurnWork): Promise<'running' | '
         runId: work.id,
       }),
     );
-    return run?.status && hostedCheckTerminal(run) ? 'terminal' : 'running';
+    if (!run?.status) return 'unknown';
+    return hostedCheckTerminal(run) ? 'terminal' : 'running';
   }
   const page = decode(
     await exchange.client.query(makeFunctionReference<'query'>('projectHostedFinishObserve:page'), {
@@ -121,7 +143,8 @@ export async function hostedTurnWorkProbe(work: TurnWork): Promise<'running' | '
     }),
   ) as { submission?: { observation?: { state?: string } } };
   const state = page.submission?.observation?.state;
-  return state && state !== 'pending' ? 'terminal' : 'running';
+  if (!state) return 'unknown';
+  return state === 'pending' ? 'running' : 'terminal';
 }
 
 export async function runTurnEndHook(text: string) {

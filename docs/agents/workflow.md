@@ -1510,7 +1510,10 @@ settle wait covers the stop and the hook allows it. After a Forge
 wait, the next stop counts as a first attempt again. `nforge wait ID [--budget S]`
 runs the canonical wait for that session's recorded work. Each stop costs one
 local read. A hosted query runs only when no live or recent (30 s) observation
-exists. Idle costs nothing, and any failure allows the stop. Work without a
+exists. Idle costs nothing, and any failure allows the stop, including a hosted query that
+cannot confirm the work (no hosted address, an error or its 2.5 s deadline). Entries whose
+Lane folder is gone, or whose observer is dead and last observed over an hour ago (the
+landing queue's own drop window), are pruned by that same local read and never block. Work without a
 session id, and non-Forge background processes, are not covered. Turn it off with
 `nforge settings firstWriteHooks false`.
 

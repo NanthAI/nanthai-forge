@@ -16,7 +16,12 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { turnEndDecision, turnEndMessage } from '../dist/agent-stop-hook.js';
+import {
+  TURN_WORK_STALE_MS,
+  hostedTurnWorkProbe,
+  turnEndDecision,
+  turnEndMessage,
+} from '../dist/agent-stop-hook.js';
 import {
   readTurnLedger,
   recordTurnWait,
@@ -59,7 +64,10 @@ function session(t, client = 'codex') {
       else process.env[key] = value;
     rmSync(directory, { recursive: true, force: true });
   });
-  return { directory, id, root: join(directory, 'lane') };
+  // The Lane folder exists: a ledger entry whose root is gone is pruned, not probed.
+  const root = join(directory, 'lane');
+  mkdirSync(root);
+  return { directory, id, root };
 }
 const landing = (root, id = randomUUID(), pid = process.pid, observedAt) => ({
   id,
@@ -165,15 +173,81 @@ test('budget: idle and finished sessions cost zero queries and zero writes; cold
   assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe: finished.probe }), {});
   assert.deepEqual(finished.calls, [cold.id], 'exactly one hosted query, for the newest entry');
   assert(!readTurnLedger(s.id).work.some(work => work.id === cold.id));
-  // Cold and still running, or unreachable: one query, block once.
-  for (const answer of ['running', new ForgeError('EXCHANGE_REQUEST_FAILED', 'synthetic outage')]) {
-    const probe = countingProbe(answer);
-    const decision = await turnEndDecision({ session_id: s.id }, { probe: probe.probe });
-    assert.equal(decision.decision, 'block');
-    assert.equal(probe.calls.length, 1);
-    assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe: probe.probe }), {});
-    assert.equal(probe.calls.length, 1, 'the allowed second stop makes no query');
+  // Cold and still running: one query, block once.
+  const running = countingProbe('running');
+  assert.equal((await turnEndDecision({ session_id: s.id }, { probe: running.probe })).decision, 'block');
+  assert.equal(running.calls.length, 1);
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe: running.probe }), {});
+  assert.equal(running.calls.length, 1, 'the allowed second stop makes no query');
+});
+
+test('a probe that cannot confirm allows the stop and never blocks: error, deadline, unknown', async t => {
+  const s = session(t);
+  const answers = [
+    new ForgeError('EXCHANGE_REQUEST_FAILED', 'synthetic outage'),
+    'unknown',
+    () => new Promise(() => {}), // never answers: only the deadline ends it
+  ];
+  for (const answer of answers) {
+    rmSync(turnLedgerDirectory(), { recursive: true, force: true });
+    recordTurnWork(landing(s.root, randomUUID(), deadPid, Date.now() - 60_000));
+    const calls = [];
+    const probe = async work => {
+      calls.push(work.id);
+      if (typeof answer === 'function') return answer();
+      if (answer instanceof Error) throw answer;
+      return answer;
+    };
+    assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe }), {}, String(answer));
+    assert.equal(calls.length, 1, 'one query, no retry');
+    assert.equal(readTurnLedger(s.id).blocked ?? null, null, 'an unconfirmed stop leaves no block');
   }
+  // The real probe: a root without a hosted address (or no root) is unknown, never running.
+  assert.equal(await hostedTurnWorkProbe(landing(s.root)), 'unknown');
+  assert.equal(await hostedTurnWorkProbe(landing(join(s.directory, 'missing'))), 'unknown');
+  // And through the real probe the hook allows the stop and makes no block.
+  recordTurnWork(landing(s.root, randomUUID(), deadPid, Date.now() - 60_000));
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }), {});
+  assert.equal(readTurnLedger(s.id).blocked ?? null, null);
+});
+
+test('stale ledger entries (dead observer past the queue life, or a missing root) never block and are pruned', async t => {
+  const s = session(t);
+  const probe = countingProbe('running');
+  const now = Date.now();
+  const gone = join(s.directory, 'deleted-bench-workspace'); // never created
+  const old = landing(s.root, randomUUID(), deadPid, now - TURN_WORK_STALE_MS - 60_000);
+  const rootless = landing(gone, randomUUID(), process.pid, now); // live pid, root deleted
+  const rootlessCheck = { ...landing(gone), kind: 'check', input: { runId: randomUUID() }, pid: null };
+  recordTurnWork(old);
+  recordTurnWork(rootless);
+  recordTurnWork({ ...rootlessCheck, id: rootlessCheck.input.runId });
+  assert.equal(readTurnLedger(s.id).work.length, 3);
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe: probe.probe, now }), {});
+  assert.deepEqual(probe.calls, [], 'pruned entries are never probed');
+  assert.deepEqual(readTurnLedger(s.id).work, [], 'all three entries were pruned');
+  assert.equal(readTurnLedger(s.id).blocked ?? null, null);
+  // An old observation with a live observer is not stale; neither is a recent dead one.
+  const live = landing(s.root, randomUUID(), process.pid, now - TURN_WORK_STALE_MS - 60_000);
+  recordTurnWork(live);
+  assert.equal((await turnEndDecision({ session_id: s.id }, { probe: probe.probe, now })).decision, 'block');
+  assert.equal(readTurnLedger(s.id).work.length, 1);
+  assert.deepEqual(probe.calls, []);
+  // A live landing with a fresh observation still blocks exactly once beside stale entries.
+  rmSync(turnLedgerDirectory(), { recursive: true, force: true });
+  const fresh = landing(s.root, randomUUID(), deadPid, now - 5_000);
+  recordTurnWork(old);
+  recordTurnWork(fresh);
+  const first = await turnEndDecision({ session_id: s.id }, { probe: probe.probe, now });
+  assert.equal(first.decision, 'block');
+  assert.match(first.reason, new RegExp(`^Your landing ${fresh.id.slice(0, 8)} is still running`));
+  assert.deepEqual(
+    readTurnLedger(s.id).work.map(work => work.id),
+    [fresh.id],
+    'only the stale entry was pruned',
+  );
+  assert.deepEqual(await turnEndDecision({ session_id: s.id }, { probe: probe.probe, now }), {});
+  assert.deepEqual(probe.calls, [], 'no hosted query for any of it');
 });
 
 test('other sessions, other events and disabled state never block', async t => {
