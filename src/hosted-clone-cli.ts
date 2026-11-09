@@ -12,7 +12,7 @@ import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { durableReplace } from './native-durability.js';
 import { workLocked } from './work-lock.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 export const CLONE_HELP = 'nforge clone <project-url|project-id> DIR [--deployment URL]\n';
 type Client = Pick<ConvexExchange['client'], 'query'>;
 /** Root binding is the same private address used by CLI/MCP; no native owner is created. */
@@ -24,36 +24,48 @@ export async function cloneHostedProject(
   root = resolve(root);
   const directory = hostedAgentDirectory(root),
     path = join(directory, 'clone.json');
-  const operation = workLocked(join(directory, 'clone.lock'), () => {
-    if (checkoutPathExists(path)) {
-      const previous = z
-        .object({ url: z.string(), projectId: z.string(), operationId: z.uuid() })
-        .parse(readAgentJson(path));
-      invariant(
-        previous.url === address.url && previous.projectId === address.projectId,
-        'WORK_OPERATION_CHANGED',
-        'Retry clone with its original project and deployment.',
-      );
-      return previous;
-    }
-    if (checkoutPathExists(root)) {
-      const stat = lstatSync(root);
-      invariant(
-        stat.isDirectory() && !stat.isSymbolicLink(),
-        'UNSAFE_PATH',
-        'Clone destination must be a real directory.',
-      );
-      invariant(
-        readdirSync(root).length === 0,
-        'WORK_CONFLICT',
-        'Clone requires an empty destination directory.',
-      );
-    }
-    const request = { ...address, operationId: randomUUID() };
-    durableReplace(path, JSON.stringify(request));
-    return request;
-  });
-  const result = await checkoutHostedMain(root, operation, transport);
+  const select = (fresh: boolean) =>
+    workLocked(join(directory, 'clone.lock'), () => {
+      if (!fresh && checkoutPathExists(path)) {
+        const previous = z
+          .object({ url: z.string(), projectId: z.string(), operationId: z.uuid() })
+          .parse(readAgentJson(path));
+        invariant(
+          previous.url === address.url && previous.projectId === address.projectId,
+          'WORK_OPERATION_CHANGED',
+          'Retry clone with its original project and deployment.',
+        );
+        return previous;
+      }
+      if (checkoutPathExists(root)) {
+        const stat = lstatSync(root);
+        invariant(
+          stat.isDirectory() && !stat.isSymbolicLink(),
+          'UNSAFE_PATH',
+          'Clone destination must be a real directory.',
+        );
+        invariant(
+          readdirSync(root).length === 0,
+          'WORK_CONFLICT',
+          'Clone requires an empty destination directory.',
+        );
+      }
+      const request = { ...address, operationId: randomUUID() };
+      durableReplace(path, JSON.stringify(request));
+      return request;
+    });
+  let operation = select(false),
+    result;
+  try {
+    result = await checkoutHostedMain(root, operation, transport);
+  } catch (error) {
+    // The earlier clone finished but its folder is gone or emptied (Issue ca49dc6c): a clone into it
+    // is new work, so it installs again (from this machine's cached objects when they are kept),
+    // never a replayed success with no files. A non-empty folder still refuses below.
+    if (!(error instanceof ForgeError && error.code === 'CHECKOUT_MISSING')) throw error;
+    operation = select(true);
+    result = await checkoutHostedMain(root, operation, transport);
+  }
   durableReplace(join(directory, 'address.json'), JSON.stringify(address));
   return { ...result, operationId: operation.operationId, transport: 'hosted', path: result.root };
 }

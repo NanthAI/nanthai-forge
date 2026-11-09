@@ -13,6 +13,10 @@ const task = await import(moduleUrl('../convex/projectConvexSourceTask.ts'));
 const node = await import(moduleUrl('../convex/projectConvexSourceNode.ts'));
 const small = await import(moduleUrl('../convex/projectConvexSource.ts'));
 const { sourceStorage } = await import(moduleUrl('../convex/projectConvexSourceStorage.ts'));
+/** Every stand-in for leaked request text (URLs, bodies, RPC payloads) carries this token. Guards
+ * match it, not a plain word such as "private", which also occurs in stack-frame paths (macOS
+ * tmpdir is /private/var/...). */
+export const leakSentinel = 'leak-sentinel-5f0c2e';
 export const identity = { projectId: 'project', jobId: 'job', step: 3, index: 2, generation: 4 };
 const at = '2026-01-01T00:00:00.000Z';
 export async function failureFixture(t, kind, wrapper = 'task') {
@@ -89,7 +93,7 @@ export async function failureFixture(t, kind, wrapper = 'task') {
         (mode === 'progress-section' && !String(url).includes(loaded.cursor.split(':')[1]))
       ) {
         hits++;
-        throw new DOMException('secret-url?token=private-response', 'TimeoutError');
+        throw new DOMException(`secret-url?token=private-response-${leakSentinel}`, 'TimeoutError');
       }
       if (mode === 'body') {
         hits++;
@@ -97,14 +101,14 @@ export async function failureFixture(t, kind, wrapper = 'task') {
           new ReadableStream({
             start(c) {
               c.enqueue(bytes.subarray(0, 1));
-              c.error(Object.assign(new TypeError('private-body'), { code: 'ECONNRESET' }));
+              c.error(Object.assign(new TypeError(`private-body-${leakSentinel}`), { code: 'ECONNRESET' }));
             },
           }),
         );
       }
       if (typeof mode === 'number') {
         hits++;
-        return new Response('private-response', { status: mode });
+        return new Response(`private-response-${leakSentinel}`, { status: mode });
       }
     }
     return serve(url, init);
@@ -116,15 +120,18 @@ export async function failureFixture(t, kind, wrapper = 'task') {
     if (name === 'projectConvexSourceObjects:resolve') {
       if (mode === 'rpc-syntax') {
         hits++;
-        throw new SyntaxError('private RPC parse failure');
+        throw new SyntaxError(`private RPC parse failure ${leakSentinel}`);
       }
       if (mode === 'rpc') {
         hits++;
-        throw Error('private nested RPC payload');
+        throw Error(`private nested RPC payload ${leakSentinel}`);
       }
       if (mode === 'rpc-timeout') {
         hits++;
-        throw new ConvexError({ code: 'EXCHANGE_REQUEST_TIMEOUT', message: 'private RPC timeout' });
+        throw new ConvexError({
+          code: 'EXCHANGE_REQUEST_TIMEOUT',
+          message: `private RPC timeout ${leakSentinel}`,
+        });
       }
       if (mode === 'absent')
         throw new ConvexError({ code: 'SOURCE_UNAVAILABLE', message: 'Exact source object is absent.' });
@@ -136,7 +143,7 @@ export async function failureFixture(t, kind, wrapper = 'task') {
           return {
             descriptor: { object: { sha256: id, size: bytes.length }, recipe: null },
             storageId: null,
-            url: `https://synthetic.r2.cloudflarestorage.com${key}?signature=private`,
+            url: `https://synthetic.r2.cloudflarestorage.com${key}?signature=private-${leakSentinel}`,
           };
         }),
       );

@@ -10,6 +10,9 @@ type Selection = {
   fallback?: 'scoped-root-config' | 'scoped-unclassified';
 };
 type Side = ReturnType<typeof selectImpactPair>[number];
+/** The standard plan's full suite in the composed Candidate (one rule, docs/forge-only-rules.md). */
+const suiteTests = (files: Map<string, string>) =>
+  [...files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
 const rootConfig = (paths: string[]) => paths.find(path => !path.includes('/') && !documentation(path));
 
 /** Runner-side selection on the exact recomposed Candidate, from one import graph: the tests that
@@ -28,7 +31,7 @@ export function scopedRecheckSelection(input: {
   files: Map<string, string>;
   semanticTests?: string[];
 }): Selection {
-  const all = [...input.files.keys()].filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
+  const all = suiteTests(input.files);
   const full = (reason: string, fallback: NonNullable<Selection['fallback']>): Selection => ({
     scope: 'full',
     reason: `Scoped recheck needs full: ${reason}`,
@@ -72,6 +75,41 @@ export function scopedRecheckSelection(input: {
     reason:
       `Scoped recheck: ${both.length} tests affected by main and this change${basis}, ${own.length} own tests, ` +
       `fixed smoke; ${all.length - tests.length} of ${all.length} full-suite tests are main-audit debt`,
+    tests,
+  };
+}
+
+/** A cohort's main-race recheck (Issue 28f08555): the union of each member's scoped selection, where a
+ * member's change is what its full pass checked (checked base → checked head) and the other side is
+ * everything that differs in the cohort's Candidate (main's delta and the other members). Any member
+ * whose own side needs full (a root, unclassified or deleted path) keeps the full union. One graph:
+ * `selectImpactPair` runs once per member on the same file map. */
+export function batchScopedRecheckSelection(input: {
+  members: { lanePaths: string[]; mainPaths: string[] }[];
+  files: Map<string, string>;
+  semanticTests?: string[];
+}): Selection {
+  const selections = input.members.map(member =>
+    scopedRecheckSelection({ ...member, files: input.files, semanticTests: input.semanticTests ?? [] }),
+  );
+  const full = selections.find(selection => selection.scope === 'full');
+  if (full) return { ...full, reason: `Cohort member: ${full.reason}` };
+  const suite = suiteTests(input.files);
+  const all = suite.length;
+  // A cohort with no basis is never scoped (the gate parser refuses one); fail safe all the same.
+  if (!selections.length)
+    return {
+      scope: 'full',
+      reason: 'Scoped recheck needs full: cohort without a basis',
+      tests: suite,
+      fallback: 'scoped-unclassified',
+    };
+  const tests = [...new Set(selections.flatMap(selection => selection.tests))].sort();
+  return {
+    scope: 'scoped',
+    reason:
+      `Scoped cohort recheck: union of ${selections.length} member selection(s), ${tests.length} tests; ` +
+      `${all - tests.length} of ${all} full-suite tests are main-audit debt`,
     tests,
   };
 }

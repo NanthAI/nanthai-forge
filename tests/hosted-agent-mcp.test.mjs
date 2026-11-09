@@ -113,7 +113,13 @@ for (const action of [
     const response = await tool.call({ command: parsed });
     assert(!response.isError, response.content[0].text);
     const actual = body(response);
-    assert.deepEqual(actual, slimReceipt(await s.transport().dispatch(requested, input)));
+    const replay = slimReceipt(await s.transport().dispatch(requested, input));
+    // A save answered from its settled receipt says it replayed (Issue ca49dc6c); all else is the same.
+    if (['save', 'checkpoint'].includes(action)) {
+      const { replayed, ...rest } = replay.result;
+      assert.equal(replayed, true);
+      assert.deepEqual(actual, { ...replay, result: rest });
+    } else assert.deepEqual(actual, replay);
     const { operationId, ...data } = input;
     const expected = hostedAgentCommandSchemas[hostedAgentAction(action)].parse(
       ['status', 'observe'].includes(action) ? input : data,

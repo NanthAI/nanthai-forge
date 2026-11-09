@@ -129,7 +129,8 @@ export function firstCheckReceipt(
       ...(input.rule ? { rule: input.rule } : {}),
     };
   const reason = admission.recheck ?? (input.batch ? 'cohort' : 'not-tried');
-  return input.scoped && !input.batch
+  // A cohort's scoped recheck records it on every member's receipt (Issue 28f08555).
+  return input.scoped
     ? { landedOn: 'scoped-intersection', reason, selection: input.scoped.reason, tests: input.scoped.tests }
     : { landedOn: 'recheck', reason };
 }

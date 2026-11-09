@@ -32,6 +32,10 @@ import { hostedAgentCli } from '../dist/hosted-agent-cli.js';
 import { submitHostedLand } from '../dist/hosted-land-cli.js';
 import { digest } from '../dist/hash.js';
 import { notSavedInclude } from '../dist/save-not-saved.js';
+import { resolutionFixture } from './hosted-agent-resolution-fixture.mjs';
+import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
+import { replayBindings } from '../dist/hosted-replay-holds.js';
+import { slimReceipt } from '../dist/receipt-slim.js';
 
 const address = { url: 'https://fixture.invalid', projectId: 'unused' };
 
@@ -534,4 +538,57 @@ test('pull without ROOT uses the Forge clone holding the current directory (fric
   await assert.rejects(hostedPullCli([], gate), error => error.code === 'WORK_CONFLICT');
   assert.equal(gated, 1, 'no clone, no call');
   await assert.rejects(hostedPullCli(['a', 'b'], gate), error => error.code === 'BAD_ARGUMENT');
+});
+
+// Issue ca49dc6c: a replay is valid only while the state it reports still holds.
+test('incident replay 9694afff: a bare save after new edits saves them; an unchanged one replays and says so', async t => {
+  const s = await resolutionFixture(t, { overlap: false }),
+    f = s.f;
+  await s.transport().dispatch('open', { laneId: f.lane.laneId });
+  writeFileSync(join(s.root, 'first.txt'), 'first edit');
+  const first = await s.transport().dispatch('save', {});
+  assert.equal(first.result.outcome.status, 'completed');
+  assert.equal(first.result.replayed, undefined);
+  assert.equal(first.result.unsavedEdits, undefined);
+  const saved = readHostedLaneCheckout(s.root).selection;
+  // Nothing changed: the identical request replays the settled receipt, says so, and saves nothing.
+  const same = await s.transport().dispatch('save', {});
+  assert.equal(same.operationId, first.operationId);
+  assert.equal(same.result.replayed, true);
+  assert.equal(same.result.unsavedEdits, undefined);
+  assert.equal(readHostedLaneCheckout(s.root).selection.version, saved.version);
+  // New edits: the earlier receipt no longer says what is saved, so the same bare save is new work.
+  writeFileSync(join(s.root, 'second.txt'), 'second edit');
+  const second = await s.transport().dispatch('save', {});
+  assert.notEqual(second.operationId, first.operationId, 'a new save, not a replay of the earlier one');
+  assert.equal(second.result.outcome.status, 'completed');
+  assert.equal(second.result.replayed, undefined);
+  assert.equal(second.result.unsavedEdits, undefined, 'the new edits are in this save');
+  const after = readHostedLaneCheckout(s.root);
+  assert.notEqual(after.selection.head, saved.head);
+  assert(after.state.files.some(file => file.path === 'second.txt'));
+  assert.equal((await f.readLane(f.lane.laneId)).head, after.selection.head);
+  // An explicit replay of the first operation answers from its receipt, and names the edits that
+  // differ from the head it reports instead of implying they are saved.
+  writeFileSync(join(s.root, 'third.txt'), 'third edit');
+  const explicit = await s.transport().dispatch('save', { operationId: first.operationId });
+  assert.equal(explicit.result.replayed, true);
+  assert.equal(explicit.result.unsavedEdits.saved, false);
+  // The brief receipt keeps both facts.
+  const brief = slimReceipt(explicit);
+  assert.equal(brief.result.replayed, true);
+  assert.equal(brief.result.unsavedEdits.saved, false);
+});
+
+test('every hosted agent action declares how its replay binds to current state', () => {
+  const kinds = new Set(['checked', 'transport', 'server', 'read']);
+  const actions = Object.keys(hostedAgentCommandSchemas).sort();
+  assert.deepEqual(Object.keys(replayBindings).sort(), actions);
+  for (const action of actions) {
+    const binding = replayBindings[action];
+    assert(kinds.has(binding.kind), action);
+    if (binding.kind === 'checked') assert.equal(typeof binding.superseded, 'function', action);
+  }
+  for (const action of ['save', 'sync', 'withdraw', 'open'])
+    assert.equal(replayBindings[action].kind, 'checked', `${action} receipts describe local state`);
 });

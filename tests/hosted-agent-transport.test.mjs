@@ -104,7 +104,12 @@ for (const [action, api] of [
     const first = await s.transport().dispatch(action, command);
     const again = await s.transport().dispatch(action, command);
     assert.equal(first.operationId, again.operationId);
-    assert.deepEqual(first.result, again.result);
+    // A save answered from its settled receipt says it replayed (Issue ca49dc6c); all else is the same.
+    if (action === 'save') {
+      const { replayed, ...rest } = again.result;
+      assert.equal(replayed, true);
+      assert.deepEqual(first.result, rest);
+    } else assert.deepEqual(first.result, again.result);
     if (api !== 'download') {
       const before = firstCalls.filter(call => call.name === api).at(-1);
       const after = s.calls.filter(call => call.name === api).at(-1);

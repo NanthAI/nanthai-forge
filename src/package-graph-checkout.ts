@@ -54,16 +54,28 @@ const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
  * checkout, so a repository's own CI script opts in with one line. */
 export function writeCheckPackages(
   directory: string,
-  changes: { mode?: unknown; paths?: unknown; mainPaths?: unknown } | undefined,
+  changes: { mode?: unknown; paths?: unknown; mainPaths?: unknown; members?: unknown } | undefined,
   runner?: { node: string; script: string },
 ): { path: string; run: string | null; remove: () => void } | null {
   if (changes?.mode !== 'scoped' || !Array.isArray(changes.paths)) return null;
   const strings = (list: unknown[]) => list.filter((path): path is string => typeof path === 'string');
   const changed = strings(changes.paths);
-  // A scoped main-race recheck names main's delta: the packages that can see both changes.
-  const selection = Array.isArray(changes.mainPaths)
-    ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths))
-    : checkoutPackageSelection(directory, changed);
+  // A scoped main-race recheck names main's delta: the packages that can see both changes. A cohort
+  // recheck names each member's sides (Issue 28f08555): the union of their intersections.
+  const members = Array.isArray(changes.members)
+    ? changes.members.map(member => {
+        const { paths, mainPaths } = (member ?? {}) as { paths?: unknown; mainPaths?: unknown };
+        return {
+          lanePaths: Array.isArray(paths) ? strings(paths) : [],
+          mainPaths: Array.isArray(mainPaths) ? strings(mainPaths) : [],
+        };
+      })
+    : undefined;
+  const selection = members
+    ? checkoutPackageIntersection(directory, changed, [], members)
+    : Array.isArray(changes.mainPaths)
+      ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths))
+      : checkoutPackageSelection(directory, changed);
   const folder = mkdtempSync(join(tmpdir(), 'forge-packages-'));
   const path = join(folder, 'packages.json');
   writeFileSync(
@@ -90,7 +102,12 @@ export function writeCheckPackages(
 }
 
 /** A scoped main-race recheck's package selection (src/package-intersection.ts) in a checkout. */
-export function checkoutPackageIntersection(directory: string, changed: string[], mainPaths: string[]) {
+export function checkoutPackageIntersection(
+  directory: string,
+  changed: string[],
+  mainPaths: string[],
+  members?: { lanePaths: string[]; mainPaths: string[] }[],
+) {
   const paths = checkoutPaths(directory);
   const graph = paths
     ? buildPackageGraph(paths, path => {
@@ -101,5 +118,5 @@ export function checkoutPackageIntersection(directory: string, changed: string[]
         }
       })
     : ({ status: 'unknown', reason: `more than ${MAX_PATHS} files` } as const);
-  return packageIntersectionTestSelection(graph, changed, mainPaths);
+  return packageIntersectionTestSelection(graph, changed, mainPaths, members);
 }

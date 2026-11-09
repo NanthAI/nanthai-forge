@@ -26,6 +26,7 @@ import {
   settlePriorHostedSave,
 } from './hosted-save-client.js';
 import { capturedNotSaved } from './save-not-saved.js';
+import { saveSettledHere, unsavedAfterSave } from './hosted-save-receipt-state.js';
 import { transitionHostedLane } from './hosted-lifecycle-client.js';
 import { hostedLifecycleRequestSchema } from './hosted-lifecycle.js';
 import { randomUUID } from 'node:crypto';
@@ -502,6 +503,8 @@ export async function executeHostedAgent(
     const command = hostedAgentCommandSchemas.save.parse(input);
     checkLocalLane(session, command.laneId);
     const timing = syncTiming();
+    // A save already settled here answers from its receipt and captures nothing new: say so.
+    const replayed = saveSettledHere(session.root, operationId);
     const settleBackground = session.capabilities.features?.includes('save-settle-background') ?? false;
     const saved = await saveHostedLane(
       session.root,
@@ -538,7 +541,17 @@ export async function executeHostedAgent(
         : session.journal.get<typeof split>('save-timing');
     // New paths the capture left out by name (credential names), bounded: the save says so.
     const notSaved = capturedNotSaved(session.root, operationId);
-    return { ...outcome, ...(kept ? { timing: kept } : {}), ...(notSaved ? { notSaved } : {}) };
+    // A save never reports success for edits it did not capture (Issue ca49dc6c): files that differ
+    // from the head it saved (edited after its capture, or a replay of an earlier save) are named as
+    // unsaved, with the next step. Local digest pass over stat-index misses; no call.
+    const unsaved = unsavedAfterSave(session.root, outcome);
+    return {
+      ...outcome,
+      ...(replayed ? { replayed: true } : {}),
+      ...(kept ? { timing: kept } : {}),
+      ...(notSaved ? { notSaved } : {}),
+      ...(unsaved ? { unsavedEdits: unsaved } : {}),
+    };
   }
   if (action === 'compose')
     return composeAgentSource(session, hostedAgentCommandSchemas.compose.parse(input), operationId);

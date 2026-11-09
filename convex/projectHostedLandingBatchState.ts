@@ -6,6 +6,7 @@ import { batchFailureSchema, batchMemberDetailSchema } from '../src/hosted-batch
 import { hostedLandingAttemptSchema } from '../src/hosted-landing';
 import { HOSTED_BATCH_MEMBERS } from '../src/hosted-landing-batch';
 import { invariant } from '../src/errors';
+import { scopedRecheckBasisSchema } from '../src/scoped-recheck-policy';
 
 export type BatchIdentity = { projectId: Id<'hostedProjects'>; batchId: string };
 export const batchSchema = z
@@ -33,6 +34,8 @@ export const batchSchema = z
       .max(3)
       .optional(),
     runId: z.uuid().optional(),
+    /** The cohort's last whole pass, kept across main-race retries (Issue 28f08555). */
+    recheck: scopedRecheckBasisSchema.optional(),
     included: z.array(z.uuid()).max(HOSTED_BATCH_MEMBERS).optional(),
   })
   .strict();

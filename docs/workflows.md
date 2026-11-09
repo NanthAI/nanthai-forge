@@ -108,8 +108,16 @@ become main-audit debt; a failed scoped recheck fails the landing as usual. The
 receipt records `firstCheck: {"landedOn":"scoped-intersection","reason",
 "selection","tests"}`. A configured check command gets the package intersection in
 `FORGE_CHECK_PACKAGES` (packages this change touches, plus its dependents that
-main's delta also reaches). Batches still recheck the full union. Set
-`scopedRecheck: false` to keep full rechecks.
+main's delta also reaches). A cohort's shared check is scoped the same way
+when every member holds a full-pass basis (Issue 28f08555): the cohort's own
+earlier whole pass when only main moved under it, otherwise each member's own.
+Per basis, the planner rechecks the tests that can see both that checked change
+and everything else in the cohort's Candidate (main's delta and the other
+members), and runs their union with the members' own tests and smoke. A member
+without a basis, or whose own side needs the full suite, keeps the full union.
+Skipped tests are main-audit debt once per cohort head, and each member receipt
+records `landedOn: "scoped-intersection"`. Set `scopedRecheck: false` to keep
+full rechecks.
 
 For a combined Candidate, every member must be eligible for the contract gate;
 its check covers the union of their declared tests. One full-gated member makes
@@ -319,8 +327,10 @@ its check declares more. Either way it receives the changed paths:
   `base` is the main the Candidate composed on and `head` the exact Candidate (`FORGE_CHECK_BASE`,
   `FORGE_CHECK_HEAD`); `paths` lists every added, modified, deleted or mode-changed path, sorted. A scoped
   run may add `tests` (Intent contract or probe test files the command must run) and, for a scoped
-  recheck after main moved, `mainPaths` (what main gained since the checked base). `paths` is absent when
-  the list is over 128 KiB; `mode` is then `full`.
+  recheck after main moved, `mainPaths` (what main gained since the checked base). A scoped cohort
+  recheck instead adds `members: [{paths, mainPaths}]`, per member basis its checked change and what
+  else differs in the cohort's Candidate. `paths` is absent when the list is over 128 KiB; `mode` is
+  then `full`.
 - `mode: "full"` (also `FORGE_CHECK_FULL=1`) means run everything. `mode: "scoped"`
   (`FORGE_CHECK_SCOPED=1`) means the command may run only what the change affects.
 - `FORGE_CHECK_PACKAGES` (hosted Actions, scoped runs only): path of a JSON file outside the checkout
@@ -331,7 +341,8 @@ its check declares more. Either way it receives the changed paths:
   the graph could not place the change; the command then runs everything. A command may run
   `commands` as given or use `packages` with its own tool. On a scoped main-race recheck the file holds the
   package intersection: the packages this change touches, plus those of its dependents that
-  main's delta since the checked base also reaches (`src/package-intersection.ts`).
+  main's delta since the checked base also reaches (`src/package-intersection.ts`); on a scoped
+  cohort recheck, the union of each member's intersection.
 - `FORGE_CHECK_PACKAGES_RUN` (same runs, only when the graph selected packages with tests): an
   executable that runs those `commands` in the checkout, in order, without a shell, with the calling
   script's environment, and exits with the first failure's code (Forge's

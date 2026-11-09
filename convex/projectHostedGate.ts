@@ -17,7 +17,7 @@ import { trustGateReader } from './projectHostedTrust';
 import { effectivePolicy, type AcceptanceActor } from '../src/autonomy-policy';
 import { gateFor, gateForCandidates, acceptGate, type GateInput } from '../src/contract-gate-policy';
 import type { HostedCheckRun } from '../src/hosted-check';
-import { acceptScopedRecheck, scopedRecheckBase, scopedRecheckPolicy } from '../src/scoped-recheck-policy';
+import { acceptScopedRecheck, isScopedRecheck, scopedRecheckPolicy } from '../src/scoped-recheck-policy';
 import { GRAPH_FIRST_CONTRACT, acceptGraphFirst, isGraphFirstGate } from '../src/graph-first-check';
 import type { HostedRecord } from '../src/hosted-records';
 
@@ -117,7 +117,7 @@ export async function hostedAcceptGate(
       run.gate,
     );
   // A scoped main-race recheck is accepted on the contract gate's terms.
-  if (scopedRecheckBase(run.gate))
+  if (isScopedRecheck(run.gate))
     return acceptScopedRecheck(
       await hostedGateInput(ctx, project, candidate, actor, null, { scopedRecheck: true }),
     );

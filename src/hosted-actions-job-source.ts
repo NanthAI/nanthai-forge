@@ -11,7 +11,7 @@ import { digest } from './hash.js';
 import { invariant, type ForgeError } from './errors.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { mapExchange } from './exchange-parallel.js';
-import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
 import { materializeSubmodules, type SubmoduleAccess } from './submodule-materialize.js';
 import { actionsSubmoduleAccessCapability } from './hosted-actions-capabilities.js';
 import { submoduleAccessReplySchema } from './hosted-actions-direct.js';
@@ -36,9 +36,12 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
   const connection = client.transport(),
     { transport, resolve, prepareRecipes } = connection;
   let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
-  // A scoped recheck also needs the checked base inventory; it shares this window.
+  // A scoped recheck also needs the checked base inventory; a cohort recheck each member basis's
+  // checked base and head (Issue 28f08555). They share this window: no added Convex call.
   const recheckBase = scopedRecheckBase(run.gate);
-  let heads = [run.request.expectedHead, run.candidate.base.head, ...(recheckBase ? [recheckBase] : [])];
+  const pairs = scopedRecheckPairs(run.gate);
+  const extra = recheckBase ? [recheckBase] : [...new Set(pairs?.flatMap(p => [p.base, p.checked]) ?? [])];
+  let heads = [run.request.expectedHead, run.candidate.base.head, ...extra];
   try {
     await resolve(heads);
     await prepareRecipes(heads);
@@ -48,7 +51,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     await resolve(heads);
     await prepareRecipes(heads);
   }
-  const [candidateRef, baseRef, checkedBaseRef] = await transport.describeBatch!(heads);
+  const [candidateRef, baseRef, ...extraRefs] = await transport.describeBatch!(heads);
   // The State manifests are independent R2 reads: overlap them (same GETs, one round trip
   // of wait instead of two or three). One object named twice is read once.
   const reads = new Map<string, Promise<Buffer>>();
@@ -57,16 +60,25 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     if (!reads.has(id)) reads.set(id, reader.bytes(ref));
     return reads.get(id)!;
   };
-  const [stateBytes, baseBytes, checkedBase] = await Promise.all([
+  const [stateBytes, baseBytes, ...extraStates] = await Promise.all([
     read(candidateRef!),
     read(baseRef!),
     // Unavailable or invalid checked-base bytes select the full suite, never fail the check.
-    checkedBaseRef
-      ? read(checkedBaseRef)
-          .then(bytes => (digest(bytes) === recheckBase ? parseNativeState(bytes) : null))
-          .catch(() => null)
-      : null,
+    ...extra.map((head, index) =>
+      extraRefs[index]
+        ? read(extraRefs[index])
+            .then(bytes => (digest(bytes) === head ? parseNativeState(bytes) : null))
+            .catch(() => null)
+        : null,
+    ),
   ]);
+  const checkedBase = recheckBase ? (extraStates[0] ?? null) : null;
+  const byHead = new Map(extra.map((head, index) => [head, extraStates[index] ?? null]));
+  // Every basis State or none: a cohort member without its checked States keeps the full union.
+  const recheckPairs =
+    pairs && pairs.every(p => byHead.get(p.base) && byHead.get(p.checked))
+      ? pairs.map(p => ({ base: byHead.get(p.base)!, checked: byHead.get(p.checked)! }))
+      : null;
   const state = parseNativeState(stateBytes);
   const base = parseNativeState(baseBytes);
   phases.stateFetchMs = performance.now() - phaseStarted;
@@ -250,6 +262,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     stateBytes,
     base,
     checkedBase,
+    recheckPairs,
     packed,
     deltaFiles: changed.length,
     deltaBytes,

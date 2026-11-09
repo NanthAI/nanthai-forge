@@ -191,6 +191,10 @@ function briefSave(result: Json): Json | undefined {
       result: { head: saved.head, ...(saved.unchanged === true ? { unchanged: true } : {}) },
     },
     ...(typeof totalMs === 'number' ? { totalMs } : {}),
+    // What the save did not capture is never trimmed: a replay, held paths, edits left unsaved.
+    ...(result.replayed === true ? { replayed: true } : {}),
+    ...(result.notSaved !== undefined ? { notSaved: result.notSaved } : {}),
+    ...(result.unsavedEdits !== undefined ? { unsavedEdits: result.unsavedEdits } : {}),
   };
 }
 

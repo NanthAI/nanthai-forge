@@ -27,8 +27,8 @@ import { planPool, poolArm, poolUnits } from '../scripts/shard-pool.mjs';
 import { poolClaimsSchema, type PoolClaim } from './hosted-actions-pool.js';
 import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
-import { scopedRecheckBase } from './scoped-recheck-policy.js';
-import { scopedRecheckSelection } from './scoped-recheck.js';
+import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
+import { batchScopedRecheckSelection, scopedRecheckSelection } from './scoped-recheck.js';
 import type { NativeState } from './native-state-format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
@@ -107,7 +107,7 @@ export async function prepareActionsJob(
   await mkdir(cache, { recursive: true });
   const source = await materializeActionsSource(client, directory, cache);
   lap('sourceMs');
-  const { state, base, checkedBase } = source;
+  const { state, base, checkedBase, recheckPairs } = source;
   const inventory = new Map(state.files.map(file => [file.path, file]));
   const paths = changedPaths(base, state);
   const standard = isStandardForgeCheck(run.check);
@@ -118,6 +118,11 @@ export async function prepareActionsJob(
     files,
     standard,
     checkedBase ? changedPaths(checkedBase, base) : null,
+    // Per cohort basis: its checked change, and everything in this Candidate that differs from it.
+    recheckPairs?.map(pair => ({
+      lanePaths: changedPaths(pair.base, pair.checked),
+      mainPaths: changedPaths(pair.checked, state),
+    })) ?? null,
   );
   // Markdown that tests or scripts read: a clean merge of any other Markdown can
   // land on its first check (Issue 7fe54c7c). Absent means every Markdown is tested.
@@ -304,16 +309,19 @@ const changedPaths = (before: NativeState, after: NativeState) => {
     path => checkPin(b.get(path) ?? null) !== checkPin(a.get(path) ?? null),
   );
 };
+type RecheckMembers = { lanePaths: string[]; mainPaths: string[] }[] | null;
 /** Gate metadata is sent only in response to a server-stamped run (skew handshake).
- * `mainPaths` is the main delta since a scoped recheck's checked base. */
+ * `mainPaths` is the main delta since a scoped recheck's checked base; `members` a cohort
+ * recheck's per-basis sides (Issue 28f08555), null when a basis State is unavailable. */
 export function actionsGateSelection(
   run: HostedCheckRun,
   paths: string[],
   files: Map<string, string>,
   standard: boolean,
   mainPaths: string[] | null = null,
+  members: RecheckMembers = null,
 ) {
-  const raw = gateSelection(run, paths, files, standard, mainPaths);
+  const raw = gateSelection(run, paths, files, standard, mainPaths, members);
   // Gate probes, contract unions and rechecks can select nothing; that must never pass.
   const selected = standard ? guardedSelection(raw, { files, paths }) : raw;
   // Why the command could not be narrowed or skipped, pinned with the selection (7c2e69e1).
@@ -323,6 +331,7 @@ export function actionsGateSelection(
     docsPaths: run.check?.docsPaths,
     paths,
     mainPaths,
+    members,
     selected,
     // Intent union tests under another command run with the project's own test runner.
     testRunner: () =>
@@ -338,6 +347,7 @@ function gateSelection(
   files: Map<string, string>,
   standard: boolean,
   mainPaths: string[] | null,
+  members: RecheckMembers,
 ) {
   const gate = run.gate;
   const union = semanticTests(run.semanticPlan);
@@ -356,8 +366,13 @@ function gateSelection(
         tests: [] as string[],
       };
     // Any other command gets the changed paths; it scopes only when its check declares so.
-    return commandSelection(run, paths, files, scopedRecheckBase(gate) ? mainPaths : null, changed =>
-      graphShareFor(files, changed),
+    return commandSelection(
+      run,
+      paths,
+      files,
+      scopedRecheckBase(gate) ? mainPaths : null,
+      changed => graphShareFor(files, changed),
+      members,
     );
   }
   const forceFull = gate?.mode === 'audit' || (gate?.mode === 'full' && union.length > 0);
@@ -381,6 +396,16 @@ function gateSelection(
   if (scopedRecheckBase(gate)) {
     if (mainPaths)
       return scopedRecheckSelection({ lanePaths: paths, mainPaths, files, semanticTests: union });
+    const selected = standardSelection({
+      paths,
+      files,
+      semanticTests: union,
+      env: { FORGE_CHECK_FULL: '1' },
+    });
+    return { ...selected, reason: `Scoped recheck base unavailable; ${selected.reason}` };
+  }
+  if (scopedRecheckPairs(gate)) {
+    if (members) return batchScopedRecheckSelection({ members, files, semanticTests: union });
     const selected = standardSelection({
       paths,
       files,

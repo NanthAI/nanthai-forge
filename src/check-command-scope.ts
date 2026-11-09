@@ -2,7 +2,7 @@
 import { invariant } from './errors.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { contractTestPath } from './intent-test-contract.js';
-import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
 import type { CheckGate } from './bet2-gate.js';
 import { checkCallBudget, maxTestShards } from '../scripts/test-shards.mjs';
 import { GRAPH_FIRST_MAX_SHARE, isGraphFirstGate, type GraphShare } from './graph-first-check.js';
@@ -32,6 +32,8 @@ export type CommandChanges = {
   mode: 'full' | 'scoped';
   paths?: string[];
   mainPaths?: string[];
+  /** A cohort recheck (Issue 28f08555): per member basis, its checked change and the other side. */
+  members?: { paths: string[]; mainPaths: string[] }[];
   tests?: string[];
 };
 export type CommandSelection = {
@@ -43,8 +45,8 @@ export type CommandSelection = {
   graph?: GraphShare;
 };
 
-const fits = (paths: readonly string[]) =>
-  new TextEncoder().encode(JSON.stringify(paths)).length <= commandChangesBytes;
+const fits = (value: unknown) =>
+  new TextEncoder().encode(JSON.stringify(value)).length <= commandChangesBytes;
 
 /** A declared command may scope only where Forge's own check may (a contract, probe or scoped
  * gate); full and audit gates, and runs with no gate, always ask for everything. A scoped run
@@ -57,6 +59,7 @@ export function commandSelection(
   files: { has(path: string): boolean },
   mainPaths: readonly string[] | null = null,
   share?: (paths: string[]) => GraphShare,
+  members: readonly { lanePaths: readonly string[]; mainPaths: readonly string[] }[] | null = null,
 ): CommandSelection {
   const changes = {
     version: 1 as const,
@@ -77,6 +80,20 @@ export function commandSelection(
     return full(`Command scope: ${paths.length} changed paths exceed the changed-paths file; full run`);
   if (!gate || gate.mode === 'full' || gate.mode === 'audit')
     return full(`Command scope: ${gate ? `${gate.mode} gate` : 'no reduced-evidence gate'}; full run`);
+  if (scopedRecheckPairs(gate)) {
+    const sides = members?.map(member => ({
+      paths: [...member.lanePaths].sort(),
+      mainPaths: [...member.mainPaths].sort(),
+    }));
+    if (!sides || !fits(sides))
+      return full('Command scope: scoped cohort recheck bases unavailable; full run');
+    return {
+      scope: 'scoped',
+      reason: 'Command scope: scoped cohort recheck, command-selected',
+      tests: [],
+      changes: { ...changes, mode: 'scoped', members: sides },
+    };
+  }
   if (scopedRecheckBase(gate)) {
     if (!mainPaths || !fits(mainPaths))
       return full('Command scope: scoped recheck base unavailable; full run');

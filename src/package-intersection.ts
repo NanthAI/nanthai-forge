@@ -7,6 +7,7 @@ import {
   type PackageCommand,
   type PackageGraph,
   type PackageSelection,
+  type SelectedPackage,
 } from './package-graph.js';
 import type { PackageTestSelection } from './package-test-selection.js';
 
@@ -30,6 +31,22 @@ export function packageIntersection(
     return { ...lane, reason: `${lane.reason}; main reaches every package (${main.reason})` };
   const shared = new Set(main.packages.map(keyOf));
   const packages = lane.packages.filter(pkg => pkg.why === 'changed' || shared.has(keyOf(pkg)));
+  return withCommands(
+    graph,
+    packages,
+    lanePaths,
+    `package graph: ${packages.length} package(s) that can see both this change and main ` +
+      `(${packages.map(keyOf).sort().slice(0, 8).join(', ')}); ${lane.packages.length - packages.length} ` +
+      `of this change's ${lane.packages.length} affected package(s) are main-audit debt`,
+  );
+}
+function withCommands(
+  graph: PackageGraph,
+  packages: SelectedPackage[],
+  lanePaths: string[],
+  reason: string,
+): PackageSelection {
+  if (graph.status !== 'available') return { scope: 'full', reason: graph.reason };
   const byKey = new Map(graph.packages.map(pkg => [packageKey(pkg), pkg]));
   const commands: PackageCommand[] = [];
   for (const ecosystem of graph.ecosystems) {
@@ -42,15 +59,34 @@ export function packageIntersection(
       return { scope: 'full', reason: `package graph: ${ecosystem.ecosystem}: ${result.refusal}` };
     commands.push(...result);
   }
-  return {
-    scope: commands.length ? 'scoped' : 'none',
-    reason:
-      `package graph: ${packages.length} package(s) that can see both this change and main ` +
-      `(${packages.map(keyOf).sort().slice(0, 8).join(', ')}); ${lane.packages.length - packages.length} ` +
-      `of this change's ${lane.packages.length} affected package(s) are main-audit debt`,
+  return { scope: commands.length ? 'scoped' : 'none', reason, packages, commands };
+}
+
+/** A cohort recheck at package level (Issue 28f08555): the union of each member's intersection, its
+ * checked change against everything else in the cohort's Candidate. Any member that needs every
+ * package keeps the full run. */
+export function packageIntersectionUnion(
+  graph: PackageGraph,
+  members: { lanePaths: string[]; mainPaths: string[] }[],
+): PackageSelection {
+  const selections = members.map(member => packageIntersection(graph, member.lanePaths, member.mainPaths));
+  const full = selections.find(selection => selection.scope === 'full');
+  if (full || !members.length || graph.status !== 'available')
+    return { scope: 'full', reason: `cohort member: ${full?.reason ?? 'no basis'}` };
+  const packages = [
+    ...new Map(
+      selections
+        .flatMap(selection => ('packages' in selection ? selection.packages : []))
+        .map(pkg => [keyOf(pkg), pkg]),
+    ).values(),
+  ];
+  return withCommands(
+    graph,
     packages,
-    commands,
-  };
+    [...new Set(members.flatMap(member => member.lanePaths))],
+    `package graph: union of ${members.length} cohort member intersection(s), ${packages.length} package(s) ` +
+      `(${packages.map(keyOf).sort().slice(0, 8).join(', ')})`,
+  );
 }
 
 /** The `FORGE_CHECK_PACKAGES` shape of the intersection (src/package-test-selection.ts). */
@@ -58,8 +94,11 @@ export function packageIntersectionTestSelection(
   graph: PackageGraph,
   lanePaths: string[],
   mainPaths: string[],
+  members?: { lanePaths: string[]; mainPaths: string[] }[],
 ): PackageTestSelection {
-  const selection = packageIntersection(graph, lanePaths, mainPaths);
+  const selection = members
+    ? packageIntersectionUnion(graph, members)
+    : packageIntersection(graph, lanePaths, mainPaths);
   if (selection.scope === 'full')
     return {
       scope: 'full',

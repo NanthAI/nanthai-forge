@@ -608,7 +608,10 @@ Hosted automatic-accept projects batch by default, including existing policies
 without a landing setting. `acceptance.landing: "serial"` opts out; the explicit
 `batched` setting remains valid. An explicit legacy `optimistic` setting retains
 its hosted serial behavior. Eligibility and current governance are unchanged.
-A group checks the full union without requiring separate solo checks first.
+A group checks the full union without requiring separate solo checks first. A
+main-race recheck of a group whose members all hold a full-pass basis runs the
+union of their scoped intersections instead
+([hosted acceptance gate](../workflows.md#hosted-acceptance-gate)).
 
 A group's receipts say LANDED only for members its shared State carries. The
 compose worker accounts for every member as merged or as a retained conflict and

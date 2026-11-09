@@ -6,6 +6,7 @@ import { scheduleDirectActions } from './projectHostedActionsDirect';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { hostedGateForCandidates, hostedGateInput } from './projectHostedGate';
 import {
+  scopedRecheckBatchGate,
   scopedRecheckEligible,
   scopedRecheckGate,
   type ScopedRecheckBasis,
@@ -109,6 +110,8 @@ export async function enqueueHostedCheck(
     request: unknown;
     /** Main-race retry: a full gate may become the scoped recheck selection. */
     recheck?: ScopedRecheckBasis;
+    /** A cohort's main-race retry (Issue 28f08555): every included member's full-pass basis. */
+    cohortRecheck?: ScopedRecheckBasis[];
   },
 ) {
   const request = hostedCheckRequestSchema.parse(input.request);
@@ -207,7 +210,7 @@ export async function enqueueHostedCheck(
   const check = checkSchema.parse(JSON.parse(definition.value));
   // No contract, a configured command that reads the changed paths: the contract gate's other
   // guards decide a package-graph-scoped first check (src/graph-first-check.ts). Same reads.
-  const graphFirst = !member && !input.recheck && graphFirstCheck(check);
+  const graphFirst = !member && !input.recheck && !input.cohortRecheck && graphFirstCheck(check);
   const direct = runner.provider === 'github-actions' && !runner.credential;
   let gate =
     direct && project.autonomyPolicy?.acceptance.gate
@@ -235,6 +238,18 @@ export async function enqueueHostedCheck(
     )
   )
     gate = scopedRecheckGate(input.recheck);
+  // A cohort's shared check is otherwise stamped full whatever the project gate (enqueueBatchCheck).
+  else if (
+    direct &&
+    !recoveryGate &&
+    input.cohortRecheck?.length &&
+    scopedRecheckEligible(
+      await hostedGateInput(ctx, project, candidate, { kind: 'agent', id: actor }, null, {
+        scopedRecheck: true,
+      }),
+    )
+  )
+    gate = scopedRecheckBatchGate(input.cohortRecheck);
   const run = hostedCheckRunSchema.parse({
     ...(gate ? { gate } : {}),
     ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),

@@ -55,3 +55,42 @@ export const scopedRecheckFallback = (
   basis: ScopedRecheckBasis | undefined,
 ) =>
   !basis && scopedRecheckPolicy(previous.policy.acceptance) ? ('scoped-no-evidence' as const) : undefined;
+
+/** A passing cohort refused only because main moved (Issue 28f08555): its own exact whole pass is the
+ * basis of the retried cohort's scoped recheck, covering every member together. A scoped pass keeps
+ * the basis the cohort inherited. Reads stay inside the caller's mutation. */
+export async function cohortRecheckBasis(
+  ctx: MutationCtx,
+  inherited: ScopedRecheckBasis | undefined,
+  runId: string | undefined,
+  shared: HostedLandingAttempt,
+): Promise<ScopedRecheckBasis | undefined> {
+  const head = shared.candidate.head;
+  if (
+    !scopedRecheckPolicy(shared.policy.acceptance) ||
+    !shared.check ||
+    shared.check.runId !== runId ||
+    !head
+  )
+    return inherited;
+  try {
+    const run = await requireHostedCheckEvidence(ctx, {
+      projectId: shared.projectId as Parameters<typeof requireHostedCheckEvidence>[1]['projectId'],
+      actor: shared.actor.id,
+      candidateId: shared.candidate.id,
+      head,
+      authorityEpoch: shared.authorityEpoch,
+      ...shared.check,
+    });
+    const whole = run.gate === undefined || run.gate.effective === 'full';
+    if (whole && run.status === 'passed' && run.candidate.digest === shared.candidate.digest)
+      return {
+        checked: { id: shared.candidate.id, head, digest: shared.candidate.digest },
+        checkedBase: shared.main,
+        runId: run.id,
+      };
+  } catch (error) {
+    if (!(error instanceof ForgeError)) throw error;
+  }
+  return inherited;
+}

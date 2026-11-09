@@ -25,6 +25,7 @@ import { loadHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { finishRow, scheduleFinish } from './projectHostedFinishWake';
 import { retainLandingTrain } from './projectHostedLandingWake';
 import { invariant } from '../src/errors';
+import { scopedRecheckPairs, type ScopedRecheckBasis } from '../src/scoped-recheck-policy';
 
 export {
   batchSchema,
@@ -164,17 +165,22 @@ export async function formLandingBatch(
   return true;
 }
 /** Full gate is deliberate. B2.2 can replace this with the members' contract
- * union once its batch eligibility/acceptance policy is supplied. Provider work
- * is only scheduled, so stamping the gate stays in the reservation transaction. */
+ * union once its batch eligibility/acceptance policy is supplied. A cohort whose
+ * members all hold a full-pass basis rechecks a main race scoped instead: the
+ * union of each member's intersection (Issue 28f08555). Provider work is only
+ * scheduled, so stamping the gate stays in the reservation transaction. */
 export async function enqueueBatchCheck(
   ctx: MutationCtx,
   input: {
     projectId: Id<'hostedProjects'>;
     actor: string;
     request: unknown;
+    recheck?: ScopedRecheckBasis[] | undefined;
   },
 ) {
-  const run = await enqueueHostedCheck(ctx, input);
+  const { recheck, ...check } = input;
+  const run = await enqueueHostedCheck(ctx, { ...check, ...(recheck ? { cohortRecheck: recheck } : {}) });
+  if (scopedRecheckPairs(run.gate)) return run;
   run.gate = { mode: 'full', reason: 'Hosted landing batch: full union gate' };
   const { row } = await loadHostedCheck(ctx, { projectId: input.projectId, runId: run.id });
   await ctx.db.patch(row._id, { gate: run.gate });
@@ -240,7 +246,13 @@ export async function installBatchAttempt(
 
 /** Main moved, not a check failure: retain the cohort and create one new exact
  * shared source/check generation. Late uploads retain their old operation pins. */
-export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, batch: LandingBatch) {
+export async function retryLandingBatch(
+  ctx: MutationCtx,
+  input: BatchIdentity,
+  batch: LandingBatch,
+  /** The cohort's own full pass, refused only because main moved: the basis of its scoped recheck. */
+  recheck?: ScopedRecheckBasis,
+) {
   await invalidatePipeline(ctx, input, batch);
   const live = [];
   for (const original of batch.members) {
@@ -268,6 +280,7 @@ export async function retryLandingBatch(ctx: MutationCtx, input: BatchIdentity, 
     input,
     {
       ...retained,
+      ...(recheck ? { recheck } : {}),
       members: live.map(member => member.original),
       leaderId: live[0]!.state.id,
       composeOperationId: crypto.randomUUID(),

@@ -15,6 +15,16 @@ import { firstCheckReceipt, hostedAcceptanceSchema } from '../dist/hosted-accept
 import { smokeTests } from '../scripts/test-impact.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { passWithSelection, seedFullMain, useSyntheticHostedEnv } from './hosted-race-fixture.mjs';
+import * as recheckSelection from '../dist/scoped-recheck.js';
+import * as recheckPolicy from '../dist/scoped-recheck-policy.js';
+import * as intersection from '../dist/package-intersection.js';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { commandSelection } from '../dist/check-command-scope.js';
+import { buildPackageGraph } from '../dist/package-graph.js';
+import { writeCheckPackages } from '../dist/package-graph-checkout.js';
+import { batchesFixture, states } from './hosted-landing-batches-fixture.mjs';
 
 useSyntheticHostedEnv(test);
 
@@ -437,14 +447,15 @@ test('the receipt records landedOn scoped-intersection with the selection reason
     selection: scoped.reason,
     tests: 7,
   });
-  // A full recheck, a cohort and the admission run itself keep their records.
+  // A full recheck and the admission run itself keep their records; a cohort's scoped recheck
+  // records it too (Issue 28f08555, below).
   assert.deepEqual(firstCheckReceipt(admission, { runId: 'b', reused: false, batch: false }), {
     landedOn: 'recheck',
     reason: 'tested-doc',
   });
   assert.equal(
     firstCheckReceipt(admission, { runId: 'b', reused: false, batch: true, scoped }).landedOn,
-    'recheck',
+    'scoped-intersection',
   );
   assert.equal(
     firstCheckReceipt(admission, { runId: 'a', reused: false, batch: false, scoped }).landedOn,
@@ -460,4 +471,314 @@ test('the receipt records landedOn scoped-intersection with the selection reason
     }).success,
     true,
   );
+});
+
+// Issue 28f08555: a cohort's main-race recheck runs the union of each member's scoped intersection
+// (the tests that can see both its checked change and everything else in the cohort's Candidate, its
+// own tests, smoke), not the full union. A member that never passed a whole check, or whose own side
+// cannot be placed, keeps the full union. New names come through namespace imports, so against
+// main's sources (without the fix) each case below fails on its own.
+const { batchScopedRecheckSelection } = recheckSelection;
+const { cohortRecheckBases, isScopedRecheck, scopedRecheckBatchGate, scopedRecheckPairs } = recheckPolicy;
+const { packageIntersectionUnion } = intersection;
+
+const hex = c => c.repeat(64);
+const cohortBasis = (base, checked) => ({
+  checked: { id: randomUUID(), head: checked, digest: hex('e') },
+  checkedBase: { head: base, receiptId: randomUUID() },
+  runId: randomUUID(),
+});
+// Member A edits convex/a.ts, member B convex/b.ts, main convex/main.ts. tests/a-main reaches A and
+// main, tests/a-b reaches both members, tests/b-only only B, tests/other nothing.
+const cohortFiles = (extra = []) =>
+  new Map([
+    ['package.json', '{"scripts":{}}'],
+    ['package-lock.json', '{"lockfileVersion":3,"packages":{}}'],
+    ['convex/a.ts', 'export const a = 1;'],
+    ['convex/b.ts', 'export const b = 1;'],
+    ['convex/main.ts', 'export const main = 1;'],
+    ['convex/a-main.ts', "import './a.ts'; import './main.ts'; export const am = 1;"],
+    ['convex/a-b.ts', "import './a.ts'; import './b.ts'; export const ab = 1;"],
+    ['tests/a-main.test.mjs', "import '../convex/a-main.ts';"],
+    ['tests/a-b.test.mjs', "import '../convex/a-b.ts';"],
+    ['tests/b-only.test.mjs', "import '../convex/b.ts';"],
+    ['tests/other.test.mjs', "import 'node:assert';"],
+    ...smokeTests.map(path => [path, "import 'node:test';"]),
+    ...extra,
+  ]);
+// Each member's other side is everything in the cohort's Candidate that differs from what it checked:
+// main's delta and the other member's change.
+const raced = (a = ['convex/a.ts'], b = ['convex/b.ts']) => [
+  { lanePaths: a, mainPaths: ['convex/main.ts', ...b] },
+  { lanePaths: b, mainPaths: ['convex/main.ts', ...a] },
+];
+
+test('replay: a two-member cohort that raced main reruns the union of each member intersection', () => {
+  const selected = batchScopedRecheckSelection({ members: raced(), files: cohortFiles() });
+  assert.equal(selected.scope, 'scoped', selected.reason);
+  // A×(main+B): a-main, a-b. B×(main+A): a-b. Plus smoke; b-only and other are main-audit debt.
+  assert.deepEqual(selected.tests, ['tests/a-b.test.mjs', 'tests/a-main.test.mjs', ...smokeTests].sort());
+  assert.match(selected.reason, /union of 2 member selection\(s\)/);
+  assert.match(selected.reason, /2 of \d+ full-suite tests are main-audit debt/);
+  // Each member's own test files always run.
+  const own = batchScopedRecheckSelection({
+    members: raced(['convex/a.ts', 'tests/a-new.test.mjs']),
+    files: cohortFiles([['tests/a-new.test.mjs', "import 'node:assert';"]]),
+  });
+  assert(own.tests.includes('tests/a-new.test.mjs'));
+  // The union is never narrower than either member's own solo intersection.
+  for (const member of raced())
+    for (const test of scopedRecheckSelection({ ...member, files: cohortFiles() }).tests)
+      assert(selected.tests.includes(test), test);
+});
+
+test('replay: one member with an unplaced path on its own side keeps the full union', () => {
+  for (const lane of [['package.json'], ['convex/deleted.ts'], ['tsconfig.json']]) {
+    const selected = batchScopedRecheckSelection({
+      members: raced(['convex/a.ts'], lane),
+      files: cohortFiles([['tsconfig.json', '{}']]),
+    });
+    assert.equal(selected.scope, 'full', `${lane}`);
+    assert.match(selected.reason, /^Cohort member: Scoped recheck needs full/);
+    assert.equal(
+      selected.tests.length,
+      [...cohortFiles([['tsconfig.json', '{}']]).keys()].filter(p => /^tests\//.test(p)).length,
+    );
+  }
+  assert.equal(batchScopedRecheckSelection({ members: [], files: cohortFiles() }).scope, 'full');
+});
+
+test('the cohort gate carries every basis pair; old and other gates never parse as one', () => {
+  const a = cohortBasis(hex('1'), hex('2')),
+    b = cohortBasis(hex('3'), hex('4'));
+  const gate = scopedRecheckBatchGate([a, b, a]);
+  assert.equal(gate.mode, 'scoped');
+  assert.deepEqual(scopedRecheckPairs(gate), [
+    { base: hex('1'), checked: hex('2') },
+    { base: hex('3'), checked: hex('4') },
+  ]);
+  assert.equal(scopedRecheckBase(gate), null, 'an older planner reads an ordinary scoped gate');
+  assert(isScopedRecheck(gate) && isScopedRecheck(scopedRecheckGate(a)));
+  assert.equal(scopedRecheckPairs(scopedRecheckGate(a)), null);
+  assert.equal(scopedRecheckPairs({ mode: 'full', reason: gate.reason }), null);
+  assert.equal(scopedRecheckPairs({ mode: 'scoped', reason: 'scoped-recheck-batch:' }), null);
+  assert.equal(scopedRecheckPairs({ mode: 'scoped', reason: `scoped-recheck-batch:${hex('1')}` }), null);
+  // Bases: the cohort's own whole pass covers every member; otherwise each member needs its own.
+  assert.deepEqual(cohortRecheckBases(a, [{}, {}]), [a]);
+  assert.deepEqual(cohortRecheckBases(undefined, [{ recheck: a }, { recheck: b }]), [a, b]);
+  assert.equal(cohortRecheckBases(undefined, [{ recheck: a }, {}]), undefined);
+  assert.equal(cohortRecheckBases(undefined, []), undefined);
+});
+
+test('the Actions planner runs the cohort union, and full when a basis State is unavailable', () => {
+  const gate = scopedRecheckBatchGate([cohortBasis(hex('1'), hex('2')), cohortBasis(hex('3'), hex('4'))]);
+  const paths = ['convex/a.ts', 'convex/b.ts'];
+  const scoped = actionsGateSelection({ gate }, paths, cohortFiles(), true, null, raced());
+  assert.deepEqual(scoped.tests, ['tests/a-b.test.mjs', 'tests/a-main.test.mjs', ...smokeTests].sort());
+  const missing = actionsGateSelection({ gate }, paths, cohortFiles(), true, null, null);
+  assert.equal(missing.scope, 'full');
+  assert.match(missing.reason, /^Scoped recheck base unavailable/);
+  assert.equal(missing.fallback, 'scoped-base-unavailable');
+});
+
+// Any CI: a configured command gets the per-member sides and FORGE_CHECK_PACKAGES the union of the
+// members' package intersections.
+const cargo = {
+  'Cargo.toml': '[workspace]\nmembers = ["crates/*"]\n',
+  'Cargo.lock': '',
+  'crates/core/Cargo.toml': '[package]\nname = "fx-core"\n',
+  'crates/core/src/lib.rs': '',
+  'crates/api/Cargo.toml': '[package]\nname = "fx-api"\n\n[dependencies]\nfx-core = { path = "../core" }\n',
+  'crates/api/src/lib.rs': '',
+  'crates/tool/Cargo.toml': '[package]\nname = "fx-tool"\n',
+  'crates/tool/src/main.rs': '',
+  'crates/misc/Cargo.toml': '[package]\nname = "fx-misc"\n',
+  'crates/misc/src/lib.rs': '',
+};
+const crates = [
+  { lanePaths: ['crates/core/src/lib.rs'], mainPaths: ['crates/api/src/lib.rs', 'crates/tool/src/main.rs'] },
+  { lanePaths: ['crates/tool/src/main.rs'], mainPaths: ['crates/api/src/lib.rs', 'crates/core/src/lib.rs'] },
+];
+test('a configured command gets each member side and the union of package intersections', t => {
+  const run = {
+    check: { executable: 'bash', args: ['ci.sh'], selection: { scope: 'changed-paths' } },
+    gate: scopedRecheckBatchGate([cohortBasis(hex('1'), hex('2'))]),
+    candidate: { base: { head: hex('5') } },
+    request: { expectedHead: hex('6') },
+  };
+  const paths = ['crates/core/src/lib.rs', 'crates/tool/src/main.rs'];
+  const selected = commandSelection(run, paths, new Set(), null, undefined, crates);
+  assert.equal(selected.scope, 'scoped');
+  assert.equal(selected.changes.mode, 'scoped');
+  assert.deepEqual(
+    selected.changes.members.map(m => m.paths),
+    crates.map(m => m.lanePaths),
+  );
+  assert.equal(commandSelection(run, paths, new Set(), null, undefined, null).scope, 'full');
+  const graph = buildPackageGraph(Object.keys(cargo), path => cargo[path]);
+  const union = packageIntersectionUnion(graph, crates);
+  // core×(api,tool): core, api. tool×(api,core): tool. misc is never reached.
+  assert.deepEqual(union.packages.map(p => p.name).sort(), ['fx-api', 'fx-core', 'fx-tool']);
+  assert.equal(
+    packageIntersectionUnion(graph, [...crates, { lanePaths: ['Cargo.lock'], mainPaths: [] }]).scope,
+    'full',
+  );
+  const root = mkdtempSync(join(tmpdir(), 'forge-cohort-packages-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const [path, text] of Object.entries(cargo)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
+  const written = writeCheckPackages(root, selected.changes);
+  t.after(() => written?.remove());
+  const file = JSON.parse(readFileSync(written.path, 'utf8'));
+  assert.equal(file.scope, 'scoped');
+  assert.deepEqual(file.packages.map(p => p.name).sort(), ['fx-api', 'fx-core', 'fx-tool']);
+});
+
+test('every member receipt records landedOn scoped-intersection for a scoped cohort recheck', () => {
+  const admission = { runId: 'a', status: 'passed', full: true, recheck: 'tested-doc' };
+  const scoped = { reason: 'Scoped cohort recheck: union of 2 member selection(s), 7 tests', tests: 7 };
+  assert.deepEqual(firstCheckReceipt(admission, { runId: 'b', reused: false, batch: true, scoped }), {
+    landedOn: 'scoped-intersection',
+    reason: 'tested-doc',
+    selection: scoped.reason,
+    tests: 7,
+  });
+  assert.deepEqual(
+    firstCheckReceipt({ ...admission, recheck: undefined }, { runId: 'b', reused: false, batch: true }),
+    {
+      landedOn: 'recheck',
+      reason: 'cohort',
+    },
+  );
+});
+
+// Hosted replays on the batch fixture: the direct Actions runner (the only one with server gates),
+// green main, two members.
+async function cohort(t, { bases = 'both', scopedRecheck } = {}) {
+  const f = await batchesFixture(t, { count: 0 });
+  if (scopedRecheck !== undefined) {
+    const project = f.tables.hostedProjects.get(f.projectId);
+    const policy = project.autonomyPolicy;
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, scopedRecheck } },
+    });
+  }
+  const { credential: _credential, ...runner } = f.rawChecks.runner;
+  f.rawChecks.configuration = await f.rawChecks.configure(
+    { kind: 'runner', configuration: runner },
+    f.rawChecks.configuration.digest,
+  );
+  const green = () => {
+    const main = f.currentMain();
+    for (const row of [...f.tables.projectHostedMainAudits.values()])
+      f.patch('projectHostedMainAudits', row._id, {
+        lastGreen: { sequence: main.sourceRevision, head: main.head, runId: randomUUID() },
+        unaudited: { count: 0, firstAt: null },
+        debt: false,
+      });
+    if (!f.tables.projectHostedMainAudits.size)
+      f.insert('projectHostedMainAudits', {
+        projectId: f.projectId,
+        lastGreen: { sequence: main.sourceRevision, head: main.head, runId: randomUUID() },
+      });
+  };
+  green();
+  await f.add(0);
+  await f.add(1);
+  // Run until the cohort forms, before its shared composition reserves the check.
+  for (let n = 0; n < 100 && !f.tables.projectHostedLandingBatches.size; n++) await f.execute(f.pending()[0]);
+  const [row] = [...f.tables.projectHostedLandingBatches.values()];
+  assert(row, 'the two members formed one cohort');
+  const formed = JSON.parse(row.value);
+  assert.equal(formed.phase, 'composing');
+  // Both members passed their own whole check before main moved: the basis
+  // projectHostedFinishCompose pins on each refused member attempt. Basis heads are State heads.
+  const seeded = [];
+  const members = formed.members.map((member, index) => {
+    if (bases === 'none' || (bases === 'one' && index > 0)) return member;
+    const recheck = cohortBasis(f.currentMain().head, f.entries[index].candidate.result.head);
+    seeded.push(recheck);
+    return { ...member, recheck };
+  });
+  f.patch('projectHostedLandingBatches', row._id, { value: JSON.stringify({ ...formed, members }) });
+  const calls = f.counts.length;
+  await f.drain();
+  const io = f.counts.slice(calls);
+  return {
+    f,
+    seeded,
+    green,
+    budget: { calls: io.length, writes: io.reduce((n, c) => n + (c.writes ?? 0), 0) },
+  };
+}
+
+test('hosted replay: a cohort whose members each raced main stamps one scoped cohort recheck', async t => {
+  const { f, seeded } = await cohort(t);
+  assert.equal(new Set(states(f).map(s => s.batchId)).size, 1);
+  assert.equal(f.runs().length, 1, 'one shared check');
+  const run = f.runs()[0];
+  // Before: { mode: 'full', reason: 'Hosted landing batch: full union gate' }.
+  assert.equal(run.gate.mode, 'scoped', run.gate.reason);
+  assert.deepEqual(run.gate, scopedRecheckBatchGate(seeded));
+  assert.equal(scopedRecheckPairs(run.gate).length, 2);
+  // The runner selected the union (effective contract): one landing, main-audit debt once per batch head.
+  await f.passChecks();
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === run.id);
+  const passed = JSON.parse(row.value);
+  passed.gate = { ...passed.gate, effective: 'contract' };
+  f.patch('projectHostedCheckRuns', row._id, { gate: passed.gate, value: JSON.stringify(passed) });
+  await f.drain();
+  assert(
+    states(f).every(s => s.phase === 'landed'),
+    JSON.stringify(states(f).map(s => s.phase)),
+  );
+  const receipts = [...f.tables.projectHostedAcceptances.values()].map(r => JSON.parse(r.value));
+  assert.equal(receipts.length, 2);
+  assert(receipts.every(r => r.check.runId === run.id));
+  const audit = [...f.tables.projectHostedMainAudits.values()][0];
+  assert.equal(audit.unaudited.count, 1, 'the skipped tests are main-audit debt once per batch head');
+});
+
+test('hosted replay: a member without a whole-pass basis keeps the full union gate', async t => {
+  for (const bases of ['one', 'none']) {
+    const { f } = await cohort(t, { bases });
+    assert.equal(f.runs().length, 1);
+    assert.deepEqual(f.runs()[0].gate, { mode: 'full', reason: 'Hosted landing batch: full union gate' });
+  }
+});
+
+test('hosted replay: a passing cohort refused by a main race rechecks scoped on its own pass', async t => {
+  const { f, green } = await cohort(t, { bases: 'none' });
+  const first = f.runs()[0];
+  assert.equal(first.gate.mode, 'full');
+  f.moveMain();
+  green();
+  await f.passChecks();
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === first.id);
+  const passed = JSON.parse(row.value);
+  passed.gate = { ...passed.gate, effective: 'full' };
+  f.patch('projectHostedCheckRuns', row._id, { gate: passed.gate, value: JSON.stringify(passed) });
+  await f.drain();
+  assert.equal(f.tables.projectHostedAcceptances.size, 0, 'main moved: nothing published on the old head');
+  const retry = f.runs().find(r => r.id !== first.id);
+  assert(retry, 'the cohort recomposed one shared check');
+  // Before: a second full union gate. Now one basis: the cohort's own whole pass on the old main.
+  assert.equal(retry.gate.mode, 'scoped', retry.gate.reason);
+  assert.deepEqual(scopedRecheckPairs(retry.gate), [
+    { base: first.candidate.base.head, checked: first.request.expectedHead },
+  ]);
+  const batch = JSON.parse([...f.tables.projectHostedLandingBatches.values()][0].value);
+  assert.equal(batch.recheck.runId, first.id);
+});
+
+test('a scoped cohort recheck adds no Convex calls or writes over the full union gate', async t => {
+  const on = await cohort(t);
+  const off = await cohort(t, { scopedRecheck: false });
+  assert.equal(off.f.runs()[0].gate.mode, 'full', 'scopedRecheck:false keeps the full union');
+  assert.equal(on.f.runs()[0].gate.mode, 'scoped');
+  console.log(JSON.stringify({ on: on.budget, off: off.budget }));
+  assert.equal(on.budget.calls, off.budget.calls, 'no extra Convex function calls per cohort');
+  assert(on.budget.writes <= off.budget.writes, 'no extra document writes');
 });

@@ -24,8 +24,7 @@ import { withExchangeProgress } from './exchange-progress.js';
 import { networkFailure } from './network-fetch.js';
 import { networkContinuation } from './network-continuation.js';
 import { reconcileHostedSync, hasHostedSyncHandoff } from './hosted-sync-handoff.js';
-import { supersededSync } from './hosted-sync-retained.js';
-import { withdrawDone } from './hosted-agent-withdraw.js';
+import { autoReplaySuperseded } from './hosted-replay-holds.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
@@ -860,17 +859,18 @@ export class HostedAgentTransport {
         action === 'start' && !operationId
           ? await this.closedStart(root, capabilities.actor, command.data, startSession)
           : null;
-      // An identical auto-addressed sync whose retained pins this checkout has moved past is new
-      // work, never a replay of the old request (local reads only).
-      const movedSync =
-        action === 'sync' &&
+      // An identical auto-addressed request replays only while the state its receipt reports still
+      // holds (Issue ca49dc6c): a sync whose pins this checkout moved past, a withdraw whose landing
+      // ended, a settled save whose Lane files changed since, an open whose folder is gone. Each
+      // is new work instead. Local reads only; every action declares its binding (replayBindings).
+      const supersededReplay =
         !operationId &&
-        supersededSync(root, this.address, capabilities.actor, command.data);
-      // A withdraw whose receipt arrived ended that landing; the same request later targets the next one.
-      const doneWithdraw =
-        action === 'withdraw' &&
-        !operationId &&
-        withdrawDone(root, this.address, capabilities.actor, command.data);
+        autoReplaySuperseded(action, {
+          root,
+          address: this.address,
+          actor: capabilities.actor,
+          command: command.data,
+        });
       const journal =
         action === 'finish'
           ? await selectHostedFinish(
@@ -894,7 +894,7 @@ export class HostedAgentTransport {
               action,
               command.data,
               operationId as string | undefined,
-              previousStart !== null || movedSync || doneWithdraw,
+              previousStart !== null || supersededReplay,
               startSession,
             );
       metricOperationId(journal.operationId);
@@ -1207,14 +1207,25 @@ export class HostedAgentTransport {
       return startContinuation(this.root, data, journal.operationId, into, reason);
     };
     // A checkout ROOT keeps its warm object cache for the new Lane, wherever it opens.
-    const opening = (async () =>
+    const open = async () =>
       openHostedRootLane(
         hostedRootLanePath(root, this.address) ? root : into,
         this.address,
         this.exchange,
         { laneId, operationId: await journal.id('checkout') },
         into,
-      ))();
+      );
+    const opening = (async () => {
+      try {
+        return await open();
+      } catch (error) {
+        // A replayed start whose Lane folder was deleted since (Issue ca49dc6c): its finished
+        // checkout no longer holds, so the Lane opens again as new work at its current saved head.
+        if (!(error instanceof ForgeError && error.code === 'CHECKOUT_MISSING')) throw error;
+        journal.forget('id:checkout');
+        return open();
+      }
+    })();
     const opened = await boundedStep(opening, left());
     if (opened.status !== 'done') {
       const failure =

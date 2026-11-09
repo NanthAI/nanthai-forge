@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { markdownPath } from './tested-docs.js';
-import { scopedRecheckBase } from './scoped-recheck-policy.js';
+import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
 import { isGraphFirstGate } from './graph-first-check.js';
 import type { CheckGate } from './bet2-gate.js';
 
@@ -93,6 +93,8 @@ export function selectionFallback(input: {
   docsPaths: readonly string[] | undefined;
   paths: readonly string[];
   mainPaths: readonly string[] | null;
+  /** A cohort recheck's per-basis sides; null when a basis State is unavailable. */
+  members?: readonly unknown[] | null;
   selected: { scope: string; fallback?: unknown };
   /** The project's test runner for tests Forge must run itself (src/project-test-runner.ts). */
   testRunner?: () => 'available' | 'unavailable' | undefined;
@@ -110,6 +112,7 @@ export function selectionFallback(input: {
   if (input.selected.scope !== 'full') return undefined;
   if (isGraphFirstGate(input.gate)) return 'graph-full';
   if (scopedRecheckBase(input.gate) && !input.mainPaths) return 'scoped-base-unavailable';
+  if (scopedRecheckPairs(input.gate) && !input.members) return 'scoped-base-unavailable';
   if (input.gate?.mode === 'contract') return 'contract-full';
   // An opaque command runs whole for a Markdown-only change unless its check declares docs paths.
   if (

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { recoverMainPublication } from './hosted-main-publish.js';
-import { readHostedMainMarker } from './hosted-main-marker.js';
+import { readHostedMainMarker, readHostedMainSelection } from './hosted-main-marker.js';
+import { checkoutMissing } from './checkout-missing.js';
 import { reuseMainSource } from './hosted-main-reuse.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { preserveMisplacedReadCaches } from './hosted-legacy-cache.js';
@@ -148,6 +149,9 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
       );
       // A crash after the completion receipt can leave the old clone behind.
       if (original.complete) disposePrevious(original.previousMarker);
+      // A completed checkout replays only while this folder still holds it (Issue ca49dc6c).
+      if (original.complete && readHostedMainSelection(root)?.projectId !== request.projectId)
+        throw checkoutMissing(root);
       return original as {
         request: typeof request;
         selection: HostedMain;

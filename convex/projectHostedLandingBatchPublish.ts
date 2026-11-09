@@ -23,6 +23,9 @@ import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { channelRow } from './projectHostedChannels';
 import { saveObject } from './projectHostedSaveStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
+import { hostedAcceptGate } from './projectHostedGate';
+import { cohortRecheckBasis } from './projectHostedScopedRecheck';
+import { scopedRecheckPairs } from '../src/scoped-recheck-policy';
 import { scheduleAcceptanceCompletion } from './projectHostedAcceptanceCompletion';
 import { noteMainLanding } from './projectHostedMainAuditState';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -171,7 +174,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       !batchEligible(project, policy, member.attempt.actor, originalCandidate);
   }
   if (mainChanged && !retry && members.length === batch.members.length) {
-    await retryLandingBatch(ctx, key, batch);
+    await retryLandingBatch(
+      ctx,
+      key,
+      batch,
+      await cohortRecheckBasis(ctx, batch.recheck, batch.runId, attempt),
+    );
     await releaseLandingQueue(ctx, queue, now);
     return {
       status: 'pending' as const,
@@ -251,11 +259,22 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     authorityEpoch: attempt.authorityEpoch,
     ...attempt.check,
   });
+  const scoped = scopedRecheckPairs(run.gate) !== null;
   invariant(
-    run.candidate.digest === candidateRow.digest && run.gate?.mode === 'full',
+    run.candidate.digest === candidateRow.digest && (run.gate?.mode === 'full' || scoped),
     'EVIDENCE_CHANGED',
-    'The batch needs full-gate evidence for this exact Candidate.',
+    'The batch needs full-gate or scoped cohort recheck evidence for this exact Candidate.',
   );
+  // A scoped cohort recheck is accepted on the solo recheck's terms (Issue 28f08555). Refused now
+  // (main red, policy or trust changed), the cohort recomposes for one full shared check instead.
+  if (scoped && (await hostedAcceptGate(ctx, project, candidate, attempt.actor, run)) !== 'pass') {
+    await retryLandingBatch(ctx, key, batch);
+    await releaseLandingQueue(ctx, queue, now);
+    return {
+      status: 'pending' as const,
+      reason: 'The scoped cohort recheck is no longer accepted; the cohort is recomposing one full check.',
+    };
+  }
   const check = {
     ...attempt.check,
     terminalDigest: run.terminalDigest!,
@@ -297,7 +316,12 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
         : {}),
       batchId: batch.id,
       ...firstCheckField(
-        firstCheckReceipt(member.row.admission, { runId: check.runId, reused: false, batch: true }),
+        firstCheckReceipt(member.row.admission, {
+          runId: check.runId,
+          reused: false,
+          batch: true,
+          scoped: run.plan?.scoped,
+        }),
       ),
       actor: member.attempt.actor,
       ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),

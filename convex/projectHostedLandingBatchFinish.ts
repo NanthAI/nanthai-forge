@@ -33,6 +33,7 @@ import { scheduleFinish, watchFinishCompose } from './projectHostedFinishWake';
 import { isStored } from './projectObjectFields';
 import { hostedStartMain } from './projectHostedChannels';
 import { invariant } from '../src/errors';
+import { cohortRecheckBases } from '../src/scoped-recheck-policy';
 import { findObject, objectRow } from './projectObjectFind';
 
 export async function batchFinishStep(
@@ -226,6 +227,7 @@ export async function batchFinishStep(
     const run = await enqueueBatchCheck(ctx, {
       projectId: input.projectId,
       actor: state.actor,
+      recheck: cohortRecheckBases(batch.recheck, included),
       request: {
         ...check,
         operationId: batch.checkOperationId,

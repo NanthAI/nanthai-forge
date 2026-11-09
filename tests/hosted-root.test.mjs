@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -13,6 +13,7 @@ import { HostedCheckoutDownloads } from '../dist/hosted-checkout-downloads.js';
 import { hostedCloneCli, cloneHostedProject } from '../dist/hosted-clone-cli.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { hostedAgentAddress } from '../dist/hosted-agent-cli.js';
+import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 const transport = f => {
   const downloads = new HostedCheckoutDownloads(f.exchange);
   return {
@@ -304,3 +305,57 @@ for (const cycle of [false, true])
       assert.deepEqual(readFileSync(join(f.root, 'large.bin')), Buffer.alloc(4 * 1024 * 1024, 0x61));
     }
   });
+
+// Issue ca49dc6c: a completed checkout replays only while its folder still holds it.
+test('incident replay 8fbda971: clone into a folder deleted or emptied after an earlier clone installs it again', async t => {
+  const f = await rootFixture(t);
+  mkdirSync(f.root);
+  const first = await clone(f);
+  assert.equal(first.replayed, false);
+  assert.equal((await clone(f)).replayed, true, 'an intact clone still replays');
+  rmSync(f.root, { recursive: true, force: true });
+  assert(existsSync(`${f.root}.forge-client`), 'the sidecar receipt is kept');
+  const again = await clone(f);
+  assert.equal(again.replayed, false);
+  assert.notEqual(again.operationId, first.operationId);
+  assert.equal(again.head, f.main.head);
+  assert.equal(readFileSync(join(f.root, 'large.bin')).length, 4 * 1024 * 1024);
+  // Emptied (folder kept): the same.
+  for (const name of readdirSync(f.root)) rmSync(join(f.root, name), { recursive: true, force: true });
+  const emptied = await clone(f);
+  assert.equal(emptied.replayed, false);
+  assert(existsSync(join(f.root, 'large.bin')));
+  // A folder replaced by other files is never overwritten: it refuses with the empty-folder rule.
+  for (const name of readdirSync(f.root)) rmSync(join(f.root, name), { recursive: true, force: true });
+  writeFileSync(join(f.root, 'keep'), 'synthetic local draft');
+  await assert.rejects(cloneHostedProject(f.root, f.address, transport(f)), {
+    code: 'WORK_CONFLICT',
+  });
+  assert.equal(readFileSync(join(f.root, 'keep'), 'utf8'), 'synthetic local draft');
+});
+
+test('open and a replayed start into a deleted Lane folder install the Lane again, never report empty success', async t => {
+  const f = await rootFixture(t);
+  mkdirSync(f.root);
+  await clone(f);
+  const agent = new HostedAgentTransport(f.root, f.address, f.exchange);
+  agent.agentSession = 'one-agent-session'; // the identical start below replays within this session
+  const started = await agent.dispatch('start', { outcome: 'Deleted folder' });
+  const laneId = started.result.lane.laneId,
+    path = started.result.path;
+  assert(existsSync(join(path, 'large.bin')));
+  const opened = await agent.dispatch('open', { laneId });
+  assert.equal(opened.result.root, path);
+  rmSync(path, { recursive: true, force: true });
+  const reopened = await agent.dispatch('open', { laneId });
+  assert.notEqual(reopened.operationId, opened.operationId, 'the open is new work');
+  assert.equal(reopened.result.replayed, false);
+  assert.equal(readFileSync(join(path, 'large.bin')).length, 4 * 1024 * 1024);
+  assert.equal(readHostedLaneCheckout(path).selection.laneId, laneId);
+  rmSync(path, { recursive: true, force: true });
+  const replayed = await agent.dispatch('start', { outcome: 'Deleted folder' });
+  assert.equal(replayed.operationId, started.operationId, 'the same start replays');
+  assert.equal(replayed.result.lane.laneId, laneId);
+  assert.equal(replayed.result.checkout.replayed, false);
+  assert(existsSync(join(path, 'large.bin')));
+});

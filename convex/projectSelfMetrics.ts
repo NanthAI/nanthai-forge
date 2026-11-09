@@ -11,7 +11,7 @@ import type { HostedRecord } from '../src/hosted-records';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
-import { scopedRecheckBase } from '../src/scoped-recheck-policy';
+import { isScopedRecheck } from '../src/scoped-recheck-policy';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { runFlakes } from '../src/self-metrics-flakes';
@@ -264,7 +264,7 @@ export const page = query({
                   ? ['full', 'audit'].includes((run.gate ?? run.request.gate)!.mode) ||
                     (run.gate ?? run.request.gate)!.effective === 'full'
                   : null,
-              ...(scopedRecheckBase(run.gate) ? { scopedRecheck: true } : {}),
+              ...(isScopedRecheck(run.gate) ? { scopedRecheck: true } : {}),
               // Files that failed once and passed on the single retry.
               // Explicit null means projected and none; an older deploy omits the field.
               flaky: runFlakes(run) ?? null,

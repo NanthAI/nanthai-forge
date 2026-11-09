@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { failureFixture, identity } from './convex-source-failure-fixture.mjs';
+import { failureFixture, identity, leakSentinel } from './convex-source-failure-fixture.mjs';
 import { loadTaskData } from '../dist/hosted-source-task-data.js';
 import { runSourceTask, applySourceFanout } from '../dist/hosted-source-fanout.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
@@ -19,7 +19,9 @@ for (const wrapper of ['task', 'node', 'small']) {
         const original = JSON.stringify(f.loaded);
         f.fault(fault);
         await assert.rejects(f.run(), error => {
-          assert(![error.message, error.stack, JSON.stringify(error)].join(' ').includes('private'));
+          // The sentinel, not the word "private": stack frames name module paths, and macOS tmpdir
+          // is /private/var/... (friction d7b052ed).
+          assert(![error.message, error.stack, JSON.stringify(error)].join(' ').includes(leakSentinel));
           assert.equal(error.cause, undefined);
           return !['SOURCE_HASH_MISMATCH', 'SOURCE_WORKER_FAILED'].includes(error.code);
         });
@@ -35,6 +37,7 @@ for (const wrapper of ['task', 'node', 'small']) {
         }
         assert(Number.isFinite(diagnostic.elapsedMs));
         assert(!JSON.stringify(f.logs).includes('private'));
+        assert(!JSON.stringify(f.logs).includes(leakSentinel));
         if (typeof fault === 'number') assert.equal(diagnostic.httpStatus, fault);
         f.fault(null);
         await f.run();

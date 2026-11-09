@@ -16,7 +16,7 @@ import { invariant } from '../src/errors';
 import { secretAllowEvidenceSchema } from '../src/secret-allow';
 import { validCommandPlan } from '../src/check-command-scope';
 import { selectionFallbackSchema } from '../src/fallback-reasons';
-import { scopedRecheckBase } from '../src/scoped-recheck-policy';
+import { isScopedRecheck } from '../src/scoped-recheck-policy';
 export const prepare = internalMutation({
   args: {
     ...sessionArgs,
@@ -138,7 +138,7 @@ export const prepare = internalMutation({
       shardCount: recipe.groups.length + 1,
       ...(skipped ? { skipped } : {}),
       ...(allowChanges.success ? { secretAllow: allowChanges.data } : {}),
-      ...(scopedRecheckBase(run.gate) && recipe.selection.scope === 'scoped'
+      ...(isScopedRecheck(run.gate) && recipe.selection.scope === 'scoped'
         ? {
             scoped: {
               reason: recipe.selection.reason.slice(0, 300) || 'Scoped recheck',

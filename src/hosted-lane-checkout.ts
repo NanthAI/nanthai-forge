@@ -52,6 +52,7 @@ import {
 } from './hosted-lane-checkout-marker.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { withSubmoduleCheckouts } from './submodule-checkout.js';
+import { checkoutMissing } from './checkout-missing.js';
 export interface LaneTransport extends CheckoutObjectTransport {
   select(laneId: string): Promise<HostedLaneSelection>;
 }
@@ -211,6 +212,9 @@ async function checkout(
               );
               // A crash after the completion receipt can leave the old checkout behind.
               if (original.complete) disposePrevious(original.previousMarker);
+              // A completed checkout replays only while this folder still holds the Lane (Issue
+              // ca49dc6c). Its pins may be older than the Lane's saves, so it is never reinstalled.
+              if (original.complete && !baseline()) throw checkoutMissing(root, request.laneId);
               return original;
             }
             const current = {
