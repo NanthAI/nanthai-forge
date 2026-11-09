@@ -493,6 +493,48 @@ test('declared-setup step check: undefined skips, a workflow needs every generat
     }
 });
 
+test('hosted Elixir, Ruby and PHP blocks (Issue 721cd45c): plan outputs, Candidate paths, PHP gets no token', async () => {
+  const { hostedLateToolBlocks, HOSTED_LATE_TOOLS, hostedUnsupportedTools } =
+    await import('../dist/actions-toolchains-hosted.js');
+  // Every declarable tool now has fixed-workflow steps; none is refused by name.
+  assert.deepEqual(hostedUnsupportedTools({ toolchains: ACTIONS_TOOLS.map(tool => ({ tool })) }), []);
+  snapshot('hosted-late-tools.yml', HOSTED_LATE_TOOLS.flatMap(tool => hostedLateToolBlocks(tool)).join(''));
+  assert.deepEqual(
+    hostedToolchains({
+      toolchains: [
+        { tool: 'elixir', version: '1.17', otpVersion: '27' },
+        { tool: 'ruby', versionFile: 'app/.ruby-version' },
+        { tool: 'php', version: '8.3' },
+      ],
+    }),
+    {
+      elixir: { version: '1.17', otpVersion: '27', versionFile: '', versionType: 'loose' },
+      ruby: { version: '.ruby-version', directory: 'app' },
+      php: { version: '8.3', versionFile: '' },
+    },
+  );
+  assert.deepEqual(
+    hostedToolchains({
+      toolchains: [
+        { tool: 'elixir', versionFile: '.tool-versions' },
+        { tool: 'ruby', version: '3.3' },
+        { tool: 'php', versionFile: '.php-version' },
+      ],
+    }),
+    {
+      elixir: { version: '', otpVersion: '', versionFile: '.tool-versions', versionType: 'strict' },
+      ruby: { version: '3.3', directory: '.' },
+      php: { version: '', versionFile: '.php-version' },
+    },
+  );
+  for (const block of hostedLateToolBlocks('php')) assert.match(block, /\n {10}github-token: ''\n$/);
+  for (const block of hostedLateToolBlocks('ruby')) assert.doesNotMatch(block, /bundler-cache/);
+  // Paths read from the Candidate are under runner.temp/candidate, never the control checkout.
+  for (const tool of ['elixir', 'ruby', 'php'])
+    for (const block of hostedLateToolBlocks(tool))
+      assert.match(block, /format\('\{0\}\/candidate\/\{1\}', runner\.temp, /, tool);
+});
+
 test('Dart takes a version only, Flutter a version, a channel or pubspec.yaml', () => {
   const parse = toolchains => actionsToolchainsSchema.safeParse(toolchains).success;
   assert.equal(parse([{ tool: 'dart', version: 'stable' }]), true);
@@ -523,9 +565,20 @@ test('Dart takes a version only, Flutter a version, a channel or pubspec.yaml', 
 });
 
 test("this repository's forge-check.yml installs every declared-setup block and plan output", async () => {
-  const { declaredStepsInstalled } = await import('../dist/actions-toolchains-hosted.js');
+  const { declaredStepsInstalled, HOSTED_LATE_TOOLS, hostedLateToolBlocks } =
+    await import('../dist/actions-toolchains-hosted.js');
   const workflow = readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
   assert.equal(declaredStepsInstalled(workflow), true);
+  // Every late tool too, each block before its job's dependency-cache restore.
+  const all = { toolchains: HOSTED_LATE_TOOLS.map(tool => ({ tool, version: '1' })) };
+  assert.equal(declaredStepsInstalled(workflow, all), true);
+  const restores = [...workflow.matchAll(/^ {8}id: forge-deps$/gm)].map(m => m.index);
+  assert.equal(restores.length, 2);
+  for (const tool of HOSTED_LATE_TOOLS)
+    hostedLateToolBlocks(tool).forEach((block, job) => {
+      const at = workflow.indexOf(block);
+      assert.ok(at < restores[job] && (job === 0 || at > restores[0]), `${tool} block ${job}`);
+    });
   assert.match(workflow, /^ {6}toolchains: \$\{\{ steps\.plan\.outputs\.toolchains \}\}$/m);
   assert.match(workflow, /^ {6}deps_cache: \$\{\{ steps\.plan\.outputs\.deps_cache \}\}$/m);
 });

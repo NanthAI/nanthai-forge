@@ -19,15 +19,18 @@ export type HostedToolchains = Partial<
     'go' | 'python' | 'java' | 'dotnet' | 'zig' | 'cmake' | 'dart' | 'flutter',
     { version: string; versionFile: string; distribution?: string; channel?: string }
   > &
-    Record<'rust', { version: string; directory: string }>
+    Record<'rust', { version: string; directory: string }> &
+    Record<'elixir', { version: string; otpVersion: string; versionFile: string; versionType: string }> &
+    /** `version` is a release or the version file's name, which setup-ruby reads in `directory`. */
+    Record<'ruby', { version: string; directory: string }> &
+    Record<'php', { version: string; versionFile: string }>
 >;
 export type HostedDepsCache =
   | { key: string; paths: string; save: boolean; seed: string }
   | Record<string, never>;
 
-/** Tools the fixed workflow has steps for (Zig, CMake, Dart and Flutter through their own blocks, below). Elixir,
- * Ruby and PHP run in an exported workflow; on the App/OIDC path planning refuses them by name
- * instead of running without them. */
+/** Tools the fixed workflow has steps for (the late tools through their own blocks, below). A tool
+ * missing here is refused by name on the App/OIDC path instead of running without it. */
 export const HOSTED_TOOLS = [
   'go',
   'python',
@@ -38,6 +41,9 @@ export const HOSTED_TOOLS = [
   'cmake',
   'dart',
   'flutter',
+  'elixir',
+  'ruby',
+  'php',
 ] as const;
 const hosted = (tool: string): tool is (typeof HOSTED_TOOLS)[number] =>
   (HOSTED_TOOLS as readonly string[]).includes(tool);
@@ -65,6 +71,20 @@ export function hostedToolchains(declaration: ActionsDeclaration | undefined): H
         version: channel ? '' : (t.version ?? ''),
         versionFile: t.versionFile ?? '',
         channel: channel ? t.version! : 'stable',
+      };
+    } else if (t.tool === 'elixir') {
+      // setup-beam reads a version file only with version-type strict.
+      out.elixir = {
+        version: t.version ?? '',
+        otpVersion: t.otpVersion ?? '',
+        versionFile: t.versionFile ?? '',
+        versionType: t.versionFile ? 'strict' : 'loose',
+      };
+    } else if (t.tool === 'ruby') {
+      const file = t.versionFile ?? '';
+      out.ruby = {
+        version: t.version ?? file.slice(file.lastIndexOf('/') + 1),
+        directory: file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '.',
       };
     } else
       out[t.tool] = {
@@ -173,23 +193,36 @@ export const hostedWorkflowBlocks = () => [
   hostedDeclaredSteps('needs.hosted-plan.outputs') +
     hostedSeedSteps('needs.hosted-plan.outputs', "matrix.shard == 'static' && "),
 ];
-/** Setup steps of tools added after the workflow blocks above were installed (Zig, CMake, Dart, Flutter). They are
+/** Setup steps of tools added after the workflow blocks above were installed (Zig, CMake, Dart, Flutter,
+ * Elixir, Ruby, PHP). They are
  * separate blocks so the blocks above, and every installed `forge-check.yml`, stay byte-identical:
  * a declaration that names such a tool needs these in the workflow, any other declaration does not.
- * One block per job kind, in the same places as the blocks above (before the cache restore). */
-export const HOSTED_LATE_TOOLS = ['zig', 'cmake', 'dart', 'flutter'] as const;
+ * One block per job kind, installed directly before that job's block above (which stays contiguous),
+ * so before the cache restore. */
+export const HOSTED_LATE_TOOLS = ['zig', 'cmake', 'dart', 'flutter', 'elixir', 'ruby', 'php'] as const;
 export function hostedLateToolBlocks(tool: (typeof HOSTED_LATE_TOOLS)[number]) {
   const block = (outputs: string, when: string) => {
     const t = `fromJSON(${outputs}.toolchains || '{}')`;
+    const file = (name: string) =>
+      `\${{ ${t}.${tool}.${name} && format('{0}/candidate/{1}', runner.temp, ${t}.${tool}.${name}) || '' }}`;
     const inputs =
-      tool === 'zig'
-        ? `          version: \${{ ${t}.zig.version }}\n          use-cache: false\n`
-        : tool === 'cmake'
-          ? `          cmakeVersion: \${{ ${t}.cmake.version }}\n          useCloudCache: false\n`
-          : tool === 'dart'
-            ? `          sdk: \${{ ${t}.dart.version }}\n`
-            : `          channel: \${{ ${t}.flutter.channel }}\n          flutter-version: \${{ ${t}.flutter.version }}\n` +
-              `          flutter-version-file: \${{ ${t}.flutter.versionFile && format('{0}/candidate/{1}', runner.temp, ${t}.flutter.versionFile) || '' }}\n`;
+      tool === 'elixir'
+        ? `          elixir-version: \${{ ${t}.elixir.version }}\n          otp-version: \${{ ${t}.elixir.otpVersion }}\n` +
+          `          version-file: ${file('versionFile')}\n          version-type: \${{ ${t}.elixir.versionType }}\n`
+        : tool === 'ruby'
+          ? // Never `bundler-cache`: it runs `bundle install`, which runs the Gemfile.
+            `          ruby-version: \${{ ${t}.ruby.version }}\n          working-directory: ${file('directory')}\n`
+          : tool === 'php'
+            ? // An empty token, so none lands in Composer's auth.json where repository code could read it.
+              `          php-version: \${{ ${t}.php.version }}\n          php-version-file: ${file('versionFile')}\n          github-token: ''\n`
+            : tool === 'zig'
+              ? `          version: \${{ ${t}.zig.version }}\n          use-cache: false\n`
+              : tool === 'cmake'
+                ? `          cmakeVersion: \${{ ${t}.cmake.version }}\n          useCloudCache: false\n`
+                : tool === 'dart'
+                  ? `          sdk: \${{ ${t}.dart.version }}\n`
+                  : `          channel: \${{ ${t}.flutter.channel }}\n          flutter-version: \${{ ${t}.flutter.version }}\n` +
+                    `          flutter-version-file: \${{ ${t}.flutter.versionFile && format('{0}/candidate/{1}', runner.temp, ${t}.flutter.versionFile) || '' }}\n`;
     return `      - if: ${when}${t}.${tool}\n        uses: ${TOOLCHAIN_ACTIONS[tool]}\n        with:\n${inputs}`;
   };
   return [block('steps.plan.outputs', HOSTED_PLAN_WHEN), block('needs.hosted-plan.outputs', '')];

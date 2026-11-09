@@ -371,16 +371,17 @@ test('the Candidate-free Composer seed copies only composer.json and the lockfil
   assert.deepEqual(listing.sort(), ['composer.json', 'composer.lock']);
 });
 
-test('the fixed App/OIDC workflow refuses Elixir, Ruby and PHP toolchains by name instead of skipping them', () => {
+test('the fixed App/OIDC workflow sets up Elixir, Ruby and PHP through their own blocks', () => {
   const declaration = {
     toolchains: [
       { tool: 'go', version: '1.23' },
       { tool: 'ruby', version: '3.3' },
       { tool: 'php', versionFile: '.php-version' },
+      { tool: 'elixir', version: '1.17', otpVersion: '27' },
     ],
   };
-  assert.deepEqual(hostedUnsupportedTools(declaration), ['ruby', 'php']);
-  assert.deepEqual(Object.keys(hostedToolchains(declaration)), ['go']);
+  assert.deepEqual(hostedUnsupportedTools(declaration), []);
+  assert.deepEqual(Object.keys(hostedToolchains(declaration)), ['go', 'ruby', 'php', 'elixir']);
   assert.deepEqual(hostedUnsupportedTools({ toolchains: [{ tool: 'rust', version: '1.82.0' }] }), []);
   // Zig and CMake have their own hosted blocks (hostedLateToolBlocks), so they are never refused here.
   assert.deepEqual(

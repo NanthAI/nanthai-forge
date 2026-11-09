@@ -63,7 +63,7 @@ Some fields name code that lives in a module of its own. A new value there needs
   the registry's.
 - A new Actions `tool`: `ACTIONS_TOOLS`, its pinned action and its setup steps. Generated workflows
   change, so an owner checks the workflow diff. A tool added after a runner repository installed its
-  `forge-check.yml` (Zig, CMake) gets its own hosted blocks in `HOSTED_LATE_TOOLS`
+  `forge-check.yml` (Zig, CMake, Dart, Flutter, Elixir, Ruby, PHP) gets its own hosted blocks in `HOSTED_LATE_TOOLS`
   (`src/actions-toolchains-hosted.ts`) instead of changing `hostedWorkflowBlocks()`: the installed
   workflow stays valid for every other declaration, and a declaration naming the tool is refused with
   `ACTIONS_WORKFLOW_OUTDATED` until the workflow carries its blocks.

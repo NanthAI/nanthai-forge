@@ -1,0 +1,76 @@
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').zig.version }}
+          use-cache: false
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').zig.version }}
+          use-cache: false
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').cmake
+        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+        with:
+          cmakeVersion: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').cmake.version }}
+          useCloudCache: false
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').cmake
+        uses: lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2
+        with:
+          cmakeVersion: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').cmake.version }}
+          useCloudCache: false
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').dart
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').dart.version }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dart
+        uses: dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1
+        with:
+          sdk: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dart.version }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').flutter.channel }}
+          flutter-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').flutter.version }}
+          flutter-version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').flutter.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').flutter.versionFile) || '' }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          channel: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').flutter.channel }}
+          flutter-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').flutter.version }}
+          flutter-version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').flutter.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').flutter.versionFile) || '' }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').elixir.version }}
+          otp-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').elixir.otpVersion }}
+          version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').elixir.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').elixir.versionFile) || '' }}
+          version-type: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').elixir.versionType }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          elixir-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir.version }}
+          otp-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir.otpVersion }}
+          version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir.versionFile) || '' }}
+          version-type: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').elixir.versionType }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').ruby
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        with:
+          ruby-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').ruby.version }}
+          working-directory: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').ruby.directory && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').ruby.directory) || '' }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').ruby
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+        with:
+          ruby-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').ruby.version }}
+          working-directory: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').ruby.directory && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').ruby.directory) || '' }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').php
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').php.version }}
+          php-version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').php.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').php.versionFile) || '' }}
+          github-token: ''
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').php
+        uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').php.version }}
+          php-version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').php.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').php.versionFile) || '' }}
+          github-token: ''

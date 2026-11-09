@@ -1185,9 +1185,9 @@ reading every check:
 
   Swift needs no entry: the runner image's Swift (Xcode on macOS, swift.org on Ubuntu) runs.
 
-  `elixir`, `ruby` and `php` run in an exported workflow. The fixed App/OIDC `forge-check.yml`
-  has no steps for them yet, so planning a check that declares one fails with
-  `ACTIONS_TOOL_UNSUPPORTED`, naming the tools, instead of running without them.
+  Every tool above runs in an exported workflow and in the fixed App/OIDC `forge-check.yml`. A
+  tool the fixed workflow has no steps for would fail planning with `ACTIONS_TOOL_UNSUPPORTED`,
+  naming the tools, instead of running without them.
 
 - **`actionsCache`**: `presets` from `go`, `cargo`, `pip`, `uv`, `poetry`, `maven`, `gradle`, `nuget`,
   `npm`, `pnpm`, `yarn`, `zig`, `vcpkg`, `conan`, `hex`, `bundler`, `composer`, `swiftpm` and `pub`. One entry holds the presets' download caches under the runner's home
@@ -1236,7 +1236,7 @@ read-only. Lane code never writes an entry that another Lane restores.
   `hostedWorkflowBlocks()` (`src/actions-toolchains-hosted.ts`) run only for declared tools,
   after the Candidate is in place and before the check step. If the installed workflow lacks those steps, planning a
   declared check fails with `ACTIONS_WORKFLOW_OUTDATED` instead of running without its
-  toolchains. The `zig`, `cmake`, `dart` and `flutter` tools have their own blocks
+  toolchains. The `zig`, `cmake`, `dart`, `flutter`, `elixir`, `ruby` and `php` tools have their own blocks
   (`hostedLateToolBlocks()`), required only by a declaration that names them, so a runner repository
   that predates them keeps working for every other declaration.
 
