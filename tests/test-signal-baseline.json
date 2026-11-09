@@ -1,0 +1,525 @@
+{
+  "version": 1,
+  "files": {
+    "tests/actions-runner-fixture.test.mjs": {
+      "sleep": 2
+    },
+    "tests/agent-clean.test.mjs": {
+      "sleep": 1
+    },
+    "tests/agent-command-return.test.mjs": {
+      "sleep": 1
+    },
+    "tests/agent-edit-hook.test.mjs": {
+      "sleep": 1,
+      "elapsed": 1
+    },
+    "tests/agent-edit-hosted.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/agent-feedback.test.mjs": {
+      "sleep": 1
+    },
+    "tests/agent-finish.test.mjs": {
+      "sleep": 7
+    },
+    "tests/agent-landing.test.mjs": {
+      "sleep": 9
+    },
+    "tests/agent-lock-snapshots.test.mjs": {
+      "sleep": 4,
+      "elapsed": 2
+    },
+    "tests/agent-no-dead-ends.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/agent-peers.test.mjs": {
+      "sleep": 1
+    },
+    "tests/agent-reads-never-write.test.mjs": {
+      "sleep": 1,
+      "elapsed": 1
+    },
+    "tests/agent-run-observer.test.mjs": {
+      "sleep": 5
+    },
+    "tests/agent-turn-end-hook.test.mjs": {
+      "elapsed": 2
+    },
+    "tests/agent-wait-submission.test.mjs": {
+      "sleep": 2
+    },
+    "tests/agent-wait.test.mjs": {
+      "sleep": 2
+    },
+    "tests/agent-workflow.test.mjs": {
+      "sleep": 1
+    },
+    "tests/another-process.test.mjs": {
+      "sleep": 1
+    },
+    "tests/automatic-cleanup.test.mjs": {
+      "sleep": 4
+    },
+    "tests/bench-t3code-relay.test.mjs": {
+      "sleep": 4,
+      "elapsed": 1
+    },
+    "tests/board-wait.test.mjs": {
+      "sleep": 2,
+      "elapsed": 2
+    },
+    "tests/browser-r2-bytes.test.mjs": {
+      "sleep": 1
+    },
+    "tests/candidate-names.test.mjs": {
+      "docs": 1
+    },
+    "tests/check-brief.test.mjs": {
+      "docs": 1
+    },
+    "tests/check-contract.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/check-environment.test.mjs": {
+      "sleep": 1
+    },
+    "tests/check-input-ui.test.mjs": {
+      "sleep": 1
+    },
+    "tests/check-inputs.test.mjs": {
+      "sleep": 4
+    },
+    "tests/check-quarantine-landing.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/check-queue-preemption.test.mjs": {
+      "sleep": 1
+    },
+    "tests/check-resilience.test.mjs": {
+      "sleep": 3
+    },
+    "tests/checkonly-finish.test.mjs": {
+      "sleep": 2
+    },
+    "tests/checkout-small-admission.test.mjs": {
+      "sleep": 4
+    },
+    "tests/checkout-stat-index-refresh.test.mjs": {
+      "sleep": 5
+    },
+    "tests/ci-scope.test.mjs": {
+      "docs": 2
+    },
+    "tests/cli-canary.test.mjs": {
+      "sleep": 4,
+      "elapsed": 2
+    },
+    "tests/cli-measurement-hold-scope.test.mjs": {
+      "sleep": 1
+    },
+    "tests/cli-update.test.mjs": {
+      "sleep": 7,
+      "elapsed": 1
+    },
+    "tests/compute-calls.test.mjs": {
+      "sleep": 1
+    },
+    "tests/contracts.test.mjs": {
+      "sleep": 1
+    },
+    "tests/convex-function-names.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/convex-network-fetch.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/convex-source-overlap-writes.test.mjs": {
+      "sleep": 1
+    },
+    "tests/convex-source-step.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/coordination-watch.test.mjs": {
+      "sleep": 1
+    },
+    "tests/deployments.test.mjs": {
+      "sleep": 1
+    },
+    "tests/discussion.test.mjs": {
+      "sleep": 2
+    },
+    "tests/disjoint-fast-path.test.mjs": {
+      "sleep": 2
+    },
+    "tests/docs-conflict-resolve.test.mjs": {
+      "sleep": 1,
+      "docs": 1
+    },
+    "tests/docs-readers-selection.test.mjs": {
+      "docs": 1
+    },
+    "tests/evidence.test.mjs": {
+      "sleep": 8
+    },
+    "tests/exchange-request.test.mjs": {
+      "sleep": 1
+    },
+    "tests/finish-work-stale.test.mjs": {
+      "sleep": 3
+    },
+    "tests/forge-only-rules.test.mjs": {
+      "docs": 1
+    },
+    "tests/github-actions-backend.test.mjs": {
+      "sleep": 5
+    },
+    "tests/github-actions-burst.test.mjs": {
+      "sleep": 2
+    },
+    "tests/github-actions-dispatch.test.mjs": {
+      "sleep": 1
+    },
+    "tests/github-actions-infra.test.mjs": {
+      "sleep": 2
+    },
+    "tests/github-actions-resilience.test.mjs": {
+      "sleep": 1
+    },
+    "tests/heavy-fairness.test.mjs": {
+      "sleep": 8
+    },
+    "tests/host-progress.test.mjs": {
+      "sleep": 2
+    },
+    "tests/hosted-actions-direct.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-actions-job.test.mjs": {
+      "sleep": 4,
+      "elapsed": 1
+    },
+    "tests/hosted-actions-output.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-actions-retry.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-agent-help.test.mjs": {
+      "docs": 1
+    },
+    "tests/hosted-agent-mcp.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-agent-planning.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-check-log.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-checkout-barriers.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-checkout-delta.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-compose-syntax.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-conflict-scale.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-contributors.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-cross-head-cost.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-finish.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-history.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-landing-compose-watchdog.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-landing-controller-wakes.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-landing-desired.test.mjs": {
+      "elapsed": 2
+    },
+    "tests/hosted-lost-dispatch.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-main-audit.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/hosted-main-delta-recovery.test.mjs": {
+      "sleep": 2
+    },
+    "tests/hosted-root.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hosted-scoped-recheck.test.mjs": {
+      "elapsed": 1,
+      "docs": 1
+    },
+    "tests/hosted-source-parallel.test.mjs": {
+      "sleep": 3
+    },
+    "tests/hosted-work.test.mjs": {
+      "sleep": 1
+    },
+    "tests/hot-storage-invariant.test.mjs": {
+      "docs": 1
+    },
+    "tests/import-object-packs.test.mjs": {
+      "sleep": 1
+    },
+    "tests/integration-preview-auto.test.mjs": {
+      "sleep": 4
+    },
+    "tests/interaction-finish.test.mjs": {
+      "sleep": 1
+    },
+    "tests/invariants.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-admission.test.mjs": {
+      "sleep": 3
+    },
+    "tests/landing-batch-contention.test.mjs": {
+      "sleep": 2
+    },
+    "tests/landing-batch-lock-context.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-batch.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-burst.test.mjs": {
+      "sleep": 5
+    },
+    "tests/landing-desired.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-driver-starvation.test.mjs": {
+      "sleep": 7,
+      "elapsed": 1
+    },
+    "tests/landing-journal-reads.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-journal-settle.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-stale-incident.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-worker-wake.test.mjs": {
+      "sleep": 1
+    },
+    "tests/landing-worker.test.mjs": {
+      "sleep": 3
+    },
+    "tests/lane-auto-snapshot.test.mjs": {
+      "sleep": 4
+    },
+    "tests/legacy-storage-cleanup.test.mjs": {
+      "sleep": 1
+    },
+    "tests/legacy-storage-verify.test.mjs": {
+      "sleep": 1
+    },
+    "tests/lint-rules.test.mjs": {
+      "docs": 1
+    },
+    "tests/local-checks.test.mjs": {
+      "sleep": 1
+    },
+    "tests/local-process-snapshot.test.mjs": {
+      "sleep": 5
+    },
+    "tests/local-reliability.test.mjs": {
+      "sleep": 11
+    },
+    "tests/local-watcher.test.mjs": {
+      "sleep": 14,
+      "elapsed": 1
+    },
+    "tests/mcp-hosted-source.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/mcp-lifecycle.test.mjs": {
+      "sleep": 1
+    },
+    "tests/mcp.test.mjs": {
+      "sleep": 1
+    },
+    "tests/metrics-deadline.test.mjs": {
+      "sleep": 4,
+      "elapsed": 2
+    },
+    "tests/mirrors.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-artifact-alias.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-git-batch.test.mjs": {
+      "sleep": 4
+    },
+    "tests/native-git-export-waits.test.mjs": {
+      "sleep": 4,
+      "elapsed": 1
+    },
+    "tests/native-git.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-objects.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-policy.test.mjs": {
+      "sleep": 2
+    },
+    "tests/native-pr.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-work-history.test.mjs": {
+      "sleep": 1
+    },
+    "tests/native-work.test.mjs": {
+      "sleep": 2
+    },
+    "tests/network-deadlines.test.mjs": {
+      "sleep": 2,
+      "elapsed": 1
+    },
+    "tests/optimistic-landing.test.mjs": {
+      "sleep": 1
+    },
+    "tests/overlap-alerts-ordering.test.mjs": {
+      "sleep": 5
+    },
+    "tests/owner-cleanup.test.mjs": {
+      "sleep": 3
+    },
+    "tests/parallel-work-defaults.test.mjs": {
+      "sleep": 1
+    },
+    "tests/playbooks.test.mjs": {
+      "sleep": 5
+    },
+    "tests/preflight-docs-readers.test.mjs": {
+      "docs": 3
+    },
+    "tests/preflight-selection.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/preflight-static.test.mjs": {
+      "sleep": 1
+    },
+    "tests/presence.test.mjs": {
+      "sleep": 12,
+      "elapsed": 1
+    },
+    "tests/projectWorkIndex-progress.test.mjs": {
+      "sleep": 1
+    },
+    "tests/projectWorkIndex-resilience.test.mjs": {
+      "sleep": 1
+    },
+    "tests/publication.test.mjs": {
+      "sleep": 1
+    },
+    "tests/queue-control.test.mjs": {
+      "sleep": 1
+    },
+    "tests/r2-backfill.test.mjs": {
+      "sleep": 1
+    },
+    "tests/r2-bytepaths.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/robust-errors.test.mjs": {
+      "sleep": 2,
+      "elapsed": 1
+    },
+    "tests/sandbox-process-identity.test.mjs": {
+      "sleep": 2
+    },
+    "tests/self-metrics-hosted.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/self-metrics-weekly.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/selfhost-notices.test.mjs": {
+      "docs": 1
+    },
+    "tests/selfhost.test.mjs": {
+      "docs": 2
+    },
+    "tests/shard-pool.test.mjs": {
+      "sleep": 4
+    },
+    "tests/source-pack-client.test.mjs": {
+      "sleep": 1
+    },
+    "tests/source-step-timing.test.mjs": {
+      "sleep": 2,
+      "elapsed": 1
+    },
+    "tests/state-git-pack.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/state-git.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/status-summary.test.mjs": {
+      "sleep": 1
+    },
+    "tests/test-bootstrap-cleanup.test.mjs": {
+      "sleep": 1
+    },
+    "tests/test-files.test.mjs": {
+      "sleep": 1
+    },
+    "tests/test-impact-build-chain.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/test-tree-scanners.test.mjs": {
+      "docs": 1
+    },
+    "tests/tested-docs.test.mjs": {
+      "docs": 1
+    },
+    "tests/ui-shots.test.mjs": {
+      "sleep": 1
+    },
+    "tests/verify-stream.test.mjs": {
+      "sleep": 2
+    },
+    "tests/work-backup.test.mjs": {
+      "sleep": 1
+    },
+    "tests/work-index-cost.test.mjs": {
+      "elapsed": 1
+    },
+    "tests/work-lock-async.test.mjs": {
+      "sleep": 3,
+      "elapsed": 1
+    },
+    "tests/work-lock-queue.test.mjs": {
+      "sleep": 11
+    },
+    "tests/work-phase-retry.test.mjs": {
+      "sleep": 1
+    },
+    "tests/work-record-read-batches.test.mjs": {
+      "sleep": 1
+    }
+  }
+}

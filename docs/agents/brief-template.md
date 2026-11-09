@@ -18,9 +18,9 @@ Use this portable template for one finite slice. The [standard builder block](br
 - Docs-only alternative: runtime calls, DB I/O, memory behavior and byte placement do not change. State the planning-read/write and landing budget instead.
 - Disk floor: `<GiB free required before start, builds and tests>`.
 - Time box: `<time and a concrete handoff checkpoint if incomplete>`.
-- Done when: `<behavior, failure cases, evidence per line, required repeats and noise allowance>`.
+- Done when: `<behavior, failure cases, evidence per line, required repeats and noise allowance>`. Name the behaviour, contract or incident each line guards, so the builder tests that and nothing else ([test signal](lint-rules.md#test-signal)); do not write "add tests".
 - Must not regress: `<metric and comparison method>`.
-- Targeted verification: `<affected tests, docs, format/lint/type checks>`; full verification belongs to the landing runner.
+- Targeted verification: `<affected tests, docs, format/lint/type checks>` (the guarded behaviour decides which tests exist, never a count); full verification belongs to the landing runner.
 - Independent review: `<required review and scope, if applicable>`.
 
 ## Standard safety and delivery block

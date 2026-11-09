@@ -86,7 +86,9 @@ budget, time box, acceptance bar and metrics that must not regress.
    edits; missing notices never prove independence. Answer blocking notices
    before landing; advisory notices need no answer. Record order/split, notice
    counts and conflicts. Missing alerts mean friction, not independence.
-8. Save then `preflight {laneId}`. Run all affected tests: added tests, direct and
+8. Add a test only for a behaviour, contract or incident you can name, and put that name in the test (a brief
+   asks for the guarded behaviour, not for "tests"; [test signal](lint-rules.md#test-signal)).
+   Save then `preflight {laneId}`. Run all affected tests: tests you add, direct and
    transitive consumers of changed/deleted modules and changed literal paths.
    No arbitrary file cap. Include relevant docs/format/lint/type checks. Re-select
    after sync or main changes. A near-full set belongs to the landing runner;

@@ -76,6 +76,7 @@ Hosted source reads: `show {"channel":"main","path":"FILE"}` returns exact accep
 - Small modules split by responsibility (aim for ≤300 lines). No speculative abstractions.
 - Trace the current code before changing it. Make the smallest complete change.
 - Test behavior, including failure paths; authorization and network changes need negative tests.
+- Each test names the behaviour, contract or incident it guards; no tests of type-guaranteed internals, mock-call or doc-text mirrors, wall-clock asserts or real sleeps. See [test signal](docs/agents/lint-rules.md#test-signal).
 - Forge stands alone: no dependency on another private product's accounts, deployments or runtimes.
 - Bytes go to R2 on every deployment, for every project; Convex holds records, read and written O(pages). `npm run verify` fails a new Convex file-storage use. See [data placement](docs/data-placement.md).
 

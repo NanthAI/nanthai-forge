@@ -33,10 +33,43 @@ This page lists the guards and says where the next one goes.
 | Recovery advice | check script `check-recovery-advice.mjs` | backend conflict evidence that guesses the caller's checkout | `tests/recovery-advice-guard.test.mjs` |
 | Action pins | check script `check-action-pins.mjs` | workflow `uses:` lines not pinned to a commit SHA | `tests/action-pins.test.mjs` |
 | Candidate steps | check script `check-candidate-steps.mjs` | in a check job: a step after the check step, an `id` or token on it, a cache save after it or off the default branch, an unbounded cache restore or `npm ci` | `tests/action-pins.test.mjs` |
+| Test signal | check script `check-test-signal.mjs`, ratchet | new real sleeps or timer waits, elapsed-time asserts and reads of `docs/` text in tests: they flake on a loaded runner or fail on prose edits and guard no behaviour (ffbec6ef; t3code cut 43% of its tests as low-signal) | `tests/check-test-signal.test.mjs` |
 | Token permissions | test | a GitHub App token permission change broke one path class the mirror pushes (708b6943: contents-only token got 403 on a `.github/workflows/` tree). A permission change must be tested against every path class | `tests/hosted-github-mirror-retry.test.mjs`, `tests/github-token-permissions.test.mjs` |
 | Forge-only rules | test | product code keys a fast path on Forge's own check, layout or npm lockfile (audit 1bb0d8e6: first-check reuse only for `scripts/forge-check.mjs`, 05df5aed). An ecosystem lockfile, folder or extension list outside the [ecosystem registry](ecosystems.md) fails too (9c0ece48). Hits are listed in [Forge-only rules](../forge-only-rules.md) | `tests/forge-only-rules.test.mjs` |
 | BYOCI parity | test | a landing fast path that works for Forge's check but not for a project's own command on a pnpm tree with a link and a submodule (05df5aed) | `tests/byoci-parity.test.mjs` |
 | Message mirror | test | the finish message dropped from the mirror commit (eacfdb6e, b30284de) | `tests/landing-message-mirror.test.mjs` |
+
+## Test signal
+
+A test earns its place by naming the behaviour, contract or incident it guards. Do not write:
+
+- tests of what TypeScript types or validators already guarantee at an internal boundary;
+- mock-call mirrors (the test only repeats which mock the code calls);
+- doc-text mirrors (the test asserts a sentence or heading in `docs/`; the documents check covers prose);
+- wall-clock asserts or real sleeps (inject a clock, or wait on the event).
+
+These stay wanted: validation at the outside boundary (user, network, file input), call-count and
+byte budgets, incident replays, and golden contracts.
+
+The ratchet `scripts/check-test-signal.mjs` runs in `npm run check` and counts, per test file:
+
+| Pattern | Counts |
+| --- | --- |
+| `sleep` | `setTimeout(`, `setInterval(`, `Atomics.wait(`, `sleep(`/`delay(`/`pause(` calls (and `timers/promises` aliases), a spawned `sleep` |
+| `elapsed` | an assert comparing `Date.now()`/`performance.now()` deltas, or a variable holding one |
+| `docs` | a read of the repository's `docs/` (`new URL('../docs/…', import.meta.url)`, `readFileSync('docs/…')`, `join(repo, 'docs/…')`) |
+
+It fails only when a file's count goes above its baseline in
+[`tests/test-signal-baseline.json`](../../tests/test-signal-baseline.json) (a file not listed has
+baseline 0). The standard check scans only the changed test files; a direct run, or a change to the
+baseline or the script, scans all of them. Counting is per source line.
+
+- Real exception: put `// test-signal: allow <reason>` on the line, or alone on the line above. A marker
+  without a reason exempts nothing.
+- After deleting or rewriting tests, run `node scripts/check-test-signal.mjs --update`: it lowers the
+  baseline to the new counts and never raises it (it also drops deleted files). It exits 1 if a file is
+  still above its baseline. `--init` writes the first baseline and refuses to overwrite one.
+- Findings name file, lines and pattern only; they never echo source.
 
 ## Add a lint rule
 
