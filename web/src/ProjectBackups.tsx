@@ -17,6 +17,7 @@ import { ActionPanel } from './WorkspaceUI';
 import HostedWork from './HostedWork';
 import ExchangeHandoff from './ExchangeHandoff';
 import ProjectLifecycle from './ProjectLifecycle';
+import { deriveProjectPhase } from '../../src/project-phase';
 import NewHostedProject, { HostedProjectWelcome } from './NewHostedProject';
 
 type Backup = FunctionReturnType<typeof api.projectBackups.history>['page'][number];
@@ -501,11 +502,7 @@ export default function ProjectBackups({ explore }: { explore?: () => void }) {
                 .map(project => (
                   <button key={project.id} onClick={() => chooseProject(project.id)}>
                     {project.name || 'Removed project'} ·{' '}
-                    {project.removal === 'trash'
-                      ? 'deleted, restorable'
-                      : project.removal === 'deleting'
-                        ? 'purging'
-                        : 'purged'}
+                    {deriveProjectPhase(project, Date.now()).label.toLowerCase()}
                   </button>
                 ))}
             </details>

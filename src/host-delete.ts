@@ -18,6 +18,7 @@ import { readHostState, updateHostState, retirePendingHost } from './host-bindin
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { syncDirectory } from './native-durability.js';
+import { deriveProjectPhase } from './project-phase.js';
 
 type Project = {
   id: string;
@@ -27,6 +28,8 @@ type Project = {
   currentBackup: string | null;
   removal?: 'trash' | 'deleting' | 'deleted';
   purgeBlocked?: 'R2_MAINTENANCE_DISABLED' | 'R2_PURGE_RETRY_EXHAUSTED' | 'R2_PURGE_UNAUTHORIZED';
+  retention?: { purgeAt: number; revoking?: boolean };
+  purge?: { completedAt?: number };
 };
 const requestSchema = z.object({
   deployment: z.string(),
@@ -211,6 +214,7 @@ export async function deleteHostedProject(
       return saved;
     });
     const result = () => {
+      const finalPhase = deriveProjectPhase(project, Date.now());
       const retired = local.retire(options.projectId, deployment, request.operationId);
       return {
         projectId: options.projectId,
@@ -220,6 +224,7 @@ export async function deleteHostedProject(
         purgeComplete: true,
         pendingHostCleared: retired,
         project,
+        phase: { state: finalPhase.state, label: finalPhase.label, nextStep: finalPhase.nextStep },
         message:
           'Project removed permanently; hosted tombstone confirmed. The local owner and binding are retained.',
       };
@@ -258,12 +263,11 @@ export async function deleteHostedProject(
     for (let attempt = 0; attempt < pollAttempts; attempt++) {
       project = await readProject();
       if (project.removal === 'deleted') return result();
-      if (project.purgeBlocked)
+      const phase = deriveProjectPhase(project, Date.now());
+      if (phase.state === 'purge-blocked')
         throw new ForgeError(
-          project.purgeBlocked,
-          project.purgeBlocked === 'R2_PURGE_RETRY_EXHAUSTED'
-            ? `R2 purge stopped after repeated storage errors. Resolve the R2 storage failure, then retry this command to resume operation ${request.operationId}.`
-            : `Project purge is blocked: the R2 prefix purge has no confirmed permanent-delete grant; retry this command to confirm and resume operation ${request.operationId}.`,
+          project.purgeBlocked!,
+          `${phase.reason} ${phase.nextStep} To resume operation ${request.operationId}, retry this command.`,
         );
       if (attempt + 1 < pollAttempts) {
         const delay = Math.min((dependencies?.pollIntervalMs ?? 2000) * 2 ** attempt, 10_000);

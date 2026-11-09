@@ -8,6 +8,7 @@ import { AcceptedToast, type Accepted } from '../ui/signals';
 import { acceptedSince, acceptanceArrival, type MoveRecord } from '../cockpit/now-model';
 import { useQuery } from 'convex/react';
 import type { Id } from '../../../convex/_generated/dataModel';
+import { api } from '../../../convex/_generated/api';
 import { byAttention, cockpitLanes, type CockpitWork } from '../cockpit/model';
 import {
   overlapDecisions,
@@ -16,6 +17,8 @@ import {
   mainCheckDecisions,
   githubPushDecisions,
   quarantineDecisions,
+  approvalDecisions,
+  type OpenApproval,
 } from '../cockpit/attention';
 import {
   overlapCounts,
@@ -54,6 +57,8 @@ export function hostedAttention(
     claims: Parameters<typeof hostedOverlaps>[0];
     overlapAnswers?: readonly import('../cockpit/overlap-model').OverlapAnswer[];
     overlapSignals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
+    /** The owner's open approval requests (`projectHostedApprovals:list`); absent for other viewers. */
+    approvals?: { projectId: string; requests: readonly OpenApproval[] };
   },
   now: number,
 ) {
@@ -123,6 +128,7 @@ export function hostedAttention(
     ...laneDecisions(lanes, overlapCounts(overlaps)),
     ...overlapDecisions(lanes, unanswered, now),
     ...needsFixDecisions(records.needsFix ?? [], records.intents),
+    ...(live.approvals ? approvalDecisions(live.approvals.projectId, live.approvals.requests) : []),
   ];
   return {
     lanes,
@@ -178,6 +184,20 @@ export function HostedAttention({
   const hostedChannels = useWorkRecords<unknown>(projectId, workspace, 'hostedChannels');
   const channels = useWorkRecords<unknown>(projectId, workspace, 'channels');
   const live = useCoordination(projectId);
+  // The owner's open approval requests: one reactive read that re-runs only when those rows change.
+  const rawApprovals = useQuery(
+    api.projectHostedApprovals.list,
+    workspace?.capabilities.owner ? { projectId } : 'skip',
+  );
+  const approvals = useMemo(() => {
+    if (!rawApprovals) return undefined;
+    try {
+      const parsed = JSON.parse(rawApprovals) as { requests?: OpenApproval[] };
+      return { projectId, requests: parsed.requests ?? [] };
+    } catch {
+      return undefined;
+    }
+  }, [rawApprovals, projectId]);
   const now = useNow();
   const value = useMemo(
     () =>
@@ -196,7 +216,12 @@ export function HostedAttention({
           ...(workspace?.landingWorker ? { landingWorker: workspace.landingWorker } : {}),
           ...(workspace?.repairNotices ? { repairNotices: workspace.repairNotices } : {}),
         },
-        { ...live, githubAutoPush: githubPush.records[0], githubMirror: workspace?.githubMirror },
+        {
+          ...live,
+          githubAutoPush: githubPush.records[0],
+          githubMirror: workspace?.githubMirror,
+          ...(approvals ? { approvals } : {}),
+        },
         now,
       ),
     [
@@ -219,6 +244,7 @@ export function HostedAttention({
       live.unacked,
       live.overlapAnswers,
       live.overlapSignals,
+      approvals,
       now,
     ],
   );

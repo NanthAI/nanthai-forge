@@ -72,6 +72,7 @@ export const list = query({
       retention: v.optional(
         v.object({
           purgeAt: v.number(),
+          revoking: v.optional(v.boolean()),
           retainedBytes: v.number(),
           retainedObjects: v.number(),
           measured: v.boolean(),
@@ -106,6 +107,7 @@ export const list = query({
           ? {
               retention: {
                 purgeAt: project.retention.purgeAt,
+                ...(project.retention.revoking ? { revoking: true } : {}),
                 retainedBytes: project.retention.retainedBytes,
                 retainedObjects: project.retention.retainedObjects,
                 measured: project.retention.measured,

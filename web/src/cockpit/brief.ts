@@ -53,6 +53,9 @@ export function decisionBrief(item: {
     case 'revert':
     case 'needs-fix':
       return null;
+    // Only the project owner grants an approval; an agent cannot take it.
+    case 'approval':
+      return null;
     case 'review':
       return { situation: 'review-and-accept', ...lane, ...(item.viewId ? { viewId: item.viewId } : {}) };
     case 'conflict':

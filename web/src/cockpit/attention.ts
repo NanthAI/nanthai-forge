@@ -4,6 +4,7 @@ import { displayLaneName } from '../../../src/lane-name';
 import type { CockpitWork } from './model';
 import type { CockpitLane } from './model';
 import { checkMeaning } from './check-meaning';
+import type { ApprovalKind } from '../../../src/approval-state';
 export { overlapDecisions } from './overlap-decisions';
 export { needsFixDecisions } from './needs-fix';
 
@@ -12,7 +13,16 @@ export type DecisionItem = {
   id: string;
   githubMirror?: boolean;
   queue?: QueueFact;
-  kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed' | 'overlap' | 'revert' | 'needs-fix';
+  kind:
+    | 'review'
+    | 'conflict'
+    | 'handoff'
+    | 'message'
+    | 'failed'
+    | 'overlap'
+    | 'revert'
+    | 'needs-fix'
+    | 'approval';
   files?: { path: string; with: string }[];
   noticeIds?: string[];
   overlapCount?: number;
@@ -46,6 +56,8 @@ export type DecisionItem = {
   gates?: { main?: boolean; overlaps: number; queuedAt?: string };
   /** Small fact beside the answers, e.g. "6 files · +212 −38". */
   hint?: string;
+  /** An approval request's page for the owner (`/approve?project=…&lane=…`). */
+  approveHref?: string;
   /** The person or agent best placed to take it next. */
   owner?: string;
   /** The live session that can simply continue the work. */
@@ -362,4 +374,48 @@ export function quarantineDecisions(runs: CockpitWork['runs']): DecisionItem[] {
     runId: latest!.id,
     at: latest!.endedAt,
   }));
+}
+
+/** One open request from `projectHostedApprovals:list`, as the server derives it (`deriveApproval`). */
+export type OpenApproval = {
+  laneId: string;
+  kind: ApprovalKind;
+  state: string;
+  needsOwner: boolean;
+  label: string;
+  nextStep: string;
+  reason?: string;
+  requester?: string;
+  agent?: string;
+  pullRequest?: number;
+  setting?: { origin: string };
+  at?: string;
+};
+
+/** Requests that wait for the owner's answer: a Lane, a fork pull request run or a held settings
+ * change. Owners otherwise learn of them only from a board note. `projectId` builds the page link. */
+export function approvalDecisions(projectId: string, requests: readonly OpenApproval[] = []): DecisionItem[] {
+  return requests
+    .filter(request => request.needsOwner)
+    .map(request => {
+      const who = request.requester
+        ? `@${request.requester}${request.agent ? `/${request.agent}` : ''}`
+        : undefined;
+      return {
+        id: `approval:${request.laneId}`,
+        kind: 'approval' as const,
+        title:
+          request.kind === 'setting'
+            ? `Settings change waits for you (${request.setting?.origin ?? 'settings'})`
+            : request.kind === 'fork'
+              ? `Check run for pull request #${request.pullRequest ?? '?'} waits for you`
+              : `Approval for Lane ${request.laneId.slice(0, 8)} waits for you`,
+        ...(who ? { subtitle: `Requested by ${who}` } : {}),
+        ...(request.reason ? { body: request.reason } : {}),
+        hint: request.nextStep,
+        ...(request.at ? { at: request.at } : {}),
+        ...(request.kind === 'lane' ? { laneId: request.laneId } : {}),
+        approveHref: `/approve?project=${encodeURIComponent(projectId)}&lane=${encodeURIComponent(request.laneId)}`,
+      };
+    });
 }

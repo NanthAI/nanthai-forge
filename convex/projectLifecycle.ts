@@ -63,6 +63,12 @@ export async function transition(
     if (project.removal === 'deleting') await schedule(ctx, project);
     return null;
   }
+  // SM-D guards (machine M1): restoring an active project and trashing a trashed one already
+  // hold the state they ask for. They return before the revision check and write nothing, so a stale
+  // second tab neither bumps the revision (which would fail every other holder with WORK_STALE) nor
+  // re-measures retention and moves its expiry.
+  if ((action === 'restore' && !project.removal) || (action === 'trash' && project.removal === 'trash'))
+    return null;
   invariant(
     project.revision === input.expectedRevision,
     'WORK_STALE',

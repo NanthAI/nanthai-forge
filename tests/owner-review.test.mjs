@@ -9,6 +9,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
+import { deriveApproval } from '../dist/approval-state.js';
+import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 const { grantedApproval } = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
@@ -16,6 +18,7 @@ const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApprova
 const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
 const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+const { approvalDecisions } = await import(moduleUrl('../web/src/cockpit/attention.ts'));
 
 function syntheticR2(t) {
   const synthetic = {
@@ -662,4 +665,166 @@ test('a fork PR head asks the owner once; only the owner person grants, which st
   assert.equal(await gate('forkRunAgain'), false, 'one run per grant');
   const [asked] = tasks('projectGithubPullStatus:post');
   assert.equal(expiry.scheduledTime - asked.scheduledTime, forkApprovalTtlMs, 'expires in 30 days');
+});
+
+// SM-D machine M3 (owner approval requests). Bug M3-a: `list` returned only stored `live` rows, so open
+// fork pull request run requests and held settings changes (never live) were missing from it, and no
+// surface told the owner about any request except a board note.
+test('M3 list: every open request kind (Lane, fork run, held settings) with a derived state; ended ones are not listed', async t => {
+  const { f, laneId } = await requestedLane(t);
+  const row = fields => ({
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    requester: 'owner',
+    reason: 'synthetic reason',
+    head: 'a'.repeat(64),
+    at: Date.now(),
+    status: 'requested',
+    live: false,
+    version: 1,
+    ...fields,
+  });
+  f.insert('projectHostedApprovals', row({ laneId: 'fork-open', pullRequest: 12 }));
+  f.insert(
+    'projectHostedApprovals',
+    row({ laneId: 'fork-done', pullRequest: 13, ended: { kind: 'settled', at: 1 } }),
+  );
+  // A declined settings change stays open: the owner can still grant it, but it no longer waits for them.
+  f.insert(
+    'projectHostedApprovals',
+    row({
+      laneId: 'setting:policy',
+      setting: { origin: 'policy', request: '{}' },
+      status: 'declined',
+      decision: { operationId: randomUUID(), by: 'owner', at: 2, head: 'a'.repeat(64), via: 'lane' },
+    }),
+  );
+  f.insert(
+    'projectHostedApprovals',
+    row({
+      laneId: 'setting:runner',
+      setting: { origin: 'runner', request: '{}' },
+      ended: { kind: 'applied', at: 3 },
+    }),
+  );
+  f.insert('projectHostedApprovals', row({ laneId: 'lane-withdrawn', ended: { kind: 'withdrawn', at: 4 } }));
+  const listed = JSON.parse(await f.tx('list', approvals.list, { projectId: f.projectId }, 'owner'));
+  assert.equal(listed.complete, true);
+  const byLane = Object.fromEntries(listed.requests.map(request => [request.laneId, request]));
+  assert.deepEqual(Object.keys(byLane).sort(), [laneId, 'fork-open', 'setting:policy'].sort());
+  assert.deepEqual(
+    [byLane[laneId], byLane['fork-open'], byLane['setting:policy']].map(r => [r.kind, r.state, r.needsOwner]),
+    [
+      ['lane', 'requested', true],
+      ['fork', 'requested', true],
+      ['setting', 'declined', false],
+    ],
+  );
+  for (const request of listed.requests) {
+    assert.ok(request.label && request.nextStep && request.tone, `${request.laneId} carries its words`);
+    assert.equal(request.live, true, 'existing fields keep their meaning: live reads as open');
+    assert.match(request.url, /^https:\/\/forge\.example\.invalid\/approve\?project=/);
+  }
+});
+test('M3 derive: kind and phase for each request, one row per phase, unknown is never open', () => {
+  const lane = { status: 'requested', live: true };
+  const row = (record, kind, state, open, needsOwner) => {
+    const got = deriveApproval(record);
+    assert.deepEqual([got.kind, got.state, got.open, got.needsOwner], [kind, state, open, needsOwner]);
+    assert.ok(got.label && got.nextStep);
+  };
+  row(lane, 'lane', 'requested', true, true);
+  row({ ...lane, status: 'granted' }, 'lane', 'granted', true, false);
+  row({ ...lane, status: 'declined' }, 'lane', 'declined', true, false);
+  row({ status: 'granted', live: false, ended: { kind: 'landed' } }, 'lane', 'landed', false, false);
+  row({ status: 'requested', live: false, ended: { kind: 'withdrawn' } }, 'lane', 'withdrawn', false, false);
+  // Fork and settings requests are never stored live; open means not ended.
+  row({ status: 'requested', live: true, pullRequest: 4 }, 'fork', 'requested', true, true);
+  row(
+    { status: 'requested', live: true, pullRequest: 4, ended: { kind: 'settled' } },
+    'fork',
+    'settled',
+    false,
+    false,
+  );
+  row({ status: 'declined', live: true, setting: { origin: 'runner' } }, 'setting', 'declined', true, false);
+  row(
+    { status: 'granted', live: false, setting: {}, ended: { kind: 'applied' } },
+    'setting',
+    'applied',
+    false,
+    false,
+  );
+  // Records that fit no writer are "can't confirm", not open and not closed.
+  row({ status: 'requested', live: false }, 'lane', 'unknown', false, false);
+  row({ status: 'mystery', live: true }, 'lane', 'unknown', false, false);
+  row({ status: 'granted', live: false, ended: { kind: 'future-kind' } }, 'lane', 'unknown', false, false);
+});
+test('M3 surfaces: Needs you gets an approval item for the owner and the CLI lists the same requests', () => {
+  const requests = [
+    {
+      laneId: 'fork-open',
+      kind: 'fork',
+      state: 'requested',
+      needsOwner: true,
+      label: 'x',
+      nextStep: 'Open it.',
+      pullRequest: 12,
+      requester: 'builder',
+      reason: 'Fork PR #12',
+      at: '2026-11-09T00:00:00.000Z',
+    },
+    {
+      laneId: 'setting:policy',
+      kind: 'setting',
+      state: 'declined',
+      needsOwner: false,
+      label: 'y',
+      nextStep: 'Leave it.',
+      setting: { origin: 'policy' },
+    },
+    {
+      laneId: '12345678-aaaa-bbbb-cccc-1234567890ab',
+      kind: 'lane',
+      state: 'requested',
+      needsOwner: true,
+      label: 'z',
+      nextStep: 'Grant it.',
+      agent: 'otter',
+      requester: 'owner',
+      reason: 'look first',
+    },
+  ];
+  const items = approvalDecisions('project 1', requests);
+  assert.deepEqual(
+    items.map(item => [item.kind, item.id]),
+    [
+      ['approval', 'approval:fork-open'],
+      ['approval', 'approval:12345678-aaaa-bbbb-cccc-1234567890ab'],
+    ],
+    'only requests that wait for the owner are items',
+  );
+  assert.equal(items[0].approveHref, '/approve?project=project%201&lane=fork-open');
+  assert.equal(items[1].laneId, '12345678-aaaa-bbbb-cccc-1234567890ab');
+  assert.equal(items[1].subtitle, 'Requested by @owner/otter');
+  // The CLI prints the same set; an older server without the derived fields reads through the same derive.
+  const reply = openApprovalsReply({
+    requests: [
+      {
+        laneId: 'fork-open',
+        status: 'requested',
+        live: true,
+        pullRequest: 12,
+        url: 'https://forge.example.invalid/approve?x=1',
+      },
+      { laneId: 'setting:policy', status: 'declined', live: true, setting: { origin: 'policy' } },
+    ],
+    complete: true,
+  });
+  assert.deepEqual(reply.attention, [
+    { laneId: 'fork-open', kind: 'fork', url: 'https://forge.example.invalid/approve?x=1' },
+  ]);
+  assert.match(reply.next, /1 approval request waits for the project owner/);
+  assert.match(openApprovalsReply({ requests: [], complete: false }).next, /can't confirm/);
+  assert.match(openApprovalsReply({ requests: [], complete: true }).next, /No approval request is waiting/);
 });

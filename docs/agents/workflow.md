@@ -339,6 +339,13 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   own wait also returns on their decision. A grant covers the exact Lane head the
   owner saw; a later save or sync needs the owner again (their one click on the held
   landing). `{"withdraw":true}` drops your request. Agents can request, never grant.
+- The owner finds requests without a board note: Needs you shows an approval item for each
+  open request that waits for them (Lane approval, fork pull request run, held settings
+  change) with its `/approve` link, and `approve-link '{}'` (no `operationId`) prints the
+  same list: `requests` (each with `kind`, `state`, `needsOwner`, `label`, `nextStep`, `url`),
+  `attention` (the ones waiting) and `next`. `complete:false` means a read bound was hit, so
+  an absent request is not confirmed absent. `projectHostedApprovals:list` returns every
+  open kind (it used to return only Lane requests that hold a landing).
 - Settings changes can come back as an approval request. From an agent sign-in (any
   `nforge login` device, the owner's own included), `set-policy` that changes what a
   landing may accept (gate, mode, protected or owner-approval paths, `autoActors`,

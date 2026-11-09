@@ -59,6 +59,17 @@ export function HostedAnswers({
         owner={owner}
       />
     );
+  if (item.kind === 'approval' && item.approveHref)
+    return (
+      <>
+        <ButtonLink size="sm" variant="rec" href={item.approveHref}>
+          Review request
+        </ButtonLink>
+        <Button size="sm" variant="ghost" onClick={notNow}>
+          Not now
+        </Button>
+      </>
+    );
   if (item.queue?.state === 'failed')
     return (
       <>

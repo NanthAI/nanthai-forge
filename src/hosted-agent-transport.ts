@@ -113,7 +113,7 @@ import {
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
-import { executeHostedApproval, type ApprovalCommand } from './hosted-agent-approval.js';
+import { executeHostedApproval, openApprovalsReply, type ApprovalCommand } from './hosted-agent-approval.js';
 import { savedChangedPaths } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { missingRequiredFeatures } from './hosted-contract-features.js';
@@ -631,6 +631,12 @@ export class HostedAgentTransport {
           operationId as string | undefined,
         );
         return this.response(action, approval.operationId, approval.result);
+      }
+      // Without an operationId, approve-link is the owner's attention list: every open approval request
+      // (Lane, fork pull request run, held settings change) with its page link. One query.
+      if (action === 'approve-link' && typeof operationId !== 'string') {
+        const read = await this.query('projectHostedApprovals:list', {});
+        return this.response(action, null, openApprovalsReply(read));
       }
       if ((hostedAgentReviewActions as readonly string[]).includes(action)) {
         invariant(

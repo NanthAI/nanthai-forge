@@ -18,6 +18,7 @@ const kinds: Record<DecisionItem['kind'], { label: string; glyph: GlyphName }> =
   overlap: { label: 'Overlap unanswered', glyph: 'overlap' },
   revert: { label: 'Reverted from main', glyph: 'failed' },
   'needs-fix': { label: 'Fix needed', glyph: 'wrench' },
+  approval: { label: 'Approval request', glyph: 'review' },
 };
 const label = (item: DecisionItem) =>
   item.kind === 'message' && item.question ? 'Question' : kinds[item.kind].label;

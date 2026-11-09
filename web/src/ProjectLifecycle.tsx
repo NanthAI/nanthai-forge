@@ -5,6 +5,7 @@ import { useConvex } from 'convex/react';
 import type { FunctionReturnType } from 'convex/server';
 import { api } from '../../convex/_generated/api';
 import { hostedError } from './snapshot';
+import { deriveProjectPhase } from '../../src/project-phase';
 
 type Project = FunctionReturnType<typeof api.projectBackups.list>['page'][number];
 type Operation = {
@@ -104,7 +105,8 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
   }
   const confirmation = project.slug ?? project.name,
     retention = project.retention,
-    purge = project.purge;
+    purge = project.purge,
+    phase = deriveProjectPhase(project, Date.now());
   return (
     <section className="project-settings">
       <h2>Project settings</h2>
@@ -163,7 +165,10 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
       {project.removal === 'trash' && (
         <p>
           Deleted{project.removedAt ? ` ${day(project.removedAt)}` : ''}. Nobody can read or change it.
-          {retention && ` Restorable until ${day(retention.purgeAt)}, then purged.`}
+          {phase.state === 'restorable' &&
+            retention &&
+            ` Restorable until ${day(retention.purgeAt)}, then purged.`}
+          {phase.state === 'trashed' && ` ${phase.reason} ${phase.nextStep}`}
           {retention &&
             ` Retained: ${mib(retention.retainedBytes)} in ${retention.retainedObjects} objects${retention.measured ? '' : ' so far'}.`}
         </p>
@@ -174,10 +179,12 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
           {purge
             ? `: ${purge.rows} records removed in ${purge.pages} pages (operation ${purge.operationId})`
             : ''}
-          .{project.purgeBlocked ? ` Stopped: ${project.purgeBlocked}. Retry after it is resolved.` : ''}
+          .{phase.state === 'purge-blocked' ? ` Stopped: ${phase.reason} ${phase.nextStep}` : ''}
         </p>
       )}
-      {project.removal === 'deleted' && <p>Project permanently deleted.</p>}
+      {(phase.state === 'purged' || phase.state === 'purged-with-leftovers' || phase.state === 'unknown') && (
+        <p>{phase.state === 'purged' ? 'Project permanently deleted.' : `${phase.label}. ${phase.reason}`}</p>
+      )}
       <div className="import-actions">
         {!project.removal && (
           <button disabled={busy || !!attempt} onClick={() => setConfirm(true)}>
@@ -186,15 +193,17 @@ export default function ProjectLifecycle({ project }: { project: Project }) {
         )}
         {project.removal === 'trash' && (
           <>
-            <button disabled={busy || !!attempt} onClick={() => start('restore')}>
-              Restore project
-            </button>
+            {(phase.canRestore || !!retention?.revoking) && (
+              <button disabled={busy || !!attempt} onClick={() => start('restore')}>
+                Restore project
+              </button>
+            )}
             <button disabled={busy || !!attempt} onClick={() => setConfirm(true)}>
               Delete permanently now
             </button>
           </>
         )}
-        {project.removal === 'deleting' && !attempt && (
+        {phase.canRetryRemoval && !attempt && (
           <button disabled={busy} onClick={() => start('delete')}>
             Retry removal
           </button>

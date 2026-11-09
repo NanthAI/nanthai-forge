@@ -385,3 +385,38 @@ test('workspace recovery notices appear in Now and shell attention with matching
   assert.equal(hostedAttention(f.records, live, f.now).decisions.length, 0);
   assert.doesNotMatch(renderNow(f), /Reverted from main|Fix needed|Exact record/);
 });
+
+test('SM-D M3: an open approval request is a Needs you item for the owner, with its approve link', async () => {
+  const f = recoveryNoticesFixture();
+  f.records.needsFix = [];
+  const { hostedAttention } = await import(moduleUrl('../web/src/shell/Attention.tsx'));
+  const live = { sessions: [], events: [], unacked: [], claims: [] };
+  assert.equal(hostedAttention(f.records, live, f.now).decisions.length, 0, 'no request: nothing needs you');
+  const request = {
+    laneId: 'setting:policy',
+    kind: 'setting',
+    state: 'requested',
+    needsOwner: true,
+    label: 'Held settings change waits for you',
+    nextStep: 'Open the approve link, then grant or decline the settings change.',
+    reason: 'tighten the landing gate',
+    requester: 'builder',
+    setting: { origin: 'policy' },
+  };
+  const owner = { ...live, approvals: { projectId: 'synthetic', requests: [request] } };
+  const [item, ...rest] = hostedAttention(f.records, owner, f.now).decisions;
+  assert.equal(rest.length, 0);
+  assert.equal(item.kind, 'approval');
+  assert.equal(item.approveHref, '/approve?project=synthetic&lane=setting%3Apolicy');
+  const html = renderNow(f, { approvals: owner.approvals });
+  assert.match(html, /Approval request/);
+  assert.match(html, /Settings change waits for you \(policy\)/);
+  assert.match(html, /tighten the landing gate/);
+  assert.match(html, /href="\/approve\?project=synthetic&amp;lane=setting%3Apolicy"[^>]*>Review request/);
+  // A decided request, or a viewer who is not the owner (no list read), shows nothing.
+  const decided = {
+    ...owner,
+    approvals: { projectId: 'synthetic', requests: [{ ...request, needsOwner: false }] },
+  };
+  assert.equal(hostedAttention(f.records, decided, f.now).decisions.length, 0);
+});

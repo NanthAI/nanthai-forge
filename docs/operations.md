@@ -664,7 +664,18 @@ Settings shows the deleted date, the restore deadline and the retained size.
 The owner can restore the project until the deadline. Restore brings back source,
 Work and settings but **not** grants, invitations, runners or tokens; re-share
 and re-register them. Restore is refused after the deadline and while revocation
-is still paging.
+is still paging. Restore on a project that is not deleted, and delete on one that
+is already deleted, change nothing and do not bump the revision, so a stale second
+tab cannot fail other holders.
+
+Settings, Home's removed-projects list and `nforge host --delete` name the project's
+phase from one derive (`src/project-phase.ts`): active, deleted and restorable,
+deleted with restore unavailable (revocation finishing or the window ended),
+purging, purge stopped (each stop code has a reason sentence and a next step),
+permanently deleted, and deleted with the purge not confirmed. A tombstone with no
+completion receipt (older purges, Issue 4bf603cc) never reads "permanently deleted":
+it says its records and stored objects may remain. The delete command's JSON gains a
+`phase` field.
 
 At the deadline, or when the owner chooses **Delete permanently now** and types the
 project slug (`confirm` on `projectLifecycle:permanentlyDelete`; `nforge host

@@ -192,6 +192,27 @@ test('CLI request-approval defaults to the checkout Lane: one mutation with a ge
   assert.equal(dropped.result.live, false);
 });
 
+test('CLI approve-link with no operationId lists the open approval requests in one query (SM-D M3)', async t => {
+  const { s } = environment(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  const reply = await agentCli([s.root, 'approve-link', JSON.stringify({})], binary);
+  assert.deepEqual(
+    s.calls.slice(before).map(call => call.name),
+    ['projectHostedApprovals:list'],
+  );
+  assert.deepEqual(reply.result.attention, [
+    {
+      laneId: 'setting:policy',
+      kind: 'setting',
+      url: 'https://forge.example.invalid/approve?project=p&lane=setting%3Apolicy',
+    },
+  ]);
+  assert.equal(reply.result.requests[0].state, 'requested');
+  assert.match(reply.result.requests[0].nextStep, /grant or decline the settings change/);
+  assert.match(reply.result.next, /1 approval request waits for the project owner/);
+});
+
 test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
   const { s } = environment(t);
   const root = join(dirname(s.root), 'clone');

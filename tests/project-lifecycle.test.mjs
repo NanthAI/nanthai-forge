@@ -7,6 +7,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { proposalRow, state } from './hosted-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { deriveProjectPhase, purgeBlockedReasons } from '../dist/project-phase.js';
 const modules = {};
 for (const name of [
   'projectBackups',
@@ -168,6 +169,73 @@ test('deleting a project hides it from everyone (owner included), stops all chan
     s.scheduled.filter(task => s.tasks.get(task.id).state.kind === 'pending'),
     [],
   );
+});
+// SM-D machine M1 (project removal), bugs M1-a and M1-b: a stale second tab used to bump the revision
+// (failing every other holder with WORK_STALE) and trash used to re-measure and re-arm retention.
+test('M1 guards: restore on an active project and trash on a trashed one are no-ops with no revision bump', async () => {
+  const s = fixture();
+  const project = () => s.tables.hostedProjects.get('project');
+  // M1-a: restoring a project that is not deleted changes nothing, even with a stale revision.
+  const before = structuredClone(project());
+  await modules.projectLifecycle.restore._handler(s.ctx, s.operation());
+  await modules.projectLifecycle.restore._handler(s.ctx, { ...s.operation(), expectedRevision: 0 });
+  assert.deepEqual(project(), before, 'restore on an active project writes nothing');
+  assert.equal(s.scheduled.length, 0);
+  // M1-b: trash once, then again from a second tab holding the old and the new revision.
+  await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
+  const trashed = structuredClone(project());
+  assert.equal(trashed.removal, 'trash');
+  const tasks = s.scheduled.length;
+  await modules.projectLifecycle.trash._handler(s.ctx, {
+    ...s.operation(),
+    expectedRevision: before.revision,
+  });
+  await modules.projectLifecycle.trash._handler(s.ctx, s.operation());
+  assert.deepEqual(project(), trashed, 'trash on a trashed project keeps revision, lifecycle and retention');
+  assert.equal(s.scheduled.length, tasks, 'no second retention measure or expiry is scheduled');
+  // The guards never hide a real refusal: a restored project with a stale revision is still WORK_STALE.
+  await modules.projectLifecycle.restore._handler(s.ctx, s.operation());
+  assert.equal(project().removal, undefined);
+  await assert.rejects(
+    modules.projectLifecycle.trash._handler(s.ctx, { ...s.operation(), expectedRevision: 1 }),
+    e => e.data.code === 'WORK_STALE',
+  );
+});
+test('M1 phase derive: one row per state, a reason for each purge-blocked code, and no false "permanently deleted"', () => {
+  const now = 1_000;
+  const row = (project, state, extra = {}) => {
+    const phase = deriveProjectPhase(project, now);
+    assert.equal(phase.state, state, JSON.stringify(project));
+    assert.ok(phase.label && phase.nextStep, `${state} names a label and a next step`);
+    for (const [key, value] of Object.entries(extra)) assert.equal(phase[key], value, `${state}.${key}`);
+    return phase;
+  };
+  row({}, 'active', { canDeletePermanently: true, canRestore: false });
+  row({ removal: 'trash', retention: { purgeAt: now + 1 } }, 'restorable', { canRestore: true });
+  row({ removal: 'trash' }, 'restorable', { canRestore: true }); // legacy trash without a window
+  const ended = row({ removal: 'trash', retention: { purgeAt: now } }, 'trashed', { canRestore: false });
+  assert.match(ended.reason, /restore window .* ended/);
+  const revoking = row({ removal: 'trash', retention: { purgeAt: now + 9, revoking: true } }, 'trashed');
+  assert.match(revoking.reason, /revocation/);
+  row({ removal: 'deleting' }, 'purging', { canRetryRemoval: true });
+  for (const code of Object.keys(purgeBlockedReasons)) {
+    const blocked = row({ removal: 'deleting', purgeBlocked: code }, 'purge-blocked', {
+      canRetryRemoval: true,
+    });
+    assert.equal(blocked.reason, purgeBlockedReasons[code]);
+  }
+  assert.match(
+    row({ removal: 'deleting', purgeBlocked: 'FUTURE_CODE' }, 'purge-blocked').reason,
+    /FUTURE_CODE/,
+  );
+  row({ removal: 'deleted', purge: { completedAt: 5 } }, 'purged', { label: 'Permanently deleted' });
+  // Issue 4bf603cc: old tombstones (no completion receipt) left rows behind; never say "permanently deleted".
+  for (const legacy of [{ removal: 'deleted' }, { removal: 'deleted', purge: {} }]) {
+    const leftovers = row(legacy, 'purged-with-leftovers');
+    assert.notEqual(leftovers.label, 'Permanently deleted');
+    assert.match(leftovers.reason, /may remain/);
+  }
+  row({ removal: 'archived-by-a-future-server' }, 'unknown');
 });
 test('permanent project removal batches journals/grants/archives, resumes failure, preserves shared objects and leaves no downloadable project', async () => {
   const s = fixture();

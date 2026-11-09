@@ -4,6 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { markerIdentity } from './lane-prune.js';
 import { ForgeError, invariant } from './errors.js';
+import { deriveApproval } from './approval-state.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
@@ -156,4 +157,56 @@ function settingNext(outcome: ApprovalOutcome) {
   return outcome.approval?.status === 'granted'
     ? 'The owner granted the settings change and it is applied. Rerun your original command (same operationId) to read its receipt.'
     : 'The owner declined the settings change; nothing changed. Read their reason before asking again.';
+}
+
+const openRequestSchema = z.looseObject({
+  laneId: z.string(),
+  status: z.string(),
+  live: z.boolean(),
+  kind: z.enum(['lane', 'fork', 'setting']).optional(),
+  state: z.string().optional(),
+  needsOwner: z.boolean().optional(),
+  label: z.string().optional(),
+  nextStep: z.string().optional(),
+  url: z.string().nullable().optional(),
+});
+const openRequestsSchema = z.looseObject({
+  requests: z.array(openRequestSchema),
+  complete: z.boolean().optional(),
+});
+
+/**
+ * `approve-link` without an operationId: the owner's attention list. Every open approval request of
+ * the project (Lane approval, fork pull request run, held settings change) with its page link, the
+ * same set and words Needs you shows in the web app. An older server that returns fewer fields is read
+ * through the same derive, so the words match either way.
+ */
+export function openApprovalsReply(value: unknown) {
+  const read = parseHostedResponse(openRequestsSchema, value);
+  const requests = read.requests.map(request => {
+    const state = deriveApproval({ ...request, ended: undefined });
+    return {
+      ...request,
+      kind: request.kind ?? state.kind,
+      state: request.state ?? state.state,
+      needsOwner: request.needsOwner ?? state.needsOwner,
+      label: request.label ?? state.label,
+      nextStep: request.nextStep ?? state.nextStep,
+    };
+  });
+  const waiting = requests.filter(request => request.needsOwner);
+  return {
+    ...read,
+    requests,
+    attention: waiting.map(request => ({
+      laneId: request.laneId,
+      kind: request.kind,
+      url: request.url ?? null,
+    })),
+    next: waiting.length
+      ? `${waiting.length} approval request${waiting.length === 1 ? ' waits' : 's wait'} for the project owner. Hand each url to them; only the owner grants or declines.`
+      : read.complete === false
+        ? "No open request is waiting in the part of the list this read covered; it can't confirm there are none."
+        : 'No approval request is waiting for the project owner.',
+  };
 }
