@@ -31,6 +31,67 @@ const claim = {
   laneId: v.optional(v.string()),
   intentId: v.optional(v.string()),
 };
+// Mirrors decisionRecordSchema and decisionContext (src/decision-types.ts): a server-authority
+// brief returns the hosted decisions, and Convex rejects a return with an undeclared field.
+const decisionTarget = v.union(
+  v.object({ kind: v.literal('project') }),
+  v.object({ kind: v.literal('intent'), intentId: v.string() }),
+);
+const workActor = v.object({
+  kind: v.union(v.literal('person'), v.literal('agent')),
+  name: v.string(),
+  tool: v.optional(v.string()),
+});
+const decisionRecord = v.object({
+  conversation: v.optional(
+    v.object({
+      agent: v.union(v.literal('claude-code'), v.literal('codex'), v.literal('generic')),
+      sessionId: v.string(),
+      turnId: v.string(),
+      link: v.optional(v.string()),
+    }),
+  ),
+  schema: v.literal(1),
+  kind: v.literal('decision'),
+  id: v.string(),
+  operationId: v.string(),
+  request: v.string(),
+  target: decisionTarget,
+  decidedBy: v.string(),
+  what: v.string(),
+  why: v.string(),
+  at: v.string(),
+  decidedAt: v.string(),
+  overrides: v.optional(
+    v.union(
+      v.object({ kind: v.literal('decision'), decisionId: v.string(), link: v.optional(v.string()) }),
+      v.object({ kind: v.literal('default'), description: v.string(), link: v.optional(v.string()) }),
+    ),
+  ),
+  supersedes: v.optional(v.string()),
+  delegation: v.optional(
+    v.object({
+      actor: v.string(),
+      paths: v.array(v.string()),
+      level: v.union(v.literal('trusted'), v.literal('autonomous')),
+      until: v.optional(v.string()),
+    }),
+  ),
+  actor: workActor,
+  requester: workActor,
+});
+const decisions = v.object({
+  active: v.array(decisionRecord),
+  superseded: v.array(
+    v.object({
+      id: v.string(),
+      target: decisionTarget,
+      what: v.string(),
+      status: v.literal('superseded'),
+      supersededBy: v.array(v.string()),
+    }),
+  ),
+});
 const after = v.optional(v.union(v.object({ intentId: v.string() }), v.object({ viewId: v.string() })));
 const laneContext = { name: v.string(), head: v.string(), base: v.string(), state: v.string(), after };
 export const briefingResult = v.object({
@@ -45,7 +106,11 @@ export const briefingResult = v.object({
     setupLine: v.string(),
   }),
   context: v.object({
+    decisions: v.optional(decisions),
     handoff: v.optional(v.union(deliveryHandoff, v.null())),
+    // A stacked Lane's brief names its parent and the parent's latest handoff.
+    parentHandoff: v.optional(v.union(deliveryHandoff, v.null())),
+    stack: v.optional(v.string()),
     autonomyPolicy: v.optional(autonomyPolicy),
     laneId: v.optional(v.string()),
     intentId: v.optional(v.string()),
@@ -55,6 +120,7 @@ export const briefingResult = v.object({
     intent: v.optional(
       v.object({
         outcome: v.string(),
+        description: v.optional(v.string()),
         constraints: v.string(),
         status: v.string(),
         notes: v.array(v.object({ kind: v.string(), text: v.string(), at: v.string() })),

@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { state, providers } from './hosted-fixture.mjs';
+import { backupRow, state, providers } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const modules = {};
@@ -38,9 +38,18 @@ function setup(t) {
     visibility: 'private',
     currentBackup: 'backup',
     revision: 1,
-    work: { generationId: 'generation', backupId: 'backup', initialRevision: 1, revision: 1 },
+    work: {
+      generationId: 'generation',
+      backupId: 'backup',
+      operationId: 'work-operation',
+      initialRevision: 1,
+      revision: 1,
+    },
   });
-  s.tables.projectBackups.set('backup', { _id: 'backup', projectId: 'project', digest: 'a'.repeat(64) });
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({ _id: 'backup', projectId: 'project', digest: 'a'.repeat(64) }),
+  );
   s.tables.projectWorkGenerations.set('generation', {
     _id: 'generation',
     projectId: 'project',

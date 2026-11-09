@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-import { state } from './hosted-fixture.mjs';
+import { projectRow, schemaRow, state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const work = await import(moduleUrl('../convex/projectWork.ts'));
 const people = await import(moduleUrl('../convex/projectContributors.ts'));
@@ -12,8 +12,11 @@ function setup() {
   const s = state([]);
   s.tables.projectInvites = new Map();
   s.tables.projectAccessOperations = new Map();
-  s.tables.hostedProjects.set('p', { _id: 'p', owner: 'owner', name: 'Test', key: 'p' });
-  s.tables.forgeAccounts.set('a', { _id: 'a', owner: 'maya-id', handle: 'maya' });
+  s.tables.hostedProjects.set('p', projectRow({ _id: 'p', owner: 'owner', name: 'Test', key: 'p' }));
+  s.tables.forgeAccounts.set(
+    'a',
+    schemaRow('forgeAccounts', { _id: 'a', _creationTime: 1, owner: 'maya-id', handle: 'maya' }),
+  );
   const original = s.ctx.runQuery;
   s.ctx.runQuery = s.ctx.runMutation = (ref, args) => {
     const [module, name] = getFunctionName(ref).split(':');

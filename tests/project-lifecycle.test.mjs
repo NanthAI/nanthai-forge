@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { proposalRow, state } from './hosted-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 const modules = {};
 for (const name of [
@@ -23,6 +23,11 @@ const sha = b => createHash('sha256').update(b).digest('hex'),
   bytes = Buffer.from('synthetic retained native source and Work');
 const page = { paginationOpts: { cursor: null, numItems: 20 } },
   unavailable = e => e.data?.code === 'PROJECT_UNAVAILABLE';
+// A proposal of the fixture's backup bytes; `previous` is a backup-only field.
+function proposalFrom(s, fields) {
+  const { previous: _previous, ...backup } = s.tables.projectBackups.get('backup');
+  return proposalRow({ ...backup, ...fields });
+}
 function fixture() {
   const s = state([]),
     native = s.ctx.runQuery;
@@ -194,8 +199,7 @@ test('permanent project removal batches journals/grants/archives, resumes failur
     revision: 0,
   });
   s.tables.projectBackups.set(shared._id, shared);
-  const proposal = {
-    ...s.tables.projectBackups.get('backup'),
+  const proposal = proposalFrom(s, {
     _id: 'proposal',
     actor: 'contributor',
     nonce: 'original-proposal',
@@ -206,7 +210,7 @@ test('permanent project removal batches journals/grants/archives, resumes failur
     baseState: 'a'.repeat(64),
     head: 'b'.repeat(64),
     viewId: 'view',
-  };
+  });
   s.tables.projectProposals.set(proposal._id, proposal);
   s.put('proposal-file', 'application/x-forge-proposal-original-proposal');
   const op = s.operation();
@@ -376,13 +380,12 @@ test('two issued URLs for the same initial backup retain one archive and clean t
 });
 test('stored proposal duplicate outcomes recheck current grant; removal receipts reconcile original uploader late bytes without source access', async () => {
   const s = fixture(),
-    original = {
-      ...s.tables.projectBackups.get('backup'),
+    original = proposalFrom(s, {
       _id: 'proposal',
       actor: 'contributor',
       nonce: 'original-proposal',
       storageId: 'proposal-original',
-    };
+    });
   s.tables.projectProposals.set('proposal', original);
   s.put('proposal-original', 'application/x-forge-proposal-original-proposal');
   s.put('proposal-extra', 'application/x-forge-proposal-original-proposal');
@@ -456,13 +459,12 @@ test('Trash during a contributor byte transfer rejects the final response withou
 });
 test('individual proposal removal retains late cleanup facts and retries a failed original scheduled sweep without recreating source', async () => {
   const s = fixture(),
-    original = {
-      ...s.tables.projectBackups.get('backup'),
+    original = proposalFrom(s, {
       _id: 'proposal',
       actor: 'contributor',
       nonce: 'original-proposal',
       storageId: 'proposal-original',
-    };
+    });
   s.tables.projectProposals.set('proposal', original);
   s.put('proposal-original', 'application/x-forge-proposal-original-proposal');
   s.put('unknown-extra', 'application/x-forge-proposal-original-proposal');

@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
-import { state, providers } from './hosted-fixture.mjs';
+import { backupRow, projectRow, proposalRow, state, providers } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { fakeR2Config } from './fake-r2.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
@@ -39,26 +39,36 @@ const denied = e => e.data?.code === 'PROJECT_UNAVAILABLE';
 const paginationOpts = { cursor: null, numItems: 10 },
   digest = 'a'.repeat(64);
 function project(s, id, owner, backup) {
-  s.tables.hostedProjects.set(id, {
-    _id: id,
-    _creationTime: 1,
-    owner,
-    key: `${id}-key`,
-    name: id,
-    visibility: 'private',
-    currentBackup: backup,
-    revision: 1,
-    work: { generationId: `${id}-generation`, backupId: backup, initialRevision: 1, revision: 1 },
-  });
-  s.tables.projectBackups.set(backup, {
-    _id: backup,
-    projectId: id,
-    status: 'stored',
-    digest,
-    size: 1,
-    transport: 'objects',
-    preview: { format: 'native', head: digest, manifestDigest: digest, revision: 1 },
-  });
+  s.tables.hostedProjects.set(
+    id,
+    projectRow({
+      _id: id,
+      owner,
+      key: `${id}-key`,
+      name: id,
+      visibility: 'private',
+      currentBackup: backup,
+      revision: 1,
+      work: {
+        generationId: `${id}-generation`,
+        backupId: backup,
+        operationId: `${id}-work`,
+        initialRevision: 1,
+        revision: 1,
+      },
+    }),
+  );
+  s.tables.projectBackups.set(
+    backup,
+    backupRow({
+      _id: backup,
+      projectId: id,
+      digest,
+      size: 1,
+      transport: 'objects',
+      preview: { format: 'native', head: digest, manifestDigest: digest, revision: 1 },
+    }),
+  );
   s.tables.projectWorkGenerations.set(`${id}-generation`, {
     _id: `${id}-generation`,
     _creationTime: 1,
@@ -71,15 +81,18 @@ function project(s, id, owner, backup) {
     nextBatch: 0,
     metadata: JSON.stringify({ sourceHead: digest, counts: { intents: 0 } }),
   });
-  s.tables.projectProposals.set(`${id}-proposal`, {
-    _id: `${id}-proposal`,
-    projectId: id,
-    actor: 'former',
-    status: 'stored',
-    transport: 'objects',
-    digest,
-    size: 1,
-  });
+  s.tables.projectProposals.set(
+    `${id}-proposal`,
+    proposalRow({
+      _id: `${id}-proposal`,
+      projectId: id,
+      actor: 'former',
+      baseBackupId: backup,
+      transport: 'objects',
+      digest,
+      size: 1,
+    }),
+  );
 }
 function setup() {
   const s = state([]);
@@ -282,6 +295,8 @@ test('browser review and object metadata return real plans and URLs only while a
   });
   s.tables.projectObjects.set('object', {
     _id: 'object',
+    _creationTime: 1,
+    nonce: 'object',
     projectId: 'project',
     digest,
     size: 1,

@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { setup, pinOf } from './r2-harness.mjs';
 import { backupPreview } from './project-backup-fixture.mjs';
+import { proposalRow } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { putR2 } from '../dist/exchange-blobs.js';
 import { downloadArchiveFile } from '../dist/archive-download-file.js';
@@ -298,7 +299,11 @@ test('archive HEAD refuses wrong size/checksum and a proposal download signs its
   fake.objects.delete(fake.key(row.r2Key));
   await putR2(target, Buffer.from('original bytes'));
   await actions.complete._handler(s.ctx, { id: 'backup' });
-  s.tables.projectProposals.set('proposal', { ...row, _id: 'proposal', status: 'stored', actor: 'owner' });
+  const { previous: _previous, ...archive } = row;
+  s.tables.projectProposals.set(
+    'proposal',
+    proposalRow({ ...archive, _id: 'proposal', status: 'stored', actor: 'owner' }),
+  );
   const part = await proposals.downloadPart._handler(s.ctx, {
     id: 'proposal',
     offset: 0,

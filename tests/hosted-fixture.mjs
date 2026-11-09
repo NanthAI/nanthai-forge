@@ -20,10 +20,12 @@ import {
   checkDocument,
   checkReturn,
   checkReturns,
+  rawHandler,
   insertedDocument,
   updatedDocument,
 } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
+import { backupFields, backupPreview, proposalFields } from './project-backup-fixture.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
 const projectExchangeCache = await import(moduleUrl('../convex/projectExchangeCache.ts'));
@@ -56,6 +58,35 @@ const projectWorkIndexBuildStore = await import(moduleUrl('../convex/projectWork
 const projectWorkIndexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const publicPeople = await import(moduleUrl('../convex/publicPeople.ts'));
 const projectHistoryStore = await import(moduleUrl('../convex/projectHistoryStore.ts'));
+/** A hand-written row, checked against the schema when it is built: a seed no schema-validated
+ * write can produce makes return checks fail far from its cause (Issue b7c8e4dd). */
+export const schemaRow = (table, row) => (checkDocument(schema, table, row), row);
+/** A `hostedProjects` row with synthetic defaults for every required field. */
+export const projectRow = fields =>
+  schemaRow('hostedProjects', {
+    _creationTime: 1,
+    owner: 'owner',
+    key: 'project-key',
+    name: 'Synthetic project',
+    currentBackup: null,
+    revision: 1,
+    ...fields,
+  });
+/** Stored `projectBackups` / `projectProposals` rows with synthetic defaults for every required field. */
+export const backupRow = ({ preview, ...fields } = {}) =>
+  schemaRow('projectBackups', {
+    _creationTime: 1,
+    ...backupFields(),
+    ...fields,
+    preview: backupPreview(preview),
+  });
+export const proposalRow = ({ preview, ...fields } = {}) =>
+  schemaRow('projectProposals', {
+    _creationTime: 1,
+    ...proposalFields(),
+    ...fields,
+    preview: backupPreview(preview),
+  });
 export const job = (id = 'own') => ({
   _id: id,
   _creationTime: 1,
@@ -508,7 +539,8 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     ctx.runMutation =
       (fn, args) => {
         const [module, name] = getFunctionName(fn).split(':'),
-          handler = modules[module][name];
+          handler = modules[module][name],
+          run = handler[rawHandler] ?? handler._handler;
         // The value must match the declared `returns` validator (a mismatch fails the call in
         // production, Issue 4c2635dc) and serialize; a mutation's writes roll back on either.
         const returned = value => (
@@ -517,8 +549,8 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
           value
         );
         return handler.isMutation
-          ? transaction(async () => returned(await handler._handler(ctx, args)))
-          : Promise.resolve(handler._handler(ctx, args)).then(returned);
+          ? transaction(async () => returned(await run(ctx, args)))
+          : Promise.resolve(run(ctx, args)).then(returned);
       };
   return {
     ctx,

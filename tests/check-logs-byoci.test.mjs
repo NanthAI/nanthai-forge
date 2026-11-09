@@ -2,6 +2,7 @@
 import { transferArchiveFixture } from './native-archive-fixture.mjs';
 import { captureNativeArchive } from './native-archive-fixture.mjs';
 import test from 'node:test';
+import { backupRow } from './hosted-fixture.mjs';
 import assert from 'node:assert/strict';
 import {
   chmodSync,
@@ -401,18 +402,18 @@ test('hosted cleanup dry-run/apply deletes Convex and R2 log objects, preserves 
     manifest.files.push({ path: `check-${f.run.id}/${name}`, ...pin });
   }
   const root = await upload(s, Buffer.from(JSON.stringify(manifest)));
-  s.tables.projectBackups.set('backup', {
-    _id: 'backup',
-    _creationTime: 1,
-    projectId: 'project',
-    transport: 'objects',
-    digest: root.sha256,
-    size: root.size,
-    status: 'stored',
-    preview: { manifestDigest: root.sha256 },
-    operationId: randomUUID(),
-    _creationTime: 1,
-  });
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({
+      _id: 'backup',
+      projectId: 'project',
+      transport: 'objects',
+      digest: root.sha256,
+      size: root.size,
+      preview: { manifestDigest: root.sha256 },
+      operationId: randomUUID(),
+    }),
+  );
   const logRow = [...s.tables.projectObjects.values()].find(row => row.digest === providerPins[1].sha256);
   // A fake committed R2 copy plus the Convex copy exercise both delete paths.
   Object.assign(logRow, {

@@ -98,7 +98,19 @@ test('anchored notes hand over to the Node action with the resolved owner, befor
     },
   };
   const calls = [];
-  const sentinel = { _id: 'node-event', operationId: 'sentinel' };
+  // The Node action's reply: a stored Work event, as its declared `returns` requires.
+  const sentinel = {
+    _id: 'node-event',
+    _creationTime: 1,
+    projectId: s.projectId,
+    operationId: 'sentinel',
+    request: '0'.repeat(64),
+    previousRevision: 1,
+    revision: 2,
+    actor: 'owner',
+    at: new Date(0).toISOString(),
+    command: '{}',
+  };
   s.ctx.runAction = async (ref, args) => {
     calls.push([getFunctionName(ref), args]);
     return sentinel;
@@ -111,7 +123,8 @@ test('anchored notes hand over to the Node action with the resolved owner, befor
     revision: (await s.read()).data.revision,
     command: JSON.stringify(command),
   });
-  assert.equal(result, sentinel);
+  // Public-people mapping rebuilds a reply that names an actor, so the event comes back equal, not identical.
+  assert.deepEqual(result, sentinel);
   assert.equal(calls.length, 1);
   assert.equal(calls[0][0], 'projectWorkActions:commandNode');
   assert.equal(calls[0][1].owner, 'owner');

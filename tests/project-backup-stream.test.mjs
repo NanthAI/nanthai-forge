@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { backupRow, projectRow, state } from './hosted-fixture.mjs';
 const queries = await import(moduleUrl('../convex/projectBackups.ts'));
 const actions = await import(moduleUrl('../convex/projectBackupActions.ts'));
 const partSize = 2 * 1024 * 1024,
@@ -22,26 +22,21 @@ function fixture(size = partSize + 17) {
   const s = state([]),
     digest = sha(size),
     native = s.ctx.runQuery;
-  s.tables.hostedProjects.set('project', {
-    _id: 'project',
-    owner: 'owner',
-    currentBackup: 'backup',
-    revision: 1,
-    key: 'key',
-    name: 'Synthetic',
-  });
-  s.tables.projectBackups.set('backup', {
-    _id: 'backup',
-    _creationTime: 1,
-    projectId: 'project',
-    operationId: 'original-operation',
-    status: 'stored',
-    storageId: 'object',
-    size,
-    digest,
-    previous: null,
-    preview: {},
-  });
+  s.tables.hostedProjects.set(
+    'project',
+    projectRow({ _id: 'project', owner: 'owner', currentBackup: 'backup', key: 'key', name: 'Synthetic' }),
+  );
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({
+      _id: 'backup',
+      projectId: 'project',
+      operationId: 'original-operation',
+      storageId: 'object',
+      size,
+      digest,
+    }),
+  );
   const calls = { query: 0, metadata: 0, url: 0, fetch: 0, produced: 0, canceled: 0 };
   s.ctx.runQuery = async (ref, input) => {
     if (getFunctionName(ref) !== 'projectBackups:get') return native(ref, input);

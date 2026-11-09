@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { checkArgs, checkReturns } from './convex-args.mjs';
 import {
   HOSTED_WORK_INDEX_FORMAT,
   laneSummary,
@@ -22,7 +23,7 @@ const paths = await import(moduleUrl('../convex/projectBriefingSources.ts'));
 const actions = await import(moduleUrl('../convex/projectBriefingActions.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const code = expected => error => error.data?.code === expected;
-async function setup() {
+async function setup(extraLanes = []) {
   const s = state([]),
     projectId = 'project',
     backupId = 'backup',
@@ -51,9 +52,10 @@ async function setup() {
     metadata: '{}',
   });
   let count = 0;
-  for (const [collection, values] of Object.entries(records).filter(
-    ([name]) => !['events', 'claims'].includes(name),
-  )) {
+  for (const [collection, values] of Object.entries({
+    ...records,
+    lanes: [...records.lanes, ...extraLanes],
+  }).filter(([name]) => !['events', 'claims'].includes(name))) {
     for (const [position, value] of values.entries()) {
       const key = value.id ?? value.name;
       const parent = value.intentId ?? value.viewId ?? '';
@@ -478,7 +480,6 @@ test('server-authority brief includes hosted-created decisions with one extra in
   s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
   s.tables.projectHostedDecisions = new Map();
   const decisions = await import(moduleUrl('../convex/projectHostedDecisions.ts'));
-  const { checkArgs } = await import('./convex-args.mjs');
   const create = async extra => {
     const args = {
       projectId: s.projectId,
@@ -495,7 +496,12 @@ test('server-authority brief includes hosted-created decisions with one extra in
     return JSON.parse(await s.transaction(() => decisions.decide._handler(s.ctx, args)));
   };
   const old = await create({}),
-    replacement = await create({ supersedes: old.id, what: 'Replacement hosted context' });
+    replacement = await create({
+      supersedes: old.id,
+      what: 'Replacement hosted context',
+      overrides: { kind: 'default', description: 'Earlier default', link: 'docs/concepts.md' },
+      conversation: { agent: 'codex', sessionId: 'session', turnId: 'turn' },
+    });
   let queries = 0;
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {
@@ -515,4 +521,28 @@ test('server-authority brief includes hosted-created decisions with one extra in
   );
   assert.deepEqual(result.context.decisions.superseded[0].supersededBy, [replacement.id]);
   assert.match(result.full, /Replacement hosted context/);
+  // Convex rejects a return with an undeclared field: the brief failed for every server-authority
+  // project with decisions (context.decisions extra field, Issue b7c8e4dd).
+  checkReturns(briefs.brief, result, 'projectBriefings:brief');
+});
+
+test('a stacked Lane brief returns its parent and stack line inside the declared shape', async () => {
+  const child = randomUUID();
+  const s = await setup([
+    {
+      ...records.lanes[0],
+      id: child,
+      name: 'stacked-child',
+      pendingMerge: undefined,
+      stack: { laneId: ids.lane, startHead: head, head, channel: 'main' },
+    },
+  ]);
+  const result = await briefs.brief._handler(s.ctx, {
+    projectId: s.projectId,
+    situation: 'continue-lane',
+    laneId: child,
+  });
+  assert.match(result.context.stack, new RegExp(`^${ids.lane} → ${child} · `));
+  assert.ok('parentHandoff' in result.context);
+  checkReturns(briefs.brief, result, 'projectBriefings:brief');
 });

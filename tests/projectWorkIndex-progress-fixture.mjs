@@ -416,6 +416,8 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
               digest,
               size: sizes.get(digest) ?? objects.get(digest).length,
               storageId: digest,
+              nonce: digest,
+              removed: false,
             }),
           };
         },

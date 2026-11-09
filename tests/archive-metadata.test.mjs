@@ -12,7 +12,7 @@ import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { backupRow, projectRow, state } from './hosted-fixture.mjs';
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const { projectArchiveMetadata } = await import(moduleUrl('../convex/projectArchiveMetadata.ts'));
@@ -200,28 +200,27 @@ async function nativeFixture(t) {
   s.tables.hostedProjects = new Map([
     [
       'project',
-      {
+      projectRow({
         _id: 'project',
         owner: 'owner',
         key: randomUUID(),
         name: 'Streamed fixture',
         revision: 1,
         currentBackup: 'backup',
-      },
+      }),
     ],
   ]);
   s.tables.projectBackups = new Map([
     [
       'backup',
-      {
+      backupRow({
         _id: 'backup',
         projectId: 'project',
         digest: digest(bytes),
         size: bytes.length,
-        status: 'stored',
         storageId: 'storage',
         preview: { manifestDigest: digest(md.manifest) },
-      },
+      }),
     ],
   ]);
   const previous = s.ctx.runQuery;

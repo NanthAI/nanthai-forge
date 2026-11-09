@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 const { get, begin } = await import(moduleUrl('../convex/imports.ts'));
 const job = {
   _id: 'import',
+  _creationTime: 1,
   task: 'old-task',
   phase: 'indexing',
   generation: 2,

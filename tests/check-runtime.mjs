@@ -3,6 +3,7 @@ import { appendFileSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installDefaultR2 } from './default-r2.mjs';
+import { checkReturns, rawHandler, returnsCheck } from './convex-args.mjs';
 // A killed test process (timeout, CI cancel) never runs its exit handler. Each run first removes the
 // private directories of earlier runs: our own prefixes, older than two hours (a live run is younger).
 const ownPrefixes = ['forge-test-'];
@@ -33,6 +34,28 @@ process.env.USERPROFILE = home;
 process.env.FORGE_TEST_MODE = '1';
 // Bytes always go to R2 (there is no Convex byte mode): every test process gets an in-memory bucket.
 installDefaultR2();
+// Convex validates every return value against the declared `returns` validator and fails the call
+// on a mismatch. Tests that call `fn._handler` directly bypass any fixture, so Convex's registration
+// (`func._handler = handler`) lands here and stores a handler that checks its result (Issue b7c8e4dd).
+// Fixtures that check under the function's name call the unchecked handler via `rawHandler`.
+Object.defineProperty(Function.prototype, '_handler', {
+  configurable: true,
+  set(handler) {
+    const fn = this;
+    function checked(...args) {
+      const result = handler.apply(this, args);
+      // Without a declared `returns` the exact result (sync value, same promise) passes through.
+      if (typeof fn.exportReturns !== 'function' || !returnsCheck(fn)) return result;
+      const returned = value => (checkReturns(fn, value, '_handler'), value);
+      return typeof result?.then === 'function' ? result.then(returned) : returned(result);
+    }
+    for (const [key, value] of [
+      ['_handler', checked],
+      [rawHandler, handler],
+    ])
+      Object.defineProperty(fn, key, { value, writable: true, configurable: true, enumerable: true });
+  },
+});
 const cleanup = () => {
   rmSync(directory, { recursive: true, force: true });
   rmSync(config, { recursive: true, force: true });

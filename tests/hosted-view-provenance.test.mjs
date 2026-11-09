@@ -125,10 +125,12 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
     s.files.set(id, { blob: new Blob([source.object(pin.sha256)]) });
     s.tables.projectObjects.set(rowId, {
       _id: rowId,
+      _creationTime: 1,
       projectId: s.projectId,
       digest: pin.sha256,
       size: pin.size,
-      status: 'stored',
+      nonce: rowId,
+      removed: false,
       storageId: id,
     });
   }

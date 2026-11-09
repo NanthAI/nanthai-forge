@@ -75,6 +75,8 @@ export function recipeObjects(objects, sizes, sources, deepTrees = false) {
       digest: key,
       size: sizes.get(key) ?? bytes(key).length,
       ...(recipe ? { recipe } : { storageId: key }),
+      nonce: key,
+      removed: false,
     };
   };
   return { row, bindings };

@@ -126,14 +126,20 @@ export function checkArgs(fn, args, name) {
 /** A function's return value against its declared `returns` validator, as Convex checks it after the
  * handler (a mismatch there is not caught by the handler's own error mapping). */
 const returnChecks = new WeakMap();
-export function checkReturns(fn, value, name) {
+/** The registered handler without the return check that tests/check-runtime.mjs adds. */
+export const rawHandler = Symbol.for('forge.test.rawHandler');
+/** The compiled `returns` check, or null when the function declares none (exported as null). */
+export function returnsCheck(fn) {
   let check = returnChecks.get(fn.exportReturns);
   if (check === undefined) {
-    // A function without `returns` has no validator to check (exported as null).
     const spec = JSON.parse(fn.exportReturns());
     check = spec === null ? null : compile(spec);
     returnChecks.set(fn.exportReturns, check);
   }
+  return check;
+}
+export function checkReturns(fn, value, name) {
+  const check = returnsCheck(fn);
   if (!check) return;
   // A handler returning undefined is stored and validated as null.
   check(value === undefined ? null : value, name, 'ReturnsValidationError');

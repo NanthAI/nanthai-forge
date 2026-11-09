@@ -2,8 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { v } from 'convex/values';
-import { makeFunctionReference } from 'convex/server';
-import { checkArgs, checkReturn, checkReturns } from './convex-args.mjs';
+import { makeFunctionReference, queryGeneric } from 'convex/server';
+import './check-runtime.mjs';
+import { checkArgs, checkReturn, checkReturns, rawHandler } from './convex-args.mjs';
 import { state } from './hosted-fixture.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
@@ -290,4 +291,22 @@ test('return checks skip functions without a declared validator and read undefin
   const nothing = { exportReturns: () => JSON.stringify(v.null().json) };
   checkReturns(nothing, undefined, 'void');
   assert.throws(() => checkReturns(nothing, 0, 'void'), /ReturnsValidationError at void/);
+});
+
+test('direct _handler calls check the declared returns validator; undeclared returns pass through exactly', async () => {
+  let value = { id: 'a' };
+  const typed = queryGeneric({ args: {}, returns: v.object({ id: v.string() }), handler: async () => value });
+  assert.equal(await typed._handler({}, {}), value);
+  value = { id: 'a', extra: 1 };
+  await assert.rejects(typed._handler({}, {}), /ReturnsValidationError at _handler\.extra \(extra field\)/);
+  assert.equal(
+    await typed[rawHandler]({}, {}),
+    value,
+    'fixtures that check under a name call the raw handler',
+  );
+  const sync = queryGeneric({ args: {}, returns: v.null(), handler: () => 0 });
+  assert.throws(() => sync._handler({}, {}), /ReturnsValidationError at _handler/);
+  const promise = Promise.resolve({ anything: true });
+  const untyped = queryGeneric({ args: {}, handler: () => promise });
+  assert.equal(untyped._handler({}, {}), promise);
 });

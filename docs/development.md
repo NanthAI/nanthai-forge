@@ -290,8 +290,12 @@ hosted code depends on: index fields and range order come from `convex/schema.ts
 (an undefined index or out-of-order range throws), `unique()` rejects several
 matches, and a mutation run through `ctx.runMutation` (or `state().transaction`)
 undoes its database writes and scheduled work when it throws. Storage operations
-are not rolled back. It has no OCC, validators or
-subscriptions; interleaved mutations are not isolated.
+are not rolled back. Writes are checked against the schema, and every return value
+against the function's declared `returns` validator: through the fixture's dispatch, and
+for direct `fn._handler` calls through `tests/check-runtime.mjs`. Rows a test writes
+straight into `s.tables` bypass the schema; build them with `schemaRow`, `projectRow`,
+`backupRow` or `proposalRow` from the fixture. It has no OCC or subscriptions;
+interleaved mutations are not isolated.
 The heartbeat test advances mock interval time at the production interval; polling
 unit tests inject a clock/sleep function. Fixtures that must stay running use
 explicit cancellation rather than waiting for a 3- or 60-second timeout. The

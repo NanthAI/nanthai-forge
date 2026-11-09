@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { fixture, modules, upload } from './project-exchange-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { backupRow } from './hosted-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -171,16 +172,17 @@ async function seeded(t, runs = 1, objectCount = 0) {
   const tree = buildExchangeRoot(Buffer.from(JSON.stringify(manifest)), work, { records: true });
   for (const bytes of tree.objects.values()) await upload(s, bytes);
   const pin = await upload(s, tree.bytes);
-  s.tables.projectBackups.set('backup', {
-    _id: 'backup',
-    _creationTime: 1,
-    projectId: 'project',
-    transport: 'objects',
-    digest: pin.sha256,
-    size: pin.size,
-    status: 'stored',
-    preview: { manifestDigest: digest(JSON.stringify(manifest)), revision: manifest.revision },
-  });
+  s.tables.projectBackups.set(
+    'backup',
+    backupRow({
+      _id: 'backup',
+      projectId: 'project',
+      transport: 'objects',
+      digest: pin.sha256,
+      size: pin.size,
+      preview: { manifestDigest: digest(JSON.stringify(manifest)), revision: manifest.revision },
+    }),
+  );
   for (let i = s.tables.projectObjects.size; i < objectCount; i++) {
     const id = `unrelated-${i}`;
     s.tables.projectObjects.set(id, {
@@ -588,6 +590,7 @@ test('E3 dogfood State closure parses 2,500 3,000-file States once within 15,000
       digest: head,
       size: bytes.length,
       storageId: `state-${i}`,
+      nonce: `state-${i}`,
       removed: false,
     });
   }

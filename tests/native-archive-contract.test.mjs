@@ -19,7 +19,7 @@ import { digest } from '../dist/hash.js';
 import { latestWorkFormat } from '../dist/work-format.js';
 import { fixture, git, code } from './helpers.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { backupRow, projectRow, state } from './hosted-fixture.mjs';
 import { getFunctionName } from 'convex/server';
 const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
@@ -155,28 +155,27 @@ test('provider readers accept exact schema 2 metadata and still recheck current 
   s.tables.hostedProjects = new Map([
     [
       'project',
-      {
+      projectRow({
         _id: 'project',
         owner: 'owner',
         key: randomUUID(),
         name: 'Compact fixture',
         revision: 1,
         currentBackup: 'backup',
-      },
+      }),
     ],
   ]);
   s.tables.projectBackups = new Map([
     [
       'backup',
-      {
+      backupRow({
         _id: 'backup',
         projectId: 'project',
         digest: digest(f.bytes),
         size: f.bytes.length,
-        status: 'stored',
         storageId: 'storage',
         preview: { manifestDigest: digest(f.manifestBytes) },
-      },
+      }),
     ],
   ]);
   const prior = s.ctx.runQuery;

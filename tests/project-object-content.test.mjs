@@ -50,6 +50,8 @@ async function recipe(s, count = 64, group = count, tag = 0, changeLast = false)
     digest: pin.sha256,
     size: pin.size,
     recipe: { digest: body.sha256, size: body.size },
+    nonce: `recipe-${pin.sha256}`,
+    removed: false,
   };
   s.tables.projectObjects.set(row._id, row);
   return { row, pin, bytes, leaves, tree };

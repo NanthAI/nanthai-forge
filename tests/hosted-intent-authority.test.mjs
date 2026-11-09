@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { state } from './hosted-fixture.mjs';
+import { backupRow, projectRow, proposalRow, schemaRow, state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 import { intentHeader } from '../dist/work-hosted-index.js';
@@ -12,19 +12,36 @@ const denied = error => error.code === 'PROJECT_UNAVAILABLE' || error.data?.code
 function setup() {
   const s = state([]),
     intentId = randomUUID();
-  s.tables.hostedProjects.set('project', {
-    _id: 'project',
-    owner: 'owner',
-    visibility: 'private',
-    work: { backupId: 'backup', generationId: 'generation', revision: 1, initialRevision: 0 },
-  });
-  s.tables.projectWorkGenerations.set('generation', {
-    _id: 'generation',
-    projectId: 'project',
-    backupId: 'backup',
-    status: 'ready',
-    format: HOSTED_WORK_INDEX_FORMAT,
-  });
+  s.tables.hostedProjects.set(
+    'project',
+    projectRow({
+      _id: 'project',
+      owner: 'owner',
+      visibility: 'private',
+      work: {
+        backupId: 'backup',
+        generationId: 'generation',
+        operationId: 'work-operation',
+        revision: 1,
+        initialRevision: 0,
+      },
+    }),
+  );
+  s.tables.projectWorkGenerations.set(
+    'generation',
+    schemaRow('projectWorkGenerations', {
+      _id: 'generation',
+      _creationTime: 1,
+      projectId: 'project',
+      backupId: 'backup',
+      revision: 1,
+      initialRevision: 0,
+      status: 'ready',
+      format: HOSTED_WORK_INDEX_FORMAT,
+      nextBatch: 0,
+      metadata: '{}',
+    }),
+  );
   for (const contributor of ['creator', 'assigned', 'other'])
     s.tables.projectContributors.set(contributor, { _id: contributor, projectId: 'project', contributor });
   const intent = {
@@ -88,7 +105,7 @@ test('a superseded partition cannot retain assignment authority', async () => {
 });
 test('proposal details follow private reader and public project visibility; writes retain contributor checks', async () => {
   const s = setup(),
-    proposal = { _id: 'proposal', projectId: 'project', actor: 'creator' };
+    proposal = proposalRow({ _id: 'proposal', projectId: 'project', actor: 'creator' });
   s.tables.projectProposals.set('proposal', proposal);
   s.tables.projectReaders.set('reader', { _id: 'reader', projectId: 'project', reader: 'reader' });
   assert.deepEqual(await proposals.get._handler(s.ctx, { id: 'proposal', actor: 'reader' }), proposal);
@@ -103,7 +120,7 @@ test('proposal details follow private reader and public project visibility; writ
 test('indexed Intent detail advertises current assignment rights without requiring a creation event', async () => {
   const s = setup();
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
-  s.tables.projectBackups.set('backup', { _id: 'backup', projectId: 'project' });
+  s.tables.projectBackups.set('backup', backupRow({ _id: 'backup', projectId: 'project' }));
   s.caller('assigned');
   const detail = await index.detail._handler(s.ctx, {
     projectId: 'project',
