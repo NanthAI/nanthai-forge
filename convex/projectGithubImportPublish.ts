@@ -20,7 +20,9 @@ import { importPageFiles } from '../src/github-import-pages';
 const stagedPageBytes = 2 * 1024 * 1024;
 /** ~35 KB rows: the web's 100-row record window stays a few MB at the archive limit. */
 const treePathsPerRow = 500;
-export type ImportRows = Record<'imported' | 'blobs', { key: string; value: string }[]>;
+type ImportRow = { key: string; value: string };
+/** Re-iterable, so an archive import can produce rows lazily instead of holding every JSON string. */
+export type ImportRows = Record<'imported' | 'blobs', Iterable<ImportRow>>;
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
  * State string, manifest string or projection crosses an RPC boundary. Archive
  * imports pass their verified rows in key order instead of an inventory. */
@@ -63,8 +65,14 @@ async function publishRows(
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
     if (memory) {
-      const rows = memory[part as keyof ImportRows];
-      for (let at = 0; at < rows.length; at += importPageFiles) yield rows.slice(at, at + importPageFiles);
+      let page: ImportRow[] = [];
+      for (const row of memory[part as keyof ImportRows]) {
+        page.push(row);
+        if (page.length < importPageFiles) continue;
+        yield page;
+        page = [];
+      }
+      if (page.length) yield page;
       return;
     }
     let after = '';

@@ -233,23 +233,30 @@ export async function runArchiveImport(
     });
     return;
   }
-  const rows: ImportRows = { imported: [], blobs: [] };
-  const blobs = new Map<string, number>();
-  for (const file of listing.files) {
+  // Rows are produced page by page while publication reads them: 100,000 files
+  // as materialized JSON rows held about 190 MB of a 512 MB action.
+  const row = (file: GithubSourceEntry) => {
     const value = imported.get(file.path)!;
-    rows.imported.push({
+    return {
       key: importPathKey(file.path),
-      value: JSON.stringify({
-        path: value.path,
-        blob: value.blob,
-        size: value.size,
-        mode: value.mode,
-      }),
-    });
-    blobs.set(value.blob, value.size);
-  }
-  for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
-    rows.blobs.push({ key: sha256, value: JSON.stringify({ sha256, size }) });
+      value: JSON.stringify({ path: value.path, blob: value.blob, size: value.size, mode: value.mode }),
+    };
+  };
+  const rows: ImportRows = {
+    imported: {
+      *[Symbol.iterator]() {
+        for (const file of listing.files) yield row(file);
+      },
+    },
+    blobs: {
+      *[Symbol.iterator]() {
+        const blobs = new Map<string, number>();
+        for (const value of imported.values()) blobs.set(value.blob, value.size);
+        for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
+          yield { key: sha256, value: JSON.stringify({ sha256, size }) };
+      },
+    },
+  };
   await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog, meter);
 }
 

@@ -13,7 +13,7 @@ import { importPathKey } from '../src/github-import-pages';
 import type { ImportRequestMeter } from '../src/github-import-meter';
 import { windowEntries } from './projectGithubImportCatalog';
 import type { CatalogEntry } from './projectGithubImportUpload';
-import { publishImport, type ImportRows } from './projectGithubImportPublish';
+import { publishImport } from './projectGithubImportPublish';
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 
@@ -60,7 +60,7 @@ export async function rowsFromState(
   job: Doc<'projectGithubImports'>,
   stored: Map<string, CatalogEntry>,
   pin: { sha256: string; size: number },
-): Promise<ImportRows> {
+): Promise<Record<'imported' | 'blobs', { key: string; value: string }[]>> {
   const entry = stored.get(pin.sha256);
   invariant(entry && entry.size === pin.size, 'INVALID_WORK_BACKUP', 'The stored State is missing.');
   const parts: Buffer[] = [];
@@ -80,7 +80,7 @@ export async function rowsFromState(
     Buffer.concat(parts).toString(),
   );
   invariant(state.files.length === job.total, 'INVALID_WORK_BACKUP', 'The stored State lists other files.');
-  const rows: ImportRows = { imported: [], blobs: [] };
+  const rows = { imported: [], blobs: [] } as Record<'imported' | 'blobs', { key: string; value: string }[]>;
   const blobs = new Map<string, number>();
   for (const { path, blob, mode } of state.files) {
     const size = stored.get(blob)?.size;
@@ -106,7 +106,7 @@ export async function resumePublication(
   const pin = job.stateObject;
   if (!pin || !job.totalKnown || job.completed !== job.total) return false;
   const stored = await storedObjects(ctx, input);
-  let rows: ImportRows;
+  let rows: Awaited<ReturnType<typeof rowsFromState>>;
   try {
     rows = await rowsFromState(job, stored, pin);
   } catch (error) {

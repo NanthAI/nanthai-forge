@@ -685,3 +685,9 @@ test('class guard: publication-path mutations never page a repository-sized coll
       );
   }
 });
+
+test('Issue c6426ee9: an archive import hands publication lazily produced rows; a 100,000-file run held 190 MB of JSON rows and ran out of its 512 MB action', () => {
+  const source = readFileSync(new URL('../convex/projectGithubImportArchive.ts', import.meta.url), 'utf8');
+  assert.ok(!/rows\.(?:imported|blobs)\.push/.test(source), 'build rows while publication pages them');
+  assert.match(source, /\*\[Symbol\.iterator\]/);
+});
