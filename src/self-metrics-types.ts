@@ -92,7 +92,14 @@ export type MetricRun = {
 export type MetricRecords = {
   fullResultsUnavailable?: string;
   error?: { code: 'METRICS_UNAVAILABLE'; message: string };
-  finishTimings?: { id: string; at: string; trusted: boolean; minutes: number | null }[];
+  finishTimings?: {
+    id: string;
+    at: string;
+    trusted: boolean;
+    minutes: number | null;
+    /** True: the landing took its admission check as acceptance evidence; false: it rechecked; null: not admitted or unknown. */
+    onAdmissionRun?: boolean | null;
+  }[];
   surfaceGaps?: string[];
   observations?: MetricObservation[];
   diskSamples?: DiskSample[];

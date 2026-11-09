@@ -60,11 +60,17 @@ export function metricTotals(
     waste: wrap(calculateWaste(records, period), count(records.submissions)),
     finishToMain: (() => {
       const rows = (records.finishTimings ?? []).filter(row => row.trusted && during(row.at, period));
+      const minutes = rows.flatMap(row => (row.minutes === null ? [] : [row.minutes]));
+      const admitted = rows.filter(row => row.onAdmissionRun != null);
       return {
-        p50Minutes: percentile(
-          rows.flatMap(row => (row.minutes === null ? [] : [row.minutes])),
-          0.5,
-        ),
+        p50Minutes: percentile(minutes, 0.5),
+        // The p50 flips on a two-humped distribution (main did not move vs moved): read these with it.
+        p90Minutes: percentile(minutes, 0.9),
+        meanMinutes: minutes.length ? minutes.reduce((n, m) => n + m, 0) / minutes.length : null,
+        /** Share of pre-queue admitted landings that landed on their admission check (no recheck). */
+        admissionRunShare: admitted.length
+          ? admitted.filter(row => row.onAdmissionRun).length / admitted.length
+          : null,
         sourceRecords: rows.length,
         partial: true,
         gaps: [
@@ -77,8 +83,11 @@ export function metricTotals(
       {
         ...result.metric1,
         landings: records.error ? null : result.landings,
+        // Lanes whose first-ever land entry in the window was accepted (src/first-attempt-land-rate.ts).
+        firstAttemptLandRate: result.firstAttemptLandRate,
         firstTryShare:
-          result.landings && !result.metric1.rows.some(row => row.path === 'unknown')
+          result.landings &&
+          !result.metric1.rows.some(row => row.path === 'unknown' || row.path === 'unresolved')
             ? result.metric1.rows.filter(row => row.path === 'first-try').length / result.landings
             : null,
       },
@@ -103,8 +112,10 @@ export function metricTotals(
             ...result.metric6,
             runnerMinutes: null,
             wallMinutes: null,
+            checkMinutes: null,
             runnerMinutesPerLanding: null,
             wallMinutesPerLanding: null,
+            checkMinutesPerLanding: null,
           }
         : result.metric6,
       count(records.runs) + count(records.checkRequests ?? []),

@@ -27,6 +27,9 @@ function pathFor(
   histories: Map<string, MetricRecords['submissions']>,
   badRuns: Map<string, MetricRecords['runs']>,
 ) {
+  // No resolved input Lanes (an unreadable compose page or a Lane outside the context window) is a
+  // named gap of its own, never folded into the classification 'unknown'.
+  if (!inputs.length) return 'unresolved';
   const paths = inputs.map(input => {
     const all = (histories.get(input.intentId) ?? [])
       .filter(s => instant(s.at) <= instant(at))
@@ -43,6 +46,14 @@ function pathFor(
     );
     if (input.savedAt && failed.some(s => instant(s.endedAt!) < instant(input.savedAt!)))
       return 'after-fixer';
+    // A builder retry: an explicit retry row, or an earlier attempt that failed, was interrupted or
+    // was superseded for a reason other than a main race.
+    // An attempt replaced in the instant it was created is Forge's internal handoff, not a retry or a
+    // recompose: it carries no time and its place among equal timestamps is arbitrary (M3).
+    const lived = (s: (typeof history)[number]) => !!s.endedAt && instant(s.endedAt) > instant(s.at);
+    const laterSame = (s: (typeof history)[number], index: number) =>
+      !!s.endedAt &&
+      history.slice(index + 1).some(next => same(next) && instant(next.at) >= instant(s.endedAt!));
     if (
       history.some(
         s =>
@@ -58,12 +69,19 @@ function pathFor(
       history.some(
         (s, index) =>
           same(s) &&
-          ['failed', 'interrupted', 'superseded'].includes(s.status) &&
-          s.endedAt &&
-          history.slice(index + 1).some(next => same(next) && instant(next.at) >= instant(s.endedAt!)),
+          (['failed', 'interrupted'].includes(s.status) ||
+            (s.status === 'superseded' && !s.mainRace && lived(s))) &&
+          laterSame(s, index),
       )
     )
       return 'after-retry';
+    // Forge's own recompose after main moved: the attempt was superseded by a main-race child (M3).
+    if (
+      history.some(
+        (s, index) => same(s) && s.status === 'superseded' && s.mainRace && lived(s) && laterSame(s, index),
+      )
+    )
+      return 'after-recompose';
     if (all.some(s => raceReused(s) && same(s))) return 'reused-after-race';
     const priorBadRun = (badRuns.get(`${input.intentId}:${input.head}`) ?? []).some(
       run =>
@@ -72,18 +90,36 @@ function pathFor(
         ['failed', 'interrupted'].includes(run.status) &&
         run.inputs.some(i => i.intentId === input.intentId && i.head === input.head),
     );
-    if (same(history[0]!) && !priorBadRun) return 'first-try';
+    // The landing's own submission carries this head. Earlier submissions of the Intent that failed,
+    // were interrupted or cancelled before it (a new head made by sync or resolve has no save record,
+    // so the fixer rule above cannot see it) make it a retry. Earlier submissions that landed, on
+    // other heads or Lanes of the same Intent, are earlier work, not failures (Nov 6/9 unknowns).
+    const own = history.find(same);
+    if (!own) return 'unknown';
+    if (
+      history.some(
+        s =>
+          !same(s) &&
+          ['failed', 'interrupted', 'cancelled', 'conflict'].includes(s.status) &&
+          !!s.endedAt &&
+          instant(s.endedAt) <= instant(own.at),
+      )
+    )
+      return 'after-retry';
+    if (!priorBadRun) return 'first-try';
     return 'unknown';
   });
   return paths.includes('after-fixer')
     ? 'after-fixer'
     : paths.includes('after-retry')
       ? 'after-retry'
-      : paths.length && paths.every(p => p === 'first-try' || p === 'reused-after-race')
-        ? paths.includes('reused-after-race')
-          ? 'reused-after-race'
-          : 'first-try'
-        : 'unknown';
+      : paths.includes('after-recompose')
+        ? 'after-recompose'
+        : paths.length && paths.every(p => p === 'first-try' || p === 'reused-after-race')
+          ? paths.includes('reused-after-race')
+            ? 'reused-after-race'
+            : 'first-try'
+          : 'unknown';
 }
 /** Pure calculation. Period is [from,to); days are UTC; asOf fixes the 60-minute stall test. */
 export function calculateSelfMetrics(
@@ -133,9 +169,12 @@ export function calculateSelfMetrics(
     firstTry: rows.filter(row => row.day === day && row.path === 'first-try').length,
     afterRetry: rows.filter(row => row.day === day && row.path === 'after-retry').length,
     afterFixer: rows.filter(row => row.day === day && row.path === 'after-fixer').length,
+    afterRecompose: rows.filter(row => row.day === day && row.path === 'after-recompose').length,
     reusedAfterRace: rows.filter(row => row.day === day && row.path === 'reused-after-race').length,
     unknown: rows.filter(row => row.day === day && row.path === 'unknown').length,
+    unresolved: rows.filter(row => row.day === day && row.path === 'unresolved').length,
   }));
+  const unresolved = rows.filter(row => row.path === 'unresolved').length;
   const first = <T extends { at: string }>(items: T[], key: (item: T) => string) =>
     unique(
       [...items].sort((a, b) => instant(b.at) - instant(a.at)),
@@ -231,6 +270,13 @@ export function calculateSelfMetrics(
     } else if (run.runnerMinutes === undefined) unknownRunnerRuns++;
     else runnerMinutes += run.runnerMinutes;
   }
+  // Runs whose passing or failing result a moved main discarded: the recompose (not a builder) caused them.
+  const runIdsInPeriod = new Set(runs.map(r => r.id));
+  const discardedMainRaceRuns = new Set(
+    records.submissions.flatMap(row =>
+      row.mainRace && !row.raceReusedBy ? row.runIds.filter(id => runIdsInPeriod.has(id)) : [],
+    ),
+  ).size;
   const fullChecksStarted = runs.filter(r => !r.reusedFrom && r.started !== false).length;
   const retainedReuses = runs.filter(
     r =>
@@ -331,12 +377,19 @@ export function calculateSelfMetrics(
       period.to,
     ),
     metric1: {
+      unresolved,
       partial:
         rows.some(r => r.path === 'unknown') ||
+        unresolved > 0 ||
         records.landingKindsComplete === false ||
         !!records.landingCoverageGaps?.length,
       gaps: [
         ...(records.landingCoverageGaps ?? []),
+        ...(unresolved
+          ? [
+              `${unresolved} landings resolved no input Lane (compose pages not read or unreadable, or Lanes outside the context window); they are not classified.`,
+            ]
+          : []),
         ...(rows.some(r => r.path === 'unknown')
           ? ['Submission history or saved-head/failure ordering is unavailable for unclassified landings.']
           : []),
@@ -402,10 +455,17 @@ export function calculateSelfMetrics(
         unknownRunnerRuns === runs.filter(r => !r.reusedFrom).length && unknownRunnerRuns
           ? null
           : runnerMinutes,
+      /** Summed request-to-end minutes of every started, non-reused run (runs add up when they overlap;
+       * the run record keeps its request time, not a separate start time). Check-minutes, not latency. */
+      checkMinutes: unknownWallRuns && !wallMinutes ? null : wallMinutes,
+      checkMinutesPerLanding: unknownWallRuns && !wallMinutes ? null : ratio(wallMinutes, landings.length),
+      /** Deprecated aliases of checkMinutes / checkMinutesPerLanding; removed next release. */
       wallMinutes: unknownWallRuns && !wallMinutes ? null : wallMinutes,
       runnerMinutesPerLanding:
         unknownRunnerRuns && !runnerMinutes ? null : ratio(runnerMinutes, landings.length),
       wallMinutesPerLanding: unknownWallRuns && !wallMinutes ? null : ratio(wallMinutes, landings.length),
+      runsPerLanding: ratio(runs.filter(r => !r.reusedFrom && r.started !== false).length, landings.length),
+      discardedMainRaceRuns,
       unknownRunnerRuns,
       unknownWallRuns,
       reused: unknownReuseHistory && !reused ? null : reused,

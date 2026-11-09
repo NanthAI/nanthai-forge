@@ -4,12 +4,12 @@ const number = (value: number | null | undefined) =>
   value == null ? 'unknown' : Number(value.toFixed(3)).toString();
 export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, string> {
   return {
-    '5.1': `${number(t['5.1'].landings)} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.reusedAfterRace, 0)} reused after main moved, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
+    '5.1': `${number(t['5.1'].landings)} (${t['5.1'].days.reduce((n, d) => n + d.firstTry, 0)} first-try, ${t['5.1'].days.reduce((n, d) => n + d.afterRetry, 0)} retry, ${t['5.1'].days.reduce((n, d) => n + d.afterRecompose, 0)} recompose after main moved, ${t['5.1'].days.reduce((n, d) => n + d.afterFixer, 0)} fixer, ${t['5.1'].days.reduce((n, d) => n + d.reusedAfterRace, 0)} reused after main moved, ${t['5.1'].days.reduce((n, d) => n + d.unknown, 0)} unknown, ${t['5.1'].unresolved} no inputs); first-attempt land rate ${number(t['5.1'].firstAttemptLandRate.rate)} (${t['5.1'].firstAttemptLandRate.accepted}/${t['5.1'].firstAttemptLandRate.lanes} Lanes); reverts ${number(t['5.1'].reverts)}, compensating ${number(t['5.1'].compensating)}`,
     '5.2': `${number(t['5.2'].errors)} / ${number(t['5.2'].finishes)} finishes; ${t['5.2'].byCode.map(c => `${c.code} ${number(c.per100Finishes)}/100`).join(', ') || 'rates unknown'}`,
     '5.3': number(t['5.3'].dropped),
     '5.4': `${number(t['5.4'].delivered)}/${number(t['5.4'].overlappingSaves)} delivered; acknowledgement ${number(t['5.4'].acknowledgementRate)}; median ${number(t['5.4'].medianDeliverySeconds)} s`,
     '5.5': `${number(t['5.5'].perLanding)} (${number(t['5.5'].interventions)} interventions)`,
-    '5.6': `${number(t['5.6'].runnerMinutesPerLanding)} runner, ${number(t['5.6'].wallMinutesPerLanding)} wall; reuse ${number(t['5.6'].reuseRate)} (missed ${number(t['5.6'].missedReuse.runs)} runs); total ${number(t['5.6'].runnerMinutes)} runner / ${number(t['5.6'].wallMinutes)} wall min`,
+    '5.6': `${number(t['5.6'].runnerMinutesPerLanding)} runner, ${number(t['5.6'].checkMinutesPerLanding)} check-minutes (${number(t['5.6'].runsPerLanding)} runs/landing, ${t['5.6'].discardedMainRaceRuns} discarded by a moved main); reuse ${number(t['5.6'].reuseRate)} (missed ${number(t['5.6'].missedReuse.runs)} runs); total ${number(t['5.6'].runnerMinutes)} runner / ${number(t['5.6'].checkMinutes)} check min`,
     '5.7': `${t['5.7'].totals.map(m => `${m.mode} ${m.revisions} revisions; p50/p95 ${number(m.secondsP50)}/${number(m.secondsP95)} s, ${number(m.revisionLagP50)}/${number(m.revisionLagP95)} revisions`).join('; ')}; contradictions ${number(t['5.7'].contradictionMinutes)} min`,
     '5.8':
       [
@@ -26,6 +26,10 @@ export function metricValues(t: MetricTotals): Record<keyof typeof metricNames, 
     B: `${number(t.B.reuseAcceptances)} reuse acceptances; ${number(t.B.mainCheckFailures)} main-check failures (${number(t.B.failuresAfterReuse)} after reuse, ${number(t.B.flakeCleared)} flake, ${number(t.B.culprits)} culprits, ${number(t.B.reuseCulprits)} on reuse)`,
   };
 }
+const finishToMain = (current: MetricsSurface) => {
+  const f = current.totals.finishToMain;
+  return `p50 ${number(f.p50Minutes)} / p90 ${number(f.p90Minutes)} / mean ${number(f.meanMinutes)} min; ${f.admissionRunShare === null ? 'admission-run share unknown' : `${number(f.admissionRunShare * 100)}% landed on the admission check`}`;
+};
 const cell = (value: string) => value.replace(/\|/g, '\\|').replace(/[\r\n]/g, ' ');
 export function formatMetricReport(current: MetricsSurface, before?: MetricsSurface) {
   const values = metricValues(current.totals),
@@ -57,7 +61,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
     '',
     ...formatFallbacks(current),
-    `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} minutes. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
+    `Finish-to-main (trusted actors): ${finishToMain(current)}. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
     ...formatFlakes(current).map(line => (line.startsWith('  ') ? `- ${line.trim()}` : line)),
     '',
@@ -123,7 +127,7 @@ export function formatMetrics(current: MetricsSurface) {
   return [
     `Metrics UTC [${current.period.from}, ${current.period.to})`,
     ...rows,
-    `Finish-to-main p50 (trusted actors): ${number(current.totals.finishToMain.p50Minutes)} min · partial`,
+    `Finish-to-main (trusted actors): ${finishToMain(current)} · partial`,
     ...current.totals.waste.byCause
       .filter(row => row.attempts)
       .map(

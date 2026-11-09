@@ -255,6 +255,28 @@ row's elapsed time is the race-to-acceptance gap with no runner minutes
 (`reusedAfterRace: true` on the row), the landing's path in 5.1 is `reused-after-race`, and 5.6
 counts the reuse once. A replacement that starts its own run is a re-check run with its runner minutes.
 
+How `metrics` reads landings (5.1, 5.6 and finish-to-main). The path of a landing comes from the Lanes it
+carried: a batch landing is classed by its member Lanes (the stacked Candidate itself carries none), and a
+landing that resolves no Lane is `unresolved`, counted in `totals['5.1'].unresolved` with a named gap, not
+folded into `unknown`. `first-try`: no earlier submission of the Intent failed, was interrupted or was
+cancelled, and no earlier run of the head failed; earlier submissions that landed are earlier work.
+`after-fixer`: a failed submission ended before the head was saved by a builder (sync writes no save record,
+so a head made by sync after a failure is an `after-retry`). `after-retry`: a retry row, or a failed,
+interrupted or non-race superseded attempt of the same head. `after-recompose`: Forge's own recompose after
+main moved, not a builder retry. An attempt replaced in the instant it was created is an internal handoff and
+counts as neither. `reused-after-race` is as above. First-try mostly means main did not move under the
+landing, so read it with the moved-main share, not as builder quality. `totals['5.1'].firstAttemptLandRate`
+is the Lane-level rate: Lanes whose first-ever land entry in the window was accepted.
+
+5.6 `checkMinutes` and `checkMinutesPerLanding` (the old `wall*` keys stay one release) sum request-to-end
+minutes of every started, non-reused run, so overlapping runs add; they measure work, not latency, and the
+run record keeps its request time, not a start time. `runsPerLanding` and `discardedMainRaceRuns` (runs a
+moved main made useless) show what drives them. Finish-to-main reports `p50Minutes`, `p90Minutes`,
+`meanMinutes` and `admissionRunShare` (admitted landings that landed on their admission check): the p50 alone
+flips on a two-humped distribution (main did not move versus moved). `heldAfterCheck` and the 60 s floor on its
+waits are a floor: shorter order waits are in `orderWaits` without a duration. The builder's own measurement-hold
+wait is client-side before submission, so no server timestamp includes it.
+
 #### Fallback reasons
 
 Each time Forge takes a slower path than its fast one, the decision records a stable

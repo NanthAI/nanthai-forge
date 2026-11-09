@@ -45,6 +45,7 @@ const rowSchemas = {
     reused: z.boolean().optional(),
     revision: z.number().int().nonnegative().nullable().optional(),
     firstCheckRecheck: z.string().min(1).max(64).nullable().optional(),
+    landedOnAdmissionRun: z.boolean().nullable().optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -297,6 +298,7 @@ export async function readHostedMetricPages(
               at: row.at,
               trusted: row.trusted,
               minutes: minutesBetween(row.submittedAt ?? '', row.at) ?? null,
+              onAdmissionRun: row.landedOnAdmissionRun ?? null,
             });
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);

@@ -149,10 +149,25 @@ function evidence(f) {
     assert(pins.reduce((sum, pin) => sum + pin.size, 0) <= 1024 * 1024);
     return pins.map(pin => objects.get(pin.sha256));
   };
+  // A stacked batch Candidate is composed with empty inputs; its members ride on memberCandidate.
+  const stack = () => {
+    const built = buildComposePages([]);
+    for (const page of built.pages) objects.set(page.pin.sha256, saveBytes(page.value));
+    return built.manifest.root;
+  };
+  const batch = (id, start, end, member, runId = id) => {
+    landing(id, start, end, stack(), runId);
+    const row = f.tables.projectHostedLandingAttempts.find(row => row.attemptId === id);
+    row.value = JSON.stringify({ ...JSON.parse(row.value), memberCandidate: { inputs: member } });
+    const move = f.tables.projectHostedAcceptances.at(-1);
+    move.value = JSON.stringify({ ...JSON.parse(move.value), memberCandidate: { inputs: member } });
+  };
   return {
     input,
     attempt,
     landing,
+    batch,
+    stack,
     fail,
     get objectCalls() {
       return objectCalls;
@@ -200,7 +215,7 @@ test('hosted immutable inputs classify first try, retry, fixer and main-race was
     waste = calculateWaste(records, period);
   assert.deepEqual(result.metric1.rows.map(row => row.path).sort(), [
     'after-fixer',
-    'after-retry',
+    'after-recompose', // the main race: Forge's own recompose, not a builder retry
     'after-retry',
     'first-try',
   ]);
@@ -209,12 +224,129 @@ test('hosted immutable inputs classify first try, retry, fixer and main-race was
   // The resubmit takes its kind from the signed-in identity on the attempt (an agent here), not a fixed person label.
   assert.equal(result.metric5.byActor[0].actor, 'agent:owner');
   assert.equal(result.metric6.runnerMinutes, 22);
+  assert.equal(result.metric6.discardedMainRaceRuns, 1);
   assert.equal(waste.byCause.find(row => row.cause === 'main-race').runnerMinutes, 4);
   assert.equal(waste.byCause.find(row => row.cause === 'main-race').discardedPassedRunnerMinutes, 4);
   assert.equal(waste.mainRaceRecheckRunnerMinutes, 5);
   assert.equal(waste.byCause.find(row => row.cause === 'flake').attempts, 0);
   assert(e.objectCalls < 7, 'input pins deduplicate across moves/runs/attempts');
   assert.equal(f.meter.writes, 0);
+});
+
+test('batch landings classify by their member Lanes, never unknown because the stack has empty inputs', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  e.batch('first', at(1), at(5), e.input(randomUUID(), randomUUID(), head('a'), at(-30)));
+  f.run('first', at(1), at(5), 180);
+  const retry = e.input(randomUUID(), randomUUID(), head('b'), at(-20));
+  e.fail('retry-failed', at(2), at(4), retry);
+  e.batch('retry-landed', at(6), at(16), retry);
+  f.run('retry-landed', at(6), at(10), 180);
+  // M5: the second landing rechecked after the admission check; the first landed on it.
+  const firstCheck = [
+    { landedOn: 'admission-run', mainMoved: false },
+    { landedOn: 'recheck', reason: 'main-moved' },
+  ];
+  f.tables.projectHostedAcceptances.forEach((row, i) => {
+    row.value = JSON.stringify({ ...JSON.parse(row.value), firstCheck: firstCheck[i] });
+  });
+  const { records } = await readHostedMetricPages(f.query, period);
+  const result = calculateSelfMetrics(records, period);
+  assert.deepEqual(result.metric1.rows.map(row => row.path).sort(), ['after-retry', 'first-try']);
+  assert.equal(result.metric1.unresolved, 0);
+  assert.equal(f.meter.writes, 0);
+  const totals = metricsSurface(records, period).totals;
+  // M5: p50 alone flips on a two-humped distribution; p90, mean and the admission share ride beside it.
+  assert.deepEqual(
+    [
+      totals.finishToMain.p50Minutes,
+      totals.finishToMain.p90Minutes,
+      totals.finishToMain.meanMinutes,
+      totals.finishToMain.admissionRunShare,
+    ],
+    [4, 10, 7, 0.5],
+  );
+  // M8: the documented first-attempt land rate is on the 5.1 totals (each member Lane's first entry).
+  assert.equal(totals['5.1'].firstAttemptLandRate.lanes, 2);
+  assert.equal(totals['5.1'].firstAttemptLandRate.accepted, 1, 'the retried Lane failed its first entry');
+  assert.equal(totals['5.1'].firstAttemptLandRate.retriedLanes, 1);
+});
+
+test('5.6 is check-minutes per landing with runs per landing and runs a moved main discarded', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const race = e.input(randomUUID(), randomUUID(), head('e'), at(-10));
+  e.landing('race', at(1), at(12), race, 'race-recheck');
+  e.attempt('race', at(1), race, 'race-discarded');
+  e.attempt('race/child', at(6), race, 'race-recheck', head('2'), 'race');
+  f.run('race-discarded', at(1), at(5), 240);
+  f.run('race-recheck', at(6), at(11), 300);
+  const { records } = await readHostedMetricPages(f.query, period);
+  const m = calculateSelfMetrics(records, period).metric6;
+  assert.equal(m.checkMinutes, 9);
+  assert.equal(m.checkMinutesPerLanding, 9);
+  assert.equal(m.wallMinutesPerLanding, 9, 'the old key stays one release');
+  assert.equal(m.runsPerLanding, 2);
+  assert.equal(m.discardedMainRaceRuns, 1);
+});
+
+test('a head made by sync (no save record) after a failed attempt is a retry, never a fixer or unknown', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  e.fail('sync-failed', at(2), at(4), e.input(lane, intent, head('c'), at(-10)));
+  e.landing('sync-landed', at(7), at(11), e.input(lane, intent, head('d'), at(5), 1));
+  // The sync's new head has no `save` record: only saves reach the metric's saves stream (M4).
+  f.tables.projectHostedRecords.pop();
+  f.tables.projectHostedRecordBodies.pop();
+  const { records } = await readHostedMetricPages(f.query, period);
+  assert.equal(calculateSelfMetrics(records, period).metric1.rows[0].path, 'after-retry');
+});
+
+test('an attempt replaced in the instant it was created is a handoff, not a retry, in either row order', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const pin = e.input(randomUUID(), randomUUID(), head('a'), at(-10));
+  e.landing('handoff', at(1), at(5), pin);
+  // The child shares the parent's timestamp but was stored earlier, so the parent row sorts first.
+  e.attempt('handoff/child', at(0.9), pin, 'handoff', head('1'), 'handoff');
+  f.tables.projectHostedLandingAttempts.find(row => row.attemptId === 'handoff/child').value = JSON.stringify(
+    {
+      id: 'handoff/child',
+      at: at(1),
+      parentAttemptId: 'handoff',
+      main: { head: head('1') },
+      candidate: { inputs: pin },
+      check: { runId: 'handoff' },
+      actor: { kind: 'agent' },
+      policy: { acceptance: { mode: 'auto-on-pass' } },
+    },
+  );
+  f.run('handoff', at(1), at(5), 120);
+  const { records } = await readHostedMetricPages(f.query, period);
+  assert.deepEqual(
+    calculateSelfMetrics(records, period).metric1.rows.map(row => row.path),
+    ['first-try'],
+  );
+});
+
+test('a Lane landing again on an Intent that already landed is a first try, not unknown', async () => {
+  const f = fixture(),
+    e = evidence(f);
+  const lane = randomUUID(),
+    intent = randomUUID();
+  e.landing('earlier', at(1), at(5), e.input(lane, intent, head('a'), at(-10)));
+  f.run('earlier', at(1), at(5), 120);
+  e.landing('again', at(10), at(15), e.input(lane, intent, head('b'), at(8), 1));
+  f.run('again', at(10), at(15), 120);
+  const { records } = await readHostedMetricPages(f.query, period);
+  assert.deepEqual(
+    calculateSelfMetrics(records, period)
+      .metric1.rows.map(row => row.path)
+      .sort(),
+    ['first-try', 'first-try'],
+  );
 });
 
 test('a main race resolved by adopting the passing run is one reuse, not a recheck or a lost check', async () => {
@@ -270,7 +402,10 @@ test('input bytes are verified; unavailable Lane version never classifies a part
   await assert.rejects(readHostedMetricPages(f.query, period), error => error.code === 'EVIDENCE_CHANGED');
   delete f.query.objects;
   const { records } = await readHostedMetricPages(f.query, period);
-  assert.equal(calculateSelfMetrics(records, period).metric1.rows[0].path, 'unknown');
+  const unresolved = calculateSelfMetrics(records, period).metric1;
+  assert.equal(unresolved.rows[0].path, 'unresolved', 'no resolved input is its own named gap, not unknown');
+  assert.equal(unresolved.unresolved, 1);
+  assert(unresolved.gaps.some(gap => gap.includes('resolved no input Lane')));
 });
 
 test('30-day 6000-landing demand-driven reader has bounded page and object calls, zero writes and idle zero', async t => {

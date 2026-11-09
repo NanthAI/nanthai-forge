@@ -71,8 +71,10 @@ test('metric 1: hand-computed first try, same-head retry, fixer saved by another
       firstTry: 1,
       afterRetry: 1,
       afterFixer: 0,
+      afterRecompose: 0,
       reusedAfterRace: 0,
       unknown: 0,
+      unresolved: 0,
     },
     {
       day: '2026-10-21',
@@ -80,8 +82,10 @@ test('metric 1: hand-computed first try, same-head retry, fixer saved by another
       firstTry: 0,
       afterRetry: 0,
       afterFixer: 1,
+      afterRecompose: 0,
       reusedAfterRace: 0,
       unknown: 0,
+      unresolved: 0,
     },
   ]);
   assert.equal(m.metric1.partial, false);

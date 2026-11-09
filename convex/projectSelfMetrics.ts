@@ -233,7 +233,8 @@ export const page = query({
               trusted: selected?.actor.kind === 'agent' && selected.policy.acceptance.mode === 'auto-on-pass',
               kind: request?.revertOf ? 'compensating' : 'landing',
               attemptId: move.attemptId,
-              inputPin: move.candidate.inputs ?? null,
+              // A stacked batch Candidate has empty inputs; its members' Lanes ride on memberCandidate.
+              inputPin: (move.memberCandidate ?? move.candidate).inputs ?? null,
               // Back-stop metric (Issue 71767c9b): derived from the receipt, no write.
               reused: Boolean(move.crossHeadProof),
               revision: move.snapshot?.revision ?? null,
@@ -242,6 +243,8 @@ export const page = query({
                 move.firstCheck && move.firstCheck.landedOn !== 'admission-run'
                   ? move.firstCheck.reason
                   : null,
+              // Whether an admitted landing took its first check as acceptance evidence (M5); null: not admitted.
+              landedOnAdmissionRun: move.firstCheck ? move.firstCheck.landedOn === 'admission-run' : null,
             };
           }
           if (input.stream === 'runs') {
@@ -317,7 +320,7 @@ export const page = query({
               at: attempt.at ?? new Date(row._creationTime).toISOString(),
               parentAttemptId: attempt.parentAttemptId ?? null,
               mainHead: attempt.main?.head ?? null,
-              inputPin: attempt.candidate?.inputs ?? null,
+              inputPin: (attempt.memberCandidate ?? attempt.candidate)?.inputs ?? null,
               runId: attempt.check?.runId ?? null,
               recheckReason: attempt.recheckReason ?? null,
               scopedFallback: attempt.scopedFallback ?? null,
