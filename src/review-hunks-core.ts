@@ -1,16 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
+import { byteString, displayLine, isTextBytes, stringBytes, utf8Text } from './text-bytes.js';
 type Op = { kind: 'context' | 'removed' | 'added'; text: string; before: number; after: number };
 
+/** Lines split on 0x0A for comparison, one character per byte (exact). Text is Git's rule
+ * (Issue 113bc7b3), so any ASCII-compatible encoding diffs, not only valid UTF-8. */
 function decoded(bytes: Uint8Array): string[] | null {
-  if (bytes.length > 1024 * 1024) return null;
-  try {
-    const value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
-    if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(value)) return null;
-    // Preserve the final empty line to disclose final-newline changes.
-    return value ? value.split('\n') : [];
-  } catch {
-    return null;
-  }
+  if (bytes.length > 1024 * 1024 || !isTextBytes(bytes)) return null;
+  // Preserve the final empty line to disclose final-newline changes.
+  return bytes.length ? byteString(bytes).split('\n') : [];
 }
 export function computeHunks(original: Uint8Array, selected: Uint8Array, context: number) {
   const a = decoded(original),
@@ -18,7 +15,7 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
   if (!a || !b)
     return {
       hunks: [],
-      content: 'binary, invalid UTF-8 or over 1 MiB; hashes remain exact',
+      content: 'binary or over 1 MiB; hashes remain exact',
       truncated: true,
     };
   let first = 0,
@@ -29,7 +26,11 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
     lastA--;
     lastB--;
   }
-  if (first === lastA && first === lastB) return { hunks: [], truncated: false };
+  // Not valid UTF-8 (Windows-1252, Latin-1, ...): lines still diff byte for byte; each shown
+  // line that is not valid UTF-8 is escaped losslessly and the result names the encoding.
+  const encoding =
+    utf8Text(original) === null || utf8Text(selected) === null ? { encoding: 'not-utf-8' as const } : {};
+  if (first === lastA && first === lastB) return { hunks: [], truncated: false, ...encoding };
   const x = a.slice(first, lastA),
     y = b.slice(first, lastB),
     bounded = (x.length + 1) * (y.length + 1) <= 1_000_000;
@@ -81,11 +82,16 @@ export function computeHunks(original: Uint8Array, selected: Uint8Array, context
       afterStart: ops[start]!.after,
       beforeLines: ops.slice(start, end).filter(op => op.kind !== 'added').length,
       afterLines: ops.slice(start, end).filter(op => op.kind !== 'removed').length,
-      lines: ops.slice(start, end).map(({ kind, text }) => ({ kind, text })),
+      lines: ops.slice(start, end).map(({ kind, text }) => ({ kind, ...shown(text) })),
     })),
     truncated: !bounded,
+    ...encoding,
     ...(!bounded
       ? { content: 'Bounded replacement hunk; minimal alignment exceeded the computation budget' }
       : {}),
   };
+}
+/** Display text for one compared line: its UTF-8 text, or escaped bytes (displayLine). */
+function shown(line: string): { text: string; escaped?: true } {
+  return displayLine(stringBytes(line));
 }

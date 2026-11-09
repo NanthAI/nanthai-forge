@@ -1,12 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
+import { TEXT_SNIFF_BYTES } from './text-bytes.js';
 /** Serializable, bounded line-prefix scanner shared by local and hosted recovery.
- * A separator alone is ordinary source; only an ordered three-marker hunk counts. */
+ * A separator alone is ordinary source; only an ordered three-marker hunk counts.
+ * Binary is Git's rule, as the merge decides it (Issue 113bc7b3): a NUL byte in the first
+ * 8,000 bytes. Text in any ASCII-compatible encoding, valid UTF-8 or not, is scanned. */
 export type ConflictMarkerScan = {
   prefix: string;
   skip: boolean;
   found: boolean;
   stage?: number;
   binary?: boolean;
+  /** Bytes scanned so far, up to the binary sniff window. */
+  seen?: number;
+  /** Retired field of the UTF-8 gate; ignored when a persisted scan still carries it. */
   utf8Tail?: string;
 };
 export const conflictMarkerScan = (): ConflictMarkerScan => ({
@@ -21,29 +27,10 @@ function line(scan: ConflictMarkerScan) {
   else if (/^>>>>>>>(?: |\r?$)/.test(scan.prefix) && scan.stage === 2) scan.found = true;
 }
 export function scanConflictMarkers(scan: ConflictMarkerScan, bytes: Uint8Array) {
-  if (bytes.includes(0)) scan.binary = true;
-  if (!scan.binary) {
-    let textBytes = bytes;
-    if (scan.utf8Tail) {
-      textBytes = new Uint8Array(scan.utf8Tail.length + bytes.length);
-      for (let i = 0; i < scan.utf8Tail.length; i++) textBytes[i] = scan.utf8Tail.charCodeAt(i);
-      textBytes.set(bytes, scan.utf8Tail.length);
-    }
-    try {
-      new TextDecoder('utf-8', { fatal: true }).decode(textBytes, { stream: true });
-    } catch {
-      scan.binary = true;
-    }
-    scan.utf8Tail = '';
-    // Retain at most three incomplete UTF-8 bytes across physical chunks and
-    // persisted worker steps; decoding never retains a whole file.
-    for (let i = textBytes.length - 1; i >= Math.max(0, textBytes.length - 4); i--) {
-      const byte = textBytes[i]!;
-      if ((byte & 0xc0) === 0x80) continue;
-      const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 1;
-      if (length > textBytes.length - i) scan.utf8Tail = String.fromCharCode(...textBytes.subarray(i));
-      break;
-    }
+  const seen = scan.seen ?? 0;
+  if (seen < TEXT_SNIFF_BYTES) {
+    if (bytes.subarray(0, TEXT_SNIFF_BYTES - seen).includes(0)) scan.binary = true;
+    scan.seen = Math.min(TEXT_SNIFF_BYTES, seen + bytes.length);
   }
   if (scan.binary) return;
   for (let start = 0; start < bytes.length;) {
@@ -63,7 +50,7 @@ export function scanConflictMarkers(scan: ConflictMarkerScan, bytes: Uint8Array)
 }
 export function conflictMarkersFound(scan: ConflictMarkerScan) {
   line(scan);
-  return scan.found && !scan.binary && !scan.utf8Tail;
+  return scan.found && !scan.binary;
 }
 export function hasConflictMarkers(bytes: Uint8Array) {
   const scan = conflictMarkerScan();

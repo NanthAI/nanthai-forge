@@ -4,6 +4,7 @@ import {
   saveObjectSchema as object,
   saveWorkerObjectSchema as source,
   saveExpectedSchema,
+  keepPathsSchema,
 } from './hosted-save.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedRecordSchema } from './hosted-records.js';
@@ -55,7 +56,15 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       originLaneId: z.uuid().optional(),
     })
     .strict(),
-  z.object({ ...common, ...lane, kind: z.literal('resolve') }).strict(),
+  z
+    .object({
+      ...common,
+      ...lane,
+      kind: z.literal('resolve'),
+      /** Conflict paths whose unchanged side (no markers) is kept explicitly (Issue 113bc7b3). */
+      keep: keepPathsSchema.optional(),
+    })
+    .strict(),
 ]);
 export const syncWorkSchema = z.discriminatedUnion('mode', [
   z.object({ mode: z.literal('revert'), receiptId: z.uuid(), previous: source, accepted: source }).strict(),
@@ -69,7 +78,14 @@ export const syncWorkSchema = z.discriminatedUnion('mode', [
     })
     .strict(),
   z.object({ mode: z.literal('resolution'), candidateId: z.uuid(), conflicts: object }).strict(),
-  z.object({ mode: z.literal('resolve'), left: source, resolution: resolutionSchema }).strict(),
+  z
+    .object({
+      mode: z.literal('resolve'),
+      left: source,
+      resolution: resolutionSchema,
+      keep: keepPathsSchema.optional(),
+    })
+    .strict(),
 ]);
 export const syncInputSchema = z
   .object({

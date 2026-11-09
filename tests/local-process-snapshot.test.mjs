@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import childProcess, { spawn } from 'node:child_process';
+import childProcess, { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
 import {
   processIdentity,
+  processIdentityIfKnown,
+  processLiveness,
+  windowsLookup,
+  windowsStart,
   processesAlive,
   stopProcessTree,
   WINDOWS_START_SCRIPT,
@@ -160,4 +164,64 @@ test('Windows never signals the PID of a command that already exited (1444471f)'
     syncBuiltinESMExports();
   }
   assert.equal(windowsTaskkill('D:\\Win'), 'D:\\Win\\System32\\taskkill.exe');
+});
+
+test('SM-C M15: one liveness answer names alive, dead, reused and legacy/unknown processes', async t => {
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)']); // test-signal: allow child process has no event to wait on
+  t.after(() => child.kill());
+  await once(child, 'spawn');
+  const peer = processIdentity(child.pid);
+  assert.equal(processLiveness(peer), 'alive');
+  assert.equal(processLiveness({ pid: child.pid, startTime: 'different-start' }), 'reused');
+  assert.equal(processLiveness({ pid: child.pid }), 'alive', 'a legacy record never guesses reuse');
+  const exited = once(child, 'exit');
+  child.kill();
+  await exited;
+  assert.equal(processLiveness(peer), 'dead');
+});
+
+test('Windows CLI smoke 42676003944: a slow first start-time lookup is retried, never failing the command', t => {
+  const original = windowsLookup.run;
+  t.after(() => {
+    windowsLookup.run = original;
+  });
+  const timeouts = [];
+  // A cold PowerShell outruns the first bound; the retry succeeds.
+  windowsLookup.run = (pid, timeout) => {
+    timeouts.push(timeout);
+    if (timeouts.length === 1)
+      throw Object.assign(new Error('spawnSync powershell ETIMEDOUT'), { code: 'ETIMEDOUT' });
+    return '133800000000000000\r\n';
+  };
+  assert.equal(windowsStart(4242), '133800000000000000');
+  assert.deepEqual(timeouts, windowsLookup.bounds, 'one retry, with the longer bound');
+  // Always slow: an unconfirmed start time (undefined), not a thrown error.
+  windowsLookup.run = () => {
+    throw Object.assign(new Error('ETIMEDOUT'), { code: 'ETIMEDOUT' });
+  };
+  assert.equal(windowsStart(4242), undefined);
+  // A refused exec is not retried.
+  let calls = 0;
+  windowsLookup.run = () => {
+    calls++;
+    throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+  };
+  assert.equal(windowsStart(4242), undefined);
+  assert.equal(calls, 1);
+});
+
+test('an unconfirmable start time is unknown for records that only name their owner; strict records still refuse', () => {
+  const gone = 2 ** 22 + 54321; // beyond the default pid range: no process, no start time
+  assert.deepEqual(processIdentityIfKnown(gone), { pid: gone });
+  assert.throws(() => processIdentity(gone), { code: 'PROCESS_IDENTITY_UNAVAILABLE' });
+  assert.equal(typeof processIdentityIfKnown().startTime, 'string');
+});
+
+test('the CLI reads its own start time from the launcher instead of shelling out', () => {
+  const module = new URL('../dist/local-process.js', import.meta.url).href;
+  const script = `globalThis[Symbol.for('forge.ownProcessStart')] = { pid: process.pid, startTime: 'LAUNCHER-START' };
+    const { processStartTime } = await import(${JSON.stringify(module)});
+    process.stdout.write(String(processStartTime(process.pid)));`;
+  const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8' });
+  assert.equal(child.stdout, 'LAUNCHER-START', child.stderr);
 });

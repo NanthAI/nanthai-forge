@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { reconcileNativeImports } from './native-import-merge.js';
+import { isTextBytes, linesEol, utf8Text } from './text-bytes.js';
 /** Conservative line-based diff3. Ambiguous/expensive or non-text edits stay conflicts. */
 type Edit = { start: number; end: number; lines: string[] };
 export type NativeTextResolution = { baseLine: number; resolved: 'both-insertions' };
@@ -27,11 +28,33 @@ function lines(bytes: Buffer): string[] | null {
   try {
     const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
     if (/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text)) return null;
-    return text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+    return split(text);
   } catch {
     return null;
   }
 }
+const split = (text: string) => text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+type Encoding = 'utf8' | 'latin1';
+/** The three inputs as lines split on 0x0A, or null when one is binary (Git's rule, Issue
+ * 113bc7b3). Valid UTF-8 everywhere merges as UTF-8 text, exactly as before. Otherwise every
+ * input is read one character per byte (latin1), so lines compare and merge byte for byte
+ * in any ASCII-compatible encoding (Windows-1252, Latin-1, Shift-JIS, EUC). */
+function textLines(inputs: Buffer[]): { lines: string[][]; encoding: Encoding } | null {
+  if (!inputs.every(isTextBytes)) return null;
+  const utf8 = inputs.map(utf8Text);
+  if (utf8.every(text => text !== null)) return { lines: utf8.map(split), encoding: 'utf8' };
+  return { lines: inputs.map(bytes => split(bytes.toString('latin1'))), encoding: 'latin1' };
+}
+/** Lines back to exact bytes. Latin1 text holds only byte-sized characters; anything wider
+ * (never produced by a byte merge) is refused instead of truncated. */
+function encode(output: string[], encoding: Encoding): Buffer | null {
+  const text = output.join('');
+  if (encoding === 'utf8') return Buffer.from(text);
+  return /[^\x00-\xff]/u.test(text) ? null : Buffer.from(text, 'latin1');
+}
+/** A marker label in the text's encoding: its UTF-8 bytes, so marker lines stay ASCII/UTF-8. */
+const label = (value: string, encoding: Encoding) =>
+  encoding === 'utf8' ? value : Buffer.from(value).toString('latin1');
 function edits(before: string[], after: string[]): Edit[] | null {
   // Myers shortest edit path; cap computation, never source/history retention.
   // Falling back preserves the pre-existing explicit-conflict behavior.
@@ -111,10 +134,9 @@ export function mergeNativeText(
   path?: string,
   options: MergeOptions = {},
 ): Buffer | null {
-  const original = lines(base),
-    a = lines(left),
-    b = lines(right);
-  if (!original || !a || !b) return null;
+  const text = textLines([base, left, right]);
+  if (!text) return null;
+  const [original, a, b] = text.lines as [string[], string[], string[]];
   const first = edits(original, a),
     second = edits(original, b);
   if (!first || !second) return null;
@@ -154,8 +176,10 @@ export function mergeNativeText(
   output.push(...original.slice(cursor));
   const reconciled = reconcileNativeImports(original, a, b, output, path);
   if (!reconciled) return null;
+  const bytes = encode(reconciled, text.encoding);
+  if (!bytes) return null;
   options.resolutions?.push(...resolutions);
-  return Buffer.from(reconciled.join(''));
+  return bytes;
 }
 type Side = Edit & { side: 0 | 1 };
 function overlaps(edit: Edit, other: Edit) {
@@ -169,6 +193,29 @@ function overlaps(edit: Edit, other: Edit) {
         ? other.start >= edit.start && other.start <= edit.end
         : edit.start < other.end && other.start < edit.end;
 }
+/** One Git-style conflict hunk. Marker lines and a terminated last line take the hunk's EOL
+ * (Issue d36380ca): CRLF when every terminated line of its sides ends in CRLF, LF when they
+ * are mixed, and the surrounding file's rule (else LF) when no side line is terminated. */
+function markerHunk(x: string[], y: string[], labels: [string, string], encoding: Encoding, fileEol: string) {
+  const eol = linesEol([...x, ...y]) ?? fileEol;
+  const terminated = (part: string[]) =>
+    part.length && !part.at(-1)!.endsWith('\n') ? [...part.slice(0, -1), part.at(-1)! + eol] : part;
+  return [
+    `<<<<<<< ${label(labels[0], encoding)}${eol}`,
+    ...terminated(x),
+    `=======${eol}`,
+    ...terminated(y),
+    `>>>>>>> ${label(labels[1], encoding)}${eol}`,
+  ];
+}
+/** Both whole sides as one conflict hunk, for text whose hunks merge but whose merge was
+ * refused (for example by the import reconcile). Null for binary input. */
+export function wholeFileConflict(left: Buffer, right: Buffer, labels: [string, string]): Buffer | null {
+  const text = textLines([left, right]);
+  if (!text) return null;
+  const [a, b] = text.lines as [string[], string[]];
+  return encode(markerHunk(a, b, labels, text.encoding, '\n'), text.encoding);
+}
 /** diff3 with Git-style conflict hunks for a working tree. Returns null for
  * non-text input. `conflicted` is false when every hunk merged cleanly. */
 export function markNativeTextConflicts(
@@ -178,22 +225,15 @@ export function markNativeTextConflicts(
   labels: [string, string],
   insertionOrder: NativeInsertionOrder = 'left-first',
 ): { bytes: Buffer; conflicted: boolean; resolutions?: NativeTextResolution[] } | null {
-  const original = lines(base),
-    a = lines(left),
-    b = lines(right);
-  if (!original || !a || !b) return null;
-  const terminated = (part: string[]) =>
-    part.length && !part.at(-1)!.endsWith('\n') ? [...part.slice(0, -1), part.at(-1)! + '\n'] : part;
-  const hunk = (x: string[], y: string[]) => [
-    `<<<<<<< ${labels[0]}\n`,
-    ...terminated(x),
-    '=======\n',
-    ...terminated(y),
-    `>>>>>>> ${labels[1]}\n`,
-  ];
+  const text = textLines([base, left, right]);
+  if (!text) return null;
+  const [original, a, b] = text.lines as [string[], string[], string[]];
+  const fileEol = linesEol([...original, ...a, ...b]) ?? '\n';
+  const hunk = (x: string[], y: string[]) => markerHunk(x, y, labels, text.encoding, fileEol);
+  const bytes = (output: string[]) => encode(output, text.encoding)!;
   const first = edits(original, a),
     second = edits(original, b);
-  if (!first || !second) return { bytes: Buffer.from(hunk(a, b).join('')), conflicted: true };
+  if (!first || !second) return { bytes: bytes(hunk(a, b)), conflicted: true };
   const all: Side[] = [
     ...first.map(edit => ({ ...edit, side: 0 as const })),
     ...second.map(edit => ({ ...edit, side: 1 as const })),
@@ -222,7 +262,7 @@ export function markNativeTextConflicts(
     const start = Math.min(...group.map(edit => edit.start)),
       end = Math.max(...group.map(edit => edit.end)),
       sides = [0, 1].map(side => group.filter(edit => edit.side === side));
-    if (start < cursor) return { bytes: Buffer.from(hunk(a, b).join('')), conflicted: true };
+    if (start < cursor) return { bytes: bytes(hunk(a, b)), conflicted: true };
     output.push(...original.slice(cursor, start));
     cursor = end;
     const x = apply(sides[0]!, start, end),
@@ -238,7 +278,7 @@ export function markNativeTextConflicts(
     }
   }
   output.push(...original.slice(cursor));
-  return { bytes: Buffer.from(output.join('')), conflicted, ...(resolutions.length ? { resolutions } : {}) };
+  return { bytes: bytes(output), conflicted, ...(resolutions.length ? { resolutions } : {}) };
 }
 
 // Shared deterministic alignment for source attribution; this never executes source.

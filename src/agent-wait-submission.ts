@@ -119,7 +119,7 @@ export function waitSubmissions(
         ...outcome,
         outcome: outcome.state,
         state: original.state === 'superseded' ? 'superseded' : outcome.state,
-        terminal: true,
+        terminal: outcome.state !== 'unknown',
         complete: false,
       };
     }

@@ -25,12 +25,15 @@ export function laneOwnership(
     actor,
     ...(session ? { sessionId: session.sessionId } : {}),
     ...(quietMs !== undefined ? { quietMs } : {}),
+    // `completed` is the web's word too (presenceState): a finished session is not working (SM-C M11).
     state:
       session?.status === 'waiting'
         ? 'waiting'
-        : quietMs !== undefined && quietMs <= PRESENCE.workingMs
-          ? 'working'
-          : 'quiet',
+        : session?.status === 'completed'
+          ? 'completed'
+          : quietMs !== undefined && quietMs <= PRESENCE.workingMs
+            ? 'working'
+            : 'quiet',
   };
 }
 

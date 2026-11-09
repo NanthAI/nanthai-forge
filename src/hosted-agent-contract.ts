@@ -203,7 +203,14 @@ export const hostedAgentCommandSchemas = {
     })
     .strict(),
   'recover-apply': z.object({ applyOperationId: uuid }).strict(),
-  resolve: z.object({ ...lane, ...message }).strict(),
+  resolve: z
+    .object({
+      ...lane,
+      ...message,
+      /** Conflict paths kept as they are although they still hold one side unchanged. */
+      keep: z.array(z.string().refine(safeRelative)).min(1).max(1000).optional(),
+    })
+    .strict(),
   check: check.extend({ candidateId: uuid, expectedHead: hash.optional() }).strict(),
   finish: z
     .object({

@@ -9,6 +9,37 @@ import { readFileSync } from 'node:fs';
 import { ForgeError } from './errors.js';
 
 let ownStartTime: string | undefined;
+/** The CLI launcher computes this process's start time once, with the same lookup, before it imports
+ * the CLI into this very process; reading it here means the CLI never shells out for its own identity
+ * (a cold PowerShell on a loaded Windows runner outran the lookup bound, and failed the command). */
+export const OWN_START_SYMBOL = Symbol.for('forge.ownProcessStart');
+function launcherStartTime(): string | undefined {
+  const recorded = (globalThis as Record<symbol, unknown>)[OWN_START_SYMBOL] as
+    | { pid?: unknown; startTime?: unknown }
+    | undefined;
+  return recorded?.pid === process.pid && typeof recorded.startTime === 'string'
+    ? recorded.startTime
+    : undefined;
+}
+/** Bounded Windows lookups: a first try, then one retry with a longer bound. A timeout is not a failure
+ * of the command; it is an unconfirmed start time (`unknown`). Overridable so a test can stub a slow lookup. */
+export const windowsLookup = {
+  bounds: [10_000, 20_000] as number[],
+  run: (pid: number, timeout: number): string =>
+    execFileSync(windowsPowerShell(), windowsStartArgs(pid), { ...options, timeout }),
+};
+export function windowsStart(pid: number): string | undefined {
+  for (const timeout of windowsLookup.bounds)
+    try {
+      const startTime = windowsLookup.run(pid, timeout).trim();
+      if (/^\d+$/.test(startTime)) return startTime;
+      return undefined;
+    } catch (error) {
+      // Only a timeout is retried; a missing process or refused exec will not change.
+      if ((error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') return undefined;
+    }
+  return undefined;
+}
 const options: ExecFileSyncOptionsWithStringEncoding = {
   encoding: 'utf8',
   timeout: 5000,
@@ -83,7 +114,10 @@ function observeDarwin<T>(ps: () => T, kernel: () => T): T {
   return kernel();
 }
 function inspect(pid: number): { startTime: string; zombie: boolean } | undefined {
-  if (pid === process.pid && ownStartTime) return { startTime: ownStartTime, zombie: false };
+  if (pid === process.pid) {
+    ownStartTime ??= launcherStartTime();
+    if (ownStartTime) return { startTime: ownStartTime, zombie: false };
+  }
   try {
     if (process.platform === 'linux') {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -91,8 +125,10 @@ function inspect(pid: number): { startTime: string; zombie: boolean } | undefine
       return { startTime: fields[19]!, zombie: fields[0] === 'Z' };
     }
     if (process.platform === 'win32') {
-      const startTime = execFileSync(windowsPowerShell(), windowsStartArgs(pid), options).trim();
-      return /^\d+$/.test(startTime) ? { startTime, zombie: false } : undefined;
+      const startTime = windowsStart(pid);
+      // Our own start time never changes: keep it, so the lookup runs at most once per process.
+      if (startTime && pid === process.pid) ownStartTime = startTime;
+      return startTime ? { startTime, zombie: false } : undefined;
     }
     return observeDarwin<Observation | undefined>(
       () => {
@@ -128,16 +164,35 @@ export function processIdentity(pid = process.pid) {
   if (pid === process.pid) ownStartTime = startTime;
   return { pid, startTime };
 }
-export function processAlive(identity: { pid: number; startTime?: string | undefined }): boolean {
+/** The named result of a liveness check (M15): `reused` is a live process with a different
+ * start identity than the recorded one; `unknown` means it exists but cannot be inspected. */
+export type Liveness = 'alive' | 'dead' | 'reused' | 'unknown';
+export function processLiveness(identity: { pid: number; startTime?: string | undefined }): Liveness {
   try {
     process.kill(identity.pid, 0);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
+    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'dead';
   }
   const current = inspect(identity.pid);
-  if (current?.zombie) return false;
-  if (!identity.startTime) return true; // Legacy runs have no start identity; never guess PID reuse.
-  return current === undefined || current.startTime === identity.startTime;
+  if (current?.zombie) return 'dead';
+  // Legacy records have no start identity; never guess PID reuse.
+  if (!identity.startTime) return current ? 'alive' : 'unknown';
+  if (!current) return 'unknown';
+  return current.startTime === identity.startTime ? 'alive' : 'reused';
+}
+/** Unknown stays alive: only a dead, zombie or reused process may be reclaimed. */
+/** Like `processIdentity`, but an unconfirmable start time is `startTime: undefined` (the legacy,
+ * pid-only record every liveness check already honours) instead of an error. For records that
+ * only need to name their owner: the work lock. Queue tickets, runner records and watchers still
+ * require the start time and keep using `processIdentity`. */
+export function processIdentityIfKnown(pid = process.pid): { pid: number; startTime?: string } {
+  const startTime = processStartTime(pid);
+  if (startTime && pid === process.pid) ownStartTime = startTime;
+  return startTime ? { pid, startTime } : { pid };
+}
+export function processAlive(identity: { pid: number; startTime?: string | undefined }): boolean {
+  const liveness = processLiveness(identity);
+  return liveness !== 'dead' && liveness !== 'reused';
 }
 /** Fresh kernel snapshot for one queue scan, avoiding one ps process per ticket.
  * Missing/failed observations remain conservative; only an observed different

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { submissionOutcome } from '../dist/landing-submission-state.js';
+import { submissionOutcome, sourceSubmission } from '../dist/landing-submission-state.js';
 import { submissionOutcome as nativeOutcome, projectSubmission } from '../dist/landing-submission.js';
 import { landingObservation } from '../dist/hosted-landing.js';
 
@@ -89,4 +89,23 @@ test('restored native helpers retain exact destination review and batch attempt 
     }),
     /pending \(checking\).*12345678.*87654321/,
   );
+});
+
+test('SM-C M6: a status this build does not recognize is unknown, never terminal-failed rejected', () => {
+  for (const status of ['status-from-a-newer-build', 'passed', 'completed']) {
+    const outcome = submissionOutcome({ status });
+    assert.deepEqual(outcome, { state: 'unknown', pendingReason: null, cause: null }, status);
+    const view = sourceSubmission(outcome, 'h', 'h');
+    assert.equal(view.terminal, false, 'an unknown outcome is never terminal');
+    assert.equal(view.complete, false);
+  }
+  // Known failures and coded failures keep their meaning.
+  assert.deepEqual(submissionOutcome({ status: 'cancelled' }), {
+    state: 'terminal-failed',
+    pendingReason: null,
+    cause: 'rejected',
+  });
+  assert.equal(submissionOutcome({ status: 'newer-status', code: 'LANE_STALE' }).cause, 'stale-head');
+  // The hosted wire has no unknown state: its server-owned statuses are all recognized.
+  assert.equal(landingObservation('cancelled').state, 'terminal-failed');
 });

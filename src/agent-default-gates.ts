@@ -8,6 +8,7 @@ import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
+import { preflightOutcome } from './agent-preflight-incomplete.js';
 import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
 import { answerId, hostedOverlapNotice } from './hosted-overlap-notice.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
@@ -76,7 +77,7 @@ export function finishGates(
     const sameSource =
       receipt?.laneId === lane.laneId &&
       (receipt.tree && lane.tree ? receipt.tree === lane.tree : receipt.head === lane.head);
-    if (sameSource && receipt?.environment)
+    if (sameSource && receipt?.environment && preflightOutcome(receipt) === 'environment')
       advisories.preflight = {
         status: 'environment',
         ...receipt.environment,
@@ -86,7 +87,7 @@ export function finishGates(
       };
     // Must-run files the budget did not start: never shown as a pass, never refused as a failure
     // (the landing check runs them); the receipt's one command finishes them first.
-    else if (sameSource && receipt?.incomplete)
+    else if (sameSource && receipt?.incomplete && preflightOutcome(receipt) === 'incomplete')
       advisories.preflight = {
         status: 'incomplete',
         tests: receipt.tests,
@@ -97,7 +98,7 @@ export function finishGates(
         deferredTests: receipt.deferredTests ?? 0,
         at: receipt.at,
       };
-    else if (sameSource && receipt?.passed)
+    else if (sameSource && receipt && preflightOutcome(receipt) === 'passed')
       advisories.preflight = {
         status: 'passed',
         tests: receipt.tests,

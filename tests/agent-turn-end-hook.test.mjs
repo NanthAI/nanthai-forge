@@ -533,3 +533,49 @@ test('trusted wake: a live settle wait covers the stop with zero queries; unwatc
   recordTurnWork({ ...watched, pid: deadPid });
   assert.equal((await turnEndDecision({ session_id: s.id }, { probe })).decision, 'block');
 });
+
+test('SM-C M1: ledger entries have named states; a reused pid is not an observer (pid plus start time)', async t => {
+  const { turnEntryState, turnEntry } = await import('../dist/agent-turn-state.js');
+  const { processStartTime } = await import('../dist/local-process.js');
+  const { ownsLiveLanding } = await import('../dist/landing-freeze.js');
+  const s = session(t);
+  const now = Date.now(),
+    own = processStartTime(process.pid);
+  assert.ok(own, 'this process has a start time');
+  const entry = (over = {}) => ({ ...landing(s.root, randomUUID(), null, now), ...over });
+  const rows = [
+    ['watched', entry({ pid: process.pid, startTime: own, wake: 'trusted' })],
+    ['observed', entry({ pid: process.pid, startTime: own })],
+    ['observed', entry({ pid: process.pid })], // a legacy record has no start time: pid only
+    ['warm', entry({ observedAt: now - 5_000 })],
+    ['cold', entry({ observedAt: now - 60_000 })],
+    ['stale', entry({ root: join(s.directory, 'missing') })],
+    ['stale', entry({ pid: deadPid, observedAt: now - TURN_WORK_STALE_MS - 1 })],
+    // The pid is alive but belongs to another process: not an observer, so an old entry is stale.
+    [
+      'stale',
+      entry({
+        pid: process.pid,
+        startTime: 'Thu Jan  1 00:00:00 1970',
+        observedAt: now - TURN_WORK_STALE_MS - 1,
+      }),
+    ],
+    ['cold', entry({ pid: process.pid, startTime: 'Thu Jan  1 00:00:00 1970', observedAt: now - 60_000 })],
+  ];
+  for (const [state, work] of rows) {
+    const named = turnEntry(work, now);
+    assert.equal(turnEntryState(work, now), state);
+    assert.equal(named.state, state);
+    assert.ok(named.label && named.nextStep, `${state} has a label and one next step`);
+  }
+  // The ledger stores the observer's start time next to its pid.
+  recordTurnWork(landing(s.root, randomUUID(), process.pid, now));
+  assert.equal(readTurnLedger(s.id).work[0].startTime, own);
+  // ownsLiveLanding shares the hook's staleness test: an old entry with no live observer is not live.
+  rmSync(turnLedgerDirectory(), { recursive: true, force: true });
+  assert.equal(ownsLiveLanding(s.root, s.id, now), false);
+  recordTurnWork(landing(s.root, randomUUID(), deadPid, now - TURN_WORK_STALE_MS - 60_000));
+  assert.equal(ownsLiveLanding(s.root, s.id, now), false, 'a dead observer past the queue life is not live');
+  recordTurnWork(landing(s.root, randomUUID(), deadPid, now - 60_000));
+  assert.equal(ownsLiveLanding(s.root, s.id, now), true);
+});

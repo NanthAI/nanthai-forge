@@ -14,6 +14,7 @@ import { announceRegistryHosts } from './install-registry-hosts.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { randomUUID } from 'node:crypto';
 import { conflictFinishOptions } from './hosted-conflict-finish-options.js';
+import { UNCHANGED_SIDE, failedCode, unchangedSideRefusal } from './hosted-unchanged-side.js';
 import { clientCacheRoot } from './root-paths.js';
 import { retainSyncHandoff, clearSyncHandoff } from './hosted-sync-handoff.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -299,6 +300,7 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
     authorityEpoch: session.capabilities.authority.epoch,
     lifecycleVersion: marker.selection.lifecycleVersion,
     message: command.message,
+    ...(command.keep ? { keep: [...new Set(command.keep)].sort() } : {}),
   }));
   const chain = session.capabilities.features?.includes('save-then-resolve') ?? false;
   // source-run-publish: the save's own action replies with its outcome and, run there, the chain.
@@ -384,6 +386,8 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       timing.server(observed);
     }
   } catch (error) {
+    if (error instanceof ForgeError && error.code === UNCHANGED_SIDE)
+      throw unchangedSideRefusal(session.root, marker.selection.laneId, command, error.recovery);
     const safe = hostedActionError(error, 'resolution');
     if (safe.code !== 'HOSTED_ACTION_FAILED' || safe.recovery) throw safe;
     throw new ForgeError(
@@ -396,6 +400,8 @@ export async function resolveHostedAgent(session: HostedAgentSession, input: unk
       },
     );
   }
+  if (failedCode(progress) === UNCHANGED_SIDE)
+    throw unchangedSideRefusal(session.root, marker.selection.laneId, command);
   const parsed = syncResultSchema.safeParse(completed(progress));
   if (!parsed.success || parsed.data.status !== 'resolved' || !parsed.data.from)
     return { ...(progress as object), ...continuation };

@@ -44,19 +44,59 @@ const pending = (status: string) =>
   ].includes(status);
 const success = (status: string) =>
   ['accepted', 'already-accepted', 'passed', 'completed', 'landed'].includes(status);
+/** Statuses that end an entry unsuccessfully. A status in none of the three lists is `unknown`:
+ * not terminal, not ok, with a diagnostic (SM-C M5), never a guessed failure. */
+const failure = (status: string) =>
+  [
+    'failed',
+    'cancelled',
+    'conflict',
+    'rejected',
+    'interrupted',
+    'runner-unavailable',
+    'runner-budget-exhausted',
+    'timed-out',
+    'retry-exhausted',
+    'sync-required',
+    'preview-excluded',
+    'awaiting-review',
+    'review-needed',
+    'source-changed',
+    'abandoned',
+    'terminal-failed',
+    'stale',
+    'blocked',
+  ].includes(status);
+/** The one table wait reads an entry status through; `unknown` is its own answer, never a failure. */
+export const waitStatusClass = (status: string) =>
+  pending(status)
+    ? ('pending' as const)
+    : success(status)
+      ? ('success' as const)
+      : failure(status)
+        ? ('failure' as const)
+        : ('unknown' as const);
+const recognized = (status: string) => waitStatusClass(status) !== 'unknown';
 function outcome(
   id: string,
   status: string,
   terminal: boolean,
   detail: Record<string, unknown> = {},
 ): WaitEvent {
+  const known = recognized(status) || status === 'unknown';
   return {
     ...detail,
+    ...(known
+      ? {}
+      : {
+          unrecognizedStatus: status,
+          reason: `Unrecognized status "${status.slice(0, 80)}": this CLI cannot tell whether it succeeded. Update the CLI (nforge update) and wait again.`,
+        }),
     type: 'operation',
     id,
     status: status === 'accepted' || status === 'already-accepted' ? 'landed' : status,
-    terminal,
-    ok: terminal && success(status),
+    terminal: known && terminal,
+    ok: known && terminal && success(status),
     failureClass: infrastructure(status) ? 'infrastructure' : status === 'failed' ? 'check' : null,
   };
 }

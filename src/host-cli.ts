@@ -70,7 +70,7 @@ export async function hostProject(
     );
     const saved = savedCredential(deployment);
     invariant(
-      process.env.FORGE_AUTH_TOKEN !== undefined || !saved || saved.scope === 'cli',
+      Boolean(process.env.FORGE_AUTH_TOKEN) || !saved || saved.scope === 'cli',
       'AUTH_SCOPE_DENIED',
       'Run nforge login with --scope cli; this credential grants coordination only.',
     );

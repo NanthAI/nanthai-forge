@@ -10,6 +10,7 @@ import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { revertFixture, synthetic } from './hosted-revert-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
+import { readTurnLedger, recordTurnWork } from '../dist/agent-turn-work.js';
 const modules = Object.fromEntries(
   await Promise.all(
     ['projectHostedAgent', 'projectHostedLandingWithdraw', 'projectHostedLanding'].map(async name => [
@@ -118,3 +119,40 @@ test('withdraw by submissionId cancels that landing in one call, whatever Lane h
     /not both/,
   );
 });
+
+for (const verb of ['withdraw', 'cancel'])
+  test(`SM-C M1: ${verb} settles the turn ledger entry of the landing it ended`, async t => {
+    const s = await setup(t),
+      first = await landing(s.f);
+    const keys = ['XDG_STATE_HOME', 'CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID'];
+    const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+    const state = mkdtempSync(join(tmpdir(), 'forge-withdraw-ledger-'));
+    process.env.XDG_STATE_HOME = state;
+    process.env.CLAUDE_CODE_SESSION_ID = `synthetic-session-${first.id}`;
+    delete process.env.CODEX_THREAD_ID;
+    t.after(() => {
+      for (const [key, value] of Object.entries(before))
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      rmSync(state, { recursive: true, force: true });
+    });
+    const session = process.env.CLAUDE_CODE_SESSION_ID;
+    // A live waiter and an unrelated landing: only the ended landing leaves the ledger.
+    recordTurnWork({
+      id: first.operationId,
+      kind: 'landing',
+      root: state,
+      input: { operationIds: [first.operationId] },
+      pid: null,
+    });
+    const other = crypto.randomUUID();
+    recordTurnWork({ id: other, kind: 'landing', root: state, input: { operationIds: [other] }, pid: null });
+    assert.equal(readTurnLedger(session).work.length, 2);
+    const reply = await s.transport().dispatch(verb, { submissionId: first.id });
+    assert.ok(reply.result);
+    assert.deepEqual(
+      readTurnLedger(session).work.map(work => work.id),
+      [other],
+      'the ended landing is settled; the other stays',
+    );
+  });

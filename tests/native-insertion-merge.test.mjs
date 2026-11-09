@@ -100,6 +100,121 @@ test('conflict markers retain auto-resolved insertion hunks alongside a real mod
   assert.deepEqual(result.resolutions, [{ baseLine: 1, resolved: 'both-insertions' }]);
 });
 
+// Issue 113bc7b3: text is Git's rule (no NUL in the first 8,000 bytes, no UTF-16 BOM), not UTF-8
+// validity, so legacy-encoded sources merge line by line on their exact bytes.
+const latin = text => Buffer.from(text, 'latin1');
+const legacy = [
+  latin('/* caf\xe9 \xa9 */'),
+  latin('int a = 1; /* \x93quoted\x94 */'),
+  latin('int b = 2;'),
+  latin('int c = 3;'),
+  latin('int d = 4; /* \x80\x96\xf1 */'),
+];
+const file = (lines, eol) => Buffer.concat(lines.flatMap(line => [line, latin(eol)]));
+const replaced = (lines, edits) => lines.map((line, i) => edits[i] ?? line);
+test('incident 113bc7b3: disjoint edits to Windows-1252 and Latin-1 CRLF files merge byte-exact', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const original = file(legacy, eol),
+      left = file(replaced(legacy, { 0: latin('/* d\xe9j\xe0 */') }), eol),
+      right = file(replaced(legacy, { 4: latin('int d = 5; /* \xa9 */') }), eol),
+      expected = file(
+        replaced(legacy, { 0: latin('/* d\xe9j\xe0 */'), 4: latin('int d = 5; /* \xa9 */') }),
+        eol,
+      );
+    assert.equal(new TextDecoder().decode(original).includes('\ufffd'), true, 'fixture is not UTF-8');
+    assert.deepEqual(
+      mergeNativeText(original, left, right, 'legacy.c'),
+      expected,
+      `merge, eol ${JSON.stringify(eol)}`,
+    );
+    const marked = markNativeTextConflicts(original, left, right, ['lane', 'main']);
+    assert.equal(marked.conflicted, false);
+    assert.deepEqual(marked.bytes, expected);
+  }
+});
+test('incident 113bc7b3: a same-line edit in a Windows-1252 file gets ASCII markers and both sides exactly', () => {
+  const original = file(legacy, '\n'),
+    left = file(replaced(legacy, { 2: latin('int b = 20; /* \xe9 */') }), '\n'),
+    right = file(replaced(legacy, { 2: latin('int b = 21; /* \xf1 */') }), '\n');
+  assert.equal(mergeNativeText(original, left, right, 'legacy.c'), null);
+  const marked = markNativeTextConflicts(original, left, right, ['lane', 'main']);
+  assert.equal(marked.conflicted, true);
+  assert.deepEqual(
+    marked.bytes,
+    file(
+      [
+        ...legacy.slice(0, 2),
+        latin('<<<<<<< lane'),
+        latin('int b = 20; /* \xe9 */'),
+        latin('======='),
+        latin('int b = 21; /* \xf1 */'),
+        latin('>>>>>>> main'),
+        ...legacy.slice(3),
+      ],
+      '\n',
+    ),
+  );
+});
+test('incident 113bc7b3: NUL and UTF-16 inputs stay binary; UTF-8 text with control bytes merges', () => {
+  const nul = Buffer.from('a\nb\0\nc\n'),
+    utf16 = Buffer.from([0xff, 0xfe, 0x61, 0x00]);
+  assert.equal(mergeNativeText(nul, Buffer.from('A\nb\0\nc\n'), Buffer.from('a\nb\0\nC\n')), null);
+  assert.equal(markNativeTextConflicts(nul, nul, Buffer.from('x\0')), null);
+  assert.equal(markNativeTextConflicts(utf16, utf16, Buffer.from([0xff, 0xfe, 0x62, 0x20])), null);
+  // A NUL after Git's 8,000-byte window does not make the file binary.
+  const tail = Buffer.concat([Buffer.from('a\n' + 'x'.repeat(8000) + '\n'), Buffer.from('\0\n')]);
+  assert.deepEqual(
+    mergeNativeText(
+      tail,
+      Buffer.concat([Buffer.from('A'), tail.subarray(1)]),
+      Buffer.concat([tail, Buffer.from('z\n')]),
+    ),
+    Buffer.concat([Buffer.from('A'), tail.subarray(1), Buffer.from('z\n')]),
+  );
+  assert.deepEqual(
+    mergeNativeText(Buffer.from('\f\na\nb\n'), Buffer.from('\f\nA\nb\n'), Buffer.from('\f\na\nB\n')),
+    Buffer.from('\f\nA\nB\n'),
+  );
+});
+test('incident d36380ca: markers take the hunk EOL: CRLF in CRLF files, LF unchanged, LF for a mixed hunk', () => {
+  const crlf = markNativeTextConflicts(
+    Buffer.from('a\r\nb\r\nc\r\n'),
+    Buffer.from('a\r\nL\r\nc\r\n'),
+    Buffer.from('a\r\nR\r\nc\r\n'),
+    ['lane', 'main'],
+  );
+  assert.equal(crlf.bytes.toString(), 'a\r\n<<<<<<< lane\r\nL\r\n=======\r\nR\r\n>>>>>>> main\r\nc\r\n');
+  const resolved = crlf.bytes
+    .toString()
+    .split('\r\n')
+    .filter(line => !/^(<<<<<<<|=======|>>>>>>>)/.test(line))
+    .join('\r\n');
+  assert.doesNotMatch(resolved, /[^\r]\n/, 'removing marker lines leaves no lone LF');
+  // A last line without EOL in a CRLF file is terminated with CRLF inside the hunk.
+  assert.equal(
+    markNativeTextConflicts(Buffer.from('a\r\nb'), Buffer.from('a\r\nL'), Buffer.from('a\r\nR'), [
+      'lane',
+      'main',
+    ]).bytes.toString(),
+    'a\r\n<<<<<<< lane\r\nL\r\n=======\r\nR\r\n>>>>>>> main\r\n',
+  );
+  assert.equal(
+    markNativeTextConflicts(Buffer.from('a\nb\nc\n'), Buffer.from('a\nL\nc\n'), Buffer.from('a\nR\nc\n'), [
+      'lane',
+      'main',
+    ]).bytes.toString(),
+    'a\n<<<<<<< lane\nL\n=======\nR\n>>>>>>> main\nc\n',
+  );
+  assert.equal(
+    markNativeTextConflicts(
+      Buffer.from('a\nb\r\nc\n'),
+      Buffer.from('a\nL\r\nc\n'),
+      Buffer.from('a\nR\nc\n'),
+      ['lane', 'main'],
+    ).bytes.toString(),
+    'a\n<<<<<<< lane\nL\r\n=======\nR\n>>>>>>> main\nc\n',
+  );
+});
 function fixture(t, withDocs = false) {
   const root = mkdtempSync(join(tmpdir(), 'forge-insertion-merge-'));
   t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));

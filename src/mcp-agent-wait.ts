@@ -37,7 +37,8 @@ export function registerAgentWait(server: McpServer, store: WorkStore) {
         );
         await notifications;
         return {
-          ...(result.ok ? {} : { isError: true }),
+          // A plain budget timeout is an answer ("not yet"), as in the hosted tool; only a failure is an error.
+          ...(result.ok || result.status === 'timeout' ? {} : { isError: true }),
           content: [{ type: 'text' as const, text: events.map(event => JSON.stringify(event)).join('\n') }],
         };
       } catch (error) {

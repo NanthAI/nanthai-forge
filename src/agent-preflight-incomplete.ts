@@ -46,8 +46,28 @@ export function incompletePreflight(input: {
   };
 }
 
-/** The word a receipt's verdict starts with: a run is passed, NOT COMPLETE or FAILED. */
-export const preflightVerdict = (receipt: {
+/** What a preflight receipt means (SM-C M4): one derive for the summary word, the land gate's
+ * advisory and the retry reader. An environment problem (a program missing here, a wedged tool)
+ * is never a failed run, and wins over everything else the receipt carries. */
+export type PreflightOutcome = 'passed' | 'incomplete' | 'environment' | 'failed';
+export const preflightOutcome = (receipt: {
   passed: boolean;
+  environment?: unknown;
   incomplete?: PreflightIncomplete | undefined;
-}) => (receipt.passed ? 'passed' : receipt.incomplete ? 'NOT COMPLETE' : 'FAILED');
+}): PreflightOutcome =>
+  receipt.environment
+    ? 'environment'
+    : receipt.incomplete
+      ? 'incomplete'
+      : receipt.passed
+        ? 'passed'
+        : 'failed';
+const verdictWords = {
+  passed: 'passed',
+  incomplete: 'NOT COMPLETE',
+  environment: 'ENVIRONMENT (not a failed run)',
+  failed: 'FAILED',
+} satisfies Record<PreflightOutcome, string>;
+/** The word a receipt's verdict starts with: a run is passed, NOT COMPLETE, ENVIRONMENT or FAILED. */
+export const preflightVerdict = (receipt: Parameters<typeof preflightOutcome>[0]) =>
+  verdictWords[preflightOutcome(receipt)];

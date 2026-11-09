@@ -62,7 +62,11 @@ export async function cliRollback(
       // Hold the head that was left until main moves; going back to it clears the hold.
       const held = readCliCanaryRefusal(installation);
       if (held?.head === target) clearCliCanaryRefusal(installation);
-      else
+      // The single slot never drops another head's active refusal (SM-C M20): main has moved past
+      // the build being left, so its hold would match nothing, while that refusal still guards main.
+      else if (held && held.head !== from && (held.hold || Date.now() < held.nextRetryAt)) {
+        /* keep the active refusal of the other head */
+      } else
         writeCliCanaryRefusal(installation, {
           head: from,
           at: new Date().toISOString(),

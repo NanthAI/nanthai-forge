@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { LandingDiagnosisReport } from './landing-diagnosis.js';
-export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded';
+/** `unknown`: a status this build does not recognize, so it cannot say landed, failed or running
+ * (SM-C M6). It is never terminal; the wait keeps its own budget and the diagnostic names the status. */
+export type SubmissionState = 'pending' | 'terminal-failed' | 'landed' | 'superseded' | 'unknown';
 export type PendingReason =
   | 'queued'
   | 'checking'
@@ -33,6 +35,25 @@ export type Submission = {
   waitingFor?: import('./landing-batch-types.js').LandingWaiting;
   phases?: ReturnType<typeof import('./land-progress.js').readLandingProgress>;
 };
+/** Statuses that end a request unsuccessfully; any other unrecognized status with no code is `unknown`. */
+const failed = [
+  'failed',
+  'cancelled',
+  'conflict',
+  'rejected',
+  'interrupted',
+  'runner-unavailable',
+  'runner-budget-exhausted',
+  'timed-out',
+  'retry-exhausted',
+  'sync-required',
+  'preview-excluded',
+  'terminal-failed',
+  'stale',
+  'blocked',
+  'dropped',
+  'error',
+];
 const busy = ['queued', 'preparing', 'running', 'checking', 'waiting', 'waiting to land', 'source-changed'];
 /** Additive vocabulary over existing receipts; it neither drives nor authorizes landing. */
 export function submissionOutcome(result: Record<string, unknown> = {}): {
@@ -63,6 +84,7 @@ export function submissionOutcome(result: Record<string, unknown> = {}): {
       cause: null,
     };
   const code = String(result.code ?? '');
+  if (!failed.includes(status) && !code) return { state: 'unknown', pendingReason: null, cause: null };
   const checkStatus = String(result.checkStatus ?? status);
   const cause: SubmissionCause =
     status === 'conflict'
@@ -100,7 +122,7 @@ export function sourceSubmission(
     ...outcome,
     outcome: outcome.state,
     state,
-    terminal: state !== 'pending',
+    terminal: state !== 'pending' && state !== 'unknown',
     complete: state === 'landed',
   };
 }

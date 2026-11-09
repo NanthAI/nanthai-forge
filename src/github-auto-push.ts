@@ -61,6 +61,8 @@ export async function drainGithubPush(
     debounceMs?: number;
     retryMs?: number;
     sleep?: (ms: number) => Promise<unknown>;
+    /** The push itself; tests replace it to reach outcomes Git cannot be made to produce on demand. */
+    sync?: typeof githubSync;
   } = {},
 ) {
   if (serverRecoveryAuthority(readHostState(store))) return;
@@ -123,7 +125,7 @@ export async function drainGithubPush(
               return;
             await update({ status: 'pushing', attempts: selected.attempts + 1, nextAttemptAt: '' });
             try {
-              const result = await githubSync(store.root, {
+              const result = await (options.sync ?? githubSync)(store.root, {
                 repository: selected.repository,
                 branch: 'main',
                 push: true,
@@ -141,7 +143,16 @@ export async function drainGithubPush(
               break;
             } catch (error) {
               const code = error instanceof ForgeError ? error.code : 'GITHUB_SYNC_FAILED';
-              if (code === 'GITHUB_SYNC_CHECK_PENDING') return;
+              if (code === 'GITHUB_SYNC_CHECK_PENDING') {
+                // Main's post-accept check has not passed: the push waits for the next wake, with no worker.
+                // Say so (retrying, no backoff time) rather than leave `pushing` behind a released worker (SM-C M17).
+                await update({
+                  status: 'retrying',
+                  code,
+                  detail: 'Waiting for the post-accept check of main; the push resumes when it is green.',
+                });
+                return;
+              }
               if (code === 'GITHUB_SYNC_CHANGED') {
                 const heads = error as ForgeError & {
                   expectedHead?: string;

@@ -58,6 +58,12 @@ export const saveExpectedSchema = hostedLaneSelectionSchema.pick({
   sourceVersion: true,
   lifecycleVersion: true,
 });
+/** Sorted, unique relative paths, bounded like a conflict page set. */
+export const keepPathsSchema = z
+  .array(z.string().min(1).max(4096))
+  .min(1)
+  .max(1000)
+  .refine(paths => paths.every((path, i) => i === 0 || paths[i - 1]! < path), 'Sort keep paths uniquely.');
 /** The resolve that follows this save (feature save-then-resolve, 1eef1b43): once the save
  * completes the server prepares, submits and runs this sync itself, from the save's own result. */
 export const saveThenSchema = z
@@ -67,6 +73,7 @@ export const saveThenSchema = z
     authorityEpoch: number,
     lifecycleVersion: saveExpectedSchema.shape.lifecycleVersion,
     message: z.string(),
+    keep: keepPathsSchema.optional(),
   })
   .strict();
 export type SaveThen = z.infer<typeof saveThenSchema>;

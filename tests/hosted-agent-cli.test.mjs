@@ -317,7 +317,8 @@ test('hosted wait CLI returns and prints direct conflict recovery without finish
   assert.equal(result.result.recovery.conflict.next.action, 'sync');
   assert.equal(conflictReads, 1);
   assert(err.join('').includes('Continue recovery: ' + result.result.recovery.conflict.command));
-  assert.equal(process.exitCode, 0, 'wait terminal failures retain their documented exit status');
+  // SM-C M7 (Issue 68361cd5): a failed landing exits 2 from wait, as from land; it was 0 before.
+  assert.equal(process.exitCode, 2, 'wait on a terminal-failed landing exits 2, the same as land');
 });
 
 // This table exercises public production wrappers, rather than only the pure normalizer.

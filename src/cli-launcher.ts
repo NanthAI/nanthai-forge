@@ -47,16 +47,22 @@ function kernelStart(pid: number): string | undefined {
       },
     };
     if (process.platform !== 'win32') return darwinStart(pid, options);
-    const start = execFileSync(
-      `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        LAUNCHER_WINDOWS_START_SCRIPT.replace('PID', String(pid)),
-      ],
-      options,
-    ).trim();
+    const command = `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const args = [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      LAUNCHER_WINDOWS_START_SCRIPT.replace('PID', String(pid)),
+    ];
+    // A cold PowerShell on a loaded runner can outrun one bound: one retry with a longer one.
+    let start = '';
+    for (const timeout of [10_000, 20_000])
+      try {
+        start = execFileSync(command, args, { ...options, timeout }).trim();
+        break;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ETIMEDOUT') throw error;
+      }
     return /^\d+$/.test(start) ? start : undefined;
   } catch {
     return undefined;
@@ -103,6 +109,8 @@ export function cliProcessIdentity(): Identity {
         'Cannot identify this CLI process; retry the original command.',
       );
     identity = { pid: process.pid, startTime };
+    // The CLI is imported into this process: it reads its own start time here, never by shelling out.
+    (globalThis as Record<symbol, unknown>)[Symbol.for('forge.ownProcessStart')] = identity;
   }
   return identity;
 }

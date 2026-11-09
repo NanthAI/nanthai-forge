@@ -115,3 +115,41 @@ test('Git-backed lifecycle uses the same explicit completion and reopening witho
     ['completed', 'active'],
   );
 });
+
+test('SM-C M10: lane-status refuses a move the transition table does not allow and names the legal ones', t => {
+  const root = fixture(t, { 'source.ts': 'export const value=1;' });
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'Fixture']);
+  const work = new WorkService(root),
+    act = command => work.execute(command, work.status().revision).result;
+  const intent = act({ action: 'intent', outcome: 'Guarded' }),
+    lane = act({ action: 'lane', intentId: intent.id, name: 'Guarded worker' });
+  const set = state => act({ action: 'lane-status', laneId: lane.id, state });
+  const force = state => {
+    const data = work.store.load();
+    data.lanes[0].state = state;
+    work.store.save(data);
+  };
+  set('completed');
+  set('completed'); // a replay of the same state is allowed
+  force('abandoned');
+  for (const state of ['completed', 'ready', 'paused'])
+    assert.throws(
+      () => set(state),
+      { code: 'LANE_STATE_INVALID', message: /abandoned Lane cannot become .*can become: active/ },
+      state,
+    );
+  assert.equal(set('active').state, 'active'); // reopen
+  force('completed');
+  assert.throws(() => set('paused'), { code: 'LANE_STATE_INVALID' });
+});
+test('SM-C M10: a creating Lane has no lane-status move until it is materialized', async () => {
+  const { assertLaneStatusTransition, LANE_STATUS_TRANSITIONS } =
+    await import('../dist/lane-state-transition.js');
+  assert.throws(() => assertLaneStatusTransition('creating', 'ready'), {
+    code: 'LANE_STATE_INVALID',
+    message: /creating Lane cannot become ready/,
+  });
+  assert.doesNotThrow(() => assertLaneStatusTransition('active', 'active'));
+  assert.deepEqual(LANE_STATUS_TRANSITIONS.completed, ['active']);
+});

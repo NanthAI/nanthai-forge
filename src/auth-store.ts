@@ -87,14 +87,37 @@ export function writeAuth(store: Store) {
 export function savedCredential(deployment: string) {
   return readAuth().deployments[deploymentUrl(deployment)];
 }
+/** Where a deployment's credential stands (SM-C M23). An empty `FORGE_AUTH_TOKEN` is unset, so it
+ * never hides a saved login. `expired` keeps the saved entry's expiry for the message. */
+export type AuthState =
+  | { kind: 'none' }
+  | { kind: 'envToken'; token: string }
+  | { kind: 'saved'; token: string; expiresAt: number }
+  | { kind: 'expired'; expiresAt: number };
+export const AUTH_STATE_NEXT_STEP = {
+  none: 'Run nforge login.',
+  envToken: 'Nothing to do: FORGE_AUTH_TOKEN is in use.',
+  saved: 'Nothing to do.',
+  expired: 'Forge login expired. Run nforge login.',
+} satisfies Record<AuthState['kind'], string>;
+export function authState(
+  deployment: string,
+  override: string | undefined = process.env.FORGE_AUTH_TOKEN,
+): AuthState {
+  if (override) return { kind: 'envToken', token: override };
+  const saved = savedCredential(deployment);
+  if (!saved) return { kind: 'none' };
+  return saved.expiresAt > Date.now()
+    ? { kind: 'saved', token: saved.token, expiresAt: saved.expiresAt }
+    : { kind: 'expired', expiresAt: saved.expiresAt };
+}
 export function resolveAuthToken(
   deployment: string,
   override: string | undefined = process.env.FORGE_AUTH_TOKEN,
 ) {
-  if (override !== undefined) return override;
-  const saved = savedCredential(deployment);
-  invariant(!saved || saved.expiresAt > Date.now(), 'AUTH_EXPIRED', 'Forge login expired. Run nforge login.');
-  return saved?.token;
+  const state = authState(deployment, override);
+  invariant(state.kind !== 'expired', 'AUTH_EXPIRED', AUTH_STATE_NEXT_STEP.expired);
+  return state.kind === 'none' ? undefined : state.token;
 }
 export function hasSavedAuth() {
   return Object.keys(readAuth().deployments).length > 0;

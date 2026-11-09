@@ -9,7 +9,7 @@ import { composeConflictPageSchema } from './hosted-compose.js';
 import { syncInputSchema, syncOutputSchema } from './hosted-sync.js';
 import { saveBytes, savePin } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import type { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 import { resolveDocsComposition } from './native-docs-resolve.js';
@@ -60,6 +60,11 @@ export async function buildHostedSyncState(
       (await resolveCalculate(() => source.state(resolution.draftHead).files)).map(file => [file.path, file]),
     );
     const currentFiles = new Map(state.files.map(file => [file.path, file]));
+    // Issue 113bc7b3: a conflict file placed without markers holds one side unchanged (a binary
+    // conflict, or one side kept whole). Resolving it as is would drop the other side's change
+    // silently, so it needs an edit, the other side's bytes, or an explicit keep.
+    const keep = new Set(work.keep ?? []),
+      unchanged: string[] = [];
     let pin: WorkerPin | null = resolution.conflicts;
     const seen = new Set<string>();
     while (pin) {
@@ -86,8 +91,14 @@ export async function buildHostedSyncState(
         const original = draftFiles.get(conflict.path),
           file = currentFiles.get(conflict.path);
         // Text drafts contain generated marker bytes. Binary and file/directory
-        // conflicts retain the left side unchanged and need no marker parsing.
-        if (!original || original.blob === conflict.left?.blob || !file) continue;
+        // conflicts retain the left side unchanged and need no marker parsing, but must
+        // not stay unchanged unless kept explicitly.
+        if (!original || original.blob === conflict.left?.blob) {
+          const same = original?.blob === file?.blob && original?.mode === file?.mode;
+          if (same && !keep.has(conflict.path)) unchanged.push(conflict.path);
+          continue;
+        }
+        if (!file) continue;
         if (source.resolvedContent) {
           source.resolvedContent(file);
           continue;
@@ -101,6 +112,7 @@ export async function buildHostedSyncState(
       }
       pin = page.next;
     }
+    if (unchanged.length) throw unchangedConflictSides(unchanged, resolution);
     const head = await resolveCalculate(() =>
       source.writeState(state.files, [work.left.object.sha256, resolution.right], plan.message, plan.at),
     );
@@ -262,4 +274,24 @@ export async function buildHostedSyncState(
       maxRssBytes: process.resourceUsage().maxRSS * 1024,
     },
   };
+}
+/** The structured refusal for conflict files still holding one side unchanged. In a Candidate
+ * resolution the draft holds main's side (left) and the Lane is right; in a Lane sync the
+ * draft holds the Lane's side and the sync target is right. */
+export function unchangedConflictSides(
+  paths: string[],
+  resolution: { candidateId: string | null; left: string; right: string },
+) {
+  const held = resolution.candidateId ? "main's version" : "the Lane's version",
+    other = resolution.candidateId ? "the Lane's version" : "the sync target's version",
+    shown = paths.slice(0, 20);
+  return new ForgeError(
+    'CONFLICT_SIDE_REQUIRED',
+    `${shown.join(', ')}${paths.length > shown.length ? ` and ${paths.length - shown.length} more` : ''} ` +
+      `${paths.length === 1 ? 'still holds' : 'still hold'} ${held} unchanged, without conflict markers; resolving now would drop ${other}. ` +
+      `Edit each file, or write ${other} (show {"state":"${resolution.right}","path":"PATH"}), ` +
+      `or keep ${held} explicitly with resolve keep:["PATH"], then resolve again.`,
+    undefined,
+    { paths: shown, more: paths.length - shown.length, held, other, otherState: resolution.right },
+  );
 }

@@ -21,7 +21,14 @@ import { readClientSettings } from './client-settings.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { landingHold } from './hosted-landing-hold.js';
 import { markerIdentity } from './lane-prune.js';
-import { landPhase, landSummary, resultOf, landTerminal } from './hosted-land-summary.js';
+import {
+  landExitsFailed,
+  landOutcomeKind,
+  landPhase,
+  landSummary,
+  resultOf,
+  landTerminal,
+} from './hosted-land-summary.js';
 import { learnFromLanding } from './preflight-learned.js';
 import {
   landAnnouncement,
@@ -313,9 +320,10 @@ export async function hostedLandCli(
     for (const line of lines) process.stderr.write(`${line}\n`);
     learnFromLanding(hostedAgentRoot(root), resultOf(submitted), command.laneId);
     // Not waiting here: an unfinished landing still names the one command that waits for it.
-    const continuation = lines[0]?.startsWith('FAILED')
-      ? undefined
-      : landWaitContinuation(hostedAgentRoot(root), submitted);
+    const continuation =
+      landOutcomeKind(submitted) === 'failed'
+        ? undefined
+        : landWaitContinuation(hostedAgentRoot(root), submitted);
     const awake =
       wake && continuation ? wakeContinuation(hostedAgentRoot(root), continuation.next) : undefined;
     const next = awake?.command ?? continuation?.waitCommand;
@@ -324,7 +332,7 @@ export async function hostedLandCli(
         `land: ${resultOf(submitted).phase === 'finish' ? 'SUBMITTED' : 'IN PROGRESS'}; it settles without you. Run once in the background; its exit is your one wake (landed, failed or cancelled, with the receipt): ${awake.command}\n`,
       );
     else if (next) process.stderr.write(`Next: wait for the outcome with ${next}\n`);
-    if (lines[0]?.startsWith('FAILED')) process.exitCode = 2;
+    if (landOutcomeKind(submitted) === 'failed') process.exitCode = 2;
     else if (
       (wait || wake) &&
       !awake &&
@@ -423,13 +431,8 @@ export async function hostedLandCli(
         (id): id is string => typeof id === 'string',
       ),
     );
-  const outcome = landPhase(final);
-  if (
-    outcome === 'terminal-failed' ||
-    lines[0]?.startsWith('FAILED') ||
-    lines[0]?.startsWith('SYNC REQUIRED')
-  )
-    process.exitCode = 2;
+  // The exit code comes from the typed outcome, never from the printed first line (SM-C M7).
+  if (landExitsFailed(final)) process.exitCode = 2;
   else if (!landTerminal(final)) {
     if (!(resultOf(final).phase === 'check' && resultOf(final).run?.status === 'passed')) {
       const resume = landWaitCommand(transport.root ?? root, final);

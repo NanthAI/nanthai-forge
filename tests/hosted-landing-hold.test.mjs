@@ -188,3 +188,43 @@ test('status {laneId}: this machine remembers the last observed hold, and clears
   registry.recordLaneHold(LANE, incident.operationId, null);
   assert.equal(registry.laneLiveness(LANE).landingHold, undefined);
 });
+
+test('SM-C M7: land and wait exit codes come from a typed outcome kind, not the printed first line', async () => {
+  const { landOutcomeKind, landExitsFailed, landSummary } = await import('../dist/hosted-land-summary.js');
+  const failedBy = (submission, extra = {}) => ({ result: { phase: 'finish', submission, ...extra } });
+  const rows = [
+    [failedBy({ phase: 'landed', observation: { state: 'landed' } }), 'landed', false],
+    [failedBy({ phase: 'terminal-failed', observation: { state: 'terminal-failed' } }), 'failed', true],
+    [
+      failedBy({
+        phase: 'terminal-failed',
+        observation: { state: 'terminal-failed' },
+        error: { code: 'CHECK_FAILED', message: 'Check failed' },
+      }),
+      'failed',
+      true,
+    ],
+    [failedBy({ phase: 'queued', observation: { state: 'superseded' } }), 'superseded', false],
+    [
+      failedBy({ phase: 'queued', observation: { state: 'pending', pendingReason: 'queued' } }),
+      'pending',
+      false,
+    ],
+    [
+      failedBy(
+        { phase: 'queued', observation: { state: 'pending', pendingReason: 'queued' } },
+        { syncRequired: { paths: ['a.txt'], more: 0 } },
+      ),
+      'sync-required',
+      true,
+    ],
+  ];
+  for (const [response, kind, exits] of rows) {
+    assert.equal(landOutcomeKind(response), kind);
+    assert.equal(landExitsFailed(response), exits);
+  }
+  // Reword every printed line: the kind and the exit decision do not move.
+  const failed = failedBy({ phase: 'terminal-failed', observation: { state: 'terminal-failed' } });
+  assert.match(landSummary(failed)[0], /^FAILED/);
+  assert.equal(landExitsFailed({ ...failed, result: { ...failed.result, checkLogs: 'public logs' } }), true);
+});

@@ -7,6 +7,7 @@ import { syncTiming, type StepTimer } from './sync-timing.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { executeHostedFinish } from './hosted-agent-finish.js';
 import { executeHostedWithdraw } from './hosted-agent-withdraw.js';
+import { settleTurnWork } from './agent-turn-work.js';
 import { executeHostedMetrics } from './hosted-agent-metrics.js';
 import { isMachineRunner, machineRunnerDescription } from './hosted-machine-runner.js';
 import { checkLogsField, publicLogsNotice } from './runner-visibility.js';
@@ -857,6 +858,9 @@ export async function executeHostedAgent(
     const cancelled = await session.mutation<Record<string, unknown>>('projectHostedLanding:cancel', {
       request: canonicalPayload(request),
     });
+    // The landing is ended: this turn has nothing left to wait for (SM-C M1).
+    const ended = cancelled?.operationId;
+    if (typeof ended === 'string') settleTurnWork([ended]);
     // Item 4 of the agent defaults: the cheap path after a failure is the same Lane, not a new one.
     return typeof cancelled === 'object' && cancelled ? { ...cancelled, cost: CANCEL_COST } : cancelled;
   }

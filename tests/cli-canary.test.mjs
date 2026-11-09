@@ -36,6 +36,7 @@ import {
   cliCanaryPreSwitch,
   readCliCanaryRefusal,
   rememberCanaryClone,
+  writeCliCanaryRefusal,
 } from '../dist/cli-canary.js';
 
 const a = 'a'.repeat(64),
@@ -955,4 +956,46 @@ test('rollback needs no network and refuses under a measurement hold', async t =
   rmSync(join(f.installation, '.freeze'));
   const result = await cliRollback(f.installation, { migrate: () => {} });
   assert.equal(result.cliCommit, a);
+});
+
+const refusal = (head, over = {}) => ({
+  head,
+  at: new Date().toISOString(),
+  step: 'rollback',
+  reason: 'synthetic',
+  attempts: 1,
+  nextRetryAt: Number.MAX_SAFE_INTEGER,
+  hold: true,
+  alerted: true,
+  ...over,
+});
+
+test('SM-C M20: a passing canary for one head keeps a rollback hold on another head', async t => {
+  const f = fixture(t);
+  f.build(b);
+  f.build(c);
+  const canary = cliCanaryPreSwitch(f.installation, { home: f.home, log: () => {}, alert: async () => {} });
+  writeCliCanaryRefusal(f.installation, refusal(b));
+  await run(f, c, canary);
+  assert.equal(current(f), c);
+  // It cleared any head before; the hold on b lasts until main moves.
+  assert.equal(readCliCanaryRefusal(f.installation)?.head, b);
+  assert.equal(readCliCanaryRefusal(f.installation)?.hold, true);
+});
+
+test('SM-C M20: rollback never overwrites the active refusal of the head main is on', async t => {
+  const f = fixture(t);
+  f.build(b);
+  const canary = cliCanaryPreSwitch(f.installation, { home: f.home, log: () => {}, alert: async () => {} });
+  await run(f, b, canary);
+  assert.equal(current(f), b);
+  // Main moved on to c, which the canary refused (back-off running, not a hold).
+  writeCliCanaryRefusal(
+    f.installation,
+    refusal(c, { step: 'wait', hold: false, nextRetryAt: Date.now() + 3_600_000 }),
+  );
+  const result = await cliRollback(f.installation, { migrate: () => {}, lockWaitMs: 0 });
+  assert.equal(result.status, 'rolled-back');
+  assert.equal(readCliCanaryRefusal(f.installation)?.head, c, 'the refusal that guards main stays');
+  assert.equal(readCliCanaryRefusal(f.installation)?.step, 'wait');
 });

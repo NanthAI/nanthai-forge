@@ -377,3 +377,21 @@ test('duplicate Intent index follows changed outcomes and rebuilds when deleted'
     duplicateStartWarnings(agent.work.store, second.laneId, 'Renamed outcome')[0].includes(first.laneId),
   );
 });
+
+test('SM-C M11: a completed session is completed, not working, however recent its last activity', async () => {
+  const { laneOwnership } = await import('../dist/agent-ownership.js');
+  const now = Date.now(),
+    lane = { id: 'lane-1', owner: { actor: 'builder', at: new Date(now).toISOString() } };
+  const presence = status => ({
+    s1: { sessionId: 's1', name: 'builder', context: { laneId: lane.id }, lastSeen: now - 1000, status },
+  });
+  for (const [status, state] of [
+    ['working', 'working'],
+    ['waiting', 'waiting'],
+    ['completed', 'completed'],
+  ])
+    assert.equal(laneOwnership({}, lane, now, presence(status)).state, state, status);
+  const old = presence('completed');
+  old.s1.lastSeen = now - PRESENCE.workingMs - 1;
+  assert.equal(laneOwnership({}, lane, now, old).state, 'completed');
+});

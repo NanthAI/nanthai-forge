@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { NativeFile } from './native-state-format.js';
 import type { NativeMergeConflict, NativeMergeResolution } from './native-merge.js';
-import { mergeNativeText, markNativeTextConflicts } from './native-text-merge.js';
+import { mergeNativeText, markNativeTextConflicts, wholeFileConflict } from './native-text-merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
@@ -231,16 +231,8 @@ export async function calculateSourceFiles(
       );
       if (marked) {
         kind = 'text';
-        const line = (b: Buffer) => (b.length && b.at(-1) !== 10 ? Buffer.concat([b, Buffer.from('\n')]) : b);
-        bytes = marked.conflicted
-          ? marked.bytes
-          : Buffer.concat([
-              Buffer.from('<<<<<<< lane\n'),
-              line(left),
-              Buffer.from('=======\n'),
-              line(right),
-              Buffer.from(`>>>>>>> ${request.channel}\n`),
-            ]);
+        // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
+        bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, ['lane', request.channel]);
       }
     }
     const pin = bytes

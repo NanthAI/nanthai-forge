@@ -97,6 +97,7 @@ const progressSchema = z
         found: z.boolean(),
         stage: z.number().int().min(0).max(2).optional(),
         binary: z.boolean().optional(),
+        seen: z.number().int().min(0).max(8000).optional(),
         utf8Tail: z.string().max(3).optional(),
       })
       .strict()

@@ -53,6 +53,36 @@ test('native right-first insertions and disjoint text edits are byte-identical',
   const file = JSON.parse(s.objects.get(result.state.sha256)).files.find(f => f.path === 'a.txt');
   assert.equal(s.objects.get(file.blob).toString(), 'first\na\nY\nX\nb\nc\nlast\n');
 });
+test('incident 113bc7b3: Windows-1252 CRLF disjoint edits merge in the hosted sync worker byte-exact; same-line edits get CRLF markers', async t => {
+  const s = await composeFixture(),
+    latin = text => Buffer.from(text, 'latin1');
+  const root = s.state([s.file('legacy.c', latin('/* caf\xe9 */\r\nint a;\r\nint b;\r\n')), s.hidden]);
+  const left = s.state(
+    [s.file('legacy.c', latin('/* d\xe9j\xe0 */\r\nint a;\r\nint b;\r\n')), s.hidden],
+    [root.sha256],
+  );
+  const right = s.state(
+    [s.file('legacy.c', latin('/* caf\xe9 */\r\nint a;\r\nint b = \x93q\x94;\r\n')), s.hidden],
+    [root.sha256],
+  );
+  const { result } = await parity(t, s, left, right);
+  assert.equal(result.status, 'merged');
+  const file = JSON.parse(s.objects.get(result.state.sha256)).files.find(f => f.path === 'legacy.c');
+  assert.deepEqual(s.objects.get(file.blob), latin('/* d\xe9j\xe0 */\r\nint a;\r\nint b = \x93q\x94;\r\n'));
+  const other = s.state(
+    [s.file('legacy.c', latin('/* caf\xe9 */\r\nint a;\r\nint b = \xf1;\r\n')), s.hidden],
+    [root.sha256],
+  );
+  const conflict = (await parity(t, s, right, other)).result;
+  assert.equal(conflict.status, 'conflict');
+  const draft = JSON.parse(s.objects.get(conflict.state.sha256)).files.find(f => f.path === 'legacy.c');
+  assert.deepEqual(
+    s.objects.get(draft.blob),
+    latin(
+      '/* caf\xe9 */\r\nint a;\r\n<<<<<<< lane\r\nint b = \x93q\x94;\r\n=======\r\nint b = \xf1;\r\n>>>>>>> target\r\n',
+    ),
+  );
+});
 for (const recursive of [false, true])
   for (const kind of ['text', 'binary', 'mode', 'delete', 'path', 'symlink']) {
     test(`${recursive ? 'recursive' : 'single'} ${kind} draft uses local native conflict semantics`, async t => {
@@ -137,34 +167,62 @@ test('250 conflict paths page automatically and fetch each affected object once'
   assert.equal(new Set(output.reads.map(p => p.sha256)).size, output.reads.length);
   t.diagnostic(JSON.stringify({ ...output.metrics, conflictPages: pages }));
 });
-test('binary choose-left resolution is explicit even with unchanged file bytes', async () => {
+// Incident 113bc7b3: a binary conflict's draft holds one side unchanged. Resolving it untouched
+// used to drop the other side silently; it is refused until the file changes or is kept explicitly.
+test('incident 113bc7b3: an unchanged binary conflict is refused; an explicit keep resolves choose-left', async () => {
   const s = await composeFixture(),
     root = s.state([s.file('f', 'base\0'), s.hidden]),
     left = s.state([s.file('f', 'left\0'), s.hidden], [root.sha256]),
     right = s.state([s.file('f', 'right\0'), s.hidden], [root.sha256]);
   const draft = await s.compute(plan(left, right)),
     conflict = JSON.parse(draft.manifest).result;
-  const resolution = {
-    candidateId: null,
-    conflicts: conflict.conflicts,
-    left: left.sha256,
-    right: right.sha256,
-    draftHead: conflict.state.sha256,
-    status: 'pending',
-  };
-  const completed = await s.compute({
+  for (const candidateId of [null, '00000000-0000-4000-8000-000000000001']) {
+    const resolution = {
+      candidateId,
+      conflicts: conflict.conflicts,
+      left: left.sha256,
+      right: right.sha256,
+      draftHead: conflict.state.sha256,
+      status: 'pending',
+    };
+    const work = { mode: 'resolve', left: { object: conflict.state, recipe: null }, resolution };
+    await assert.rejects(s.compute({ ...plan(left, right), work }), error => {
+      assert.equal(error.code, 'CONFLICT_SIDE_REQUIRED');
+      assert.deepEqual(error.recovery.paths, ['f']);
+      assert.equal(error.recovery.otherState, right.sha256);
+      assert.match(error.message, candidateId ? /main's version unchanged/ : /the Lane's version unchanged/);
+      assert.match(error.message, /keep:\["PATH"\]/);
+      return true;
+    });
+    const completed = await s.compute({ ...plan(left, right), work: { ...work, keep: ['f'] } });
+    const result = JSON.parse(completed.manifest).result,
+      state = JSON.parse(s.objects.get(result.state.sha256));
+    assert.equal(result.status, 'resolved');
+    assert.equal(result.resolution.status, 'resolved');
+    assert.deepEqual(state.parents, [conflict.state.sha256, right.sha256]);
+    assert.equal(
+      state.files.find(f => f.path === 'f').blob,
+      JSON.parse(s.objects.get(left.sha256)).files.find(f => f.path === 'f').blob,
+    );
+  }
+  // Writing the other side's bytes is an explicit choice and needs no keep.
+  const chosen = s.state([s.file('f', 'right\0'), s.hidden], [conflict.state.sha256]);
+  const taken = await s.compute({
     ...plan(left, right),
-    work: { mode: 'resolve', left: { object: conflict.state, recipe: null }, resolution },
+    work: {
+      mode: 'resolve',
+      left: { object: chosen, recipe: null },
+      resolution: {
+        candidateId: null,
+        conflicts: conflict.conflicts,
+        left: left.sha256,
+        right: right.sha256,
+        draftHead: conflict.state.sha256,
+        status: 'pending',
+      },
+    },
   });
-  const result = JSON.parse(completed.manifest).result,
-    state = JSON.parse(s.objects.get(result.state.sha256));
-  assert.equal(result.status, 'resolved');
-  assert.equal(result.resolution.status, 'resolved');
-  assert.deepEqual(state.parents, [conflict.state.sha256, right.sha256]);
-  assert.equal(
-    state.files.find(f => f.path === 'f').blob,
-    JSON.parse(s.objects.get(left.sha256)).files.find(f => f.path === 'f').blob,
-  );
+  assert.equal(JSON.parse(taken.manifest).result.status, 'resolved');
 });
 test('unrelated roots, substituted drafts and corrupt ancestry fail without guessing source', async () => {
   const s = await composeFixture(),

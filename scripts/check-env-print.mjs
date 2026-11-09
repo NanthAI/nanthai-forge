@@ -11,10 +11,35 @@ const MARKER = /forge-env-print:\s*name-only/;
 // A sentence that forbids a command is a rule, not an instruction to run it.
 const NEGATED = /\b(?:never|not|no|don't|dont|avoid|forbid(?:den|s)?|instead of|without|refuse[sd]?)\b/i;
 
+// `env` is the command only in a command position (friction 9ed03b2b): the start of the text, or after
+// `;`, `&&`, `||`, `&`, `$(` or a backtick, or after a pipe whose left side is a command with arguments.
+// As an identifier in a code span it is not one: a function argument `f(env)`, a union member
+// `A | env`, a name inside quotes.
+function bareEnvCommand(text) {
+  for (const match of text.matchAll(/\benv\b/g)) {
+    const before = text.slice(0, match.index),
+      after = text.slice(match.index + 3);
+    const follow = /^\s*(?:$|[|>;&`)])/.exec(after);
+    if (!follow) continue;
+    const lead = /(?:^|;|&&|\|\||&|\$\(|`|\|)\s*(?:sudo\s+)?$/.exec(before);
+    if (!lead) continue;
+    const operator = lead[0].trimStart()[0];
+    // `)` closes a command substitution only; elsewhere it closes a call such as `f(env)`.
+    if (/^\s*\)/.test(after) && !lead[0].includes('$(')) continue;
+    if (operator === '|' && !lead[0].startsWith('||')) {
+      // Left side of a pipe: a command has arguments; a lone word or literal is a union member.
+      const left = before.slice(0, lead.index).trim();
+      if (/\s/.test(left) === false || /['"`]$/.test(left)) continue;
+    }
+    return true;
+  }
+  return false;
+}
+
 const SHELL_RULES = [
   ['printenv', /(?:^|[\s;|&(`$])printenv\b/],
   ['convex env list', /\bconvex\s+env\s+list\b/],
-  ['bare env', /(?:^|[;|&(`]|\$\()\s*(?:sudo\s+)?env\s*(?:$|[|>;&`)])/],
+  ['bare env', { test: bareEnvCommand }],
   ['pgrep -fl', /\bpgrep\s+(?:-\w+\s+)*-\w*(?:f\w*l|l\w*f|a)\w*\b/],
   // macOS `ps -E` and BSD `ps e`/`ps auxeww` append each process's environment.
   ['ps -E', /(?:^|[\s;|&(`])ps\s+(?:-\w+\s+)*(?:-\w*E\w*|[aAjluvwx]*e[aAjluvwx]*)(?=\s|$|[|;&`)])/],

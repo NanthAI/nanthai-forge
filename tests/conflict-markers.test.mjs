@@ -39,9 +39,27 @@ test('conflict detection requires a complete ordered three-marker text hunk', ()
   }
 });
 
-test('binary and invalid UTF-8 are not text; multibyte text survives one-byte chunks', () => {
-  assert.equal(hasConflictMarkers(Buffer.concat([Buffer.from([255]), Buffer.from(hunk)])), false);
-  assert.equal(hasConflictMarkers(Buffer.concat([Buffer.from(hunk), Buffer.from([0xe2])])), false);
+test('incident 113bc7b3: binary is a NUL in the first 8,000 bytes; non-UTF-8 text is scanned; multibyte text survives one-byte chunks', () => {
+  // Windows-1252 bytes and a cut UTF-8 sequence are text: markers written into them must be found.
+  assert.equal(hasConflictMarkers(Buffer.concat([Buffer.from([255, 10]), Buffer.from(hunk)])), true);
+  assert.equal(hasConflictMarkers(Buffer.concat([Buffer.from(hunk), Buffer.from([0xe2])])), true);
+  assert.equal(hasConflictMarkers(Buffer.from(`caf\xe9\n${hunk}`, 'latin1')), true);
+  assert.equal(
+    hasConflictMarkers(
+      Buffer.concat([Buffer.from('x'.repeat(7999)), Buffer.from([0]), Buffer.from(`\n${hunk}`)]),
+    ),
+    false,
+  );
+  const late = Buffer.concat([Buffer.from('x'.repeat(8000)), Buffer.from([0]), Buffer.from(`\n${hunk}`)]);
+  assert.equal(hasConflictMarkers(late), true, 'a NUL after the window does not hide markers');
+  for (const width of [1, 7, 4096]) {
+    let scan = conflictMarkerScan();
+    for (let i = 0; i < late.length; i += width) {
+      scanConflictMarkers(scan, late.subarray(i, i + width));
+      scan = JSON.parse(JSON.stringify(scan));
+    }
+    assert.equal(conflictMarkersFound(scan), true, `chunks of ${width}`);
+  }
   const scan = conflictMarkerScan();
   for (const byte of Buffer.from(`文\n${hunk}文`)) scanConflictMarkers(scan, Uint8Array.of(byte));
   assert.equal(conflictMarkersFound(scan), true);

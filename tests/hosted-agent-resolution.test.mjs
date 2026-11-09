@@ -269,3 +269,71 @@ test('a durable asynchronous finish automatically syncs its terminal conflict on
   assert.match(recovered.result.recovery.conflict.files[0].content, /<<<<<<< lane/);
   assert.match(recovered.result.recovery.conflict.command, / resolve /);
 });
+
+test('incident 113bc7b3: resolve refuses a binary conflict left unchanged, then an explicit keep resolves it', async t => {
+  const s = await resolutionFixture(t, { overlap: true }),
+    f = s.f;
+  const peer = await f.c.lane(
+    f.c.state([f.c.file('a.txt', Buffer.from('peer\0binary\n')), f.c.hidden], [f.c.baseline.sha256]),
+  );
+  await f.landOriginal();
+  await s.transport().dispatch('open', { laneId: peer.laneId });
+  const result = await s.transport().dispatch('finish', { laneId: peer.laneId, accept: true });
+  const conflict = result.result.recovery.conflict;
+  assert.deepEqual(conflict.paths, ['a.txt']);
+  const held = readFileSync(join(conflict.root, 'a.txt'));
+  const resolve = { ...conflict.next };
+  delete resolve.action;
+  const refused = await s
+    .transport(conflict.root)
+    .dispatch('resolve', resolve)
+    .catch(error => error);
+  // The old behaviour resolved here and the landing dropped the Lane's binary edit silently.
+  assert.equal(refused.code, 'CONFLICT_SIDE_REQUIRED');
+  assert.deepEqual(refused.recovery.paths, ['a.txt']);
+  assert.match(refused.message, /drop the other side's change/);
+  assert.deepEqual(refused.recovery.choices.keep.next.keep, ['a.txt']);
+  assert.equal(refused.recovery.choices.edit.next.keep, undefined);
+  assert.notEqual(refused.recovery.choices.keep.next.operationId, resolve.operationId);
+  assert.equal((await f.readLane(conflict.laneId)).resolution.status, 'pending');
+  assert.deepEqual(readFileSync(join(conflict.root, 'a.txt')), held, 'the refusal changes no file');
+  const keep = { ...refused.recovery.choices.keep.next };
+  delete keep.action;
+  const kept = await s.transport(conflict.root).dispatch('resolve', keep);
+  assert.equal(kept.result.source.outcome.result.status, 'resolved', 'an explicit keep resolves');
+  assert.deepEqual(readFileSync(join(conflict.root, 'a.txt')), held);
+});
+
+test('incident 113bc7b3: a hosted failed outcome carries only the refusal code; resolve still names the files and choices', async t => {
+  const { failedCode, unchangedSideRefusal } = await import('../dist/hosted-unchanged-side.js');
+  const { rememberConflictPaths } = await import('../dist/hosted-conflict-precheck.js');
+  const { mkdtempSync, rmSync, mkdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const terminal = {
+    attemptId: randomUUID(),
+    at: '2026-01-01T00:00:00.000Z',
+    outcome: { status: 'failed', error: { code: 'CONFLICT_SIDE_REQUIRED', message: 'generic' } },
+  };
+  assert.equal(failedCode(terminal), 'CONFLICT_SIDE_REQUIRED');
+  assert.equal(failedCode({ outcome: { status: 'completed', result: {} } }), null);
+  const parent = mkdtempSync(join(tmpdir(), 'forge-unchanged-side-')),
+    root = join(parent, 'lane');
+  t.after(() => rmSync(parent, { recursive: true, force: true }));
+  const { clientCacheRoot } = await import('../dist/root-paths.js');
+  mkdirSync(root);
+  mkdirSync(clientCacheRoot(root), { recursive: true });
+  const laneId = randomUUID();
+  writeFileSync(join(root, 'logo.bin'), Buffer.from('main\0'));
+  mkdirSync(join(root, 'src'));
+  writeFileSync(join(root, 'src', 'a.txt'), '<<<<<<< lane\nx\n=======\ny\n>>>>>>> target\n');
+  rememberConflictPaths(root, laneId, ['logo.bin', 'src/a.txt'], { laneId, operationId: randomUUID() });
+  const error = unchangedSideRefusal(root, laneId, { message: 'm' });
+  assert.equal(error.code, 'CONFLICT_SIDE_REQUIRED');
+  assert.deepEqual(
+    error.recovery.paths,
+    ['logo.bin'],
+    'files still holding markers are not offered for keep',
+  );
+  assert.deepEqual(error.recovery.choices.keep.next.keep, ['logo.bin']);
+  assert.match(error.message, /logo\.bin still holds one side unchanged/);
+});

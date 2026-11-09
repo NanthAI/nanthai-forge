@@ -288,3 +288,20 @@ test('a code change beside those documents still selects its real tests', () => 
   for (const test of [at('tests', 'check-brief.test.mjs'), at('tests', 'planning-search.test.mjs')])
     assert.ok(mandatory.includes(test), `${test} must be mandatory`);
 });
+
+test('SM-C M4: an environment receipt reads ENVIRONMENT, never FAILED; the gate and the summary share one outcome', async () => {
+  const { preflightOutcome } = await import('../dist/agent-preflight-incomplete.js');
+  const environment = { kind: 'program-missing', units: ['x'] };
+  const incomplete = { mustRun: 1, finish: 'f', estimateMinutes: 1 };
+  const rows = [
+    [{ passed: true }, 'passed', 'passed'],
+    [{ passed: false, incomplete }, 'incomplete', 'NOT COMPLETE'],
+    [{ passed: false, environment }, 'environment', 'ENVIRONMENT (not a failed run)'],
+    [{ passed: false, environment, incomplete }, 'environment', 'ENVIRONMENT (not a failed run)'],
+    [{ passed: false }, 'failed', 'FAILED'],
+  ];
+  for (const [receipt, outcome, word] of rows) {
+    assert.equal(preflightOutcome(receipt), outcome);
+    assert.equal(preflightVerdict(receipt), word);
+  }
+});

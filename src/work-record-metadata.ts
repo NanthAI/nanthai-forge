@@ -7,6 +7,7 @@ import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { LocalWorkCommand, Lane } from './work-types.js';
 import { applyIntentMetadata } from './work-metadata.js';
 import { invariant } from './errors.js';
+import { assertLaneStatusTransition } from './lane-state-transition.js';
 import { NativeSource } from './native-source.js';
 import { validateAnchorView, validateAnchorFile } from './work-source-anchor.js';
 import { headAt } from './work-git.js';
@@ -124,6 +125,7 @@ export function recordMetadata(
             'LANE_STALE',
             'Lane has later work; leave that head open.',
           );
+          assertLaneStatusTransition(found.record.state, command.state);
           options.workspace?.(found.record);
           if (command.state === 'completed' || Object.hasOwn(found.counts, 'lifecycle')) {
             if (found.record.state !== command.state)

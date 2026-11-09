@@ -176,7 +176,12 @@ export async function prepareHostedSync(
     const left = await saveObject(ctx, auth.projectId, { sha256: lane.head });
     if (request.kind === 'resolve') {
       invariant(lane.resolution?.status === 'pending', 'WORK_STALE', 'Select the pending resolution Lane.');
-      work = { mode: 'resolve', left, resolution: lane.resolution };
+      work = {
+        mode: 'resolve',
+        left,
+        resolution: lane.resolution,
+        ...(request.keep ? { keep: request.keep } : {}),
+      };
     } else {
       const target = request.target;
       if (target.kind === 'main') {

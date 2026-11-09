@@ -580,7 +580,10 @@ export const cliCanaryPreSwitch =
         ...(hooks.stepMs ? { stepMs: hooks.stepMs } : {}),
         ...(hooks.home ? { home: hooks.home } : {}),
       });
-      clearCliCanaryRefusal(installation);
+      // A pass for this head ends its own refusal and any stale back-off, never a rollback hold on
+      // another head (SM-C M20): that hold lasts until main moves.
+      const held = readCliCanaryRefusal(installation);
+      if (!held?.hold || held.head === head) clearCliCanaryRefusal(installation);
       log(
         `Forge CLI canary passed for ${head.slice(0, 8)} in ${((now() - started) / 1000).toFixed(1)}s: ` +
           result.steps

@@ -522,7 +522,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   and join the deferred set; `stoppedRerun` is `preflight '{"laneId":"…","retry":true}'`, which
   plans exactly those files (passes are reused, no filler). When a stopped file is must-run
   (changed, learned or direct), the run is **NOT COMPLETE**: not passed (`passed: false`) and not
-  failed (`exitCode: 0`). `incomplete` counts those files (`mustRun`, listed first in `stopped`)
+  failed (`exitCode: 0`). An environment result (a program missing here, a wedged tool) reads
+  `ENVIRONMENT (not a failed run)` in the summary and `status: "environment"` in the land
+  advisory, never FAILED. `incomplete` counts those files (`mustRun`, listed first in `stopped`)
   and gives the one command that finishes them, `finish`:
   `preflight '{"laneId":"…","retry":true,"trim":false}'`, the stopped files with no wall-time cap,
   priced in `estimateMinutes` at this run's speed. `land --save` reports it as

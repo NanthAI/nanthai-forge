@@ -1664,3 +1664,22 @@ for (const cohort of [false, true])
     assert.equal(git(f.remote, ['rev-parse', 'main^']).trim(), previous);
     assert.equal(result.alreadyPushed, true);
   });
+
+test('SM-C M17: a push that finds main not yet green says it is retrying and releases its worker, never left pushing', async t => {
+  const f = fixture(t);
+  await green(f);
+  await mirrorPolicy(f);
+  const { ForgeError } = await import('../dist/errors.js');
+  await drainGithubPush(f.work.store, {
+    debounceMs: 0,
+    retryMs: 1,
+    sync: async () => {
+      throw new ForgeError('GITHUB_SYNC_CHECK_PENDING', 'Current main has no passing check.');
+    },
+  });
+  const status = f.work.store.load().githubAutoPush;
+  assert.equal(status.status, 'retrying');
+  assert.equal(status.code, 'GITHUB_SYNC_CHECK_PENDING');
+  assert.match(status.detail, /post-accept check/);
+  assert.equal(status.worker, undefined, 'the worker is released');
+});

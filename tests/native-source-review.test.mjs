@@ -155,3 +155,53 @@ test('saved file link reads its requested line from exact retained source', asyn
     { code: 'BAD_ARGUMENT' },
   );
 });
+
+test('incident 113bc7b3: review diff shows Windows-1252 hunks losslessly; UTF-8 unchanged; NUL stays binary', async () => {
+  const { computeHunks } = await import('../dist/review-hunks-core.js');
+  const latin = text => Buffer.from(text, 'latin1');
+  const before = latin('/* caf\xe9 */\r\nint a = 1;\r\nint b = 2; /* \\ok */\r\n'),
+    after = latin('/* caf\xe9 */\r\nint a = 10; /* \x93q\x94 */\r\nint b = 2; /* \\ok */\r\n');
+  const diff = computeHunks(before, after, 1);
+  assert.equal(diff.encoding, 'not-utf-8');
+  assert.equal(diff.truncated, false);
+  assert.deepEqual(diff.hunks, [
+    {
+      beforeStart: 1,
+      afterStart: 1,
+      beforeLines: 3,
+      afterLines: 3,
+      lines: [
+        { kind: 'context', text: '/* caf\\xe9 */\r', escaped: true },
+        { kind: 'removed', text: 'int a = 1;\r' },
+        { kind: 'added', text: 'int a = 10; /* \\x93q\\x94 */\r', escaped: true },
+        { kind: 'context', text: 'int b = 2; /* \\ok */\r' },
+      ],
+    },
+  ]);
+  // Lossless: an escaped line decodes back to its exact bytes (backslash doubled, \xNN per byte).
+  const unescape = text =>
+    latin(
+      text.replace(/\\(\\|x([0-9a-f]{2}))/g, (_, all, hex) =>
+        hex ? String.fromCharCode(parseInt(hex, 16)) : '\\',
+      ),
+    );
+  assert.deepEqual(unescape(diff.hunks[0].lines[2].text), latin('int a = 10; /* \x93q\x94 */\r'));
+  const { displayLine } = await import('../dist/text-bytes.js');
+  const shown = displayLine(latin('a\\b\xff'));
+  assert.deepEqual(shown, { text: 'a\\\\b\\xff', escaped: true });
+  assert.deepEqual(unescape(shown.text), latin('a\\b\xff'));
+  const utf8 = computeHunks(Buffer.from('é\nb\n'), Buffer.from('é\nc\n'), 1);
+  assert.equal(utf8.encoding, undefined);
+  assert.deepEqual(utf8.hunks[0].lines, [
+    { kind: 'context', text: 'é' },
+    { kind: 'removed', text: 'b' },
+    { kind: 'added', text: 'c' },
+    { kind: 'context', text: '' },
+  ]);
+  const binary = computeHunks(Buffer.from('a\0\n'), Buffer.from('b\0\n'), 3);
+  assert.deepEqual(binary, {
+    hunks: [],
+    content: 'binary or over 1 MiB; hashes remain exact',
+    truncated: true,
+  });
+});

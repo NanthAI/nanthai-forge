@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { backgroundWake } from './agent-wake.js';
+import { processStartTime } from './local-process.js';
 
 /** Machine-local ledger of unfinished Forge work an agent session started: one small
  * file per client session, written only by Forge commands that session runs, read once
@@ -17,6 +18,8 @@ const entrySchema = z.object({
   input: z.record(z.string(), z.unknown()),
   /** The Forge process observing it now; a dead pid means nobody is waiting. */
   pid: z.number().int().nullable(),
+  /** The observer's kernel start identity: with the pid it tells a reused pid from the observer. */
+  startTime: z.string().optional(),
   /** How the recording client wakes the agent when a background command exits
    * (agent-wake.ts); absent when it does not. */
   wake: z.enum(['background', 'trusted']).optional(),
@@ -81,10 +84,12 @@ export function recordTurnWork(
   session = turnSessionKey(),
 ) {
   const wake = backgroundWake();
+  const startTime = work.startTime ?? (work.pid === null ? undefined : processStartTime(work.pid));
   return update(session, ledger => {
     const entry = entrySchema.parse({
       ...(wake ? { wake } : {}),
       ...work,
+      ...(startTime ? { startTime } : {}),
       observedAt: work.observedAt ?? Date.now(),
     });
     return {

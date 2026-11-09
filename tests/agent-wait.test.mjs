@@ -338,7 +338,8 @@ test('MCP exposes forge_wait and live progress notifications with cancellation',
       },
     },
   );
-  assert.equal(result.isError, true);
+  // SM-C M24 (Issue 68361cd5): a plain budget timeout is an answer, not an MCP error (the hosted tool agrees).
+  assert.notEqual(result.isError, true);
   assert.equal(notifications.length, 2);
   assert.equal(JSON.parse(notifications[0].params.message).type, 'lane');
   assert.equal(JSON.parse(result.content[0].text.split('\n').at(-1)).status, 'timeout');
@@ -377,4 +378,22 @@ test('live shard progress wakes any-change without changing Work metadata', asyn
   assert.equal(summary.status, 'changed');
   assert.ok(wait.events.some(e => e.type === 'progress' && e.reason === 'Completed shard 0 (exit 0)'));
   assert.deepEqual(store.pointer(), before);
+});
+
+test('SM-C M5: wait reads an entry status through one table; an unrecognized status is unknown, not a failure', async () => {
+  const { waitStatusClass } = await import('../dist/agent-wait-observation.js');
+  for (const [status, expected] of [
+    ['queued', 'pending'],
+    ['checking', 'pending'],
+    ['accepted', 'success'],
+    ['landed', 'success'],
+    ['failed', 'failure'],
+    ['cancelled', 'failure'],
+    ['conflict', 'failure'],
+    ['awaiting-review', 'failure'],
+    ['source-changed', 'failure'],
+    ['status-from-a-newer-build', 'unknown'],
+    ['', 'unknown'],
+  ])
+    assert.equal(waitStatusClass(status), expected, status);
 });

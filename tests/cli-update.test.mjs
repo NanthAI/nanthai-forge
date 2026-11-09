@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
-import { cliUpdateRun } from '../dist/cli-update.js';
+import { cliUpdateRun, cliUpdateRunning } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli as updateCliChecked } from '../dist/cli-update.js';
 import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
@@ -1486,4 +1486,23 @@ test('each installed build keeps one private compile cache, and caches of remove
   const blocked = run(f.old);
   assert.equal(blocked.status, 0, 'a cache failure never stops the command');
   assert.equal(blocked.stdout, '', 'and the command runs uncached');
+});
+
+test('SM-C M15: the update lock is live for its recorded process and not for a reused pid', async t => {
+  const installation = mkdtempSync(join(tmpdir(), 'forge-update-lock-'));
+  t.after(() => rmSync(installation, { recursive: true, force: true }));
+  const slot = join(installation, 'update-lock', '1');
+  mkdirSync(slot, { recursive: true });
+  const { processStartTime } = await import('../dist/local-process.js');
+  const start = processStartTime(process.pid);
+  assert.ok(start);
+  writeFileSync(join(slot, 'pid'), String(process.pid));
+  writeFileSync(join(slot, 'start'), start);
+  assert.equal(cliUpdateRunning(installation), true, 'the recorded updater is running');
+  // The pid is alive but now belongs to another process: the updater that held the lock is gone.
+  writeFileSync(join(slot, 'start'), 'Thu Jan  1 00:00:00 1970');
+  assert.equal(cliUpdateRunning(installation), false, 'a reused pid is not the updater');
+  // A legacy slot (pid only) stays conservative.
+  rmSync(join(slot, 'start'));
+  assert.equal(cliUpdateRunning(installation), true);
 });

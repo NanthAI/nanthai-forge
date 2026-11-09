@@ -16,7 +16,7 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { workProgress, workProgressIdentity } from './work-progress.js';
 import { CheckQueue, queueHolder } from './check-queue.js';
-import { processAliveCached, processIdentity } from './local-process.js';
+import { processAliveCached, processIdentityIfKnown } from './local-process.js';
 import { ForgeError, invariant } from './errors.js';
 
 export type WorkLockOptions = {
@@ -154,7 +154,7 @@ function* lockAdmission<T>(path: string, run: () => T, options: WorkLockOptions)
       yield Math.min(25, Math.max(1, waitMs - (Date.now() - began)));
     }
     const started = Date.now(),
-      identity = processIdentity(),
+      identity = processIdentityIfKnown(),
       owner = {
         ...identity,
         ...workProgressIdentity(),

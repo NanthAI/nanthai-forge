@@ -8,15 +8,15 @@ import {
   settleTurnWork,
   type TurnWork,
 } from './agent-turn-work.js';
-import { LANDING_DROP_MS } from './landing-stall.js';
 import { WAKE_BUDGET_SECONDS } from './agent-wake.js';
+import {
+  turnEntryStale,
+  turnObserverAlive,
+  TURN_WORK_STALE_MS,
+  TURN_WORK_WARM_MS,
+} from './agent-turn-state.js';
 
-/** A ledger entry observed this recently needs no hosted confirmation. */
-export const TURN_WORK_WARM_MS = 30_000;
-/** A dead observer whose last observation is older than the landing queue's own maximum
- * life (a pending landing with no progress is dropped after this long) cannot be live
- * work any more: the entry is pruned. */
-export const TURN_WORK_STALE_MS = LANDING_DROP_MS;
+export { TURN_WORK_STALE_MS, TURN_WORK_WARM_MS };
 const PROBE_DEADLINE_MS = 2500;
 /** `unknown`: the probe could not confirm either way (no address, error, deadline). */
 export type TurnWorkState = 'running' | 'terminal' | 'unknown';
@@ -32,15 +32,6 @@ export function turnEndMessage(work: Pick<TurnWork, 'id' | 'kind' | 'wake'>, wat
     ? `${what} Its settle wait runs in the background. ${block}; otherwise stop again: its exit wakes you.`
     : `${what} Run once in the background: nforge wait ${work.id} --budget ${WAKE_BUDGET_SECONDS}; its exit wakes you when it settles. ${block}. To stop anyway, stop again.`;
 }
-const alive = (pid: number) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'EPERM';
-  }
-};
-
 /** Claude Code Stop / Codex Stop hook. Blocks only the first stop attempt while this
  * session owns unfinished Forge work; the next attempt is always allowed. Cost: one
  * local ledger read; at most one hosted query, only when no live or recent observation
@@ -62,18 +53,18 @@ export async function turnEndDecision(
   // A live observer the owner trusts to wake the agent (turn end never ends its task):
   // stopping now costs nothing, the observer's exit re-invokes the agent on settle.
   const now = options.now ?? Date.now();
-  const stale = ledger.work.filter(work => staleTurnWork(work, now));
+  const stale = ledger.work.filter(work => turnEntryStale(work, now));
   if (stale.length)
     settleTurnWork(
       stale.map(work => work.id),
       session,
     );
   const unwatched = ledger.work.filter(
-    work => !stale.includes(work) && !(work.wake === 'trusted' && work.pid !== null && alive(work.pid)),
+    work => !stale.includes(work) && !(work.wake === 'trusted' && turnObserverAlive(work)),
   );
   if (!unwatched.length) return {};
   let selected =
-    unwatched.find(work => work.pid !== null && alive(work.pid)) ??
+    unwatched.find(work => turnObserverAlive(work)) ??
     unwatched.find(work => now - work.observedAt < TURN_WORK_WARM_MS);
   if (!selected) {
     // Cold cache: confirm only the most recent entry with one hosted query.
@@ -88,14 +79,8 @@ export async function turnEndDecision(
   if (!markTurnBlocked(selected.id, session, now)) return {};
   return {
     decision: 'block',
-    reason: turnEndMessage(selected, selected.pid !== null && alive(selected.pid)),
+    reason: turnEndMessage(selected, turnObserverAlive(selected)),
   };
-}
-/** No live observer and no observation inside the queue's maximum life, or a root that
- * is gone: nothing here can be confirmed or waited on. */
-function staleTurnWork(work: TurnWork, now: number) {
-  if (!existsSync(work.root)) return true;
-  return (work.pid === null || !alive(work.pid)) && now - work.observedAt > TURN_WORK_STALE_MS;
 }
 async function withDeadline(probe: Promise<TurnWorkState>): Promise<TurnWorkState> {
   let timer: NodeJS.Timeout | undefined;

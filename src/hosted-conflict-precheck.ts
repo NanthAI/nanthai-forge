@@ -93,6 +93,10 @@ export function rememberConflictPaths(
     }),
   );
 }
+/** The original Lane this folder's retained resolution was made for, when known. */
+export function inPlaceOrigin(root: string) {
+  return context(root)?.originLaneId;
+}
 /** The resolution Lane this folder became for `originLaneId`, with its retained paths. */
 export function inPlaceResolution(root: string, originLaneId: string) {
   const saved = context(root);

@@ -19,6 +19,7 @@ export function resolveSyncRequest(then: SaveThen, laneId: string, saved: unknow
       lifecycleVersion: then.lifecycleVersion,
     }),
     message: then.message,
+    ...(then.keep ? { keep: then.keep } : {}),
   });
 }
 

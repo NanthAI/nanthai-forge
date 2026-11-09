@@ -38,6 +38,7 @@ import {
 import { migrateEditHookRunner } from './agent-install-hooks.js';
 import type { HostedMain } from './hosted-main.js';
 import { clientCacheRoot } from './root-paths.js';
+import { processAlive } from './local-process.js';
 import { cliPackageRoot } from './cli-installation.js';
 import { shellQuote } from './agent-brief-render.js';
 import {
@@ -59,8 +60,14 @@ export function cliUpdateRunning(installation: string) {
   try {
     const pid = Number(readFileSync(join(slot, 'pid'), 'utf8'));
     if (!Number.isSafeInteger(pid) || pid <= 0) return Date.now() - statSync(slot).mtimeMs < 60_000;
-    process.kill(pid, 0);
-    return true;
+    // The slot records the holder's start time next to its pid: a reused pid is not the updater.
+    let startTime: string | undefined;
+    try {
+      startTime = readFileSync(join(slot, 'start'), 'utf8') || undefined;
+    } catch {
+      /* a legacy slot has no start identity: pid only */
+    }
+    return processAlive({ pid, startTime });
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'EPERM';
   }

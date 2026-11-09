@@ -51,6 +51,8 @@ export const ghFields = {
     'deployment',
     'host',
     'authenticated',
+    'state',
+    'nextStep',
     'account',
     'source',
     'tokenSource',

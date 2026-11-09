@@ -66,7 +66,9 @@ verified account's Forge handle, never the account id or a display name. `hosts`
 host-to-account-array map with host/login/active/state/tokenSource. Environment
 overrides use tokenSource FORGE_AUTH_TOKEN; saved credentials use saved. Signed
 out exits 1; verified authentication exits 0; unavailable verification is a
-structured error and exits 1.
+structured error and exits 1. `state` is `none`, `saved`, `envToken` or `expired` with a
+`nextStep`; an expired saved login prints `authenticated:false` with `state:"expired"` and
+exits 1 instead of failing. An empty `FORGE_AUTH_TOKEN` counts as unset.
 
 ## JSON fields
 

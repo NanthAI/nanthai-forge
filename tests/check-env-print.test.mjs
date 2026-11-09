@@ -74,3 +74,17 @@ test('markers, the allowlist and synthetic tests are exempt; other paths are not
   assert.equal(envPrintFindings('README.md', 'Run `printenv` first.').length, 1);
   assert.deepEqual(envPrintFindings('scripts/data.json', '{"run":"printenv"}'), []);
 });
+
+test('friction 9ed03b2b: `env` as an identifier in a code span is not the env command; real command positions still are', () => {
+  const doc = [
+    'Run the loader with `load(env)` and read `type Mode = "ci" | env | "local"` for the modes.', // identifiers
+    'Run `env` to see the values.',
+    'Run `echo go; env` once.',
+    'Run `cat names | env` once.',
+    'Run `make $(env)` once.',
+    'Run `a && env` once.',
+  ].join('\n');
+  assert.deepEqual(lines('docs/operations.md', doc), [2, 3, 4, 5, 6]);
+  const shell = ['foo(env)', 'x | env', 'env | sort', 'FOO=1 true; env'].join('\n');
+  assert.deepEqual(lines('scripts/debug.sh', shell), [3, 4]);
+});

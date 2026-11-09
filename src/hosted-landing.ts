@@ -222,6 +222,12 @@ export type HostedLandingRequest = z.infer<typeof hostedLandingRequestSchema>;
 export type HostedLandingAttempt = z.infer<typeof hostedLandingAttemptSchema>;
 export type HostedLandingState = z.infer<typeof hostedLandingStateSchema>;
 /** Exactly the S01 observation vocabulary; ready is still pending until H14's receipt. */
-export const landingObservation = (status: string, code?: string) =>
-  submissionOutcome({ status, ...(code ? { code } : {}) });
+export const landingObservation = (status: string, code?: string) => {
+  const outcome = submissionOutcome({ status, ...(code ? { code } : {}) });
+  // The wire vocabulary has no `unknown`, and the server passes only its own literal statuses, so
+  // it never reaches here; the CLI-side reader of other builds' statuses is where `unknown` lives.
+  return outcome.state === 'unknown'
+    ? { ...outcome, state: 'terminal-failed' as const, cause: 'rejected' as const }
+    : { ...outcome, state: outcome.state };
+};
 export const HOSTED_LANDING_LEASE_MS = 30_000;

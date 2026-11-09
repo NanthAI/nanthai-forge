@@ -1448,8 +1448,10 @@ opens that immutable conflict draft. Ordinary Lane sync conflicts return the
 same guided response. The original Lane and accepted main remain unchanged.
 
 Edit the files in the returned root and run `resolve` there. It saves those
-bytes, checks the original conflict files for remaining markers, and completes
-the server's resolution operation. Its response gives a fresh `finish` command.
+bytes, checks the original conflict files for remaining markers, refuses a file
+placed without markers that still holds one side unchanged
+(`CONFLICT_SIDE_REQUIRED`; edit it, or pass `keep:["PATH"]` to keep that side
+explicitly), and completes the server's resolution operation. Its response gives a fresh `finish` command.
 No extra edit or separate checkpoint is needed, including when the resolution
 was already saved. Unknown replies reuse the original operation ID; changed
 edits after a terminal failure need a new operation ID.

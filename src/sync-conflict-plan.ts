@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
-import { markNativeTextConflicts } from './native-text-merge.js';
+import { markNativeTextConflicts, wholeFileConflict } from './native-text-merge.js';
 import type { SyncTarget as Target } from './native-sync-workspace.js';
 import type { Lane } from './work-types.js';
 // Kept apart from agent-sync.ts: the hosted source worker imports this, and agent-sync's own
@@ -48,17 +48,8 @@ export function conflictPlan(
       conflicts.push({ path: item.path, kind: 'binary' });
       continue;
     }
-    const line = (bytes: Buffer) =>
-      bytes.length && bytes.at(-1) !== 10 ? Buffer.concat([bytes, Buffer.from('\n')]) : bytes;
-    const bytes = marked.conflicted
-      ? marked.bytes
-      : Buffer.concat([
-          Buffer.from('<<<<<<< lane\n'),
-          line(left),
-          Buffer.from('=======\n'),
-          line(right),
-          Buffer.from(`>>>>>>> ${channel}\n`),
-        ]);
+    // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
+    const bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, ['lane', channel])!;
     files.push({ path: item.path, mode: item.left?.mode ?? item.right?.mode ?? 'file', bytes });
     conflicts.push({ path: item.path, kind: 'text' });
   }

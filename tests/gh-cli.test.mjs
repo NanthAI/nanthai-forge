@@ -341,3 +341,69 @@ test('check projection buckets states and excludes stale View/head evidence', ()
     'pass',
   );
 });
+
+test('SM-C M23: an expired saved login answers authenticated:false with its own state; an empty FORGE_AUTH_TOKEN is unset', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-gh-auth-state-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  const deployment = 'http://127.0.0.1:9',
+    env = { XDG_CONFIG_HOME: directory };
+  mkdirSync(join(directory, 'forge'));
+  writeFileSync(
+    join(directory, 'forge', 'auth.json'),
+    JSON.stringify({
+      defaultDeployment: deployment,
+      deployments: {
+        [deployment]: {
+          token: 'synthetic-expired-token',
+          credentialId: 'device',
+          name: 'Synthetic',
+          scope: 'cli',
+          expiresAt: Date.now() - 60000,
+        },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  // Expired: the same JSON shape and exit as logged out, with the state and the one next step.
+  const expired = await run(['auth', 'status', '--json'], directory, env);
+  assert.equal(expired.code, 1, expired.stderr);
+  assert.equal(expired.json.authenticated, false);
+  assert.equal(expired.json.state, 'expired');
+  assert.match(expired.json.nextStep, /nforge login/);
+  assert.ok(!JSON.stringify(expired.json).includes('synthetic-expired-token'));
+  // An empty environment token counts as unset (state names read the saved login, not the env).
+  const previous = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = directory;
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previous;
+  });
+  const { authState, resolveAuthToken } = await import('../dist/auth-store.js');
+  assert.equal(authState(deployment, '').kind, 'expired');
+  assert.throws(() => resolveAuthToken(deployment, ''), { code: 'AUTH_EXPIRED' });
+  assert.equal(authState(deployment, 'synthetic-env-token').kind, 'envToken');
+  assert.equal(resolveAuthToken(deployment, 'synthetic-env-token'), 'synthetic-env-token');
+  writeFileSync(
+    join(directory, 'forge', 'auth.json'),
+    JSON.stringify({
+      defaultDeployment: deployment,
+      deployments: {
+        [deployment]: {
+          token: 'synthetic-saved-token',
+          credentialId: 'device',
+          name: 'Synthetic',
+          scope: 'cli',
+          expiresAt: Date.now() + 60000,
+        },
+      },
+    }),
+    { mode: 0o600 },
+  );
+  assert.equal(
+    resolveAuthToken(deployment, ''),
+    'synthetic-saved-token',
+    'an empty env token never hides the login',
+  );
+  assert.equal(authState(deployment, '').kind, 'saved');
+  assert.equal(authState('http://127.0.0.1:10', '').kind, 'none');
+});

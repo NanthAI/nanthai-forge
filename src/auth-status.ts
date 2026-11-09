@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { coordinationClient } from './coordination-client.js';
-import { deploymentUrl, readAuth, resolveAuthToken, writeAuth } from './auth-store.js';
+import { AUTH_STATE_NEXT_STEP, authState, deploymentUrl, readAuth, writeAuth } from './auth-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseGhOptions, projectGh } from './gh-cli-options.js';
 
@@ -26,14 +26,18 @@ export async function authStatus(args: string[]): Promise<unknown> {
   const deployment = selected ? deploymentUrl(selected) : null,
     host = deployment ? new URL(deployment).host : null,
     saved = deployment ? store.deployments[deployment] : undefined,
-    token = deployment ? resolveAuthToken(deployment) : undefined;
+    state = deployment ? authState(deployment) : ({ kind: 'none' } as const),
+    token = 'token' in state ? state.token : undefined;
   if (!token) {
+    // An expired login answers like a missing one, with its own state (SM-C M23), instead of throwing.
     process.exitCode = 1;
     return projectGh(
       {
         deployment,
         host,
         authenticated: false,
+        state: state.kind,
+        nextStep: AUTH_STATE_NEXT_STEP[state.kind],
         account: null,
         source: null,
         tokenSource: null,
@@ -41,7 +45,7 @@ export async function authStatus(args: string[]): Promise<unknown> {
         identity: null,
         name: null,
         scope: null,
-        expiresAt: null,
+        expiresAt: state.kind === 'expired' ? state.expiresAt : null,
       },
       options.fields,
     );
@@ -70,15 +74,17 @@ export async function authStatus(args: string[]): Promise<unknown> {
       'Forge authentication could not be verified. Check connectivity or run nforge login.',
     );
   }
-  if (process.env.FORGE_AUTH_TOKEN === undefined) hintLegacyDeviceName(deployment!);
-  const environment = process.env.FORGE_AUTH_TOKEN !== undefined,
-    tokenSource = environment ? 'FORGE_AUTH_TOKEN' : 'saved',
+  const environment = state.kind === 'envToken';
+  if (!environment) hintLegacyDeviceName(deployment!);
+  const tokenSource = environment ? 'FORGE_AUTH_TOKEN' : 'saved',
     account = identity.handle ?? 'no handle yet';
   return projectGh(
     {
       deployment,
       host,
       authenticated: true,
+      state: state.kind,
+      nextStep: AUTH_STATE_NEXT_STEP[state.kind],
       account,
       source: environment ? 'environment' : 'saved',
       tokenSource,

@@ -8,6 +8,7 @@ import {
 import { canonicalPayload } from './hosted-source-operation.js';
 import { operationWait } from './agent-operation-wait.js';
 import { shellQuote } from './shell-quote.js';
+import { settleTurnWork } from './agent-turn-work.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseHostedResponse } from './hosted-response.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
@@ -47,6 +48,8 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
   );
   // Received: an identical withdraw after this one is new work (a later landing), not a replay.
   await session.journal.retain('withdraw-received', () => landing.id);
+  // Ended, or already accepted: either way this turn has no unfinished landing to wait for (SM-C M1).
+  settleTurnWork([landing.operationId]);
   return withdrawReceipt(session.root, laneId, landing);
 }
 
@@ -65,6 +68,7 @@ async function withdrawSubmission(session: HostedAgentSession, submissionId: str
     await session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) }),
   );
   await session.journal.retain('withdraw-received', () => landing.id);
+  settleTurnWork([landing.operationId]);
   return withdrawReceipt(session.root, null, landing);
 }
 
