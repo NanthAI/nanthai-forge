@@ -77,6 +77,7 @@ function fixture(
   );
   let denied = false,
     limited = null,
+    splitProbe = false,
     blobs = 0;
   const window = { reset: Math.ceil(Date.now() / 1000) + 3600 };
   const github = [];
@@ -118,8 +119,11 @@ function fixture(
       );
     if (p.includes('/commits/'))
       return reply({ sha: 'a'.repeat(40), commit: { tree: { sha: 'b'.repeat(40) } } }, options);
-    // A truncated recursive listing keeps these cases on directory-by-directory discovery.
-    if (p.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
+    // A root GitHub truncates even without recursion cannot be split (Issue c6426ee9), which keeps
+    // these cases on directory-by-directory discovery; the paged reads after the split probe pass.
+    if (p.includes('/git/trees/') && new URL(url).searchParams.has('recursive') && (splitProbe = true))
+      return reply({ sha: 'b'.repeat(40), truncated: true, tree: [] }, options);
+    if (p.includes('/git/trees/') && splitProbe && !(splitProbe = false))
       return reply({ sha: 'b'.repeat(40), truncated: true, tree: [] }, options);
     if (p.includes('/git/trees/'))
       return reply(
@@ -354,8 +358,9 @@ test('truncated-tree fallback reads through the App installation token; the impo
 });
 
 test('an import stops at 10 percent of the importer limit with a retryable error naming the reset, then resumes', async t => {
-  // 50 requests per hour: this import may spend 5 with the importer's credential.
-  const s = fixture(t, { privateRepository: true, userLimit: 50 }),
+  // 60 requests per hour: this import may spend 6 with the importer's credential (one is the
+  // tree-split probe, Issue c6426ee9).
+  const s = fixture(t, { privateRepository: true, userLimit: 60 }),
     op = randomUUID(),
     id = await s.start(op);
   for (let i = 0; i < 3 && s.tables.projectGithubImports.get(id).phase !== 'error'; i++) await s.advance(id);
@@ -364,8 +369,8 @@ test('an import stops at 10 percent of the importer limit with a retryable error
   assert.equal(job.error.code, 'GITHUB_RATE_LIMIT');
   assert.equal(job.error.retryAt, s.window.reset * 1000);
   assert.ok(job.error.message.includes(new Date(s.window.reset * 1000).toISOString()));
-  assert.equal(job.githubRequests.userWindow.used, 5);
-  assert.equal(s.github.filter(request => request.auth === 'Bearer ghu_synthetic').length, 5);
+  assert.equal(job.githubRequests.userWindow.used, 6);
+  assert.equal(s.github.filter(request => request.auth === 'Bearer ghu_synthetic').length, 6);
   assert.equal(s.tables.hostedProjects.get(job.projectId).currentBackup, null);
   const progress = await modules.projectGithubImportProgress.current._handler(s.ctx, { id });
   assert.equal(progress.error.retryAt, s.window.reset * 1000);

@@ -6,13 +6,17 @@ import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-projec
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
+import { splitGithubTree, TreeSplitUnavailable, type GithubTreeEntry } from './github-tree-split.js';
 
 const gitId = (value: unknown): value is string =>
   typeof value === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value);
 export type GithubListing = { files: GithubSourceEntry[]; totalBytes: number; submodules: number };
 
-/** One request for the whole committed tree. A truncated reply returns null so
- * the caller uses directory-by-directory discovery; it never imports a partial tree. */
+/** One request for the whole committed tree. When GitHub truncates that reply
+ * (100,000 entries or about 7 MB) the same listing is assembled from smaller tree
+ * reads (see splitGithubTree). Only a tree that cannot be split (one directory above
+ * the limit, or more than the request cap) returns null so the caller uses
+ * directory-by-directory discovery; a partial tree is never imported. */
 export async function listGithubTree(
   repository: string,
   tree: string,
@@ -20,23 +24,38 @@ export async function listGithubTree(
   request: GithubFetch = networkFetch,
 ): Promise<GithubListing | null> {
   invariant(gitId(tree), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
-  const reply = await githubJson<{
-    sha: string;
-    truncated: boolean;
-    tree: { path: string; mode: string; type: string; sha: string; size?: number }[];
-  }>(`/repos/${repository}/git/trees/${tree}?recursive=1`, token, request);
+  const reply = await githubJson<{ sha: string; truncated: boolean; tree: GithubTreeEntry[] }>(
+    `/repos/${repository}/git/trees/${tree}?recursive=1`,
+    token,
+    request,
+  );
   invariant(
     reply.sha === tree && Array.isArray(reply.tree),
     'GITHUB_RESPONSE',
     'GitHub returned another tree.',
   );
-  if (reply.truncated !== false) return null;
+  let entries = reply.tree;
+  if (reply.truncated !== false) {
+    const stats = { requests: 1, splits: 0 };
+    try {
+      entries = await splitGithubTree(repository, tree, token, request, stats);
+    } catch (error) {
+      if (!(error instanceof TreeSplitUnavailable)) throw error;
+      console.log(
+        `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split-unavailable', reason: error.reason, requests: stats.requests })}`,
+      );
+      return null;
+    }
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries: entries.length })}`,
+    );
+  }
   const paths = new Set<string>(),
     directories = new Set<string>(['']);
   const files: GithubSourceEntry[] = [];
   let totalBytes = 0,
     submodules = 0;
-  for (const entry of reply.tree) {
+  for (const entry of entries) {
     const path = entry.path;
     invariant(
       typeof path === 'string' && safeRelative(path) && !paths.has(path) && gitId(entry.sha),

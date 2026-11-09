@@ -8,6 +8,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
+import { listGithubTree } from '../dist/github-archive-source.js';
 import { getFunctionName } from 'convex/server';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -104,6 +105,19 @@ const r2Env = {
   R2_SECRET_ACCESS_KEY: fakeR2Config.secretAccessKey,
   FORGE_BLOBS: 'r2',
 };
+/** Tree replies for a repository whose recursive root listing GitHub truncates (entry count or reply
+ * size): the root, its directories and optionally one directory that is itself still truncated. */
+function splitTreeReply(repo, sha, recursive, truncatedChild) {
+  const dirs = new Map(repo.tree.filter(e => e.type === 'tree').map(e => [e.sha, e.path]));
+  if (sha === hex(1) && recursive) return { sha, truncated: true, tree: repo.tree.slice(0, 3) };
+  if (sha === hex(1)) return { sha, truncated: false, tree: repo.tree.filter(e => !e.path.includes('/')) };
+  const dir = dirs.get(sha);
+  const inside = repo.tree
+    .filter(e => e.path.startsWith(`${dir}/`))
+    .map(e => ({ ...e, path: e.path.slice(dir.length + 1) }));
+  if (recursive && sha === truncatedChild) return { sha, truncated: true, tree: inside.slice(0, 2) };
+  return { sha, truncated: false, tree: inside };
+}
 /** Synthetic GitHub plus a strict fake R2 bucket (create-only, checksummed PUTs). */
 async function serve(t, repo, counts) {
   const saved = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]]));
@@ -142,6 +156,13 @@ async function serve(t, repo, counts) {
       });
     if (path.includes('/commits/'))
       return Response.json({ sha: 'a'.repeat(40), commit: { tree: { sha: hex(1) } } });
+    if (repo.split && path.includes('/git/trees/')) {
+      const recursive = u.searchParams.get('recursive') === '1';
+      count(recursive ? 'treesRecursive' : 'treesFlat');
+      return Response.json(
+        splitTreeReply(repo, path.split('/').at(-1), recursive, repo.split.truncatedChild),
+      );
+    }
     if (path.endsWith(`/git/trees/${hex(1)}`)) {
       count('trees');
       assert.equal(u.searchParams.get('recursive'), '1');
@@ -346,6 +367,81 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(
     byPath.get('rewritten.txt').blob,
     digestOf(repo.bodies.get(gitSha(Buffer.from('$Format:%H$ expands in archives only\n')))),
+  );
+});
+
+const treeFetch = (repo, counts, truncatedChild) => async url => {
+  const u = new URL(url),
+    recursive = u.searchParams.get('recursive') === '1';
+  counts[recursive ? 'recursive' : 'flat'] = (counts[recursive ? 'recursive' : 'flat'] ?? 0) + 1;
+  return Response.json(splitTreeReply(repo, u.pathname.split('/').at(-1), recursive, truncatedChild));
+};
+const wholeFetch = repo => async () => Response.json({ sha: hex(1), truncated: false, tree: repo.tree });
+
+test('Issue c6426ee9: a root truncated by entry count lists as the complete tree from one read per directory, gitlinks and modes exact', async () => {
+  const repo = repository({ files: 40, directories: 4, submodules: 2 }),
+    counts = {};
+  const listing = await listGithubTree('fixture/arch', hex(1), undefined, treeFetch(repo, counts));
+  const whole = await listGithubTree('fixture/arch', hex(1), undefined, wholeFetch(repo));
+  assert.deepEqual(listing, whole);
+  // The truncated recursive root, the root without recursion, then each of the 4 directories once.
+  assert.deepEqual(counts, { recursive: 1 + 4, flat: 1 });
+  assert.equal(listing.submodules, 2);
+  assert.equal(listing.files.find(f => f.path === 'vendor-1').mode, '160000');
+  assert.equal(listing.files.find(f => f.path === 'dir-1/file-1').mode, '120000');
+  assert.equal(listing.files.find(f => f.path === 'dir-0/' + 'x'.repeat(90) + '-file-0').mode, '100755');
+});
+
+test('Issue c6426ee9: a directory still truncated by reply size is split again; a nested gitlink and identical subtrees survive', async () => {
+  const repo = repository({ files: 40, directories: 4, submodules: 0 });
+  // dir-copy repeats dir-0 byte for byte (one tree object id); dir-1 holds a nested submodule.
+  repo.tree.push(
+    { path: 'dir-1/vendor-nested', mode: '160000', type: 'commit', sha: hex(77) },
+    { path: 'dir-copy', mode: '040000', type: 'tree', sha: hex(2) },
+    ...repo.tree
+      .filter(e => e.path.startsWith('dir-0/'))
+      .map(e => ({ ...e, path: e.path.replace('dir-0/', 'dir-copy/') })),
+  );
+  const counts = {};
+  const listing = await listGithubTree('fixture/arch', hex(1), undefined, treeFetch(repo, counts, hex(3)));
+  const reference = repo.tree.filter(e => e.type !== 'tree').map(e => e.path);
+  assert.deepEqual(
+    listing.files.map(f => f.path),
+    reference.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
+  );
+  assert.ok(listing.files.some(f => f.path.startsWith('dir-copy/')));
+  // Root recursive, root flat, dir-1 recursive + flat (truncated), dir-0/2/3 recursive; dir-copy reuses dir-0's reply.
+  assert.deepEqual(counts, { recursive: 1 + 4, flat: 2 });
+  assert.equal(listing.files.find(f => f.path === 'dir-1/vendor-nested').mode, '160000');
+  assert.equal(listing.submodules, 1);
+});
+
+test('Issue c6426ee9: a single directory above the reply limit has no smaller read and falls back to paged acquisition', async () => {
+  const request = async url => {
+    const u = new URL(url);
+    return Response.json({ sha: u.pathname.split('/').at(-1), truncated: true, tree: [] });
+  };
+  assert.equal(await listGithubTree('fixture/arch', hex(1), undefined, request), null);
+});
+
+test('Issue c6426ee9: a root truncated by count imports through the archive stream, not per-blob acquisition', async t => {
+  const repo = {
+      ...repository({ files: 60, directories: 3, submodules: 1 }),
+      split: { truncatedChild: hex(3) },
+    },
+    counts = {},
+    s = pagedFixture();
+  await serve(t, repo, counts);
+  const job = await importArchive(s);
+  assert.equal(job.protocol, 3, 'archive path, not protocol 2');
+  assert.equal(job.completed, repo.files);
+  // Per listing: the truncated root, 3 directories recursive, the root and the still-truncated directory flat.
+  // Start lists once and the archive run lists again.
+  assert.deepEqual(counts, { treesRecursive: 8, treesFlat: 4, tarball: 1, archive: 1, blobs: 2 });
+  assert.equal(
+    job.githubRequests.anonymous,
+    2 + 12 + 4 + 1,
+    'start: repository and commit; 2 listings of 6; run: repository, tarball, 2 blobs; publication: repository',
   );
 });
 

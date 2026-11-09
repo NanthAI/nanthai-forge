@@ -55,6 +55,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
     globalThis.fetch = old;
   });
   let blobRequests = 0,
+    splitProbe = false,
     apiRequests = 0;
   globalThis.fetch = async (url, init) => {
     if (new URL(url).hostname.endsWith('.r2.cloudflarestorage.com')) return old(url, init);
@@ -73,8 +74,11 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
         sha: 'a'.repeat(40),
         commit: { tree: { sha: hex(1) } },
       });
-    // Truncated recursive listing: this budget covers directory-by-directory discovery.
-    if (path.includes('/git/trees/') && new URL(url).searchParams.has('recursive'))
+    // A root truncated even without recursion cannot be split (Issue c6426ee9): this budget covers
+    // directory-by-directory discovery, after the split probe.
+    if (path.includes('/git/trees/') && new URL(url).searchParams.has('recursive') && (splitProbe = true))
+      return Response.json({ sha: hex(1), truncated: true, tree: [] });
+    if (path.includes('/git/trees/') && splitProbe && !(splitProbe = false))
       return Response.json({ sha: hex(1), truncated: true, tree: [] });
     if (path.includes('/git/trees/')) {
       const id = path.split('/').at(-1);

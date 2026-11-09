@@ -72,8 +72,15 @@ A complete recursive Git tree selects archive transfer (protocol 3). The worker
 streams the selected commit's tarball, follows only the validated GitHub codeload
 redirect without forwarding credentials, and verifies every retained file against
 its Git object ID. Archive-omitted or rewritten members are fetched by Git blob;
-submodules remain commit pointers. A truncated recursive tree uses paged tree/blob
-acquisition (protocol 2) instead; no partial tree is published.
+submodules remain commit pointers. GitHub truncates a recursive tree reply at 100,000
+entries or about 7 MB, whichever comes first. A truncated reply does not change the
+path: the listing is rebuilt from smaller tree reads (the root without recursion, each
+child recursively, and again non-recursively only for a child still truncated; equal
+trees are read once, 8 reads at a time), about one request per split directory rather
+than per directory or blob. Paged tree/blob acquisition (protocol 2) is used only when
+a single directory is itself above the reply limit or the split would need more than
+1,500 tree reads; the reason is logged as `listing-split-unavailable`. No partial tree
+is published.
 
 Committed regular files, executable modes, symlink targets, binaries, empty files
 and committed ignored paths are retained. Source names cannot overlap the
@@ -148,7 +155,7 @@ import fails with `GITHUB_LFS_LIMIT`, naming the total, the limit and the larges
 object, and publishes no main. A pointer GitHub LFS has no object for fails with
 `GITHUB_LFS_OBJECT_MISSING` and names the path.
 
-A truncated recursive listing (protocol 2) resolves LFS the same way, page by page.
+Protocol 2 (a tree that cannot be split) resolves LFS the same way, page by page.
 The listing records every `.gitattributes` it sees (up to 1,000, else
 `GITHUB_LFS_LIMIT`; 1 MiB each) in the import cursor. A page that fetches a
 pointer-shaped file reads those files once, decides the page's LFS paths, and binds
