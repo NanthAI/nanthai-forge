@@ -268,6 +268,58 @@ and both are requested; this costs no extra GitHub call.
 remove a workflow; docs-only; other `.github/` paths). A token permission change must be tested against all
 of them.
 
+## Protected main on the mirror
+
+A mirror repository keeps `main` Forge-only with one branch ruleset on the default
+branch (`~DEFAULT_BRANCH`): rules `deletion`, `non_fast_forward` and `update`, and
+exactly one bypass actor, the Forge GitHub App (mode `always`). No person, team or
+role bypasses it, so humans change code through Forge. Do not add required pull
+requests, reviews, status checks, linear history or signed commits: each would put a
+gate on the App's push (its commits are unsigned) and a landing needs no human
+approval. A second ruleset on tags (`deletion`, `non_fast_forward`, same bypass,
+creation open) keeps tags from being moved or deleted. Bench and scratch repositories
+are exempt. A production App that mirrors the same repository must be added to both
+bypass lists first, or its first push is refused.
+
+The ruleset JSON (replace `ID` with the App's integration id) is also the rollback file:
+
+```json
+{
+  "name": "main is the Forge mirror",
+  "target": "branch",
+  "enforcement": "active",
+  "bypass_actors": [{ "actor_id": ID, "actor_type": "Integration", "bypass_mode": "always" }],
+  "conditions": { "ref_name": { "include": ["~DEFAULT_BRANCH"], "exclude": [] } },
+  "rules": [{ "type": "deletion" }, { "type": "non_fast_forward" }, { "type": "update" }]
+}
+```
+
+Recovery. Accepted work is never lost: Forge `main` is the source of truth and the
+mirror only fast-forwards.
+
+- **A rule blocks the sync** (the App lost its bypass). The landing succeeds on Forge;
+  the mirror job is retained as failed with `GITHUB_SYNC_API`, HTTP 422 and GitHub's
+  "Repository rule violations" text, and `nforge status` shows the failing State and
+  lag. GitHub `main` does not move. Put the App back on the ruleset's bypass list
+  (`gh api -X PUT repos/OWNER/NAME/rulesets/RULESET_ID --input RULESET.json`), then the
+  operator resumes the job named in the failure detail
+  (`projectGithubMirrorStore:resume '{"jobId":"…"}'`, see
+  [workflows](../workflows.md#automatic-main-mirror)). It returns `scheduled`; GitHub then
+  receives one commit per skipped State in order, with no duplicate and no force.
+  Drilled on a throwaway repository: failure, restore, resume, catch-up.
+- **Forge `main` is wrong** (a bad landing). Do not touch GitHub. Land
+  `nforge x ROOT revert '{"target":{"kind":"receipt","receiptId":"…"}}'` (or accept a
+  retained earlier State as a person); the mirror adds a fast-forward commit and
+  history stays. Drilled the same way.
+- **GitHub `main` moved outside Forge** (`GITHUB_SYNC_CHANGED`). Forge keeps its
+  accepted `main` and sync stops without overwriting. Bring a wanted change in through a
+  contribution Lane and accept it. To drop an unwanted one, only the repository owner
+  can: set the ruleset `enforcement` to `disabled`, force-move `main` to the newest
+  commit whose `Forge-State` trailer is an accepted State, set it back to `active`
+  straight away, then resume the job. Keep that window to minutes and record the SHAs
+  on the Issue.
+- **Ruleset lost or edited by mistake.** Re-create it from the JSON above.
+
 ## Operator override
 
 Self-hosters may configure `FORGE_GITHUB_REPO_BINDINGS` as comma-separated
