@@ -83,6 +83,7 @@ export const projectPurgeTables = {
   projectHostedLandingRequests: 'by_project',
   projectHostedLandingAttempts: 'by_project',
   projectHostedFinishes: 'by_project_and_submission',
+  projectHostedApprovals: 'by_project_and_lane',
   projectHostedAcceptances: 'by_project',
   projectHostedAcceptanceSnapshots: 'by_project_and_snapshot',
   projectHostedAcceptanceEvents: 'by_project_and_sequence',

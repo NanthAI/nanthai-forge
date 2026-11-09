@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { held, heldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { finishPendingForReader } from '../src/hosted-finish';
 import {
@@ -100,7 +101,7 @@ async function reader(
 ) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted landing requests.');
-  await accessibleProject(ctx, projectId, user.subject);
+  return accessibleProject(ctx, projectId, user.subject);
 }
 export const status = query({
   args: {
@@ -111,7 +112,7 @@ export const status = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      await reader(ctx, input.projectId);
+      const project = await reader(ctx, input.projectId);
       const { row, state } = await loadLanding(ctx, input);
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
       const stallAlert = await latestStallAlert(ctx, input, state);
@@ -119,10 +120,15 @@ export const status = query({
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
+      // A held landing says which policy it is pinned to and when it re-reads it: no extra read.
+      const pin = held(state) ? heldPolicy(project, attempt) : null;
       const queue = await readQueueStatus(ctx, state);
       const orderWait = landingOrderWaitForReader(row, state);
       return canonicalPayload({
-        request: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+        request: noteHeldPolicy(
+          landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+          pin,
+        ),
         queuePosition: queue?.position ?? null,
         queue: syncRequiredQueue(queue, wouldConflict),
         ...(orderWait ? { orderWait } : {}),

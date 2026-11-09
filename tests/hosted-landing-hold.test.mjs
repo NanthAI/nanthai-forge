@@ -41,6 +41,18 @@ test('a review hold names its reason, protected paths and next step from the sta
   assert.match(hold.reason, /protected paths: \.github\/workflows\/forge-check\.yml/);
   assert.match(hold.next, /owner accepts submission 24828b1f-9bc4-4fa6-815a-de200ecaa7d3 as a person/);
   assert.match(hold.next, new RegExp(`land --withdraw '\\{"laneId":"${LANE}"\\}'`));
+  // The owner's link comes from approve-link on this exact operation (fe5bea80).
+  assert.match(hold.next, /approve-link '\{"operationId":"0d5394e3-4ccf-4cdc-964e-0df73decfacc"\}'/);
+  // A builder's approval request after protected paths: the paths still parse.
+  const requested = landingHold({
+    ...incident,
+    error: {
+      code: 'REVIEW_REQUIRED',
+      message: 'needs owner approval: protected paths a.yml; approval requested on Lane 0bd3b652: billing',
+    },
+  });
+  assert.deepEqual(requested.paths, ['a.yml']);
+  assert.match(requested.reason, /approval requested on Lane 0bd3b652: billing/);
   // Public-governance wording, several paths, no Lane known.
   const governed = landingHold({
     ...incident,

@@ -19,6 +19,7 @@ import { sourceAuthority } from '../src/hosted-source-authority';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 import { boardWake } from './projectBoardDelivery';
+import { loadHeldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 
 /** Finite selected-request pages. Every page/subscription rechecks current access;
  * neither reading nor reconnecting wakes a controller. Versions are durable offsets,
@@ -183,12 +184,21 @@ async function observePage(
       eventCount = events.length;
     }
     stage = 'response';
+    // A held landing says which policy it is pinned to and when it re-reads it; one read, only while held.
+    const pin = await loadHeldPolicy(ctx, project, state);
+    if (pin)
+      for (const event of events)
+        if (event.submission.version === state.version)
+          event.submission = noteHeldPolicy(event.submission, pin);
     return canonicalPayload({
       projectId: input.projectId,
       operationId: input.operationId,
       canonicalOperationId: state.operationId,
       authority: sourceAuthority(project),
-      submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+      submission: noteHeldPolicy(
+        landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
+        pin,
+      ),
       queuePosition: queue?.position ?? null,
       queue: syncRequiredQueue(queue, wouldConflict),
       ...(wouldConflict ? { wouldConflict } : {}),

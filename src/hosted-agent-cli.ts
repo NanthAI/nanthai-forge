@@ -33,6 +33,7 @@ import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { networkTimeout } from './network-fetch.js';
 import { canonicalOperationIds } from './operation-id-case.js';
 import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-board-wait.js';
+import { approvalNext, observeApproval } from './hosted-agent-approval.js';
 /** Address selection precedes construction of native WorkStore/owner services. */
 export function hostedAgentAddress(
   root: string,
@@ -106,13 +107,16 @@ export async function hostedAgentCli(
   );
   if (action === 'wait') {
     const selectedWait = hostedWaitSchema.parse(command);
+    const alone = selectedWait.peer ?? selectedWait.approval;
     invariant(
-      selectedWait.peer
-        ? !selectedWait.runId && !selectedWait.operationIds?.length
+      alone
+        ? !selectedWait.runId &&
+            !selectedWait.operationIds?.length &&
+            !(selectedWait.peer && selectedWait.approval)
         : Boolean(selectedWait.runId) !== Boolean(selectedWait.operationIds?.length),
       'BAD_ARGUMENT',
-      selectedWait.peer
-        ? 'Wait for a peer Lane in its own command, without runId or operationIds.'
+      alone
+        ? 'Wait for a peer Lane or an approval in its own command, without runId or operationIds.'
         : 'Choose one run or hosted landing operationIds.',
     );
     // Wait accepts any operation id the CLI handed out. A save (or other non-landing
@@ -182,6 +186,37 @@ export async function hostedAgentCli(
       const board = selectedWait.runId ? undefined : boardWaitOption(root, laneId);
       const { next, waitCommand, inProgress } = continuation;
       const resume = { next, command: waitCommand, waitCommand, inProgress };
+      if (selectedWait.approval) {
+        const laneId = selectedWait.approval;
+        const outcome = await observeApproval(
+          transport,
+          { laneId, timeoutSeconds: budgetSeconds },
+          controller.signal,
+        );
+        process.exitCode =
+          outcome.status === 'decided' || outcome.status === 'none'
+            ? 0
+            : outcome.status === 'cancelled'
+              ? 130
+              : 3;
+        const next = approvalNext(outcome, laneId);
+        return {
+          schema: 1 as const,
+          transport: 'hosted' as const,
+          action: 'observe' as const,
+          operationId: null,
+          resolved: null,
+          result: next
+            ? { status: 'terminal', reason: 'approval', approval: outcome.approval, next }
+            : {
+                status: 'IN_PROGRESS',
+                reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
+                budgetSeconds,
+                approval: outcome.approval,
+                ...resume,
+              },
+        };
+      }
       if (selectedWait.peer) {
         const peer = selectedWait.peer;
         const outcome = await withLaneCommand(laneId, 'wait', () =>

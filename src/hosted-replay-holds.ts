@@ -113,6 +113,8 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   'check-settings': read,
   // Returns a link for the owner's approval page; no operation.
   'approve-link': read,
+  // One mutation keyed by its own operationId; a retry replays the same request.
+  'request-approval': server,
   policy: read,
   'set-policy': server,
   planning: read,

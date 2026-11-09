@@ -41,6 +41,7 @@ import { acceptedLandingMessage } from './projectHostedLandingMessage';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
 import { secretAllowMark, secretAllowReview } from '../src/secret-allow';
 import { grantedApproval } from './projectHostedOwnerGrant';
+import { approvalHoldReason, attemptApprovals, endLandedApprovals } from './projectHostedApprovalStore';
 /** One constant-size publication transaction. A completed replay authorizes the
  * reader first, then returns the original receipt without rechecking old policy,
  * acquiring another lease or rewinding any later main/saved Lane. */
@@ -267,17 +268,27 @@ export async function publishAcceptance(
       : null;
   // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
   const secretAllowAdded = secretAllowMark(run?.plan?.secretAllow, candidate.governance?.paths ?? null);
+  // Issue fe5bea80: a builder's approval request on a landed Lane holds it until the owner grants
+  // that exact Lane head (or accepts the held landing as a person). One read, normally empty.
+  const approvals = await attemptApprovals(ctx, claim.projectId, attempt.operations.accept);
+  const approvalReason =
+    actor.kind === 'person' && actor.id === project.owner ? null : approvalHoldReason(approvals);
   const reason =
-    governanceReason(
-      project,
-      policy,
-      actor,
-      candidate.governance?.paths ?? null,
-      candidate.governance?.ownerInputs,
-      checks,
-    ) ??
-    protectedReason ??
-    secretAllowReview(policy, actor, secretAllowAdded);
+    [
+      governanceReason(
+        project,
+        policy,
+        actor,
+        candidate.governance?.paths ?? null,
+        candidate.governance?.ownerInputs,
+        checks,
+      ) ??
+        protectedReason ??
+        secretAllowReview(policy, actor, secretAllowAdded),
+      approvalReason,
+    ]
+      .filter(Boolean)
+      .join('; ') || null;
   if (reason) {
     const next = {
       ...state,
@@ -394,6 +405,7 @@ export async function publishAcceptance(
     error: null,
   };
   await writeLanding(ctx, row, next, false);
+  await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);
   await noteMainLanding(ctx, { project, receipt, run });

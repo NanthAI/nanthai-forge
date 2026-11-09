@@ -83,6 +83,34 @@ owner is unchanged, its own check passed, and it changes no path the approved Ca
 did not. Otherwise it holds for review again. A busy queue does the same without
 recomposing: the landing takes its turn. Agents cannot create a grant.
 
+A held landing stays pinned to the policy its attempt was prepared under. A policy edit
+never re-checks it, and no sweep, alarm or recompose touches a held entry. approve-link
+returns `policy` (the attempt it is pinned to, when, whether the policy changed since) and
+`policyNote` (when it re-reads the policy); once the policy changed, every held reason
+(`wait`, `status`, the owner page) carries that note too. Only a fresh attempt re-reads it: the owner approves after main moved
+or after the policy changed (a full check on current main), or the builder withdraws and
+lands again. The approval carries to that fresh attempt only while the policy is unchanged.
+After a policy edit, the fresh attempt holds for the owner once more if the current policy
+still needs review. Otherwise it lands without review, and its receipt names the submitter
+(an agent), not the owner. That is how held submission 991a1a94 landed on 2026-11-09: the
+owner approved after main had moved, and the protected path had been lifted while it was
+held.
+
+A builder can also ask for the owner's go on any saved Lane, whatever the path rules:
+`request-approval {laneId,reason}` writes one row per Lane
+(`projectHostedApprovals:request`, the Lane author or the owner) and one project board
+note, and replies with `/approve?project=…&lane=…`. While the request is open, landing
+that Lane holds after its check with `REVIEW_REQUIRED` naming the reason (a batch member
+lands alone). The owner person grants or declines in one step on that page
+(`projectHostedApprovals:decide`, refused for agents, device sign-ins and contributors).
+A grant covers exactly the Lane head the owner saw (a stale head is refused); if the
+Lane's landing is already held, the grant is that landing's exact approval and a decline
+ends it `REVIEW_DECLINED`. Approving or declining the held landing directly settles the
+request the same way. Landing with the grant ends the request; a declined request holds
+the next landing until the owner grants or the builder withdraws it. `wait {approval}`
+subscribes to the one request row: no polling, idle costs nothing. A publish reads one
+index (live requests, normally none) and only then the landing's input pages.
+
 The own-Lane exception uses retained server provenance: all input Lanes and dependency
 Candidates must be owner-only. Any contributor write clears a Lane's owner-only flag;
 later owner writes do not restore it. Missing legacy provenance cannot grant the

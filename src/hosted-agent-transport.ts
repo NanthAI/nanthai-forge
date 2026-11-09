@@ -113,6 +113,7 @@ import {
   type HostedAgentCapabilities,
 } from './hosted-agent-contract.js';
 import { executeHostedAgent, hostedCheckSettings } from './hosted-agent-actions.js';
+import { executeHostedApproval, type ApprovalCommand } from './hosted-agent-approval.js';
 import { savedChangedPaths } from './hosted-changed-paths.js';
 import { publishClientSourcePack } from './source-pack-client.js';
 import { hostedContractFeatures, missingRequiredFeatures } from './hosted-contract-features.js';
@@ -133,6 +134,7 @@ import { isHostedReplyError, parseHostedResponse } from './hosted-response.js';
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 const quietActions = new Set([
   'approve-link',
+  'request-approval',
   'diff',
   'peers',
   'queue',
@@ -533,6 +535,7 @@ export class HostedAgentTransport {
         'check-settings',
         'policy',
         'approve-link',
+        'request-approval',
         ...hostedAgentPlanningActions,
       ].includes(requestedAction)
     )
@@ -615,6 +618,19 @@ export class HostedAgentTransport {
         return this.response(action, policy.operationId, policy.result);
       }
       // One query, no capability discovery; the page needs a signed-in owner, never this credential.
+      if (action === 'request-approval') {
+        const approval = await executeHostedApproval(
+          {
+            root: this.root,
+            query: this.query.bind(this),
+            mutation: this.mutation.bind(this),
+            agentSlug: () => this.agentSlug() ?? undefined,
+          },
+          command.data as ApprovalCommand,
+          operationId as string | undefined,
+        );
+        return this.response(action, approval.operationId, approval.result);
+      }
       if ((hostedAgentReviewActions as readonly string[]).includes(action)) {
         invariant(
           typeof operationId === 'string',

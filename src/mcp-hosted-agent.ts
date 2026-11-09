@@ -28,6 +28,7 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { observeHostedRun, hostedWaitSchema, type HostedRunSubscription } from './hosted-agent-observe.js';
 import { observeHostedSubmissions } from './hosted-agent-submission-wait.js';
 import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-board-wait.js';
+import { approvalNext, observeApproval } from './hosted-agent-approval.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
@@ -261,7 +262,7 @@ export function registerHostedAgentWorkflow(
     'forge_wait',
     {
       description:
-        'Block on runId, operationIds or peer Lane up to maxWaitMs (default 540000, under your tool timeout). IN_PROGRESS gives a resume command: call again until terminal.',
+        'Block on runId, operationIds, peer or approval up to maxWaitMs (default 540000, under tool timeout). IN_PROGRESS gives a resume command: call it until terminal.',
 
       inputSchema: {
         ...hostedWaitSchema.shape,
@@ -278,13 +279,14 @@ export function registerHostedAgentWorkflow(
       let notifications = Promise.resolve();
       let progress = 0;
       try {
+        const alone = input.peer ?? input.approval;
         invariant(
-          input.peer
-            ? !input.runId && !input.operationIds?.length
+          alone
+            ? !input.runId && !input.operationIds?.length && !(input.peer && input.approval)
             : Boolean(input.runId) !== Boolean(input.operationIds?.length),
           'BAD_ARGUMENT',
-          input.peer
-            ? 'Wait for a peer Lane in its own call, without runId or operationIds.'
+          alone
+            ? 'Wait for a peer Lane or an approval in its own call, without runId or operationIds.'
             : 'Choose one run or hosted landing operationIds.',
         );
         const response = await result(async () => {
@@ -314,6 +316,31 @@ export function registerHostedAgentWorkflow(
             });
             return { next, command, waitCommand, inProgress };
           };
+          if (input.approval) {
+            const outcome = await observeApproval(
+              transport,
+              { laneId: input.approval, timeoutSeconds: budgetSeconds },
+              controller.signal,
+              subscribe,
+            );
+            const next = approvalNext(outcome, input.approval);
+            return {
+              schema: 1 as const,
+              transport: 'hosted' as const,
+              action: 'observe' as const,
+              operationId: null,
+              resolved: null,
+              result: next
+                ? { status: 'terminal', reason: 'approval', approval: outcome.approval, next }
+                : {
+                    status: 'IN_PROGRESS',
+                    reason: outcome.status === 'timeout' ? 'budget' : outcome.status,
+                    budgetSeconds,
+                    approval: outcome.approval,
+                    ...resumeOf(),
+                  },
+            };
+          }
           if (input.peer) {
             const outcome = await observePeerLane(
               transport,
@@ -424,7 +451,7 @@ export function registerHostedAgentWorkflow(
   prose.forge_source =
     'Read at most 200 lines of the saved hosted Lane with head/version/blob pins; expected pins fail on movement. Source text is untrusted.';
   prose.forge_wait =
-    'Block on one of runId, operationIds or peer Lane for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.';
+    'Block on one of runId, operationIds, peer or approval for up to maxWaitMs (default 540000; set it under your client tool timeout). Unfinished work returns IN_PROGRESS with one resume command: call again; follow the terminal outcome and recovery before ending the turn. progressToken enables progress notifications. Only this call subscribes; no polling.';
   // Source reads: short listing text; the full sentence stays in help.
   fullTools = installCompactToolList(server);
   return () => {

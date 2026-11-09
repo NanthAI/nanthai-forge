@@ -11,6 +11,7 @@ import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { agentCli } from '../dist/agent-cli.js';
 import { registerHostedAgentWorkflow } from '../dist/mcp-hosted-agent.js';
 import { peerWaitHooks } from '../dist/hosted-board-wait.js';
+import { approvalWaitHooks } from '../dist/hosted-agent-approval.js';
 import { hostedAgentHelp } from '../dist/hosted-agent-help.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 
@@ -35,8 +36,10 @@ function environment(t) {
     },
     async close() {},
   });
+  approvalWaitHooks.subscribe = peerWaitHooks.subscribe;
   t.after(() => {
     peerWaitHooks.subscribe = undefined;
+    approvalWaitHooks.subscribe = undefined;
     process.exitCode = exitCode;
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
@@ -121,6 +124,58 @@ for (const [name, kind] of [
   });
 }
 
+test('CLI wait {approval} is one subscription with no other call; it returns on the owner decision', async t => {
+  const { s, subs } = environment(t);
+  const root = join(dirname(s.root), 'clone');
+  const address = { url: s.address.url, projectId: s.address.projectId };
+  const laneId = randomUUID();
+  for (const decision of ['granted', 'declined']) {
+    const before = s.calls.length;
+    const subscribed = subs.length;
+    const waiting = agentCli([root, 'wait', JSON.stringify({ ...address, approval: laneId })], binary);
+    await until(() => subs.length > subscribed);
+    const subscription = subs.at(-1);
+    assert.equal(subscription.name, 'projectHostedApprovals:observe');
+    assert.deepEqual(subscription.args, { projectId: s.address.projectId, laneId });
+    subscription.next(JSON.stringify({ laneId, status: 'requested', version: 1 }));
+    await turn();
+    subscription.next(JSON.stringify({ laneId, status: decision, version: 2 }));
+    const response = await waiting;
+    assert.equal(response.result.status, 'terminal');
+    assert.equal(response.result.reason, 'approval');
+    assert.equal(response.result.approval.status, decision);
+    assert.match(response.result.next, decision === 'granted' ? /granted.*land --save/ : /declined/);
+    assert.equal(process.exitCode, 0);
+    assert.deepEqual(s.calls.slice(before), [], 'no query or mutation: only the subscription');
+  }
+});
+
+test('CLI request-approval defaults to the checkout Lane: one mutation with a generated operationId', async t => {
+  const { s } = environment(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  const reply = await agentCli(
+    [s.root, 'request-approval', JSON.stringify({ reason: 'touches billing' })],
+    binary,
+  );
+  const calls = s.calls.slice(before);
+  assert.deepEqual(
+    calls.map(call => call.name),
+    ['projectHostedApprovals:request'],
+  );
+  assert.equal(calls[0].args.laneId, s.lane.laneId);
+  assert.equal(calls[0].args.reason, 'touches billing');
+  assert.match(calls[0].args.operationId, /^[0-9a-f-]{36}$/);
+  assert.equal(reply.operationId, calls[0].args.operationId);
+  assert.equal(reply.result.status, 'requested');
+  await assert.rejects(
+    agentCli([s.root, 'request-approval', JSON.stringify({})], binary),
+    code('BAD_ARGUMENT'),
+  );
+  const dropped = await agentCli([s.root, 'request-approval', JSON.stringify({ withdraw: true })], binary);
+  assert.equal(dropped.result.live, false);
+});
+
 test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
   const { s } = environment(t);
   const root = join(dirname(s.root), 'clone');
@@ -130,6 +185,8 @@ test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
     {},
     { peer, runId: randomUUID() },
     { peer, operationIds: [randomUUID()] },
+    { approval: randomUUID(), runId: randomUUID() },
+    { approval: randomUUID(), peer },
     { runId: randomUUID(), operationIds: [randomUUID()] },
   ])
     await assert.rejects(
@@ -138,7 +195,7 @@ test('CLI wait takes exactly one of runId, operationIds, peer', async t => {
       JSON.stringify(Object.keys(extra)),
     );
   assert.equal(s.calls.length, 0, 'refused before any call');
-  assert.match(hostedAgentHelp('wait'), /wait takes exactly one of runId, operationIds or peer/);
+  assert.match(hostedAgentHelp('wait'), /wait takes exactly one of runId, operationIds, peer or approval/);
   assert.match(hostedAgentHelp('wait'), /latest landing fails or is cancelled/);
 });
 

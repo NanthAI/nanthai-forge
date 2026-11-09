@@ -6,6 +6,8 @@ export type OwnerReview = {
   accept: () => void;
   decline: (why: string) => void;
   busy?: boolean;
+  /** Button words; a Lane approval request says Grant/Decline instead of landing words. */
+  labels?: { accept: string; decline: string };
 };
 /** Accept or decline one landing held for the project owner (Issue fe5bea80). The caller passes it
  * only to a signed-in owner; the server refuses everyone else, agents and device sign-ins included. */
@@ -21,7 +23,7 @@ export function OwnerReviewActions({ review }: { review: OwnerReview }) {
         </label>
         <div className="fx-land-actions">
           <Button variant="primary" disabled={review.busy} onClick={() => review.decline(why)}>
-            Decline landing
+            {review.labels?.decline ?? 'Decline landing'}
           </Button>
           <Button variant="ghost" disabled={review.busy} onClick={() => setDeclining(false)}>
             Not now
@@ -32,7 +34,7 @@ export function OwnerReviewActions({ review }: { review: OwnerReview }) {
   return (
     <div className="fx-land-actions">
       <Button variant="primary" disabled={review.busy} onClick={review.accept}>
-        Accept into main
+        {review.labels?.accept ?? 'Accept into main'}
       </Button>
       <Button variant="ghost" disabled={review.busy} onClick={() => setDeclining(true)}>
         Decline…

@@ -370,6 +370,10 @@ export function agentFixture(t) {
     else if (name === 'projectHostedQueueView:read') result = queueView;
     else if (name === 'projectHostedOverlapAnswers:read') result = { schema: 1, answers: [], args };
     else if (name === 'projectHostedLaneHistory:read') result = { schema: 1, laneId: args.laneId };
+    else if (name === 'projectHostedApprovals:request')
+      result = { laneId: args.laneId, status: 'requested', live: true, reason: args.reason, version: 1 };
+    else if (name === 'projectHostedApprovals:withdraw')
+      result = { laneId: args.laneId, status: 'requested', live: false, version: 2 };
     else assert.fail(`Unexpected API call ${name}`);
     if (fail === name) {
       fail = null;

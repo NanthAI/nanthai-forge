@@ -99,6 +99,7 @@ export const namedReads = [
   'friction-list',
   'policy',
   'approve-link',
+  'request-approval',
   'check-settings',
   'capabilities',
   'resolve',

@@ -40,6 +40,12 @@ import {
 } from '../src/hosted-acceptance';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { batchEligible } from '../src/hosted-landing-batch';
+import {
+  approvalHoldReason,
+  attemptApprovals,
+  endLandedApprovals,
+  liveApprovals,
+} from './projectHostedApprovalStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { policyDigestCurrent } from '../src/policy-digest';
 import { landingObservation } from '../src/hosted-landing';
@@ -152,6 +158,16 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   const mainChanged = candidate.base.head !== main.head || candidate.base.receiptId !== main.receipt.id;
   let retry = false;
   const memberPaths: BatchMemberPaths[] = [];
+  // A member whose Lane waits on an owner approval request lands alone, where it holds (fe5bea80).
+  const approvals = await liveApprovals(ctx, claim.projectId);
+  const granted: Awaited<ReturnType<typeof attemptApprovals>> = [];
+  const memberApprovals = async (receiptId: string) => {
+    const matched = approvals.length
+      ? await attemptApprovals(ctx, claim.projectId, receiptId, approvals)
+      : [];
+    granted.push(...matched);
+    return matched;
+  };
   for (const member of members) {
     await hostedWriteProject(ctx, claim.projectId, member.attempt.actor.id, member.attempt.authorityEpoch);
     const own = await readHostedRecord(ctx, {
@@ -173,7 +189,8 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     });
     retry ||=
       !policyDigestCurrent(policy, member.attempt.policyDigest) ||
-      !batchEligible(project, policy, member.attempt.actor, originalCandidate);
+      !batchEligible(project, policy, member.attempt.actor, originalCandidate) ||
+      approvalHoldReason(await memberApprovals(member.attempt.operations.accept)) !== null;
   }
   if (mainChanged && !retry && members.length === batch.members.length) {
     await retryLandingBatch(
@@ -423,6 +440,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       ...precompose,
       candidate: { id: last.candidate.id, actor: last.actor.id, digest: last.candidate.digest },
     });
+  await endLandedApprovals(ctx, granted);
   await writeBatch(ctx, key, { ...batch, phase: 'landed' });
   await releaseLandingQueue(ctx, queue, now);
   await noteMainLanding(ctx, { project, receipt: last, run });

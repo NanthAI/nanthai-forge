@@ -18,13 +18,14 @@ import { completeAcceptedHeads, guardAcceptanceCompletion } from './projectHoste
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { ForgeError, invariant } from '../src/errors';
 import { grantOwnerApproval } from './projectHostedOwnerGrant';
-import { releaseApprovedReview } from './projectHostedOwnerReview';
+import { heldPolicy, releaseApprovedReview } from './projectHostedOwnerReview';
 import { finishRow } from './projectHostedFinishWake';
 import { landingQueue } from './projectHostedLandingStore';
 import { releaseLandingQueue } from './projectHostedLandingWake';
 import { reserveFinishRetry } from './projectHostedFinishCompose';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { settleAttemptApprovals } from './projectHostedApprovalStore';
 async function publishSelected(
   ctx: MutationCtx,
   claim: import('./projectHostedLandingControl').LandingClaim,
@@ -132,72 +133,88 @@ export const approve = mutation({
     try {
       const actor = await acceptanceActor(ctx);
       await activeOwnedProject(ctx, input.projectId, actor.id);
-      invariant(
-        actor.kind === 'person',
-        'PROJECT_UNAVAILABLE',
-        'Owner approval requires explicit person acceptance.',
-      );
-      const { row, attempt, state } = await acceptanceSelection(ctx, input);
-      if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
-        return canonicalPayload(
-          await publishSelected(
-            ctx,
-            { ...input, channel: 'main', owner: attempt.operations.accept, token: 0 },
-            Date.now(),
-            actor,
-            state,
-          ),
-        );
-      await grantOwnerApproval(ctx, row, actor, attempt);
-      const claim = await claimReadyLanding(
-        ctx,
-        {
-          ...input,
-          channel: 'main',
-          owner: attempt.operations.accept,
-        },
-        Date.now(),
-        false,
-      );
-      if (!claim || 'waitingFor' in claim)
-        return canonicalPayload(
-          (await releaseApprovedReview(ctx, input))
-            ? { status: 'pending', reason: 'approved; lands in its turn' }
-            : { status: 'pending', reason: 'queued' },
-        );
-      let published;
-      try {
-        published = await publishSelected(ctx, claim, Date.now(), actor, state);
-      } catch (error) {
-        const finish = await finishRow(ctx, input);
-        if (
-          !finish ||
-          !(error instanceof ForgeError) ||
-          !['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH'].includes(error.code)
-        )
-          throw error;
-        // Same recovery as the finish driver: yield main, recompose and check this exact selection.
-        const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
-        if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
-        await reserveFinishRetry(ctx, finish, JSON.parse(finish.value));
-        return canonicalPayload({
-          status: 'pending',
-          reason:
-            'approved; main moved, so this exact source is checked again on current main and lands with this approval',
-        });
-      }
-      await recordMutationReceipt(ctx, {
-        projectId: input.projectId,
-        actor: actor.id,
-        operationId: attempt.operations.accept,
-        action: 'accept',
-      });
-      return canonicalPayload(published);
+      return canonicalPayload(await approveHeldLanding(ctx, actor, input));
     } catch (error) {
       return report(error);
     }
   },
 });
+/** The owner person's approval of one exact held attempt (the approve mutation, and a grant on the
+ * Lane's approval request while its landing is held). The caller has checked project ownership. */
+export async function approveHeldLanding(
+  ctx: MutationCtx,
+  actor: import('../src/autonomy-policy').AcceptanceActor,
+  input: AcceptanceIdentity,
+) {
+  invariant(
+    actor.kind === 'person',
+    'PROJECT_UNAVAILABLE',
+    'Owner approval requires explicit person acceptance.',
+  );
+  const { row, attempt, state } = await acceptanceSelection(ctx, input);
+  if (await acceptanceRow(ctx, { projectId: input.projectId, receiptId: attempt.operations.accept }))
+    return await publishSelected(
+      ctx,
+      { ...input, channel: 'main', owner: attempt.operations.accept, token: 0 },
+      Date.now(),
+      actor,
+      state,
+    );
+  await grantOwnerApproval(ctx, row, actor, attempt);
+  // A builder waiting on the Lane's approval request returns now, not only once it lands.
+  await settleAttemptApprovals(ctx, {
+    projectId: input.projectId,
+    receiptId: attempt.operations.accept,
+    operationId: attempt.operations.accept,
+    by: actor.id,
+    status: 'granted',
+  });
+  const claim = await claimReadyLanding(
+    ctx,
+    { ...input, channel: 'main', owner: attempt.operations.accept },
+    Date.now(),
+    false,
+  );
+  if (!claim || 'waitingFor' in claim)
+    return (await releaseApprovedReview(ctx, input))
+      ? { status: 'pending', reason: 'approved; lands in its turn' }
+      : { status: 'pending', reason: 'queued' };
+  let published;
+  try {
+    published = await publishSelected(ctx, claim, Date.now(), actor, state);
+  } catch (error) {
+    const finish = await finishRow(ctx, input);
+    if (
+      !finish ||
+      !(error instanceof ForgeError) ||
+      !['CHANNEL_CHANGED', 'CHECK_EVIDENCE_REFRESH', 'POLICY_CHANGED'].includes(error.code)
+    )
+      throw error;
+    // Same recovery as the finish driver: yield main, recompose and check this exact selection. The
+    // fresh attempt re-reads the current policy; the grant carries to it only while the policy is
+    // unchanged (grantedApproval). Main is compared first, so a moved main hides a policy edit:
+    // compare the policy here too (991a1a94 landed in the submitter's name after such an approve).
+    const project = await ctx.db.get(input.projectId);
+    const policyMoved =
+      error.code === 'POLICY_CHANGED' || Boolean(project && heldPolicy(project, attempt).changed);
+    const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
+    if (queue?.lease?.submissionId === input.submissionId) await releaseLandingQueue(ctx, queue);
+    await reserveFinishRetry(ctx, finish, JSON.parse(finish.value));
+    return {
+      status: 'pending',
+      reason: policyMoved
+        ? 'approved; the landing policy changed since this was held, so a fresh attempt re-checks it under the current policy: it holds for you once more if that policy still needs review, otherwise it lands without review (its receipt then names the submitter)'
+        : 'approved; main moved, so this exact source is checked again on current main and lands with this approval',
+    };
+  }
+  await recordMutationReceipt(ctx, {
+    projectId: input.projectId,
+    actor: actor.id,
+    operationId: attempt.operations.accept,
+    action: 'accept',
+  });
+  return published;
+}
 export const publish = internalMutation({
   args: { ...selection, channel: v.literal('main'), owner: v.string(), token: v.number() },
   returns: v.string(),

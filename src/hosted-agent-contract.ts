@@ -69,8 +69,9 @@ export const hostedAgentRecordActions = [
 /** Project policy: one Convex call each, served before capability discovery. Not advertised;
  * the server enforces owner authority on set-policy. */
 export const hostedAgentPolicyActions = ['policy', 'set-policy'] as const;
-/** Owner review (fe5bea80): one query for the approve link of a held landing. Not advertised. */
-export const hostedAgentReviewActions = ['approve-link'] as const;
+/** Owner review (fe5bea80): one query for the approve link of a held landing, and one mutation to
+ * request the owner's approval on a Lane. Not advertised. */
+export const hostedAgentReviewActions = ['approve-link', 'request-approval'] as const;
 /** Landing recovery (78a97771): `land --withdraw` ends the Lane's live landing. Not advertised (released
  * clients parse the capability list strictly); the server feature `landing-withdraw` gates it. */
 export const hostedAgentLandingActions = ['withdraw'] as const;
@@ -376,6 +377,16 @@ export const hostedAgentCommandSchemas = {
   policy: z.object({}).strict(),
   /** The approve link of a landing (operationId = its original landing UUID) for a signed-in owner. */
   'approve-link': z.object({}).strict(),
+  /** Ask the project owner to approve a saved Lane (default: this checkout's Lane) with a reason;
+   * landing it holds until they grant it. withdraw:true drops your request. */
+  'request-approval': z
+    .object({
+      laneId: uuid.optional(),
+      reason: z.string().trim().min(1).max(500).optional(),
+      withdraw: z.literal(true).optional(),
+    })
+    .strict()
+    .refine(value => Boolean(value.reason) !== Boolean(value.withdraw), 'Give a reason, or withdraw:true.'),
   /** Owner-only merge of policy fields; operationId (a UUID, generated if omitted) makes a replay a no-op. */
   'set-policy': policyWriteObject
     .omit({ action: true, operationId: true })

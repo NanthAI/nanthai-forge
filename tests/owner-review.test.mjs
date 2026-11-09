@@ -12,6 +12,9 @@ const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
 const { grantedApproval } = await import(moduleUrl('../convex/projectHostedOwnerGrant.ts'));
 const { OwnerApproval } = await import(moduleUrl('../web/src/review/OwnerApproval.tsx'));
+const { LaneApproval } = await import(moduleUrl('../web/src/review/LaneApproval.tsx'));
+const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
+const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 
 function syntheticR2(t) {
   const synthetic = {
@@ -31,14 +34,7 @@ function syntheticR2(t) {
     }
   });
 }
-/** A public project whose owner agent's finish touches a protected path: checked, then held. */
-async function heldLanding(t) {
-  syntheticR2(t);
-  const f = await finishFixture(t);
-  const policy = policyPreset('trusted');
-  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
-  f.patch('hostedProjects', f.projectId, { visibility: 'public', autonomyPolicy: policy });
-  f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+function syntheticDevice(f) {
   f.insert('cliCredentials', {
     credentialId: 'synthetic-device',
     owner: 'owner',
@@ -49,6 +45,16 @@ async function heldLanding(t) {
     expiresAt: Date.now() + 60 * 60_000,
     revoked: false,
   });
+}
+/** A public project whose owner agent's finish touches a protected path: checked, then held. */
+async function heldLanding(t) {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = ['selected.txt'];
+  f.patch('hostedProjects', f.projectId, { visibility: 'public', autonomyPolicy: policy });
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+  syntheticDevice(f);
   const state = await f.enqueue(f.request());
   await f.drain();
   await f.passChecks();
@@ -214,4 +220,239 @@ test('the /approve card shows Accept and Decline only for a held landing', () =>
     }),
     /Declined/,
   );
+});
+
+/** A Lane with no protected path whose builder (the owner's device, an agent) asks for approval. */
+async function requestedLane(t) {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  f.patch('hostedProjects', f.projectId, { visibility: 'public' });
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+  syntheticDevice(f);
+  const laneId = f.lane.laneId;
+  const ask = {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    laneId,
+    reason: 'touches the billing migration; please look first',
+  };
+  const requested = JSON.parse(await f.tx('request', approvals.request, ask, device));
+  const read = async () =>
+    JSON.parse(await f.tx('observe', approvals.observe, { projectId: f.projectId, laneId }, device));
+  const decide = async (decision, head, actor = 'owner', reason) =>
+    JSON.parse(
+      await f.tx(
+        'decide',
+        approvals.decide,
+        {
+          projectId: f.projectId,
+          operationId: randomUUID(),
+          laneId,
+          decision,
+          head,
+          ...(reason ? { reason } : {}),
+        },
+        actor,
+      ),
+    );
+  return { f, laneId, ask, requested, read, decide };
+}
+const hold = async f => {
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  return { state, read: await f.current(state.id) };
+};
+
+test('a builder requests approval on a saved Lane: one row, a project board note, a replay-safe reply', async t => {
+  const { f, laneId, ask, requested, read } = await requestedLane(t);
+  assert.equal(requested.status, 'requested');
+  assert.equal(requested.reason, ask.reason);
+  assert.equal(requested.head, f.lane.head);
+  assert.equal(
+    requested.url,
+    `https://forge.example.invalid/approve?project=${encodeURIComponent(f.projectId)}&lane=${laneId}`,
+  );
+  assert.match(requested.next, /wait '\{"approval":"/);
+  assert.deepEqual(JSON.parse(await f.tx('requestReplay', approvals.request, ask, device)), requested);
+  assert.equal(f.tables.projectHostedApprovals.size, 1);
+  const notes = [...f.tables.projectBoardMessages.values()];
+  assert.equal(notes.length, 1, 'the replay posts no second note');
+  assert.equal(notes[0].targetKey, 'project');
+  assert.match(notes[0].body, /Approval requested on Lane .*billing migration/);
+  assert.equal((await read()).status, 'requested');
+  // Another member cannot request on a Lane that is not theirs; a reason is required.
+  await assert.rejects(
+    f.tx('requestOther', approvals.request, { ...ask, operationId: randomUUID() }, 'contributor'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  await assert.rejects(
+    f.tx('requestEmpty', approvals.request, { ...ask, operationId: randomUUID(), reason: '  ' }, device),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal(f.pending().length, 0, 'a request leaves no idle task');
+});
+
+test('landing a Lane with an open request holds after its check, names the reason, and agents cannot decide', async t => {
+  const { f, read: approval, decide } = await requestedLane(t);
+  const { state, read } = await hold(f);
+  assert.equal(read.submission.observation.pendingReason, 'waiting-for-review');
+  assert.equal(read.submission.error.code, 'REVIEW_REQUIRED');
+  assert.match(read.submission.error.message, /approval requested on Lane .*billing migration/);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0);
+  for (const actor of [device, 'contributor'])
+    await assert.rejects(decide('grant', f.lane.head, actor), code('PROJECT_UNAVAILABLE'));
+  assert.equal((await approval()).status, 'requested');
+  // A grant for a head the owner did not see is refused.
+  await assert.rejects(decide('grant', '0'.repeat(64)), code('WORK_STALE'));
+  // The owner's one grant on the Lane approves the held landing: it lands as the owner.
+  const granted = await decide('grant', f.lane.head);
+  assert.equal(granted.approval.status, 'granted');
+  assert.equal(granted.landing.status, 'landed');
+  assert.deepEqual(granted.landing.receipt.actor, { id: 'owner', kind: 'person' });
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.observation.state, 'landed');
+  const after = await approval();
+  assert.equal(after.live, false, 'landing with the grant ends the request');
+  assert.equal(after.ended.kind, 'landed');
+});
+
+test('a grant before landing lets that exact Lane head land without a hold', async t => {
+  const { f, read: approval, decide } = await requestedLane(t);
+  assert.equal((await decide('grant', f.lane.head)).landing, null);
+  const { read } = await hold(f);
+  assert.equal(read.submission.observation.state, 'landed');
+  assert.equal((await approval()).ended.kind, 'landed');
+});
+
+test('approving the held landing directly also grants the Lane request; declining declines it', async t => {
+  {
+    const { f, read: approval } = await requestedLane(t);
+    const { read } = await hold(f);
+    const selection = {
+      projectId: f.projectId,
+      submissionId: read.submission.id,
+      attemptId: read.submission.attemptId,
+    };
+    assert.equal(JSON.parse(await f.tx('approve', acceptance.approve, selection)).status, 'landed');
+    const after = await approval();
+    assert.equal(after.status, 'granted');
+    assert.equal(after.decision.via, 'landing');
+    assert.equal(after.live, false);
+  }
+  {
+    const { f, read: approval, decide } = await requestedLane(t);
+    const { state } = await hold(f);
+    const declined = await decide('decline', f.lane.head, 'owner', 'split the migration first');
+    assert.equal(declined.approval.status, 'declined');
+    assert.equal(declined.landing.error.code, 'REVIEW_DECLINED');
+    await f.drain();
+    assert.equal((await f.current(state.id)).submission.observation.state, 'terminal-failed');
+    const after = await approval();
+    assert.equal(after.decision.reason, 'split the migration first');
+    assert.equal(after.live, true, 'a declined request still holds the next landing');
+    const lane = [...f.tables.projectBoardMessages.values()].find(
+      row => row.targetKey === `lane:${f.lane.laneId}`,
+    );
+    assert.match(lane.body, /declined the approval request.*split the migration first/);
+  }
+});
+
+test('the requester withdraws the request and the Lane lands as before', async t => {
+  const { f, laneId, read: approval } = await requestedLane(t);
+  const withdrawn = JSON.parse(
+    await f.tx('withdraw', approvals.withdraw, { projectId: f.projectId, laneId }, device),
+  );
+  assert.equal(withdrawn.live, false);
+  assert.equal(withdrawn.ended.kind, 'withdrawn');
+  assert.equal((await hold(f)).read.submission.observation.state, 'landed');
+  assert.equal((await approval()).ended.kind, 'withdrawn');
+});
+
+test('a held landing names the policy it is pinned to; a policy edit re-reads only on approval', async t => {
+  const { f, state, select } = await heldLanding(t);
+  const linkOf = async label =>
+    JSON.parse(
+      await f.tx(label, review.link, { projectId: f.projectId, operationId: state.operationId }, device),
+    );
+  const pinned = await linkOf('linkPinned');
+  assert.equal(pinned.policy.changed, false);
+  assert.equal(typeof pinned.policy.attempt, 'number');
+  assert.match(pinned.policyNote, /^Pinned to the landing policy of attempt \d+ .*only on a fresh attempt/);
+  const policy = policyPreset('trusted');
+  policy.acceptance.ownerApprovalPaths = ['selected.txt', 'other.txt'];
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policy });
+  const link = await linkOf('linkStale');
+  assert.equal(link.policy.changed, true);
+  assert.match(link.policyNote, /policy changed since.*holds for the owner once more/);
+  const page = JSON.parse(
+    await f.tx(
+      'observeStale',
+      observe.page,
+      { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 },
+      device,
+    ),
+  );
+  assert.match(
+    page.submission.error.message,
+    /protected paths selected\.txt.*Pinned to the landing policy.*changed since/,
+  );
+  const held = await select();
+  const reply = JSON.parse(await f.tx('approvePolicy', acceptance.approve, held));
+  assert.equal(reply.status, 'pending');
+  assert.match(reply.reason, /policy changed/);
+  assert.equal(f.tables.projectHostedAcceptances.size, 0, 'the old-policy attempt never lands');
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const fresh = await f.current(state.id);
+  assert.notEqual(fresh.submission.attemptId, held.attemptId);
+  // The new policy still protects selected.txt: the fresh attempt holds once more for the owner.
+  assert.equal(fresh.submission.observation.pendingReason, 'waiting-for-review');
+  assert.doesNotMatch(fresh.submission.error.message, /changed since/);
+  const landed = JSON.parse(await f.tx('approveFresh', acceptance.approve, await select()));
+  assert.equal(landed.status, 'landed');
+});
+
+test('991a1a94 replay: path lifted while held, main moves, the owner approves: it lands without review in the submitter name', async t => {
+  const { f, state, select } = await heldLanding(t);
+  const held = await select();
+  f.patch('hostedProjects', f.projectId, { autonomyPolicy: policyPreset('trusted') });
+  f.moveMain();
+  // Main is compared before the policy: the reply still says the policy changed.
+  const reply = JSON.parse(await f.tx('approveLifted', acceptance.approve, held));
+  assert.equal(reply.status, 'pending');
+  assert.match(reply.reason, /policy changed.*lands without review.*names the submitter/);
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const landed = await f.current(state.id);
+  assert.equal(landed.submission.observation.state, 'landed');
+  const [receipt] = [...f.tables.projectHostedAcceptances.values()].map(row => JSON.parse(row.value));
+  assert.equal(receipt.attemptId, landed.submission.attemptId);
+  assert.equal(receipt.actor.kind, 'agent', 'the approval was for the old policy; the new one needs none');
+});
+
+test('the /approve?lane card offers Grant and Decline only for a live request', () => {
+  const noop = { accept() {}, decline() {} };
+  const render = approval =>
+    renderToStaticMarkup(
+      createElement(LaneApproval, { phase: { kind: 'read', approval }, review: noop, signIn: null }),
+    );
+  const base = {
+    laneId: randomUUID(),
+    live: true,
+    reason: 'touches billing',
+    requester: 'thevarsek',
+    agent: 'ready-narwhal',
+    landing: null,
+  };
+  const open = render({ ...base, status: 'requested' });
+  assert.match(open, />Grant</);
+  assert.match(open, /touches billing/);
+  assert.match(open, /@thevarsek\/ready-narwhal/);
+  assert.doesNotMatch(render({ ...base, status: 'granted' }), />Grant</);
+  assert.match(render({ ...base, live: false, status: 'granted', ended: { kind: 'landed' } }), /Landed/);
+  assert.match(render({ ...base, status: 'none', live: false }), /no approval request/);
 });

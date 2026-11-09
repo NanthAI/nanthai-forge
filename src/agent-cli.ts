@@ -228,6 +228,7 @@ const examples: Record<string, unknown> = {
   brief: { situation: 'continue-lane', laneId: 'LANE_ID', agent: 'generic' },
   policy: {},
   'approve-link': { operationId: 'LANDING_UUID' },
+  'request-approval': { laneId: 'LANE_ID', reason: 'Why the owner should look before this lands' },
   'set-policy': { operationId: 'UUID', preset: 'trusted' },
   'undo-sync': { laneId: 'LANE_ID', syncOperationId: 'SYNC_UUID' },
   guidance: {

@@ -22,7 +22,8 @@ export async function postSystemLaneNote(
     projectId: Id<'hostedProjects'>;
     /** Deterministic per event, so a replay of the event returns the first note. */
     id: string;
-    toLaneId: string;
+    /** The Lane whose inbox gets it; 'project' posts to the whole project (no Lane inbox wakes). */
+    toLaneId: string | 'project';
     fromLaneId: string;
     author: string;
     agent?: string;
@@ -43,7 +44,7 @@ export async function postSystemLaneNote(
     .unique();
   if ((counter?.live ?? 0) >= BOARD_PROJECT_LIVE_CAP) return 'skipped';
   const now = input.now ?? Date.now();
-  const targetKey = `lane:${input.toLaneId}`;
+  const targetKey = input.toLaneId === 'project' ? 'project' : `lane:${input.toLaneId}`;
   // Each note gets a later time than the project's last one, so a client cursor never skips a note.
   const at = Math.max(now, (counter?.lastAt ?? 0) + 1);
   await ctx.db.insert('projectBoardMessages', {
