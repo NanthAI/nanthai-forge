@@ -2,7 +2,7 @@
 import { actionsCheckRuntime, checkRoute } from './check-backend.js';
 import { readPolicy } from './work-autonomy.js';
 import { digest } from './hash.js';
-import { PROJECT_LOCKFILES, projectLockfile } from './project-lockfile.js';
+import { isProjectLockfile, lockfileDigest } from './project-lockfile.js';
 import { NativeSource } from './native-source.js';
 import { workGit } from './work-git.js';
 import { checkPassthrough } from './check-environment.js';
@@ -29,22 +29,22 @@ export function checkReuseKey(
       const source = new NativeSource(store.root),
         files = source.state(run.head).files;
       tree = digest(JSON.stringify(files));
-      const name = projectLockfile(path => files.some(file => file.path === path));
-      lockfile = files.find(file => file.path === name)?.blob ?? digest('');
+      lockfile = lockfileDigest(files);
     } else {
       tree = workGit(store.root, ['rev-parse', `${run.head}^{tree}`]).trim();
-      const rows = new Map(
-        workGit(store.root, ['ls-tree', '-z', run.head, '--', ...PROJECT_LOCKFILES])
-          .split('\0')
-          .flatMap(row => {
-            const found = /^[0-9]+ blob ([0-9a-f]+)\t(.+)$/.exec(row);
-            return found ? [[found[2]!, found[1]!] as const] : [];
-          }),
+      // Every lockfile in the tree, at any depth: its bytes' digest stands in for the State blob.
+      const found = workGit(store.root, ['ls-tree', '-r', '-z', run.head])
+        .split('\0')
+        .flatMap(row => {
+          const match = /^[0-9]+ blob ([0-9a-f]+)\t(.+)$/.exec(row);
+          return match && isProjectLockfile(match[2]!) ? [{ path: match[2]!, id: match[1]! }] : [];
+        });
+      lockfile = lockfileDigest(
+        found.map(({ path, id }) => ({
+          path,
+          blob: digest(workGit(store.root, ['cat-file', 'blob', id], undefined, false, true)),
+        })),
       );
-      const blob = rows.get(projectLockfile(path => rows.has(path)) ?? '');
-      lockfile = blob
-        ? digest(workGit(store.root, ['cat-file', 'blob', blob], undefined, false, true))
-        : digest('');
     }
     return selfMetricReuseKey({
       tree,

@@ -39,12 +39,13 @@ export type EcosystemManager = {
   /** Exact manifest file names the package graph reads (`go.mod`, `Cargo.toml`). Names with a
    * pattern (`*.csproj`, `requirements*.txt`) stay with their reader. */
   manifests?: readonly string[];
-  /** Root lockfile names that identify this manager and pin a check plan (first present wins). */
+  /** Lockfile names that identify this manager and pin a check plan, at the root or in any folder
+   * (src/project-lockfile.ts digests every one in the State). */
   lockfiles?: readonly string[];
   /** Lockfiles that pin a plan but do not identify the manager (`npm-shrinkwrap.json`). */
   pinOnly?: readonly string[];
-  /** Lockfiles recognised as dependency state (preflight learning skips them) that check plans do
-   * not pin yet (`gradle.lockfile`; Issue 721cd45c). */
+  /** Files recognised as dependency state (preflight learning skips them) that are not lockfiles
+   * and so pin no check plan (`vcpkg-configuration.json`). */
   unpinned?: readonly string[];
   /** How Forge installs this manager's dependencies (src/ecosystem-install.ts). `argv` runs no
    * dependency install script or plugin; `scriptFlags` are the words of `argv` that keep them off.
@@ -341,7 +342,7 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       { name: 'maven' },
       {
         name: 'gradle',
-        unpinned: ['gradle.lockfile'],
+        lockfiles: ['gradle.lockfile'],
         install: {
           argv: ['gradle', 'dependencies'],
           manifestIsCode: true,
@@ -391,7 +392,7 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
   {
     id: 'dotnet',
     code: 'cs',
-    managers: [{ name: 'nuget', unpinned: ['packages.lock.json'] }],
+    managers: [{ name: 'nuget', lockfiles: ['packages.lock.json'] }],
     projectOutputDirs: { dirs: ['bin', 'obj'], beside: '(cs|fs|vb)proj' },
     actions: {
       tool: 'dotnet',
@@ -423,7 +424,7 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       // Xcode projects (`*.xcodeproj`) are patterned names: src/package-graph-swift.ts reads them.
       {
         name: 'cocoapods',
-        unpinned: ['Podfile.lock'],
+        lockfiles: ['Podfile.lock'],
         install: {
           argv: ['pod', 'install'],
           manifestIsCode: true,
@@ -582,7 +583,7 @@ const all = <T>(pick: (entry: EcosystemEntry) => readonly T[] | undefined, entri
 const unique = <T>(values: readonly T[]) => [...new Set(values)];
 const ending = (extensions: Extensions, flags = '') => new RegExp(`\\.(?:${extensions})$`, flags);
 
-/** Root lockfiles in pin order: each manager's own, then its pin-only ones. */
+/** Lockfile names that pin a check plan: each manager's own, then its pin-only ones. */
 export const pinLockfiles = (entries = ECOSYSTEMS) =>
   unique(all(entry => entry.managers?.flatMap(m => [...(m.lockfiles ?? []), ...(m.pinOnly ?? [])]), entries));
 /** Lockfiles that identify a manager, by manager name. */

@@ -6,7 +6,6 @@ import type { HostedCheckRun } from './hosted-check.js';
 import { standardTestPath } from './intent-test-contract.js';
 import { checkPin } from './hosted-check.js';
 import { semanticTests } from './intent-semantic-conflict.js';
-import { digest } from './hash.js';
 import { guardedSelection, standardSelection } from '../scripts/test-impact.mjs';
 import { describeShardPlan, timedShards } from '../scripts/test-shards.mjs';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
@@ -42,7 +41,7 @@ import { resolveTestRunner } from './project-test-runner.js';
 import { scanSecretPaths, SECRET_SCAN_ALLOW_FILE } from './secret-scan.js';
 import { isStandardForgeCheck } from './standard-check.js';
 import { commandSelection, commandShardCount, commandShardGroups } from './check-command-scope.js';
-import { projectLockfile } from './project-lockfile.js';
+import { lockfileDigest } from './project-lockfile.js';
 import { graphShareFor, isGraphFirstGate } from './graph-first-check.js';
 /** The base (main) allow file's bytes. Usually cached already (unchanged, or from the base
  * pack); otherwise one small object read, only when the base has the file. Unreadable
@@ -253,11 +252,10 @@ export async function prepareActionsJob(
   );
   const unsupported = hostedUnsupportedTools(recipe.actions);
   invariant(!unsupported.length, 'ACTIONS_TOOL_UNSUPPORTED', actionsToolUnsupported(unsupported));
-  const lock = inventory.get(projectLockfile(path => inventory.has(path)) ?? '');
   lap('selectMs');
   const planned = (await client.call({
     kind: 'plan',
-    plan: { recipe, lockfile: digest(lock ? readFileSync(join(cache, lock.blob)) : Buffer.alloc(0)) },
+    plan: { recipe, lockfile: lockfileDigest(state.files) },
   })) as typeof run | { run: typeof run; claims: unknown };
   let claims: PoolClaim[] | null = null;
   if (recipe.pool) {

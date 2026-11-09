@@ -15,7 +15,7 @@ import type { CheckRun } from './work-types.js';
 import { partitionTests, timingDurations } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
 import { isStandardForgeCheck } from './standard-check.js';
-import { projectLockfile } from './project-lockfile.js';
+import { lockfileDigest } from './project-lockfile.js';
 import { scanSecretPaths } from './secret-scan.js';
 import { LazySourceFiles } from './lazy-source-files.js';
 
@@ -77,7 +77,7 @@ export async function remoteCheckPlan(
   if (run.checkSelection?.scope === 'partial' && selection.tests.some(path => !files.has(path)))
     throw new Error('An explicit test file is absent from the pinned source.');
   const durations = timingDurations(readTimingHistory(join(store.directory, 'test-timings.json')));
-  const lockfile = digest(files.get(projectLockfile(path => files.has(path)) ?? '') ?? '');
+  const lockfile = lockfileDigest(state.files);
   const impact = comparison.paths
     ? comparison.paths.length
       ? selectTests({ files, paths: comparison.paths })

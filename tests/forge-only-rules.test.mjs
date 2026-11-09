@@ -366,10 +366,7 @@ test('C/C++, Zig and Delphi fixtures are recognised through the registry', async
       .some(candidate => candidate.dirs.has(name) && candidate.beside.test('A.dproj'));
 
   const c = fixtureFiles('c');
-  assert.equal(
-    lockfiles.projectLockfile(path => c.has(path)),
-    'conan.lock',
-  );
+  assert.equal([...c.keys()].find(lockfiles.isProjectLockfile), 'conan.lock');
   for (const [path, name] of [
     ['tests/greeter_test.cpp', 'tests/greeter_test'],
     ['src/greeter.c', 'src/greeter'],
@@ -394,10 +391,7 @@ test('C/C++, Zig and Delphi fixtures are recognised through the registry', async
   );
 
   const zig = fixtureFiles('zig');
-  assert.equal(
-    lockfiles.projectLockfile(path => zig.has(path)),
-    'build.zig.zon',
-  );
+  assert.equal([...zig.keys()].find(lockfiles.isProjectLockfile), 'build.zig.zon');
   assert.equal(stem('src/greeter.zig'), 'src/greeter');
   assert.ok(dependencyDirs.ECOSYSTEM_DIRS.has('.zig-cache') && dependencyDirs.ECOSYSTEM_DIRS.has('zig-out'));
   assert.match(graphOf(zig).reason, /build\.zig, build\.zig\.zon.*whole suite/);
@@ -407,10 +401,7 @@ test('C/C++, Zig and Delphi fixtures are recognised through the registry', async
 
   // Delphi stays light: recognised files and regenerable folders, no lockfile, no toolchain setup.
   const delphi = fixtureFiles('delphi');
-  assert.equal(
-    lockfiles.projectLockfile(path => delphi.has(path)),
-    undefined,
-  );
+  assert.equal([...delphi.keys()].find(lockfiles.isProjectLockfile), undefined);
   for (const [path, name] of [
     ['GreeterUnit.pas', 'GreeterUnit'],
     ['Greeter.dpr', 'Greeter'],

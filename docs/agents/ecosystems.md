@@ -21,7 +21,7 @@ Adding an ecosystem means adding **one entry and one fixture repository**:
 | --- | --- |
 | `id` | docs and fixture names |
 | `code` | source-file extensions (`exs?`): test-name stems, JUnit code labels, the credential-name capture rule |
-| `managers[]` | `name`, exact `manifests` (package graph), `lockfiles` (identify the manager and pin check plans, first present wins), `pinOnly`, `unpinned` (recognised as dependency state, not pinned yet) and `install` (the install argv without scripts or plugins, the flags that keep them off, and `manifestIsCode` when the manifest is a program; `src/ecosystem-install.ts`) |
+| `managers[]` | `name`, exact `manifests` (package graph), `lockfiles` (identify the manager and pin check plans, at the root or in any folder), `pinOnly`, `unpinned` (recognised as dependency state but not lockfiles, so they pin nothing) and `install` (the install argv without scripts or plugins, the flags that keep them off, and `manifestIsCode` when the manifest is a program; `src/ecosystem-install.ts`) |
 | `regenerableDirs` | Lane cleanup reclaims them only when ignored |
 | `dependencyDirs` | installs and tool caches: hard-linked files there are not source |
 | `buildDirs` | build output that Lane cleanup always reclaims |
@@ -34,8 +34,14 @@ Adding an ecosystem means adding **one entry and one fixture repository**:
 | `codeMap` | the code map's analysed languages |
 | `moduleGraph` | the module graph's readers |
 
-Entry order matters only for lockfile pins: JS comes first, so a project with `package-lock.json`
-pins the same bytes as before.
+Entry order matters only for the order of root lockfile names (`PROJECT_LOCKFILES`). A check plan's
+lockfile digest (`lockfileDigest`, `src/project-lockfile.ts`) covers every registry lockfile in the
+pinned State at any depth: no lockfile is the empty-input digest, a repository whose only lockfile is
+one root file keeps the digest of its bytes, and anything else is the digest of the sorted path and
+blob lines, so a change to a nested lockfile (or moving one) changes the plan and its cache key, and
+an unrelated file does not. It reads State records only, never file bytes. Repositories with a nested
+lockfile, a second root lockfile or a `gradle.lockfile`, `packages.lock.json` or `Podfile.lock` got a
+different plan digest once, when this landed.
 
 ## Code that is not data
 
@@ -146,7 +152,7 @@ trees, so this repository holds no live manifest), tests in `tests/ecosystem-fix
 | | Swift | Kotlin / Android | Dart / Flutter |
 | --- | --- | --- | --- |
 | Entry | `swift` | the `jvm` entry (one per toolchain) | `dart` |
-| Detection | `Package.swift`, `Package.resolved` (pinned), `*.xcodeproj`, `Podfile.lock` (unpinned) | Gradle Kotlin DSL, `settings.gradle.kts`, Android modules | `pubspec.yaml`, `pubspec.lock` (pinned) |
+| Detection | `Package.swift`, `Package.resolved` (pinned), `*.xcodeproj`, `Podfile.lock` (pinned) | Gradle Kotlin DSL, `settings.gradle.kts`, Android modules | `pubspec.yaml`, `pubspec.lock` (pinned) |
 | Package graph | `src/package-graph-swift.ts`: literal `.package(path:)` edges; an Xcode project depends on every SwiftPM package | `src/package-graph-jvm.ts`: `project(":x")` edges | `src/package-graph-pub.ts`: `path:` dependencies, overrides, `workspace:` members |
 | Test command | `swift test` per package; Xcode has none Forge can read (scheme, simulator) and names the `preflight.tests` declaration with an `xcodebuild test` example | `gradle :p:test` (`*Test.kt`, `src/test`, `src/androidTest`) | `flutter test` when the package takes `sdk: flutter`, else `dart test` (`test/*_test.dart`; `integration_test/` needs a device) |
 | Regenerable | `.build`, `.swiftpm`, `DerivedData`, `Pods` | `.gradle`, `.kotlin`, `.cxx` | `.dart_tool` |

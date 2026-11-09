@@ -9,6 +9,8 @@ import { exportHostedActions, withHostedActionsExport } from '../dist/hosted-act
 import { hostedActionsGit } from '../dist/hosted-actions-git.js';
 import { checkPin } from '../dist/hosted-check.js';
 import { code } from './hosted-checks-fixture.mjs';
+import { lockfileDigest } from '../dist/project-lockfile.js';
+import { digest } from '../dist/hash.js';
 
 test('R2 exact State export preserves binary, symlink, mode, hostile attributes and selected Blacksmith label', async () => {
   const files = [
@@ -94,6 +96,28 @@ test('GitHub-hosted label is generated exactly and source or lockfile corruption
   const head = s.input.request.expectedHead;
   s.bytes.set(head, Buffer.from('wrong bytes'));
   await assert.rejects(exportHostedActions(s.input, s.transport), code('SOURCE_HASH_MISMATCH'));
+});
+test('the plan lockfile digest covers lockfiles below the root (Issue 721cd45c)', async () => {
+  const files = [
+    { path: 'go.sum', bytes: 'root sum' },
+    { path: 'svc/api/go.sum', bytes: 'nested sum' },
+    { path: 'svc/api/main.go', bytes: 'package main' },
+  ];
+  const s = await actionsFixture(files);
+  const expected = lockfileDigest([
+    { path: 'go.sum', blob: digest('root sum') },
+    { path: 'svc/api/go.sum', blob: digest('nested sum') },
+  ]);
+  // The fixture pins only a root package-lock.json: here the empty digest, which no longer matches.
+  await assert.rejects(exportHostedActions(s.input, s.transport), code('EVIDENCE_CHANGED'));
+  const input = structuredClone(s.input);
+  input.plan.lockfile = expected;
+  input.planDigest = checkPin(input.plan);
+  assert.ok((await exportHostedActions(input, s.transport)).export.commit);
+  // The old root-only digest is refused.
+  input.plan.lockfile = digest('root sum');
+  input.planDigest = checkPin(input.plan);
+  await assert.rejects(exportHostedActions(input, s.transport), code('EVIDENCE_CHANGED'));
 });
 test('recipe source, command, runtime, shard selection and generated-path overlap fail closed', async () => {
   const s = await actionsFixture();

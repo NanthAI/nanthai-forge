@@ -10,14 +10,13 @@ import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-
 import { parseNativeState } from './native-state-format.js';
 import { hostedActionsRecipeSchema, hostedActionsRuntime, type ActionsExport } from './hosted-actions.js';
 import { checkPin } from './hosted-check.js';
-import { digest } from './hash.js';
 import type { HostedCheckDispatch } from './hosted-check-controller.js';
 import { githubActionsWorkflow } from './github-actions-workflow.js';
 import { actionsDeclaration } from './actions-toolchains.js';
 import { hostedActionsGit } from './hosted-actions-git.js';
 import { invariant } from './errors.js';
 import { isStandardForgeCheck, STANDARD_CHECK_ENTRY } from './standard-check.js';
-import { projectLockfile } from './project-lockfile.js';
+import { lockfileDigest } from './project-lockfile.js';
 
 /** Fixed source-worker export. Hash-verified R2 bytes go straight to bare Git
  * objects; source is never checked out and no project code runs here. */
@@ -132,13 +131,11 @@ export async function exportHostedActions(
     );
     await hostedActionsGit(root, ['init', '--bare', '--template=', '--initial-branch=forge-export']);
     const entries: string[] = [];
-    let lockfile = digest('');
-    const lockName = projectLockfile(path => state.files.some(file => file.path === path));
+    const lockfile = lockfileDigest(state.files);
     // Deduplicate before describing; consume grants and stream bytes in bounded windows.
     await reader.resolveMany(state.files.map(file => file.blob));
     for (const file of state.files) {
       const path = join(cache, file.blob);
-      if (file.path === lockName) lockfile = file.blob;
       if (generated.has(file.path)) continue;
       const hash =
         file.mode === 'gitlink'
@@ -155,7 +152,7 @@ export async function exportHostedActions(
       entries.push(`${mode} ${hash}\t${file.path}\0`);
       await progress();
     }
-    // The local contract hashes the exact lockfile bytes, or the empty string.
+    // The local contract digests every lockfile in the State, or the empty string.
     invariant(
       lockfile === input.plan.lockfile,
       'EVIDENCE_CHANGED',

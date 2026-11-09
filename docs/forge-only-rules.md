@@ -121,7 +121,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-manager.ts` | `package-json-config` | 5 | JS package managers keep `packageManager` and `workspaces` in package.json (slice H, 4ce67b9a) | non-JS repositories install with their own tooling |
 | `src/package-manager-install.ts` | `package-json-config` | 1 | reads the JS install scripts the package manager would run (slice H, 4ce67b9a) | the same for every JS package manager |
 | `src/shared-dependencies.ts` | `npm-lockfile` | 2 | Lanes share an npm install keyed by the exact lockfile | each Lane installs with its own tooling |
-| `src/project-lockfile.ts` | `npm-lockfile` | 1 | says npm's lockfile pins first (the list is the registry's, src/ecosystems.ts) | their own lockfile (pnpm, Yarn, Bun, Cargo, Go, Python, Ruby, PHP) |
 | `src/agent-cli.ts` | `build-folders` | 1 | a runner-label example (`["linux","build"]`) in help text, not a folder | — |
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
@@ -163,7 +162,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/contract-packages.ts` | `ecosystem-extensions` | 1 | contract-unknown code extensions, wider than the registry on purpose (any-ecosystem slice E, 7e97573d) | contract unknown, never independence |
 | `src/contract-structural.ts` | `ecosystem-extensions` | 1 | the languages that have a structural contract reader (slice E) | contract unknown, never independence |
 | `src/files.ts` | `ecosystem-folders` | 2 | analysis skips JS installs and Next.js output by name; build folders follow the ignore rules | the same for every repository |
-| `src/first-check-risk.ts` | `ecosystem-lockfile` | 1 | risk rule v1 is frozen (plans pin the rule version); a new ecosystem adds its inputs in the next rule version | the same rule for every repository |
+| `src/first-check-risk.ts` | `ecosystem-lockfile` | 2 | risk rule v1 is frozen (plans pin the rule version); a new ecosystem adds its inputs in the next rule version | the same rule for every repository |
 | `src/package-ci-flags.ts` | `ecosystem-extensions` | 1 | the CI-flag reader: words that name test targets in Python, Go, Rust and .NET commands | — (lexical reading of their own CI) |
 | `src/package-graph-python.ts` | `ecosystem-lockfile` | 2 | the Python reader runs pytest through `uv` or `poetry` from its own lockfile | the same for every Python repository |
 | `src/package-graph-jvm.ts` | `ecosystem-folders` | 1 | Gradle and Kotlin plugin ids (`org.gradle.*`, `org.jetbrains.kotlin.*`) read like folder names | the same for every repository |
