@@ -65,10 +65,11 @@ export function unadvertisedActionError(action: string): ForgeError {
     `This deployment does not offer hosted action ${action} under its current source authority. ${hostedActionAlternative(action)}`,
   );
 }
-export function protocolMismatchError(): ForgeError {
+/** `paths`: the reply fields that failed (replyIssuePaths: paths only, never values). */
+export function protocolMismatchError(paths: readonly string[] = []): ForgeError {
   return new ForgeError(
     'HOSTED_PROTOCOL_INVALID',
-    `Hosted agent response does not match the contract of nforge ${CUTOVER_CLI_VERSION}; the CLI and deployment versions likely differ. ${CLI_UPGRADE_STEP}`,
+    `Hosted agent response does not match the contract of nforge ${CUTOVER_CLI_VERSION}${paths.length ? ` at ${paths.join(', ')}` : ''}; the CLI and deployment versions likely differ. ${CLI_UPGRADE_STEP}`,
   );
 }
 /** A contract failure that did not come from the reply boundary: this CLI's own request or a local

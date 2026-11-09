@@ -16,7 +16,15 @@ import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { landingRedriver } from './hosted-landing-redrive.js';
 import { rememberLandedOperations } from './landed-operations.js';
 import { boardWaker, type BoardDelivery, type BoardWaitOption } from './hosted-board-wait.js';
-import { parseHostedResponse } from './hosted-response.js';
+import {
+  parseHostedOutcome,
+  replyIssuePaths,
+  safeParseHostedResponse,
+  type ReplySkew,
+} from './hosted-response.js';
+import { stableSubmissionPageSchema } from './hosted-landing-stable.js';
+import { contractSkew, replySkewError, replySkewSide } from './hosted-reply-skew.js';
+import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';
 
 export const hostedSubmissionWaitSchema = z
@@ -182,6 +190,10 @@ async function observeHostedSubmissionsOnce(
   const features = (discovery.result as { features?: unknown }).features;
   const boardWait = board && Array.isArray(features) && features.includes('board-wait') ? board : undefined;
   const actor = z.object({ actor: z.string() }).parse(discovery.result).actor;
+  // A reply read only in part across a deploy (Issue 71ef0a66): reported, never silent.
+  let skew: ReplySkew | undefined;
+  const side = () => replySkewSide(features);
+  const waitStarted = Date.now();
   const cursor = new HostedSubmissionWaitCursor(transport.address, actor, operations, command.cursor);
   const canonicalOperations = new Map<string, string>();
   const current = new Map<string, z.infer<typeof eventSchema>>();
@@ -327,15 +339,25 @@ async function observeHostedSubmissionsOnce(
     for (;;) {
       if (stopped || signal.aborted) return;
       const nextVersion = cursor.versions.get(operationId) ?? 0;
-      const page = parseHostedResponse(
+      const read = parseHostedOutcome(
         pageSchema,
-        decode(
-          await transport.query('projectHostedFinishObserve:page', {
-            operationId,
-            nextVersion,
-          }),
-        ),
+        stableSubmissionPageSchema,
+        decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
       );
+      if (read.skew) skew = read.skew;
+      // The stable read carries every other field as sent; authority keeps its normal form so a
+      // skewed page never looks like an authority change (which would cost a resnapshot read).
+      const page = (
+        read.skew?.stable
+          ? {
+              ...read.data,
+              authority: ((authority: { success: boolean; data?: unknown }) =>
+                authority.success ? authority.data : read.data.authority)(
+                safeParseHostedResponse(sourceAuthoritySchema, read.data.authority),
+              ),
+            }
+          : read.data
+      ) as z.infer<typeof pageSchema>;
       invariant(
         page.projectId === transport.address.projectId &&
           page.operationId === operationId &&
@@ -436,6 +458,7 @@ async function observeHostedSubmissionsOnce(
       resnapshot,
       cursor: cursor.encode() as string | null,
       ...(delivery ? { board: delivery } : {}),
+      ...(skew ? { contractSkew: contractSkew(skew, side()) } : {}),
     },
   });
   let waker: ReturnType<typeof boardWaker> | undefined;
@@ -509,8 +532,26 @@ async function observeHostedSubmissionsOnce(
       refresh();
     });
   } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError)
-      throw new ForgeError('HOSTED_PROTOCOL_INVALID', 'Hosted submission observation is invalid.');
+    if (error instanceof z.ZodError || error instanceof SyntaxError) {
+      // Not even the stable outcome fields were readable: the landing may still have succeeded.
+      const seen = [...current.values()]
+        .map(entry => Date.parse(entry.submission.at))
+        .filter(Number.isFinite);
+      const from = new Date(Math.min(waitStarted - 3_600_000, ...seen) - 60_000).toISOString();
+      throw replySkewError(
+        'submission observation',
+        error instanceof z.ZodError ? replyIssuePaths(error.issues) : ['reply'],
+        side(),
+        {
+          outcome: 'The landing may have succeeded; this failed read changes nothing.',
+          command: hostedRecoveryCommand(transport.root, 'landings', {
+            ...transport.address,
+            from,
+            to: new Date(Date.now() + 60_000).toISOString(),
+          }),
+        },
+      );
+    }
     throw hostedActionError(error, 'submission observation');
   } finally {
     stopped = true;

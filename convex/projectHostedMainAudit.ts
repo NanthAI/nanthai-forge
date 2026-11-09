@@ -3,7 +3,8 @@ import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
 import { z } from 'zod';
 import { internalMutation } from './server';
-import { mutation, query } from './cliServer';
+import { mutation, query, type MutationCtx } from './cliServer';
+import type { Id } from './_generated/dataModel';
 import {
   mainAuditStatus,
   auditRow,
@@ -13,7 +14,8 @@ import {
   releaseMainHolds,
 } from './projectHostedMainAuditState';
 import { beginCheckOperation, checkCaller, checkSetting, loadHostedCheck } from './projectHostedCheckStore';
-import { saveCheckSetting } from './projectHostedCheckDefinitions';
+import { heldSettingReply, saveCheckSetting } from './projectHostedCheckDefinitions';
+import { settingKey } from './projectSettingApprovals';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { recordLandingObservation } from './projectHostedLandingStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -70,32 +72,51 @@ export const configure = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const request = configureSchema.parse(JSON.parse(input.request));
-      const { actor } = await checkCaller(ctx, input.projectId);
-      const replay = await hostedOperationRow(ctx, input.projectId, actor, request.operationId);
-      const saved = await saveCheckSetting(ctx, input.projectId, request, request, () => ({
-        kind: 'runner',
-        key: 'main-audit',
-        value: request.settings,
-        digest: checkPin(request.settings),
-      }));
-      const row = await auditRow(ctx, input.projectId);
-      if (!replay && row?.unaudited?.count && (!row.audit || hostedCheckTerminal(row.audit))) {
-        if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
-        await armAudit(
-          ctx,
-          { ...row, wake: undefined },
-          row.unaudited.count >= request.settings.landings
-            ? Date.now()
-            : Date.parse(row.unaudited.firstAt!) + request.settings.minutes * 60_000,
-        );
-      }
-      return saved;
+      return await configureMainAudit(ctx, input.projectId, input.request);
     } catch (error) {
       return report(error);
     }
   },
 });
+/** The settings write; `approved` is the owner person's grant of an agent's held change (Issue 470ef29b). */
+export async function configureMainAudit(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  text: string,
+  approved = false,
+) {
+  const input = { projectId };
+  const request = configureSchema.parse(JSON.parse(text));
+  const { actor } = await checkCaller(ctx, input.projectId);
+  const replay = await hostedOperationRow(ctx, input.projectId, actor, request.operationId);
+  const saved = await saveCheckSetting(
+    ctx,
+    input.projectId,
+    request,
+    request,
+    () => ({
+      kind: 'runner',
+      key: 'main-audit',
+      value: request.settings,
+      digest: checkPin(request.settings),
+    }),
+    { origin: 'main-audit', key: settingKey('main-audit'), approved },
+  );
+  // A held change altered nothing; the audit schedule moves only when it is applied.
+  if (heldSettingReply(saved)) return saved;
+  const row = await auditRow(ctx, input.projectId);
+  if (!replay && row?.unaudited?.count && (!row.audit || hostedCheckTerminal(row.audit))) {
+    if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    await armAudit(
+      ctx,
+      { ...row, wake: undefined },
+      row.unaudited.count >= request.settings.landings
+        ? Date.now()
+        : Date.parse(row.unaudited.firstAt!) + request.settings.minutes * 60_000,
+    );
+  }
+  return saved;
+}
 /** Rollout preflight may seed only retained, explicitly full-passed evidence. */
 export const seed = internalMutation({
   args: identity,

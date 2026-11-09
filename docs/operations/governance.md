@@ -10,7 +10,7 @@ exact Candidate/check pins, current policy and the main head/receipt CAS still a
 | --- | --- | --- |
 | Signed-in stranger / reader | Read public source and Work. Cannot start, save, compose, sync, finish, register a project runner or upload a proposal to this project. | Cannot accept, approve, change policy/check definitions/runner configuration, publish source, grant membership or change the mirror. |
 | Invited contributor | Start and save hosted Lanes, compose, sync, check and submit finish; use their own local runner or submit an archive proposal for an authorized Intent. Shared Lane writes remain visible as contributor work. | Ordinary server-authoritative public changes may land under auto-on-pass with an exact passing check. Selecting person authority does not bypass these rules. Protected changes need the owner. Cannot change project execution settings, membership, policy, source authority or mirror settings. |
-| Owner | All project operations, including inviting contributors and accepting proposals. | Can explicitly accept an exact prepared Candidate with person authority. Own Lanes (owner-only provenance, below) can auto-land under auto-on-pass, including the owner-approval paths. `acceptance.protectedPaths` still holds every agent for a person, the owner's own agents too. Review mode turns automatic landing off. |
+| Owner | All project operations, including inviting contributors and accepting proposals. | Can explicitly accept an exact prepared Candidate with person authority. The owner person's own landings and settings writes are direct. An agent signed in with the owner's account is an agent: the owner-approval paths and `acceptance.protectedPaths` hold it for the owner person, and its policy, check and runner changes become approval requests (below). Review mode turns automatic landing off. |
 
 Secret Objects have separate per-capability grants. Public visibility and contributor
 membership confer no secret discovery, use, modification or delegation authority.
@@ -33,8 +33,41 @@ For server-authoritative public projects the default owner-approval list is:
 - `netlify.toml` and `netlify/**`
 - `scripts/deploy*` and `scripts/deploy/**`
 
-Check definitions and hosted runner configuration are database settings and already
-owner-only. Source-controlled policy/configuration belongs in the protected paths.
+The list applies on every project, public or private, to every agent, the owner's own
+agents included (any device sign-in, such as `nforge login`, is an agent); on a public
+project it also applies to contributor persons. Only the owner person skips it.
+Owner-only provenance (below) marks inputs no contributor wrote; it no longer exempts
+an agent from this list.
+
+Check definitions and hosted runner configuration are database settings, owner-only.
+Source-controlled policy/configuration belongs in the protected paths.
+
+## Settings changes from agents
+
+A person approves changes to what landings must pass. When an agent sign-in (the
+owner's own CLI included) changes the project policy in a way that alters what a
+landing may accept (gate, mode, protected and owner-approval paths, `autoActors`,
+checks, lifecycle, enforced trust) or the GitHub mirror, or changes a check
+definition, the runner configuration or the main-audit setting, nothing is written.
+The write records one approval request instead (one row per setting, keyed
+`setting:policy`, `setting:runner`, `setting:main-audit`,
+`setting:check-definition:CHECK_ID` or `setting:check-import:…`; a new request
+replaces an open one) and replies `rule:"held"` with the owner's link
+`/approve?project=…&lane=setting:…`. The owner person opens it signed in, sees the
+change as sent, and grants or declines in one step (`projectHostedApprovals:decide`;
+agents, device sign-ins and contributors are refused). A grant applies exactly that
+request as the agent's own operation, so the agent's retry returns the applied
+receipt; a policy request applies only while the policy parts it would change are as
+they were when it was asked. The agent's `wait {approval}` returns on the decision.
+
+Two cases apply directly and say so: an agent's writes on a project with no accepted
+landing yet (`rule:"bootstrap"`, so scratch, zoo and bench setup keep working), and
+policy edits no landing depends on (`agentDefaults`, `notify`, the `preset` label,
+trust in shadow mode: `rule:"no-gate-change"`). The owner person's writes are
+`rule:"owner-person"`; granted ones are `rule:"owner-approved"`. Settings requests
+never hold a landing and the landing path reads nothing more for them; a held write
+costs one approval-row write, and the bootstrap test one indexed read on agent
+settings writes only.
 Put future deploy-step files under `.forge/`, `.github/`, `netlify/` or
 `scripts/deploy/`, or add their paths before enabling a step that receives secrets.
 These globs cannot infer a new deployment entry point at an arbitrary filename.
@@ -114,8 +147,10 @@ the next landing until the owner grants or the builder withdraws it. `wait {appr
 subscribes to the one request row: no polling, idle costs nothing. A publish reads one
 index (live requests, normally none) and only then the landing's input pages.
 
-The own-Lane exception uses retained server provenance: all input Lanes and dependency
-Candidates must be owner-only. Any contributor write clears a Lane's owner-only flag;
+Owner-only provenance is retained server evidence that every input Lane and dependency
+Candidate came from the owner account with no contributor write. It lets the owner's
+agent landings batch together; it never excuses an agent from owner approval. Its rules:
+all input Lanes and dependency Candidates must be owner-only. Any contributor write clears a Lane's owner-only flag;
 later owner writes do not restore it. Missing legacy provenance cannot grant the
 exception. Recomposition retains the original provenance. Creating an owner request
 around a contributor Candidate does not make it an owner-only Candidate.
@@ -176,7 +211,9 @@ For hosted archive proposals the owner first invites the contributor and assigns
 or permits their Intent; public read access alone cannot upload one. See
 [contributor proposals](../workflows.md#contributor-proposals).
 
-This is Forge's equivalent of branch protection plus CODEOWNERS: changed-path
+This is Forge's equivalent of branch protection plus CODEOWNERS (and of GitHub's rule that
+workflow files and repository settings need a person with admin rights, not a bot token acting
+for them): changed-path
 ownership is enforced at acceptance, and a passing check alone cannot approve a
 protected contributor change. GitHub `main` is a read-only mirror for contributors;
 only the Forge mirror App updates it, with force-push and deletion blocked by the

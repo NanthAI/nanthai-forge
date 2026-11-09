@@ -10,7 +10,9 @@ import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
-import { safeParseHostedResponse } from './hosted-response.js';
+import { replyIssuePaths, safeParseHostedResponse } from './hosted-response.js';
+import { replySkewError } from './hosted-reply-skew.js';
+import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
 
 export const hostedRunWaitSchema = z
   .object({
@@ -107,10 +109,24 @@ async function observeHostedRunOnce(
   function run(value: unknown) {
     value = typeof value === 'string' ? JSON.parse(value) : value;
     const parsed = safeParseHostedResponse(runSchema, value);
+    // A run reply this CLI cannot read (a deploy changed it, Issue 71ef0a66) says nothing about the run.
+    if (!parsed.success)
+      throw replySkewError(
+        'run observation',
+        replyIssuePaths(parsed.error.issues),
+        (initial as { serverContract?: { missing?: unknown[] } }).serverContract?.missing?.length
+          ? 'server-older'
+          : 'cli-older',
+        {
+          outcome: 'The check may have finished; this failed read changes nothing.',
+          command: hostedRecoveryCommand(transport.root, 'status', {
+            ...transport.address,
+            runId: command.runId,
+          }),
+        },
+      );
     invariant(
-      parsed.success &&
-        parsed.data.id === command.runId &&
-        parsed.data.projectId === transport.address.projectId,
+      parsed.data.id === command.runId && parsed.data.projectId === transport.address.projectId,
       'HOSTED_PROTOCOL_INVALID',
       'Run observation differs from the selected project/run.',
     );
@@ -180,10 +196,11 @@ export const hostedWaitSchema = z
       .string()
       .regex(/^[0-9a-fA-F]{8}[0-9a-fA-F-]{0,28}$/, 'a Lane id or 8+ character prefix')
       .optional(),
-    /** Wait for the project owner to grant or decline this Lane's approval request (fe5bea80). Exclusive with the others. */
+    /** Wait for the project owner to grant or decline this Lane's approval request (fe5bea80), or a held
+     * settings change's request (its `setting:` id, Issue 470ef29b). Exclusive with the others. */
     approval: z
       .string()
-      .regex(/^[0-9a-f-]{36}$/, 'a full Lane id')
+      .regex(/^(?:[0-9a-f-]{36}|setting:[\w:-]{1,120})$/, 'a full Lane id or a setting: request id')
       .optional(),
   })
   .strict();

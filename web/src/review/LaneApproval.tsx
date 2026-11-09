@@ -18,8 +18,19 @@ export type LaneApprovalRead = {
   decision?: { by?: string; head: string; reason?: string; via: 'lane' | 'landing' };
   /** A fork pull request's run request (Issue f7793473): granting runs its check, never lands. */
   pullRequest?: number;
-  ended?: { kind: 'landed' | 'withdrawn' | 'settled' };
+  ended?: { kind: 'landed' | 'withdrawn' | 'settled' | 'applied' };
   landing: { submissionId: string; held: boolean } | null;
+  /** Issue 470ef29b: a held settings change from an agent sign-in, not a Lane. */
+  setting?: { origin: 'policy' | 'check-definition' | 'check-import' | 'runner' | 'main-audit' };
+  /** The change as the agent sent it (the owner's read only). */
+  change?: unknown;
+};
+const SETTING_LABEL: Record<NonNullable<LaneApprovalRead['setting']>['origin'], string> = {
+  policy: 'project policy',
+  'check-definition': 'check definition',
+  'check-import': 'check definition',
+  runner: 'check runner',
+  'main-audit': 'main audit setting',
 };
 export type LaneApprovalPhase =
   | { kind: 'loading' }
@@ -71,6 +82,7 @@ export function LaneApproval({
       'This Lane has no approval request, or you cannot read this project.',
       'plain',
     );
+  else if (phase.approval.setting) body = settingBody(phase.approval);
   else {
     const { approval } = phase;
     const who = approval.requester
@@ -119,6 +131,35 @@ export function LaneApproval({
         )}
         <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
         {full}
+      </>
+    );
+  }
+  function settingBody(approval: LaneApprovalRead) {
+    const what = SETTING_LABEL[approval.setting!.origin];
+    const who = approval.requester
+      ? `@${approval.requester}${approval.agent ? `/${approval.agent}` : ''}`
+      : 'an agent';
+    if (approval.status === 'granted')
+      return head('Applied', `You granted this ${what} change and it is in effect.`, 'passed');
+    if (approval.status === 'declined')
+      return head('Declined', `The ${what} change was not applied.`, 'plain');
+    if (!approval.live)
+      return head('Request closed', 'The agent withdrew or replaced this request.', 'plain');
+    return (
+      <>
+        {head(
+          `Apply this ${what} change?`,
+          `Requested by ${who}, signed in as an agent. ${what[0]!.toUpperCase()}${what.slice(1)} changes decide what every landing must pass, so they need you.`,
+        )}
+        <dl className="fx-dv-facts">
+          <div>
+            <dt>Change</dt>
+            <dd className="fx-dv-untrusted">
+              <pre>{JSON.stringify(approval.change ?? null, null, 2)}</pre>
+            </dd>
+          </div>
+        </dl>
+        <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
       </>
     );
   }

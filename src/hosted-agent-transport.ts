@@ -129,7 +129,7 @@ import {
   takeCallerReceipts,
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
-import { isHostedReplyError, parseHostedResponse } from './hosted-response.js';
+import { isHostedReplyError, parseHostedResponse, replyIssuePaths } from './hosted-response.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
@@ -1179,7 +1179,9 @@ export class HostedAgentTransport {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
       if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
       if (error instanceof z.ZodError)
-        throw isHostedReplyError(error) ? protocolMismatchError() : localShapeError(action, error.issues);
+        throw isHostedReplyError(error)
+          ? protocolMismatchError(replyIssuePaths(error.issues))
+          : localShapeError(action, error.issues);
       const safe = hostedActionError(error, `agent ${action}`);
       // A write pause, OCC conflict or 429/503 refusal ran nothing: keep its structured
       // retryable flag and retryAt instead of rebuilding it from code and message (72d50375).

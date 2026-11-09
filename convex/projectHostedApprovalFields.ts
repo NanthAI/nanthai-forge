@@ -2,7 +2,8 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 
-/** Issue fe5bea80: a builder's request for the owner's go on one Lane. One row per Lane; a new
+/** Issue fe5bea80: a builder's request for the owner's go on one Lane (or, Issue 470ef29b, on one
+ * held settings change). One row per Lane; a new
  * request on the same Lane reopens it. `live` rows apply to that Lane's landings: requested or
  * declined holds them; granted lets the exact approved Lane head land. Landing with it (or the
  * requester withdrawing it) ends it. */
@@ -37,12 +38,35 @@ export const hostedApprovalTables = {
         via: v.union(v.literal('lane'), v.literal('landing')),
       }),
     ),
-    /** Set when a landing carried the grant to main, the requester withdrew it, or (a fork PR
-     * request) its run started or the PR head settled without one. */
+    /** Set when a landing carried the grant to main, the requester withdrew it, (a fork PR
+     * request) its run started or the PR head settled without one, or (a settings request) the
+     * owner's grant applied the change. */
     ended: v.optional(
       v.object({
-        kind: v.union(v.literal('landed'), v.literal('withdrawn'), v.literal('settled')),
+        kind: v.union(
+          v.literal('landed'),
+          v.literal('withdrawn'),
+          v.literal('settled'),
+          v.literal('applied'),
+        ),
         at: v.number(),
+      }),
+    ),
+    /** Issue 470ef29b: an agent's held settings change (`laneId` is then a `setting:` key, never a
+     * Lane, and landings ignore the row). `head` is the request digest the owner grants. */
+    setting: v.optional(
+      v.object({
+        origin: v.union(
+          v.literal('policy'),
+          v.literal('check-definition'),
+          v.literal('check-import'),
+          v.literal('runner'),
+          v.literal('main-audit'),
+        ),
+        /** The original request, applied verbatim on a grant. */
+        request: v.string(),
+        /** Policy requests: digest of the policy the change was made against. */
+        base: v.optional(v.string()),
       }),
     ),
     version: v.number(),

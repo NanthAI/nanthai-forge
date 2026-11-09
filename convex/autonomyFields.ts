@@ -135,5 +135,15 @@ export const autonomyTables = {
     policy: autonomyPolicy,
     /** Queued landings this edit invalidated, kept so a replay returns the same reply. */
     invalidatedLandings: v.optional(v.number()),
+    /** Issue 470ef29b: who could write it (SettingRule in convex/projectSettingApprovals.ts). */
+    rule: v.optional(
+      v.union(
+        v.literal('owner-person'),
+        v.literal('owner-approved'),
+        v.literal('bootstrap'),
+        v.literal('no-gate-change'),
+        v.literal('held'),
+      ),
+    ),
   }).index('by_project_and_operation', ['projectId', 'operationId']),
 };

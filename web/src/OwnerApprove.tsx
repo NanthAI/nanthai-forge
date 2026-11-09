@@ -103,7 +103,11 @@ function LaneApprove() {
       <LaneApproval
         phase={phase}
         error={error}
-        laneHref={`/?project=${encodeURIComponent(projectId)}&projectTab=lanes&lane=${encodeURIComponent(laneId)}`}
+        laneHref={
+          laneId.startsWith('setting:')
+            ? undefined
+            : `/?project=${encodeURIComponent(projectId)}&projectTab=lanes&lane=${encodeURIComponent(laneId)}`
+        }
         review={{ busy, accept: () => void decide('grant'), decline: why => void decide('decline', why) }}
         signIn={
           <SignInButton mode="modal">

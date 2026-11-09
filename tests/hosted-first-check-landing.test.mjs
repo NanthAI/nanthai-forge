@@ -46,6 +46,14 @@ async function drive(f, { until = () => false, skip = /MainAudit:start/ } = {}) 
     await f.execute(task);
   }
 }
+/** These waves measure rechecks, not governance: an owner agent changing a check entry or `.github/**`
+ * holds for the owner person (Issue 470ef29b, tests/public-governance.test.mjs), so they opt out. */
+function noOwnerApproval(f) {
+  const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: [] } },
+  });
+}
 async function wave(t, options = {}) {
   const f = await batchesFixture(t, { batchMaxSize: null, admissionCheck: 'default', ...options, count: 0 });
   f.rawChecks.setPlanSelection(options.selection ?? full);
@@ -56,6 +64,7 @@ async function wave(t, options = {}) {
       autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, hostedCrossHeadReuse: false } },
     });
   }
+  if (options.noOwnerApproval) noOwnerApproval(f);
   for (let i = 0; i < (options.count ?? 2); i++) await f.add(i);
   await drive(f, { until: options.until });
   return f;
@@ -141,7 +150,7 @@ for (const [name, memberPaths] of [
   ['main', ['.github/workflows/check.yml', 'src/b.ts']],
 ])
   test(`a global-risk file in ${name} rechecks`, async t => {
-    const f = await wave(t, { memberPaths, fileCount: 2 });
+    const f = await wave(t, { memberPaths, fileCount: 2, noOwnerApproval: true });
     assert.deepEqual(
       states(f).map(s => s.phase),
       ['landed', 'landed'],
@@ -292,7 +301,12 @@ test('own check command: a change that replaces a symlink rechecks (unsupported-
 });
 
 test('own check command: the file the command names is global-risk and rechecks', async t => {
-  const f = await wave(t, { ...ownCheck, memberPaths: ['ci/check.sh', 'src/b.ts'], fileCount: 2 });
+  const f = await wave(t, {
+    ...ownCheck,
+    memberPaths: ['ci/check.sh', 'src/b.ts'],
+    fileCount: 2,
+    noOwnerApproval: true,
+  });
   assert.deepEqual(
     states(f).map(s => s.phase),
     ['landed', 'landed'],
@@ -311,7 +325,12 @@ test('own check command: the file its Actions setup command names is global-risk
       actions: { setup: { executable: 'bash', args: ['ci/setup.sh'] } },
     },
   };
-  const f = await wave(t, { ...withSetup, memberPaths: ['ci/setup.sh', 'src/b.ts'], fileCount: 2 });
+  const f = await wave(t, {
+    ...withSetup,
+    memberPaths: ['ci/setup.sh', 'src/b.ts'],
+    fileCount: 2,
+    noOwnerApproval: true,
+  });
   assert.deepEqual(
     states(f).map(s => s.phase),
     ['landed', 'landed'],

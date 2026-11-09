@@ -263,8 +263,8 @@ export async function publishAcceptance(
   const protectedReason =
     policy.acceptance.gate === 'contract' &&
     !(actor.kind === 'person' && actor.id === project.owner) &&
-    protectedGatePaths(policy, candidate.governance?.paths ?? null, checks) &&
-    !(actor.id === project.owner && candidate.governance?.ownerInputs)
+    // Issue 470ef29b: owner-only inputs never excuse an agent, the owner's own included.
+    protectedGatePaths(policy, candidate.governance?.paths ?? null, checks)
       ? 'needs owner approval: protected or unknown paths'
       : null;
   // Issue 93e14bb0: from the run plan and changed paths already loaded; no extra read.
@@ -276,14 +276,7 @@ export async function publishAcceptance(
     actor.kind === 'person' && actor.id === project.owner ? null : approvalHoldReason(approvals);
   const reason =
     [
-      governanceReason(
-        project,
-        policy,
-        actor,
-        candidate.governance?.paths ?? null,
-        candidate.governance?.ownerInputs,
-        checks,
-      ) ??
+      governanceReason(project, policy, actor, candidate.governance?.paths ?? null, checks) ??
         protectedReason ??
         secretAllowReview(policy, actor, secretAllowAdded),
       approvalReason,

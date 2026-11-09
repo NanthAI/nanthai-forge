@@ -6,7 +6,14 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { moduleUrl } from './convex-module.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
-import { parseHostedResponse, safeParseHostedResponse } from '../dist/hosted-response.js';
+import { randomUUID } from 'node:crypto';
+import {
+  isHostedReplyError,
+  parseHostedOutcome,
+  parseHostedResponse,
+  safeParseHostedResponse,
+} from '../dist/hosted-response.js';
+import { hostedLandingStateSchema } from '../dist/hosted-landing.js';
 import { hostedAgentCapabilitiesSchema } from '../dist/hosted-agent-contract.js';
 import { effectiveAgentDefaultsSchema } from '../dist/agent-parallel-defaults.js';
 import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
@@ -174,4 +181,68 @@ test('hosted replies of the snapshotted schemas go through the reply boundary', 
     if (direct.test(text)) found.push(file);
   }
   assert.deepEqual(found, [], 'use parseHostedResponse(schema, reply) for hosted replies');
+});
+
+test('incident replay 71ef0a66: a CLI that required acceptedBy.handle reads a landed reply after the rename', () => {
+  // States 45c55f71..a4f1e07f shipped acceptedBy with a REQUIRED handle; ff527aa0 renamed it to actor,
+  // so those CLIs rejected every landed reply: the final read of a wait running across that deploy.
+  const firstRelease = z
+    .object({
+      kind: z.enum(['person', 'auto']),
+      handle: z.string().min(1),
+      at: z.iso.datetime(),
+      note: z.string(),
+    })
+    .strict();
+  const old = hostedLandingStateSchema.shape.acceptance
+    .unwrap()
+    .extend({ acceptedBy: firstRelease.optional() })
+    .strict();
+  const at = '2026-11-09T14:13:35.040Z';
+  const reply = {
+    receiptId: randomUUID(),
+    head: 'b'.repeat(64),
+    acceptedBy: { kind: 'auto', actor: 'thevarsek', at, note: 'Accepted automatically.' },
+  };
+  const strict = safeParseHostedResponse(old, reply);
+  assert.equal(strict.success, false, 'the 3205f7e6 boundary alone rejects it: a required field is missing');
+  assert.deepEqual(strict.error.issues.map(issue => [issue.code, issue.path.join('.')]).sort(), [
+    ['invalid_type', 'acceptedBy.handle'],
+    ['unrecognized_keys', 'acceptedBy'],
+  ]);
+  const read = parseHostedOutcome(old, z.never(), reply);
+  assert.deepEqual(read.data, { receiptId: reply.receiptId, head: reply.head });
+  assert.deepEqual(read.skew, { paths: ['acceptedBy.handle'], dropped: ['acceptedBy'], stable: false });
+});
+
+test('parseHostedOutcome never drops a required field and throws a reply error when nothing reads', () => {
+  const schema = z
+    .object({
+      id: z.string(),
+      state: z.enum(['open', 'done']),
+      note: z.object({ n: z.number() }).strict().optional(),
+    })
+    .strict();
+  const stable = z.object({ id: z.string() }).passthrough();
+  assert.deepEqual(parseHostedOutcome(schema, stable, { id: 'a', state: 'open', extra: 1 }), {
+    data: { id: 'a', state: 'open' },
+  });
+  const optional = parseHostedOutcome(schema, stable, { id: 'a', state: 'open', note: { n: 'x' } });
+  assert.deepEqual(optional, {
+    data: { id: 'a', state: 'open' },
+    skew: { paths: ['note.n'], dropped: ['note'], stable: false },
+  });
+  const required = parseHostedOutcome(schema, stable, { id: 'a', state: 'parked' });
+  assert.deepEqual(required, {
+    data: { id: 'a', state: 'parked' },
+    skew: { paths: ['state'], dropped: [], stable: true },
+  });
+  let thrown;
+  try {
+    parseHostedOutcome(schema, stable, { id: 1, state: 'open' });
+  } catch (error) {
+    thrown = error;
+  }
+  assert(thrown instanceof z.ZodError);
+  assert.equal(isHostedReplyError(thrown), true);
 });

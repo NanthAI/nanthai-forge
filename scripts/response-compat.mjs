@@ -3,7 +3,7 @@
 // (src/hosted-response.ts): unknown keys are dropped, everything else must match. So a server
 // change is safe for released CLIs when every reply the new contract allows is still accepted by
 // the released contract once unknown keys are ignored. This compares the two as JSON Schema.
-// Docs: docs/agents/hosted-parity.md "Response contract".
+// Docs: docs/operations/cli-update.md "Server replies".
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';

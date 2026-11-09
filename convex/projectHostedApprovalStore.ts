@@ -13,22 +13,42 @@ export const APPROVAL_LIVE_LIMIT = 100;
 /** A landing's input pages read for the hold; a solo landing has one. */
 const INPUT_PAGE_LIMIT = 8;
 
+export function laneApproveUrl(projectId: string, laneId: string) {
+  const web = process.env.FORGE_WEB_URL;
+  if (!web) return null;
+  const url = new URL('/approve', web);
+  url.searchParams.set('project', projectId);
+  url.searchParams.set('lane', laneId);
+  return url.href;
+}
+
 export const approvalRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>, laneId: string) =>
   ctx.db
     .query('projectHostedApprovals')
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
 
+/** A held settings change as the agent sent it, for the owner's page only. */
+export function settingChange(row: ApprovalRow): unknown {
+  if (!row.setting) return undefined;
+  try {
+    return JSON.parse(row.setting.request);
+  } catch {
+    return row.setting.request;
+  }
+}
+/** Issue 470ef29b: a held settings request that is still open (never `live`; open until it ends). */
+export const openSettingRequest = (row: ApprovalRow | null) => Boolean(row?.setting && !row.ended);
 /** A fork PR run request that is still open: it is never `live` (it holds no landing). */
 export const openForkRequest = (row: ApprovalRow | null) => row?.pullRequest !== undefined && !row.ended;
 /** What every reader sees (the requester and deciding person map to handles). `live` reads as
- * "open": a fork PR run request is open until it ends. */
+ * "open": a fork PR run request or a settings request is open until it ends. */
 export function approvalView(row: ApprovalRow | null, laneId: string) {
   if (!row) return { laneId, status: 'none' as const, live: false, version: 0 };
   return {
     laneId: row.laneId,
     status: row.status,
-    live: row.live || openForkRequest(row),
+    live: row.live || openForkRequest(row) || openSettingRequest(row),
     ...(row.pullRequest !== undefined ? { pullRequest: row.pullRequest } : {}),
     reason: row.reason,
     requester: row.requester,
@@ -47,6 +67,8 @@ export function approvalView(row: ApprovalRow | null, laneId: string) {
         }
       : {}),
     ...(row.ended ? { ended: { kind: row.ended.kind, at: new Date(row.ended.at).toISOString() } } : {}),
+    // Issue 470ef29b: a held settings change; its content is for the owner (settingChange).
+    ...(row.setting ? { setting: { origin: row.setting.origin } } : {}),
     version: row.version,
   };
 }

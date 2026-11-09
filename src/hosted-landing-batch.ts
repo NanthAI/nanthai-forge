@@ -53,7 +53,7 @@ export function batchEligible(
     policy.acceptance.mode === 'auto-on-pass' &&
     candidate.result.status === 'clean' &&
     candidate.governance?.ownerInputs === true &&
-    governanceReason(project, policy, actor, candidate.governance.paths, true) === null
+    governanceReason(project, policy, actor, candidate.governance.paths) === null
   );
 }
 

@@ -31,6 +31,7 @@ for (const name of [
   'projectHostedFinish',
   'projectHostedLanding',
   'projectHostedCheckDefinitions',
+  'projectHostedApprovals',
   'projectCheckRequests',
   'projectProposals',
   'projectGithubImportStore',
@@ -420,9 +421,11 @@ test('a contributor change to the project check entry needs owner approval; Forg
   );
   const h = await projectCheckFixture(['.bench/ci.sh']);
   assert.equal((await h.accept(await prepared(h, ['src/app.ts']), 'contributor')).status, 'landed');
-  // The owner's own agent Lane keeps the owner exemption.
+  // Issue 470ef29b: an owner-account agent is held like any agent, even on its own owner-only Lane.
   const i = await projectCheckFixture(['.bench/ci.sh']);
-  assert.equal((await i.accept(await prepared(i, ['.bench/ci.sh'], 'owner', true, true))).status, 'landed');
+  const held = await i.accept(await prepared(i, ['.bench/ci.sh'], 'owner', true, true));
+  assert.equal(held.status, 'pending');
+  assert.equal(held.reason, 'needs owner approval: protected paths .bench/ci.sh');
 });
 
 test('check entry protection is a default: unrelated project files, path-free checks and explicit lists are unaffected', () => {
@@ -430,7 +433,7 @@ test('check entry protection is a default: unrelated project files, path-free ch
     actor = { id: 'contributor', kind: 'agent' },
     policy = policyPreset('trusted'),
     check = { executable: 'bash', args: ['.bench/ci.sh'] };
-  const reason = (paths, run, p = policy) => governanceReason(project, p, actor, paths, false, run);
+  const reason = (paths, run, p = policy) => governanceReason(project, p, actor, paths, run);
   assert.equal(reason(['.bench/ci.sh']), null, 'no check: not protected');
   assert.match(reason(['.bench/ci.sh'], check), /protected paths \.bench\/ci\.sh/);
   assert.equal(reason(['.bench/other.sh', 'src/a.ts'], check), null);
@@ -454,7 +457,7 @@ test('entry files of every defined check and setup action need owner approval; e
   const project = { owner: 'owner', visibility: 'public' },
     actor = { id: 'contributor', kind: 'agent' },
     policy = policyPreset('trusted');
-  const reason = (paths, checks, p = policy) => governanceReason(project, p, actor, paths, false, checks);
+  const reason = (paths, checks, p = policy) => governanceReason(project, p, actor, paths, checks);
   assert.match(reason(['.bench/setup.sh'], gating), /protected paths \.bench\/setup\.sh/);
   assert.match(reason(['tools/lint-check.mjs'], [gating, other]), /protected paths tools\/lint-check\.mjs/);
   assert.equal(reason(['tools/lint-check.mjs'], gating), null, 'a check not passed in is not known');
@@ -527,7 +530,7 @@ test('declared globalRiskPaths fold into the project row apart from protected ch
   assert.equal(result.status, 'landed');
 });
 
-test('contributor ordinary changes auto-land; owner own protected Lane auto-lands; review policy still applies', async () => {
+test('contributor ordinary changes auto-land; owner-account agents hold on protected paths; review policy still applies', async () => {
   for (const agent of [true, false]) {
     const f = await publicFixture();
     assert.equal(
@@ -535,9 +538,15 @@ test('contributor ordinary changes auto-land; owner own protected Lane auto-land
       'landed',
     );
   }
+  // Issue 470ef29b: owner-only inputs no longer exempt the owner's agent from the owner-approval list.
   const f = await publicFixture();
+  assert.match(
+    (await f.accept(await prepared(f, ['.github/workflows/deploy.yml'], 'owner', true, true))).reason,
+    /needs owner approval: protected paths \.github\/workflows\/deploy\.yml/,
+  );
+  const ordinary = await publicFixture();
   assert.equal(
-    (await f.accept(await prepared(f, ['.github/workflows/deploy.yml'], 'owner', true, true))).status,
+    (await ordinary.accept(await prepared(ordinary, ['src/app.ts'], 'owner', true, true))).status,
     'landed',
   );
   const g = await publicFixture();
@@ -822,4 +831,194 @@ test('contributors cannot replace hosted check definitions or the runner configu
       ),
       code('PROJECT_UNAVAILABLE'),
     );
+});
+
+// Issue 470ef29b: an agent signed in with the owner's account (a device credential) is an agent.
+const DEVICE = { subject: 'owner', forgeCredential: 'synthetic-owner-device' };
+function ownerDevice(f) {
+  f.insert('cliCredentials', {
+    credentialId: DEVICE.forgeCredential,
+    owner: 'owner',
+    name: 'Synthetic owner device',
+    tokenHash: 'synthetic-owner-hash',
+    issuedAt: Date.now(),
+    scope: 'cli',
+    expiresAt: Date.now() + 600_000,
+    revoked: false,
+  });
+}
+const policyCommand = fields =>
+  JSON.stringify({ action: 'set-policy', operationId: randomUUID(), ...fields });
+
+test('an owner-account agent changing the check entry file holds for the owner person, on public and private projects', async () => {
+  for (const visibility of ['public', 'private']) {
+    const f = await projectCheckFixture(['.bench/ci.sh']);
+    f.patch('hostedProjects', f.projectId, { visibility });
+    ownerDevice(f);
+    // Owner-only inputs (the owner's own Lane), submitted and accepted from an owner device sign-in.
+    const state = await prepared(f, ['.bench/ci.sh', 'src/app.ts'], 'owner', true, true);
+    const held = await f.accept(state, DEVICE);
+    assert.equal(held.status, 'pending', visibility);
+    assert.equal(held.reason, 'needs owner approval: protected paths .bench/ci.sh', visibility);
+    assert.equal(f.currentMain().sourceRevision, 0);
+    // The same device cannot approve it; the owner person can, in one step.
+    await assert.rejects(
+      f.transaction('deviceApprove', api.approve, f.select(state), DEVICE),
+      code('PROJECT_UNAVAILABLE'),
+    );
+    const approved = JSON.parse(await f.transaction('ownerApprove', api.approve, f.select(state)));
+    assert.equal(approved.status, 'landed', visibility);
+    assert.deepEqual(approved.receipt.actor, { id: 'owner', kind: 'person' });
+  }
+  // A private project's ordinary owner-agent change is unchanged: it auto-lands.
+  const g = await projectCheckFixture(['.bench/ci.sh']);
+  g.patch('hostedProjects', g.projectId, { visibility: 'private' });
+  ownerDevice(g);
+  assert.equal(
+    (await g.accept(await prepared(g, ['src/app.ts'], 'owner', true, true), DEVICE)).status,
+    'landed',
+  );
+  // The owner person keeps the fast path, protected paths included.
+  const h = await projectCheckFixture(['.bench/ci.sh']);
+  assert.equal(
+    (await h.accept(await prepared(h, ['.bench/ci.sh'], 'owner', false, true), 'owner')).status,
+    'landed',
+  );
+});
+
+test('owner-device settings writes apply before the first landing and are held for the owner person after it', async () => {
+  const f = await publicFixture();
+  ownerDevice(f);
+  const settings = {
+    policy: (actor, command) =>
+      f.transaction('policy', modules.projectAutonomy.set, { projectId: f.projectId, command }, actor),
+    definition: (actor, operationId = randomUUID()) =>
+      f.rawChecks.configure(
+        {
+          kind: 'definition',
+          checkId: f.rawChecks.checkId,
+          command: { name: 'verify', environmentLabel: 'clean', executable: 'bash', args: ['ci.sh'] },
+        },
+        f.rawChecks.definition.digest,
+        operationId,
+        actor,
+      ),
+    runner: (actor, operationId = randomUUID()) =>
+      f.rawChecks.configure(
+        { kind: 'runner', configuration: { ...f.rawChecks.runner, runsOn: 'ubuntu-24.04' } },
+        f.rawChecks.configuration.digest,
+        operationId,
+        actor,
+      ),
+  };
+  // Bootstrap: no accepted landing yet, so an agent's setup writes still apply directly.
+  const boot = await settings.policy(DEVICE, policyCommand({ acceptance: { protectedPaths: ['boot/**'] } }));
+  assert.equal(boot.rule, 'bootstrap');
+  assert.deepEqual(boot.policy.acceptance.protectedPaths, ['boot/**']);
+  const bootDefinition = await settings.definition(DEVICE);
+  assert.equal(bootDefinition.rule, 'bootstrap');
+  f.rawChecks.definition = bootDefinition;
+  const bootRunner = await settings.runner(DEVICE);
+  assert.equal(bootRunner.rule, 'bootstrap');
+  f.rawChecks.configuration = bootRunner;
+  // The first accepted landing ends the bootstrap.
+  f.rawChecks.selection = (
+    select => overrides =>
+      select({
+        expectedDefinition: f.rawChecks.definition.digest,
+        expectedConfiguration: f.rawChecks.configuration.digest,
+        ...overrides,
+      })
+  )(f.rawChecks.selection);
+  assert.equal((await f.accept(await prepared(f, ['src/app.ts']), 'contributor')).status, 'landed');
+
+  // Policy: an edit that changes what landings may accept is held; nothing changes until a grant.
+  const command = policyCommand({ acceptance: { protectedPaths: [] } });
+  const held = await settings.policy(DEVICE, command);
+  assert.equal(held.rule, 'held');
+  assert.deepEqual(held.policy.acceptance.protectedPaths, ['boot/**']);
+  assert.equal(held.approval.id, 'setting:policy');
+  assert.match(held.approval.next, /wait '\{"approval":"setting:policy"\}'/);
+  assert.deepEqual(await settings.policy(DEVICE, command), held, 'a retry returns the same request');
+  // An edit no landing depends on still applies directly.
+  const stacking = await settings.policy(DEVICE, policyCommand({ agentDefaults: { stacking: 'auto' } }));
+  assert.equal(stacking.rule, 'no-gate-change');
+  assert.equal(stacking.policy.agentDefaults.stacking, 'auto');
+
+  // Definitions and the runner configuration are held the same way.
+  const definitionOperation = randomUUID();
+  const heldDefinition = await settings.definition(DEVICE, definitionOperation);
+  assert.equal(heldDefinition.rule, 'held');
+  assert.equal(heldDefinition.approval.id, `setting:check-definition:${f.rawChecks.checkId}`);
+  const heldRunner = await settings.runner(DEVICE);
+  assert.equal(heldRunner.rule, 'held');
+  assert.equal(heldRunner.approval.id, 'setting:runner');
+  const current = JSON.parse(
+    await f.transaction('current', modules.projectHostedCheckDefinitions.current, {
+      projectId: f.projectId,
+      checkId: f.rawChecks.checkId,
+    }),
+  );
+  assert.equal(
+    current.configurationDigest,
+    f.rawChecks.configuration.digest,
+    'a held runner change is not applied',
+  );
+
+  // The owner person grants each request in one step on the approve link; the grant applies it.
+  const observe = laneId =>
+    f
+      .transaction('observe', modules.projectHostedApprovals.observe, {
+        projectId: f.projectId,
+        laneId,
+        detail: 1,
+      })
+      .then(JSON.parse);
+  const decide = async (laneId, decision, actor = 'owner') =>
+    JSON.parse(
+      await f.transaction(
+        'decide',
+        modules.projectHostedApprovals.decide,
+        {
+          projectId: f.projectId,
+          operationId: randomUUID(),
+          laneId,
+          decision,
+          head: (await observe(laneId)).currentHead,
+        },
+        actor,
+      ),
+    );
+  const page = await observe('setting:policy');
+  assert.equal(page.status, 'requested');
+  assert.equal(page.live, true);
+  assert.deepEqual(page.change.acceptance, { protectedPaths: [] });
+  await assert.rejects(decide('setting:policy', 'grant', DEVICE), code('PROJECT_UNAVAILABLE'));
+  const granted = await decide('setting:policy', 'grant');
+  assert.equal(granted.approval.status, 'granted');
+  assert.equal(granted.applied.rule, 'owner-approved');
+  assert.deepEqual(granted.applied.policy.acceptance.protectedPaths, []);
+  // The agent's retry of its original operation now returns the applied receipt.
+  const replay = await settings.policy(DEVICE, command);
+  assert.equal(replay.rule, 'owner-approved');
+  assert.deepEqual(replay.policy.acceptance.protectedPaths, []);
+
+  const grantedDefinition = await decide(heldDefinition.approval.id, 'grant');
+  assert.equal(grantedDefinition.applied.rule, 'owner-approved');
+  assert.equal((await settings.definition(DEVICE, definitionOperation)).rule, 'owner-approved');
+  const declined = await decide('setting:runner', 'decline');
+  assert.equal(declined.approval.status, 'declined');
+  assert.equal(declined.applied, undefined);
+
+  // The owner person is unchanged: direct writes, rule owner-person.
+  const person = await settings.policy('owner', policyCommand({ acceptance: { protectedPaths: ['x/**'] } }));
+  assert.equal(person.rule, 'owner-person');
+  assert.deepEqual(person.policy.acceptance.protectedPaths, ['x/**']);
+  const personRunner = await f.rawChecks.configure(
+    { kind: 'runner', configuration: { ...f.rawChecks.runner, runsOn: 'ubuntu-22.04' } },
+    f.rawChecks.configuration.digest,
+  );
+  assert.equal(personRunner.rule, 'owner-person');
+  // Settings requests never hold a landing: the gate's live read does not see them.
+  assert.equal([...f.tables.projectHostedApprovals.values()].filter(row => row.live).length, 0);
 });

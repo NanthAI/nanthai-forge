@@ -1087,3 +1087,80 @@ test('wake wait: one settle wait through queued, checking and ready wakes once p
     assert.equal(s.counts().opens, s.counts().closes, `${name}: the observer closes`);
   }
 });
+
+test('a wait across a server deploy that changes the landed reply shape returns the landing outcome (71ef0a66)', async () => {
+  const receipt = { receiptId: randomUUID(), head: 'a'.repeat(64) };
+  // The server deploys while the wait runs: from then on, a landed reply has a shape this CLI does not know.
+  const deploy = (s, change) => {
+    const query = s.transport.query.bind(s.transport);
+    s.transport.query = async (name, args) => {
+      const page = await query(name, args);
+      if (name !== 'projectHostedFinishObserve:page') return page;
+      const touch = sub =>
+        sub.observation.state === 'landed' ? change({ ...sub, acceptance: receipt }) : sub;
+      return {
+        ...page,
+        submission: touch(page.submission),
+        events: page.events.map(e => ({ ...e, submission: touch(e.submission) })),
+      };
+    };
+  };
+  const run = async change => {
+    const s = await fixture(),
+      a = await s.start();
+    const waiting = s.wait({ operationIds: [a.request.operationId] }).catch(error => error);
+    await turn();
+    if (change) deploy(s, change);
+    await s.update(a.state.id, 'landed');
+    s.wake();
+    return { s, result: await waiting };
+  };
+  const control = await run();
+  assert.equal(control.result.result.successful, true);
+  assert.equal(control.result.result.contractSkew, undefined);
+  const reads = control.s.counts().reads;
+
+  // An optional field changed shape (the incident: acceptance.acceptedBy was renamed under the CLI).
+  const optional = await run(sub => ({
+    ...sub,
+    acceptance: { ...sub.acceptance, acceptedBy: { kind: 'delegate', at: sub.at, note: 'n' } },
+  }));
+  assert.equal(optional.result.result.status, 'terminal');
+  assert.equal(optional.result.result.successful, true);
+  const landed = optional.result.result.submissions[0].submission;
+  assert.equal(landed.acceptance.receiptId, receipt.receiptId, 'the receipt survives');
+  assert.equal('acceptedBy' in landed.acceptance, false);
+  const skew = optional.result.result.contractSkew;
+  assert.deepEqual(skew.paths, [
+    'submission.acceptance.acceptedBy.kind',
+    'events.*.submission.acceptance.acceptedBy.kind',
+  ]);
+  assert.deepEqual(skew.dropped, [
+    'submission.acceptance.acceptedBy',
+    'events.*.submission.acceptance.acceptedBy',
+  ]);
+  assert.equal(skew.stable, false);
+  assert.equal(skew.side, 'server-older', 'the fixture server advertises no contract features');
+  assert.match(skew.message, /differs from this CLI's contract at submission\.acceptance\.acceptedBy\.kind/);
+  assert.equal(optional.s.counts().reads, reads, 'no read added');
+
+  // A required field changed: the stable outcome fields still tell the outcome.
+  const required = await run(sub => ({ ...sub, phase: 'published', sequence: 'one' }));
+  assert.equal(required.result.result.successful, true);
+  assert.equal(required.result.result.submissions[0].submission.acceptance.receiptId, receipt.receiptId);
+  assert.equal(required.result.result.contractSkew.stable, true);
+  assert.match(required.result.result.contractSkew.message, /read from its stable fields/);
+  assert.equal(required.s.counts().reads, reads, 'no read added');
+
+  // Even the stable outcome changed: the error says the landing may have landed and how to check.
+  const unknown = await run(sub => ({ ...sub, observation: { ...sub.observation, state: 'finalized' } }));
+  assert(unknown.result instanceof ForgeError);
+  assert.equal(unknown.result.code, 'HOSTED_PROTOCOL_INVALID');
+  assert.match(unknown.result.message, /at submission\.observation\.state/);
+  assert.match(unknown.result.message, /server, whose deploy has not reached it yet/);
+  assert.match(unknown.result.message, /may have succeeded/);
+  assert.match(
+    unknown.result.message,
+    /nforge agent '\/synthetic' landings '\{"url":"https:\/\/fixture\.invalid"/,
+  );
+});

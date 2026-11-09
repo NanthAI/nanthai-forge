@@ -7,8 +7,9 @@ import type { z } from 'zod';
  * still rejects a missing required field, a wrong type or an unknown enum value. Response schemas
  * stay `.strict()` (tests catch typos); only this boundary forgives unknown keys. Request schemas
  * never go through here. A new field that CHANGES the meaning of a reply (not just adds to it)
- * goes behind a named contract feature (src/hosted-contract-features.ts) instead.
- * Docs: docs/agents/hosted-parity.md "Response contract".
+ * goes behind a named contract feature (src/hosted-contract-features.ts) instead. Reads that report an
+ * outcome across a deploy use parseHostedOutcome (below), which degrades further and says so.
+ * Docs: docs/operations/cli-update.md "Server replies".
  */
 type Issue = z.core.$ZodIssue;
 type Strip = { path: PropertyKey[]; keys: string[] };
@@ -82,4 +83,100 @@ export function safeParseHostedResponse<S extends z.ZodType>(schema: S, value: u
     parsed = schema.safeParse(current);
   }
   return parsed as z.ZodSafeParseResult<z.output<S>>;
+}
+
+/** Field names only: an index or a record key (which can be data, such as a file path) shows as `*`. */
+const pathText = (path: readonly PropertyKey[]) =>
+  path
+    .map(part => (typeof part === 'string' && /^[A-Za-z_$][\w$]{0,63}$/.test(part) ? part : '*'))
+    .join('.') || 'reply';
+/** Reply field paths a contract failure names (indices as `*`, at most 5; paths only, never values).
+ * Unknown keys are named only when nothing else failed: the boundary drops them anyway. */
+export function replyIssuePaths(issues: readonly Issue[]): string[] {
+  const failed = issues.filter(issue => issue.code !== 'unrecognized_keys');
+  const paths = (failed.length ? failed : issues).map(issue =>
+    issue.code === 'unrecognized_keys'
+      ? `${pathText(issue.path)}{${issue.keys.map(key => pathText([key])).join('|')}}`
+      : pathText(issue.path),
+  );
+  return [...new Set(paths)].slice(0, 5);
+}
+
+const startsWith = (path: readonly PropertyKey[], prefix: readonly PropertyKey[]) =>
+  prefix.every((part, index) => path[index] === part);
+const holds = (value: unknown, path: readonly PropertyKey[], key: string): boolean => {
+  let at = value;
+  for (const part of path)
+    at = at && typeof at === 'object' ? (at as Record<PropertyKey, unknown>)[part] : undefined;
+  return Boolean(at && typeof at === 'object' && !Array.isArray(at) && Object.hasOwn(at, key));
+};
+/** One removal of the smallest OPTIONAL field that holds a contract failure, or undefined. A required
+ * field is never removed: deleting it leaves a failure at its own path, so the next ancestor is tried. */
+function dropMismatched(
+  schema: z.ZodType,
+  value: unknown,
+  issues: readonly Issue[],
+  budget: { parses: number },
+) {
+  for (const issue of issues) {
+    if (issue.code === 'unrecognized_keys') continue;
+    for (let depth = issue.path.length; depth > 0 && budget.parses > 0; depth--) {
+      const key = issue.path[depth - 1],
+        parent = issue.path.slice(0, depth - 1),
+        prefix = issue.path.slice(0, depth);
+      if (typeof key !== 'string' || !holds(value, parent, key)) continue;
+      const next = without(value, { path: parent, keys: [key] });
+      budget.parses--;
+      const parsed = schema.safeParse(next);
+      if (parsed.success || !parsed.error.issues.some(found => startsWith(found.path, prefix)))
+        return { next, dropped: prefix };
+    }
+  }
+  return undefined;
+}
+
+/** A reply this CLI could read only in part: the failing paths and which side is older. */
+export type ReplySkew = {
+  /** Reply fields that did not match this CLI's contract. */
+  paths: string[];
+  /** Optional fields left out of the parsed reply because their shape is newer than this CLI. */
+  dropped: string[];
+  /** true: only the stable outcome fields were read (`stable` schema). */
+  stable: boolean;
+};
+
+/**
+ * Reads that report an operation's OUTCOME across a deploy (Issue 71ef0a66: a running wait read a
+ * landed reply whose optional `acceptance.acceptedBy` had been renamed, and called a landed change
+ * failed). Never silent: the caller reports the returned skew. In order:
+ * 1. the normal boundary (unknown keys dropped); no skew;
+ * 2. optional fields whose shape differs are left out (bounded re-parses of the same value);
+ * 3. the `stable` schema, the outcome fields servers keep unchanged, passing everything else through.
+ * Only when all fail does it throw the original error (a reply error). Zero extra calls.
+ */
+export function parseHostedOutcome<S extends z.ZodType, C extends z.ZodType>(
+  schema: S,
+  stable: C,
+  value: unknown,
+): { data: z.output<S>; skew?: ReplySkew } | { data: z.output<C>; skew: ReplySkew & { stable: true } } {
+  const first = safeParseHostedResponse(schema, value);
+  if (first.success) return { data: first.data };
+  const paths = replyIssuePaths(first.error.issues);
+  const dropped: string[] = [];
+  const budget = { parses: 64 };
+  let current = value,
+    parsed: z.ZodSafeParseResult<z.output<S>> = first;
+  for (let round = 0; !parsed.success && round < 16 && budget.parses > 0; round++) {
+    const drop = dropMismatched(schema, current, parsed.error.issues, budget);
+    if (!drop) break;
+    dropped.push(pathText(drop.dropped));
+    current = drop.next;
+    parsed = safeParseHostedResponse(schema, current);
+  }
+  if (parsed.success)
+    return { data: parsed.data, skew: { paths, dropped: [...new Set(dropped)], stable: false } };
+  const core = stable.safeParse(value);
+  if (core.success) return { data: core.data, skew: { paths, dropped: [], stable: true } };
+  replyErrors.add(first.error);
+  throw first.error;
 }

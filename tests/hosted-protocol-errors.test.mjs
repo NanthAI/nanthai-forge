@@ -87,7 +87,8 @@ test('only the reply boundary produces the version-skew message', async t => {
   };
   const skew = await via(boundary);
   assert.equal(skew.code, 'HOSTED_PROTOCOL_INVALID');
-  assert.equal(skew.message, protocolMismatchError().message, 'reply skew keeps its upgrade step');
+  assert.equal(skew.message, protocolMismatchError(['a']).message, 'reply skew keeps its upgrade step');
+  assert.match(skew.message, / at a;/, 'and names the failing reply field, never a value');
   const local = await via(reply.safeParse({ a: 1 }).error);
   assert.equal(local.code, 'HOSTED_PROTOCOL_INVALID');
   assert.doesNotMatch(local.message, /Upgrade nforge|retained operation IDs resume/);

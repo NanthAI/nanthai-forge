@@ -4,7 +4,17 @@ import { bindingInstallation, requireStoredRepositoryBinding, runnerGrant } from
 import { refreshCheckEntries } from './projectHostedCheckEntries';
 import { z } from 'zod';
 import { v } from 'convex/values';
-import { mutation, query, type MutationCtx } from './cliServer';
+import { isDeviceIdentity, mutation, query, type MutationCtx } from './cliServer';
+import { hostedOperationRow } from './projectHostedOperations';
+import {
+  agentSettingRule,
+  heldReplay,
+  holdSetting,
+  settingKey,
+  settingReply,
+  type SettingOrigin,
+  type SettingRule,
+} from './projectSettingApprovals';
 import type { Doc, Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import {
@@ -43,18 +53,57 @@ const requestSchema = z
   .strict();
 type CheckSettingRequest = { operationId: string; authorityEpoch: number; expected: string | null };
 type CheckSettingChange = { kind: 'runner' | 'definition'; key: string; value: unknown; digest: string };
+/** Which held-settings row a write belongs to, and whether the owner person granted it (Issue 470ef29b). */
+export type CheckSettingHold = { origin: SettingOrigin; key: string; approved?: boolean };
 /** One owner-only, operation-idempotent, digest-CAS settings write. The change is
- * resolved only for a new operation, so a replay never rereads its inputs. */
+ * resolved only for a new operation, so a replay never rereads its inputs. Issue 470ef29b: from an
+ * agent (device) sign-in after the project's first accepted landing it is held for the owner person
+ * instead, and the result's `rule` says which rule applied. */
 export async function saveCheckSetting(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   request: CheckSettingRequest,
   payload: unknown,
   resolve: (project: Doc<'hostedProjects'>, at: string) => Promise<CheckSettingChange> | CheckSettingChange,
+  hold: CheckSettingHold,
 ) {
   const { actor, project } = await checkCaller(ctx, projectId);
   // Project execution settings retain the existing owner authority boundary.
   invariant(project.owner === actor, 'PROJECT_UNAVAILABLE', 'Project check settings belong to its owner.');
+  const user = (await ctx.auth.getUserIdentity())!;
+  let rule: SettingRule = hold.approved ? 'owner-approved' : 'owner-person';
+  if (hold.approved)
+    invariant(!isDeviceIdentity(user), 'PROJECT_UNAVAILABLE', 'Only the owner person can grant this.');
+  else if (
+    isDeviceIdentity(user) &&
+    !(await hostedOperationRow(ctx, projectId, actor, request.operationId))
+  ) {
+    const text = canonicalPayload(payload);
+    const pending = await heldReplay(ctx, projectId, hold.key, request.operationId, text);
+    if (pending)
+      return canonicalPayload({
+        operationId: request.operationId,
+        rule: 'held',
+        approval: settingReply(pending),
+      });
+    rule = await agentSettingRule(ctx, projectId, user);
+    if (rule === 'held') {
+      const row = await holdSetting(ctx, {
+        projectId,
+        key: hold.key,
+        origin: hold.origin,
+        operationId: request.operationId,
+        requester: actor,
+        request: text,
+        summary: `${settingLabel[hold.origin]} change from an agent sign-in.`,
+      });
+      return canonicalPayload({
+        operationId: request.operationId,
+        rule: 'held',
+        approval: settingReply(row),
+      });
+    }
+  }
   const prepared = await beginCheckOperation(ctx, {
     projectId,
     actor,
@@ -89,41 +138,74 @@ export async function saveCheckSetting(
   if (old) await ctx.db.replace(old._id, saved);
   else await ctx.db.insert('projectHostedCheckSettings', saved);
   if (kind === 'definition') await refreshCheckEntries(ctx, projectId);
-  const result = { kind, key, version: saved.version, digest, value };
+  const result = { kind, key, version: saved.version, digest, value, rule };
   await completeCheckOperation(ctx, prepared.operation, result);
   return canonicalPayload(result);
+}
+const settingLabel: Record<SettingOrigin, string> = {
+  policy: 'Policy',
+  'check-definition': 'Check definition',
+  'check-import': 'Check definition import',
+  runner: 'Runner configuration',
+  'main-audit': 'Main audit setting',
+};
+/** True when a check-settings reply is a held request (nothing changed yet). */
+export const heldSettingReply = (text: string) => (JSON.parse(text) as { rule?: string }).rule === 'held';
+export async function configureCheckSetting(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  text: string,
+  approved = false,
+) {
+  const input = { projectId };
+  const request = requestSchema.parse(JSON.parse(text));
+  const change = request.change;
+  const hold: CheckSettingHold =
+    change.kind === 'runner'
+      ? { origin: 'runner', key: settingKey('runner'), approved }
+      : {
+          origin: 'check-definition',
+          key: settingKey('check-definition', change.kind === 'import' ? change.check.id : change.checkId),
+          approved,
+        };
+  return await saveCheckSetting(
+    ctx,
+    input.projectId,
+    request,
+    request,
+    async (_project, at) => {
+      if (change.kind === 'runner') {
+        invariant(
+          change.configuration.provider !== 'modal',
+          'BAD_ARGUMENT',
+          'The Modal runner has been retired. Select mac, self-hosted or github-actions.',
+        );
+        if (change.configuration.provider === 'github-actions')
+          await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository, {
+            runner: true,
+          });
+        return {
+          kind: 'runner',
+          key: 'runner',
+          value: change.configuration,
+          digest: checkPin(change.configuration),
+        };
+      }
+      const value =
+        change.kind === 'import'
+          ? importedHostedCheck(change.check)
+          : hostedCheckDefinition(change.command, change.checkId, at);
+      return { kind: 'definition', key: value.id, value, digest: value.definition };
+    },
+    hold,
+  );
 }
 export const configure = mutation({
   args: { projectId: v.id('hostedProjects'), request: v.string() },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const request = requestSchema.parse(JSON.parse(input.request));
-      const change = request.change;
-      return await saveCheckSetting(ctx, input.projectId, request, request, async (_project, at) => {
-        if (change.kind === 'runner') {
-          invariant(
-            change.configuration.provider !== 'modal',
-            'BAD_ARGUMENT',
-            'The Modal runner has been retired. Select mac, self-hosted or github-actions.',
-          );
-          if (change.configuration.provider === 'github-actions')
-            await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository, {
-              runner: true,
-            });
-          return {
-            kind: 'runner',
-            key: 'runner',
-            value: change.configuration,
-            digest: checkPin(change.configuration),
-          };
-        }
-        const value =
-          change.kind === 'import'
-            ? importedHostedCheck(change.check)
-            : hostedCheckDefinition(change.command, change.checkId, at);
-        return { kind: 'definition', key: value.id, value, digest: value.definition };
-      });
+      return await configureCheckSetting(ctx, input.projectId, input.request);
     } catch (error) {
       return report(error);
     }

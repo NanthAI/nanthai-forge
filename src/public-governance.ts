@@ -41,26 +41,28 @@ export function ownerApprovalMatcher(policy: AutonomyPolicy, checks?: DefinedChe
   const matches = (path: string) => entries.includes(path) || patterns.some(pattern => pattern.test(path));
   return Object.assign(matches, { any: patterns.length + entries.length > 0 });
 }
+/** Why a landing waits for the owner person, or null. Issue 470ef29b: the owner-approval list holds
+ * every agent on every project, the owner's own agents included (an agent signed in with the owner's
+ * account is still an agent); only the owner person keeps the fast path. On a public project it also
+ * holds contributor persons, who then follow automatic policy like agents. */
 export function governanceReason(
   project: { owner: string; visibility?: string },
   policy: AutonomyPolicy,
   actor: AcceptanceActor,
   paths: string[] | null,
-  ownerInputs = false,
   checks?: DefinedChecks,
 ): string | null {
-  if (project.visibility !== 'public') return reviewReason(policy, actor, paths);
-  const owner = actor.id === project.owner;
-  if (owner && actor.kind === 'person') return null;
-  if (!owner || !ownerInputs) {
+  if (actor.id === project.owner && actor.kind === 'person') return null;
+  const isPublic = project.visibility === 'public';
+  if (isPublic || actor.kind === 'agent') {
     const protectedPath = ownerApprovalMatcher(policy, checks);
     if (paths === null && protectedPath.any)
       return 'needs owner approval: protected-path coverage is unavailable';
     const matched = (paths ?? []).filter(path => protectedPath(path));
     if (matched.length) return `needs owner approval: protected paths ${matched.join(', ')}`;
   }
-  // Account authentication is not owner approval. Contributors follow automatic policy.
-  return reviewReason(policy, { ...actor, kind: 'agent' }, paths);
+  // Account authentication is not owner approval. Public contributors follow automatic policy.
+  return reviewReason(policy, isPublic ? { ...actor, kind: 'agent' } : actor, paths);
 }
 export const requiresGovernedCheck = (
   project: { owner: string; visibility?: string },

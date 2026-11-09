@@ -72,6 +72,14 @@ async function wave(t, check, options) {
     count: 0,
   });
   f.rawChecks.setPlanSelection(options.selection ?? fullSelection(check));
+  // Rechecks, not governance: an owner agent changing a check entry holds for the owner person
+  // (Issue 470ef29b, tests/public-governance.test.mjs), so these waves opt out of that hold.
+  if (options.noOwnerApproval) {
+    const policy = f.tables.hostedProjects.get(f.projectId).autonomyPolicy;
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: { ...policy, acceptance: { ...policy.acceptance, ownerApprovalPaths: [] } },
+    });
+  }
   for (let i = 0; i < 2; i++) await f.add(i);
   for (let tick = 0; ; tick++) {
     assert(tick < 900, JSON.stringify(states(f).map(s => s.phase)));
@@ -113,6 +121,7 @@ const scenarios = [
     check => ({
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
+      noOwnerApproval: true,
     }),
   ],
   [
@@ -174,6 +183,7 @@ test('parity: the setup action entry is global-risk like the check entry', async
   const outcome = await wave(t, project, {
     memberPaths: ['ci/setup.sh', 'packages/b/src/b.ts'],
     fileCount: 2,
+    noOwnerApproval: true,
   });
   assert.deepEqual(outcome.decisions, ['global-risk']);
   assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'global-risk' });

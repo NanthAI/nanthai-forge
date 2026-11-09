@@ -134,6 +134,7 @@ export async function observeApproval(
 
 /** The wait's one-line next step for each outcome. */
 export function approvalNext(outcome: ApprovalOutcome, laneId: string) {
+  if (laneId.startsWith('setting:')) return settingNext(outcome);
   const lane = laneId.slice(0, 8);
   if (outcome.status === 'none')
     return outcome.approval?.status === 'requested'
@@ -143,4 +144,16 @@ export function approvalNext(outcome: ApprovalOutcome, laneId: string) {
   return outcome.approval?.status === 'granted'
     ? `The owner granted Lane ${lane}. Land it now (land --save); a new save after the grant needs the owner again.`
     : `The owner declined Lane ${lane}. Read their reason, address it in this Lane, then request-approval again.`;
+}
+
+/** Issue 470ef29b: a held settings change (policy, check definition or runner) from an agent sign-in. */
+function settingNext(outcome: ApprovalOutcome) {
+  if (outcome.status === 'none')
+    return outcome.approval?.status === 'requested'
+      ? 'The settings request was withdrawn or replaced by a newer one; nothing changed.'
+      : 'No held settings change with that id.';
+  if (outcome.status !== 'decided') return null;
+  return outcome.approval?.status === 'granted'
+    ? 'The owner granted the settings change and it is applied. Rerun your original command (same operationId) to read its receipt.'
+    : 'The owner declined the settings change; nothing changed. Read their reason before asking again.';
 }

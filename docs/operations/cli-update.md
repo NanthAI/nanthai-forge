@@ -380,12 +380,23 @@ retypes, makes optional or adds enum values to a field without a contract featur
   client advertised the matching feature of `src/hosted-contract-features.ts`. Example: the
   capability reply's `agentDefaults` keeps the frozen keys of `WIRE_AGENT_DEFAULT_KEYS`; newer
   keys go only to a CLI that asks for `agent-defaults-extended` (State fe3b6292).
+- Reads that report an outcome across a deploy (Issue 71ef0a66: the first release of
+  `acceptance.acceptedBy` required `handle`, the next renamed it to `actor`, and CLIs of the first
+  release rejected every landed reply, so a running wait called landed changes failed). The landing
+  wait (`wait`, `land`) parses each page with `parseHostedOutcome`: first the normal boundary; then
+  it leaves out an optional field whose shape differs (never a required one); then it reads only the
+  stable outcome fields (`src/hosted-landing-stable.ts`: ids, version, phase, observation state,
+  acceptance receipt and head, error code). Servers keep those fields as they are. Any of the
+  last two adds `contractSkew` to the result. When nothing reads, the error names the fields,
+  which side is older (`src/hosted-reply-skew.ts`, from the features the capability reply already
+  advertises) and the `landings` command that checks the outcome. Zero extra calls.
 - New CLI, older server: a reply field the CLI adds must be optional or take a `.default()`
   (the server it talks to may not have deployed yet), or sit behind a feature.
 - Guard: `tests/hosted-response-contract.test.mjs` (part of the landing check's full run)
   compares the Candidate's reply schemas with `scripts/response-compat/released.json`, the
   released CLI's contract, and parses the Candidate server's capability reply with that
-  released contract. A failure names the field; declare a feature-gated change in
+  released contract. It does not see a field added and then changed between two releases
+  (main builds run in between), which is why outcome reads degrade as above. A failure names the field; declare a feature-gated change in
   `scripts/response-compat/declared.json` with the printed `path` and `change`. Refresh the
   baseline at release with `npm run build:core && npm run response:snapshot`.
 
