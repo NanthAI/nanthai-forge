@@ -5,7 +5,8 @@ import { actionsSession, sessionArgs } from './projectHostedActionsSession';
 import { outputHead, rootForOutput, commitHostedOutputWindow } from './projectHostedOutputStore';
 import { outputMessage, signOutput, outputRootObject, outputKey } from '../src/hosted-check-output';
 import { outputSigningKey } from './projectHostedOutputApi';
-import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
+import type { HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckOutputSettled } from '../src/hosted-check-verdict';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -20,7 +21,7 @@ export async function finalOutputTarget(
 ) {
   const head = await outputHead(ctx, input);
   if (head?.final) return null;
-  if (!(hostedCheckTerminal(run) && run.executionId && (head?.streams ?? 0) === (head?.sealed ?? 0)))
+  if (!(hostedCheckOutputSettled(run) && run.executionId && (head?.streams ?? 0) === (head?.sealed ?? 0)))
     return undefined;
   const root = rootForOutput(input, run.executionId, head),
     object = outputRootObject(root);

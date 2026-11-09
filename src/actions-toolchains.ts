@@ -194,7 +194,8 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
   const cache = declaration.cache;
   if (cache)
     text +=
-      `      - id: forge-deps\n        uses: actions/cache/restore@${CACHE_SHA}\n        with:\n${cachePathInput(cache)}` +
+      // A download stalled for 1 min is a miss, so the check installs normally (friction d99fcf3a).
+      `      - id: forge-deps\n        uses: actions/cache/restore@${CACHE_SHA}\n        env:\n          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'\n        with:\n${cachePathInput(cache)}` +
       `          key: ${cacheKeyPrefix(cache)}-\${{ runner.os }}-\${{ runner.arch }}-\${{ hashFiles(${cacheLockfiles(
         cache,
       )
@@ -202,13 +203,92 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
         .join(', ')}) }}\n`;
   return text;
 }
-/** Saved only by a run on the default branch and only after the check passed. */
-export function declaredSaveSteps(declaration: ActionsDeclaration | undefined) {
+/** Candidate-free seeds (Issue 432164bf): a dependency cache is saved only from a download that
+ * runs no repository code. Forge copies just the named manifest files beside each lockfile into an
+ * empty temporary folder (no repository configuration such as .npmrc or .pnpmfile.cjs comes along)
+ * and runs a download-only command there. Presets with no such command (cargo, uv, poetry, maven,
+ * gradle, nuget, yarn: resolution there can run repository code or configured programs) are
+ * restored only, never seeded. */
+export const CACHE_SEEDS: Partial<
+  Record<CachePreset, { lockfile: string; manifests: string[]; command: string[] }>
+> = {
+  go: { lockfile: 'go.sum', manifests: ['go.mod'], command: ['go', 'mod', 'download'] },
+  npm: {
+    lockfile: 'package-lock.json',
+    manifests: ['package.json'],
+    command: ['npm', 'ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+  },
+  pnpm: {
+    lockfile: 'pnpm-lock.yaml',
+    manifests: [],
+    command: ['pnpm', 'fetch', '--ignore-scripts', '--ignore-pnpmfile'],
+  },
+  pip: {
+    lockfile: 'requirements*.txt',
+    manifests: [],
+    // Binary wheels only: building a source distribution would run its setup code.
+    command: [
+      'python3',
+      '-m',
+      'pip',
+      'download',
+      '--only-binary=:all:',
+      '--dest',
+      'wheels',
+      '-r',
+      '{lockfile}',
+    ],
+  },
+};
+/** The seeded presets of a declaration, space-separated ('' when none). */
+export const cacheSeedPresets = (cache: ActionsCache) =>
+  cache.presets.filter(preset => CACHE_SEEDS[preset]).join(' ');
+/**
+ * The seed program, plain CommonJS for `node -e PROGRAM ROOT PRESETS`: walks ROOT (skipping
+ * dependency, build and VCS folders; at most 64 lockfiles), copies each lockfile and its manifests
+ * into a fresh temporary folder and runs the preset's command there. A failed or missing tool skips
+ * that lockfile with a line; the program always exits 0, so a seed never fails a check.
+ */
+export const DEPS_SEED_PROGRAM = `const { spawnSync } = require('child_process'), fs = require('fs'), path = require('path'), os = require('os');
+const seeds = ${JSON.stringify(CACHE_SEEDS)};
+const root = path.resolve(process.argv[1]), presets = String(process.argv[2] || '').split(' ').filter(p => seeds[p]);
+const skip = new Set(['.git', '.forge', 'node_modules', 'vendor', 'target', 'build', 'dist', '.venv', 'venv']);
+const match = (glob, name) => { const [head, tail = ''] = glob.split('*'); return glob.includes('*') ? name.length >= head.length + tail.length && name.startsWith(head) && name.endsWith(tail) : name === glob; };
+const found = [];
+(function walk(dir, depth) {
+  if (depth > 8 || found.length >= 64) return;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory() && !skip.has(entry.name)) walk(path.join(dir, entry.name), depth + 1);
+    else if (entry.isFile()) for (const p of presets) if (match(seeds[p].lockfile, entry.name)) found.push([p, path.join(dir, entry.name)]);
+  }
+})(root, 0);
+for (const [preset, lockfile] of found.slice(0, 64)) {
+  const seed = seeds[preset], dir = path.dirname(lockfile), label = preset + ' ' + (path.relative(root, lockfile) || '.');
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-seed-'));
+  try {
+    for (const name of [path.basename(lockfile), ...seed.manifests]) if (fs.existsSync(path.join(dir, name))) fs.copyFileSync(path.join(dir, name), path.join(temp, name));
+    const args = seed.command.map(a => (a === '{lockfile}' ? path.basename(lockfile) : a));
+    const result = spawnSync(args[0], args.slice(1), { cwd: temp, stdio: ['ignore', 'inherit', 'inherit'], timeout: 600000 });
+    console.log('Forge seed: ' + label + (result.status === 0 ? ' downloaded' : ' skipped (' + (result.error ? result.error.code : 'exit ' + result.status) + ')'));
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+}
+console.log('Forge seed: ' + found.length + ' lockfile' + (found.length === 1 ? '' : 's') + ' for ' + (presets.join(', ') || 'no seeded preset'));
+`;
+/** The export workflow's static job, on the default branch after a cache miss: the Candidate-free
+ * seed, then the save, both before the check command runs (never after it). */
+export function declaredSeedSteps(declaration: ActionsDeclaration | undefined) {
   const cache = declaration?.cache;
-  if (!cache) return '';
+  if (!cache || !cacheSeedPresets(cache)) return '';
+  const when = `steps.forge-deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)`;
   return (
-    `      - if: steps.forge-deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)\n` +
-    `        uses: actions/cache/save@${CACHE_SHA}\n        with:\n${cachePathInput(cache)}` +
+    `      - if: ${when}\n        timeout-minutes: 15\n        run: node -e "$FORGE_SEED_PROGRAM" . ${q(cacheSeedPresets(cache))}\n` +
+    `        env:\n          FORGE_SEED_PROGRAM: |\n${DEPS_SEED_PROGRAM.split('\n')
+      .filter(Boolean)
+      .map(line => `            ${line}\n`)
+      .join('')}` +
+    `      - if: ${when}\n        uses: actions/cache/save@${CACHE_SHA}\n        with:\n${cachePathInput(cache)}` +
     `          key: \${{ steps.forge-deps.outputs.cache-primary-key }}\n`
   );
 }

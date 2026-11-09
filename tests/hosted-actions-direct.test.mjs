@@ -25,6 +25,7 @@ const source = await import(moduleUrl('../convex/projectHostedActionsSource.ts')
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
 const results = await import(moduleUrl('../convex/projectHostedActionsResults.ts'));
 const webhooks = await import(moduleUrl('../convex/projectHostedActionsWebhook.ts'));
+const verdicts = await import(moduleUrl('../convex/projectHostedActionsVerdict.ts'));
 const { handle } = await import(moduleUrl('../convex/projectHostedActionsHttp.ts'));
 
 /** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
@@ -171,6 +172,11 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
       recipeStorage,
     });
   };
+  // Every shard passed: the pass waits for GitHub's signed completed event (Issue 432164bf).
+  const conclude = async (conclusion = 'success') => {
+    await call(webhooks, 'receive', { payload: JSON.stringify(webhook({ run }, 'completed', conclusion)) });
+    return s.status(run.id);
+  };
   return {
     ...s,
     scheduled,
@@ -186,6 +192,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
     prepare,
     runner,
     configuration,
+    conclude,
   };
 }
 test('App JWT uses RS256 for GitHub PKCS#1 and PKCS#8; installation is derived per call', async t => {
@@ -404,7 +411,11 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   await send(first);
   assert.equal((await send(first)).counts.completed, 1);
   await assert.rejects(send({ ...first, exitCode: 1 }), code('WORK_OPERATION_CHANGED'));
-  const terminal = await send({ index: 1, exitCode: 0 });
+  const held = await send({ index: 1, exitCode: 0 });
+  assert.equal(held.status, 'running', "every shard passed: the pass waits for the provider's conclusion");
+  assert.equal(held.actions.verdictPending, true);
+  assert.equal(s.tables.projectHostedTestTimings.size, 0);
+  const terminal = await s.conclude();
   assert.equal(terminal.status, 'passed');
   assert.equal(terminal.contractReports['tests/synthetic-0.test.mjs'].durationMs, 5);
   assert.deepEqual(terminal.testFiles.counts, { total: 1, failed: 0, flaky: 0 });
@@ -418,7 +429,8 @@ test('duplicate results are immutable and complete shard evidence is needed to p
   assert.deepEqual(JSON.parse(session.timingHistory), history);
   assert.equal((await send(first)).status, 'passed');
   assert.equal([...s.tables.projectHostedTestTimings.values()][0].history, histories[0].history);
-  assert.equal(s.cancelled.length, 1);
+  // The watchdog and the one confirm read are both cancelled.
+  assert.equal(s.cancelled.length, 2);
   const scheduled = s.scheduled.length;
   await s.call(direct, 'expire', { ...s.id, fence: terminal.fence });
   assert.equal(s.scheduled.length, scheduled);
@@ -447,7 +459,8 @@ test('retained shard execution intervals make Actions runner seconds observed; a
         }),
       });
     await send(0, 90);
-    const terminal = await send(1, 30);
+    await send(1, 30);
+    const terminal = await s.conclude();
     assert.equal(terminal.status, 'passed');
     const shards = [...s.tables.projectHostedCheckShards.values()].map(row => JSON.parse(row.value));
     assert.equal(shards.filter(shard => shard.execution).length, timed);
@@ -559,6 +572,7 @@ test('first planning session bootstraps weights from bounded, already retained t
     }),
   });
   await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index: 1, exitCode: 0 }) });
+  await s.conclude();
   const stored = JSON.parse([...s.tables.projectHostedTestTimings.values()][0].history);
   assert.equal(stored.files[file].durationMs, 240);
   assert.deepEqual(stored.runs, [previousId, s.run.id]);
@@ -576,6 +590,82 @@ test('webhook backstops cancellation, failure, timeout and missing evidence; doe
     assert.equal((await s.status(s.run.id)).status, status);
     await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s, 'completed', conclusion)) });
     assert.equal(s.cancelled.length, 1);
+  }
+});
+const passAll = async s => {
+  await s.bind();
+  await s.prepare();
+  for (const index of [0, 1])
+    await s.call(results, 'result', { ...s.input(), result: JSON.stringify({ index, exitCode: 0 }) });
+  return s.status(s.run.id);
+};
+test("passing shard results alone never pass: the provider's conclusion decides (Issue 432164bf)", async t => {
+  for (const [conclusion, status] of [
+    ['success', 'passed'],
+    ['failure', 'runner-unavailable'],
+    ['timed_out', 'runner-unavailable'],
+    ['cancelled', 'cancelled'],
+  ]) {
+    const s = await fixture(t);
+    const held = await passAll(s);
+    assert.equal(held.status, 'running');
+    assert.equal(held.actions.verdictPending, true);
+    const confirm = s.scheduled.find(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+    assert.equal(confirm.delay, 5 * 60_000, 'one fallback read, scheduled once');
+    assert.equal(held.actions.confirm, confirm.id);
+    const settled = await s.conclude(conclusion);
+    assert.equal(settled.status, status, conclusion);
+    assert.ok(s.cancelled.includes(confirm.id), 'the fallback read is cancelled once the event arrives');
+    if (conclusion === 'failure') assert.match(settled.failureReason, /only with the provider's success/);
+    // A replayed event changes nothing.
+    await s.conclude('success');
+    assert.equal((await s.status(s.run.id)).status, status);
+  }
+});
+test('a lost completed event: at most two bounded reads of the run, then only the watchdog', async t => {
+  variables(t, {
+    GITHUB_APP_ID: '12345',
+    GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+  });
+  const ctx = s => ({
+    runMutation: (ref, input) => s.call(verdicts, getFunctionName(ref).split(':')[1], input),
+  });
+  for (const answers of [
+    ['completed:success'],
+    ['in_progress', 'completed:failure'],
+    ['in_progress', 'in_progress'],
+  ]) {
+    const s = await fixture(t);
+    bindRepository(t, s.id.projectId, repository);
+    const reads = [];
+    t.mock.method(globalThis, 'fetch', async url => {
+      if (url.endsWith('/installation')) return Response.json({ id: 9 });
+      if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+      reads.push(url);
+      const [state, conclusion = null] = answers[reads.length - 1].split(':');
+      return Response.json({ status: state, conclusion });
+    });
+    await passAll(s);
+    for (let attempt = 0; attempt < answers.length; attempt++) {
+      const pending = s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm'));
+      assert.equal(pending.length, attempt + 1);
+      assert.equal(pending.at(-1).delay, [5, 30][attempt] * 60_000);
+      await verdicts.confirm._handler(ctx(s), pending.at(-1).input);
+    }
+    assert.equal(reads.length, answers.length);
+    assert.ok(reads.every(url => url.endsWith(`/repos/${repository}/actions/runs/123`)));
+    const run = await s.status(s.run.id);
+    const expected = {
+      'completed:success': 'passed',
+      'completed:failure': 'runner-unavailable',
+      in_progress: 'running',
+    };
+    assert.equal(run.status, expected[answers.at(-1)]);
+    assert.equal(
+      s.scheduled.filter(item => item.name.endsWith('projectHostedActionsVerdict:confirm')).length,
+      answers.length,
+      'no third read: the 12 h watchdog is the backstop',
+    );
   }
 });
 test('OIDC/session and webhook retain epoch, actor and dispatch fencing before replay', async t => {
@@ -645,7 +735,7 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
       }),
     });
   }
-  assert.equal((await s.status(s.run.id)).status, 'passed');
+  assert.equal((await s.conclude()).status, 'passed');
   const runMeters = s.counts.filter(m => m.name === 'checkEnqueue' || m.name.startsWith('direct-'));
   const totalReads = runMeters.reduce((n, m) => n + m.documents, 0),
     totalWrites = runMeters.reduce((n, m) => n + m.writes, 0);
@@ -2011,7 +2101,8 @@ test('shard pool: a pooled check whose yielded files were all reported passes', 
     contractReports: { 'tests/synthetic-0.test.mjs': pass },
     pool: { yielded: ['tests/yielded.test.mjs'] },
   });
-  const run = await send({ index: 2, exitCode: 0 });
+  await send({ index: 2, exitCode: 0 });
+  const run = await s.conclude();
   assert.equal(run.status, 'passed');
   assert.equal(run.poolPending, undefined);
 });
@@ -2097,7 +2188,8 @@ test('shard pool: the final result deletes its run claims and sweeps stale ones,
     }),
   );
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).status, 'passed');
+  // Every shard reported: claims are cleaned now; the pass itself waits for the provider.
+  assert.equal((await response.json()).actions.verdictPending, true);
   // The own-claims page and the stale sweep run concurrently and each signs before it fetches, so their
   // arrival order is not defined; both exact list calls are still required.
   assert.deepEqual(

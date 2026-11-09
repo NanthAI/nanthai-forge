@@ -109,7 +109,9 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/work-docs-admission.ts` | `forge-folders` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/work-docs-admission.ts` | `npm-lockfile` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/integration-preview-checks.ts` | `npm-lockfile` | 2 | integration previews install with `npm ci` only for npm-locked projects | their check sets up its own dependencies |
-| `src/actions-toolchains.ts` | `npm-lockfile` | 1 | npm's row in the per-ecosystem Actions cache table (slice C, 721cd45c) | each ecosystem's own lockfile row |
+| `src/actions-toolchains.ts` | `npm-lockfile` | 2 | npm's rows in the per-ecosystem Actions cache and Candidate-free seed tables (slice C, 721cd45c; 432164bf) | each ecosystem's own lockfile row |
+| `src/actions-toolchains.ts` | `build-folders` | 1 | the dependency seed skips dependency, build and VCS folders of every ecosystem while finding lockfiles (432164bf) | the same list for every repository |
+| `src/actions-toolchains.ts` | `package-json-config` | 1 | npm's seed copies its manifest beside the lockfile (432164bf); each seeded ecosystem names its own | each ecosystem's own manifest row |
 | `src/npm-install.ts` | `npm-lockfile` | 1 | npm's own install reads its lockfile for scripted packages (slice H, 4ce67b9a) | pnpm, Yarn and Bun use their own (src/package-manager-install.ts) |
 | `src/package-manager.ts` | `npm-lockfile` | 1 | npm's row in the per-manager lockfile table (slice H, 4ce67b9a) | each manager's own lockfile row |
 | `src/package-manager.ts` | `package-json-config` | 5 | JS package managers keep `packageManager` and `workspaces` in package.json (slice H, 4ce67b9a) | non-JS repositories install with their own tooling |

@@ -10,7 +10,6 @@ import {
   directLogSchema,
   directCallback,
   shardExecution,
-  actionsExecutionCost,
 } from '../src/hosted-actions-direct';
 import { outputSigningKey } from './projectHostedOutputApi';
 import { authorizeOutputWindow, commitHostedOutputWindow } from './projectHostedOutputStore';
@@ -29,6 +28,8 @@ import { writeHostedCheck } from './projectHostedCheckStore';
 import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
 import { recordShardReports } from './projectHostedActionsReports';
+import { completeFromResults, holdForConclusion } from './projectHostedActionsVerdict';
+import { hostedCheckOutputSettled } from '../src/hosted-check-verdict';
 export const output = internalMutation({
   // withRun: an inline-log result also needs the session run to verify the stored object.
   args: {
@@ -66,7 +67,7 @@ export const result = internalMutation({
   handler: async (ctx, { withFinal, ...input }) => {
     const run = await settle(ctx, input);
     if (!withFinal) return JSON.stringify(run);
-    const final = hostedCheckTerminal(run) ? await finalOutputTarget(ctx, input, run) : null;
+    const final = hostedCheckOutputSettled(run) ? await finalOutputTarget(ctx, input, run) : null;
     return JSON.stringify({ run, final: final === undefined ? 'prepare' : final });
   },
 });
@@ -148,26 +149,15 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
   }
   if (run.counts.completed === run.plan!.shardCount) {
     const failed = run.counts.failed > 0 || Object.values(run.contractReports!).some(report => report.failed);
-    const complete = directCallback(run, {
-      kind: 'complete',
-      status: run.cancelRequested ? 'cancelled' : failed ? 'failed' : 'passed',
-      exitCode: run.cancelRequested ? null : failed ? 1 : 0,
-      output: null,
-      cost: actionsExecutionCost(run, run.plan!.shardCount),
-      contractReports: run.contractReports,
-    });
-    run = await receiveHostedCheckCallback(
-      ctx,
-      {
-        projectId: input.projectId,
-        callback: complete,
-        signature: signHostedCheckCallback(complete, outputSigningKey(run.keyId)),
-        // The row this transaction just wrote, exactly as a reload would parse it, without
-        // reading its full reports back (Issue 75cb5074). actionsSession authorized the write.
-        loaded: { row, run: storedHostedCheck(run) },
-      },
-      outputSigningKey,
-    );
+    // The row this transaction just wrote, exactly as a reload would parse it, without reading its
+    // full reports back (Issue 75cb5074). actionsSession authorized the write.
+    const loaded = { row, run: storedHostedCheck(run) };
+    // A failure or cancellation settles now; a pass also needs the provider's own conclusion,
+    // which the job that ran the Candidate cannot write (Issue 432164bf).
+    run =
+      run.cancelRequested || failed
+        ? await completeFromResults(ctx, loaded, run.cancelRequested ? 'cancelled' : 'failed')
+        : await holdForConclusion(ctx, loaded);
   }
   return run;
 }

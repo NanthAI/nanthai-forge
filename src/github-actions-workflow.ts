@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { RemoteCheckPlan } from './remote-check-plan.js';
-import { declaredSaveSteps, declaredSetupSteps, type ActionsDeclaration } from './actions-toolchains.js';
+import { declaredSeedSteps, declaredSetupSteps, type ActionsDeclaration } from './actions-toolchains.js';
 
 /** Only generated in the run export; never changes the accepted candidate. Declared
- * toolchains and cache add pinned steps; without them the bytes are unchanged. */
+ * toolchains and cache add pinned steps; without them the bytes are unchanged. A dependency
+ * cache is seeded and saved only before the check command, by the static job on the default
+ * branch, never after project code ran (Issue 432164bf). */
 export function githubActionsWorkflow(
   runsOn: string | string[] = 'ubuntu-latest',
   declaration?: ActionsDeclaration,
 ) {
   const setup = declaredSetupSteps(declaration),
-    save = declaredSaveSteps(declaration);
+    seed = declaredSeedSteps(declaration);
   return `name: Forge check
 run-name: forge-check/\${{ inputs.runId }}
 on:
@@ -43,7 +45,7 @@ ${setup}      - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: \${{ matrix.shard }}
-${save}  static:
+  static:
     name: forge-static
     runs-on: ${JSON.stringify(runsOn)}
     steps:
@@ -53,11 +55,11 @@ ${save}  static:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-${setup}      - run: node scripts/forge-check.mjs
+${setup}${seed}      - run: node scripts/forge-check.mjs
         env:
           FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
           FORGE_ACTIONS_SHARD: static
-${save}`;
+`;
 }
 export function githubActionsRecipe(plan: RemoteCheckPlan) {
   const { retryFiles, pin, head, definition, selection, groups, standard, interaction, command, actions } =

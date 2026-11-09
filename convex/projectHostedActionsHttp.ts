@@ -11,7 +11,7 @@ import { verifyOutputObject, storeOutputObject } from './projectHostedOutputApi'
 import { directOutput } from '../src/hosted-actions-direct';
 import { outputSigningKey } from './projectHostedOutputApi';
 import { outputMessage, type OutputRoot } from '../src/hosted-check-output';
-import { hostedCheckTerminal } from '../src/hosted-check';
+import { hostedCheckOutputSettled } from '../src/hosted-check-verdict';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -333,7 +333,7 @@ async function settleResult(
       withFinal: true,
     }),
   ) as { run: HostedCheckRun; final: FinalOutput | 'prepare' };
-  if (!hostedCheckTerminal(settled)) return settled;
+  if (!hostedCheckOutputSettled(settled)) return settled;
   // Runs beside the output manifest work; it never throws.
   const cleanup = settled.poolClaimed ? cleanPoolClaims(input.projectId, settled.id) : undefined;
   try {

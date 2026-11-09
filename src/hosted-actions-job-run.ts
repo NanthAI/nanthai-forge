@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import { ContractTimingReader, unstoredReportsNote } from './contract-test-timings.js';
 import { HostedOutputRedactor } from './hosted-output-redactor.js';
@@ -29,6 +29,23 @@ export function planErrorCommand(executable: string, error: { code: string; mess
     '--eval',
     `console.error(${JSON.stringify(`${error.code}: ${error.message}`)}); process.exitCode = 1;`,
   ];
+}
+import {
+  candidateIsolation,
+  homePaths,
+  toolchainReadable,
+  type CandidateIsolation,
+} from './candidate-user.js';
+import { cachePaths } from './actions-toolchains.js';
+let isolation: CandidateIsolation = {
+  mode: 'shared',
+  reason: 'the supervisor did not request a Candidate user',
+};
+/** Called once by the fixed supervisor entry (scripts/hosted-actions-job.mjs) before it runs a
+ * shard; embedding callers and tests keep the runner user. */
+export function isolateCandidates(value: CandidateIsolation = candidateIsolation()) {
+  isolation = value;
+  return value;
 }
 /** Below the server's 512 KiB request window, leaving room for identity fields. */
 const inlineRequestBytes = 448 * 1024;
@@ -143,22 +160,51 @@ async function executeActiveActionsJob(
   };
   // Any check may write JUnit XML here (docs/operations/github-actions-checks.md).
   const junit = junitDirectory();
+  // Candidate children run as their own unprivileged user where the runner allows it (Linux with
+  // passwordless sudo); the result never depends on it, but the log says which (Issue 432164bf).
+  const placement =
+    isolation.mode === 'user'
+      ? `Candidate user: project code runs as ${isolation.user}, without the runner's credentials, environment or sudo.`
+      : `Candidate user: project code runs as the runner user (${isolation.reason}).`;
+  console.log(placement);
+  observe(Buffer.from(`${placement}\n`));
+  const home = process.env.HOME ?? '';
+  const paths = {
+    // The Candidate's own: its checkout, its report folder and the dependency caches restored for it.
+    writable: [
+      directory,
+      junit.directory,
+      ...(recipe.actions?.cache ? homePaths(cachePaths(recipe.actions.cache), home) : []),
+      // Forge's own suite installs from the npm download cache restored with the control install.
+      ...(recipe.standard && home ? [join(home, '.npm')] : []),
+    ],
+    readable: [
+      resolve(import.meta.dirname, '..'),
+      planPath,
+      join(dirname(planPath), 'forge-actions-state.json'),
+      ...(sourceCache ? [sourceCache] : []),
+      ...(packages ? [packages.path] : []),
+      ...toolchainReadable(process.env, home),
+    ],
+  };
   /** One executor process. `part` is the shard pool part: kept files, or one unit (tests only). */
   const spawnPart = (part?: string) => {
-    const child = spawn(command[0]!, command.slice(1), {
+    const env: Record<string, string> = {
+      ...(childEnv({ allow: ['CI', 'PATH', ...toolchainEnvAllow()] }) as Record<string, string>),
+      ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
+      FORGE_ACTIONS_PLAN: planPath,
+      FORGE_ACTIONS_SHARD: shard,
+      ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
+      ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
+      ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
+      [junitDirEnv]: junit.directory,
+    };
+    const argv = isolation.mode === 'user' ? isolation.command(command, env, directory, paths) : command;
+    const child = spawn(argv[0]!, argv.slice(1), {
       cwd: directory,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: {
-        ...childEnv({ allow: ['CI', 'PATH', ...toolchainEnvAllow()] }),
-        ...(sourceCache ? { FORGE_SOURCE_CACHE_DIR: sourceCache } : {}),
-        FORGE_ACTIONS_PLAN: planPath,
-        FORGE_ACTIONS_SHARD: shard,
-        ...(part ? { FORGE_ACTIONS_POOL_PART: part } : {}),
-        ...(packages ? { FORGE_CHECK_PACKAGES: packages.path } : {}),
-        ...(packages?.run ? { FORGE_CHECK_PACKAGES_RUN: packages.run } : {}),
-        [junitDirEnv]: junit.directory,
-      },
+      env,
     });
     // Decode across chunks before parsing complete machine reports.
     child.stdout.setEncoding('utf8');
@@ -225,7 +271,8 @@ async function executeActiveActionsJob(
       if (unstored.failed && !exitCode) exitCode = 1;
     }
   } finally {
-    junit.remove();
+    if (isolation.mode === 'user') isolation.remove(junit.directory);
+    else junit.remove();
     packages?.remove();
   }
   lap('commandMs');

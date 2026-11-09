@@ -1,14 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import {
-  actionsCapacityFile,
-  actionsFoldDecision,
-  parseActionsCapacity,
-} from '../dist/hosted-actions-job-fold.js';
+import { actionsCapacityFile, parseActionsCapacity } from '../dist/hosted-actions-capacity.js';
 const capacityPath = resolve(process.env.RUNNER_TEMP ?? '.', actionsCapacityFile);
-/** The runner queue read: the one step that holds the GitHub token, so the planning step
- * (which may also run the check) never does. GitHub-hosted only; anything else observes nothing. */
+/** The runner queue read: the one step that holds the GitHub token, so no step that plans or
+ * runs project code ever does. GitHub-hosted only; anything else observes nothing. */
 async function readCapacity() {
   if (process.env.RUNNER_ENVIRONMENT !== 'github-hosted') return undefined;
   const { readActionsCapacity } = await import('./actions-capacity.mjs');
@@ -18,6 +14,11 @@ async function readCapacity() {
     runId: process.env.GITHUB_RUN_ID,
     token: process.env.GITHUB_TOKEN,
   });
+}
+// Candidate-free dependency-cache seed before the check (no Forge call, never fails the job).
+if (process.argv[2] === 'seed') {
+  const { seedDependencyCache } = await import('../dist/hosted-actions-job-seed.js');
+  process.exit(await seedDependencyCache());
 }
 if (process.argv[2] === 'capacity') {
   writeFileSync(capacityPath, JSON.stringify((await readCapacity()) ?? null));
@@ -60,40 +61,20 @@ try {
     );
     // Forge's own suite installs from the control lockfile, so only it reads the npm download cache.
     const npmCache = result.recipe.standard === true;
-    const fold = actionsFoldDecision({
-      env: process.env,
-      singleShard: result.singleShard,
-      toolchains: result.toolchains,
-      depsCache: result.depsCache,
-      npmCache,
-      packRefresh: result.packRefresh.refresh === true,
-    });
+    // The only step that writes workflow outputs: it reads the Candidate as data and runs none of
+    // its code (Issue 432164bf). The check itself always runs in the separate run step.
     appendFileSync(
       process.env.GITHUB_OUTPUT,
-      // A folded execution runs below, in this step: the separate run step sees no single shard.
-      `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${fold.fold ? '' : result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n` +
+      `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n` +
         // Declared toolchains and dependency cache for the workflow's setup steps (single-line JSON).
         `toolchains=${JSON.stringify(result.toolchains)}\ndeps_cache=${JSON.stringify(result.depsCache)}\n` +
-        `npm_cache=${npmCache}\nfolded=${fold.fold}\n`,
+        `npm_cache=${npmCache}\n`,
     );
     // Keep source refresh out of the plan/artifact dependency path.
     writeFileSync(
       resolve(process.env.RUNNER_TEMP, 'forge-pack-refresh.json'),
       JSON.stringify(result.packRefresh),
     );
-    if (process.env.FORGE_ACTIONS_FOLD === '1')
-      console.log(
-        fold.fold ? 'Actions run: in the planning step' : `Actions run: separate step (${fold.reason})`,
-      );
-    if (fold.fold) {
-      const { executeActionsJob } = await import('../dist/hosted-actions-job-run.js');
-      process.exitCode = await executeActionsJob(
-        client,
-        directory,
-        resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'),
-        result.singleShard,
-      );
-    }
   } else if (process.argv[2] === 'pack') {
     const { refreshActionsSourcePack } = await import('../dist/hosted-actions-job-pack.js');
     const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
@@ -115,7 +96,8 @@ try {
     }
   } else {
     restoreRun();
-    const { executeActionsJob } = await import('../dist/hosted-actions-job-run.js');
+    const { executeActionsJob, isolateCandidates } = await import('../dist/hosted-actions-job-run.js');
+    isolateCandidates();
     process.exitCode = await executeActionsJob(
       client,
       directory,

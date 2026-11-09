@@ -5,11 +5,13 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { childEnv } from '../scripts/child-env.mjs';
+import { CANDIDATE_USER, candidateIsolation, homePaths, toolchainReadable } from '../dist/candidate-user.js';
+import { hostedCheckOutputSettled, providerVerdict } from '../dist/hosted-check-verdict.js';
 import { checkWorkerEnv, checkServiceEnv } from '../dist/worker-environment.js';
 import { nativeGitRunner } from '../dist/native-git-runner.js';
 import { nativeGitBatch } from '../dist/native-git-batch.js';
@@ -396,4 +398,126 @@ test('Windows lookup keeps Path and ComSpec, filters credentials case-insensitiv
   assert.equal(env.Path, undefined);
   assert.equal(env.home, 'fake-new-home');
   assert.equal(env.HOME, undefined);
+});
+
+// The Candidate user launcher and the provider verdict (Issue 432164bf).
+/** A fake runner: records commands; `fail` names commands that exit non-zero. */
+function runner(fail = () => false) {
+  const calls = [];
+  return {
+    calls,
+    run: (command, args) => {
+      calls.push([command, ...args]);
+      return { status: fail([command, ...args].join(' ')) ? 1 : 0 };
+    },
+  };
+}
+const linux = (fake, env = { HOME: '/srv/ci-home' }) =>
+  candidateIsolation({ env, platform: 'linux', run: fake.run });
+
+test('the Candidate user falls back to the runner user, with a reason, wherever it cannot isolate', () => {
+  assert.deepEqual(
+    candidateIsolation({ env: { FORGE_CANDIDATE_USER: 'off' }, platform: 'linux' }).mode,
+    'shared',
+  );
+  assert.match(candidateIsolation({ env: {}, platform: 'darwin' }).reason, /darwin runner/);
+  for (const [fails, reason] of [
+    ['sudo -n true', /no passwordless sudo/],
+    ['command -v unshare', /unshare, setpriv or mount is missing/],
+    ['useradd', /could not create the forge-check user/],
+    ['candidate-sandbox.mjs', /self-test failed/],
+  ]) {
+    const fake = runner(line => line.includes(fails) || (fails === 'useradd' && line.startsWith('id ')));
+    const isolation = linux(fake);
+    assert.equal(isolation.mode, 'shared', fails);
+    assert.match(isolation.reason, reason);
+  }
+});
+
+test('an existing user is reused; a missing one is created without a home directory', () => {
+  const existing = runner();
+  assert.equal(linux(existing).mode, 'user');
+  assert.ok(!existing.calls.some(call => call.includes('useradd')));
+  const missing = runner(line => line.startsWith('id '));
+  assert.equal(linux(missing).user, CANDIDATE_USER);
+  const add = missing.calls.find(call => call.includes('useradd'));
+  assert.ok(add.includes('--no-create-home') && add.includes('--system'), add.join(' '));
+});
+
+test('a launch passes exactly the child env and the allow-listed paths, moving ownership once', t => {
+  const isolation = linux(runner());
+  assert.equal(isolation.mode, 'user');
+  const argv = isolation.command(['npm', 'test'], { PATH: '/usr/bin', CI: 'true' }, '/work/candidate', {
+    writable: ['/work/candidate', '/srv/ci-home/.npm'],
+    readable: ['/work/control'],
+  });
+  const spec = argv.at(-1);
+  t.after(() => rmSync(spec, { force: true }));
+  assert.deepEqual(argv.slice(0, 8), [
+    'sudo',
+    '-n',
+    '--',
+    'unshare',
+    '--mount',
+    '--propagation',
+    'private',
+    '--',
+  ]);
+  assert.match(argv.at(-2), /scripts\/candidate-sandbox\.mjs$/);
+  assert.equal(statSync(spec).mode & 0o777, 0o600, 'the spec is private to the runner user');
+  const written = JSON.parse(readFileSync(spec, 'utf8'));
+  assert.deepEqual(written.env, {
+    PATH: '/usr/bin',
+    CI: 'true',
+    USER: CANDIDATE_USER,
+    LOGNAME: CANDIDATE_USER,
+  });
+  assert.deepEqual(written.argv, ['npm', 'test']);
+  assert.equal(written.home, '/srv/ci-home');
+  assert.deepEqual(written.readable, ['/work/control']);
+  assert.deepEqual(written.chown, ['/work/candidate', '/srv/ci-home/.npm']);
+  // A later part of the same job (a pooled unit) reuses the ownership already moved.
+  const again = isolation.command(['npm', 'test'], {}, '/work/candidate', {
+    writable: ['/work/candidate', '/work/junit-2'],
+    readable: [],
+  });
+  t.after(() => rmSync(again.at(-1), { force: true }));
+  assert.deepEqual(JSON.parse(readFileSync(again.at(-1), 'utf8')).chown, ['/work/junit-2']);
+});
+
+test('toolchain folders under the home are readable; data homes and other paths are not', t => {
+  const home = mkdtempSync(join(tmpdir(), 'forge-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  for (const dir of ['.cargo/bin', '.rustup', 'go/bin', 'sdk/jdk'])
+    mkdirSync(join(home, dir), { recursive: true });
+  const env = {
+    HOME: home,
+    PATH: [join(home, '.cargo/bin'), '/usr/bin', join(home, 'missing')].join(':'),
+    JAVA_HOME: join(home, 'sdk/jdk'),
+    GOPATH: join(home, 'go'),
+    CARGO_HOME: join(home, '.cargo'),
+  };
+  assert.deepEqual(toolchainReadable(env), [
+    join(home, '.cargo/bin'),
+    join(home, '.rustup'),
+    join(home, 'sdk/jdk'),
+  ]);
+  assert.deepEqual(toolchainReadable({ ...env, HOME: '' }), []);
+  assert.deepEqual(homePaths(['~/.npm', '~', '/opt/x'], '/srv/ci-home'), [
+    '/srv/ci-home/.npm',
+    '/srv/ci-home',
+    '/opt/x',
+  ]);
+});
+
+test("a pass needs the CI provider's success; any other conclusion never passes", () => {
+  assert.deepEqual(providerVerdict('success'), { status: 'passed' });
+  assert.equal(providerVerdict('cancelled').status, 'cancelled');
+  for (const conclusion of ['failure', 'timed_out', 'action_required', 'neutral', 'skipped', null]) {
+    const verdict = providerVerdict(conclusion);
+    assert.equal(verdict.status, 'runner-unavailable', String(conclusion));
+    assert.match(verdict.reason, /only with the provider's success/);
+  }
+  assert.equal(hostedCheckOutputSettled({ status: 'running', actions: { verdictPending: true } }), true);
+  assert.equal(hostedCheckOutputSettled({ status: 'running', actions: {} }), false);
 });

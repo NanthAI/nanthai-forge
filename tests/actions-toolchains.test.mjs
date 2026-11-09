@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 import {
   ACTIONS_TOOLS,
@@ -12,11 +13,13 @@ import {
   actionsDeclaration,
   actionsToolchainsSchema,
   actionsCacheSchema,
+  CACHE_SEEDS,
+  DEPS_SEED_PROGRAM,
 } from '../dist/actions-toolchains.js';
 import {
   hostedDeclaredSteps,
   hostedDepsCache,
-  hostedSaveSteps,
+  hostedSeedSteps,
   hostedToolchains,
 } from '../dist/actions-toolchains-hosted.js';
 import { hostedCheckDefinition } from '../dist/hosted-check.js';
@@ -69,18 +72,27 @@ test('generated workflow snapshot per toolchain, by version and from a file', ()
   }
 });
 
-test('generated workflow snapshot per cache preset, keyed on its lockfiles and saved only by main', () => {
+test('generated workflow snapshot per cache preset: restored before the check, seeded Candidate-free only by main', () => {
   for (const preset of Object.keys(CACHE_PRESETS)) {
     const workflow = githubActionsWorkflow('ubuntu-latest', { cache: { presets: [preset] } });
     snapshot(`cache-${preset}.yml`, workflow);
-    // Restore in both jobs before the check; save after it, only on the default branch.
     assert.equal(workflow.match(/actions\/cache\/restore@/g).length, 2);
-    assert.equal(workflow.match(/actions\/cache\/save@/g).length, 2);
+    // A seeded preset saves once, from the static job's seed, before the check; others never save.
+    const seeded = Boolean(CACHE_SEEDS[preset]);
+    assert.equal((workflow.match(/actions\/cache\/save@/g) ?? []).length, seeded ? 1 : 0, preset);
     assert.equal(
-      workflow.match(/github.ref == format\('refs\/heads\/\{0\}', github.event.repository.default_branch\)/g)
-        .length,
-      2,
+      (
+        workflow.match(
+          /github.ref == format\('refs\/heads\/\{0\}', github.event.repository.default_branch\)/g,
+        ) ?? []
+      ).length,
+      seeded ? 2 : 0,
     );
+    if (seeded) {
+      const check = workflow.lastIndexOf('      - run: node scripts/forge-check.mjs');
+      assert.ok(workflow.indexOf('actions/cache/save@') < check, `${preset} saves before the check`);
+      assert.ok(workflow.indexOf('actions/cache/save@') > workflow.indexOf('  static:'));
+    }
     for (const glob of CACHE_PRESETS[preset].lockfiles) assert.ok(workflow.includes(`'${glob}'`), glob);
   }
   const custom = githubActionsWorkflow('ubuntu-latest', {
@@ -103,8 +115,8 @@ test('hosted fixed-workflow steps read the pinned plan outputs and pin every act
   );
   snapshot('hosted-check-steps.yml', hostedDeclaredSteps('needs.hosted-plan.outputs'));
   snapshot(
-    'hosted-plan-save.yml',
-    hostedSaveSteps('steps.plan.outputs', "steps.plan.outputs.single_shard != '' && "),
+    'hosted-plan-seed.yml',
+    hostedSeedSteps('steps.plan.outputs', "steps.plan.outputs.single_shard != '' && "),
   );
   // Values reach the Rust shell step only through env, never through its script text.
   const steps = hostedDeclaredSteps('needs.hosted-plan.outputs');
@@ -223,6 +235,8 @@ test('hosted outputs: version files are Candidate-relative and the cache key fol
   assert.match(entry.key, /^forge-deps-v1-go-[0-9a-f]{16}-Linux-X64-[0-9a-f]{64}$/);
   assert.equal(entry.paths, '~/go/pkg/mod\n~/.cache/go-build');
   assert.equal(entry.save, false);
+  assert.equal(entry.seed, 'go');
+  assert.equal(hostedDepsCache({ cache: { presets: ['cargo'] } }, input).seed, '');
   // Source edits keep the key; a lockfile edit, another project or another runner changes it.
   const edited = files.map(f => (f.path === 'main.go' ? { ...f, blob: '4'.repeat(64) } : f));
   assert.equal(hostedDepsCache(declared, { ...input, files: [...edited].reverse() }).key, entry.key);
@@ -308,8 +322,53 @@ test('declared-setup step check: undefined skips, a workflow needs every generat
   assert.equal(declaredStepsInstalled(undefined), true);
   assert.equal(declaredStepsInstalled(''), false);
   const blocks = hostedWorkflowBlocks();
-  assert.equal(blocks.length, 4);
+  assert.equal(blocks.length, 2);
   assert.equal(declaredStepsInstalled(blocks.join('\n')), true);
   assert.equal(declaredStepsInstalled(blocks.slice(1).join('\n')), false);
   for (const block of blocks) assert.deepEqual(actionPinFindings('block', block), []);
+});
+
+test("this repository's forge-check.yml installs every declared-setup block and plan output", async () => {
+  const { declaredStepsInstalled } = await import('../dist/actions-toolchains-hosted.js');
+  const workflow = readFileSync(new URL('../.github/workflows/forge-check.yml', import.meta.url), 'utf8');
+  assert.equal(declaredStepsInstalled(workflow), true);
+  assert.match(workflow, /^ {6}toolchains: \$\{\{ steps\.plan\.outputs\.toolchains \}\}$/m);
+  assert.match(workflow, /^ {6}deps_cache: \$\{\{ steps\.plan\.outputs\.deps_cache \}\}$/m);
+});
+
+test('the dependency seed copies only lockfiles and manifests into an empty folder and never fails', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-seed-test-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, 'repo'),
+    bin = join(root, 'bin'),
+    log = join(root, 'log.jsonl');
+  for (const dir of [repo, join(repo, 'svc'), join(repo, 'node_modules/dep'), bin])
+    mkdirSync(dir, { recursive: true });
+  writeFileSync(join(repo, 'package-lock.json'), '{}');
+  writeFileSync(join(repo, 'package.json'), '{}');
+  writeFileSync(join(repo, '.npmrc'), 'repository configuration');
+  writeFileSync(join(repo, 'svc/go.sum'), '');
+  writeFileSync(join(repo, 'svc/go.mod'), 'module x');
+  writeFileSync(join(repo, 'svc/main.go'), 'package main');
+  writeFileSync(join(repo, 'node_modules/dep/package-lock.json'), '{}');
+  // A fake npm records its folder and what it can see; a fake go fails (a broken tool skips its lockfile).
+  const record = `#!/bin/sh\nnode -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), files: require("fs").readdirSync(".").sort(), args: process.argv.slice(2)})+"\\n")' ${JSON.stringify(log)} "$@"\n`;
+  writeFileSync(join(bin, 'npm'), record, { mode: 0o755 });
+  writeFileSync(join(bin, 'go'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
+  const result = spawnSync(process.execPath, ['-e', DEPS_SEED_PROGRAM, repo, 'npm go cargo'], {
+    env: { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const [npm, ...more] = readFileSync(log, 'utf8')
+    .trim()
+    .split('\n')
+    .map(line => JSON.parse(line));
+  assert.equal(more.length, 0, 'node_modules is never walked');
+  assert.deepEqual(npm.files, ['package-lock.json', 'package.json']);
+  assert.ok(!npm.cwd.startsWith(repo), 'the download runs outside the Candidate');
+  assert.deepEqual(npm.args, ['ci', '--ignore-scripts', '--no-audit', '--no-fund']);
+  assert.match(result.stdout, /Forge seed: npm package-lock.json downloaded/);
+  assert.match(result.stdout, /Forge seed: go svc\/go.sum skipped \(exit 3\)/);
+  assert.match(result.stdout, /Forge seed: 2 lockfiles for npm, go/);
 });

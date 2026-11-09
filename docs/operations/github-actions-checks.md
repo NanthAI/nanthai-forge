@@ -64,6 +64,53 @@ code, an empty shard, or a pinned selection that names no test file fails with `
 Only docs scope (when no test reads the changed documents) and explicit partial evidence (which never lands) run without test files; arbitrary
 commands have no selection.
 
+### What Actions evidence attests
+
+A hosted check job runs the Candidate's own code (its tests and scripts) on the same runner as
+Forge's supervisor. So Forge takes the verdict, the outputs later steps read and every cache entry
+only from places that code cannot write (Issue 432164bf). For every CI adapter:
+
+- **A pass needs the provider's own success.** Supervisor results say which tests ran, failed or
+  flaked, and a failing result fails the check at once. When every shard has reported passing, the run
+  waits for the CI provider's own record that the run succeeded: on GitHub, the signed
+  `workflow_run` completed event Forge already receives (no extra call). If that event is lost, one
+  scheduled read of the run follows 5 minutes later, and once more at 30 minutes if the run was still
+  going; after that the 12-hour watchdog settles it. Any conclusion other than success (failure,
+  timeout, cancelled) never passes; it ends the run as `runner-unavailable` (or `cancelled`) with
+  that reason, and the retry policy decides what follows. The rule is `src/hosted-check-verdict.ts`.
+  A new adapter supplies the same record from a channel the job cannot write: a signed provider event
+  or a provider API read with the adapter's own credential.
+- **Outputs come from the planning step only.** It reads the Candidate as data and runs none of its
+  code; the check runs in a separate later step with no `id`, nothing after it in its job, and no
+  secret or workflow token in its environment. Plan and run never share a step.
+- **Caches are saved before the check step, never after it.** Forge's own control caches come from
+  the pinned control checkout; a declared dependency cache is seeded by a download that runs no
+  repository code ([Toolchains and dependency cache](#toolchains-and-dependency-cache)). Only the
+  default branch (and, on the App/OIDC path, a main audit) saves.
+- **Candidate code runs as its own user on Linux.** Where the runner user has passwordless `sudo`
+  (GitHub-hosted Ubuntu), each Candidate child runs as the system user `forge-check` in a private
+  mount namespace (`src/candidate-user.ts`, `scripts/candidate-sandbox.mjs`): the runner's home is
+  replaced by an empty folder, and only the check's working folders, its declared cache folders and
+  the toolchains under the home come back (the toolchains read-only). It has no groups, no
+  capabilities and cannot gain privileges, so it cannot read the runner's credentials, the
+  supervisor's environment or the step-command files, and cannot use `sudo`. Creating the user takes
+  about 20 ms, each launch about 0.2 s. Elsewhere (macOS, Windows, a self-hosted runner without
+  passwordless `sudo`, or `FORGE_CANDIDATE_USER=off`) the child runs as the runner user and the job
+  log says why: `Candidate user: project code runs as the runner user (…)`. The optional
+  `actions.setup` program is the owner's own configuration and still runs as the runner user.
+- **Slow caches and registries fail fast.** Every cache restore in a check workflow treats a download
+  stalled for 1 minute as a miss (`SEGMENT_DOWNLOAD_TIMEOUT_MINS`), so the job installs normally, and
+  every `npm ci` has a 5-minute timeout, so a stalled registry fails the job and Forge retries the
+  check instead of holding a landing batch (friction d99fcf3a).
+
+`scripts/check-candidate-steps.mjs` enforces the workflow rules for every workflow in the repository
+and every generated one (`tests/action-pins.test.mjs`).
+
+What a pass therefore attests: the pinned plan ran on the provider, every planned shard reported its
+tests from the supervisor, and the provider recorded the run as successful. Without a Candidate user
+(the fallback above), project code shares the runner user's access during its own step, so treat such
+a pass as no stronger than the check's own tests.
+
 ### Check contract
 
 A hosted check runs the control plane's executor (the pinned main checkout's
@@ -750,6 +797,7 @@ Cache policy for every CI adapter, not only GitHub Actions:
   independent keys; cache loss changes preparation time only.
 - A new adapter implements the same three rules with its own cache primitive: key from
   `control-deps-key.mjs`, seed from the default branch before Candidate execution, restore read-only.
+  A stalled restore is a miss and an install has a timeout ([What Actions evidence attests](#what-actions-evidence-attests)).
 
 Measure the policy with `node scripts/actions-cache-report.mjs OWNER/REPO [runs]` (uses the owner's
 `gh` login, one list call plus one read per run): jobs, misses (a job whose `npm ci` step ran),
@@ -825,12 +873,10 @@ so installed workflows keep working without a reinstall:
 - **Capacity step.** `node control/scripts/hosted-actions-job.mjs capacity` reads the runner queue with
   the GitHub token and writes `forge-actions-capacity.json` to the runner temp folder. A planning step
   that finds that file reads it instead of calling GitHub, so it needs no token.
-- **Plan and run in one step.** With `FORGE_ACTIONS_FOLD=1`, the planning step also runs the check when
-  nothing has to happen between them: one static execution, no test shards, no source-pack refresh, no
-  declared toolchain or cache step, and no `GITHUB_TOKEN` in that step. It then sets `single_shard`
-  empty and `folded=true`, so the separate run step is skipped. Otherwise it logs why it did not fold
-  and the run step runs as before. Forge's own suite also needs its npm download cache restored first
-  (`FORGE_ACTIONS_NPM_CACHE=ready`); the plan output `npm_cache` is `true` only for that suite.
+- **Plan and run stay separate.** An earlier opt-in ran the check inside the planning step to save
+  about 1 s per check; it is removed, because the planning step's outputs must come from a step that
+  ran no Candidate code ([What Actions evidence attests](#what-actions-evidence-attests)). The plan
+  output `npm_cache` is `true` only for Forge's own suite, which installs from its npm download cache.
 - **Small control runtime.** With a restored control build (`dist/`), the supervisor and executor load
   only the packages that `node scripts/control-runtime-deps.mjs paths control` lists (about 32 MB
   unpacked, not the full install of about 150 MiB compressed). Its `key` command gives a cache key
@@ -1138,9 +1184,23 @@ a plan that lacks it, or names another one, is refused. The runner sends it only
 server that advertises the `checks.toolchains` capability, and refuses a declared check
 otherwise. Declaring adds no Convex call.
 
-**Who saves.** As for Forge's own dependencies, only main writes. A run whose ref is the
-default branch, and on the App/OIDC path only a main audit (a check of accepted main),
-saves the entry after its command passes and its restore missed. Every other check restores
+**Who saves.** As for Forge's own dependencies, only main writes, and never from the check.
+A run whose ref is the default branch, and on the App/OIDC path only a main audit (a check of
+accepted main), seeds the entry when its restore missed, before the check step runs: Forge copies
+only each lockfile and its manifest into an empty temporary folder (no repository configuration
+comes along) and runs a download-only command there, then saves. On Linux the seed runs as the
+Candidate user too. A seed that fails skips that lockfile and never fails the check.
+
+| Preset | Seed |
+| --- | --- |
+| `go` | `go mod download` beside `go.sum` and `go.mod` |
+| `npm` | `npm ci --ignore-scripts --no-audit --no-fund` beside `package-lock.json` and `package.json` |
+| `pnpm` | `pnpm fetch --ignore-scripts --ignore-pnpmfile` beside `pnpm-lock.yaml` |
+| `pip` | `pip download --only-binary=:all:` of each `requirements*.txt` (wheels only, so no build code runs) |
+
+The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`) are restored only:
+their resolvers can run repository code or configured programs, so Forge does not seed them yet, and
+a check that declares them downloads its own dependencies on every run. Every other check restores
 read-only. Lane code never writes an entry that another Lane restores.
 
 **Where the steps live.**
@@ -1152,7 +1212,7 @@ read-only. Lane code never writes an entry that another Lane restores.
   repository, so it cannot inline one project's values. The planning step pins the
   declaration and writes the `toolchains` and `deps_cache` outputs. Steps generated by
   `hostedWorkflowBlocks()` (`src/actions-toolchains-hosted.ts`) run only for declared tools,
-  after the Candidate is in place. If the installed workflow lacks those steps, planning a
+  after the Candidate is in place and before the check step. If the installed workflow lacks those steps, planning a
   declared check fails with `ACTIONS_WORKFLOW_OUTDATED` instead of running without its
   toolchains.
 

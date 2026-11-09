@@ -10,6 +10,7 @@ import { checkFailureKind } from '../src/hosted-landing-admission';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
 import { invariant } from '../src/errors';
+import { applyConclusion } from './projectHostedActionsVerdict';
 const payloadSchema = z.object({
   action: z.enum(['requested', 'in_progress', 'completed']),
   repository: z.object({ full_name: z.string() }),
@@ -73,7 +74,10 @@ export const receive = internalMutation({
     );
     run.executionId = String(workflow.id);
     run.actions.workflowSha = workflow.head_sha;
-    if (payload.action === 'completed') {
+    if (payload.action === 'completed' && run.actions.verdictPending) {
+      // Every shard reported passing: GitHub's own conclusion decides (src/hosted-check-verdict.ts).
+      await applyConclusion(ctx, selected, workflow.conclusion);
+    } else if (payload.action === 'completed') {
       const conclusion = workflow.conclusion;
       // Workflow failure is not Candidate evidence: OIDC/source/setup can fail
       // before tests run. Only an authenticated failed shard proves a check failed.

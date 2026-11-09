@@ -20,6 +20,7 @@ const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts')
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
 const results = await import(moduleUrl('../convex/projectHostedActionsResults.ts'));
+const webhooks = await import(moduleUrl('../convex/projectHostedActionsWebhook.ts'));
 const finalOutput = await import(moduleUrl('../convex/projectHostedActionsOutput.ts'));
 const { rootForOutput } = await import(moduleUrl('../convex/projectHostedOutputStore.ts'));
 const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
@@ -237,7 +238,26 @@ async function landing(t, shards) {
   };
   const stored = () =>
     JSON.parse([...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === id.runId).value);
-  return { s, id, send, post, stored, responses };
+  // The provider's signed completed event: a pass needs it (Issue 432164bf).
+  const conclude = (conclusion = 'success') =>
+    s.transaction('webhook', webhooks.receive, {
+      payload: JSON.stringify({
+        action: 'completed',
+        repository: { full_name: repository },
+        workflow_run: {
+          id: 123,
+          run_attempt: 1,
+          display_title: `forge-check/${id.runId}`,
+          event: 'workflow_dispatch',
+          path: '.github/workflows/forge-check.yml',
+          head_branch: 'main',
+          head_sha: 'a'.repeat(40),
+          created_at: new Date().toISOString(),
+          conclusion,
+        },
+      }),
+    });
+  return { s, id, send, post, stored, responses, conclude };
 }
 const sum = (meters, key) => meters.reduce((n, m) => n + m[key], 0);
 const kb = n => Math.round(n / 102.4) / 10;
@@ -260,11 +280,13 @@ async function measure(t, shards, replays = []) {
       });
     }
   }
+  assert.equal(body.actions.verdictPending, true, 'the last result holds the pass for the provider');
+  await l.conclude();
   const row = [...l.s.tables.projectHostedCheckRuns.values()].find(row => row.runId === l.id.runId);
   return {
     l,
     calls,
-    body,
+    body: l.stored(),
     runRowBytes: Buffer.byteLength(JSON.stringify(row)),
   };
 }
@@ -491,7 +513,8 @@ test('the last shard reads about one copy of the reports, not every shard record
     // The finished run row holds every file's report, so it is the unit: one copy plus a little.
     assert(result.readBytes <= 1.2 * runRowBytes, `last result read ${result.readBytes} of ${runRowBytes}`);
     assert(result.readBytes <= 100 * 1024, `last result read ${result.readBytes}`);
-    assert.equal(result.readDocumentsByTable.projectHostedCheckRuns, 3, 'run rows read once');
+    // The completion (with its terminal lookups) runs on the provider's completed event now.
+    assert.equal(result.readDocumentsByTable.projectHostedCheckRuns, 1, 'run row read once');
     assert(!last.some(m => m.name.endsWith(':prepare')), 'prepare folded into the final result');
     assert(apply.readBytes <= runRowBytes + 4096, `apply read ${apply.readBytes}`);
     assert.equal(
@@ -567,6 +590,8 @@ test('unsealed output: the committed result stands and prepare refuses exactly a
       'projectHostedActionsOutput:prepare',
     ],
   );
+  assert.equal(l.stored().actions.verdictPending, true);
+  await l.conclude();
   assert.equal(l.stored().status, 'passed');
   assert(![...l.s.tables.projectHostedOutputHeads.values()][0].final);
 });

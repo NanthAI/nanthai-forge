@@ -313,7 +313,12 @@ test('one failing change in the middle does not land, the others do, and main is
     { path: 'c.txt', at: 20 },
     { path: 'd.txt', at: 30 },
   ]);
-  assert.deepEqual(statuses(f), ['accepted', 'failed', 'accepted', 'accepted']);
+  // Arrivals enqueue concurrently, so a loaded runner may admit them out of `at` order: check
+  // each change's own outcome, not the queue's arrival order.
+  assert.deepEqual(
+    ready.map(item => f.store.select('landingEntries', item.command.operationId).status),
+    ['accepted', 'failed', 'accepted', 'accepted'],
+  );
   assert.equal(f.content('bad.txt'), undefined);
   for (const path of ['a.txt', 'c.txt', 'd.txt']) assert.equal(f.content(path), `${path}\n`);
   assert.equal(f.store.select('landingEntries', ready[1].command.operationId).status, 'failed');

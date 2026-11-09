@@ -74,40 +74,77 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       pack_refresh: ${{ steps.plan.outputs.pack_refresh }}
+      toolchains: ${{ steps.plan.outputs.toolchains }}
+      deps_cache: ${{ steps.plan.outputs.deps_cache }}
+      npm_cache: ${{ steps.plan.outputs.npm_cache }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
         with:
           path: control
           ref: ${{ github.sha }}
           persist-credentials: false
+      # Every cache restore treats a download stalled for 1 min as a miss (the default waits 10 min)
+      # and every install has a timeout, so a slow cache or registry fails fast: the job fails and
+      # Forge retries the check instead of holding a landing batch (friction d99fcf3a).
+      # Node from GitHub's cache into the runner tool cache: setup-node then links it instead of
+      # downloading and copying it (Issue ca8a2ca4). Seeded only before any Candidate code runs.
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: node
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ runner.tool_cache }}/node/24.22.1
+          key: forge-node-24.22.1-${{ runner.os }}-${{ runner.arch }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      # Save only trusted control dependencies; Candidate source/results are never cached.
-      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
-      - id: deps-key
-        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
-        working-directory: control
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        id: deps
+      - if: steps.node.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
-          path: |
-            control/node_modules
-            ~/.npm
-          key: ${{ steps.deps-key.outputs.key }}
-      - if: steps.deps.outputs.cache-hit != 'true'
-        run: npm ci --ignore-scripts
-        working-directory: control
-      # Content hash of the lockfile and every file the build reads (any CI can run this script).
-      - id: build-key
-        run: echo "hash=$(node scripts/control-build-key.mjs)" >> "$GITHUB_OUTPUT"
+          path: ${{ runner.tool_cache }}/node/24.22.1
+          key: forge-node-24.22.1-${{ runner.os }}-${{ runner.arch }}
+      # Keys from the pinned control checkout only (any CI computes them): the full install
+      # (scripts/control-deps-key.mjs), the supervisor's runtime packages
+      # (scripts/control-runtime-deps.mjs) and the content hash of every file the build reads
+      # (scripts/control-build-key.mjs). Candidate source/results are never cached.
+      - id: keys
+        run: |
+          echo "deps=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+          echo "runtime=$(node scripts/control-runtime-deps.mjs key)" >> "$GITHUB_OUTPUT"
+          echo "build=$(node scripts/control-build-key.mjs)" >> "$GITHUB_OUTPUT"
+          { echo 'runtime_paths<<FORGE_PATHS'; node scripts/control-runtime-deps.mjs paths control; echo FORGE_PATHS; } >> "$GITHUB_OUTPUT"
         working-directory: control
       # Exact build inputs only. Never restore a prefix or save after Candidate execution.
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: control-build
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
         with:
           path: control/dist
-          key: forge-control-dist-v2-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ steps.build-key.outputs.hash }}
+          key: forge-control-dist-v2-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ steps.keys.outputs.build }}
+      # A cached build runs with only the supervisor's runtime packages (about 7 MB, not 150 MiB).
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: runtime
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ steps.keys.outputs.runtime_paths }}
+          key: ${{ steps.keys.outputs.runtime }}
+      # The full install only to build, or when the runtime entry is missing.
+      - if: steps.control-build.outputs.cache-hit != 'true' || steps.runtime.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: deps
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: ${{ steps.keys.outputs.deps }}
+      - if: steps.deps.outcome == 'success' && steps.deps.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+        working-directory: control
+        timeout-minutes: 5
       - if: steps.control-build.outputs.cache-hit != 'true'
         run: npm run build:core
         working-directory: control
@@ -115,28 +152,41 @@ jobs:
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: control/dist
-          key: forge-control-dist-v2-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ steps.build-key.outputs.hash }}
+          key: forge-control-dist-v2-${{ runner.os }}-${{ runner.arch }}-node-24.22.1-${{ steps.keys.outputs.build }}
       # Candidate code shares this runner: save trusted dependencies before it executes,
       # never with an automatic post-job cache save after project code has run.
       # Only the default branch seeds the cache, so every other ref restores a main-seeded entry.
-      - if: steps.deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+      - if: steps.deps.outcome == 'success' && steps.deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
         uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: ${{ steps.deps-key.outputs.key }}
+          key: ${{ steps.keys.outputs.deps }}
+      - if: steps.runtime.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ steps.keys.outputs.runtime_paths }}
+          key: ${{ steps.keys.outputs.runtime }}
+      # The one step with the GitHub token: it reads the runner queue and exits. No step that
+      # plans or runs project code holds the token.
+      - run: node control/scripts/hosted-actions-job.mjs capacity
+        timeout-minutes: 2
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # NanthAI is on the GitHub Team plan: 60 concurrent jobs. Other pipelines set
+          # their own limit; unset keeps the Free-plan 20.
+          FORGE_ACTIONS_JOB_CAP: '60'
+      # The only step whose outputs later steps read: it reads the Candidate as data and runs
+      # none of its code. The check runs in its own step below (Issue 432164bf).
       - id: plan
         timeout-minutes: 30
         run: node control/scripts/hosted-actions-job.mjs plan
         env:
-          GITHUB_TOKEN: ${{ github.token }}
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
           FORGE_PROJECT_ID: ${{ inputs.projectId }}
           FORGE_RUN_ID: ${{ inputs.runId }}
           FORGE_CANDIDATE: ${{ runner.temp }}/candidate
-          # NanthAI is on the GitHub Team plan: 60 concurrent jobs. Other pipelines set
-          # their own limit; unset keeps the Free-plan 20.
           FORGE_ACTIONS_JOB_CAP: '60'
           # Shard pool (work stealing, docs/operations/github-actions-checks.md#shard-pool):
           # on | off | ab. ab runs the pool on half the checks (random run id) for the
@@ -155,6 +205,70 @@ jobs:
           path: |
             ${{ runner.temp }}/candidate.tar
             ${{ runner.temp }}/control-dist.tar
+      # Forge's own suite installs from the npm download cache in the full control entry.
+      - if: steps.plan.outputs.single_shard != '' && steps.plan.outputs.npm_cache == 'true' && steps.deps.outcome != 'success'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: ${{ steps.keys.outputs.deps }}
+      # Declared toolchains and dependency cache (src/actions-toolchains-hosted.ts); skipped when undeclared.
+      # The seed and its save run before the check step, never after it (Issue 432164bf).
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').go.version }}
+          go-version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').go.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').go.versionFile) || '' }}
+          cache: false
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').python.version }}
+          python-version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').python.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').python.versionFile) || '' }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').java.distribution }}
+          java-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').java.version }}
+          java-version-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').java.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').java.versionFile) || '' }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').dotnet.version }}
+          global-json-file: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').dotnet.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(steps.plan.outputs.toolchains || '{}').dotnet.versionFile) || '' }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.toolchains || '{}').rust
+        run: |
+          if [ -n "$FORGE_RUST_VERSION" ]; then
+            rustup toolchain install --profile minimal "$FORGE_RUST_VERSION" && rustup default "$FORGE_RUST_VERSION"
+          else
+            cd "$RUNNER_TEMP/candidate/$FORGE_RUST_DIRECTORY" && rustup toolchain install
+          fi
+        env:
+          FORGE_RUST_VERSION: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').rust.version }}
+          FORGE_RUST_DIRECTORY: ${{ fromJSON(steps.plan.outputs.toolchains || '{}').rust.directory }}
+      - if: steps.plan.outputs.single_shard != '' && fromJSON(steps.plan.outputs.deps_cache || '{}').key
+        id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').paths }}
+          key: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').key }}
+      - if: steps.plan.outputs.single_shard != '' && steps.plan.outputs.single_shard == 'static' && steps.forge-deps.outcome == 'success' && steps.forge-deps.outputs.cache-hit != 'true' && fromJSON(steps.plan.outputs.deps_cache || '{}').save && fromJSON(steps.plan.outputs.deps_cache || '{}').seed
+        timeout-minutes: 15
+        run: node control/scripts/hosted-actions-job.mjs seed
+        env:
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+          FORGE_DEPS_SEED: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').seed }}
+          FORGE_DEPS_PATHS: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').paths }}
+      - if: steps.plan.outputs.single_shard != '' && steps.plan.outputs.single_shard == 'static' && steps.forge-deps.outcome == 'success' && steps.forge-deps.outputs.cache-hit != 'true' && fromJSON(steps.plan.outputs.deps_cache || '{}').save && fromJSON(steps.plan.outputs.deps_cache || '{}').seed
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').paths }}
+          key: ${{ fromJSON(steps.plan.outputs.deps_cache || '{}').key }}
       - if: steps.plan.outputs.single_shard != ''
         timeout-minutes: 90
         run: node control/scripts/hosted-actions-job.mjs run
@@ -184,24 +298,48 @@ jobs:
           path: control
           ref: ${{ github.sha }}
           persist-credentials: false
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ runner.tool_cache }}/node/24.22.1
+          key: forge-node-24.22.1-${{ runner.os }}-${{ runner.arch }}
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24.22.1'
-      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
-      - id: deps-key
-        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+      # Keys from the pinned control checkout only (scripts/control-deps-key.mjs and
+      # scripts/control-runtime-deps.mjs; any CI computes them).
+      - id: keys
+        run: |
+          echo "deps=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+          echo "runtime=$(node scripts/control-runtime-deps.mjs key)" >> "$GITHUB_OUTPUT"
+          { echo 'runtime_paths<<FORGE_PATHS'; node scripts/control-runtime-deps.mjs paths control; echo FORGE_PATHS; } >> "$GITHUB_OUTPUT"
         working-directory: control
-      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      # Any other command needs only the supervisor's runtime packages.
+      - if: needs.hosted-plan.outputs.npm_cache != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: runtime
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ steps.keys.outputs.runtime_paths }}
+          key: ${{ steps.keys.outputs.runtime }}
+      # Forge's own suite also reads the npm download cache; a runtime miss falls back to it.
+      - if: needs.hosted-plan.outputs.npm_cache == 'true' || steps.runtime.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
         with:
           path: |
             control/node_modules
             ~/.npm
-          key: ${{ steps.deps-key.outputs.key }}
+          key: ${{ steps.keys.outputs.deps }}
       # A miss retains the cold install; dist comes from this run's pinned control commit.
-      - if: steps.deps.outputs.cache-hit != 'true'
+      - if: steps.deps.outcome == 'success' && steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
         working-directory: control
+        timeout-minutes: 5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: forge-candidate
@@ -209,6 +347,58 @@ jobs:
       - run: |
           tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
           tar -xf "$RUNNER_TEMP/control-dist.tar" -C control
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').go.version }}
+          go-version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').go.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').go.versionFile) || '' }}
+          cache: false
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').python.version }}
+          python-version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').python.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').python.versionFile) || '' }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').java.distribution }}
+          java-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').java.version }}
+          java-version-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').java.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').java.versionFile) || '' }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dotnet
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dotnet.version }}
+          global-json-file: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dotnet.versionFile && format('{0}/candidate/{1}', runner.temp, fromJSON(needs.hosted-plan.outputs.toolchains || '{}').dotnet.versionFile) || '' }}
+      - if: fromJSON(needs.hosted-plan.outputs.toolchains || '{}').rust
+        run: |
+          if [ -n "$FORGE_RUST_VERSION" ]; then
+            rustup toolchain install --profile minimal "$FORGE_RUST_VERSION" && rustup default "$FORGE_RUST_VERSION"
+          else
+            cd "$RUNNER_TEMP/candidate/$FORGE_RUST_DIRECTORY" && rustup toolchain install
+          fi
+        env:
+          FORGE_RUST_VERSION: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').rust.version }}
+          FORGE_RUST_DIRECTORY: ${{ fromJSON(needs.hosted-plan.outputs.toolchains || '{}').rust.directory }}
+      - if: fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').key
+        id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').paths }}
+          key: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').key }}
+      - if: matrix.shard == 'static' && steps.forge-deps.outcome == 'success' && steps.forge-deps.outputs.cache-hit != 'true' && fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').save && fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').seed
+        timeout-minutes: 15
+        run: node control/scripts/hosted-actions-job.mjs seed
+        env:
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+          FORGE_DEPS_SEED: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').seed }}
+          FORGE_DEPS_PATHS: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').paths }}
+      - if: matrix.shard == 'static' && steps.forge-deps.outcome == 'success' && steps.forge-deps.outputs.cache-hit != 'true' && fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').save && fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').seed
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').paths }}
+          key: ${{ fromJSON(needs.hosted-plan.outputs.deps_cache || '{}').key }}
       - run: node control/scripts/hosted-actions-job.mjs run
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
@@ -242,6 +432,8 @@ jobs:
         working-directory: control
       - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         id: deps
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
         with:
           path: |
             control/node_modules
@@ -251,6 +443,7 @@ jobs:
       - if: steps.deps.outputs.cache-hit != 'true'
         run: npm ci --ignore-scripts
         working-directory: control
+        timeout-minutes: 5
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: forge-candidate

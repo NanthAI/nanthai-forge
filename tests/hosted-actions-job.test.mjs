@@ -1487,48 +1487,84 @@ for (const scenario of [
     assert.equal(s.calls.filter(command => command.kind === 'session').length, 2);
   });
 
+// The restore and install bounds (friction d99fcf3a) are checked by tests/action-pins.test.mjs.
+const unbounded = text =>
+  text
+    .replace(/\n {8}env:\n {10}SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'/g, '')
+    .replace(/\n {8}timeout-minutes: 5(?=\n)/g, '');
 test('hosted workflow restores trusted dependencies and exact control build, falls back cold, and transfers one build', () => {
-  const workflow = readFileSync('.github/workflows/forge-check.yml', 'utf8');
+  const workflow = unbounded(readFileSync('.github/workflows/forge-check.yml', 'utf8'));
   const jobs = name => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z][\w-]*:\n/)[0];
+  const defaultBranch = "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)";
   for (const name of ['hosted-plan', 'hosted-check', 'hosted-pack']) {
     const job = jobs(name);
     assert.match(job, /actions\/cache(?:\/restore)?@[a-f0-9]{40}/);
-    // One CI-neutral key from the pinned control lockfile alone: no Candidate input, no prefix restore.
-    assert.match(
-      job,
-      /id: deps-key\n\s+run: echo "key=\$\(node scripts\/control-deps-key.mjs\)" >> "\$GITHUB_OUTPUT"\n\s+working-directory: control/,
-    );
-    assert.match(
-      job,
-      /id: deps\n\s+with:\n\s+path: \|\n[^\n]*\n[^\n]*\n\s+key: \$\{\{ steps.deps-key.outputs.key \}\}/,
-    );
     assert.doesNotMatch(job, /forge-control-v1|hashFiles/);
-    assert.match(job, /if: steps.deps.outputs.cache-hit != 'true'\n\s+run: npm ci --ignore-scripts/);
     assert.match(job, /control\/node_modules\n\s+~\/\.npm/);
     assert.doesNotMatch(job, /restore-keys:|blacksmith|uses:.*cache.*candidate/);
     assert.equal((job.match(/run: npm run build:core/g) ?? []).length, name === 'hosted-plan' ? 1 : 0);
     if (name !== 'hosted-plan') {
       assert.match(job, /actions\/cache\/restore@/);
       assert.match(job, /tar -xf "\$RUNNER_TEMP\/control-dist.tar" -C control/);
+      // Only the planning job seeds control caches; a declared dependency cache saves its own paths.
+      for (const save of job.matchAll(/uses: actions\/cache\/save@[^\n]*\n\s+with:\n\s+path: ([^\n]+)/g))
+        assert.match(save[1], /deps_cache/);
     }
+    if (name === 'hosted-pack') {
+      // One CI-neutral key from the pinned control lockfile alone: no Candidate input, no prefix restore.
+      assert.match(
+        job,
+        /id: deps-key\n\s+run: echo "key=\$\(node scripts\/control-deps-key.mjs\)" >> "\$GITHUB_OUTPUT"\n\s+working-directory: control/,
+      );
+      assert.match(job, /if: steps.deps.outputs.cache-hit != 'true'\n\s+run: npm ci --ignore-scripts/);
+      continue;
+    }
+    // Keys come from the pinned control checkout alone (any CI computes them).
+    const keys = job.slice(
+      job.indexOf('- id: keys'),
+      job.indexOf('working-directory: control', job.indexOf('- id: keys')),
+    );
+    assert.match(keys, /deps=\$\(node scripts\/control-deps-key.mjs\)/);
+    assert.match(keys, /runtime=\$\(node scripts\/control-runtime-deps.mjs key\)/);
+    assert.match(keys, /node scripts\/control-runtime-deps.mjs paths control/);
+    assert.doesNotMatch(keys, /candidate|runId|github\.sha/);
+    // Small runtime entry; the full install restores only to build, for Forge's npm cache, or on a miss.
+    assert.match(
+      job,
+      /id: runtime\n\s+with:\n\s+path: \$\{\{ steps.keys.outputs.runtime_paths \}\}\n\s+key: \$\{\{ steps.keys.outputs.runtime \}\}/,
+    );
+    assert.match(
+      job,
+      /id: deps\n\s+with:\n\s+path: \|\n[^\n]*\n[^\n]*\n\s+key: \$\{\{ steps.keys.outputs.deps \}\}/,
+    );
+    assert.match(
+      job,
+      /if: steps.deps.outcome == 'success' && steps.deps.outputs.cache-hit != 'true'\n\s+run: npm ci --ignore-scripts/,
+    );
+    // Node comes from GitHub's cache into the tool cache, keyed by version, OS and architecture.
+    assert.match(
+      job,
+      /uses: actions\/cache\/restore@[a-f0-9]{40}[^\n]*\n(?:\s+id: node\n)?\s+with:\n\s+path: \$\{\{ runner.tool_cache \}\}\/node\/24\.22\.1\n\s+key: forge-node-24\.22\.1-\$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}/,
+    );
+    assert(job.indexOf('runner.tool_cache') < job.indexOf('uses: actions/setup-node@'));
   }
+  const check = jobs('hosted-check');
+  assert.match(check, /if: needs.hosted-plan.outputs.npm_cache != 'true'\n\s+uses: actions\/cache\/restore@/);
+  assert.match(
+    check,
+    /if: needs.hosted-plan.outputs.npm_cache == 'true' \|\| steps.runtime.outputs.cache-hit != 'true'\n\s+uses: actions\/cache\/restore@/,
+  );
   const plan = jobs('hosted-plan');
-  const buildCache = plan.slice(
-    plan.indexOf('# Content hash of the lockfile'),
-    plan.indexOf('# Candidate code'),
-  );
-  const keys = [...buildCache.matchAll(/key: (.+)/g)].map(match => match[1]);
-  assert.equal(keys.length, 2);
-  assert.equal(keys[0], keys[1]);
+  const buildCache = plan.slice(plan.indexOf('# Exact build inputs only'), plan.indexOf('# Candidate code'));
+  const distKeys = [...buildCache.matchAll(/key: (forge-control-dist.+)/g)].map(match => match[1]);
+  assert.equal(distKeys.length, 2);
+  assert.equal(distKeys[0], distKeys[1]);
   assert.match(
-    keys[0],
-    /forge-control-dist-v2-.*runner.os.*runner.arch.*node-24\.22\.1-\$\{\{ steps\.build-key\.outputs\.hash \}\}$/,
+    distKeys[0],
+    /forge-control-dist-v2-.*runner.os.*runner.arch.*node-24\.22\.1-\$\{\{ steps\.keys\.outputs\.build \}\}$/,
   );
-  assert.doesNotMatch(keys[0], /github\.sha/, 'a content hash, not the commit, keys the control build');
-  assert.match(
-    buildCache,
-    /id: build-key\n\s+run: echo "hash=\$\(node scripts\/control-build-key.mjs\)" >> "\$GITHUB_OUTPUT"/,
-  );
+  assert.doesNotMatch(distKeys[0], /github\.sha/, 'a content hash, not the commit, keys the control build');
+  assert.match(plan, /build=\$\(node scripts\/control-build-key.mjs\)/);
   assert.match(plan, /path: control\n\s+ref: \$\{\{ github.sha \}\}/);
   assert.match(buildCache, /id: control-build/);
   assert.match(buildCache, /if: steps.control-build.outputs.cache-hit != 'true'\n\s+run: npm run build:core/);
@@ -1537,12 +1573,40 @@ test('hosted workflow restores trusted dependencies and exact control build, fal
     /if: steps.control-build.outputs.cache-hit != 'true'\n\s+uses: actions\/cache\/save@[a-f0-9]{40}/,
   );
   assert.equal((buildCache.match(/path: control\/dist/g) ?? []).length, 2);
+  assert.match(
+    plan,
+    /if: steps.control-build.outputs.cache-hit != 'true' \|\| steps.runtime.outputs.cache-hit != 'true'\n\s+uses: actions\/cache\/restore@[a-f0-9]{40}[^\n]*\n\s+id: deps/,
+  );
   assert.doesNotMatch(buildCache, /restore-keys:|candidate|runId|expectedHead/);
-  assert(plan.lastIndexOf('uses: actions/cache/save@') < plan.indexOf('- id: plan'));
-  assert.match(jobs('hosted-plan'), /tar -cf "\$RUNNER_TEMP\/control-dist.tar" -C control dist/);
-  assert.match(jobs('hosted-plan'), /forge-actions-state.json/);
-  assert.match(jobs('hosted-plan'), /actions: read/);
-  assert.match(jobs('hosted-plan'), /GITHUB_TOKEN: \$\{\{ github.token \}\}/);
+  // Every save precedes Candidate code; the Node, runtime and full-install seeds come from main only.
+  // The declared dependency cache (src/actions-toolchains-hosted.ts) needs the passing check, so it
+  // alone saves after planning.
+  const saves = [
+    ...plan.matchAll(
+      /- if: ([^\n]*)\n\s+uses: actions\/cache\/save@[a-f0-9]{40}[^\n]*\n\s+with:\n\s+path: ([^\n]*)/g,
+    ),
+  ].filter(save => !save[2].includes('deps_cache'));
+  assert.equal(saves.length, 4);
+  for (const save of saves) {
+    const [, condition, path] = save;
+    if (path !== 'control/dist') assert(condition.includes(defaultBranch), `${path} is seeded by main only`);
+    assert(save.index < plan.indexOf('- id: plan'), `${path} is saved before Candidate code`);
+  }
+  assert.match(plan, /tar -cf "\$RUNNER_TEMP\/control-dist.tar" -C control dist/);
+  assert.match(plan, /forge-actions-state.json/);
+  assert.match(plan, /actions: read/);
+  // Only the capacity step holds the token; the check step comes after planning.
+  assert.equal((plan.match(/GITHUB_TOKEN:/g) ?? []).length, 1);
+  const capacity = plan.indexOf('run: node control/scripts/hosted-actions-job.mjs capacity');
+  assert(capacity > 0 && capacity < plan.indexOf('GITHUB_TOKEN: ${{ github.token }}'));
+  assert(plan.indexOf('GITHUB_TOKEN: ${{ github.token }}') < plan.indexOf('- id: plan'));
+  const planStep = plan.slice(
+    plan.indexOf('- id: plan'),
+    plan.indexOf('\n      - ', plan.indexOf('- id: plan')),
+  );
+  assert.doesNotMatch(planStep, /GITHUB_TOKEN/);
+  // Planning only reads the Candidate as data; the check runs in its own later step (Issue 432164bf).
+  assert.doesNotMatch(planStep, /FORGE_ACTIONS_FOLD|FORGE_ACTIONS_NPM_CACHE/);
   assert.doesNotMatch(jobs('hosted-check'), /GITHUB_TOKEN:/);
   assert.doesNotMatch(jobs('hosted-pack'), /GITHUB_TOKEN:/);
 });
@@ -1689,7 +1753,7 @@ test('single execution uses the planning runner; distributed jobs and pack artif
   assert(plan.indexOf('uses: actions/cache/save@') < plan.indexOf('outputs.single_shard'));
   assert.match(workflow, /hosted-check:\n\s+if: \$\{\{ needs.hosted-plan.outputs.matrix != '\[\]' \}\}/);
   const script = readFileSync('scripts/hosted-actions-job.mjs', 'utf8');
-  assert.match(script, /single_shard=\$\{fold\.fold \? '' : result\.singleShard\}/);
+  assert.match(script, /single_shard=\$\{result\.singleShard\}/);
   assert.match(script, /matrix=\[\]\\nsingle_shard=\\npack_refresh=false/);
 });
 

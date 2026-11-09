@@ -17,6 +17,7 @@ import {
   type OutputRoot,
 } from '../src/hosted-check-output';
 import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckOutputSettled } from '../src/hosted-check-verdict';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 
@@ -119,7 +120,7 @@ async function validateOutput(
         ? message.body.seal.stream
         : null;
   invariant(
-    message.body.kind !== 'final' || hostedCheckTerminal(run),
+    message.body.kind !== 'final' || hostedCheckOutputSettled(run),
     'EVIDENCE_CHANGED',
     'Final output requires a settled check result.',
   );

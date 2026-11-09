@@ -242,6 +242,10 @@ export const hostedCheckRunSchema = z
         workflowSha: z.string().optional(),
         /** Why the dispatch call failed: HTTP status or error class, never a body or credential. */
         failure: z.string().max(80).optional(),
+        /** Every shard reported passing; the pass waits for the provider's own conclusion
+         * (src/hosted-check-verdict.ts), and `confirm` is the one scheduled read if its event is lost. */
+        verdictPending: z.literal(true).optional(),
+        confirm: z.string().nullable().optional(),
       })
       .strict()
       .optional(),

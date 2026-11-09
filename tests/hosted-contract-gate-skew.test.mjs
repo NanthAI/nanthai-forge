@@ -260,7 +260,27 @@ test('3k-file contract selection and complete metadata run stay below 60 functio
         }),
       }),
     );
-  assert.equal(terminal.status, 'passed');
+  // Every shard passed; GitHub's completed event (delivered on every run already) decides the pass.
+  assert.equal(terminal.actions.verdictPending, true);
+  const webhooks = await import(moduleUrl('../convex/projectHostedActionsWebhook.ts'));
+  await f.call('gateWebhook', webhooks.receive, {
+    payload: JSON.stringify({
+      action: 'completed',
+      repository: { full_name: 'synthetic/project' },
+      workflow_run: {
+        id: 123,
+        run_attempt: 1,
+        display_title: `forge-check/${run.id}`,
+        event: 'workflow_dispatch',
+        path: '.github/workflows/forge-check.yml',
+        head_branch: 'main',
+        head_sha: 'a'.repeat(40),
+        created_at: new Date().toISOString(),
+        conclusion: 'success',
+      },
+    }),
+  });
+  assert.equal([...f.tables.projectHostedCheckRuns.values()][0].status, 'passed');
   assert(f.traffic.acceptedCalls <= 60);
   // Existing direct-run accounting: HTTP + source transaction per window,
   // output/result callbacks per job, and the fixed dispatch/session/plan budget.

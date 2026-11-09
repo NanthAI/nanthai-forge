@@ -42,6 +42,8 @@ Clean environment isolation prevents ambient discovery through inherited setting
 
 Handing a secret to arbitrary code lets that code leak it.
 
+**Hosted Actions checks.** On GitHub-hosted Linux runners each Candidate child runs as a separate unprivileged user (`forge-check`) in a private mount namespace that hides the runner's home except the check's own folders and read-only toolchains, so it cannot read the runner's credentials or the supervisor's environment or use `sudo`; elsewhere it runs as the runner user and the job log says so. Independently of that, a hosted Actions pass needs the CI provider's own success record, outputs come only from the planning step and caches are saved only before the check step from downloads that run no repository code. See [what Actions evidence attests](operations/github-actions-checks.md#what-actions-evidence-attests).
+
 ## Secret scan at landing
 
 Every hosted landing check scans the paths its composed Candidate changes from the composition base, before project code runs. Forge's own executors do it (the GitHub Actions planning job and self-hosted machine runners), so it works with any configured check command. Paths already on main are not rescanned.

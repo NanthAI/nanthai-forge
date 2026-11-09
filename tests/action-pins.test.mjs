@@ -3,6 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { actionPinFindings, isWorkflowPath } from '../scripts/check-action-pins.mjs';
+import { candidateStepFindings } from '../scripts/check-candidate-steps.mjs';
+import { CACHE_PRESETS } from '../dist/actions-toolchains.js';
+import { hostedWorkflowBlocks } from '../dist/actions-toolchains-hosted.js';
 import { githubActionsWorkflow } from '../dist/github-actions-workflow.js';
 import { githubWorkflow } from '../scripts/bench-landing-workflow.mjs';
 
@@ -100,4 +103,96 @@ test('every OIDC job pins every action it runs', () => {
   assert.equal(found.job, 'w.yml a');
   assert.equal(actionPinFindings(found.job, found.block).length, 1);
   assert.deepEqual(oidcJobs('w.yml', unpinned.replace('id-token', 'contents')), []);
+});
+
+// Candidate-step rules (scripts/check-candidate-steps.mjs, Issue 432164bf).
+const SHA = '0057852bfaa89a56745cba8c7296529d2fc39830 # v4';
+const main = "github.ref == format('refs/heads/{0}', github.event.repository.default_branch)";
+const job = steps => `name: x\non: push\njobs:\n  check:\n    runs-on: ubuntu-latest\n    steps:\n${steps}`;
+const restore = `      - id: forge-deps\n        uses: actions/cache/restore@${SHA}\n        env:\n          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'\n        with:\n          path: ~/go\n          key: k\n`;
+const save = when =>
+  `      - if: ${when}\n        uses: actions/cache/save@${SHA}\n        with:\n          path: ~/go\n          key: k\n`;
+const check = '      - run: node scripts/forge-check.mjs\n';
+
+test('every workflow in this repository passes the Candidate-step rules', () => {
+  const dir = new URL('../.github/workflows/', import.meta.url);
+  for (const name of readdirSync(dir).filter(file => /\.ya?ml$/.test(file)))
+    assert.deepEqual(candidateStepFindings(name, readFileSync(new URL(name, dir), 'utf8')), [], name);
+});
+
+test('every generated workflow and hosted block passes: saves seed before the check, main only', () => {
+  const declarations = [
+    undefined,
+    ...Object.keys(CACHE_PRESETS).map(preset => ({ cache: { presets: [preset] } })),
+    { toolchains: [{ tool: 'go', versionFile: 'go.mod' }], cache: { presets: ['go', 'npm', 'cargo'] } },
+  ];
+  for (const declaration of declarations)
+    for (const runner of ['ubuntu-latest', ['self-hosted', 'linux']])
+      assert.deepEqual(
+        candidateStepFindings('generated', githubActionsWorkflow(runner, declaration)),
+        [],
+        JSON.stringify(declaration),
+      );
+  for (const block of hostedWorkflowBlocks())
+    assert.deepEqual(
+      candidateStepFindings(
+        'block',
+        job(`${block}      - run: node control/scripts/hosted-actions-job.mjs run\n`),
+      ),
+      [],
+    );
+});
+
+test('a clean check job passes; each broken rule is named', () => {
+  assert.deepEqual(candidateStepFindings('ok', job(restore + save(main) + check)), []);
+  const cases = [
+    [restore + check + save(main), /save caches before the check step/],
+    [restore + check + '      - run: echo done\n', /no step follows the check step/],
+    [restore + '      - id: verdict\n        run: node scripts/forge-check.mjs\n', /has no id/],
+    [
+      restore + `${check}        env:\n          TOKEN: \${{ secrets.NPM_TOKEN }}\n`,
+      /no secret or workflow token/,
+    ],
+    [
+      restore + `${check}        env:\n          GITHUB_TOKEN: \${{ github.token }}\n`,
+      /no secret or workflow token/,
+    ],
+    [
+      `      - uses: actions/cache@${SHA}\n        with:\n          path: ~/go\n          key: k\n${check}`,
+      /explicit save/,
+    ],
+    [restore + save("steps.forge-deps.outputs.cache-hit != 'true'") + check, /only on the default branch/],
+    [
+      `      - uses: actions/cache/restore@${SHA}\n        with:\n          path: ~/go\n          key: k\n${check}`,
+      /SEGMENT_DOWNLOAD_TIMEOUT_MINS/,
+    ],
+    [`      - run: npm ci --ignore-scripts\n${check}`, /npm ci a timeout/],
+    [
+      `      - run: node control/scripts/hosted-actions-job.mjs plan\n        env:\n          FORGE_ACTIONS_FOLD: '1'\n`,
+      /FORGE_ACTIONS_FOLD/,
+    ],
+    [
+      restore + '      - run: node control/scripts/hosted-actions-job.mjs run\n' + save(main),
+      /never after it/,
+    ],
+  ];
+  for (const [steps, finding] of cases) {
+    const found = candidateStepFindings('bad.yml', job(steps));
+    assert.ok(
+      found.some(line => finding.test(line)),
+      `${finding}: ${found.join('; ')}`,
+    );
+    assert.ok(
+      found.every(line => /^bad\.yml(?::\d+)?: /.test(line)),
+      'findings name locations only',
+    );
+  }
+  // The server's main-audit flag also gates a hosted dependency seed.
+  assert.deepEqual(
+    candidateStepFindings(
+      'hosted',
+      job(restore + save("fromJSON(steps.plan.outputs.deps_cache || '{}').save") + check),
+    ),
+    [],
+  );
 });
