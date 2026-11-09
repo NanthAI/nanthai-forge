@@ -85,13 +85,15 @@ export function advertiseV2() {
     flushPkt,
   ]);
 }
-const v0Capabilities = `side-band-64k side-band ofs-delta no-progress symref=HEAD:refs/heads/main object-format=sha1 ${agent}`;
-/** v0 ref advertisement, with the smart-HTTP service preamble. */
-export function advertiseV0(refs: GitRefs) {
+const v0Capabilities = `ofs-delta no-progress symref=HEAD:refs/heads/main object-format=sha1 ${agent}`;
+/** v0 ref advertisement, with the smart-HTTP service preamble. Without side-band the
+ * client takes the pack as raw bytes (the Worker byte path streams it untouched). */
+export function advertiseV0(refs: GitRefs, sideband = true) {
+  const capabilities = sideband ? `side-band-64k side-band ${v0Capabilities}` : v0Capabilities;
   return concatBytes([
     pkt('# service=git-upload-pack\n'),
     flushPkt,
-    pkt(`${refs.main} HEAD\0${v0Capabilities}\n`),
+    pkt(`${refs.main} HEAD\0${capabilities}\n`),
     pkt(`${refs.main} refs/heads/main\n`),
     flushPkt,
   ]);

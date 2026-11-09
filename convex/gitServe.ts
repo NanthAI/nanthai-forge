@@ -8,6 +8,8 @@ import { convexFetch } from './networkFetch';
 import { digest } from '../src/portable-hash';
 import { ForgeError } from '../src/errors';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
+import { overCap } from './gitServeWorkerStore';
+import { workerConfig, workerFetch, workerRedirect, workerRoute, type WorkerConfig } from './gitServeWorker';
 import {
   PackJoiner,
   advertiseV0,
@@ -33,6 +35,7 @@ import {
  * through Lanes. Per request: this HTTP action and one query; bytes stream from R2. */
 export const gitResponseLimitBytes = 100 * 1024 * 1024; // Convex HTTP action response limit
 const framing = (bytes: number) => Math.ceil(bytes / sidebandData) * 5;
+const tooLarge = (bytes: number) => bytes + framing(bytes) + 4096 > gitResponseLimitBytes;
 const pushRefused =
   'Forge does not accept git push. Pushes go through Lanes: nforge agent ROOT start, then land.';
 
@@ -88,7 +91,13 @@ const gitReply = (kind: 'advertisement' | 'result', body: BodyInit) =>
     headers: { 'Content-Type': `application/x-git-upload-pack-${kind}`, ...noCache },
   });
 
-type Pack = { tip: string; bytes: number; objects: number; chunks: { sha256: string; size: number }[] };
+type Pack = {
+  tip: string;
+  bytes: number;
+  objects: number;
+  packSha1: string;
+  chunks: { sha256: string; size: number }[];
+};
 type Loaded = {
   status: 'ok';
   projectId: Id<'hostedProjects'>;
@@ -101,10 +110,12 @@ type Loaded = {
       importState: string;
       error?: { code: string; message: string };
       catchUp?: { until: number };
+      joined?: { key: string; sha1: string };
     };
     packs: Pack[];
   };
   mirror: null | { repository: string; mapping: string };
+  workerUsage: { project: { packs: number; bytes: number }; all: { packs: number; bytes: number } };
 };
 const unavailable = () =>
   new ForgeError(
@@ -214,7 +225,7 @@ function fetchReply(loaded: Loaded, args: FetchArgs, version: 2 | 0) {
   const ack = pkt(common ? `ACK ${common}\n` : 'NAK\n');
   if (version === 0 && !args.done) return gitReply('result', ack);
   const bytes = chosen.length ? new PackJoiner(chosen).bytes : emptyPack().length;
-  if (bytes + framing(bytes) + 4096 > gitResponseLimitBytes)
+  if (tooLarge(bytes))
     throw new ForgeError(
       'GIT_PACK_TOO_LARGE',
       `This clone needs a ${Math.ceil(bytes / 1048576)} MiB pack; Forge's Git endpoint serves up to 100 MiB per fetch today.`,
@@ -264,41 +275,97 @@ function failure(error: unknown) {
   return { code: 'GIT_SERVE_FAILED', message: 'Forge could not answer this Git request; retry it.' };
 }
 
-export const serve = httpAction(async (ctx, request) => {
+/** A clone pack over the response limit (or the operator's threshold) goes to the Worker:
+ * checked against the daily caps here, before the redirect. Returns the refs it prepared. */
+async function largeRedirect(
+  ctx: ActionCtx,
+  loaded: Loaded,
+  reload: () => Promise<Loaded>,
+  worker: WorkerConfig,
+  credentialId: string | null,
+  v2: boolean,
+) {
+  let prepared: ReturnType<typeof servedRefs>;
+  try {
+    prepared = await preparedRefs(ctx, loaded, reload);
+  } catch (error) {
+    if (v2) return { prepared: null, redirect: null }; // ls-refs reports it, as before
+    throw error;
+  }
+  const bytes = prepared.packs.length ? new PackJoiner(prepared.packs).bytes : 0;
+  if (!(worker.minBytes ? bytes >= worker.minBytes : tooLarge(bytes))) return { prepared, redirect: null };
+  const refused = overCap(loaded.workerUsage, bytes);
+  if (refused) throw new ForgeError(refused.code, refused.message);
+  return { prepared, redirect: workerRedirect(worker, loaded.projectId, credentialId, !!prepared.gap) };
+}
+
+const sessionEnded = () =>
+  text(403, 'This Forge Git session expired or is no longer valid; run the git command again.');
+
+export const serve = httpAction(async (ctx, request): Promise<Response> => {
   const url = new URL(request.url);
-  const route = gitRoute(url.pathname);
+  const worker = workerConfig();
+  // Requests the Worker forwards: a signed session, v0 without side-band, byte plans.
+  const signed = url.pathname.startsWith('/gitw/') ? workerRoute(url.pathname, worker) : null;
+  if (signed?.kind === 'unknown') return text(404, 'Repository not found.');
+  if (signed?.kind === 'expired') return sessionEnded();
+  const session = signed?.kind === 'ok' ? signed.session : null;
+  const route =
+    signed?.kind === 'ok'
+      ? { project: { projectId: signed.session.p }, service: signed.service }
+      : gitRoute(url.pathname);
   if (!route) return text(404, 'Repository not found.');
   const service = route.service === 'info/refs' ? url.searchParams.get('service') : route.service;
   if (service === 'git-receive-pack') return text(403, pushRefused);
   if (service !== 'git-upload-pack') return text(403, 'Use Git 1.6.6 or later (smart HTTP).');
   if ((route.service === 'info/refs') !== (request.method === 'GET')) return text(405, 'Method not allowed.');
-  const credential = presentedCredential(request.headers.get('authorization'));
+  const credential = session ? null : presentedCredential(request.headers.get('authorization'));
   if (credential === 'invalid')
     return unauthorized('Use a Forge login token (nforge login) as the password.');
   const reload = async () =>
     (await ctx.runQuery(internal.gitServeStore.load, {
       ...route.project,
       ...(credential ? { credential } : {}),
+      ...(session?.c ? { sessionCredentialId: session.c } : {}),
     })) as Loaded | { status: 'bad-credential' } | { status: 'not-found'; signedIn: boolean };
   const loaded = await reload();
+  if (session && loaded.status !== 'ok')
+    return loaded.status === 'not-found' ? text(404, 'Repository not found.') : sessionEnded();
   if (loaded.status === 'bad-credential')
     return unauthorized('This Forge login expired, was revoked or is not a CLI login. Run nforge login.');
   // Signed-in readers without access learn nothing more than a missing repository.
   if (loaded.status === 'not-found')
     return loaded.signedIn ? text(404, 'Repository not found.') : unauthorized();
   const again = reload as () => Promise<Loaded>;
-  const v2 = /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
+  const v2 = !session && /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
   const kind = route.service === 'info/refs' ? 'advertisement' : 'result';
   try {
     if (route.service === 'info/refs') {
+      if (session) return gitReply(kind, advertiseV0((await preparedRefs(ctx, loaded, again)).refs, false));
+      let prepared: ReturnType<typeof servedRefs> | null = null;
+      if (worker) {
+        const large = await largeRedirect(ctx, loaded, again, worker, credential?.credentialId ?? null, v2);
+        if (large.redirect) return large.redirect;
+        prepared = large.prepared;
+      }
       if (v2) return gitReply(kind, advertiseV2());
-      return gitReply(kind, advertiseV0((await preparedRefs(ctx, loaded, again)).refs));
+      return gitReply(kind, advertiseV0((prepared ?? (await preparedRefs(ctx, loaded, again))).refs));
     }
     let body = new Uint8Array(await request.arrayBuffer());
     if (/gzip/i.test(request.headers.get('content-encoding') ?? ''))
       body = new Uint8Array(
         await ctx.runAction(internal.gitServeInflate.gunzip, { body: body.slice().buffer }),
       );
+    if (session) {
+      const reply = await workerFetch(
+        ctx,
+        loaded.projectId,
+        servedRefs(loaded).packs,
+        loaded.history?.row.joined,
+        parseV0Request(body),
+      );
+      return reply.plan ?? gitReply(kind, reply.ack);
+    }
     if (!v2) return fetchReply(loaded, parseV0Request(body), 0);
     const command = parseV2Request(body);
     if (command.command === 'ls-refs')

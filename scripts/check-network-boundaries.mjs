@@ -16,6 +16,9 @@ const exempt = new Map([
   // build, so no dist/ helper). Two Convex calls, each with its own 20 s deadline, in a job
   // capped at 5 minutes.
   ['scripts/release-sign-ci.mjs', 'standalone'],
+  // A Cloudflare Worker deployed as one self-contained file (no repo imports): its one
+  // request to the backend carries its own 5-minute deadline; the client paces the rest.
+  ['src/git-byte-worker.ts', 'standalone'],
 ]);
 
 /** Server-side code that must reach the network through the shared helper.

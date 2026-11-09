@@ -6,6 +6,7 @@ import { resolveProjectId } from './urlProjects';
 import { loadHistory, mirrorMapping } from './projectHistoryStore';
 import { hostedStartMain } from './projectHostedChannels';
 import { ForgeError } from '../src/errors';
+import { workerUsage } from './gitServeWorkerStore';
 
 /** Everything one Git smart-HTTP request needs, in one query: the presented Forge
  * credential (hash-checked against its row), current project access, stored history
@@ -16,21 +17,25 @@ export const load = internalQuery({
     handle: v.optional(v.string()),
     slug: v.optional(v.string()),
     credential: v.optional(v.object({ credentialId: v.string(), tokenHash: v.string() })),
+    /** A Worker session's credential: its token hash was checked when the session was signed;
+     * the row's revocation, expiry and scope are checked again here. */
+    sessionCredentialId: v.optional(v.string()),
   },
   returns: v.any(),
   handler: async (ctx, input) => {
     let actor = '';
-    if (input.credential) {
+    const credentialId = input.credential?.credentialId ?? input.sessionCredentialId;
+    if (credentialId) {
       const row = await ctx.db
         .query('cliCredentials')
-        .withIndex('by_credentialId', q => q.eq('credentialId', input.credential!.credentialId))
+        .withIndex('by_credentialId', q => q.eq('credentialId', credentialId))
         .unique();
       if (
         !row ||
         row.revoked ||
         row.expiresAt <= Date.now() ||
         row.scope !== 'cli' ||
-        row.tokenHash !== input.credential.tokenHash
+        (input.credential && row.tokenHash !== input.credential.tokenHash)
       )
         return { status: 'bad-credential' };
       actor = row.owner;
@@ -57,6 +62,8 @@ export const load = internalQuery({
       mainHead,
       history,
       mirror: history ? history.mirror : await mirrorMapping(ctx, id),
+      // Daily Worker byte-path use (two indexed reads), checked before a redirect.
+      workerUsage: await workerUsage(ctx, id),
     };
   },
 });

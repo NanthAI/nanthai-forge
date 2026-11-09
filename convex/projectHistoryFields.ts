@@ -39,6 +39,9 @@ export const historyTables = {
     error: v.optional(v.object({ code: v.string(), message: v.string() })),
     /** A read is fetching the catch-up pack for `tip`; other reads wait for it or the lease end. */
     catchUp: v.optional(v.object({ tip: v.string(), until: v.number() })),
+    /** SHA-1 trailer of one joined pack set, for the Worker byte path (it does not hash);
+     * `key` is the digest of the set's pack SHA-1s. */
+    joined: v.optional(v.object({ key: v.string(), sha1: v.string() })),
     /** Increments on every requested (re)import, so a stale run cannot record. */
     attempt: v.number(),
     updatedAt: v.number(),
@@ -60,4 +63,11 @@ export const historyTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_project_and_tip', ['projectId', 'tip']),
+  /** Worker byte-path use per UTC day: `scope` is a project id, or '*' for every project. */
+  gitWorkerUsage: defineTable({
+    scope: v.string(),
+    day: v.string(),
+    packs: v.number(),
+    bytes: v.number(),
+  }).index('by_scope_and_day', ['scope', 'day']),
 };

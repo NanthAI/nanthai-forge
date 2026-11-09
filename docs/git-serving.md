@@ -69,6 +69,50 @@ chunk and leave through the HTTP action (Convex data egress). Gzipped request bo
 (Git compresses requests over 1 KiB) cost one extra Node action call to decode, bounded
 at 1 MiB. Nothing runs while no one uses Git: no timers, scheduling or polling.
 
-A Convex HTTP response is at most 100 MiB, so a fetch whose pack is larger returns
-`GIT_PACK_TOO_LARGE` with its size. Larger repositories need a byte path outside Convex,
-which is not built.
+A Convex HTTP response is at most 100 MiB. Without the large-pack Worker, a fetch whose pack
+is larger returns `GIT_PACK_TOO_LARGE` with its size.
+
+## Large packs
+
+When the clone pack (every stored pack joined) is over that limit and the deployment has a
+large-pack Worker (`FORGE_GIT_WORKER_URL`), the ref listing answers `302` to the Worker. Git
+prints `warning: redirecting to https://…/gitw/<session>/…` and sends the rest of the
+session there. Nothing changes for the user: no extra step, setting or credential.
+
+- **Session.** The redirect carries a signed session (HMAC-SHA256 with a key derived from
+  the backend's R2 secret) naming the project, the Forge login's credential id (empty when
+  anonymous) and an expiry 5 minutes ahead. It holds no password or token. The Worker
+  forwards every request back to the backend's `gitw/` route, which checks the signature and
+  then, on every request, the credential row (revoked, expired, scope) and current project
+  access, exactly like the direct route. A path segment `unpublished-landings` in the
+  redirect says hosted main is ahead of the newest Git commit (this path has no `remote:`
+  line).
+- **Bytes.** On this route the backend speaks protocol v0 without side-band, so the pack is
+  raw bytes. For the final fetch it returns a byte plan instead of the pack: the ACK/NAK
+  line, the R2 object keys (whole chunks, or ranges that drop each pack's header and
+  trailer when several packs are joined) and the trailer. The Worker streams those objects
+  from its R2 bucket binding by native piping; its JavaScript never touches pack bytes, so a
+  clone fits the Workers Free CPU limit (10 ms). It holds no secret, reads only stored-object
+  keys the backend names, at most 900 per fetch, and never a key from the client. The SHA-1
+  trailer of a joined set is computed once by the backend (one read of the set's R2 bytes)
+  and cached on the history row; a single pack passes through byte-exact.
+- **Caps.** Each served pack is counted before any byte flows, per project and for all
+  projects per UTC day (`convex/gitServeWorkerStore.ts`): 1,000 packs and 20 GiB per
+  project, 10,000 packs and 100 GiB in all. The ref listing checks the same counters before
+  redirecting. Past a cap Git prints `GIT_BYTE_LIMIT` with the reset time. Usage rows older
+  than 7 days are deleted when their scope is next written.
+- **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 2–4 Worker requests). R2
+  egress is free; R2 reads are one per 32 MiB chunk, inside R2's included 10 million a month
+  at the caps. Per large clone the backend makes 3 HTTP actions, 3 queries and 1 mutation
+  (plus 1 more mutation and one read of the pack the first time a joined set is served).
+  Nothing runs while no one clones.
+
+### Operating the Worker
+
+The Worker is `src/git-byte-worker.ts`, built to `dist/git-byte-worker.js` with no imports.
+Deploy it with the `cf` CLI on the Cloudflare account that holds the deployment's R2 bucket:
+a Worker with binding `FORGE_R2` (the bucket, read only in practice) and the plain variable
+`FORGE_CONVEX_SITE` (the deployment's `https://NAME.convex.site`), served on its
+`workers.dev` route. Then set `FORGE_GIT_WORKER_URL` on the backend to the Worker's origin.
+`FORGE_GIT_WORKER_MIN_BYTES` (optional) routes clones at or over that size through the
+Worker instead of the 100 MiB default. Unset `FORGE_GIT_WORKER_URL` to turn the path off.

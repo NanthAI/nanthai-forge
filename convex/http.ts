@@ -14,7 +14,9 @@ const http = httpRouter();
 http.route({ path: '/github/oauth/callback', method: 'GET', handler: githubOAuthCallback });
 http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
 // Read-only Git smart HTTP (clone/fetch); pushes go through Lanes.
-for (const method of ['GET', 'POST'] as const) http.route({ pathPrefix: '/git/', method, handler: gitServe });
+// gitw/ carries the signed sessions the large-pack Worker forwards (docs/git-serving.md).
+for (const method of ['GET', 'POST'] as const)
+  for (const pathPrefix of ['/git/', '/gitw/']) http.route({ pathPrefix, method, handler: gitServe });
 for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
   http.route({
     path: `/worker/${operation}`,

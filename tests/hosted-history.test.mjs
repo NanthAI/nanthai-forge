@@ -34,6 +34,7 @@ for (const name of [
   'projectHistoryRead',
   'gitServeStore',
   'gitServeInflate',
+  'gitServeWorkerStore',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 
@@ -178,6 +179,8 @@ async function importedProject(f, commit) {
 }
 const historyRow = (s, projectId) =>
   [...s.tables.projectHistory.values()].find(row => row.projectId === projectId);
+const historyPacks = (s, projectId) =>
+  [...s.tables.projectHistoryPacks.values()].filter(row => row.projectId === projectId);
 /** Transport counting each server call, routed to the real handlers. */
 function transport(s, projectId) {
   const calls = [];
@@ -844,6 +847,14 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
     e => e.code === 'GIT_NOT_OUR_REF',
   );
   assert.equal(new protocol.PackJoiner(packs).bytes, 12 + (100 + 50 + 60 - 96) + 20);
+  const { chunkParts } = await import('../dist/git-worker-plan.js');
+  // A pack body without its 12-byte header and 20-byte trailer, across three chunks.
+  assert.deepEqual(chunkParts([10, 30, 5], 12, 25), [{ chunk: 1, start: 2, end: 15, whole: false }]);
+  assert.deepEqual(
+    chunkParts([10, 30, 5], 0, 45).map(part => part.whole),
+    [true, true, true],
+  );
+  assert.deepEqual(chunkParts([40, 10], 12, 30), [{ chunk: 0, start: 12, end: 30, whole: false }]);
   assert.throws(
     () => protocol.parseFetchArgs(['want ' + 'a'.repeat(40), 'ofs-delta', 'deepen 1']),
     e => e.code === 'GIT_UNSUPPORTED',
@@ -895,4 +906,185 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
   assert.match(bytes.subarray(0, 40).toString('latin1'), /acknowledgments\n.*NAK\n/s);
   assert.ok(bytes.includes(Buffer.from('PACK')));
   assert.deepEqual(host.since(before), { http: 0, query: 1, mutation: 0, action: 1 }, 'one gunzip action');
+});
+
+/** The Cloudflare Worker (dist/git-byte-worker.js) on a local port, with a bucket binding over
+ * the in-memory R2 bucket; it forwards to the local Convex host like the deployed one. */
+async function byteWorker(t, convexBase) {
+  const worker = (await import('../dist/git-byte-worker.js')).default;
+  const reads = [];
+  const bucket = {
+    async get(key, options = {}) {
+      const bytes = defaultR2Objects.get(`forge-test-blobs/${key}`);
+      if (!bytes) return null;
+      const range = options.range;
+      reads.push({ key, ...(range ?? {}) });
+      return {
+        body: new Response(range ? bytes.subarray(range.offset, range.offset + range.length) : bytes).body,
+      };
+    },
+  };
+  const hop = new Set(['transfer-encoding', 'content-length', 'connection', 'keep-alive']);
+  const server = createServer(async (req, res) => {
+    const body = [];
+    for await (const part of req) body.push(part);
+    const headers = new Headers(Object.entries(req.headers).filter(([, value]) => typeof value === 'string'));
+    const response = await worker.fetch(
+      new Request(`http://worker.example${req.url}`, {
+        method: req.method,
+        headers,
+        ...(req.method === 'POST' ? { body: Buffer.concat(body) } : {}),
+      }),
+      { FORGE_CONVEX_SITE: convexBase, FORGE_R2: bucket },
+      { waitUntil: () => {} },
+    );
+    res.writeHead(
+      response.status,
+      Object.fromEntries([...response.headers].filter(([name]) => !hop.has(name))),
+    );
+    if (response.body) for await (const part of response.body) res.write(part);
+    res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  return { base: `http://127.0.0.1:${server.address().port}`, reads, worker };
+}
+const withEnv = (t, values) => {
+  const previous = Object.fromEntries(Object.keys(values).map(name => [name, process.env[name]]));
+  Object.assign(process.env, values);
+  t.after(() => {
+    for (const [name, value] of Object.entries(previous))
+      value === undefined ? delete process.env[name] : (process.env[name] = value);
+  });
+};
+
+test('clones over the response limit go through the Worker: capped, raw R2 bytes, joined trailer cached', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const host = await gitHost(t, s);
+  // The Worker reaches the local Convex host; the fixture's fetch refuses other hosts.
+  const fixtureFetch = globalThis.fetch;
+  globalThis.fetch = (url, init) =>
+    new URL(url).hostname === '127.0.0.1' ? f.previousFetch(url, init) : fixtureFetch(url, init);
+  t.after(() => (globalThis.fetch = f.previousFetch));
+  const worker = await byteWorker(t, host.base);
+  // Threshold 1 byte: every clone of this small repository takes the large-pack path.
+  withEnv(t, { FORGE_GIT_WORKER_URL: worker.base, FORGE_GIT_WORKER_MIN_BYTES: '1' });
+  const url = `${host.base}/git/${projectId}.git`;
+  const work = scratch(t, 'forge-git-worker-');
+  let before = host.snapshot();
+  const cloned = await client(['clone', url, join(work, 'one')]);
+  assert.match(String(cloned.stderr), /redirecting to http:\/\/127\.0\.0\.1:\d+\/gitw\//);
+  assert.equal(log(join(work, 'one')), log(source.repo), 'same commits and ids as the source');
+  await client(['fsck', '--full'], join(work, 'one'));
+  // Redirect (1 query), Worker ref listing (1 query), fetch (1 query + 1 reserve mutation).
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 });
+  const [pack] = historyPacks(s, projectId);
+  assert.deepEqual(
+    worker.reads,
+    pack.chunks.map(chunk => ({ key: `v1/p/${projectId}/o/${chunk.sha256}` })),
+  );
+  const usage = [...s.tables.gitWorkerUsage.values()];
+  assert.deepEqual(usage.map(row => [row.scope, row.packs, row.bytes]).sort(), [
+    ['*', 1, pack.bytes],
+    [projectId, 1, pack.bytes],
+  ]);
+
+  // A mirror move adds a catch-up pack; a fetch takes only it, a fresh clone joins both.
+  commit(source.repo, { 'src/new.go': 'package main\n' }, 'Forge landing one');
+  const tip = commit(source.repo, { 'src/new.go': 'package main\n// two\n' }, 'Forge landing two');
+  await mirrorAt(s, projectId, tip);
+  await client(['fetch', '-q'], join(work, 'one'));
+  assert.equal(git(join(work, 'one'), ['rev-parse', 'origin/main']).toString().trim(), tip);
+  worker.reads.length = 0;
+  before = host.snapshot();
+  await client(['clone', '-q', url, join(work, 'two')]);
+  assert.equal(log(join(work, 'two')), log(source.repo, tip));
+  await client(['fsck', '--full'], join(work, 'two'));
+  assert.ok(
+    worker.reads.every(read => read.length !== undefined),
+    'joined packs drop headers and trailers',
+  );
+  assert.ok(historyRow(s, projectId).joined?.sha1, 'the joined trailer is cached on the history row');
+  assert.equal(host.since(before).mutation, 2, 'reserve + trailer cache');
+  before = host.snapshot();
+  await client(['clone', '-q', url, join(work, 'three')]);
+  assert.equal(log(join(work, 'three')), log(source.repo, tip));
+  assert.equal(host.since(before).mutation, 1, 'the cached trailer is reused');
+
+  // Caps are checked before the redirect; a forged or expired session is refused.
+  const [row] = [...s.tables.gitWorkerUsage.values()].filter(row => row.scope === projectId);
+  s.tables.gitWorkerUsage.set(row._id, {
+    ...row,
+    packs: modules.gitServeWorkerStore.workerCaps.project.packs,
+  });
+  await refused(['clone', url, join(work, 'capped')], /GIT_BYTE_LIMIT/);
+  for (const path of [
+    `/gitw/forged.token/${projectId}.git/info/refs?service=git-upload-pack`,
+    `/gitw/x/${projectId}.git/info/refs?service=git-upload-pack`,
+  ])
+    assert.equal((await host.handle(path)).status, 403);
+  const plans = [
+    { head: '', tail: '', parts: [{ key: 'v1/p/other/o/../secret' }] },
+    { head: '', tail: '', parts: [{ key: `v1/p/${projectId}/o/${'a'.repeat(64)}`, offset: -1, length: 4 }] },
+    { head: '', tail: '', parts: Array.from({ length: 901 }, () => ({ key: `v1/p/p/o/${'a'.repeat(64)}` })) },
+  ];
+  const { checkedPlan } = await import('../dist/git-byte-worker.js');
+  for (const plan of plans) assert.equal(checkedPlan(plan), null);
+  assert.equal(
+    (await worker.worker.fetch(new Request('http://worker.example/anything'), {}, {})).status,
+    404,
+  );
+});
+
+test('a Worker session rechecks the credential and current access on every request', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source, { visibility: 'private' }),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const host = await gitHost(t, s);
+  withEnv(t, { FORGE_GIT_WORKER_URL: 'https://worker.example', FORGE_GIT_WORKER_MIN_BYTES: '1' });
+  const plan = await import('../dist/git-worker-plan.js');
+  const key = plan.workerTokenKey(process.env.R2_SECRET_ACCESS_KEY);
+  const refs = token => `/gitw/${token}/${projectId}.git/info/refs?service=git-upload-pack`;
+  const sign = (c, e = Date.now() + 60_000) => plan.signWorkerToken({ p: projectId, c, e }, key);
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const login = `${encode({ alg: 'RS256' })}.${encode({ sub: 'owner', forgeCredential: 'cred-owner' })}.sig`;
+  await s.ctx.db.insert('cliCredentials', {
+    owner: 'owner',
+    name: 'Synthetic CLI',
+    scope: 'cli',
+    credentialId: 'cred-owner',
+    tokenHash: createHash('sha256').update(login).digest('hex'),
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+    revoked: false,
+  });
+  // The redirect carries a signed session naming the credential, never the login itself.
+  const redirect = await host.handle(`/git/${projectId}.git/info/refs?service=git-upload-pack`, {
+    headers: { authorization: `Bearer ${login}` },
+  });
+  assert.equal(redirect.status, 302);
+  const location = new URL(redirect.headers.get('location'));
+  assert.equal(location.origin, 'https://worker.example');
+  assert.ok(!location.href.includes(login) && !location.href.includes('sig'));
+  const [, , token] = location.pathname.split('/');
+  assert.equal(plan.verifyWorkerToken(token, key).c, 'cred-owner');
+  const ok = await host.handle(refs(sign('cred-owner')));
+  assert.equal(ok.status, 200);
+  const advertised = Buffer.from(await ok.arrayBuffer()).toString('latin1');
+  assert.match(advertised, new RegExp(`${source.head} HEAD`));
+  assert.doesNotMatch(advertised, /side-band/, 'raw pack: the Worker never frames bytes');
+  assert.equal((await host.handle(refs(sign('')))).status, 404, 'anonymous session on a private project');
+  assert.equal((await host.handle(refs(sign('cred-owner', Date.now() - 1)))).status, 403, 'expired');
+  const other = plan.signWorkerToken({ p: 'another', c: 'cred-owner', e: Date.now() + 60_000 }, key);
+  assert.equal((await host.handle(refs(other))).status, 403, 'a session names one project');
+  const [credential] = [...s.tables.cliCredentials.values()];
+  s.tables.cliCredentials.set(credential._id, { ...credential, revoked: true });
+  assert.equal((await host.handle(refs(sign('cred-owner')))).status, 403, 'revocation applies at once');
 });
