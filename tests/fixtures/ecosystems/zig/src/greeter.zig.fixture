@@ -1,0 +1,9 @@
+const std = @import("std");
+
+pub fn greet() []const u8 {
+    return "hello";
+}
+
+test "greets" {
+    try std.testing.expectEqualStrings("hello", greet());
+}

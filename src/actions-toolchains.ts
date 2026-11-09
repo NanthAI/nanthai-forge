@@ -7,7 +7,7 @@ import { safeRelative } from './safe-relative.js';
  * (docs/operations/github-actions-checks.md#toolchains-and-dependency-cache). Only these
  * pinned actions, one per tool, and these cache presets exist; nothing else can be declared.
  * Values are validated here, so generated YAML never carries an expression or a quote. */
-export const ACTIONS_TOOLS = ['go', 'python', 'java', 'dotnet', 'rust'] as const;
+export const ACTIONS_TOOLS = ['go', 'python', 'java', 'dotnet', 'rust', 'zig', 'cmake'] as const;
 export type ActionsTool = (typeof ACTIONS_TOOLS)[number];
 /** Full commit SHAs of released tags at least two weeks old when pinned. */
 export const TOOLCHAIN_ACTIONS: Record<Exclude<ActionsTool, 'rust'>, string> = {
@@ -15,7 +15,11 @@ export const TOOLCHAIN_ACTIONS: Record<Exclude<ActionsTool, 'rust'>, string> = {
   python: 'actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0',
   java: 'actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0',
   dotnet: 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0',
+  zig: 'mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1',
+  cmake: 'lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2',
 };
+/** Tools whose setup step takes a `version` only (no version file the action reads from the Candidate). */
+export const VERSION_ONLY_TOOLS: readonly ActionsTool[] = ['zig', 'cmake'];
 const CACHE_SHA = '0057852bfaa89a56745cba8c7296529d2fc39830 # v4';
 export const JAVA_DISTRIBUTIONS = [
   'temurin',
@@ -43,6 +47,9 @@ export const CACHE_PRESET_NAMES = [
   'npm',
   'pnpm',
   'yarn',
+  'zig',
+  'vcpkg',
+  'conan',
 ] as const;
 export type CachePreset = (typeof CACHE_PRESET_NAMES)[number];
 const registeredPresets = cachePresets();
@@ -92,6 +99,9 @@ export const actionsToolchainSchema = z
   .refine(t => t.distribution === undefined || t.tool === 'java', {
     message: 'Only java takes a distribution.',
   })
+  .refine(t => !VERSION_ONLY_TOOLS.includes(t.tool) || t.version !== undefined, {
+    message: 'Zig and CMake declare a version; they read no version file.',
+  })
   .refine(
     t =>
       t.tool !== 'rust' ||
@@ -102,14 +112,14 @@ export const actionsToolchainSchema = z
 export const actionsToolchainsSchema = z
   .array(actionsToolchainSchema)
   .min(1)
-  .max(5) // ACTIONS_TOOLS.length; schema snapshots read literals only
+  .max(7) // ACTIONS_TOOLS.length; schema snapshots read literals only
   .refine(list => unique(list.map(t => t.tool)), { message: 'Declare each tool once.' });
 export const actionsCacheSchema = z
   .object({
     presets: z
       .array(z.enum(presetNames))
       .min(1)
-      .max(11) // CACHE_PRESET_NAMES.length
+      .max(14) // CACHE_PRESET_NAMES.length
       .refine(unique, { message: 'Declare each preset once.' }),
     lockfiles: z
       .array(lockfileGlob)
@@ -175,6 +185,9 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
         (t.version
           ? `          java-version: ${q(t.version)}\n`
           : `          java-version-file: ${q(t.versionFile!)}\n`);
+    else if (t.tool === 'zig') text += `          version: ${q(t.version!)}\n          use-cache: false\n`;
+    else if (t.tool === 'cmake')
+      text += `          cmakeVersion: ${q(t.version!)}\n          useCloudCache: false\n`;
     else
       text += t.version
         ? `          dotnet-version: ${q(t.version)}\n`

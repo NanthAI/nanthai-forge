@@ -1,0 +1,8 @@
+program Greeter;
+
+uses
+  GreeterUnit in 'GreeterUnit.pas';
+
+begin
+  Writeln(Greet);
+end.

@@ -320,3 +320,115 @@ test('the registry is pure data and every consumer reads it: a new entry is pick
   assert.ok(registry.checkEnvHomes(entries).some(home => home.name === 'ZZ_HOME'));
   assert.ok(registry.checkEnvToolchains(entries).some(([name]) => name === 'ZZUP_HOME'));
 });
+
+// Native-code fixtures (Issue 345ebcb9): C/C++, Zig and Delphi each have one small fixture repository
+// under tests/fixtures/ecosystems/. These assertions read it through the real consumers, so they fail
+// when the registry entry is missing.
+function fixtureFiles(id) {
+  const root = fileURLToPath(new URL(`./fixtures/ecosystems/${id}/`, import.meta.url));
+  const files = new Map();
+  for (const entry of readdirSync(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const path = join(entry.parentPath ?? entry.path, entry.name);
+    // Stored as NAME.fixture so Forge's own repository never mistakes a fixture for a real build file.
+    files.set(
+      relative(root, path)
+        .split('\\')
+        .join('/')
+        .replace(/\.fixture$/, ''),
+      readFileSync(path, 'utf8'),
+    );
+  }
+  return files;
+}
+test('C/C++, Zig and Delphi fixtures are recognised through the registry', async () => {
+  const [lockfiles, codeFiles, dependencyDirs, graphModule, runnerModule, toolchains] = await Promise.all(
+    [
+      'project-lockfile',
+      'code-files',
+      'dependency-dirs',
+      'package-graph',
+      'project-test-runner',
+      'actions-toolchains',
+    ].map(name => import(`../dist/${name}.js`)),
+  );
+  const stem = path => codeFiles.codeFileName.exec(path)?.[1];
+  const graphOf = files => graphModule.buildPackageGraph(files.keys(), path => files.get(path));
+  // The repository's own test command (forge.json), or why the whole suite runs.
+  const runnerOf = (files, withForgeJson = true) =>
+    runnerModule.projectTestRunner(undefined, () => files.keys(), {
+      forgeJson: withForgeJson ? files.get('forge.json') : undefined,
+      packages: () => graphOf(files),
+    });
+  const output = name =>
+    registry
+      .projectOutputDirs()
+      .some(candidate => candidate.dirs.has(name) && candidate.beside.test('A.dproj'));
+
+  const c = fixtureFiles('c');
+  assert.equal(
+    lockfiles.projectLockfile(path => c.has(path)),
+    'conan.lock',
+  );
+  for (const [path, name] of [
+    ['tests/greeter_test.cpp', 'tests/greeter_test'],
+    ['src/greeter.c', 'src/greeter'],
+    ['include/greeter.h', 'include/greeter'],
+    ['a/b.hxx', 'a/b'],
+  ])
+    assert.equal(stem(path), name, path);
+  for (const dir of ['cmake-build-debug', 'cmake-build-release', 'builddir', 'vcpkg_installed'])
+    assert.ok(dependencyDirs.ECOSYSTEM_DIRS.has(dir), dir);
+  assert.ok(dependencyDirs.inDependencyDirectory('vcpkg_installed/x64-linux/lib/libfmt.a'));
+  assert.ok(registry.knownLockfiles().includes('vcpkg-configuration.json'));
+  const cGraph = graphOf(c);
+  assert.equal(cGraph.status, 'unknown');
+  assert.match(cGraph.reason, /CMakeLists\.txt.*conanfile\.txt.*whole suite/);
+  assert.deepEqual(runnerOf(c).runner.command.slice(0, 1), ['ctest']);
+  const noDeclaration = new Map([...c].filter(([path]) => path !== 'forge.json'));
+  assert.match(runnerOf(noDeclaration, false).reason, /package graph unknown: .*whole suite/);
+  assert.equal(registry.actionsTools().includes('cmake'), true);
+  assert.deepEqual(
+    [...registry.cachePresets().keys()].filter(name => /vcpkg|conan/.test(name)),
+    ['vcpkg', 'conan'],
+  );
+
+  const zig = fixtureFiles('zig');
+  assert.equal(
+    lockfiles.projectLockfile(path => zig.has(path)),
+    'build.zig.zon',
+  );
+  assert.equal(stem('src/greeter.zig'), 'src/greeter');
+  assert.ok(dependencyDirs.ECOSYSTEM_DIRS.has('.zig-cache') && dependencyDirs.ECOSYSTEM_DIRS.has('zig-out'));
+  assert.match(graphOf(zig).reason, /build\.zig, build\.zig\.zon.*whole suite/);
+  assert.deepEqual(runnerOf(zig).runner.command, ['zig', 'build', 'test']);
+  assert.equal(toolchains.CACHE_SEEDS.zig.command.join(' '), 'zig build --fetch');
+  assert.equal(registry.actionsTools().includes('zig'), true);
+
+  // Delphi stays light: recognised files and regenerable folders, no lockfile, no toolchain setup.
+  const delphi = fixtureFiles('delphi');
+  assert.equal(
+    lockfiles.projectLockfile(path => delphi.has(path)),
+    undefined,
+  );
+  for (const [path, name] of [
+    ['GreeterUnit.pas', 'GreeterUnit'],
+    ['Greeter.dpr', 'Greeter'],
+    ['MainForm.dfm', 'MainForm'],
+    ['tests/GreeterTests.pas', 'tests/GreeterTests'],
+  ])
+    assert.equal(stem(path), name, path);
+  assert.ok(
+    dependencyDirs.ECOSYSTEM_DIRS.has('__history') && dependencyDirs.ECOSYSTEM_DIRS.has('__recovery'),
+  );
+  assert.ok(output('Win32') && output('Win64'));
+  // `Win32` beside no project file is not build output (it only counts beside a .dproj).
+  assert.ok(
+    !registry
+      .projectOutputDirs()
+      .some(candidate => candidate.beside.test('A.csproj') && candidate.dirs.has('Win32')),
+  );
+  assert.equal(graphOf(delphi).status, 'unknown');
+  assert.deepEqual(runnerOf(delphi).runner.command, ['build-and-test.cmd']);
+  assert.ok(!toolchains.ACTIONS_TOOLS.some(tool => /delphi|pascal/.test(tool)));
+});

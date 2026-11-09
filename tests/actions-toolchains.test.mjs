@@ -60,6 +60,9 @@ const toolchainCases = [
   ],
   ['dotnet', { tool: 'dotnet', version: '8.0.x' }, { tool: 'dotnet', versionFile: 'global.json' }],
   ['rust', { tool: 'rust', version: '1.82.0' }, { tool: 'rust', versionFile: 'crates/rust-toolchain.toml' }],
+  // Zig and CMake declare a version only (their actions read no Candidate file).
+  ['zig', { tool: 'zig', version: '0.14.0' }, undefined],
+  ['cmake', { tool: 'cmake', version: '3.31.6' }, undefined],
 ];
 test('generated workflow snapshot per toolchain, by version and from a file', () => {
   assert.deepEqual(
@@ -68,8 +71,133 @@ test('generated workflow snapshot per toolchain, by version and from a file', ()
   );
   for (const [tool, byVersion, byFile] of toolchainCases) {
     snapshot(`toolchain-${tool}.yml`, githubActionsWorkflow('ubuntu-latest', { toolchains: [byVersion] }));
-    snapshot(`toolchain-${tool}-file.yml`, githubActionsWorkflow('ubuntu-latest', { toolchains: [byFile] }));
+    if (byFile)
+      snapshot(
+        `toolchain-${tool}-file.yml`,
+        githubActionsWorkflow('ubuntu-latest', { toolchains: [byFile] }),
+      );
   }
+});
+
+test('Zig and CMake (Issue 345ebcb9): version only, pinned actions that never write a cache, own hosted blocks', async () => {
+  const { hostedLateToolBlocks, declaredStepsInstalled, hostedWorkflowBlocks } =
+    await import('../dist/actions-toolchains-hosted.js');
+  const parse = toolchains => actionsToolchainsSchema.safeParse(toolchains).success;
+  assert.equal(
+    parse([
+      { tool: 'zig', version: '0.14.0' },
+      { tool: 'cmake', version: '3.31.6' },
+    ]),
+    true,
+  );
+  assert.equal(parse([{ tool: 'zig', versionFile: 'build.zig.zon' }]), false);
+  assert.equal(parse([{ tool: 'cmake', versionFile: 'CMakeLists.txt' }]), false);
+  assert.equal(parse([{ tool: 'zig', version: '0.14.0', distribution: 'zulu' }]), false);
+  // The action's own cache would save from inside the check; Forge's cache step is the only writer.
+  const workflow = githubActionsWorkflow('ubuntu-latest', {
+    toolchains: [
+      { tool: 'zig', version: '0.14.0' },
+      { tool: 'cmake', version: '3.31.6' },
+    ],
+  });
+  assert.match(
+    workflow,
+    /uses: mlugg\/setup-zig@[0-9a-f]{40} # v2\.2\.1\n {8}with:\n {10}version: "0\.14\.0"\n {10}use-cache: false/,
+  );
+  assert.match(
+    workflow,
+    /uses: lukka\/get-cmake@[0-9a-f]{40} # v4\.4\.2\n {8}with:\n {10}cmakeVersion: "3\.31\.6"\n {10}useCloudCache: false/,
+  );
+  // Hosted: the pinned declaration reaches the workflow through the plan outputs.
+  assert.deepEqual(hostedToolchains({ toolchains: [{ tool: 'zig', version: '0.14.0' }] }), {
+    zig: { version: '0.14.0', versionFile: '' },
+  });
+  // The blocks every runner repository already installed do not change; the new tools have their own.
+  const installed = hostedWorkflowBlocks().join('\n');
+  assert.doesNotMatch(installed, /setup-zig|get-cmake/);
+  const zig = { toolchains: [{ tool: 'zig', version: '0.14.0' }] };
+  assert.equal(declaredStepsInstalled(installed, { toolchains: [{ tool: 'go', version: '1.23' }] }), true);
+  assert.equal(declaredStepsInstalled(installed, zig), false);
+  assert.equal(declaredStepsInstalled(`${installed}\n${hostedLateToolBlocks('zig')[0]}`, zig), false);
+  assert.equal(declaredStepsInstalled(`${installed}\n${hostedLateToolBlocks('zig').join('\n')}`, zig), true);
+  assert.equal(
+    declaredStepsInstalled(`${installed}\n${hostedLateToolBlocks('zig').join('\n')}`, {
+      toolchains: [{ tool: 'cmake', version: '3.31.6' }],
+    }),
+    false,
+  );
+  for (const tool of ['zig', 'cmake'])
+    for (const block of hostedLateToolBlocks(tool)) {
+      assert.deepEqual(actionPinFindings(tool, block), [], tool);
+      assert.match(block, new RegExp(`if: .*fromJSON\\(.*toolchains.*\\)\\.${tool}\\n`));
+    }
+});
+
+test('vcpkg, conan and zig cache presets: restored from the lockfiles, only Zig is seeded (Candidate-free)', () => {
+  assert.deepEqual(CACHE_PRESETS.vcpkg.paths, ['~/.cache/vcpkg/archives']);
+  assert.deepEqual(CACHE_PRESETS.conan.paths, ['~/.conan2/p']);
+  assert.deepEqual(CACHE_PRESETS.zig.paths, ['~/.cache/zig/p']);
+  assert.deepEqual(CACHE_SEEDS.zig, {
+    lockfile: 'build.zig.zon',
+    manifests: ['build.zig'],
+    command: ['zig', 'build', '--fetch'],
+  });
+  assert.equal(CACHE_SEEDS.vcpkg, undefined);
+  assert.equal(CACHE_SEEDS.conan, undefined);
+  const files = [
+    { path: 'svc/build.zig.zon', blob: 'b1' },
+    { path: 'vcpkg.json', blob: 'b2' },
+    { path: 'src/main.zig', blob: 'b3' },
+  ];
+  const input = { projectId: 'p', files, save: true, os: 'Linux', arch: 'X64' };
+  const zig = hostedDepsCache({ cache: { presets: ['zig'] } }, input);
+  assert.equal(zig.seed, 'zig');
+  assert.notEqual(
+    zig.key,
+    hostedDepsCache(
+      { cache: { presets: ['zig'] } },
+      { ...input, files: [{ ...files[0], blob: 'b9' }, ...files.slice(1)] },
+    ).key,
+  );
+  assert.equal(
+    zig.key,
+    hostedDepsCache({ cache: { presets: ['zig'] } }, { ...input, files: files.slice(0, 1) }).key,
+    'only lockfiles are keyed',
+  );
+  const vcpkg = hostedDepsCache({ cache: { presets: ['vcpkg', 'conan'] } }, input);
+  assert.equal(vcpkg.seed, '');
+  assert.match(vcpkg.paths, /vcpkg\/archives\n~\/\.conan2\/p/);
+});
+
+test('the Zig seed copies only build.zig.zon and build.zig into an empty folder and runs zig build --fetch', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-zig-seed-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const repo = join(root, 'repo'),
+    bin = join(root, 'bin'),
+    log = join(root, 'log.json');
+  for (const dir of [join(repo, 'src'), bin]) mkdirSync(dir, { recursive: true });
+  for (const [name, text] of [
+    ['build.zig.zon', '.{}'],
+    ['build.zig', 'pub fn build() void {}'],
+    ['src/main.zig', 'pub fn main() void {}'],
+    ['.npmrc', 'repository configuration'],
+  ])
+    writeFileSync(join(repo, name), text);
+  writeFileSync(
+    join(bin, 'zig'),
+    `#!/bin/sh\nnode -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({cwd: process.cwd(), files: require("fs").readdirSync(".").sort(), args: process.argv.slice(2)}))' ${JSON.stringify(log)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  const result = spawnSync(process.execPath, ['-e', DEPS_SEED_PROGRAM, repo, 'zig'], {
+    env: { PATH: `${bin}:${dirname(process.execPath)}:/usr/bin:/bin` },
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const ran = JSON.parse(readFileSync(log, 'utf8'));
+  assert.deepEqual(ran.files, ['build.zig', 'build.zig.zon']);
+  assert.deepEqual(ran.args, ['build', '--fetch']);
+  assert.ok(!ran.cwd.startsWith(repo), 'the download runs outside the Candidate');
+  assert.match(result.stdout, /Forge seed: zig build\.zig\.zon downloaded/);
 });
 
 test('generated workflow snapshot per cache preset: restored before the check, seeded Candidate-free only by main', () => {

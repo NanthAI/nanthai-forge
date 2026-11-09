@@ -291,7 +291,80 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
   { id: 'swift', code: 'swift' },
   { id: 'elixir', code: 'exs?' },
   { id: 'dart', code: 'dart' },
-  { id: 'c', code: 'c|cc|cpp|h|hpp' },
+  {
+    // C and C++ (Issue 345ebcb9). No package graph: the build file is a manifest Forge does not read, so
+    // affected tests widen to a full run with the stated reason (docs/agents/ecosystems.md).
+    id: 'c',
+    code: 'c|cc|cpp|cxx|h|hh|hpp|hxx',
+    managers: [
+      { name: 'cmake', manifests: ['CMakeLists.txt'] },
+      { name: 'meson', manifests: ['meson.build'] },
+      { name: 'conan', manifests: ['conanfile.txt', 'conanfile.py'], lockfiles: ['conan.lock'] },
+      { name: 'vcpkg', manifests: ['vcpkg.json'], unpinned: ['vcpkg-configuration.json'] },
+    ],
+    regenerableDirs: [
+      'cmake-build-debug',
+      'cmake-build-release',
+      'cmake-build-relwithdebinfo',
+      'cmake-build-minsizerel',
+      'builddir',
+      'vcpkg_installed',
+    ],
+    actions: {
+      tool: 'cmake',
+      // Restore only: a recipe or port can run repository code, so Forge never seeds these.
+      cache: {
+        vcpkg: {
+          paths: ['~/.cache/vcpkg/archives'],
+          lockfiles: ['**/vcpkg.json', '**/vcpkg-configuration.json'],
+        },
+        conan: {
+          paths: ['~/.conan2/p'],
+          lockfiles: ['**/conan.lock', '**/conanfile.txt', '**/conanfile.py'],
+        },
+      },
+    },
+  },
+  {
+    // Zig (Issue 345ebcb9). `build.zig.zon` pins every dependency by content hash, so it is the lockfile.
+    id: 'zig',
+    code: 'zig',
+    managers: [{ name: 'zig', manifests: ['build.zig', 'build.zig.zon'], lockfiles: ['build.zig.zon'] }],
+    regenerableDirs: ['.zig-cache', 'zig-out'],
+    actions: {
+      tool: 'zig',
+      cache: {
+        zig: {
+          paths: ['~/.cache/zig/p'],
+          lockfiles: ['**/build.zig.zon'],
+          // `zig build --fetch` only fetches and hash-checks the dependency tree; it never compiles or
+          // runs build.zig (checked with a build.zig that cannot compile), so no repository code runs.
+          seed: { lockfile: 'build.zig.zon', manifests: ['build.zig'], command: ['zig', 'build', '--fetch'] },
+        },
+      },
+    },
+  },
+  {
+    // Delphi, light (Issue 345ebcb9): recognised source and regenerable output only. No toolchain setup
+    // (the compiler is licensed and Windows-only), no package manager, no check environment.
+    id: 'delphi',
+    code: 'pas|dpr|dpk|dfm|fmx',
+    regenerableDirs: ['__history', '__recovery'],
+    projectOutputDirs: {
+      dirs: [
+        'Win32',
+        'Win64',
+        'Win64x',
+        'OSX64',
+        'OSXARM64',
+        'Linux64',
+        'Android',
+        'Android64',
+        'iOSDevice64',
+      ],
+      beside: 'dproj',
+    },
+  },
   { id: 'json', mergeGate: { extensions: 'json', grammar: 'json' } },
 ];
 

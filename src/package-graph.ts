@@ -153,7 +153,7 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
     return {
       status: 'unknown',
       reason: manifests.length
-        ? `no package in the manifests Forge read (${manifests.slice(0, 4).join(', ')}${manifests.length > 4 ? ', …' : ''})${unplaced.length ? `: ${unplaced.join('; ')}` : ''}`.slice(
+        ? `no package in the manifests Forge read (${manifests.slice(0, 4).join(', ')}${manifests.length > 4 ? ', …' : ''})${unplaced.length ? `: ${unplaced.join('; ')}` : ': Forge has no package graph for them, so every change runs the whole suite'}`.slice(
             0,
             400,
           )

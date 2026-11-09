@@ -1,0 +1,1 @@
+{"preflight":{"tests":{"glob":["tests/*.pas"],"command":["build-and-test.cmd"]}}}

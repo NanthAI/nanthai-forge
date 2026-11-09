@@ -1,0 +1,14 @@
+unit GreeterUnit;
+
+interface
+
+function Greet: string;
+
+implementation
+
+function Greet: string;
+begin
+  Result := 'hello';
+end;
+
+end.

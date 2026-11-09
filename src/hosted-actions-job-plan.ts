@@ -245,7 +245,7 @@ export async function prepareActionsJob(
   };
   const recipe = hostedActionsRecipeSchema.parse({ pin: checkPin(pins), ...pins });
   invariant(
-    !recipe.actions || declaredStepsInstalled(workflow),
+    !recipe.actions || declaredStepsInstalled(workflow, recipe.actions),
     'ACTIONS_WORKFLOW_OUTDATED',
     ACTIONS_WORKFLOW_OUTDATED,
   );

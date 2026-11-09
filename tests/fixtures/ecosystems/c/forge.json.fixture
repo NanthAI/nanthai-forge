@@ -1,0 +1,1 @@
+{"preflight":{"tests":{"glob":["tests/*_test.cpp"],"command":["ctest","--test-dir","build","--output-on-failure"]}}}

@@ -1,0 +1,100 @@
+name: Forge check
+run-name: forge-check/${{ inputs.runId }}
+on:
+  workflow_dispatch:
+    inputs:
+      runId:
+        required: true
+        type: string
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  shard:
+    if: ${{ inputs.plan != '[]' }}
+    name: forge-shard-${{ matrix.shard }}
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.plan) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            ~/.cache/zig/p
+          key: forge-deps-v1-zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/build.zig.zon') }}
+      - run: node scripts/forge-check.mjs
+        env:
+          FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
+          FORGE_ACTIONS_SHARD: ${{ matrix.shard }}
+  static:
+    name: forge-static
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            ~/.cache/zig/p
+          key: forge-deps-v1-zig-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/build.zig.zon') }}
+      - if: steps.forge-deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        timeout-minutes: 15
+        run: node -e "$FORGE_SEED_PROGRAM" . "zig"
+        env:
+          FORGE_SEED_PROGRAM: |
+            const { spawnSync } = require('child_process'), fs = require('fs'), path = require('path'), os = require('os');
+            const seeds = {"go":{"lockfile":"go.sum","manifests":["go.mod"],"command":["go","mod","download"]},"npm":{"lockfile":"package-lock.json","manifests":["package.json"],"command":["npm","ci","--ignore-scripts","--no-audit","--no-fund"]},"pnpm":{"lockfile":"pnpm-lock.yaml","manifests":[],"command":["pnpm","fetch","--ignore-scripts","--ignore-pnpmfile"]},"pip":{"lockfile":"requirements*.txt","manifests":[],"command":["python3","-m","pip","download","--only-binary=:all:","--dest","wheels","-r","{lockfile}"]},"zig":{"lockfile":"build.zig.zon","manifests":["build.zig"],"command":["zig","build","--fetch"]}};
+            const root = path.resolve(process.argv[1]), presets = String(process.argv[2] || '').split(' ').filter(p => seeds[p]);
+            const skip = new Set(['.git', '.forge', 'node_modules', 'vendor', 'target', 'build', 'dist', '.venv', 'venv']);
+            const match = (glob, name) => { const [head, tail = ''] = glob.split('*'); return glob.includes('*') ? name.length >= head.length + tail.length && name.startsWith(head) && name.endsWith(tail) : name === glob; };
+            const found = [];
+            (function walk(dir, depth) {
+              if (depth > 8 || found.length >= 64) return;
+              for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+                if (entry.isDirectory() && !skip.has(entry.name)) walk(path.join(dir, entry.name), depth + 1);
+                else if (entry.isFile()) for (const p of presets) if (match(seeds[p].lockfile, entry.name)) found.push([p, path.join(dir, entry.name)]);
+              }
+            })(root, 0);
+            for (const [preset, lockfile] of found.slice(0, 64)) {
+              const seed = seeds[preset], dir = path.dirname(lockfile), label = preset + ' ' + (path.relative(root, lockfile) || '.');
+              const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'forge-seed-'));
+              try {
+                for (const name of [path.basename(lockfile), ...seed.manifests]) if (fs.existsSync(path.join(dir, name))) fs.copyFileSync(path.join(dir, name), path.join(temp, name));
+                const args = seed.command.map(a => (a === '{lockfile}' ? path.basename(lockfile) : a));
+                const result = spawnSync(args[0], args.slice(1), { cwd: temp, stdio: ['ignore', 'inherit', 'inherit'], timeout: 600000 });
+                console.log('Forge seed: ' + label + (result.status === 0 ? ' downloaded' : ' skipped (' + (result.error ? result.error.code : 'exit ' + result.status) + ')'));
+              } finally {
+                fs.rmSync(temp, { recursive: true, force: true });
+              }
+            }
+            console.log('Forge seed: ' + found.length + ' lockfile' + (found.length === 1 ? '' : 's') + ' for ' + (presets.join(', ') || 'no seeded preset'));
+      - if: steps.forge-deps.outputs.cache-hit != 'true' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cache/zig/p
+          key: ${{ steps.forge-deps.outputs.cache-primary-key }}
+      - run: node scripts/forge-check.mjs
+        env:
+          FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
+          FORGE_ACTIONS_SHARD: static

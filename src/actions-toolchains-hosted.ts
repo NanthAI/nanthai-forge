@@ -15,7 +15,7 @@ import {
  * recipe and writes these two outputs; the workflow's steps run only for declared tools. */
 export type HostedToolchains = Partial<
   Record<
-    'go' | 'python' | 'java' | 'dotnet',
+    'go' | 'python' | 'java' | 'dotnet' | 'zig' | 'cmake',
     { version: string; versionFile: string; distribution?: string }
   > &
     Record<'rust', { version: string; directory: string }>
@@ -141,10 +141,35 @@ export const hostedWorkflowBlocks = () => [
   hostedDeclaredSteps('needs.hosted-plan.outputs') +
     hostedSeedSteps('needs.hosted-plan.outputs', "matrix.shard == 'static' && "),
 ];
+/** Setup steps of tools added after the workflow blocks above were installed (Zig, CMake). They are
+ * separate blocks so the blocks above, and every installed `forge-check.yml`, stay byte-identical:
+ * a declaration that names such a tool needs these in the workflow, any other declaration does not.
+ * One block per job kind, in the same places as the blocks above (before the cache restore). */
+export const HOSTED_LATE_TOOLS = ['zig', 'cmake'] as const;
+export function hostedLateToolBlocks(tool: (typeof HOSTED_LATE_TOOLS)[number]) {
+  const block = (outputs: string, when: string) => {
+    const t = `fromJSON(${outputs}.toolchains || '{}')`;
+    const inputs =
+      tool === 'zig'
+        ? `          version: \${{ ${t}.zig.version }}\n          use-cache: false\n`
+        : `          cmakeVersion: \${{ ${t}.cmake.version }}\n          useCloudCache: false\n`;
+    return `      - if: ${when}${t}.${tool}\n        uses: ${TOOLCHAIN_ACTIONS[tool]}\n        with:\n${inputs}`;
+  };
+  return [block('steps.plan.outputs', HOSTED_PLAN_WHEN), block('needs.hosted-plan.outputs', '')];
+}
 /** A runner repository whose forge-check.yml predates these steps would run a declared check
- * without its toolchains; planning refuses instead and names the reinstall. */
-export function declaredStepsInstalled(workflow: string | undefined) {
-  return workflow === undefined || hostedWorkflowBlocks().every(block => workflow.includes(block));
+ * without its toolchains; planning refuses instead and names the reinstall. `declaration` adds the
+ * blocks of the late tools it names. */
+export function declaredStepsInstalled(
+  workflow: string | undefined,
+  declaration?: { toolchains?: readonly { tool: string }[] | undefined },
+) {
+  if (workflow === undefined) return true;
+  const late = HOSTED_LATE_TOOLS.filter(tool => declaration?.toolchains?.some(t => t.tool === tool));
+  return (
+    hostedWorkflowBlocks().every(block => workflow.includes(block)) &&
+    late.every(tool => hostedLateToolBlocks(tool).every(block => workflow.includes(block)))
+  );
 }
 export const ACTIONS_WORKFLOW_OUTDATED =
   "This check declares toolchains or cache, but the runner repository's forge-check.yml has no declared-setup steps. Reinstall forge-check.yml (docs/operations/github-actions-checks.md#toolchains-and-dependency-cache).";

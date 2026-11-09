@@ -55,7 +55,7 @@ const retryTags = new Set(['flakyFailure', 'flakyError', 'rerunFailure', 'rerunE
 /** The registry's code extensions (src/ecosystems.ts), written out: this module ships self-contained in
  * the check payload (src/semantic-check-command.ts), so it imports nothing local. A test keeps it equal. */
 export const JUNIT_CODE_FILE =
-  /\.(?:[cm]?[jt]sx?|rs|go|py|rb|php|java|kts?|scala|cs|swift|exs?|dart|c|cc|cpp|h|hpp)$/i;
+  /\.(?:[cm]?[jt]sx?|rs|go|py|rb|php|java|kts?|scala|cs|swift|exs?|dart|c|cc|cpp|cxx|h|hh|hpp|hxx|zig|pas|dpr|dpk|dfm|fmx)$/i;
 const code = JUNIT_CODE_FILE;
 /** Python test modules named by dotted classname (pytest xunit2: `tests.test_api.TestUser`). */
 const pythonModule = /^(?:test_\w+|\w+_test)$/;

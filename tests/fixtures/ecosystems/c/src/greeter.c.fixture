@@ -1,0 +1,2 @@
+#include "greeter.h"
+const char *greet(void) { return "hello"; }

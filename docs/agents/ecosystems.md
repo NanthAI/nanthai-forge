@@ -51,7 +51,11 @@ Some fields name code that lives in a module of its own. A new value there needs
   `src/actions-toolchains.ts`. Schema snapshots read literals only; a test keeps the names equal to
   the registry's.
 - A new Actions `tool`: `ACTIONS_TOOLS`, its pinned action and its setup steps. Generated workflows
-  change, so an owner checks the workflow diff.
+  change, so an owner checks the workflow diff. A tool added after a runner repository installed its
+  `forge-check.yml` (Zig, CMake) gets its own hosted blocks in `HOSTED_LATE_TOOLS`
+  (`src/actions-toolchains-hosted.ts`) instead of changing `hostedWorkflowBlocks()`: the installed
+  workflow stays valid for every other declaration, and a declaration naming the tool is refused with
+  `ACTIONS_WORKFLOW_OUTDATED` until the workflow carries its blocks.
 - Build inputs that make a first check risky: the next `first-check-risk` rule version. Earlier
   versions are frozen because plans pin them.
 
@@ -66,7 +70,58 @@ Some fields name code that lives in a module of its own. A new value there needs
 | JSON | `JSON.parse` | — |
 | Go | none | yes |
 | C# | none | yes |
-| Kotlin, Scala, Swift, Dart, Elixir, Ruby, PHP, C/C++ | none | none |
+| Kotlin, Scala, Swift, Dart, Elixir, Ruby, PHP, C/C++, Zig, Delphi | none | none |
 
 "None" means a text merge is accepted on the check's evidence alone. An entry adds a gate when a
 small grammar exists.
+
+## C/C++, Zig and Delphi
+
+Fixtures: `tests/fixtures/ecosystems/{c,zig,delphi}` (every file stored as `NAME.fixture`, so Forge's own
+repository never mistakes a fixture for a real build file), read by the last test of
+`tests/forge-only-rules.test.mjs`; the Actions side is in `tests/actions-toolchains.test.mjs`.
+
+| | C/C++ (`c`) | Zig (`zig`) | Delphi (`delphi`) |
+| --- | --- | --- | --- |
+| Source files | `c cc cpp cxx h hh hpp hxx` | `zig` | `pas dpr dpk dfm fmx` |
+| Detected by | `CMakeLists.txt`, `meson.build`, `conanfile.txt`/`.py`, `vcpkg.json` | `build.zig`, `build.zig.zon` | the source files above |
+| Lockfile (pins a check plan) | `conan.lock` | `build.zig.zon` (pins each dependency by hash) | none |
+| Dependency state, not pinned | `vcpkg-configuration.json` | | |
+| Regenerable (only when ignored) | `cmake-build-*`, `builddir`, `vcpkg_installed` (`build` is already reclaimed with other build output) | `.zig-cache`, `zig-out` | `__history`, `__recovery`; `Win32`, `Win64` and the other platform folders beside a `.dproj` |
+| Test command | the repo's own: declare it in `forge.json` `preflight.tests` (`ctest --test-dir build`, `meson test -C builddir`) | the repo's own (`zig build test`) | the repo's own |
+| Actions tool | `cmake` (`lukka/get-cmake`: CMake and Ninja), `version` only | `zig` (`mlugg/setup-zig`), `version` only | none |
+| Actions cache | `vcpkg` (`~/.cache/vcpkg/archives`), `conan` (`~/.conan2/p`): restored, never seeded | `zig` (`~/.cache/zig/p`), seeded with `zig build --fetch` | none |
+
+**No package graph.** Forge reads no CMake, Meson, Conan, vcpkg, Zig or Delphi manifest, so affected
+tests cannot be narrowed: the package graph is unknown and the whole suite runs. The reason is stated
+where the selection is reported (`package graph unknown: no package in the manifests Forge read
+(CMakeLists.txt, …): Forge has no package graph for them, so every change runs the whole suite`).
+Declare the project's own test command in `forge.json` `preflight.tests` to run it as the preflight
+runner; Forge never guesses `ctest` or `zig build test`.
+
+**Cache trust.** The vcpkg and Conan entries hold dependency packages that the package manager
+fetched or built from the declared dependencies (never the project's own `build/`). Their resolvers
+(ports, recipes) can run repository code, so Forge only restores them; a project that wants them warm
+saves them from its own default-branch workflow. The Zig seed is safe to run Candidate-free:
+`zig build --fetch` fetches and hash-checks the dependency tree and never compiles or runs
+`build.zig` (checked with a `build.zig` that cannot compile).
+
+**Zig and CMake actions** take `version` only (`0.14.0`, `3.31.6`, `latest`); their own caches are
+turned off (`use-cache: false`, `useCloudCache: false`) so that Forge's cache step is the only
+writer.
+
+**Delphi is light, and these are its limits.**
+
+- Forge recognises Delphi source and form files (they count as code for test-name matching and
+  change classification) and reclaims its regenerable folders. Nothing more.
+- No toolchain setup: the Delphi compiler is licensed and Windows-only, so Forge installs none and
+  declares no Actions tool for it. A project runs its tests with its own command on a runner that
+  already has the compiler (declare it in `forge.json` `preflight.tests`), typically a self-hosted
+  Windows runner.
+- No lockfile and no package manager (GetIt and Boss are not read), no code map beyond file
+  recognition, no merge parse gate and no duplicate-import fix-up.
+- Compiled output is recognised by folder only (`Win32/Debug`, `Win64/Release` under the platform
+  folders beside a `.dproj`). Loose `*.dcu`, `*.exe` and `*.res` files are not reclaimed by name:
+  keep them in the project's `.gitignore`.
+- A Delphi build file (`.dproj`, `.groupproj`) is not yet a first-check risk input
+  (`first-check-risk-v4` names none), so a first check after one changes is not flagged.

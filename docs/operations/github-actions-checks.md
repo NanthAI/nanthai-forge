@@ -1173,9 +1173,11 @@ reading every check:
   | `java` | `actions/setup-java` v6.1.0; `distribution` defaults to `temurin` | `.java-version`, `.tool-versions` |
   | `dotnet` | `actions/setup-dotnet` v6.0.0 | `global.json` |
   | `rust` | `rustup toolchain install` (rustup 1.28 or later, preinstalled on GitHub images) | `rust-toolchain.toml`, `rust-toolchain` |
+  | `zig` | `mlugg/setup-zig` v2.2.1, its own cache off | none: `version` only |
+  | `cmake` | `lukka/get-cmake` v4.4.2 (CMake and Ninja), its own cache off | none: `version` only |
 
 - **`actionsCache`**: `presets` from `go`, `cargo`, `pip`, `uv`, `poetry`, `maven`, `gradle`, `nuget`,
-  `npm`, `pnpm` and `yarn`. One entry holds the presets' download caches under the runner's home
+  `npm`, `pnpm`, `yarn`, `zig`, `vcpkg` and `conan`. One entry holds the presets' download caches under the runner's home
   directory, never build output or Candidate source. Its key is the presets, the runner OS and
   architecture and a hash of the lockfiles: each preset's defaults (for example `**/go.sum`,
   `**/Cargo.lock`), or the `lockfiles` globs the declaration lists instead. Entries use the free
@@ -1201,8 +1203,9 @@ Candidate user too. A seed that fails skips that lockfile and never fails the ch
 | `npm` | `npm ci --ignore-scripts --no-audit --no-fund` beside `package-lock.json` and `package.json` |
 | `pnpm` | `pnpm fetch --ignore-scripts --ignore-pnpmfile` beside `pnpm-lock.yaml` |
 | `pip` | `pip download --only-binary=:all:` of each `requirements*.txt` (wheels only, so no build code runs) |
+| `zig` | `zig build --fetch` beside `build.zig.zon` and `build.zig` (fetches and hash-checks; never compiles `build.zig`) |
 
-The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`) are restored only:
+The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`, `vcpkg`, `conan`) are restored only:
 their resolvers can run repository code or configured programs, so Forge does not seed them yet, and
 a check that declares them downloads its own dependencies on every run. Every other check restores
 read-only. Lane code never writes an entry that another Lane restores.
@@ -1218,7 +1221,9 @@ read-only. Lane code never writes an entry that another Lane restores.
   `hostedWorkflowBlocks()` (`src/actions-toolchains-hosted.ts`) run only for declared tools,
   after the Candidate is in place and before the check step. If the installed workflow lacks those steps, planning a
   declared check fails with `ACTIONS_WORKFLOW_OUTDATED` instead of running without its
-  toolchains.
+  toolchains. The `zig` and `cmake` tools have their own blocks (`hostedLateToolBlocks()`), required
+  only by a declaration that names them, so a runner repository that predates them keeps working for
+  every other declaration.
 
 A connected repository reinstalls `forge-check.yml` only when one of its checks declares
 toolchains or cache. Undeclared checks generate byte-identical workflows and need no
