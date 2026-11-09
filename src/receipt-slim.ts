@@ -94,20 +94,22 @@ const fileList = (items: Json[]): string[] => [...new Set(items.map(item => Stri
 /** Who an advisory notice is with (d730121f): up to 3 peer Lanes as `LANE8 handle/slug: file, file`,
  * so a peer agent run and its files are named without a follow-up read. */
 const peerList = (items: Json[]): string[] => {
-  const peers = new Map<string, { actor: string; files: string[] }>();
+  const peers = new Map<string, { actor: string; files: string[]; phase?: string }>();
   for (const item of items)
     for (const peer of Array.isArray(item.with) ? (item.with as Json[]) : []) {
       if (typeof peer.lane !== 'string') continue;
       const entry = peers.get(peer.lane) ?? { actor: String(peer.actor ?? ''), files: [] };
       const file = String(item.file);
       if (!entry.files.includes(file)) entry.files.push(file);
+      // D2: where the peer's landing is (phase, ETA), once per peer.
+      if (typeof item.peer === 'string') entry.phase ??= item.peer;
       peers.set(peer.lane, entry);
     }
   return [...peers]
     .slice(0, 3)
     .map(
       ([lane, peer]) =>
-        `${lane.slice(0, 8)} ${peer.actor}: ${peer.files.slice(0, 3).join(', ')}${peer.files.length > 3 ? ', ...' : ''}`,
+        `${lane.slice(0, 8)} ${peer.actor}: ${peer.files.slice(0, 3).join(', ')}${peer.files.length > 3 ? ', ...' : ''}${peer.phase ? ` (${peer.phase})` : ''}`,
     );
 };
 const sameOperation = (resolved: unknown, operationId: unknown) => {
@@ -131,6 +133,8 @@ function briefOverlaps(out: Json) {
           count: notice.count,
           files: fileList(items),
           ...(peers.length ? { with: peers } : {}),
+          // D2: the one stack command is the actionable part of an advisory notice.
+          ...(notice.stack ? { stack: notice.stack } : {}),
         };
     delete out.unacknowledgedOverlaps;
   } else if (overlaps && !overlaps.count && !overlaps.blockingCount) delete out.unacknowledgedOverlaps;

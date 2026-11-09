@@ -15,7 +15,7 @@ import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
 import { inPlaceResolution, refuseUnsavedResolution } from './hosted-conflict-precheck.js';
 import { agentSourceOutcome, checkLogsKey, checkSelection } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
@@ -195,6 +195,34 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   });
 }
 
+/** A stacked Lane whose parent's landing already failed would only queue a landing that fails with
+ * DEPENDENCY_NOT_LANDED (and dropping the wait would land the parent's failed changes). Its next sync
+ * re-pins it to main, taking the parent's changes out (D2, Issue 1eb42254): say so before submitting.
+ * One status read, only for a Lane stacked on a landing. */
+export async function refuseFailedStackParent(session: HostedAgentSession, laneId: string, entryId: string) {
+  let parent: { phase?: string; error?: { code?: string } | null } | undefined;
+  try {
+    parent = (
+      await session.query<{ request?: { phase?: string; error?: { code?: string } | null } }>(
+        'projectHostedLanding:status',
+        { submissionId: entryId },
+      )
+    ).request;
+  } catch {
+    return; // Unknown: the landing's own dependency wait still decides.
+  }
+  if (parent?.phase !== 'terminal-failed') return;
+  const sync = { laneId };
+  throw new ForgeError(
+    'STACK_PARENT_FAILED',
+    `This Lane is stacked on submission ${entryId}, which did not land (${parent.error?.code ?? 'failed'}). Re-pin onto main first: sync takes the parent's changes out and keeps yours, then land --save again; that landing checks once.`,
+    undefined,
+    {
+      next: { action: 'sync', ...sync },
+      command: `nforge agent ${shellQuote(session.root)} sync ${shellQuote(JSON.stringify(sync))}`,
+    },
+  );
+}
 async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   const operationId = session.journal.operationId,
     epoch = session.capabilities.authority.epoch;
@@ -221,7 +249,9 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
   if (!command.after && !command.candidateId && !command.inputs)
     command.after = await session.journal.retain('stack-parent-entry', async () => {
       const selected = await selectAgentLane(session, command.laneId);
-      return selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
+      const entryId = selected.stack && !selected.stack.detached ? (selected.stack.entryId ?? null) : null;
+      if (entryId) await refuseFailedStackParent(session, selected.laneId, entryId);
+      return entryId;
     });
   const marker = session.marker();
   const resolvedHere =

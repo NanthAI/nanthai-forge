@@ -45,6 +45,16 @@ const advice = z.object({
   board: boardDeliverySchema.optional(),
   /** A stacked Lane whose parent saved newer work (Issue f61e9339): the next save restacks when `ready`. */
   stack: stackHintSchema.optional(),
+  /** D2 (Issue 1eb42254): build on an admitted peer's pending head instead of repairing a conflict later. */
+  stackOffer: z
+    .looseObject({
+      peerLaneId: z.string(),
+      submissionId: z.string(),
+      mode: z.enum(['offer', 'auto']),
+      command: z.string(),
+      text: z.string(),
+    })
+    .optional(),
 });
 /** Advice never changes a save receipt; observation failures remain explicitly unknown. */
 export async function readHostedOverlapAdvice(
@@ -54,6 +64,8 @@ export async function readHostedOverlapAdvice(
   items?: number,
   presence?: { since?: number },
   board?: { after: number },
+  /** Declared scope of a fresh Lane (start scope.paths); sent only to servers with overlap-scope. */
+  scope?: string[],
 ) {
   try {
     return parseHostedResponse(
@@ -64,6 +76,7 @@ export async function readHostedOverlapAdvice(
         ...(items ? { items } : {}),
         ...(presence ? { presence } : {}),
         ...(board ? { board } : {}),
+        ...(scope?.length ? { scope } : {}),
       }),
     );
   } catch (error) {

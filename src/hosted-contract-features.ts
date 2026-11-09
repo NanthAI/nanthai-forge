@@ -84,6 +84,13 @@ export const hostedContractFeatures = [
    * `submitted` while the server settles the save on a scheduled step; the client's next command
    * reads its outcome and reports a failed settle. Without it the CLI waits for the settle. */
   'save-settle-background',
+  /** Coordination before the queue (D2, Issue 1eb42254): the overlap read takes `scope` (a fresh
+   * Lane's declared paths) and its reply may carry `stackOffer` and peer landing phases. Without it
+   * the CLI sends no scope. */
+  'overlap-scope',
+  /** projectHostedSync:prepare takes `stackOn` (D2): stack an unstacked Lane on an open peer's
+   * pending head. Without it the CLI refuses stackOn and the stacking:auto setting does nothing. */
+  'sync-stack-on',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

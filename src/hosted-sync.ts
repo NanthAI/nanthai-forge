@@ -33,6 +33,9 @@ export const syncRequestSchema = z.discriminatedUnion('kind', [
       /** Automatic restack onto the stack parent's newest saved head (Issue f61e9339): a conflict
        * changes nothing (no resolution Lane) and is marked so it is not retried for that head. */
       cleanOnly: z.literal(true).optional(),
+      /** Stack this unstacked Lane on an open peer Lane's pending head (D2, Issue 1eb42254; feature
+       * sync-stack-on): the peer must have a live landing, which this Lane's landing then waits for. */
+      stackOn: z.uuid().optional(),
       target: z.discriminatedUnion('kind', [
         z
           .object({ kind: z.literal('main'), head: object.shape.sha256, receiptId: z.string().min(1) })

@@ -2,6 +2,10 @@
 import { createHash } from 'node:crypto';
 import { shellQuote } from './agent-brief-render.js';
 import { actorLabel } from './agent-slug.js';
+import { peerPhaseText, type PeerLanding } from './hosted-overlap-coordination.js';
+import { owningPackage } from './hosted-coordination-client.js';
+import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
+import { hostedAgentRoot } from './hosted-agent-journal.js';
 
 type Item = {
   noticeId: string;
@@ -10,7 +14,18 @@ type Item = {
   reason?: string;
   [extra: string]: unknown;
 };
-type Advice = { unacknowledgedOverlaps: { count: number | null; coverage: string; items: Item[] } };
+type Advice = {
+  unacknowledgedOverlaps: { count: number | null; coverage: string; items: Item[] };
+  stackOffer?: { command: string; text: string; mode: string; peerLaneId: string } | undefined;
+};
+/** The checkout's paths for naming each overlapping file's package; none outside a Lane checkout. */
+function checkoutPaths(root: string): string[] {
+  try {
+    return readHostedLaneCheckout(hostedAgentRoot(root))?.state.files.map(file => file.path) ?? [];
+  } catch {
+    return [];
+  }
+}
 type Participant = { lane: string; actor: string; intent: string };
 const choices = {
   'accept-order': 'Keep your change; the peer Lane and yours will land in order.',
@@ -38,6 +53,10 @@ const command = (root: string, laneId: string, items: Item[], choice: keyof type
 export function hostedOverlapNotice(root: string, laneId: string, advice: Advice) {
   const { items, count, coverage } = advice.unacknowledgedOverlaps;
   if (!items.length) return undefined;
+  const paths = items.some(item => item.reason !== 'hot-file' && item.reason !== 'idle-lanes')
+    ? checkoutPaths(root)
+    : [];
+  const offer = advice.stackOffer;
   return {
     required: items.some(item => item.class === 'blocking'),
     summary: `${count ?? items.length} file overlap(s) between this Lane and other open Lanes. Blocking notices need an answer before landing; advisory notices need no answer.`,
@@ -48,10 +67,17 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
       class: item.class ?? 'advisory',
       reason: item.reason ?? 'unavailable',
       file: item.file,
+      // D2: the package that owns the file, and where the peer's landing is (phase, ETA).
+      ...(paths.length && owningPackage(paths, item.file) !== null
+        ? { package: owningPackage(paths, item.file)! }
+        : {}),
+      ...(item.peerLanding !== undefined
+        ? { peer: peerPhaseText(item.peerLanding as PeerLanding | null), peerLanding: item.peerLanding }
+        : {}),
       with: ((item.participants ?? []) as Participant[]).filter(p => p.lane !== laneId),
       // A cross-file note names a symbol in another file: its text says what, `with` says who.
       // The idle-Lanes summary has no single peer: its text is the whole notice.
-      ...((item.reason === 'cross-file-symbol' || item.reason === 'idle-lanes') &&
+      ...(['cross-file-symbol', 'idle-lanes', 'hot-file', 'declared-scope'].includes(item.reason ?? '') &&
       typeof item.text === 'string'
         ? { note: item.text }
         : {}),
@@ -59,6 +85,7 @@ export function hostedOverlapNotice(root: string, laneId: string, advice: Advice
     choices,
     acknowledge: command(root, laneId, items, 'accept-order'),
     routeAround: command(root, laneId, items, 'split'),
+    ...(offer ? { stack: { mode: offer.mode, text: offer.text, command: offer.command } } : {}),
   };
 }
 export type HostedOverlapNotice = NonNullable<ReturnType<typeof hostedOverlapNotice>>;
@@ -87,9 +114,19 @@ export function overlapBanner(notice: HostedOverlapNotice) {
         .filter((v, i, all) => all.indexOf(v) === i)
         .join('/')}] ${file} (${reasonLabel(items[0]!.reason)})`,
       ...items.flatMap(item =>
-        item.with.map(p => `      also changed in Lane ${p.lane} by ${actorLabel(p.actor)}: ${p.intent}`),
+        item.with.map(
+          p =>
+            `      also changed in Lane ${p.lane} by ${actorLabel(p.actor)}: ${p.intent}${item.peer ? ` (${item.peer})` : ''}`,
+        ),
       ),
+      ...(items[0]!.package ? [`      package: ${items[0]!.package}`] : []),
     ]),
+    ...(notice.stack
+      ? [
+          `Stack (${notice.stack.mode}): ${notice.stack.text}`,
+          ...(notice.stack.mode === 'offer' ? [`  ${notice.stack.command}`] : []),
+        ]
+      : []),
     ...(notice.count !== null && notice.count > notice.items.length
       ? [`  (${notice.count - notice.items.length} more; read Lane status for details)`]
       : []),

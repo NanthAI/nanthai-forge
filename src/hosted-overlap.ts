@@ -3,6 +3,7 @@ import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './host
 import { crossFileSymbolNote, symbolFacts, symbolNoteText } from './hosted-overlap-symbol-notes.js';
 import { digest } from './portable-hash.js';
 import { agentActor } from './agent-slug.js';
+import { hotFiles, inScope } from './hosted-overlap-coordination.js';
 
 export const OVERLAP_METADATA_BYTES = 128 * 1024;
 /** Advisory notices from open Lanes idle longer than this collapse into one summary line per read. */
@@ -263,6 +264,9 @@ export function hostedOverlapAdvice(
   requestedPath?: string,
   /** Collapse advisory notices of Lanes idle since before `idleBefore` (ms) into one summary item. */
   idleBefore?: number,
+  /** Declared scope of a Lane that has saved nothing yet (start scope.paths): peers' saved files
+   * inside it get one advisory item per peer Lane (D2, Issue 1eb42254). */
+  scope?: readonly string[],
 ) {
   const mineChanges = new Map(
     (JSON.parse(mine.changes) as OverlapChange[]).map(change => [change.path, change]),
@@ -284,6 +288,9 @@ export function hostedOverlapAdvice(
     advisoryCount = 0;
   const idleLanes = new Set<string>(),
     idleFiles = new Set<string>();
+  // Hot files: per path the caller saved or declared, the live open peers that saved it.
+  const shared = new Map<string, Set<string>>();
+  const scopeItems: typeof items = [];
   for (const peer of peers) {
     if (!peer.open || peer.laneId === mine.laneId) continue;
     const quiet = peer.superseded?.laneHead === peer.head;
@@ -303,9 +310,15 @@ export function hostedOverlapAdvice(
     const lanes = [mine.laneId, peer.laneId].sort();
     const peerChanges = JSON.parse(peer.changes) as OverlapChange[];
     let visible = false;
+    const scoped: string[] = [];
     for (const change of peerChanges) {
       const { path } = change,
         mineChange = mineChanges.get(path);
+      // Live Lanes only: idle ones are summarised below (their work is often on main already), and a
+      // path read (peers(path)) lists every Lane anyway.
+      if (!quiet && !idle && !requestedPath && (mineChange || (scope && inScope(scope, path))))
+        shared.set(path, (shared.get(path) ?? new Set()).add(peer.laneId));
+      if (scope && !mineChange && !requestedPath && inScope(scope, path)) scoped.push(path);
       if (requestedPath ? path !== requestedPath : !mineChange) continue;
       const classification = mineChange
         ? classifyOverlap(mineChange, change)
@@ -355,6 +368,28 @@ export function hostedOverlapAdvice(
       if (priority) items.splice(items.findIndex(item => item.class === 'advisory') >>> 0, 0, item);
       else items.push(item);
       if (items.length > maxItems) items.pop();
+    }
+    // Declared scope: one advisory item per peer Lane that saved files inside it, before any edit here.
+    const scopeId = scoped.length ? digest(JSON.stringify(['declared-scope', lanes])) : '';
+    if (scoped.length && !answered.has(scopeId)) {
+      count++;
+      advisoryCount++;
+      scopeItems.push({
+        noticeId: scopeId,
+        class: 'advisory',
+        reason: 'declared-scope',
+        file: scoped[0]!,
+        lanes,
+        participants: [mine, peer].map(lane => ({
+          lane: lane.laneId,
+          actor: agentActor(lane.actor, lane.agent),
+          intent: lane.intent,
+        })),
+        text: `advisory: Lane ${peer.laneId} (${peer.intent.slice(0, 160)}) has saved ${scoped.length} file(s) in your declared scope: ${scoped.slice(0, 3).join(', ')}${scoped.length > 3 ? ', ...' : ''}. Pick disjoint work or coordinate first.`.slice(
+          0,
+          400,
+        ),
+      });
     }
     // One advisory cross-file note per Lane pair, only when no same-file notice already names the pair.
     const note =
@@ -408,6 +443,12 @@ export function hostedOverlapAdvice(
       if (items.length < maxItems) items.push(item);
     }
   }
+  for (const item of scopeItems) if (items.length < maxItems) items.push(item);
+  // Hot files (3+ open Lanes on one path): advice only, after the pair notices, at most two per read.
+  const hot = hotFiles(mine.laneId, shared, answered);
+  count += hot.count;
+  advisoryCount += hot.count;
+  for (const item of hot.items) if (items.length < maxItems) items.push(item);
   const knownBase = mine.baseSequence !== null;
   const behind = knownBase ? Math.max(0, current.sourceRevision - mine.baseSequence!) : null;
   const mainComplete =

@@ -35,6 +35,10 @@ export const agentDefaultsSchema = z
     autoClaim: z.boolean().optional(),
     /** An open Lane with no save, start or landing for this many days is dormant (0 turns it off). */
     dormantAfterDays: z.number().int().min(0).max(365).optional(),
+    /** A Lane colliding with an admitted peer (D2, Issue 1eb42254): `offer` (default) prints the
+     * one stack command; `auto` stacks at the Lane's next sync. Stored-only, read by the server's
+     * overlap read alone, like dormantAfterDays. */
+    stacking: z.enum(['offer', 'auto']).optional(),
     stallAlerts: stallAlertsSchema.optional(),
   })
   .strict();
@@ -98,6 +102,10 @@ export const effectiveAgentDefaultsWireSchema = z.object({
 export const DORMANT_AFTER_DAYS = 2;
 export const dormantAfterDays = (stored: AgentDefaults | undefined) =>
   stored?.dormantAfterDays ?? DORMANT_AFTER_DAYS;
+
+/** Stored-only like dormantAfterDays: `offer` unless the project chose `auto`. */
+export const stackingMode = (stored: AgentDefaults | undefined): 'offer' | 'auto' =>
+  stored?.stacking ?? 'offer';
 
 export function effectiveAgentDefaults(stored: AgentDefaults | undefined): EffectiveAgentDefaults {
   const alerts = stored?.stallAlerts;

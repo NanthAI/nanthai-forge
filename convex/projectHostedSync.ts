@@ -21,6 +21,7 @@ import { report } from './errors';
 import { savePin } from '../src/hosted-save';
 import { prepareObjectTargets } from './projectObjects';
 import { upToDateSync, finishUpToDateSync } from './projectHostedSyncUpToDate';
+import { liveLaneFinish } from './projectHostedLaneFinish';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 const laneOrigin = (lane: NonNullable<SyncState['lane']>) => ({
   laneId: lane.id,
@@ -199,6 +200,11 @@ export async function prepareHostedSync(
       }
       let right = target.head;
       let stackBase, stackAfter;
+      invariant(
+        !request.stackOn || !lane.stack || lane.stack.detached,
+        'STACK_ALREADY',
+        `This Lane is already stacked on Lane ${lane.stack?.laneId}; sync without stackOn restacks onto it.`,
+      );
       if (lane.restoreBase) stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.restoreBase });
       if (target.kind === 'main' && lane.stack && !lane.stack.detached) {
         const parentRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: lane.stack.laneId });
@@ -223,6 +229,29 @@ export async function prepareHostedSync(
           ownerInputs && (detached || (parent.actor === project.owner && parentRow.ownerOnly === true));
         stackBase = await saveObject(ctx, auth.projectId, { sha256: lane.stack.head });
         stackAfter = { ...lane.stack, head: right, ...(detached ? { detached: true } : {}) };
+      } else if (request.stackOn) {
+        // Stack on a peer's pending head (D2): a true three-way merge of this Lane and the peer's
+        // saved head (their common main ancestor is the base), pinned to the peer's live landing.
+        invariant(
+          target.kind === 'main' && !request.ontoMain && !request.cleanOnly && request.stackOn !== lane.id,
+          'BAD_ARGUMENT',
+          'stackOn names another open Lane; it cannot be combined with ontoMain, cleanOnly or a Candidate target.',
+        );
+        const peerRow = await readHostedRecord(ctx, { ...auth, kind: 'lane', key: request.stackOn });
+        invariant(peerRow, 'NOT_FOUND', 'Stack peer Lane not found.');
+        const peer = hostedRecordSchema.options[1].parse(JSON.parse(peerRow.value));
+        const live =
+          peer.state === 'active'
+            ? await liveLaneFinish(ctx, { projectId: auth.projectId, laneId: peer.id, headWrittenAt: '' })
+            : null;
+        invariant(
+          live,
+          'STACK_PEER_NOT_LANDING',
+          `Lane ${peer.id} has no live landing to stack on. Sync onto main instead: sync {"laneId":"${lane.id}"}.`,
+        );
+        right = peer.head;
+        ownerInputs = ownerInputs && peer.actor === project.owner && peerRow.ownerOnly === true;
+        stackAfter = { laneId: peer.id, head: peer.head, entryId: live.submissionId };
       }
       invariant(
         !request.cleanOnly || stackAfter,
@@ -233,12 +262,15 @@ export async function prepareHostedSync(
         mode: 'sync',
         left,
         right: await saveObject(ctx, auth.projectId, { sha256: right }),
-        ...(stackBase ? { stackBase, stackAfter } : {}),
+        ...(stackBase ? { stackBase } : {}),
+        // A first stack (stackOn) has no previous parent head: the merge base is the common ancestor.
+        ...(stackAfter ? { stackAfter } : {}),
       };
       // Main has not moved past this Lane: the job would return up-to-date and write nothing, so
       // this transaction settles it (no input upload, no source job, no submit call).
       upToDate =
         target.kind === 'main' &&
+        !request.stackOn &&
         (await upToDateSync(ctx, auth.projectId, lane, target, original.ownerOnly && !ownerInputs));
     }
   }

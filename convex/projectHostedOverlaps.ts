@@ -14,6 +14,10 @@ import { safeRelative } from '../src/safe-relative';
 import { boardDelivery } from './projectBoardDelivery';
 import { mayActFor } from './projectLaneAuthority';
 import { stackRestackHint } from './projectHostedStackNotice';
+import { peerLandings } from './projectHostedOverlapPeers';
+import { peerPhaseText, stackOffer, SCOPE_PATHS, SCOPE_PATH_CHARS } from '../src/hosted-overlap-coordination';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { stackingMode } from '../src/agent-parallel-defaults';
 
 const savedPaths = (changes: string) => {
   try {
@@ -32,6 +36,9 @@ export const read = query({
     laneId: v.string(),
     paths: v.optional(v.literal(true)),
     path: v.optional(v.string()),
+    /** Declared scope of a fresh Lane (start scope.paths, feature overlap-scope): files or `dir/`
+     * prefixes; open peers that saved files inside it get one advisory item each. */
+    scope: v.optional(v.array(v.string())),
     detail: v.optional(v.boolean()),
     /** Notices to list, 5 by default; ack asks for more so one read answers a large inbox. */
     items: v.optional(v.number()),
@@ -44,9 +51,19 @@ export const read = query({
     board: v.optional(v.object({ after: v.number(), claim: v.optional(v.literal(true)) })),
   },
   returns: v.string(),
-  handler: async (ctx, { projectId, laneId, paths, items, path, detail, presence, board: boardCursor }) => {
+  handler: async (
+    ctx,
+    { projectId, laneId, paths, items, path, scope, detail, presence, board: boardCursor },
+  ) => {
     try {
       invariant(path === undefined || safeRelative(path), 'BAD_ARGUMENT', 'Select a repository path.');
+      invariant(
+        scope === undefined ||
+          (scope.length <= SCOPE_PATHS &&
+            scope.every(entry => entry.length <= SCOPE_PATH_CHARS && safeRelative(entry.replace(/\/$/, '')))),
+        'BAD_ARGUMENT',
+        `scope: up to ${SCOPE_PATHS} repository paths (a trailing / selects a directory).`,
+      );
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read hosted overlaps.');
       const project = await accessibleProject(ctx, projectId, user.subject);
@@ -124,7 +141,7 @@ export const read = query({
             };
       // A Lane with no saved path changes cannot overlap anything: skip the peer, head and answer
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
-      const idle = !path && focus.complete && focus.changes === '[]';
+      const idle = !path && !scope?.length && focus.complete && focus.changes === '[]';
       const readPeers = () =>
         Promise.all([
           liveOpenOverlapLanes(ctx, projectId, cutoff),
@@ -202,7 +219,36 @@ export const read = query({
           path,
           // The default read summarizes idle Lanes in one line; detail and path reads list them all.
           detail || path ? undefined : Date.now() - IDLE_NOTICE_MS,
+          scope?.length ? scope : undefined,
         );
+      // Peer phase and ETA on pair items, and the stack offer (D2): bounded reads, only for named peers.
+      // A detail read is a listing of every peer (board, peers(detail)); it carries no phases.
+      const coordinate = async (found: ReturnType<typeof compute>) => {
+        if (detail) return {};
+        const pairs = found.unacknowledgedOverlaps.items.filter(
+          item => item.reason !== 'hot-file' && item.reason !== 'idle-lanes',
+        );
+        const named = pairs.flatMap(item => item.lanes.filter(id => id !== laneId));
+        if (!named.length) return {};
+        const landings = await peerLandings(ctx, projectId, named);
+        for (const item of pairs) {
+          const peer = item.lanes.find(id => id !== laneId);
+          if (!peer || !landings.has(peer)) continue;
+          const landing = landings.get(peer)!;
+          Object.assign(item, {
+            peerLanding: landing,
+            text: `${item.text} ${peerPhaseText(landing)}.`.slice(0, 480),
+          });
+        }
+        const offer = stackOffer({
+          laneId,
+          stacked: Boolean(lane.stack && !lane.stack.detached),
+          landing: false,
+          mode: stackingMode(effectivePolicy(project as Parameters<typeof effectivePolicy>[0]).agentDefaults),
+          peers: [...landings].map(([id, landing]) => ({ laneId: id, landing })),
+        });
+        return offer && lane.state === 'active' ? { stackOffer: offer } : {};
+      };
       let advice = compute();
       // Presence is for members with write access only; readers and public viewers get no field.
       const writer =
@@ -328,8 +374,10 @@ export const read = query({
           if (!removed) break;
           advice = compute();
         }
+        const offered = await coordinate(advice);
         return JSON.stringify({
           ...advice,
+          ...offered,
           ...changedPaths,
           ...evidence,
           ...present,
@@ -342,8 +390,10 @@ export const read = query({
           },
         });
       }
+      const offered = await coordinate(advice);
       return JSON.stringify({
         ...advice,
+        ...offered,
         ...changedPaths,
         ...evidence,
         ...present,

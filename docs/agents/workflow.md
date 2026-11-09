@@ -77,11 +77,11 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `save --overlap-answers` | `answers, operationId?` |
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
-| `start` | `outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, path?, open?, installScripts?, operationId?` |
+| `start` | `outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, scope?, path?, open?, installScripts?, operationId?` |
 | `start --open` | `laneId, expected?, paths?, operationId?` |
 | `save` | `laneId?, message?, supersedeFinish?, operationId?` |
 | `save --candidate` | `laneId?, message?, intentId?, inputs?, dependencies?, operationId?` |
-| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, apply?, cleanOnly?, operationId?` |
+| `save --sync` | `laneId?, message?, candidateId?, target?, ontoMain?, stackOn?, apply?, cleanOnly?, operationId?` |
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
@@ -743,6 +743,8 @@ with `state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding`, `co
 Encoding is `utf8` or lossless `base64`.
 
 Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored`, or `pending-status` with `ignored:true`, reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
+
+Coordination before the queue (hosted, Issue 1eb42254). Each pair notice names the peer's landing phase and an ETA (`peer is editing (no landing yet)`, `peer landing is checking, lands in about N min`, `peer is admitted (its Lane check passed), lands in about N min`; `peerLanding` on the item) and, from the checkout's manifests, the `package` that owns the file. A path saved by 3 or more live open Lanes (yours included) adds one advisory `hot-file` note (at most two per read, each shown at most three times per Lane on one machine; idle Lanes and `detail`/`path` reads add none): consider a per-Issue file or landing it first; nothing is held. `start '{"scope":{"paths":["src/api/","README.md"]}}'` (at most 50 entries; one ending in `/` covers everything below it) reads the saved files of live peers inside that scope before your first edit and adds one advisory `declared-scope` item per peer. When a peer that touches your files is admitted, the receipt's `overlapNotice.stack` offers `nforge agent . sync '{"laneId":"YOURS","stackOn":"PEER"}'`: the sync merges the peer's pending head (not main) and your landing then waits for the peer's. It is refused with `STACK_PEER_NOT_LANDING` when the peer has no live landing and `STACK_ALREADY` on a Lane that is already stacked. With the project setting `agentDefaults.stacking:"auto"` the next plain `sync` stacks on the offered peer by itself (and falls back to a plain sync when the peer's landing has ended). If the peer's landing fails, `land --save` refuses with `STACK_PARENT_FAILED` and the one command to run: the next `sync` re-pins the Lane to main and keeps only its own changes, then the landing checks once. Cost: no added call; the overlap read looks up the landing phase of at most 3 named peers (bounded index reads), and a Lane with no peer reads nothing new.
 
 Dormant Lanes (hosted). An open Lane with no record write for `agentDefaults.dormantAfterDays` (default 2) is dormant: overlap, presence, board and start reads skip it, and any save or start revives it. A Lane whose overlap row predates the activity field and has no presence time reads as live until its activity is known; each landing completion stamps up to five such rows from their Lane record, so they go dormant on time with no manual step or added read per save. `lanes {view:"dormant"}` lists them with `abandonable`; `nforge x ROOT abandon-dormant {}` dry-runs and `{apply:true}` abandons at most 25 landed (stamped, named by a receipt, or proven equal to main's bytes) or never-saved ones per call (see [parallel-work defaults](../parallel-work-defaults.md#dormantafterdays)).
 

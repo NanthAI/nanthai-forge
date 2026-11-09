@@ -30,6 +30,7 @@ import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
 import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
+import { limitHotFiles, rememberStackOffer } from './hosted-coordination-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
 import { rememberBoardServerFeatures } from './board-local.js';
@@ -239,6 +240,8 @@ export class HostedAgentTransport {
   }
   /** This dispatch asks the overlap read for presence (start/save/sync/compose/finish, feature agent-presence). */
   private presenceAction = false;
+  /** A start's declared scope (scope.paths), sent with its overlap read (feature overlap-scope). */
+  private overlapScope?: string[] | undefined;
   private cachedAdvice:
     | {
         laneId: string;
@@ -1142,6 +1145,11 @@ export class HostedAgentTransport {
             Math.min(15_000, this.startBoundMs),
           )
         : undefined;
+      const declared = (command.data as { scope?: { paths?: string[] } }).scope?.paths;
+      this.overlapScope =
+        action === 'start' && declared?.length && this.serverFeatures?.includes('overlap-scope')
+          ? declared
+          : undefined;
       const response = await this.response(
         action,
         journal.operationId,
@@ -1347,10 +1355,20 @@ export class HostedAgentTransport {
     result: unknown,
     overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
-    const advice = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
+    const read = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
     this.cachedAdvice = undefined;
+    // D2: hot-file notices are capped per path on this machine; a stack offer is never shown while
+    // this checkout's own landing is live (no sync then), and the last offer is kept for stacking:auto.
+    const advice = read && overlapLaneId ? limitHotFiles(overlapLaneId, read) : read;
+    const offered = advice && 'stackOffer' in advice ? advice.stackOffer : undefined;
+    const offer =
+      offered && !(liveLanding(result) || ownsLiveLanding(hostedAgentRoot(this.root))) ? offered : undefined;
+    if (advice && overlapLaneId && advice.unacknowledgedOverlaps.coverage !== 'unavailable')
+      rememberStackOffer(overlapLaneId, offer);
     const notice =
-      advice && overlapLaneId ? hostedOverlapNotice(this.root, overlapLaneId, advice) : undefined;
+      advice && overlapLaneId
+        ? hostedOverlapNotice(this.root, overlapLaneId, { ...advice, stackOffer: offer })
+        : undefined;
     const presence =
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
@@ -1376,7 +1394,9 @@ export class HostedAgentTransport {
       resolved: operationId ? { operationId } : null,
       result,
       ...(advice
-        ? (({ changedPaths: _paths, presence: _presence, board: _board, ...shown }) => shown)(advice)
+        ? (({ changedPaths: _paths, presence: _presence, board: _board, ...shown }) =>
+            // The stack offer is shown once, inside overlapNotice.
+            Object.fromEntries(Object.entries(shown).filter(([key]) => key !== 'stackOffer')))(advice)
         : {}),
       ...(notice ? { overlapNotice: notice } : {}),
       ...(presence ? { presence } : {}),
@@ -1418,6 +1438,7 @@ export class HostedAgentTransport {
       undefined,
       this.presenceAction ? presenceSince(laneId) : undefined,
       this.boardVersion ? { after: readBoardCursor(this.root, laneId) } : undefined,
+      this.overlapScope,
     );
     this.cachedAdvice = { laneId, value };
     return value;

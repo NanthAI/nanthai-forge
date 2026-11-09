@@ -289,6 +289,7 @@ async function syncAgentSourceOnce(
       kind: 'sync',
       ...(command.ontoMain === undefined ? {} : { ontoMain: command.ontoMain }),
       ...(command.cleanOnly ? { cleanOnly: true } : {}),
+      ...(command.stackOn ? { stackOn: command.stackOn } : {}),
       operationId,
       authorityEpoch: session.capabilities.authority.epoch,
       laneId: lane.laneId,

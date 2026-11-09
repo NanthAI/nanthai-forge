@@ -52,6 +52,8 @@ import {
 import { invariant } from './errors.js';
 import { plannedIntent } from './hosted-agent-planning.js';
 import { unadvertisedActionError } from './hosted-agent-version.js';
+import { hostedActionError } from './hosted-action-error.js';
+import { autoStackPeer } from './hosted-coordination-client.js';
 import { completeMergedLanes } from './hosted-agent-complete.js';
 import { abandonDormantLanes } from './hosted-agent-dormant.js';
 import { recordLane, readLaneEntry } from './lane-registry.js';
@@ -584,6 +586,21 @@ export async function executeHostedAgent(
         command.laneId,
         'Sync updates the Lane checkout as well as the server Lane.',
       );
+    const stacking = session.capabilities.features?.includes('sync-stack-on') ?? false;
+    if (command.stackOn && !stacking) throw unadvertisedActionError('sync stackOn');
+    // Project setting stacking:auto (D2): the last receipt's offer stacks this Lane at its next plain
+    // sync. A peer that is no longer landing falls back to the plain sync below, once.
+    const autoPeer =
+      stacking &&
+      !command.stackOn &&
+      !command.candidateId &&
+      !command.target &&
+      command.ontoMain === undefined &&
+      !command.cleanOnly &&
+      session.journal.get(`sync:${operationId}`) === undefined
+        ? autoStackPeer(command.laneId ?? session.marker()?.selection.laneId ?? '')
+        : undefined;
+    if (autoPeer) command.stackOn = autoPeer;
     const timing = syncTiming();
     // A save this client returned unfinished still pins the marker's old head: settle it (its own
     // progress, no new save) before the sync pins the Lane. No pending save means no call.
@@ -609,12 +626,26 @@ export async function executeHostedAgent(
         : null;
     timing.mark('settle');
     let prepared;
-    try {
-      prepared = await syncAgentSource(session, command, operationId, () =>
+    const prepare = () =>
+      syncAgentSource(session, command, operationId, () =>
         settlePriorHostedSave(session.root, null, session.exchange, (id, pending) =>
           waitSaveUntil(session, id, pending),
         ),
       );
+    try {
+      try {
+        prepared = await prepare();
+      } catch (error) {
+        // The prepare transaction refused the automatic stack, so no operation began: sync plainly.
+        if (
+          !autoPeer ||
+          !['STACK_PEER_NOT_LANDING', 'NOT_FOUND'].includes(hostedActionError(error, 'sync').code)
+        )
+          throw error;
+        session.journal.forget(`sync:${operationId}`);
+        delete command.stackOn;
+        prepared = await prepare();
+      }
     } catch (error) {
       // Refused before any server operation began: nothing is left to install on a later land.
       if (error instanceof SyncPinsStale && handoff) clearSyncHandoff(session.root, operationId);

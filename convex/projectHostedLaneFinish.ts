@@ -56,7 +56,7 @@ export async function liveLaneFinish(
       const state = hostedLandingStateSchema.parse(JSON.parse(value));
       const composedAt = state.timing?.composeStartedAt ?? state.at;
       if (LIVE.has(state.phase) && composedAt >= input.headWrittenAt)
-        return { submissionId: state.id, phase: state.phase };
+        return { submissionId: state.id, phase: state.phase, state };
     }
   }
   return null;

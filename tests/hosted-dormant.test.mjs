@@ -302,7 +302,10 @@ test('notices per save before and after, on a dogfood-shaped project (60 open La
       `overlap-table bytes ${beforeCount.readBytesByTable.projectHostedOverlapLanes} -> ${afterCount.readBytesByTable.projectHostedOverlapLanes}; total bytes ${beforeCount.readBytes} -> ${afterCount.readBytes}; ranges ${beforeCount.ranges} -> ${afterCount.ranges}`,
   );
   assert(before.unacknowledgedOverlaps.count >= 50, 'the idle Lanes made the noise');
-  assert.equal(after.unacknowledgedOverlaps.count, 8, 'only the live peers notify');
+  // Eight live pair notices, plus one hot-file note: nine live Lanes share the file (D2, 1eb42254).
+  assert.equal(after.unacknowledgedOverlaps.count, 9, 'only the live peers notify');
+  const hot = after.unacknowledgedOverlaps.items.filter(item => item.reason === 'hot-file');
+  assert(hot.length <= 1 && hot.every(item => item.lanes.length <= 5), 'one hot-file note, live Lanes only');
   assert(
     afterCount.readDocumentsByTable.projectHostedOverlapLanes <= 12,
     'only live rows (and the caller’s own) are read',

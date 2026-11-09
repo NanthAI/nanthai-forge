@@ -153,6 +153,12 @@ export const hostedAgentCommandSchemas = {
       stackEntry: uuid.optional(),
       /** Start from a planned Issue: its title and body become the Intent, and it moves to in-progress. */
       planningItemId: planningRef.optional(),
+      /** Declared paths (a trailing / selects a directory): the start receipt names open Lanes that
+       * already saved files there (D2). Client-side only; never part of the start request. */
+      scope: z
+        .object({ paths: z.array(z.string().refine(path => safeRelative(path.replace(/\/$/, '')))).max(50) })
+        .strict()
+        .optional(),
     })
     .strict(),
   open: z
@@ -188,6 +194,8 @@ export const hostedAgentCommandSchemas = {
         ])
         .optional(),
       ontoMain: z.boolean().optional(),
+      /** Stack this Lane on an open peer Lane's pending head (its live landing); see stackOffer. */
+      stackOn: uuid.optional(),
       apply: z.boolean().default(true),
       /** Restack onto the stack parent only if it applies cleanly; a conflict changes nothing (save runs it). */
       cleanOnly: z.literal(true).optional(),

@@ -210,7 +210,11 @@ test('blocking notices stay visible and preserve acknowledgements across changed
   const current = { head: mine.baseHead, sourceRevision: 0 };
   const result = hostedOverlapAdvice(mine, peers, null, current, new Set());
   assert.equal(result.unacknowledgedOverlaps.blockingCount, 1);
-  assert.equal(result.unacknowledgedOverlaps.advisoryCount, 0);
+  // Clean pairs stay quiet; ten Lanes on shared.ts add only the one hot-file note (D2, 1eb42254).
+  assert.equal(result.unacknowledgedOverlaps.advisoryCount, 1);
+  assert.deepEqual(result.unacknowledgedOverlaps.items.map(item => item.reason ?? item.class).slice(1), [
+    'hot-file',
+  ]);
   assert.equal(result.unacknowledgedOverlaps.items[0].class, 'blocking');
   const oldId = hostedOverlapAdvice(mine, [peers[0]], null, current, new Set(), true, 5, 'shared.ts')
     .unacknowledgedOverlaps.items[0].noticeId;

@@ -224,7 +224,7 @@ acceptance-policy pins exclude these settings.
 
 Capabilities and the policy read carry a frozen key set (`preflight`, `preflightMaxMinutes`,
 `urgentRoles`, `overlapGate`, `checkpointNudgeMinutes`, `stallAlerts`) because CLIs before
-2026-11-06 parse that object strictly. `autoClaim` and `dormantAfterDays` are stored-only: the server
+2026-11-06 parse that object strictly. `autoClaim`, `dormantAfterDays` and `stacking` are stored-only: the server
 reads them itself, the policy read shows them only when set, and capabilities never carry them. A
 later key that agents must read goes to capabilities only for CLIs that ask for contract feature
 `agent-defaults-extended`; current CLIs drop keys they do not know. Adding `autoClaim` to the
@@ -239,6 +239,7 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
 | `dormantAfterDays` | `2` | Lanes nobody saved, started or landed for days stayed active (60 on the dogfood project, 52 idle) and kept raising overlap notices, presence entries and board signals for work long on main. | Any whole number of days; `0` never marks a Lane dormant. |
+| `stacking` | `offer` | Two Lanes on one file both built on main, and the second repaired a conflict after the first landed (rework at 3, 5 and 10 parallel Lanes). When a peer touching your files is admitted, building on its pending head avoids that repair. `offer` prints the exact `sync {stackOn}` command; agents choose. | `auto`: the next plain `sync` stacks on the offered peer by itself. |
 | `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
 
 ### preflight
@@ -570,6 +571,19 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   collapse into one `idle-lanes` summary per start/peers read, and a Lane whose Intent was landed by a
   later Lane is superseded (no presence, no advisory notices; blocking notices stay). A dormant window
   shorter than one day was therefore not needed (Issue 55024d40); keep `dormantAfterDays` at its default.
+
+### stacking
+
+- Stored-only like `dormantAfterDays`: only the server reads it (on the overlap read), and the receipt
+  carries the mode in `overlapNotice.stack.mode`. Absent means `offer`.
+- `offer` (default): a Lane whose files a peer's admitted landing (Lane check passed) also touches gets
+  `overlapNotice.stack` with the command `nforge agent . sync '{"laneId":"…","stackOn":"PEER"}'`.
+- `auto`: the CLI remembers the last offer for that Lane on this machine, and the next plain `sync`
+  sends `stackOn` itself. If the peer's landing has ended by then it falls back to a plain sync once.
+- Either way, a failed peer landing makes `land --save` refuse with `STACK_PARENT_FAILED` and the one
+  `sync` command that re-pins the Lane to main; the landing then checks once.
+- Set: `nforge x ROOT set-policy '{"agentDefaults":{"stacking":"auto"}}'`; back to the default with
+  `"stacking":"offer"`. Like other `agentDefaults` edits it does not invalidate queued landings.
 
 ### urgentRoles
 

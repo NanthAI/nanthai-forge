@@ -9,6 +9,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { withdrawReceipt } from '../dist/hosted-agent-withdraw.js';
 import { lowerVerb, parseVerbForm } from '../dist/agent-verbs.js';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
+import { syncRequestSchema } from '../dist/hosted-sync.js';
+
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -171,3 +173,160 @@ test('queue names the landing’s own Lane when its Intent has several, and with
   });
   assert.notEqual((await f.current(state.id)).submission.phase, 'terminal-failed');
 });
+
+// Stack on a pending head (D2, Issue 1eb42254): a Lane that collides with a peer whose landing is
+// live stacks on the peer's head with `sync {stackOn}`; its landing then waits for the peer, and
+// when the peer fails the Lane's next sync re-pins it to main (the existing detach path).
+{
+  const syncApi = await import(moduleUrl('../convex/projectHostedSync.ts'));
+  const peersApi = await import(moduleUrl('../convex/projectHostedOverlapPeers.ts'));
+
+  const outcome = value => {
+    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    if (parsed?.error) throw Object.assign(new Error(parsed.error.message), { code: parsed.error.code });
+    return parsed;
+  };
+  const pins = lane => ({
+    head: lane.head,
+    version: lane.version,
+    sourceVersion: lane.sourceVersion,
+    lifecycleVersion: lane.lifecycleVersion,
+  });
+  const syncRequest = (f, lane, extra = {}) => {
+    const main = f.currentMain();
+    return {
+      kind: 'sync',
+      operationId: randomUUID(),
+      authorityEpoch: 1,
+      message: 'Stack on the peer',
+      laneId: lane.laneId,
+      expected: pins(lane),
+      target: { kind: 'main', head: main.head, receiptId: main.receipt.id },
+      ...extra,
+    };
+  };
+  const prepare = (f, request) =>
+    f
+      .tx(
+        'syncPrepare',
+        syncApi.prepare,
+        { projectId: f.projectId, request: JSON.stringify(request) },
+        'owner',
+      )
+      .then(outcome);
+  const landings = (f, laneIds) =>
+    f.tx('peerLandings', { _handler: ctx => peersApi.peerLandings(ctx, f.projectId, laneIds) }, {});
+
+  test('sync stackOn is part of the wire request and refuses mixed targets', () => {
+    const laneId = randomUUID(),
+      stackOn = randomUUID();
+    const parsed = syncRequestSchema.parse({
+      kind: 'sync',
+      operationId: randomUUID(),
+      authorityEpoch: 1,
+      message: 'm',
+      laneId,
+      expected: { head: 'a'.repeat(64), version: 0, sourceVersion: 0, lifecycleVersion: 0 },
+      target: { kind: 'main', head: 'b'.repeat(64), receiptId: 'main-0' },
+      stackOn,
+    });
+    assert.equal(parsed.stackOn, stackOn);
+  });
+
+  test('stack on a peer with a live landing: pinned to its head and entry; refused without one', async t => {
+    const f = await finishFixture(t);
+    const peer = await f.readLane(f.lane.laneId);
+    const mine = await f.c.lane(f.c.baseline);
+    // No live landing yet: the peer is only editing, so there is nothing to stack on.
+    await assert.rejects(prepare(f, syncRequest(f, mine, { stackOn: peer.id })), error =>
+      /STACK_PEER_NOT_LANDING/.test(error.code ?? error.data?.code ?? error.message),
+    );
+    const editing = await landings(f, [peer.id, mine.laneId]);
+    assert.equal(editing.get(peer.id), null);
+    const state = await f.enqueue(f.request());
+    await f.drain();
+    const live = (await landings(f, [peer.id])).get(peer.id);
+    assert.equal(live.submissionId, state.id);
+    assert(['queued', 'checking', 'ready', 'composing'].includes(live.phase), live.phase);
+    assert(Number.isInteger(live.etaMinutes) && live.etaMinutes >= 1, `ETA ${live.etaMinutes}`);
+    const before = f.counts.length;
+    const prepared = await prepare(f, syncRequest(f, mine, { stackOn: peer.id }));
+    const call = f.counts.slice(before).find(count => count.name === 'syncPrepare');
+    t.diagnostic(JSON.stringify({ documents: call?.documents, writes: call?.writes }));
+    assert.equal(prepared.terminal, null, 'a real merge runs; never settled as up to date');
+    assert.deepEqual(prepared.state.work.stackAfter, { laneId: peer.id, head: peer.head, entryId: state.id });
+    assert.equal(prepared.state.work.right.object.sha256, peer.head, 'merges the peer head, not main');
+    assert.equal(prepared.state.work.stackBase, undefined, 'the merge base is the common ancestor');
+    // Self, a Candidate target and an already stacked Lane are refused before any operation.
+    await assert.rejects(prepare(f, syncRequest(f, mine, { stackOn: mine.laneId })), error =>
+      /BAD_ARGUMENT/.test(error.code ?? error.message),
+    );
+    const stacked = await f.c.lane(f.c.baseline, {
+      stack: { laneId: peer.id, head: peer.head, entryId: state.id },
+    });
+    await assert.rejects(prepare(f, syncRequest(f, stacked, { stackOn: peer.id })), error =>
+      /STACK_ALREADY/.test(error.code ?? error.message),
+    );
+  });
+
+  test('the peer fails: the stacked Lane re-pins to main at its next sync and keeps only its own delta', async t => {
+    const f = await finishFixture(t);
+    const peer = await f.readLane(f.lane.laneId);
+    const state = await f.enqueue(f.request());
+    await f.drain();
+    const child = await f.c.lane(f.c.baseline, {
+      stack: { laneId: peer.id, head: peer.head, entryId: state.id },
+    });
+    // While the peer's landing is live, a sync follows the peer (restack), not main.
+    const following = await prepare(f, syncRequest(f, child));
+    assert.equal(following.state.work.stackAfter.detached, undefined);
+    assert.equal(following.state.work.right.object.sha256, peer.head);
+    // The peer's landing ends without landing: the next sync detaches onto main.
+    await f
+      .tx(
+        'withdraw',
+        withdrawApi.withdraw,
+        {
+          projectId: f.projectId,
+          request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, laneId: peer.id }),
+        },
+        'owner',
+      )
+      .then(JSON.parse)
+      .then(withdrawn => assert.equal(withdrawn.phase, 'terminal-failed'));
+    await f.drain();
+    const repinned = await prepare(f, syncRequest(f, child));
+    assert.equal(repinned.state.work.stackAfter.detached, true);
+    assert.equal(repinned.state.work.right.object.sha256, f.currentMain().head, 'onto main');
+    assert.equal(repinned.state.work.stackBase.object.sha256, peer.head, "the peer's changes are taken out");
+  });
+
+  test('land of a Lane whose stack parent failed is refused before queueing, with the one re-pin command', async () => {
+    const { refuseFailedStackParent } = await import('../dist/hosted-agent-finish.js');
+    const laneId = randomUUID(),
+      entryId = randomUUID();
+    const session = phase => ({
+      root: '/lane',
+      query: async (name, args) => {
+        assert.equal(name, 'projectHostedLanding:status');
+        assert.deepEqual(args, { submissionId: entryId });
+        return { request: { phase, error: phase === 'terminal-failed' ? { code: 'CHECK_FAILED' } : null } };
+      },
+    });
+    for (const phase of ['queued', 'checking', 'ready', 'landed'])
+      await refuseFailedStackParent(session(phase), laneId, entryId);
+    await assert.rejects(refuseFailedStackParent(session('terminal-failed'), laneId, entryId), error => {
+      assert.equal(error.code, 'STACK_PARENT_FAILED');
+      assert.match(error.message, /CHECK_FAILED/);
+      assert.deepEqual(error.recovery.next, { action: 'sync', laneId });
+      assert.equal(error.recovery.command, `nforge agent '/lane' sync '${JSON.stringify({ laneId })}'`);
+      return true;
+    });
+    // An unreadable status never blocks: the landing's own dependency wait decides.
+    await refuseFailedStackParent(
+      { root: '/lane', query: async () => Promise.reject(new Error('down')) },
+      laneId,
+      entryId,
+    );
+  });
+}

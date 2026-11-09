@@ -140,6 +140,7 @@ export const policyReadView = (policy: AutonomyPolicy): AutonomyPolicy => ({
     ...(policy.agentDefaults?.dormantAfterDays !== undefined
       ? { dormantAfterDays: policy.agentDefaults.dormantAfterDays }
       : {}),
+    ...(policy.agentDefaults?.stacking !== undefined ? { stacking: policy.agentDefaults.stacking } : {}),
   },
 });
 /** Compare-and-swap accepts the stored form or the read view (filled agent defaults). */
