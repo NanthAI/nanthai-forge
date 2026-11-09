@@ -8,6 +8,7 @@ import {
   type SelectedPackage,
 } from './package-graph.js';
 import type { ModuleGraph } from './module-graph-types.js';
+import type { PackageFlagSource } from './package-command-flags.js';
 import { documentationPath } from './prose-paths.js';
 import { runnerTestPath, type TestRunner } from './project-test-runner.js';
 
@@ -33,6 +34,7 @@ export function packageTestSelection(
   graph: PackageGraph,
   changed: string[],
   modules?: () => ModuleGraph | undefined,
+  flags?: PackageFlagSource | { refusal: string },
 ): PackageTestSelection {
   if (changed.length && changed.every(documentationPath))
     return {
@@ -43,7 +45,7 @@ export function packageTestSelection(
       units: [],
       command: null,
     };
-  const selection = packageSelection(graph, changed, modules);
+  const selection = packageSelection(graph, changed, modules, flags);
   if (selection.scope === 'full')
     return {
       scope: 'full',

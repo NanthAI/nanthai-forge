@@ -47,6 +47,8 @@ function repo(t, files = {}) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const all = {
     'package.json': '{"type":"module"}',
+    // Forge's own check entry: the project shape that selects Forge's Node layout.
+    'scripts/forge-check.mjs': '',
     'tests/b.test.mjs': "import test from 'node:test';\ntest('b', () => {});\n",
     ...files,
   };
@@ -159,7 +161,7 @@ test('checkpoint nudge: unsavedFor from local file times, nudge past the thresho
   });
   const saved = Date.parse('2026-10-30T20:00:00.000Z') / 1000;
   utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
-  for (const path of ['package.json', 'tests/b.test.mjs'])
+  for (const path of ['package.json', 'scripts/forge-check.mjs', 'tests/b.test.mjs'])
     utimesSync(join(root, path), saved - 60, saved - 60);
   utimesSync(join(root, 'node_modules/x/index.js'), saved + 10, saved + 10);
   const now = (saved + 45 * 60) * 1000;
@@ -194,7 +196,7 @@ test('build outputs and other ignored files written after a save are never unsav
   const saved = Date.parse('2026-11-06T06:00:00.000Z') / 1000,
     now = (saved + 10 * 60) * 1000;
   utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
-  for (const path of ['package.json', 'tests/b.test.mjs', '.gitignore'])
+  for (const path of ['package.json', 'scripts/forge-check.mjs', 'tests/b.test.mjs', '.gitignore'])
     utimesSync(join(root, path), saved - 60, saved - 60);
   for (const path of ['convex/_generated/api.d.ts', 'tsconfig.tsbuildinfo', 'build/out.js', 'dist/cli.js'])
     utimesSync(join(root, path), saved + 60, saved + 60);
@@ -509,6 +511,7 @@ test('save advice reflects real unsaved bytes and never nudges a live landing', 
       parents: [],
       files: [
         { path: 'package.json', blob: digest('{"type":"module"}'), mode: 'file' },
+        { path: 'scripts/forge-check.mjs', blob: digest(''), mode: 'file' },
         { path: 'tests/b.test.mjs', blob: digest(body), mode: 'file' },
       ],
       message: 'saved',
@@ -522,6 +525,7 @@ test('save advice reflects real unsaved bytes and never nudges a live landing', 
     now = (saved + 45 * 60) * 1000;
   utimesSync(join(root, '.forge/hosted-lane.json'), saved, saved);
   utimesSync(join(root, 'package.json'), saved - 60, saved - 60);
+  utimesSync(join(root, 'scripts/forge-check.mjs'), saved - 60, saved - 60);
   // Clean saved Lane: the file was rewritten after the save (materialized, formatter) with the
   // same bytes. Not an edit.
   writeFileSync(join(root, 'tests/b.test.mjs'), body);

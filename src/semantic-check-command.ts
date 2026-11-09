@@ -57,6 +57,15 @@ if (process.env.FORGE_JUNIT_DIR && junit) {
       } catch {}
     }
     for (const [file, failed] of found) if (!covered.has(file)) { covered.add(file); if (failed) failedReports.add(file); }
+    // Reports without a file name (Go packages, JVM classes, Rust test binaries) cover their owner file.
+    if (junit.coverage) {
+      const { coveringEntries } = await import('data:text/javascript;base64,' + zlib.gunzipSync(Buffer.from(junit.coverage, 'base64')).toString('base64'));
+      const files = { read: name => { try { return name.split('/').includes('..') ? undefined : fs.readFileSync(path.join(process.cwd(), name), 'utf8'); } catch { return undefined; } } };
+      for (const test of tests) if (!covered.has(test)) {
+        const hits = coveringEntries(test, found.keys(), files);
+        if (hits.length) { covered.add(test); if (hits.some(hit => found.get(hit))) failedReports.add(test); }
+      }
+    }
   } catch {}
 }
 if (tests.some(test => failedReports.has(test))) code = code || 1;
@@ -65,13 +74,13 @@ let next = 0;
 await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => {
   while (next < missing.length) {
     const file = missing[next++], start = performance.now();
+    const entry = runner && !Array.isArray(runner) ? runner[file] : undefined;
+    const refused = runner === null || (runner && !Array.isArray(runner) && !Array.isArray(entry));
     const status = runner === undefined
       ? await execute([process.execPath, '--test', '--test-concurrency=2', '--test-timeout=90000', file])
-      : runner === null
-        ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': ' + unavailable + '\\n'), 2)
-        : !Array.isArray(runner) && !Array.isArray(runner[file])
-          ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': no runner command for this test\\n'), 2)
-          : await execute(Array.isArray(runner) ? runnerArgs(file) : runner[file]);
+      : refused
+        ? (process.stderr.write('SEMANTIC_TESTS_UNAVAILABLE: ' + file + ': ' + (runner === null ? unavailable : (entry?.unavailable ?? 'no runner command for this test')) + '\\n'), 2)
+        : await execute(Array.isArray(runner) ? runnerArgs(file) : entry);
     const durationMs = performance.now() - start;
     process.stdout.write('__FORGE_TESTS__' + JSON.stringify({file, complete:status === 0 || status === 1, durationMs, results:[{name:file, passed:status === 0}]}) + '\\n');
     if (status !== 0) code = code || status;
@@ -79,17 +88,23 @@ await Promise.all(Array.from({length: Math.min(2, missing.length)}, async () => 
 }));
 process.exitCode = code;
 `;
-let junitPayload: { module: string } | undefined | null;
-/** The JUnit parser as the check's runner can load it: the compiled module, compressed. Undefined when
- * it cannot be read (then only Forge's own markers count, as before). */
+let junitPayload: { module: string; coverage?: string } | undefined | null;
+/** The JUnit parser and its package/class coverage resolver as the check's runner can load them: the
+ * compiled modules, compressed. Undefined when the parser cannot be read (then only Forge's own markers
+ * count, as before); without the resolver only exact file names count. */
 function junitParser() {
   if (junitPayload === undefined) {
+    const load = (name: string) =>
+      gzipSync(
+        readFileSync(new URL(name, import.meta.url), 'utf8').replace(/^\/\/# sourceMappingURL=.*$/m, ''),
+      ).toString('base64');
     try {
-      const source = readFileSync(new URL('./junit-report.js', import.meta.url), 'utf8').replace(
-        /^\/\/# sourceMappingURL=.*$/m,
-        '',
-      );
-      junitPayload = { module: gzipSync(source).toString('base64') };
+      junitPayload = { module: load('./junit-report.js') };
+      try {
+        junitPayload.coverage = load('./junit-coverage.js');
+      } catch {
+        /* Exact file names only. */
+      }
     } catch {
       junitPayload = null;
     }
@@ -117,9 +132,16 @@ export function semanticCheckCommand(
       : runner && runner.runner.layout !== 'forge-node'
         ? {
             // A chained script's runner: each file's own argv, from the part whose globs own it.
-            runner: runner.runner.parts
-              ? Object.fromEntries(tests.map(test => [test, runnerCommand(runner.runner, [test])]))
-              : runner.runner.command,
+            runner: runner.runner.fileCommands
+              ? Object.fromEntries(
+                  tests.map(test => [
+                    test,
+                    runner.runner.fileCommands![test] ?? { unavailable: 'no package command for this file' },
+                  ]),
+                )
+              : runner.runner.parts
+                ? Object.fromEntries(tests.map(test => [test, runnerCommand(runner.runner, [test])]))
+                : runner.runner.command,
           }
         : {};
   const parser = junitParser();

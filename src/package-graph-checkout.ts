@@ -2,10 +2,12 @@
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
-import { buildPackageGraph } from './package-graph.js';
+import { buildPackageGraph, type PackageGraph } from './package-graph.js';
 import { buildModuleGraph } from './module-graph.js';
 import { packageTestSelection } from './package-test-selection.js';
 import { packageIntersectionTestSelection } from './package-intersection.js';
+import { checkoutPackageFlags } from './package-command-flags-checkout.js';
+import type { PackageFlagSource } from './package-command-flags.js';
 
 /** Paths walked at most: past this the graph is unknown (full), never a partial view. */
 const MAX_PATHS = 500_000;
@@ -29,7 +31,11 @@ function checkoutPaths(directory: string) {
 /** The package-graph selection for `changed` in a checked-out Candidate: manifests and (for the
  * module graph, src/module-graph.ts) Python, Go, Rust, Java and Kotlin sources read from disk, no
  * repository code run, no Forge call. */
-export function checkoutPackageSelection(directory: string, changed: string[]) {
+export function checkoutPackageSelection(
+  directory: string,
+  changed: string[],
+  flags?: PackageFlagSource | { refusal: string },
+) {
   const paths = checkoutPaths(directory);
   const read = (path: string) => {
     try {
@@ -41,7 +47,20 @@ export function checkoutPackageSelection(directory: string, changed: string[]) {
   if (!paths)
     return packageTestSelection({ status: 'unknown', reason: `more than ${MAX_PATHS} files` }, changed);
   const graph = buildPackageGraph(paths, read);
-  return packageTestSelection(graph, changed, () => buildModuleGraph({ paths, read }));
+  return packageTestSelection(graph, changed, () => buildModuleGraph({ paths, read }), flags);
+}
+
+/** The manifest package graph of a checked-out directory (no repository code runs). */
+export function checkoutPackageGraph(directory: string): PackageGraph {
+  const paths = checkoutPaths(directory);
+  if (!paths) return { status: 'unknown', reason: `more than ${MAX_PATHS} files` };
+  return buildPackageGraph(paths, path => {
+    try {
+      return readFileSync(join(directory, path), 'utf8');
+    } catch {
+      return undefined;
+    }
+  });
 }
 
 const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
@@ -56,12 +75,15 @@ export function writeCheckPackages(
   directory: string,
   changes: { mode?: unknown; paths?: unknown; mainPaths?: unknown; members?: unknown } | undefined,
   runner?: { node: string; script: string },
+  check?: { executable: string; args: readonly string[] },
 ): { path: string; run: string | null; remove: () => void } | null {
   if (changes?.mode !== 'scoped' || !Array.isArray(changes.paths)) return null;
   const strings = (list: unknown[]) => list.filter((path): path is string => typeof path === 'string');
   const changed = strings(changes.paths);
   // A scoped main-race recheck names main's delta: the packages that can see both changes. A cohort
   // recheck names each member's sides (Issue 28f08555): the union of their intersections.
+  // The project's own test flags come from forge.json or the declared check's text.
+  const flags = checkoutPackageFlags(directory, check);
   const members = Array.isArray(changes.members)
     ? changes.members.map(member => {
         const { paths, mainPaths } = (member ?? {}) as { paths?: unknown; mainPaths?: unknown };
@@ -72,10 +94,10 @@ export function writeCheckPackages(
       })
     : undefined;
   const selection = members
-    ? checkoutPackageIntersection(directory, changed, [], members)
+    ? checkoutPackageIntersection(directory, changed, [], flags, members)
     : Array.isArray(changes.mainPaths)
-      ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths))
-      : checkoutPackageSelection(directory, changed);
+      ? checkoutPackageIntersection(directory, changed, strings(changes.mainPaths), flags)
+      : checkoutPackageSelection(directory, changed, flags);
   const folder = mkdtempSync(join(tmpdir(), 'forge-packages-'));
   const path = join(folder, 'packages.json');
   writeFileSync(
@@ -85,7 +107,12 @@ export function writeCheckPackages(
       scope: selection.scope,
       reason: selection.reason,
       packages: selection.packages,
-      commands: selection.commands.map(({ ecosystem, cwd, argv }) => ({ ecosystem, cwd, argv })),
+      commands: selection.commands.map(({ ecosystem, cwd, argv, flagsFrom }) => ({
+        ecosystem,
+        cwd,
+        argv,
+        ...(flagsFrom ? { flagsFrom } : {}),
+      })),
     }),
     { mode: 0o600, flag: 'wx' },
   );
@@ -106,6 +133,7 @@ export function checkoutPackageIntersection(
   directory: string,
   changed: string[],
   mainPaths: string[],
+  flags?: PackageFlagSource | { refusal: string },
   members?: { lanePaths: string[]; mainPaths: string[] }[],
 ) {
   const paths = checkoutPaths(directory);
@@ -118,5 +146,5 @@ export function checkoutPackageIntersection(
         }
       })
     : ({ status: 'unknown', reason: `more than ${MAX_PATHS} files` } as const);
-  return packageIntersectionTestSelection(graph, changed, mainPaths, members);
+  return packageIntersectionTestSelection(graph, changed, mainPaths, flags, members);
 }

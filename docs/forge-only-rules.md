@@ -10,7 +10,8 @@ the one predicate for it, and never at another project's expense:
 - **Forge's Node test layout** is Node's test runner over `tests/*.test.mjs`
   (`layout: 'forge-node'` in [`src/project-test-runner.ts`](../src/project-test-runner.ts)). Its
   import-graph selector (`scripts/test-impact.mjs` and the `scripts/test-*.mjs` it uses) reads that
-  layout. Any other project uses its own test runner and, in local preflight, the generic JS/TS
+  layout. The layout is chosen only when the project declares that runner (`preflight.tests`) or has
+  Forge's own check entry; an outside project with `node --test` over `tests/*.test.mjs` is not it. Any other project uses its own test runner and, in local preflight, the generic JS/TS
   import graph ([`src/js-import-graph.ts`](../src/js-import-graph.ts)).
 
 Every other project gets the same fast paths through configuration (check definition, `docsPaths`,
@@ -93,6 +94,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/agent-preflight.ts` | `npm-lockfile` | 1 | the Forge-layout selector inventory | declared dependencies of every manifest |
 | `src/agent-preflight.ts` | `node-test` | 1 | Forge-layout preflight runs Node's runner | their runner's command (`runnerCommand`) |
 | `src/agent-lane-tests.ts` | `tests-folder` | 1 | the Forge-layout tests read | their runner's test files |
+| `src/junit-coverage.ts` | `tests-folder` | 1 | Cargo's own `tests/NAME.rs` test-binary layout, not Forge's (JUnit coverage of Rust union tests) | — (Cargo's convention for every Rust crate) |
 | `src/intent-test-contract.ts` | `tests-folder` | 1 | `standardTestPath`: the files Forge's selector and shards read | `contractTestPath`: any test path |
 | `src/scoped-recheck.ts` | `tests-folder` | 1 | the scoped recheck of the standard plan | their whole command, or the selection their command reports |
 | `src/semantic-check-command.ts` | `node-test` | 1 | Forge's layout runs union tests with Node's runner | their runner's command, or `SEMANTIC_TESTS_UNAVAILABLE` |

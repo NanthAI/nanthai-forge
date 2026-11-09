@@ -40,6 +40,18 @@ export function packageRunCommands(text) {
   return { commands };
 }
 
+/** pytest exits 5 when it collects no tests: a package with none has nothing to fail. True only for a
+ * pytest invocation (`pytest`, `python -m pytest`, `uv run pytest`, `poetry run pytest`), never for
+ * another tool's exit 5. */
+export function noTestsCollected(argv, status) {
+  if (status !== 5 || !Array.isArray(argv)) return false;
+  const name = word => String(word).split('/').pop();
+  const at = argv.findIndex(word => ['pytest', 'py.test'].includes(name(word)));
+  if (at < 0) return false;
+  // `python -m pytest`, `uv run pytest`, `poetry run pytest`, `pdm run pytest`: a launcher precedes it.
+  return at === 0 || ['-m', 'run'].includes(argv[at - 1]);
+}
+
 const display = command =>
   `${command.cwd ? `(cd ${command.cwd} && ` : ''}${command.argv.join(' ')}${command.cwd ? ')' : ''}`;
 
@@ -55,6 +67,12 @@ export function runPackageCommands(commands, root, { spawn = spawnSync, log = co
     });
     const status = result.error ? 127 : (result.status ?? 1);
     if (result.error) log(`forge packages: cannot run ${command.argv[0]}: ${result.error.code ?? 'error'}`);
+    if (noTestsCollected(command.argv, status)) {
+      log(
+        `forge packages: ${command.ecosystem ?? 'package'}: pytest collected no tests (exit 5); not a failure`,
+      );
+      continue;
+    }
     if (status !== 0 && code === 0) code = status;
   }
   return code;

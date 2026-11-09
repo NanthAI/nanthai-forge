@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { describeIssues } from './argument-errors.js';
@@ -394,6 +395,8 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    // The landing message limit is local knowledge: refuse before any server call (friction d8d357c2).
+    if (requestedAction === 'finish' && typeof input.message === 'string') landingMessage(input.message);
     const replay =
       typeof input.operationId === 'string' &&
       z.uuid().safeParse(input.operationId).success &&

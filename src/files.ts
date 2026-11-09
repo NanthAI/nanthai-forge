@@ -87,8 +87,9 @@ export function publicationExclusion(path: string): string | null {
 /** New files whose purpose is local credentials: never saved by a content guess. */
 export const localCredentialName = (name: string) => /^(\.env(\.local|\..+\.local)?|\.netrc)$/i.test(name);
 
+const clientStateSuffix = '.forge-client';
 /** What a new, untracked path's own name excludes from capture before ignore rules apply.
- * Adds to `sourceExclusion`: `node_modules` (dependency installs; Forge links one into
+ * Adds to `sourceExclusion`: Forge client state folders (`*.forge-client`), `node_modules` (dependency installs; Forge links one into
  * every Lane), `.env*` directories (virtualenvs and env stores), and non-code files inside a
  * `credentials`/`secrets` directory. A code package with such a name (`internal/secrets/`)
  * is walked and its code captured. Tracked paths are kept regardless. O(path). */
@@ -96,6 +97,10 @@ export function captureExclusion(path: string, directory: boolean): string | nul
   const parts = path.split('/'),
     lower = parts.map(part => part.toLowerCase());
   if (lower.includes('node_modules')) return 'protected-directory';
+  // Forge client state (`<root>.forge-client`: journals, caches, Lanes) is never new source, even
+  // when a client wrote it inside another checkout (friction 54d6b3b1). Save skips it; pull keeps it.
+  if (lower.slice(0, directory ? undefined : -1).some(part => part.endsWith(clientStateSuffix)))
+    return 'protected-directory';
   if (directory) {
     if (lower.some(p => metadataDirectories.includes(p) || credentialDirectories.includes(p)))
       return 'protected-directory';

@@ -12,7 +12,7 @@ import { revertFixture, synthetic } from './hosted-revert-fixture.mjs';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 const modules = Object.fromEntries(
   await Promise.all(
-    ['projectHostedAgent', 'projectHostedLandingWithdraw'].map(async name => [
+    ['projectHostedAgent', 'projectHostedLandingWithdraw', 'projectHostedLanding'].map(async name => [
       name,
       await import(moduleUrl(`../convex/${name}.ts`)),
     ]),
@@ -99,4 +99,22 @@ test('a server without landing-withdraw is refused before any mutation, naming x
     error => error.code === 'HOSTED_FEATURE_UNAVAILABLE' && /x .* cancel/.test(error.message),
   );
   assert(!s.calls.includes('projectHostedLandingWithdraw:withdraw'));
+});
+
+test('withdraw by submissionId cancels that landing in one call, whatever Lane holds it (friction a0faf3a9)', async t => {
+  const s = await setup(t),
+    first = await landing(s.f);
+  const before = s.calls.length;
+  const withdrawn = await s.transport().dispatch('withdraw', { submissionId: first.id });
+  assert.equal(withdrawn.result.withdrawn, true);
+  assert.equal(withdrawn.result.submissionId, first.id);
+  assert.equal(withdrawn.result.laneId, null);
+  assert.equal(withdrawn.result.landing.error.code, 'LANDING_CANCELLED');
+  assert.deepEqual(withdrawn.result.confirm.next.operationIds, [first.operationId]);
+  const mutations = s.calls.slice(before).filter(name => !name.startsWith('projectHostedAgent:'));
+  assert.deepEqual(mutations, ['projectHostedLanding:cancel'], 'one existing mutation, no Lane lookup');
+  await assert.rejects(
+    s.transport().dispatch('withdraw', { submissionId: first.id, laneId: s.f.lane.laneId }),
+    /not both/,
+  );
 });

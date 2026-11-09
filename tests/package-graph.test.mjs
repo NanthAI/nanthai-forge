@@ -145,9 +145,11 @@ const python = {
   'packages/api/pyproject.toml':
     '[project]\nname = "fx-api"\ndependencies = [\n  "FX_Core[speed] >=0.1; python_version > \'3.9\'",\n]\n',
   'packages/api/src/fx_api/app.py': '',
+  'packages/api/tests/test_api.py': '',
   'packages/legacy/setup.cfg':
     '[metadata]\nname = fx-legacy\n\n[options]\ninstall_requires =\n    fx-api\n    attrs\n',
   'packages/legacy/fx_legacy.py': '',
+  'packages/legacy/legacy_test.py': '',
 };
 
 test('Python: pyproject/setup.cfg packages and requirement names select dependents; pytest via the lockfile tool', () => {
@@ -170,6 +172,40 @@ test('Python: pyproject/setup.cfg packages and requirement names select dependen
   const none = select(bare, ['packages/core/src/fx_core/__init__.py']);
   assert.equal(none.scope, 'full');
   assert.match(none.reason, /no pytest declared/);
+});
+
+test('Python: a package with no test file below it is not testable, but its dependents still run (pytest exit 5)', () => {
+  const tree = {
+    ...python,
+    'packages/pure/pyproject.toml': '[project]\nname = "fx-pure"\n',
+    'packages/pure/src/fx_pure/__init__.py': '',
+    'packages/user/pyproject.toml': '[project]\nname = "fx-user"\ndependencies = ["fx-pure"]\n',
+    'packages/user/tests/test_user.py': '',
+  };
+  const graph = graphOf(tree);
+  const testable = Object.fromEntries(graph.packages.map(pkg => [pkg.dir, pkg.testable]));
+  assert.equal(testable['packages/pure'], false);
+  assert.equal(testable['packages/user'], true);
+  assert.equal(testable['packages/core'], true);
+  // Changing the pure library runs its dependent, never `pytest packages/pure` (nothing to collect).
+  const pure = select(tree, ['packages/pure/src/fx_pure/__init__.py']);
+  assert.deepEqual(commands(pure), [' uv run pytest packages/user']);
+  assert.deepEqual(names(pure), ['packages/pure:changed', 'packages/user:dependent']);
+  // A pure library nothing depends on has nothing to run.
+  const alone = { ...tree };
+  delete alone['packages/user/pyproject.toml'];
+  delete alone['packages/user/tests/test_user.py'];
+  const lone = select(alone, ['packages/pure/src/fx_pure/__init__.py']);
+  assert.equal(lone.scope, 'none');
+  assert.deepEqual(commands(lone), []);
+  // A test file below a deeper package belongs to that package, not to the root.
+  const nested = graphOf({
+    'pyproject.toml': '[project]\nname = "root"\n[tool.pytest.ini_options]\n',
+    'sub/pyproject.toml': '[project]\nname = "sub"\n',
+    'sub/tests/test_sub.py': '',
+  });
+  const own = Object.fromEntries(nested.packages.map(pkg => [pkg.dir || '.', pkg.testable]));
+  assert.deepEqual(own, { '.': false, sub: true });
 });
 
 const gradle = {
@@ -437,7 +473,14 @@ test('the tests read selects packages for a Rust repository with no package.json
   const forge = new Map([
     ['package.json', JSON.stringify({ scripts: { test: 'node --test tests/*.test.mjs' } })],
   ]);
-  assert.deepEqual(contractManifestPaths(forge, ['package.json', 'tests/a.test.mjs', 'x/go.mod']), []);
+  assert.deepEqual(
+    contractManifestPaths(forge, ['package.json', 'scripts/forge-check.mjs', 'tests/a.test.mjs', 'x/go.mod']),
+    [],
+  );
+  // An outside project with the same folders is not Forge's layout: its manifests are read.
+  assert.deepEqual(contractManifestPaths(forge, ['package.json', 'tests/a.test.mjs', 'x/go.mod']), [
+    'x/go.mod',
+  ]);
 });
 
 test('a scoped configured command gets FORGE_CHECK_PACKAGES from the checkout manifests; a full run does not', t => {

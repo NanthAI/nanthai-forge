@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { finishFixture, landingApi, code } from './hosted-finish-fixture.mjs';
+import { finishFixture, landingApi, code, compose } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { withdrawReceipt } from '../dist/hosted-agent-withdraw.js';
 import { lowerVerb, parseVerbForm } from '../dist/agent-verbs.js';
@@ -140,4 +140,34 @@ test('an already accepted landing is never undone by a late withdraw', async t =
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
   await assert.rejects(withdraw(f, { laneId: f.lane.laneId }), code('LANDING_NOT_LIVE'));
   assert.deepEqual(f.currentMain(), main);
+});
+
+// Friction a0faf3a9: the landing moved to a Lane the owner did not name (a resolution Lane shares its
+// origin's Intent). The queue names the Lane the landing composed, and withdraw by submissionId reaches it.
+const queueView = await import(moduleUrl('../convex/projectHostedQueueView.ts'));
+test('queue names the landing’s own Lane when its Intent has several, and withdraw by Lane says how to reach it', async t => {
+  const f = await finishFixture(t);
+  // A second Lane on the same Intent, created after the first, carries the live landing.
+  const sibling = await f.c.lane(f.lane.state.object);
+  const selection = f.c.selection([sibling]);
+  const candidate = await compose(f.c, selection);
+  const state = await f.enqueue(
+    f.request({
+      candidateId: candidate.id,
+      expectedHead: candidate.result.head,
+      finish: { composeOperationId: selection.request.operationId, after: null },
+    }),
+  );
+  await f.drain();
+  const view = JSON.parse(await f.tx('queueView', queueView.read, { projectId: f.projectId }));
+  const entry = view.entries.find(item => item.submissionId === state.id);
+  assert.equal(entry.laneId, sibling.laneId, 'the composed Lane, not the Intent’s first Lane');
+  assert.equal(entry.moreLanes, true);
+  // The Intent's first Lane has no live landing: the refusal names the submissionId route.
+  await assert.rejects(withdraw(f, { laneId: f.lane.laneId }), error => {
+    assert.equal(error.data?.code ?? error.code, 'LANDING_NOT_LIVE');
+    assert.match(error.data?.message ?? error.message, /submissionId the queue lists/);
+    return true;
+  });
+  assert.notEqual((await f.current(state.id)).submission.phase, 'terminal-failed');
 });

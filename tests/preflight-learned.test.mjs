@@ -21,6 +21,7 @@ function lane(t, bytes = {}) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const all = {
     'package.json': '{"type":"module","scripts":{}}',
+    'scripts/forge-check.mjs': '',
     'src/a.ts': 'export const n = 1;',
     'tests/a.test.mjs': "import '../src/a.ts';",
     'tests/barriers.test.mjs': "import test from 'node:test'; test('watches checkout-* names', () => {});",

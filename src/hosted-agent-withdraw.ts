@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
-import { hostedLandingStateSchema, hostedLandingWithdrawSchema } from './hosted-landing.js';
+import {
+  hostedLandingCancelSchema,
+  hostedLandingStateSchema,
+  hostedLandingWithdrawSchema,
+} from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { operationWait } from './agent-operation-wait.js';
 import { shellQuote } from './shell-quote.js';
@@ -21,6 +25,7 @@ export const WITHDRAW_COST =
  */
 export async function executeHostedWithdraw(session: HostedAgentSession, input: unknown) {
   const command = hostedAgentCommandSchemas.withdraw.parse(input);
+  if (command.submissionId) return withdrawSubmission(session, command.submissionId);
   const laneId = command.laneId ?? session.marker()?.selection.laneId;
   invariant(laneId, 'BAD_ARGUMENT', 'Select laneId, or run land --withdraw from the Lane checkout.');
   if (!session.capabilities.features?.includes('landing-withdraw'))
@@ -45,6 +50,24 @@ export async function executeHostedWithdraw(session: HostedAgentSession, input: 
   return withdrawReceipt(session.root, laneId, landing);
 }
 
+/** By submission (friction a0faf3a9): the landing the queue lists, even when it moved to a resolution
+ * Lane the caller does not know. The existing cancel mutation: one call, Lane author or project owner. */
+async function withdrawSubmission(session: HostedAgentSession, submissionId: string) {
+  const request = await session.journal.retain('withdraw-request', () =>
+    hostedLandingCancelSchema.parse({
+      operationId: session.journal.operationId,
+      authorityEpoch: session.capabilities.authority.epoch,
+      submissionId,
+    }),
+  );
+  const landing = parseHostedResponse(
+    hostedLandingStateSchema,
+    await session.mutation('projectHostedLanding:cancel', { request: canonicalPayload(request) }),
+  );
+  await session.journal.retain('withdraw-received', () => landing.id);
+  return withdrawReceipt(session.root, null, landing);
+}
+
 /** True when the identical auto-addressed withdraw already returned its receipt (local read only). */
 export function withdrawDone(root: string, address: HostedAgentAddress, actor: string, command: unknown) {
   return (
@@ -57,7 +80,7 @@ export function withdrawDone(root: string, address: HostedAgentAddress, actor: s
  * outcome at once, which also settles this turn's open landing before the builder edits. */
 export function withdrawReceipt(
   root: string,
-  laneId: string,
+  laneId: string | null,
   landing: ReturnType<typeof hostedLandingStateSchema.parse>,
 ) {
   const landed = landing.phase === 'landed';

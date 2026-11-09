@@ -47,6 +47,8 @@ import {
   type PreflightEvidence,
 } from './agent-preflight-evidence.js';
 import { shellQuote } from './agent-brief-render.js';
+import { noTestsCollected } from '../scripts/check-packages-run.mjs';
+import { declaredPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 import {
   orderRunnerTests,
   projectTestRunner,
@@ -498,7 +500,17 @@ function runnerPlan(
     }
     if (wrappers && typeof wrappers.value !== 'boolean')
       return { status: 'unavailable', reason: `${wrappers.label} is true or false` };
-    return packagePlan(root, runner, paths, graph!(), statics, keep, modules, wrappers?.value === true);
+    return packagePlan(
+      root,
+      runner,
+      paths,
+      graph!(),
+      statics,
+      keep,
+      modules,
+      declaredPackageFlags(forgeJson),
+      wrappers?.value === true,
+    );
   }
   const selection = runnerSelection(runner, allPaths, paths, preflightImports(root, runner, allPaths, paths));
   // Tests that failed in a landing check or preflight while these paths changed run again, as for
@@ -642,9 +654,10 @@ function packagePlan(
   statics: Partial<Pick<PreflightPlan & { status: 'planned' }, 'static'>>,
   keep: (tests: string[]) => string[],
   modules?: () => ModuleGraph,
+  flags?: PackageFlagSource | { refusal: string },
   treeWrappers = false,
 ): PreflightPlan {
-  const selection = treeWrapperRule(packageTestSelection(graph, paths, modules), treeWrappers);
+  const selection = treeWrapperRule(packageTestSelection(graph, paths, modules, flags), treeWrappers);
   const units = keep(selection.units);
   const commands = Object.fromEntries(
     selection.commands.map(command => [
@@ -1280,7 +1293,7 @@ export function runPreflight(
               ran++;
               fileMs[unit] = Date.now() - started;
               if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
-              if (run.status === 0) passedTests.push(unit);
+              if (run.status === 0 || noTestsCollected(command.argv, run.status)) passedTests.push(unit);
               else {
                 failedFiles.push(unit);
                 if (exitCode === 0) exitCode = run.status ?? 1;

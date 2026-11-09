@@ -13,6 +13,7 @@ import {
 } from './test-script-runner.js';
 export { FILES_PLACEHOLDER, SCRIPT_DEPTH, type RunnerPart } from './test-script-runner.js';
 import { declaredPreflight } from './project-config.js';
+import { STANDARD_CHECK_ENTRY } from './standard-check.js';
 
 /** How a project runs its test files: which paths are tests (`globs`) and the argv that runs some of
  * them (`command`; an element `{files}` expands to the files, else they are appended). Preflight, the
@@ -32,7 +33,9 @@ import { declaredPreflight } from './project-config.js';
  *    the workspace package manager), when that command is unambiguous.
  * An unrecognized `test` script (a task runner, make, another language) is not guessed: tests are
  * `unavailable` with a reason, never Forge's layout. `layout: 'forge-node'` (Node's runner over
- * `tests/*.test.mjs`) keeps Forge's import-graph selector; `packages` runs package commands; any other
+ * `tests/*.test.mjs`) keeps Forge's import-graph selector and is never inferred from that file
+ * layout alone: a project declares it, or it has Forge's own check entry (STANDARD_CHECK_ENTRY);
+ * an outside `node --test` project with the same folders gets the generic runner. `packages` runs package commands; any other
  * runner selects by path and, in local preflight, by a generic JS/TS import graph (src/js-import-graph.ts). */
 export type TestRunner = {
   source: 'declared' | 'test-script' | 'dependency' | 'files' | 'package-graph';
@@ -48,6 +51,9 @@ export type TestRunner = {
   declaredIn?: 'forge.json' | 'package.json';
   /** Ecosystems whose package commands run (`layout: 'packages'`). */
   ecosystems?: string[];
+  /** `layout: 'packages'` in a checked-out workspace: each named test file's package command (an argv),
+   * or why that file has none. Filled by src/workspace-test-runner.ts for the Intent union rerun. */
+  fileCommands?: Record<string, string[] | { unavailable: string }>;
 };
 export type RunnerOptions = {
   /** Text of the root forge.json, when the head has one. */
@@ -113,8 +119,12 @@ export function runnerCommand(runner: Pick<TestRunner, 'command' | 'parts'>, fil
 }
 
 // Forge's own Node layout is `node --test` itself: another program (tsx) keeps its own command.
-const layout = (program: TestRunner['program'], globs: string[]): TestRunner['layout'] =>
-  program === 'node' && globs.length === 1 && globs[0] === FORGE_TEST_GLOB ? 'forge-node' : 'generic';
+// `shape` is true when the project declared the runner or has Forge's own check entry; a file
+// layout of `tests/*.test.mjs` alone is any Node library's, and Forge's selector must not plan it.
+const layout = (program: TestRunner['program'], globs: string[], shape: boolean): TestRunner['layout'] =>
+  shape && program === 'node' && globs.length === 1 && globs[0] === FORGE_TEST_GLOB
+    ? 'forge-node'
+    : 'generic';
 
 /** The package manager's way to run an installed binary, from `packageManager` or the lockfile. */
 function execPrefix(manifest: Record<string, unknown>, paths: Set<string>) {
@@ -197,7 +207,7 @@ export function projectTestRunner(
         program,
         globs,
         command,
-        layout: layout(program, globs),
+        layout: layout(program, globs, true),
         declaredIn: where,
       },
     };
@@ -205,6 +215,7 @@ export function projectTestRunner(
   const scripts = record(manifest.scripts) ? manifest.scripts : {};
   let known: Set<string> | undefined;
   const all = () => (known ??= new Set(paths()));
+  const forgeShape = () => all().has(STANDARD_CHECK_ENTRY);
   if (typeof scripts.test === 'string') {
     const found = scriptRunner(scripts, () => execPrefix(manifest, all()));
     // `node --test` with no path runs Node's own patterns; top-level `tests/*.test.mjs` files keep
@@ -213,6 +224,7 @@ export function projectTestRunner(
       found &&
       'globs' in found &&
       found.globs === NODE_GLOBS &&
+      forgeShape() &&
       [...all()].some(matcher([FORGE_TEST_GLOB]))
     )
       found.globs = [FORGE_TEST_GLOB];
@@ -221,7 +233,11 @@ export function projectTestRunner(
     return found
       ? {
           status: 'available',
-          runner: { ...found, source: 'test-script', layout: layout(found.program, found.globs) },
+          runner: {
+            ...found,
+            source: 'test-script',
+            layout: layout(found.program, found.globs, forgeShape()),
+          },
         }
       : graphRunner(
           options,
@@ -244,7 +260,7 @@ export function projectTestRunner(
   const node = packageJson === undefined ? [] : [...files].filter(matcher(NODE_GLOBS));
   if (node.length) {
     // Top-level `tests/*.test.mjs` files keep the import-graph selector that reads that layout.
-    const globs = node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
+    const globs = forgeShape() && node.some(matcher([FORGE_TEST_GLOB])) ? [FORGE_TEST_GLOB] : NODE_GLOBS;
     return {
       status: 'available',
       runner: {
@@ -252,7 +268,7 @@ export function projectTestRunner(
         program: 'node',
         globs,
         command: ['node', '--test', FILES_PLACEHOLDER],
-        layout: layout('node', globs),
+        layout: layout('node', globs, forgeShape()),
       },
     };
   }

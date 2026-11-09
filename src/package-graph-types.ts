@@ -37,7 +37,14 @@ export type GraphPackage = {
 };
 
 /** One argv to run in `cwd` (relative to the repository root) for the named package keys. */
-export type PackageCommand = { ecosystem: Ecosystem; cwd: string; argv: string[]; packages: string[] };
+export type PackageCommand = {
+  ecosystem: Ecosystem;
+  cwd: string;
+  argv: string[];
+  packages: string[];
+  /** Where the project's own test flags in `argv` came from (src/package-command-flags.ts). */
+  flagsFrom?: 'forge.json' | 'ci';
+};
 
 export type EcosystemGraph = {
   ecosystem: Ecosystem;

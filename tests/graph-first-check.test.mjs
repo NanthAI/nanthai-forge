@@ -24,7 +24,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 import { selectionFallback } from '../dist/fallback-reasons.js';
 import { writeCheckPackages } from '../dist/package-graph-checkout.js';
 import { commandCheckInputs } from '../scripts/check-command-env.mjs';
-import { packageRunCommands, runPackageCommands } from '../scripts/check-packages-run.mjs';
+import { noTestsCollected, packageRunCommands, runPackageCommands } from '../scripts/check-packages-run.mjs';
 
 const base = 'a'.repeat(64),
   head = 'b'.repeat(64);
@@ -266,6 +266,49 @@ test('the per-ecosystem runner runs every command in the checkout and fails on t
     JSON.stringify({ version: 1, scope: 'scoped', commands: [{ cwd: '/etc', argv: ['true'] }] }),
   ])
     assert(packageRunCommands(bad).error, bad);
+});
+
+test('pytest exit 5 (no tests collected) is not a failure; another tool or exit code still is', () => {
+  for (const argv of [
+    ['pytest', 'packages/a'],
+    ['python', '-m', 'pytest', 'a', 'b'],
+    ['uv', 'run', 'pytest', 'packages/a'],
+    ['poetry', 'run', 'pytest'],
+    ['/usr/bin/pytest', '-m', 'not slow', 'a'],
+  ])
+    assert.equal(noTestsCollected(argv, 5), true, argv.join(' '));
+  for (const [argv, status] of [
+    [['pytest', 'a'], 1],
+    [['pytest', 'a'], 0],
+    [['cargo', 'test'], 5],
+    [['go', 'test', './...'], 5],
+    [['make', 'pytest'], 5],
+    [['echo', 'pytest'], 5],
+  ])
+    assert.equal(noTestsCollected(argv, status), false, `${argv.join(' ')} ${status}`);
+  const logs = [];
+  const status = { 'pytest a': 5, 'pytest b': 1 };
+  const spawn = (cmd, args) => ({ status: status[[cmd, ...args].join(' ')] ?? 0 });
+  const root = process.cwd();
+  assert.equal(
+    runPackageCommands([{ ecosystem: 'python', cwd: '', argv: ['pytest', 'a'] }], root, {
+      spawn,
+      log: line => logs.push(line),
+    }),
+    0,
+  );
+  assert.match(logs.join('\n'), /collected no tests \(exit 5\)/);
+  assert.equal(
+    runPackageCommands(
+      [
+        { ecosystem: 'python', cwd: '', argv: ['pytest', 'a'] },
+        { ecosystem: 'python', cwd: '', argv: ['pytest', 'b'] },
+      ],
+      root,
+      { spawn, log: () => {} },
+    ),
+    1,
+  );
 });
 
 test('the one-line opt-in runs the affected package commands and reports a scoped run', t => {

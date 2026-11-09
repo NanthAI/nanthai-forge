@@ -27,6 +27,7 @@ const fixture = () =>
   new Map(
     Object.entries({
       'package.json': '{"type":"module","scripts":{}}',
+      'scripts/forge-check.mjs': '',
       'src/a.ts': 'export const n = 1;',
       'tests/a.test.mjs': "import '../dist/a.js';",
       'tests/reads-guide.test.mjs': "readFileSync(new URL('../docs/x/guide.md', import.meta.url));",

@@ -25,6 +25,8 @@ async function fixture(t, native = true) {
     "tests/quoted ' $name.test.mjs": "import '../dist/leaf.js';\n",
     'tests/files.test.mjs': '',
     'package.json': '{"scripts":{}}',
+    // Forge's own check entry: the project shape that selects Forge's Node layout.
+    'scripts/forge-check.mjs': '',
     'package-lock.json': '{"packages":{}}',
     'README.md': 'Fixture\n',
     'web/placeholder.json': '{}',

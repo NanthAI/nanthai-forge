@@ -48,6 +48,7 @@ const graph = () =>
   new Map(
     Object.entries({
       'package.json': '{"scripts":{}}',
+      'scripts/forge-check.mjs': '',
       'src/a.ts': 'export const n = 1;',
       'src/b.ts': "import './a.js';",
       'tests/a.test.mjs': "import '../dist/a.js';",

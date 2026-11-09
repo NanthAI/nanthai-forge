@@ -10,6 +10,7 @@ import {
   type SelectedPackage,
 } from './package-graph.js';
 import type { PackageTestSelection } from './package-test-selection.js';
+import { applyPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 
 const shellWord = (value: string) =>
   /^[A-Za-z0-9_./=@:,{}-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
@@ -23,8 +24,9 @@ export function packageIntersection(
   graph: PackageGraph,
   lanePaths: string[],
   mainPaths: string[],
+  flags?: PackageFlagSource | { refusal: string },
 ): PackageSelection {
-  const lane = packageSelection(graph, lanePaths);
+  const lane = packageSelection(graph, lanePaths, undefined, flags);
   if (lane.scope === 'full' || graph.status !== 'available' || !lane.packages.length) return lane;
   const main = packageSelection(graph, mainPaths);
   if (main.scope === 'full')
@@ -38,6 +40,7 @@ export function packageIntersection(
     `package graph: ${packages.length} package(s) that can see both this change and main ` +
       `(${packages.map(keyOf).sort().slice(0, 8).join(', ')}); ${lane.packages.length - packages.length} ` +
       `of this change's ${lane.packages.length} affected package(s) are main-audit debt`,
+    flags,
   );
 }
 function withCommands(
@@ -45,6 +48,7 @@ function withCommands(
   packages: SelectedPackage[],
   lanePaths: string[],
   reason: string,
+  flags?: PackageFlagSource | { refusal: string },
 ): PackageSelection {
   if (graph.status !== 'available') return { scope: 'full', reason: graph.reason };
   const byKey = new Map(graph.packages.map(pkg => [packageKey(pkg), pkg]));
@@ -54,7 +58,13 @@ function withCommands(
       .map(pkg => byKey.get(keyOf(pkg)))
       .filter((pkg): pkg is GraphPackage => !!pkg && pkg.ecosystem === ecosystem.ecosystem && pkg.testable);
     if (!mine.length) continue;
-    const result = ecosystem.commands(mine, lanePaths);
+    const generated = ecosystem.commands(mine, lanePaths);
+    const result =
+      'refusal' in generated
+        ? generated
+        : flags && 'refusal' in flags
+          ? flags
+          : applyPackageFlags(ecosystem.ecosystem, generated, flags);
     if ('refusal' in result)
       return { scope: 'full', reason: `package graph: ${ecosystem.ecosystem}: ${result.refusal}` };
     commands.push(...result);
@@ -68,8 +78,11 @@ function withCommands(
 export function packageIntersectionUnion(
   graph: PackageGraph,
   members: { lanePaths: string[]; mainPaths: string[] }[],
+  flags?: PackageFlagSource | { refusal: string },
 ): PackageSelection {
-  const selections = members.map(member => packageIntersection(graph, member.lanePaths, member.mainPaths));
+  const selections = members.map(member =>
+    packageIntersection(graph, member.lanePaths, member.mainPaths, flags),
+  );
   const full = selections.find(selection => selection.scope === 'full');
   if (full || !members.length || graph.status !== 'available')
     return { scope: 'full', reason: `cohort member: ${full?.reason ?? 'no basis'}` };
@@ -86,6 +99,7 @@ export function packageIntersectionUnion(
     [...new Set(members.flatMap(member => member.lanePaths))],
     `package graph: union of ${members.length} cohort member intersection(s), ${packages.length} package(s) ` +
       `(${packages.map(keyOf).sort().slice(0, 8).join(', ')})`,
+    flags,
   );
 }
 
@@ -94,11 +108,12 @@ export function packageIntersectionTestSelection(
   graph: PackageGraph,
   lanePaths: string[],
   mainPaths: string[],
+  flags?: PackageFlagSource | { refusal: string },
   members?: { lanePaths: string[]; mainPaths: string[] }[],
 ): PackageTestSelection {
   const selection = members
-    ? packageIntersectionUnion(graph, members)
-    : packageIntersection(graph, lanePaths, mainPaths);
+    ? packageIntersectionUnion(graph, members, flags)
+    : packageIntersection(graph, lanePaths, mainPaths, flags);
   if (selection.scope === 'full')
     return {
       scope: 'full',

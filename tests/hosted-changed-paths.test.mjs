@@ -163,6 +163,7 @@ test('preflight "retry":true plans exactly the files the last run stopped for ti
     );
   const tests = [
     ['package.json', '{}'],
+    ['scripts/forge-check.mjs', ''],
     ['tests/a.test.mjs', "import '../src/a.ts';"],
     ['tests/b.test.mjs', "import '../src/a.ts';"],
   ];

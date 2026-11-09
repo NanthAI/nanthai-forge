@@ -152,6 +152,7 @@ function fixture(t, checks, extra = {}) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const bytes = new Map([
     ['package.json', manifest(checks, { 'format:check': 'x' })],
+    ['scripts/forge-check.mjs', ''],
     ['src/a.ts', 'export const n = 1;'],
     ['src/b.ts', 'export const n = 2;'],
     ['tests/a.test.mjs', "import test from 'node:test'; import '../src/a.ts'; test('a', () => {});"],

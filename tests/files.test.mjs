@@ -289,3 +289,11 @@ test('small private fingerprints avoid streams while retaining content, ctime, p
     });
   }
 });
+
+test('new Forge client-state folders are never captured; a file merely named like one is source (54d6b3b1)', () => {
+  assert.equal(captureExclusion('abc.forge-client', true), 'protected-directory');
+  assert.equal(captureExclusion('nested/abc.forge-client/agent/auto-x.json', false), 'protected-directory');
+  assert.equal(captureExclusion('abc.forge-client', false), null, 'a plain file of that name is source');
+  assert.equal(captureExclusion('src/forge-client.ts', false), null);
+  assert.equal(captureExclusion('docs/forge-client', true), null);
+});

@@ -60,7 +60,7 @@ export async function withdrawHostedLanding(
   invariant(
     live,
     'LANDING_NOT_LIVE',
-    `Lane ${lane.id} has no live landing to withdraw. Save and land it with land --save.`,
+    `Lane ${lane.id} has no live landing to withdraw. If its landing moved to a resolution Lane, withdraw it by the submissionId the queue lists (land --withdraw with submissionId); otherwise save and land it with land --save.`,
   );
   return cancel(live.submissionId);
 }

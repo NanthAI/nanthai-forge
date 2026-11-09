@@ -5,10 +5,11 @@ import { invariant } from './errors.js';
 /** Keeps eight worst-case escaped messages within the existing 512 KiB publication budget. */
 export const LANDING_MESSAGE_BYTES = 1024;
 export function landingMessage(value: string) {
+  const size = value.length <= LANDING_MESSAGE_BYTES ? new TextEncoder().encode(value).length : value.length;
   invariant(
-    value.length <= LANDING_MESSAGE_BYTES && new TextEncoder().encode(value).length <= LANDING_MESSAGE_BYTES,
+    size <= LANDING_MESSAGE_BYTES,
     'LANDING_MESSAGE_TOO_LARGE',
-    'A landing message must fit in 1024 UTF-8 bytes.',
+    `A landing message (the commit message) must fit in 1024 UTF-8 bytes; this one has at least ${size}. Shorten it and run the same command again.`,
   );
   const clean = cleanMessage(value);
   invariant(

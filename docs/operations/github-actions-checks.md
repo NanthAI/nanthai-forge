@@ -376,8 +376,15 @@ so the check is not re-run three times on the same failure.
 An Intent contract union that rides on the check is covered by the same reports: a union
 test file that a complete JUnit report (or `__FORGE_TESTS__` line) names was run by the
 configured command and is not run again, so a Gradle, Maven or cargo start-up is not paid
-twice; a failed report fails the union. Only the files no report names run afterwards with
-the project's test runner. The union wrapper carries the report parser itself, so an exported
+twice; a failed report fails the union. Reporters that name no file are read by what they do
+name: a Go package (gotestsum, go-junit-report) covers every `_test.go` file in that package
+(found through the nearest `go.mod`), a JVM class (Surefire, Gradle: `com.acme.LedgerTest`) covers
+the file that declares it (nested classes count), and a cargo-nextest binary (`crate::binary`)
+covers the crate's `tests/binary.rs`. An entry that cannot be attributed with certainty covers
+nothing, so the file runs again. Only the files no report names run afterwards with the project's
+test runner, or, when the project declares none and its package graph is readable, with the owning
+package's own command (`go test ./pkg`, `./gradlew :mod:test`, `cargo test -p crate`); with neither,
+the check fails with `SEMANTIC_TESTS_UNAVAILABLE` and the reason rather than guess. The union wrapper carries the report parser itself, so an exported
 Actions script needs no Forge install, and it reads the same bounded `FORGE_JUNIT_DIR`.
 A stack frame in a failure excerpt also names a changed JVM source by its qualified class
 (`at com.acme.billing.Invoice.total(...)` explains a changed

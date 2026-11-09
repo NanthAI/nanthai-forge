@@ -102,6 +102,14 @@ test('each rule finds the literal it names and nothing else', () => {
       [`src/x.ts ${rule}`],
       `${rule}: ${line}`,
     );
+  // The other forms of a tests-folder gate: a prefix test and a `.test.mjs` string literal.
+  for (const line of [
+    "const test = path => path.startsWith('tests/');",
+    'const test = path => path.startsWith("tests/");',
+    "const test = path => path.endsWith('.test.mjs');",
+    "const glob = 'tests/*.test.mjs';",
+  ])
+    assert.deepEqual([...scanHits(['src/x.ts'], () => line).keys()], ['src/x.ts tests-folder'], line);
   // The list form and a plain folder name in prose are distinct.
   assert.equal(scanHits(['src/x.ts'], () => "const dirs = ['src', 'web', 'convex'];").size, 1);
   // Shipped scripts are product code: every rule applies to them too.

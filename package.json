@@ -203,6 +203,7 @@
     "scripts/github-actions-check.mjs",
     "scripts/check-command-env.mjs",
     "scripts/check-packages-run.mjs",
+    "scripts/check-packages-run.d.mts",
     "scripts/actions-capacity.mjs",
     "scripts/check-phases.mjs",
     "scripts/control-build-key.mjs",

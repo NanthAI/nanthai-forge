@@ -17,6 +17,7 @@ import {
   packageManifestPaths,
 } from './package-graph.js';
 import { packageRunnerTests, packageTestSelection } from './package-test-selection.js';
+import { declaredPackageFlags } from './package-command-flags.js';
 
 const shellWord = (value: string) =>
   /^[A-Za-z0-9_./=@:{}-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
@@ -74,7 +75,12 @@ export function intentContractSelection(
   const graph = () => packageGraphFor(graphKey, every, path => files.get(path));
   if (runner.layout === 'packages') {
     // Package commands, not test files: no per-file contract applies.
-    const selection = packageTestSelection(graph(), paths);
+    const selection = packageTestSelection(
+      graph(),
+      paths,
+      undefined,
+      declaredPackageFlags(files.get('forge.json')),
+    );
     return {
       scope: selection.scope,
       reason: selection.reason,

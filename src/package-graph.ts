@@ -2,6 +2,7 @@
 import { digestChunks } from './portable-hash.js';
 import { documentationPath } from './prose-paths.js';
 import { moduleEcosystem, moduleNarrowing } from './module-selection.js';
+import { applyPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 import type { ModuleGraph } from './module-graph-types.js';
 import { cargoGraph, goGraph } from './package-graph-go-rust.js';
 import { pythonGraph, pythonManifest } from './package-graph-python.js';
@@ -285,6 +286,7 @@ export function packageSelection(
   graph: PackageGraph,
   changed: string[],
   modules?: () => ModuleGraph | undefined,
+  flags?: PackageFlagSource | { refusal: string },
 ): PackageSelection {
   if (graph.status === 'unknown') return { scope: 'full', reason: `package graph unknown: ${graph.reason}` };
   const full = (reason: string): PackageSelection => ({ scope: 'full', reason: `package graph: ${reason}` });
@@ -354,7 +356,11 @@ export function packageSelection(
         pkg.ecosystem === ecosystem.ecosystem && pkg.testable && narrowed.get(packageKey(pkg))?.length !== 0,
     );
     if (!mine.length) continue;
-    const result = ecosystem.commands(mine, changed, narrowed);
+    const generated = ecosystem.commands(mine, changed, narrowed);
+    if ('refusal' in generated) return full(`${ecosystem.ecosystem}: ${generated.refusal}`);
+    // The project's own test flags (forge.json template, else the declared check's), or a refusal.
+    const result =
+      flags && 'refusal' in flags ? flags : applyPackageFlags(ecosystem.ecosystem, generated, flags);
     if ('refusal' in result) return full(`${ecosystem.ecosystem}: ${result.refusal}`);
     commands.push(...result);
   }
@@ -381,7 +387,10 @@ export function packageSelection(
     (narrowed.size
       ? `; module graph: ${[...narrowed].map(([key, units]) => `${key.replace(/:$/, ':.')} runs ${units.length} test unit(s) that reach the change`).join(', ')}`
       : '') +
-    (commands.length ? '' : '; none has tests to run');
+    (commands.length ? '' : '; none has tests to run') +
+    (commands.some(command => command.flagsFrom)
+      ? `; test flags from ${[...new Set(commands.flatMap(command => (command.flagsFrom ? [command.flagsFrom === 'ci' ? "the check's own text" : 'forge.json packages.commands'] : [])))].join(' and ')}`
+      : '');
   return { scope: commands.length ? 'scoped' : 'none', reason, packages, commands };
 }
 

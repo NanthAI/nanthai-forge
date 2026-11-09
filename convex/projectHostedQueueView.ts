@@ -19,7 +19,7 @@ import { QUEUE_VIEW_LIMIT, QUEUE_VIEW_PAGES } from '../src/hosted-queue-view';
 /** One bounded read of the landing queue (09e637f7 minimal slice): who is in it,
  * in dispatch order, with Lane, Intent title, phase, last failing test files
  * and how many generations each entry went through. Reads the maintained queue
- * directory (at most QUEUE_VIEW_PAGES pages) plus about six indexed rows per
+ * directory (at most QUEUE_VIEW_PAGES pages) plus about seven indexed rows per
  * listed entry; no queue scan, history, source bytes, scheduler or idle work. Entries held
  * for a person or a dependency follow the dispatch order with no position and a `hold`. */
 export const read = query({
@@ -72,14 +72,29 @@ export const read = query({
               )
               .take(2)
           : [];
-        const hold = landingHold(state, lanes[0]?.key);
+        // The Lane this landing composed (friction a0faf3a9): its compose selection, one indexed read.
+        // A resolution Lane shares its origin's Intent, so the Intent's first Lane can be the wrong one.
+        const composed = state.request.finish?.composeOperationId
+          ? await ctx.db
+              .query('projectHostedComposeSelections')
+              .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
+                q
+                  .eq('projectId', projectId)
+                  .eq('actor', state.actor)
+                  .eq('operationId', state.request.finish!.composeOperationId!)
+                  .eq('kind', 'inputs'),
+              )
+              .take(2)
+          : [];
+        const laneId = composed.length === 1 ? composed[0]!.key : (lanes[0]?.key ?? null);
+        const hold = landingHold(state, laneId ?? undefined);
         const failed = state.testFiles?.failed.length
           ? state.testFiles.failed.map(file => file.file)
           : (state.batchDiagnostic?.failedTests ?? []);
         entries.push({
           position: key.position ?? null,
           submissionId: state.id,
-          laneId: lanes[0]?.key ?? null,
+          laneId,
           ...(lanes.length > 1 ? { moreLanes: true } : {}),
           intentId,
           intentTitle: parsed?.success && parsed.data.kind === 'intent' ? parsed.data.outcome : null,

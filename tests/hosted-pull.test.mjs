@@ -100,6 +100,22 @@ test('tracked deletes/modes refuse; ignored outputs, dependency links and nested
   assert.equal(fs.readlinkSync(join(f.root, 'node_modules')), '../dependencies');
   assert.equal(fs.readFileSync(join(clientCacheRoot(f.root), 'lanes/lane/draft'), 'utf8'), 'draft');
 });
+test('a Forge client-state folder written inside the clone is kept, never a local edit (friction 54d6b3b1)', async t => {
+  const f = pullFixture(t);
+  // Another project's client state, as a client wrote it under the clone: journals and Spotlight's marker.
+  const stray = join(f.root, 'mh70hhyhcyzmywg7fh4pfpd6z98hs4jy.forge-client');
+  fs.mkdirSync(join(stray, 'agent'), { recursive: true });
+  fs.writeFileSync(join(stray, '.metadata_never_index'), '');
+  fs.writeFileSync(join(stray, 'agent', 'auto-synthetic.json'), '{}');
+  f.select([['src/0.txt', 'new']]);
+  await pull(f);
+  assert.equal(fs.readFileSync(join(f.root, 'src/0.txt'), 'utf8'), 'new');
+  assert.equal(fs.readFileSync(join(stray, 'agent', 'auto-synthetic.json'), 'utf8'), '{}', 'kept as is');
+  // A real local edit still refuses.
+  f.select([['src/1.txt', 'next']]);
+  fs.writeFileSync(join(f.root, 'src/2.txt'), 'local');
+  await assert.rejects(pull(f), { code: 'WORK_CONFLICT' });
+});
 test('ignored incoming collision is refused before publication; source symlinks/executable/add/delete apply', async t => {
   const f = pullFixture(t);
   fs.mkdirSync(join(f.root, 'dist'));

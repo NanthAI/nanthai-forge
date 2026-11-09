@@ -80,10 +80,15 @@ async function executeActiveActionsJob(
     // Advisory input: an unreadable tree leaves the command without it, never fails the check.
     if (!recipe.standard && !commandOverride)
       try {
-        packages = writeCheckPackages(directory, recipe.selection?.changes, {
-          node: process.execPath,
-          script: join(import.meta.dirname, '../scripts/check-packages-run.mjs'),
-        });
+        packages = writeCheckPackages(
+          directory,
+          recipe.selection?.changes,
+          {
+            node: process.execPath,
+            script: join(import.meta.dirname, '../scripts/check-packages-run.mjs'),
+          },
+          run.check,
+        );
       } catch {
         packages = null;
       }

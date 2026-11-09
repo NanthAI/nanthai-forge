@@ -350,6 +350,48 @@ test('save from the project folder names the open Lane checkout (friction fa11c1
   });
 });
 
+test('sync from the project folder refuses before any server call and names the Lane checkout (friction d467b644)', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address });
+  const folder = join(s.root, '..', 'project-folder');
+  mkdirSync(folder, { recursive: true });
+  const other = new HostedAgentTransport(folder, s.address, s.exchange);
+  const before = s.calls.filter(call => /Sync/.test(call.name)).length;
+  await assert.rejects(other.dispatch('sync', { laneId: s.lane.laneId }), error => {
+    assert.equal(error.code, 'HOSTED_CHECKOUT_REQUIRED');
+    assert.equal(error.recovery.root, s.root);
+    assert(error.message.includes(s.root));
+    return true;
+  });
+  assert.equal(
+    s.calls.filter(call => /Sync/.test(call.name)).length,
+    before,
+    'the server Lane is not advanced',
+  );
+});
+
+test('an over-long landing message is refused before any server call (friction d8d357c2)', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  writeFileSync(join(s.root, 'draft.txt'), 'Unsaved draft');
+  const before = s.calls.length;
+  // 1,300 bytes, as in the dogfood case; multi-byte text counts in UTF-8 bytes.
+  for (const message of ['m'.repeat(1300), 'é'.repeat(600)])
+    await assert.rejects(s.transport().dispatch('finish', { laneId: s.lane.laneId, message }), error => {
+      assert.equal(error.code, 'LANDING_MESSAGE_TOO_LARGE');
+      assert.match(error.message, /1024 UTF-8 bytes; this one has at least \d+/);
+      return true;
+    });
+  assert.equal(s.calls.length, before, 'no capability read, save or compose');
+});
+
 test('finish with explicit saved inputs preserves local drafts without starting a save', async t => {
   const s = agentFixture(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

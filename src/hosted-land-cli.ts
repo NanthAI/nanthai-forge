@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { waitEventLine } from './hosted-wait-line.js';
+import { landingMessage } from './landing-message.js';
 import { clientCacheRoot } from './root-paths.js';
 import { isNetworkPending } from './network-continuation.js';
 import { normalizeHostedFinishResult, retryableFinishSource } from './hosted-agent-finish-result.js';
@@ -285,6 +286,8 @@ export async function hostedLandCli(
   options: { wait?: boolean | undefined; detach?: boolean; timeoutSeconds?: number } = {},
 ): Promise<HostedAgentResponse | undefined> {
   if (process.env[LAND_CHILD_ENV] === '1') return submitHostedLand(root, command, address);
+  // Before the submitter starts or any server call: an over-long message fails here, at once.
+  if (typeof command.message === 'string') landingMessage(command.message);
   // One budget for the whole command (submission and wait), from when it started.
   const budgetSeconds = options.timeoutSeconds ?? AGENT_WAIT_SECONDS,
     deadline = Date.now() + budgetSeconds * 1000;

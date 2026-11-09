@@ -172,6 +172,10 @@ test("Forge's own package.json preflight config reads unchanged", () => {
     preflightGuards(manifest, () => true).map(guard => guard.name),
     declared.guards.map(guard => guard.name),
   );
-  const runner = projectTestRunner(manifest, () => ['tests/a.test.mjs', 'src/a.ts']);
+  const runner = projectTestRunner(manifest, () => [
+    'scripts/forge-check.mjs',
+    'tests/a.test.mjs',
+    'src/a.ts',
+  ]);
   assert.equal(runner.runner.layout, 'forge-node');
 });

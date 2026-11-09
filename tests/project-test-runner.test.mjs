@@ -75,7 +75,7 @@ function lane(t, bytes) {
 
 test("Forge's own package.json infers Forge's Node layout, so its preflight and tests read are unchanged", () => {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
-  const resolved = resolve(manifest);
+  const resolved = resolve(manifest, ['scripts/forge-check.mjs', 'tests/a.test.mjs']);
   assert.equal(resolved.status, 'available');
   assert.equal(resolved.runner.layout, 'forge-node');
   assert.equal(resolved.runner.source, 'test-script');
@@ -84,6 +84,60 @@ test("Forge's own package.json infers Forge's Node layout, so its preflight and 
     'node',
     '--import',
     './tests/check-runtime.mjs',
+    '--test',
+    '{files}',
+  ]);
+});
+
+test("Forge's Node layout is never inferred from tests/*.test.mjs alone: an outside node --test project is generic", () => {
+  const outside = ['src/x.ts', 'tests/x.test.mjs', 'tests/helper.mjs'];
+  for (const manifest of [
+    { scripts: { test: 'node --test' } },
+    { scripts: { test: 'node --test tests/*.test.mjs' } },
+    {},
+  ]) {
+    const resolved = resolve(manifest, outside);
+    assert.equal(resolved.status, 'available', JSON.stringify(manifest));
+    assert.equal(resolved.runner.layout, 'generic', JSON.stringify(manifest));
+  }
+  // A bare `node --test` keeps Node's own patterns; they are not narrowed to Forge's folder.
+  const bare = resolve({ scripts: { test: 'node --test' } }, outside);
+  assert.ok(runnerTestPath(bare.runner, 'lib/y.test.js'));
+  assert.deepEqual(runnerCommand(bare.runner, ['tests/x.test.mjs']), ['node', '--test', 'tests/x.test.mjs']);
+  // With Forge's own check entry present the same manifest is Forge's layout.
+  const forge = resolve({ scripts: { test: 'node --test' } }, [...outside, 'scripts/forge-check.mjs']);
+  assert.equal(forge.runner.layout, 'forge-node');
+  assert.deepEqual(forge.runner.globs, ['tests/*.test.mjs']);
+  // A project that declares the runner chooses it.
+  const declared = projectTestRunner(
+    JSON.stringify({
+      forge: { preflight: { tests: { glob: 'tests/*.test.mjs', command: ['node', '--test', '{files}'] } } },
+    }),
+    () => outside,
+  );
+  assert.equal(declared.runner.layout, 'forge-node');
+  // Outside, the contract selection and the semantic union runner take the project runner's own command.
+  const files = new Map([['package.json', JSON.stringify({ scripts: { test: 'node --test' } })]]);
+  const contract = intentContractSelection(files, ['tests/x.test.mjs'], outside);
+  assert.equal(contract.runner.status, 'available');
+  assert.deepEqual(contract.tests, ['tests/x.test.mjs']);
+  assert.match(contract.command, /^node --test tests\/x\.test\.mjs$/);
+  const member = intentId => ({
+    intentId,
+    outcome: 'Synthetic',
+    version: 1,
+    tests: [{ path: 'tests/x.test.mjs', durationMs: 10 }],
+  });
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+  const command = semanticCheckCommand(
+    ['bash', 'ci.sh'],
+    { primaryIntentId: ids[0], members: ids.map(member) },
+    'node',
+    [],
+    bare,
+  );
+  assert.deepEqual(JSON.parse(command[4].length ? command[command.length - 1] : '{}').runner, [
+    'node',
     '--test',
     '{files}',
   ]);
@@ -127,7 +181,10 @@ test('the runner is inferred from the test script, then dependencies, then Node 
   assert.equal(files.runner.source, 'files');
   assert.equal(resolve(undefined, ['lib/a.test.js']).status, 'unavailable');
   assert.equal(files.runner.layout, 'generic');
-  assert.equal(resolve({}, ['tests/a.test.mjs', 'tests/fixture.mjs']).runner.layout, 'forge-node');
+  assert.equal(
+    resolve({}, ['scripts/forge-check.mjs', 'tests/a.test.mjs', 'tests/fixture.mjs']).runner.layout,
+    'forge-node',
+  );
 
   for (const script of ['turbo run test', 'make test', 'pnpm -r test', 'cargo test']) {
     const none = resolve({ scripts: { test: script }, devDependencies: { vitest: '3.2.4' } });
@@ -306,7 +363,7 @@ test('semantic union tests run with the project runner; Forge layout keeps its c
     ),
   };
   const base = [process.execPath, '-e', ''];
-  const forge = resolve({}, ['tests/a.test.mjs']);
+  const forge = resolve({}, ['scripts/forge-check.mjs', 'tests/a.test.mjs']);
   assert.deepEqual(
     semanticCheckCommand(base, plan, process.execPath, [], forge),
     semanticCheckCommand(base, plan, process.execPath),

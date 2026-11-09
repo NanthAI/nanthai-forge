@@ -111,8 +111,8 @@ budget, time box, acceptance bar and metrics that must not regress.
     run that one settle wait in the background and block on it with your harness
     wait tool ([asynchronous land](workflow.md#asynchronous-land-one-wake-no-waiting-turns)). If the turn-end hook blocks a stop, run its `nforge wait ID`.
     Repeat on IN PROGRESS; follow terminal recovery on failure/conflict. A passed
-    check alone is not a landing. Your finish `message` is the GitHub commit message:
-    end it with the commit trailers your harness asks for (for example `Co-Authored-By:`). Before admission, replay the full original request. Retryable source work follows its returned recovery.
+    check alone is not a landing. Your finish `message` is the GitHub commit message
+    (at most 1024 UTF-8 bytes, checked before any server call): end it with the commit trailers your harness asks for (for example `Co-Authored-By:`). Before admission, replay the full original request. Retryable source work follows its returned recovery.
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
     Before filing an Issue or friction, search planning and comment on an existing

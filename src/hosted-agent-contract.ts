@@ -249,7 +249,19 @@ export const hostedAgentCommandSchemas = {
   'source-pack': z.object({}).strict(),
   cancel: z.object({ submissionId: uuid }).strict(),
   /** land --withdraw: cancel this Lane's live landing; the Lane, saves and check evidence stay. */
-  withdraw: z.object({ ...lane, reason: z.string().min(1).max(500).optional() }).strict(),
+  withdraw: z
+    .object({
+      ...lane,
+      /** The submission from `queue` or a land receipt: reaches a landing that moved to a resolution Lane. */
+      submissionId: uuid.optional(),
+      reason: z.string().min(1).max(500).optional(),
+    })
+    .strict()
+    .refine(command => !(command.submissionId && command.laneId), 'Select laneId or submissionId, not both.')
+    .refine(
+      command => !(command.submissionId && command.reason),
+      'reason is recorded only for a withdraw by Lane; omit it with submissionId.',
+    ),
   revert: z.object({ ...message, target: revertTargetSchema }).strict(),
   abandon: z
     .object({

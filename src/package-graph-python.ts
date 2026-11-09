@@ -41,6 +41,15 @@ function ini(text: string) {
   return sections;
 }
 
+/** A Python file pytest would collect from: `test_*.py`, `*_test.py`, `conftest.py` or any `.py` file
+ * under a `tests`/`test` folder. */
+const testFile = (path: string) => {
+  const name = basename(path);
+  return (
+    /^(?:test_.*|.*_test|conftest)\.py$/.test(name) || (name.endsWith('.py') && /(?:^|\/)tests?\//.test(path))
+  );
+};
+
 type Found = { pkg: GraphPackage; requires: string[]; sources: string[]; pytest: boolean };
 
 /** Tool tables that configure a build even without `[build-system]`. */
@@ -157,7 +166,10 @@ function unittestCommand(
  * their inputs from other ecosystems (no cross-ecosystem widening). setup.py is code and is
  * never read, so a package declared only there makes the layout unknown. uv workspace members are
  * declared. Tests run with pytest when the project declares it (dependency, `[tool.pytest]`,
- * pytest.ini or conftest.py), through the lockfile's tool (uv, Poetry, PDM) or `python -m pytest`. */
+ * pytest.ini or conftest.py), through the lockfile's tool (uv, Poetry, PDM) or `python -m pytest`.
+ * A package with no test-looking file below it is not testable (it is still selected for its
+ * dependents), and a pytest run that collects nothing (exit 5) is not a failure
+ * (scripts/check-packages-run.mjs). */
 export function pythonGraph(paths: string[], read: ManifestReader): EcosystemResult {
   const manifests = paths.filter(pythonManifest);
   if (!manifests.length) return null;
@@ -227,6 +239,16 @@ export function pythonGraph(paths: string[], read: ManifestReader): EcosystemRes
       return { ecosystem: 'python', refusal: `${dir}/pyproject.toml names no project` };
   const found = [...byDir.values()];
   if (!found.length) return null;
+  // A package is testable when a test-looking file sits below it and not below a deeper package: a pure
+  // library (no tests folder) would make pytest exit 5, and its dependents still run.
+  const owners = found.map(item => item.pkg.dir).sort((a, b) => b.length - a.length);
+  const owned = new Set<string>();
+  for (const path of paths)
+    if (testFile(path) && !SKIP.test(path)) {
+      const owner = owners.find(dir => !dir || path.startsWith(`${dir}/`));
+      if (owner !== undefined) owned.add(owner);
+    }
+  for (const item of found) item.pkg.testable = owned.has(item.pkg.dir);
   const memberGlobs = members.map(globRegExp);
   const byName = new Map(found.map(item => [normal(item.pkg.name), item.pkg]));
   for (const item of found) {

@@ -18,7 +18,7 @@ import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agen
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
-import { checkoutRequired } from './hosted-lane-location.js';
+import { checkoutRequired, openLaneRoot } from './hosted-lane-location.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import {
   applyObservedSaveOutcome,
@@ -569,6 +569,21 @@ export async function executeHostedAgent(
   if (action === 'resolve') return resolveHostedAgent(session, input);
   if (action === 'sync') {
     const command = hostedAgentCommandSchemas.sync.parse(input);
+    // From a folder that is not the named Lane's checkout, the server Lane would advance while its
+    // open checkout here stays on the old head (next command WORK_STALE): refuse first, naming that
+    // checkout (friction d467b644). A Lane with no checkout on this machine still syncs server-side.
+    if (
+      command.apply &&
+      !command.candidateId &&
+      command.laneId &&
+      session.marker()?.selection.laneId !== command.laneId &&
+      openLaneRoot(session, command.laneId)
+    )
+      throw checkoutRequired(
+        session,
+        command.laneId,
+        'Sync updates the Lane checkout as well as the server Lane.',
+      );
     const timing = syncTiming();
     // A save this client returned unfinished still pins the marker's old head: settle it (its own
     // progress, no new save) before the sync pins the Lane. No pending save means no call.

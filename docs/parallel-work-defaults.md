@@ -245,8 +245,12 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 
 - **Project file `forge.json`.** Project settings for any language live in one JSON object at
   the repository root: `{"preflight": {"tests": {…}, "static": […], "guards": […]}}`, each
-  described below, `{"install": {"scripts": true}}` (see [shareDependencies](#sharedependencies))
-  and `{"packages": {"edges": […]}}` (the package graph's edges between ecosystems, below). A JS project may instead keep the same `preflight` object under `forge` in
+  described below, `{"install": {"scripts": true}}` (see [shareDependencies](#sharedependencies)),
+  `{"packages": {"edges": […]}}` (the package graph's edges between ecosystems, below) and
+  `{"packages": {"commands": {"cargo": ["cargo", "test", "--all-features", "{packages}"]}}}`, a
+  per-ecosystem test command template (cargo, go, python, dotnet, gradle, maven) for the package
+  graph below: `{packages}` expands to what Forge selected after the tool (`-p a -p b`, the Go
+  packages, the pytest paths, the Gradle tasks, the Maven selection and phase). A JS project may instead keep the same `preflight` object under `forge` in
   `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
   is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
   it does not know are ignored.
@@ -289,7 +293,9 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   graph** below. When
   nothing applies, preflight runs the static checks alone and says `tests unavailable` with the
   reason (`unavailable` when no static check applies), and the `tests` read returns scope
-  `unavailable`. Node's runner over top-level `tests/*.test.mjs` keeps the import-graph tiers below.
+  `unavailable`. Node's runner over top-level `tests/*.test.mjs` keeps the import-graph tiers below, but only
+  for a project that declares it or has Forge's own check entry; any other `node --test` project is
+  a generic runner whatever its folder names.
   Any other declared or inferred runner selects by path: changed test files, then the tests named
   for a changed module (`sum.test.ts` for `sum.ts`, closest folder first) and, in local preflight,
   every test that reaches a changed file through a static JS/TS import graph (relative imports,
@@ -365,6 +371,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   the complete set of cross-ecosystem edges; an edge naming no package makes the graph unknown
   (full). The graph is cached per head; the `tests` read reads
   manifests in the same batched source reads (none for Forge's own Node layout or a cached head).
+  A Python package with no test file below it is not tested on its own (its dependents still run), and a pytest
+  run that collects nothing (exit 5) passes.
+  A scoped run keeps the project's own test flags (`--all-features`, `-race -tags integration`,
+  `-m "not slow"`, `-c Release`, Gradle `check`, Maven `verify`): from a declared template first, else
+  read as text from the declared check's command and the repository script it runs (never executed).
+  A tool the CI runs in more than one way, or with a shell expansion or an unclear flag value, makes the
+  selection full with the reason; selection flags (`--workspace`, `-p`, `-pl`, `./...`) are replaced by
+  Forge's own. Preflight and the Intent contract have no check text, so they use the template only.
   A scoped configured check command receives the same selection in `FORGE_CHECK_PACKAGES`, with a
   runner for it in `FORGE_CHECK_PACKAGES_RUN`, and an Intent without a contract can get a scoped
   first check when the graph selects a minority ([check command scope](workflows.md#check-command-scope)).
