@@ -230,6 +230,15 @@
                     "string",
                     "null"
                   ]
+                },
+                "failedJobs": {
+                  "type": "number"
+                },
+                "nextStep": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               },
               "required": [

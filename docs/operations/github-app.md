@@ -47,6 +47,7 @@ After signing in to Forge:
 ```sh
 nforge github connect PROJECT_ID --url https://DEPLOYMENT.convex.cloud --repo OWNER/NAME
 nforge github status PROJECT_ID --url https://DEPLOYMENT.convex.cloud
+nforge github resume PROJECT_ID --url https://DEPLOYMENT.convex.cloud   # a stopped mirror (owner)
 ```
 
 A hosted Lane checkout path can replace `PROJECT_ID` and its `--url` argument.
@@ -302,7 +303,11 @@ first pull request or push is seen at once; no landing has to come first.
   Lane when `FORGE_WEB_URL` is set. A newer head of the same PR supersedes the
   older one: an unstarted job is dropped without a status; a checking one gets
   error "Superseded" and its run is cancelled. A failed status write retries twice
-  (30 s, 60 s) and otherwise stays pending on GitHub, which keeps merging blocked.
+  (30 s, 60 s). If every attempt fails, GitHub keeps the last status it accepted
+  (pending), which keeps merging blocked, and Forge records the failed post on the
+  job: mirror status reads `failed` with `GITHUB_VERIFY_POST_FAILED`, the head and
+  the next step. `nforge github resume PROJECT` (owner) posts it again; a newer
+  head of the PR also replaces it. A post that succeeds writes nothing extra.
 - **PR cost:** per head, 1 webhook mutation, the same GitHub reads and Convex calls
   as an inbound push (plus 1 compare read, and tree reads for what `main` changed
   when the PR is behind), the check-only run, about 4 small Convex calls to start
@@ -388,8 +393,8 @@ mirror only fast-forwards.
   "Repository rule violations" text, and `nforge status` shows the failing State and
   lag. GitHub `main` does not move. Put the App back on the ruleset's bypass list
   (`gh api -X PUT repos/OWNER/NAME/rulesets/RULESET_ID --input RULESET.json`), then the
-  operator resumes the job named in the failure detail
-  (`projectGithubMirrorStore:resume '{"jobId":"…"}'`, see
+  project owner runs `nforge github resume PROJECT` (the operator mutation
+  `projectGithubMirrorStore:resume '{"jobId":"…"}'` stays available, see
   [workflows](../workflows.md#automatic-main-mirror)). It returns `scheduled`; GitHub then
   receives one commit per skipped State in order, with no duplicate and no force.
   Drilled on a throwaway repository: failure, restore, resume, catch-up.
@@ -402,7 +407,7 @@ mirror only fast-forwards.
   contribution Lane and accept it. To drop an unwanted one, only the repository owner
   can: set the ruleset `enforcement` to `disabled`, force-move `main` to the newest
   commit whose `Forge-State` trailer is an accepted State, set it back to `active`
-  straight away, then resume the job. Keep that window to minutes and record the SHAs
+  straight away, then the owner runs `nforge github resume PROJECT`. Keep that window to minutes and record the SHAs
   on the Issue.
 - **Ruleset lost or edited by mistake.** Re-create it from the JSON above.
 

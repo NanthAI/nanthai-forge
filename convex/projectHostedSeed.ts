@@ -92,6 +92,45 @@ export const begin = mutation({
     }
   },
 });
+const ABORT_PAGES = 200;
+/** The owner discards a started seed that cannot finish (a bad request, a lost local pin) so the
+ * project can be seeded again; the same `operationId` resumes from page 0, a new one replaces it
+ * (Issue 68361cd5, SM-E). Pages go in bounded batches: repeat while `status` is `partial`. Source
+ * bytes are content-addressed and stay; a committed seed (backup selected) is refused. */
+export const abort = mutation({
+  args: { projectId: v.id('hostedProjects'), operationId: v.string() },
+  returns: v.object({
+    status: v.union(v.literal('aborted'), v.literal('partial'), v.literal('none')),
+    deleted: v.number(),
+  }),
+  handler: async (ctx, input) => {
+    try {
+      await caller(ctx, input.projectId);
+      const row = await rowFor(ctx, input.projectId);
+      if (!row) return { status: 'none' as const, deleted: 0 };
+      invariant(
+        row.operationId === input.operationId,
+        'WORK_OPERATION_CHANGED',
+        'Select the original seed operation to abort it.',
+      );
+      invariant(
+        !row.backupId,
+        'SEED_COMMITTED',
+        'This seed already selected its source and cannot be aborted.',
+      );
+      const pages = await ctx.db
+        .query('projectHostedSeedPages')
+        .withIndex('by_seed_and_index', q => q.eq('seedId', row._id))
+        .take(ABORT_PAGES);
+      for (const page of pages) await ctx.db.delete(page._id);
+      if (pages.length === ABORT_PAGES) return { status: 'partial' as const, deleted: pages.length };
+      await ctx.db.delete(row._id);
+      return { status: 'aborted' as const, deleted: pages.length };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
 export const inspect = internalQuery({
   args: { ...identity, owner: v.string() },
   returns: v.string(),

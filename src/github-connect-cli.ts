@@ -101,13 +101,13 @@ export async function githubConnectCli(args: string[]) {
   if (values.help)
     return {
       usage:
-        'nforge github connect|status|disconnect PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR]',
+        'nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--repo-id ID] [--cursor CURSOR]',
     };
   const [command, project] = positionals;
   invariant(
-    project && positionals.length === 2 && ['connect', 'status', 'disconnect'].includes(command!),
+    project && positionals.length === 2 && ['connect', 'status', 'disconnect', 'resume'].includes(command!),
     'BAD_ARGUMENT',
-    'Use nforge github connect|status|disconnect PROJECT.',
+    'Use nforge github connect|status|disconnect|resume PROJECT.',
   );
   const root = resolve(project);
   const address = hostedAgentAddress(
@@ -120,6 +120,9 @@ export async function githubConnectCli(args: string[]) {
     'Pass --url DEPLOYMENT with the hosted project ID, or use a hosted checkout path.',
   );
   const transport = new HostedAgentTransport(root, address);
+  // Owner only: restarts a stopped mirror job (same cursor and State), re-points a mirror whose
+  // repository changed, and posts a failed forge/verify status again. Safe to repeat.
+  if (command === 'resume') return transport.mutation('projectGithubMirrorResume:resume', {});
   if (command === 'status') {
     const listed = await transport.query<unknown>('githubBindingStore:list', {
       cursor: values.cursor ?? null,

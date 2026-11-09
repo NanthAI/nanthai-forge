@@ -72,6 +72,7 @@ export async function settlePull(ctx: MutationCtx, job: Job, result: Outcome, de
     state: result === 'superseded' ? 'error' : result,
     description: description ?? descriptions[result],
     link: await projectLink(ctx, project, inbound.laneId),
+    jobId: job._id,
   });
   // Separate transaction: a Lane or run that cannot be retired never loses the status.
   if (inbound.laneId || pull.runId)
@@ -182,6 +183,9 @@ export const receive = internalMutation({
         .order('desc')
         .take(10);
       if (older.some(job => pullOf(job)?.head === input.head)) continue;
+      // A newer head replaces an older head's unposted final status as what decides the merge.
+      if (queue.verifyFailedId && older.some(job => job._id === queue.verifyFailedId))
+        await ctx.db.patch(queue._id, { verifyFailedId: undefined });
       for (const job of older) {
         const pull = pullOf(job);
         if (!pull || pull.outcome) continue;

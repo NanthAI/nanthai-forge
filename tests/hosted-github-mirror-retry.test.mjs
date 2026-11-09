@@ -463,6 +463,13 @@ test('real action: five persistent 500s end terminal, visible in CLI and Now, wi
   const html = renderToStaticMarkup(createElement(HostedMirrorStatus, { status, now: Date.now() }));
   assert.match(html, /role="status"/);
   assert.match(html, /failed.* 5 failed attempts.*HTTP 500/);
+  // SM-E: a stopped mirror names its next step; only the owner's view (a resume handler) offers the button.
+  assert.match(status.nextStep, /nforge github resume PROJECT/);
+  assert(!/Resume mirror/.test(html), 'a non-owner view has no button');
+  const owner = renderToStaticMarkup(
+    createElement(HostedMirrorStatus, { status, now: Date.now(), resume: async () => undefined }),
+  );
+  assert.match(owner, /Resume mirror/);
   const capabilities = JSON.parse(
     await f.run(agent.capabilities, { projectId: f.projectId, mirrorVersion: 1 }),
   );
@@ -613,9 +620,9 @@ test('real action: an unexpected exception keeps a bounded redacted cause, retri
   assert.equal(job.error, 'GITHUB_SYNC_FAILED');
   assert.match(job.detail, /^Mirror step stopped on SyntaxError: not valid JSON\. Next: /);
   assert(!/synthetic-token|example\.invalid|sig=1/.test(job.detail), 'no token, URL or body text');
-  assert(
-    job.detail.includes(`npx convex run projectGithubMirrorStore:resume '{"jobId":"${f.input.jobId}"}'`),
-  );
+  // SM-E: the failure names a command a user can run, not an operator-only mutation.
+  assert(job.detail.includes('nforge github resume PROJECT'));
+  assert(!job.detail.includes('npx convex'));
   assert.equal(job.cursor, f.cursor, 'the retained cursor is kept for resume');
   await f.step();
   assert.equal(f.scheduled.length, 5, 'terminal failure schedules nothing');

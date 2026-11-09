@@ -40,6 +40,7 @@ import {
 } from './projectSettingApprovals';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
+import { retargetGithubMirror } from './projectGithubMirrorRetarget';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -136,6 +137,10 @@ async function writePolicy(
     canonicalPayload(previous.githubMirror ?? null) !== canonicalPayload(mirror)
   )
     await ensureMirrorRow(ctx, project._id, mirror.repo);
+  // A mirror pointed at another repository re-points its queue row now, off the landing path
+  // (one indexed read, only when this edit sets the mirror).
+  if (command.githubMirror && policy.githubMirror?.autoPush)
+    await retargetGithubMirror(ctx, project._id, policy.githubMirror.repo);
   await ctx.db.insert('projectPolicyChanges', {
     projectId: project._id,
     operationId: command.operationId,

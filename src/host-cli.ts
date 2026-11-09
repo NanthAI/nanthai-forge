@@ -18,13 +18,14 @@ nforge host ROOT --delete-project PROJECT_ID --confirm SLUG [--deployment URL] [
   (ROOT: a Git worktree, an nforge clone or Lane, or any directory with --deployment; Git is not needed. SLUG is printed by nforge clone.)
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
 nforge host ROOT --status
+nforge host ROOT --abort-seed
 nforge host ROOT --resume [--json]
 nforge host ROOT --cutover-file REQUEST.json --dry-run|--apply
 nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Source and records are seeded in bounded pages, then main is validated and selected.
---json streams progress and result events as JSON lines; --wait remains accepted for compatibility. With no action, --json reads status only. --resume explicitly resumes interrupted hosting with its original operation. An already bound owner needs --new to create another project.
+--json streams progress and result events as JSON lines; --wait remains accepted for compatibility. With no action, --json reads status only. --resume explicitly resumes interrupted hosting with its original operation. An already bound owner needs --new to create another project. --abort-seed discards a started seed's server-side progress (source bytes stay) so --resume seeds again from page 0.
 `;
 export interface HostingClient {
   mutation(ref: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;

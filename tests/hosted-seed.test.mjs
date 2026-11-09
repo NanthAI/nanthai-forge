@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { getFunctionName } from 'convex/server';
+import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { fixture, modules, upload } from './project-exchange-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
@@ -165,6 +165,41 @@ test('lost page reply resumes from its committed cursor, preserving the original
   assert.equal(resumed[0], 2);
   assert.equal(result.mainDigest, pin);
   assert.equal(new Set(f.uploaded).size, f.uploaded.length);
+});
+
+test('SM-E seed: the owner aborts a started seed; a stranger, another operation and a committed seed cannot; the seed restarts', async t => {
+  const f = setup(t),
+    action = f.client.action;
+  f.client.action = async (ref, args) => {
+    const value = await action(ref, args);
+    if (getFunctionName(ref).endsWith(':stage') && args.index === 1) throw new Error('lost page reply');
+    return value;
+  };
+  await assert.rejects(seedHostedProject(f.store, f.input, f.client, f.exchange), /lost page/);
+  f.client.action = action;
+  const pages = f.s.tables.projectHostedSeedPages.size;
+  assert(pages > 0);
+  const abort = (args = {}) =>
+    f.client.mutation(makeFunctionReference('projectHostedSeed:abort'), {
+      projectId: 'project',
+      operationId: f.input.operationId,
+      ...args,
+    });
+  const code = error => (error.data?.code ?? error.code) === 'WORK_OPERATION_CHANGED';
+  // Before this fix nothing but the original request could touch a started seed.
+  await assert.rejects(abort({ operationId: randomUUID() }), code);
+  const identity = f.s.ctx.auth.getUserIdentity;
+  f.s.ctx.auth.getUserIdentity = async () => ({ subject: 'someone-else' });
+  await assert.rejects(abort());
+  f.s.ctx.auth.getUserIdentity = identity;
+  assert.equal(f.s.tables.projectHostedSeedPages.size, pages, 'refused aborts delete nothing');
+  assert.deepEqual(await abort(), { status: 'aborted', deleted: pages });
+  assert.equal(f.s.tables.projectHostedSeeds.size, 0);
+  assert.equal(f.s.tables.projectHostedSeedPages.size, 0);
+  assert.deepEqual(await abort(), { status: 'none', deleted: 0 }, 'a repeat is a no-op');
+  const done = await seedHostedProject(f.store, f.input, f.client, f.exchange);
+  assert(done.backupId, 'the project seeds again from page 0');
+  await assert.rejects(abort(), error => (error.data?.code ?? error.code) === 'SEED_COMMITTED');
 });
 
 for (const reply of ['finish', 'completed begin'])

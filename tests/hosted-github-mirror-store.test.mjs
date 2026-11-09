@@ -12,6 +12,11 @@ const queue = await import(moduleUrl('../convex/projectGithubMirrorQueue.ts'));
 const store = await import(moduleUrl('../convex/projectGithubMirrorStore.ts'));
 const objects = await import(moduleUrl('../convex/projectGithubMirrorObjects.ts'));
 const action = await import(moduleUrl('../convex/projectGithubMirror.ts'));
+const retarget = await import(moduleUrl('../convex/projectGithubMirrorRetarget.ts'));
+const owner = await import(moduleUrl('../convex/projectGithubMirrorResume.ts'));
+const verifyStore = await import(moduleUrl('../convex/projectGithubPullStatusStore.ts'));
+const verifyPost = await import(moduleUrl('../convex/projectGithubPullStatus.ts'));
+const { githubMirrorStatus } = await import(moduleUrl('../convex/projectGithubMirrorStatus.ts'));
 
 /** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
 const bindRepository = (t, projectId, repo) => {
@@ -823,6 +828,8 @@ test('two-way PR: the check run settles forge/verify once; a newer head supersed
     state: 'error',
     description: 'Superseded by a newer push to this pull request.',
     link: null,
+    // SM-E: the post names its job so a failed post can be recorded on it.
+    jobId: old._id,
   });
 });
 test('two-way PR fork: the owner decision starts or settles the waiting head; expiry and a newer head close the request', async () => {
@@ -894,4 +901,167 @@ test('two-way PR fork: the owner decision starts or settles the waiting head; ex
   assert.equal(s.row().ended.kind, 'settled');
   assert.equal(f.tables.projectHostedApprovals.size, 4, 'fork requests are never live rows');
   assert(![...f.tables.projectHostedApprovals.values()].some(row => row.live));
+});
+
+const pointAt = (f, repo) =>
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...f.tables.hostedProjects.get(f.projectId).autonomyPolicy,
+      githubMirror: { repo, autoPush: true, laneRefs: false },
+    },
+  });
+const mirrorStatus = f =>
+  f.run('status', async ctx => githubMirrorStatus(ctx, await ctx.db.get(f.projectId)));
+const queueRow = f => [...f.tables.projectGithubMirrors.values()][0];
+const jobs = f => [...f.tables.projectGithubMirrorJobs.values()];
+
+test('SM-E mirror queue: a retarget re-points the queue so the next publish is a queued job, not a never-active failure', async () => {
+  const f = fixture();
+  await f.enqueue(f.receipt());
+  const [first] = jobs(f);
+  pointAt(f, 'synthetic/other');
+  assert.equal(
+    await f.run('retarget', ctx => retarget.retargetGithubMirror(ctx, f.projectId, 'synthetic/other')),
+    true,
+  );
+  assert.equal(queueRow(f).repository, 'synthetic/other');
+  assert.equal(queueRow(f).activeId, null);
+  assert.equal(queueRow(f).mapping, null);
+  assert.equal(f.tables.projectGithubMirrorJobs.get(first._id).status, 'done');
+  await f.enqueue(f.receipt());
+  const next = jobs(f).find(job => job._id !== first._id);
+  assert.equal(next.status, 'queued');
+  assert.equal(next.repository, 'synthetic/other');
+  assert.equal(queueRow(f).activeId, next._id);
+  assert.equal(f.scheduled.length, 2, 'one wake for each repository, nothing idle');
+  assert(!jobs(f).some(job => job.error === 'GITHUB_SYNC_BINDING'));
+  assert.equal(
+    await f.run('again', ctx => retarget.retargetGithubMirror(ctx, f.projectId, 'synthetic/other')),
+    false,
+    'a repeat changes nothing',
+  );
+});
+
+test('SM-E mirror status: a failed job that is not the active job is shown, and the owner resume repairs it', async () => {
+  const f = fixture();
+  await f.enqueue(f.receipt());
+  const [first] = jobs(f);
+  // A project retargeted before the fix: the old publish ended and every later one failed unseen.
+  f.patch('projectGithubMirrorJobs', first._id, { status: 'done' });
+  f.patch('projectGithubMirrors', queueRow(f)._id, { activeId: null });
+  pointAt(f, 'synthetic/other');
+  await f.enqueue(f.receipt());
+  assert.equal(jobs(f).filter(job => job.error === 'GITHUB_SYNC_BINDING').length, 1);
+  const stuck = await mirrorStatus(f);
+  assert.equal(stuck.status, 'failed');
+  assert.equal(stuck.error, 'GITHUB_SYNC_BINDING');
+  assert.equal(stuck.failedJobs, 1);
+  assert.match(stuck.nextStep, /nforge github resume PROJECT/);
+  const healed = await f.run('resume', ctx => owner.resume._handler(ctx, { projectId: f.projectId }));
+  assert.equal(healed.status, 'retargeted');
+  const after = await mirrorStatus(f);
+  assert.notEqual(after.status, 'failed');
+  assert.equal(after.failedJobs, undefined);
+  await f.enqueue(f.receipt());
+  assert.equal(queueRow(f).activeId !== null, true, 'the next publish becomes the active job');
+  // Owner only.
+  await assert.rejects(
+    f.call('stranger', owner.resume, { projectId: f.projectId }, 'someone-else'),
+    error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+  );
+});
+
+test('SM-E mirror queue: the owner resumes a terminally failed job; a healthy queue reads no failed-job rows', async () => {
+  const f = fixture();
+  await f.enqueue(f.receipt());
+  const input = f.scheduled[0].args;
+  await f.run('terminal', store.failed._handler, {
+    ...input,
+    code: 'GITHUB_INBOUND_CONFLICT',
+    detail: 'both changed a.txt',
+  });
+  const job = jobs(f)[0];
+  assert.equal(job.status, 'failed');
+  assert.match(job.detail, /nforge github resume PROJECT/);
+  assert(!/npx convex/.test(job.detail), 'the failure names a command a user can run');
+  const status = await mirrorStatus(f);
+  assert.equal(status.status, 'failed');
+  assert.match(status.nextStep, /nforge github resume PROJECT/);
+  const resumed = await f.run('resume', ctx => owner.resume._handler(ctx, { projectId: f.projectId }));
+  assert.equal(resumed.status, 'scheduled');
+  assert.equal(f.tables.projectGithubMirrorJobs.get(job._id).status, 'running');
+});
+
+const prJob = (f, extra = {}) => {
+  const queue = queueRow(f);
+  return f.insert('projectGithubMirrorJobs', {
+    projectId: f.projectId,
+    receiptId: `pull:${randomUUID()}`,
+    sequence: 0.5,
+    repository: 'synthetic/mirror',
+    authorityEpoch: 1,
+    status: 'done',
+    step: 1,
+    cursor: null,
+    state: '0'.repeat(64),
+    pullKey: '7',
+    inbound: JSON.stringify({
+      phase: 'checking',
+      pull: { number: 7, head: 'b'.repeat(40), fork: false, outcome: 'success' },
+    }),
+    ...extra,
+    ...(queue ? {} : {}),
+  });
+};
+
+test('SM-E forge/verify: a final status that never reached GitHub is recorded, shown with its next step, and re-posted by the owner', async () => {
+  const f = fixture();
+  await f.enqueue(f.receipt());
+  f.patch('projectGithubMirrorJobs', jobs(f)[0]._id, { status: 'done' });
+  f.patch('projectGithubMirrors', queueRow(f)._id, { activeId: null, mapping: null });
+  const pull = prJob(f);
+  // Earlier attempts only retry; the last one records the failure on the job and does not throw.
+  const recorded = [];
+  const ctx = {
+    runMutation: async (ref, args) => recorded.push({ name: getFunctionName(ref), args }),
+    scheduler: { runAfter: async () => 'task' },
+  };
+  const post = {
+    projectId: f.projectId,
+    repository: 'synthetic/mirror',
+    sha: 'b'.repeat(40),
+    state: 'success',
+    description: 'Forge check passed.',
+    link: null,
+    jobId: pull,
+  };
+  await verifyPost.post._handler(ctx, { ...post, attempt: 1 });
+  assert.equal(recorded.length, 0, 'a retry is not a failure yet');
+  await verifyPost.post._handler(ctx, { ...post, attempt: 3 });
+  assert.deepEqual(
+    recorded.map(call => call.name),
+    ['projectGithubPullStatusStore:statusFailed'],
+  );
+  await f.run('record', verifyStore.statusFailed._handler, {
+    jobId: pull,
+    state: 'success',
+    description: 'Forge check passed.',
+    error: 'GITHUB_STATUS_POST_FAILED',
+  });
+  const status = await mirrorStatus(f);
+  assert.equal(status.status, 'failed', 'a settled head is not all-clear while GitHub still shows pending');
+  assert.equal(status.error, 'GITHUB_VERIFY_POST_FAILED');
+  assert.match(status.detail, /PR #7 at bbbbbbbbbbbb/);
+  assert.match(status.nextStep, /nforge github resume PROJECT/);
+  const result = await f.run('resume', ctx => owner.resume._handler(ctx, { projectId: f.projectId }));
+  assert.equal(result.statusReposted, true);
+  const repost = f.scheduled.at(-1);
+  assert.equal(repost.name, 'projectGithubPullStatus:post');
+  assert.equal(repost.args.jobId, pull);
+  assert.equal(repost.args.clear, true);
+  assert.equal(repost.args.state, 'success');
+  // Its success clears the record; the status is quiet again.
+  await f.run('posted', verifyStore.statusPosted._handler, { jobId: pull });
+  assert.equal(queueRow(f).verifyFailedId, undefined);
+  assert.notEqual((await mirrorStatus(f)).status, 'failed');
 });

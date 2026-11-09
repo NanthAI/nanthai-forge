@@ -707,6 +707,13 @@ nforge host ROOT --status
 nforge host ROOT --abandon-pending OPERATION_UUID --confirm OPERATION_UUID
 ```
 
+A started seed whose server-side progress cannot finish (a bad request, a lost pin)
+is discarded with `nforge host ROOT --abort-seed` (owner only). It removes the seed
+row and its pages in bounded batches and refuses once the seed has selected its
+source (`SEED_COMMITTED`); source bytes are content-addressed and stay. The pending
+operation is kept: `nforge host ROOT --resume` then seeds the project again from
+page 0, or `--abandon-pending` retires the operation.
+
 Use the pending operation UUID shown by status. This local, replayable command
 retains a receipt and the existing binding; a changed pending operation requires
 its own UUID. Any half-created hosted project remains available for explicit

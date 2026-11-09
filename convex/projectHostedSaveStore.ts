@@ -10,6 +10,7 @@ import { hostedOperationSchema, canonicalPayload } from '../src/hosted-source-op
 import { hostedOperationRow } from './projectHostedOperations';
 import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
+import { hostedSaveStatuses } from '../src/hosted-save-state';
 import { findObject, type ObjectView } from './projectObjectFind';
 import { sourceServerTimingSchema } from './projectSourceStepTiming';
 
@@ -24,7 +25,7 @@ export const saveStateSchema = z
     stagedChanges: z.number(),
     lastPath: z.string().nullable(),
     jobOperationId: z.uuid(),
-    status: z.enum(['staging', 'ready', 'submitted', 'completed', 'stale', 'failed']),
+    status: z.enum(hostedSaveStatuses),
     /** Server clock at submit and the execution's step split at publication (friction f15db544). */
     submittedAt: z.number().optional(),
     serverTiming: sourceServerTimingSchema.optional(),

@@ -113,7 +113,7 @@ export async function publishHostedSave(
       },
     };
     await finishHostedOperation(ctx, { ...input, receipt: terminal });
-    await writeSaveState(ctx, row._id, { ...state, status: 'stale' });
+    await writeSaveState(ctx, row._id, { ...state, status: 'refused' });
     await wakeLifecycleSave(ctx, input);
     return terminal;
   }

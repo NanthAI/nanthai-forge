@@ -160,7 +160,7 @@ export async function runInbound(
   if (conflicts.length)
     throw new ForgeError(
       'GITHUB_INBOUND_CONFLICT',
-      `GitHub changed paths Forge also changed before this push was mirrored: ${conflicts.slice(0, 5).join(', ')}${conflicts.length > 5 ? ` (+${conflicts.length - 5})` : ''}. Resolve on Forge, then resume this job.`,
+      `GitHub changed paths Forge also changed before this push was mirrored: ${conflicts.slice(0, 5).join(', ')}${conflicts.length > 5 ? ` (+${conflicts.length - 5})` : ''}. Resolve on Forge, then the project owner runs nforge github resume PROJECT.`,
     );
   // Bytes are read and stored one window at a time; only pins stay in memory. Git LFS
   // pointer files at LFS paths arrive as their objects (src/github-inbound-bytes.ts).

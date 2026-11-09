@@ -26,9 +26,15 @@ export async function postPullStatus(
     ...(link?.startsWith('https://') ? { target_url: link } : {}),
   });
 }
-/** Status writes retried after a transient GitHub or network failure, then left visible as
- * pending on GitHub (merging stays blocked, never silently allowed). */
+/** Status writes retried after a transient GitHub or network failure. When every attempt fails the
+ * failure is recorded on the job (projectGithubPullStatusStore:statusFailed) and shown in the mirror
+ * status with its next step; GitHub keeps the last accepted status, so merging stays blocked,
+ * never silently allowed. */
 const attempts = 3;
+const postFailureCode = (error: unknown) => {
+  const code = (error as { code?: unknown } | null)?.code;
+  return typeof code === 'string' && /^[A-Z][A-Z0-9_]{2,60}$/.test(code) ? code : 'GITHUB_STATUS_POST_FAILED';
+};
 /** The final forge/verify status: the App's token minted for statuses write on this one bound
  * repository, then one POST. Scheduled once per settled PR head. */
 export const post = internalAction({
@@ -40,6 +46,10 @@ export const post = internalAction({
     description: v.string(),
     link: v.union(v.string(), v.null()),
     attempt: v.optional(v.number()),
+    /** The PR job this status settles; the failure after the last attempt is recorded on it. */
+    jobId: v.optional(v.id('projectGithubMirrorJobs')),
+    /** Set only by an owner re-post: a success then clears the recorded failure (one mutation). */
+    clear: v.optional(v.boolean()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -49,13 +59,30 @@ export const post = internalAction({
       await postPullStatus(api, input.repository, input.sha, input.state, input.description, input.link);
     } catch (error) {
       const attempt = (input.attempt ?? 1) + 1;
-      if (attempt > attempts) throw error;
+      if (attempt > attempts) {
+        if (!input.jobId || input.state === 'pending') throw error;
+        await ctx.runMutation(
+          makeFunctionReference<'mutation'>('projectGithubPullStatusStore:statusFailed'),
+          {
+            jobId: input.jobId,
+            state: input.state,
+            description: input.description,
+            error: postFailureCode(error),
+          },
+        );
+        return null;
+      }
       await ctx.scheduler.runAfter(
         30_000 * 2 ** (attempt - 2),
         makeFunctionReference<'action'>('projectGithubPullStatus:post'),
         { ...input, attempt },
       );
+      return null;
     }
+    if (input.clear && input.jobId)
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubPullStatusStore:statusPosted'), {
+        jobId: input.jobId,
+      });
     return null;
   },
 });

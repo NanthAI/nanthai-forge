@@ -172,6 +172,13 @@ test('a finish that appears while a save is in flight refuses publication and re
   );
   assert.equal(lane.version, 0);
   assert.deepEqual(await s.publish(output), terminal);
+  // SM-E (hosted save): a live finish is its own refusal, not the Lane-moved `stale`, with its own next step.
+  const progress = JSON.parse(
+    await s.call('progress', api.progress, { projectId: s.projectId, operationId: x.request.operationId }),
+  );
+  assert.equal(progress.state.status, 'refused');
+  assert.equal(progress.saveState, 'refused');
+  assert.match(progress.nextStep, /supersedeFinish:true/);
 });
 
 test('refusal costs a bounded constant number of reads and an idle Lane costs none', async () => {

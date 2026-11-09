@@ -246,7 +246,7 @@ export const failed = internalMutation({
       // A terminal job holds the queue: name the one recovery command.
       detail:
         delay === null
-          ? `${input.detail} Next: fix the cause, then resume job ${job._id} (npx convex run projectGithubMirrorStore:resume '{"jobId":"${job._id}"}'); its cursor and State are kept.`
+          ? `${input.detail} Next: fix the cause, then the project owner runs nforge github resume PROJECT (or Resume in the mirror panel); the cursor and State are kept.`
           : input.detail,
       httpStatus: input.httpStatus,
       apiOperation: input.apiOperation,
@@ -258,7 +258,37 @@ export const failed = internalMutation({
     return null;
   },
 });
-/** Explicit recovery of the same cursor, fencing failed or expired workers. */
+/** Explicit recovery of the same cursor, fencing failed or expired workers. Shared by the
+ * operator mutation below and the owner command (projectGithubMirrorResume). */
+export async function resumeMirrorJob(ctx: MutationCtx, jobId: Id<'projectGithubMirrorJobs'>) {
+  const job = await ctx.db.get(jobId);
+  if (!job) return { status: 'missing' as const, step: null };
+  if (job.status === 'done') return { status: 'done' as const, step: job.step };
+  const queue = await mirrorRow(ctx, job.projectId);
+  invariant(queue?.activeId === job._id, 'GITHUB_SYNC_PENDING', 'Resume the active retained mirror job.');
+  const task = job.scheduledId ? await ctx.db.system.get(job.scheduledId) : null;
+  const live = task && ['pending', 'inProgress'].includes(task.state.kind);
+  // Actions have a ten-minute runtime limit. A future backoff is still live;
+  // an overdue task beyond that window is recoverable by explicit resume.
+  if (live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
+    return { status: 'already-running' as const, step: job.step };
+  if (live) await ctx.scheduler.cancel(task._id);
+  const step = job.step + 1;
+  await ctx.db.patch(job._id, {
+    status: 'running',
+    step,
+    failures: 0,
+    nextAttemptAt: undefined,
+    error: undefined,
+    detail: undefined,
+    httpStatus: undefined,
+    apiOperation: undefined,
+    requestBytes: undefined,
+  });
+  await mirrorJob(ctx, { jobId: job._id, step });
+  await scheduleMirror(ctx, { _id: job._id, step });
+  return { status: 'scheduled' as const, step };
+}
 export const resume = internalMutation({
   args: { jobId: v.id('projectGithubMirrorJobs') },
   returns: v.object({
@@ -270,33 +300,5 @@ export const resume = internalMutation({
     ),
     step: v.union(v.number(), v.null()),
   }),
-  handler: async (ctx, input) => {
-    const job = await ctx.db.get(input.jobId);
-    if (!job) return { status: 'missing' as const, step: null };
-    if (job.status === 'done') return { status: 'done' as const, step: job.step };
-    const queue = await mirrorRow(ctx, job.projectId);
-    invariant(queue?.activeId === job._id, 'GITHUB_SYNC_PENDING', 'Resume the active retained mirror job.');
-    const task = job.scheduledId ? await ctx.db.system.get(job.scheduledId) : null;
-    const live = task && ['pending', 'inProgress'].includes(task.state.kind);
-    // Actions have a ten-minute runtime limit. A future backoff is still live;
-    // an overdue task beyond that window is recoverable by explicit resume.
-    if (live && job.status !== 'failed' && task.scheduledTime + 11 * 60_000 > Date.now())
-      return { status: 'already-running' as const, step: job.step };
-    if (live) await ctx.scheduler.cancel(task._id);
-    const step = job.step + 1;
-    await ctx.db.patch(job._id, {
-      status: 'running',
-      step,
-      failures: 0,
-      nextAttemptAt: undefined,
-      error: undefined,
-      detail: undefined,
-      httpStatus: undefined,
-      apiOperation: undefined,
-      requestBytes: undefined,
-    });
-    await mirrorJob(ctx, { jobId: job._id, step });
-    await scheduleMirror(ctx, { _id: job._id, step });
-    return { status: 'scheduled' as const, step };
-  },
+  handler: (ctx, input) => resumeMirrorJob(ctx, input.jobId),
 });

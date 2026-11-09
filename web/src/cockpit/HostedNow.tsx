@@ -50,7 +50,7 @@ import {
   type MoveRecord,
 } from './now-model';
 import { NowLayout, NowSituation } from './NowLayout';
-import { HostedMirrorStatus } from './HostedMirrorStatus';
+import { HostedMirrorStatus, useResumeMirror } from './HostedMirrorStatus';
 import { useAnswers, useCoordination } from './coordination';
 import { LaneList } from './LaneList';
 import { type CockpitWork } from './model';
@@ -103,7 +103,10 @@ export function HostedNowView({
   activity = false,
   showFirstRun = true,
   capabilities,
+  resumeMirror,
 }: {
+  /** Owner-only: resume a stopped GitHub mirror (the same command as `nforge github resume`). */
+  resumeMirror?: () => Promise<unknown>;
   /** Renders a labelled example instead of the project's Now (no project actions). */
   capabilities?: Pick<WorkIndexWorkspace['capabilities'], 'owner' | 'intent'>;
   example?: string;
@@ -211,7 +214,11 @@ export function HostedNowView({
                   working,
                 }}
               />
-              <HostedMirrorStatus status={attention.githubMirror} now={now} />
+              <HostedMirrorStatus
+                status={attention.githubMirror}
+                now={now}
+                {...(capabilities?.owner === true && resumeMirror ? { resume: resumeMirror } : {})}
+              />
             </>
           }
           actions={
@@ -362,6 +369,7 @@ function LiveNow({
   const viewer = useViewerHandle();
   const ack = useAnswers(projectId, viewer ?? 'you');
   const fix = useFixAnswers(projectId);
+  const resumeMirror = useResumeMirror(projectId);
   const records = useMemo(
     () => ({
       needsFix: workspace.needsFix,
@@ -409,6 +417,7 @@ function LiveNow({
           }
           ack={{ ...ack, startFix: fix.startFix, closeFix: fix.closeFix, error: fix.error || ack.error }}
           capabilities={workspace.capabilities}
+          resumeMirror={resumeMirror}
           newIntent={newIntent}
           project={projectId}
           {...(viewer ? { viewer } : {})}

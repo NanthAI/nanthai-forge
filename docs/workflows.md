@@ -676,14 +676,24 @@ and Now show recorded mirror failure (prefixed with the failing job's State,
 which can be older than current main), lag and the next retry time. Status reads
 use selected rows through existing discovery/workspace requests, without polling.
 
-After resolving the cause, the operator can invoke the internal
-`projectGithubMirrorStore:resume` mutation with that job's `jobId`. Resume retains
+After resolving the cause, the project owner runs `nforge github resume PROJECT`
+(or Resume in the mirror panel on Now); the operator mutation
+`projectGithubMirrorStore:resume` with the job's `jobId` stays for deployment
+operators. Resume retains
 the cursor, resets the retry budget and fences late callbacks. Failed jobs can
 replace stale pending/in-progress tasks; otherwise resume preserves a live task
 until it is overdue by eleven minutes (beyond the action runtime limit). A
 missing or completed task can be resumed immediately.
 The mutation returns `scheduled`, `already-running`, `done` or `missing`, with the
-worker step, so a deliberate no-op is distinguishable from a scheduled retry.
+worker step, so a deliberate no-op is distinguishable from a scheduled retry. The owner
+command returns `scheduled`, `already-running`, `done`, `retargeted` or `nothing-to-resume`
+plus `statusReposted`. It also repairs a mirror whose repository changed: setting the
+policy repository now re-points the queue (the old repository's unpublished jobs end `done`
+with that reason, the mapping resets and the next landing seeds the new repository), and
+`resume` does the same for a project retargeted before that, whose publishes had failed
+`GITHUB_SYNC_BINDING` without being the active job. Mirror status lists such failed
+non-active jobs (`failedJobs`) and every stopped state carries `nextStep`, the one action
+that clears it.
 Deterministic commit bytes and GitHub ref observation reconcile lost replies
 without a second commit for the State. No periodic retries or idle functions
 are scheduled; healthy and terminal jobs schedule nothing. `autoPush:false`

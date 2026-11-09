@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { sourceProgress } from './projectSourceProgress';
+import { hostedSaveState } from '../src/hosted-save-state';
 import { boundOverlapChanges, type OverlapChange } from '../src/hosted-overlap';
 import { v } from 'convex/values';
 import { mutation, query } from './cliServer';
@@ -311,6 +312,8 @@ export const progress = query({
           ? { status: 'failed', error: operation.terminal.outcome.error }
           : {}),
         state,
+        // The save's own state, label and one next step (src/hosted-save-state.ts).
+        ...hostedSaveState(state.status),
         terminal: operation.terminal,
         input:
           state.request.pages && state.status !== 'staging'

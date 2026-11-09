@@ -5,9 +5,10 @@ import { channelRow } from './projectHostedChannels';
 import { mirrorRow } from './projectGithubMirrorQueue';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
-import type { HostedMirrorStatus } from '../src/hosted-github-mirror-status';
+import { hostedMirrorNextStep, type HostedMirrorStatus } from '../src/hosted-github-mirror-status';
 import { missingObjectDelays } from '../src/hosted-github-retry';
 import { inboundJobSchema } from '../src/github-inbound-job';
+import { strandedMirrorJobs } from './projectGithubMirrorRetarget';
 import { inboundLanding, inboundOutcomeSchema } from './projectGithubInboundQueue';
 
 /** Called only after project authorization. Three selected rows, no history scan,
@@ -45,19 +46,37 @@ export async function githubMirrorStatus(
         : null;
   const targetHead: string | null = main ? JSON.parse(main.selection).head : (job?.state ?? null);
   const lagging = targetHead === null ? null : targetHead !== mapping?.state;
-  return {
+  const base: HostedMirrorStatus['status'] = !policy?.autoPush
+    ? 'disabled'
+    : job?.status === 'failed' || settled?.phase === 'terminal-failed'
+      ? 'failed'
+      : job?.status === 'retrying'
+        ? 'retrying'
+        : job
+          ? 'syncing'
+          : lagging === false
+            ? 'synced'
+            : 'unknown';
+  // Recorded failures that no active job shows (SM-E). Both reads happen only off the healthy path:
+  // the verify pointer exists only after a failed post; stranded jobs are read only while no job
+  // is active and the mirror is not caught up (`unknown`), never while a publish is syncing.
+  const verify = policy?.autoPush && queue?.verifyFailedId ? await ctx.db.get(queue.verifyFailedId) : null;
+  const verifyPost = verify?.inbound ? inboundJobSchema.parse(JSON.parse(verify.inbound)).pull : null;
+  const stranded =
+    policy?.autoPush && base === 'unknown'
+      ? await strandedMirrorJobs(ctx, project._id, queue?.activeId ?? null)
+      : [];
+  const hold = base === 'failed' || base === 'disabled' ? null : (stranded[0] ?? null);
+  const verifyFailed = base === 'failed' || base === 'disabled' || hold ? null : verifyPost?.statusPost;
+  const failedStatus: HostedMirrorStatus['status'] = hold || verifyFailed ? 'failed' : base;
+  const failedError = hold
+    ? (hold.error ?? 'GITHUB_SYNC_FAILED')
+    : verifyFailed
+      ? 'GITHUB_VERIFY_POST_FAILED'
+      : null;
+  const result = {
     repository: queue?.repository ?? policy.repo,
-    status: !policy?.autoPush
-      ? 'disabled'
-      : job?.status === 'failed' || settled?.phase === 'terminal-failed'
-        ? 'failed'
-        : job?.status === 'retrying'
-          ? 'retrying'
-          : job
-            ? 'syncing'
-            : lagging === false
-              ? 'synced'
-              : 'unknown',
+    status: failedStatus,
     targetHead,
     mirroredHead: mapping?.state ?? null,
     gitHead: mapping?.commit ?? null,
@@ -69,13 +88,20 @@ export async function githubMirrorStatus(
     attemptLimit:
       job?.status !== 'retrying' ? null : job.httpStatus === 422 ? missingObjectDelays.length + 1 : 5,
     nextAttemptAt: job?.nextAttemptAt ?? null,
-    error: job?.error ?? (settled?.phase === 'terminal-failed' ? 'GITHUB_INBOUND_FAILED' : null),
+    error:
+      failedError ?? job?.error ?? (settled?.phase === 'terminal-failed' ? 'GITHUB_INBOUND_FAILED' : null),
     // targetHead is current main; name the State this failing job publishes.
-    detail: job?.detail
-      ? inbound
-        ? `Inbound job: ${job.detail}`
-        : `Job for State ${job.state.slice(0, 8)}: ${job.detail}`
-      : inboundDetail,
-    jobId: job?._id ?? null,
+    detail: hold
+      ? `Job for State ${hold.state.slice(0, 8)}: ${hold.detail ?? 'did not run'}${stranded.length > 1 ? ` (+${stranded.length - 1} more failed publishes)` : ''}`
+      : verifyFailed
+        ? `forge/verify could not be posted to GitHub for PR #${verifyPost!.number} at ${verifyPost!.head.slice(0, 12)} (${verifyFailed.error}); GitHub keeps blocking the merge.`
+        : job?.detail
+          ? inbound
+            ? `Inbound job: ${job.detail}`
+            : `Job for State ${job.state.slice(0, 8)}: ${job.detail}`
+          : inboundDetail,
+    jobId: hold?._id ?? job?._id ?? null,
+    ...(stranded.length ? { failedJobs: stranded.length } : {}),
   };
+  return { ...result, nextStep: hostedMirrorNextStep(result) };
 }

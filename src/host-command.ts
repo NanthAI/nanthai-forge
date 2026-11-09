@@ -12,6 +12,7 @@ import { readRecoveryInventory } from './recovery-inventory.js';
 import { spawn } from 'node:child_process';
 
 import { WorkStore } from './work-store.js';
+import { abortPendingSeed } from './host-seed-abort.js';
 import { readHostState, updateHostState, abandonPendingHost } from './host-binding.js';
 import { hostProject, HOST_HELP, type HostOptions } from './host-cli.js';
 import { formatHostProgress } from './host-progress.js';
@@ -39,6 +40,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   }
   if (flags.length === 2 && flags[0] === '--source-authority')
     return transitionBoundSourceAuthority(new WorkStore(root), JSON.parse(flags[1]!));
+  if (flags.length === 1 && flags[0] === '--abort-seed') return abortPendingSeed(root);
   if (flags[0] === '--abandon-pending') {
     invariant(
       flags.length === 4 && flags[2] === '--confirm' && flags[1] && flags[3],

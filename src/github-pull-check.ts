@@ -18,6 +18,17 @@ export const pullJobSchema = z
     runId: z.uuid().optional(),
     /** Set once the final status is decided; later events for this head change nothing. */
     outcome: z.enum(['success', 'failure', 'error', 'superseded']).optional(),
+    /** Set only when the final forge/verify post to GitHub failed after its retries: GitHub still
+     * shows the last status it accepted (pending), so merging stays blocked. A re-post that
+     * succeeds removes it. Absent means the post is in flight or succeeded. */
+    statusPost: z
+      .object({
+        state: z.enum(['success', 'failure', 'error']),
+        description: z.string().max(200),
+        error: z.string().max(100),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 export type PullJob = z.infer<typeof pullJobSchema>;

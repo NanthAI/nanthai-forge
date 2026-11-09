@@ -13,6 +13,9 @@ export const githubMirrorTables = {
     repositoryKey: v.optional(v.string()),
     /** The last inbound landing's outcome (convex/projectGithubInbound.ts inboundOutcomeSchema). */
     inbound: v.optional(v.string()),
+    /** The pull request job whose final forge/verify status could not be posted to GitHub (set on
+     * failure only, cleared by a successful re-post or a newer head of that pull request). */
+    verifyFailedId: v.optional(v.id('projectGithubMirrorJobs')),
   })
     .index('by_project', ['projectId'])
     .index('by_repository_key', ['repositoryKey']),
