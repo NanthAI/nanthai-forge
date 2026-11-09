@@ -11,7 +11,7 @@ import { githubSyncCommitSchema, githubSyncSchema } from '../src/github-sync-typ
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { mirrorMessage } from '../src/landing-message';
-import { missingObjectDelays } from '../src/hosted-github-retry';
+import { missingObjectDelays, transientMirrorCodes } from '../src/hosted-github-retry';
 import { inboundBegin } from './projectGithubInbound';
 import { inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
 import { effectivePolicy } from '../src/autonomy-policy';
@@ -219,9 +219,10 @@ export const failed = internalMutation({
       failures =
         (!input.cursor && job.status === 'retrying' && job.httpStatus === 422 ? (job.failures ?? 0) : 0) + 1;
     const transient =
-      input.code === 'GITHUB_SYNC_API' &&
-      (input.httpStatus === 429 ||
-        (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599));
+      transientMirrorCodes.includes(input.code) ||
+      (input.code === 'GITHUB_SYNC_API' &&
+        (input.httpStatus === 429 ||
+          (input.httpStatus !== undefined && input.httpStatus >= 500 && input.httpStatus <= 599)));
     const delay = lag
       ? (missingObjectDelays[failures - 1] ?? null)
       : transient && failures < 5
@@ -235,7 +236,11 @@ export const failed = internalMutation({
       step,
       failures,
       error: input.code,
-      detail: input.detail,
+      // A terminal job holds the queue: name the one recovery command.
+      detail:
+        delay === null
+          ? `${input.detail} Next: fix the cause, then resume job ${job._id} (npx convex run projectGithubMirrorStore:resume '{"jobId":"${job._id}"}'); its cursor and State are kept.`
+          : input.detail,
       httpStatus: input.httpStatus,
       apiOperation: input.apiOperation,
       requestBytes: input.requestBytes,

@@ -13,6 +13,7 @@ import { digest } from '../dist/hash.js';
 import { prepareMirror } from '../dist/hosted-github-mirror.js';
 import { githubRequest } from '../dist/hosted-github-api.js';
 import { gitHash } from '../dist/hosted-github-git.js';
+import { unexpectedMirrorFailure } from '../dist/hosted-github-retry.js';
 import { hostedMirrorStatusText } from '../dist/hosted-github-mirror-status.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 import { interceptDefaultR2 } from './default-r2.mjs';
@@ -560,6 +561,95 @@ test('429 retries; 401 is terminal; duplicate failures cannot spend an attempt t
   });
   assert.equal(f.job().status, 'failed');
   assert.equal(f.scheduled.length, 2);
+});
+
+// Incident 2026-11-09 (State c36418d6): a transport fault is a NetworkTransportError,
+// not a ForgeError. It was recorded as a generic terminal GITHUB_SYNC_FAILED with
+// no retry, and the queue held GitHub main until an operator resumed the job.
+test('real action: a transport fault keeps its named cause, retries on schedule and drains', async t => {
+  let faults = 1;
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    url => {
+      if (url.endsWith('/blobs') && faults-- > 0) throw new TypeError('fetch failed');
+    },
+  );
+  await f.step();
+  assert.equal(f.job().status, 'retrying');
+  assert.equal(f.job().error, 'GITHUB_SYNC_NETWORK');
+  assert.match(f.job().detail, /^Mirror step stopped on EXCHANGE_REQUEST_FAILED: Network request failed/);
+  assert(!/synthetic-token/.test(f.job().detail));
+  assert.equal(f.scheduled.at(-1).delay, 60_000);
+  assert.match(
+    hostedMirrorStatusText(await f.status(), Date.now()),
+    /retrying .*1\/5 failed attempts.*GITHUB_SYNC_NETWORK/,
+  );
+  await f.step();
+  assert.equal(f.job().status, 'done');
+  assert.equal(f.github.commits.size, 2);
+  assert.equal(f.scheduled.length, 2, 'no timer after recovery');
+});
+
+test('real action: an unexpected exception keeps a bounded redacted cause, retries 5 times, then names the resume command', async t => {
+  const f = await fixture(
+    t,
+    () => false,
+    undefined,
+    // A 201 whose body is not JSON: response.json() raises a plain SyntaxError.
+    url =>
+      url.endsWith('/blobs')
+        ? new Response('synthetic-token-0 https://example.invalid/x?sig=1', { status: 201 })
+        : undefined,
+  );
+  for (let i = 0; i < 5; i++) await f.step();
+  assert.deepEqual(
+    f.scheduled.map(s => s.delay),
+    [0, 60_000, 120_000, 240_000, 480_000],
+  );
+  const job = f.job();
+  assert.equal(job.status, 'failed');
+  assert.equal(job.error, 'GITHUB_SYNC_FAILED');
+  assert.match(job.detail, /^Mirror step stopped on SyntaxError: not valid JSON\. Next: /);
+  assert(!/synthetic-token|example\.invalid|sig=1/.test(job.detail), 'no token, URL or body text');
+  assert(
+    job.detail.includes(`npx convex run projectGithubMirrorStore:resume '{"jobId":"${f.input.jobId}"}'`),
+  );
+  assert.equal(job.cursor, f.cursor, 'the retained cursor is kept for resume');
+  await f.step();
+  assert.equal(f.scheduled.length, 5, 'terminal failure schedules nothing');
+});
+
+test('unexpected mirror failures: named codes, bounded and credential-free detail', () => {
+  const network = unexpectedMirrorFailure(
+    Object.assign(new Error('Network request caller deadline reached.'), {
+      name: 'NetworkTransportError',
+      code: 'EXCHANGE_REQUEST_TIMEOUT',
+    }),
+  );
+  assert.deepEqual(network, {
+    code: 'GITHUB_SYNC_NETWORK',
+    detail: 'Mirror step stopped on EXCHANGE_REQUEST_TIMEOUT: Network request caller deadline reached.',
+  });
+  const io = unexpectedMirrorFailure(
+    Object.assign(new Error('Source I/O did not complete.'), {
+      name: 'SourceIoError',
+      code: 'SOURCE_R2_UNAVAILABLE',
+      stage: 'read',
+      httpStatus: 503,
+    }),
+  );
+  assert.equal(io.code, 'GITHUB_SYNC_FAILED');
+  assert.match(io.detail, /SourceIoError \(SOURCE_R2_UNAVAILABLE, stage read, HTTP 503\)/);
+  const odd = unexpectedMirrorFailure(
+    Object.assign(new Error(`ghs_${'a'.repeat(40)} secret-x ${'z'.repeat(400)}`), { name: 'Custom' }),
+    ['secret-x'],
+  );
+  assert.equal(odd.code, 'GITHUB_SYNC_FAILED');
+  assert.match(odd.detail, /^Mirror step stopped on UnknownError: \[redacted\] \[redacted\]/);
+  assert(odd.detail.length < 300);
+  assert.equal(unexpectedMirrorFailure('thrown string').detail, 'Mirror step stopped on UnknownError.');
 });
 
 test('API diagnostics count exact UTF-8 request bytes without printing credentials, paths or bodies', async () => {

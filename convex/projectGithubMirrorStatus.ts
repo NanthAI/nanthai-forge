@@ -63,7 +63,7 @@ export async function githubMirrorStatus(
     pendingSince: job?._creationTime ?? null,
     mirroredAt: queue?.mirroredAt ?? null,
     failures: job?.failures ?? 0,
-    // Only lag 422s retry (others are terminal at once); 429/5xx get 5 tries (projectGithubMirrorStore:failed).
+    // Only lag 422s retry (others are terminal at once); 429/5xx and transient codes get 5 tries (projectGithubMirrorStore:failed).
     attemptLimit:
       job?.status !== 'retrying' ? null : job.httpStatus === 422 ? missingObjectDelays.length + 1 : 5,
     nextAttemptAt: job?.nextAttemptAt ?? null,

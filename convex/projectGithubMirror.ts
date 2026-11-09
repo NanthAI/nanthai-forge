@@ -22,6 +22,8 @@ import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack
 import { sourceStorage } from './projectConvexSourceStorage';
 import { lfsBatch, uploadLfsObject } from '../src/github-lfs';
 import { runInbound } from './projectGithubInboundRun';
+import { unexpectedMirrorFailure } from '../src/hosted-github-retry';
+import { networkFailure } from '../src/network-fetch';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
@@ -103,6 +105,8 @@ export const step = internalAction({
     let plan: MirrorPlan | undefined;
     let started: { phase: MirrorPlan['phase']; index: number } | undefined;
     let durable: ReturnType<typeof sourceStorage> | undefined;
+    // Minted once per step; a failure detail never contains it.
+    let token = '';
     try {
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
@@ -116,7 +120,6 @@ export const step = internalAction({
       // GitHub call of an unverified bootstrap, which needs GitHub main to diff.
       const mint = await installationTokenMinter(ctx, loaded.projectId, loaded.repository);
       let client: Promise<GithubRequest> | undefined;
-      let token = '';
       const connect = () =>
         (client ??= mint(mirrorPermissionsFor(plan)).then(minted => {
           token = minted;
@@ -166,18 +169,22 @@ export const step = internalAction({
           progressUnavailable = true;
         }
       }
+      // A transport fault or other unexpected exception keeps its real, bounded
+      // cause and a named code; the store gives it the transient retry budget.
+      const unexpected =
+        error instanceof ForgeError && !networkFailure(error)
+          ? null
+          : unexpectedMirrorFailure(error, [token]);
       await ctx.runMutation(mutation('projectGithubMirrorStore:failed'), {
         ...input,
-        code: error instanceof ForgeError ? error.code : 'GITHUB_SYNC_FAILED',
+        code: unexpected?.code ?? (error as ForgeError).code,
         ...(cursor ? { cursor } : {}),
         ...(error instanceof GithubMirrorApiError
           ? { httpStatus: error.status, apiOperation: error.operation, requestBytes: error.requestBytes }
           : {}),
         ...(missingObjectError(error, plan) ? { missingObject: true } : {}),
         detail:
-          (error instanceof ForgeError
-            ? error.message
-            : 'Mirror action failed. Resume the retained step to reconcile its outcome.') +
+          (unexpected?.detail ?? (error as ForgeError).message) +
           (progressUnavailable
             ? ' Partial progress could not be checkpointed; retry uses the previous retained cursor.'
             : ''),

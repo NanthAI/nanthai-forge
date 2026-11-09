@@ -644,7 +644,12 @@ A fully successful step or a durable advance to a different blob resets the
 budget; an unsuccessful cursor save does not. Failure details retain validated
 GitHub request IDs and numeric rate-limit/retry headers when present, without
 request bodies, raw response bodies or credentials.
-Other failures stop immediately. `nforge status ROOT`, `nforge agent ROOT status`
+A transport fault or deadline (`GITHUB_SYNC_NETWORK`), unavailable source bytes
+(`SOURCE_UNAVAILABLE`), a GitHub LFS outage (`GITHUB_UNAVAILABLE`) and any other
+unexpected exception (`GITHUB_SYNC_FAILED`) share the 429/5xx budget. The job
+keeps the exception class and a bounded message with URLs, opaque strings and the
+step token removed. Other failures stop immediately. A terminal job's detail
+names its resume command. `nforge status ROOT`, `nforge agent ROOT status`
 and Now show recorded mirror failure (prefixed with the failing job's State,
 which can be older than current main), lag and the next retry time. Status reads
 use selected rows through existing discovery/workspace requests, without polling.
