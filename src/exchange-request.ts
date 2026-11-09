@@ -13,6 +13,15 @@ export type ExchangeRequestOptions = {
   onBytes?: ((done: number, total?: number) => void) | undefined;
 };
 
+/** The class and system code of the last failure (for example `TypeError ECONNRESET`), never its text,
+ * which can carry URLs or response bodies. Without it a worker's exit named no cause. */
+function failureCause(failure: unknown) {
+  const value = failure as { name?: unknown; code?: unknown; cause?: { code?: unknown } } | null;
+  const parts = [value?.name, value?.cause?.code ?? value?.code].filter(
+    (part): part is string => typeof part === 'string' && /^[A-Za-z0-9_.-]{1,64}$/.test(part),
+  );
+  return parts.length ? ` (last error: ${parts.join(' ')})` : '';
+}
 /** Consume the response inside the deadline. Readers call progressed after each
  * nonempty chunk; their complete read (or deliberate cancellation) is retried.
  * Call names are fixed labels, never URLs, credentials or server response text. */
@@ -70,7 +79,7 @@ export async function exchangeRequest<T>(
           ? error
           : new ForgeError(
               'EXCHANGE_REQUEST_FAILED',
-              `${call} failed after ${attempts} attempts. Retry the original operation to reconcile its outcome.`,
+              `${call} failed after ${attempts} attempts${failureCause(failure)}. Retry the original operation to reconcile its outcome.`,
             );
     } finally {
       if (response?.body && !response.bodyUsed && !response.body.locked)

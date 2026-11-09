@@ -55,7 +55,7 @@ test('folded collisions are named for the folding the volume has, and only then'
   assert.equal(foldedCollisions(unicode, { ...sensitive, unicodeInsensitive: true }).length, 2);
 });
 
-test('a link and a file below the same name in another case never write outside the checkout', t => {
+test('a link and a file below the same name in another case never write outside the checkout', async t => {
   const f = fixture(t);
   const checkout = join(f.directory, 'checkout');
   const files = [
@@ -65,10 +65,10 @@ test('a link and a file below the same name in another case never write outside 
   mkdirSync(checkout);
   const folding = probeNameFolding(checkout);
   if (folding.caseInsensitive) {
-    assert.throws(() => installHostedCheckout(checkout, f.objects, files), /share one name on this volume/);
+    await assert.rejects(installHostedCheckout(checkout, f.objects, files), /share one name on this volume/);
   } else {
     // A case-sensitive volume keeps both names: the file lands in its own directory.
-    installHostedCheckout(checkout, f.objects, files);
+    await installHostedCheckout(checkout, f.objects, files);
     assert.equal(readFileSync(join(checkout, 'lib/evil.plist'), 'utf8'), 'payload');
   }
   assert.deepEqual(readdirSync(f.outside), [], 'nothing was written through the link');
@@ -79,7 +79,7 @@ test('a link and a file below the same name in another case never write outside 
   );
 });
 
-test('links are installed after files and a link never replaces a directory or is written through', t => {
+test('links are installed after files and a link never replaces a directory or is written through', async t => {
   const f = fixture(t);
   const checkout = join(f.directory, 'checkout');
   // A State that bypassed parsing: the link `d` and a file below it.
@@ -88,7 +88,7 @@ test('links are installed after files and a link never replaces a directory or i
     { path: 'd/x.txt', mode: 'file', blob: f.blob('inside') },
   ];
   const refused = /EEXIST|share one name on this volume/;
-  assert.throws(() => installHostedCheckout(checkout, f.objects, files), refused);
+  await assert.rejects(installHostedCheckout(checkout, f.objects, files), refused);
   assert.deepEqual(readdirSync(f.outside), []);
   // On a volume that cannot tell the names apart the State is refused before anything is written.
   if (existsSync(join(checkout, 'd'))) {
@@ -98,7 +98,7 @@ test('links are installed after files and a link never replaces a directory or i
 
   // A well-formed State places links last and keeps them as links.
   const clean = join(f.directory, 'clean');
-  installHostedCheckout(clean, f.objects, [
+  await installHostedCheckout(clean, f.objects, [
     { path: 'a.txt', mode: 'file', blob: f.blob('a') },
     { path: 'link', mode: 'symlink', blob: f.blob('a.txt') },
     { path: 'sub/b.txt', mode: 'executable', blob: f.blob('b') },
@@ -133,4 +133,39 @@ test('staging a checkout refuses colliding names before writing any file', async
   if (!folding.caseInsensitive) return t.skip('this volume keeps names that differ by case apart');
   await assert.rejects(() => stageHostedFiles(stage, f.objects, files), /share one name on this volume/);
   assert.deepEqual(readdirSync(stage), []);
+});
+
+test('the install gives the event loop a turn between files and stops writing once interrupted (Issue 57a557e9)', async t => {
+  const f = fixture(t);
+  const files = Array.from({ length: 40 }, (_, index) => ({
+    path: `d${index % 5}/f${index}.txt`,
+    mode: 'file',
+    blob: f.blob(`body ${index}`),
+  }));
+  // A callback on the event loop (as the worker's lease heartbeat and abort deadline are) must run mid-install.
+  let timerFiredAt = -1,
+    seen = 0;
+  const first = join(f.directory, 'first');
+  setImmediate(() => {
+    timerFiredAt = seen;
+  });
+  await installHostedCheckout(first, f.objects, files, { interrupt: () => void seen++, sliceMs: 0 });
+  assert.ok(timerFiredAt >= 0 && timerFiredAt < files.length, 'the timer ran before the install finished');
+
+  // A lost lease aborts through `interrupt`; no file after it is written.
+  const stopped = join(f.directory, 'stopped');
+  const abort = new AbortController();
+  let installed = 0;
+  setImmediate(() => abort.abort());
+  await assert.rejects(
+    installHostedCheckout(stopped, f.objects, files, {
+      interrupt: () => (installed++, abort.signal.throwIfAborted()),
+      sliceMs: 0,
+      durable: false,
+    }),
+    { name: 'AbortError' },
+  );
+  assert.ok(installed < files.length, 'the install ended before all files');
+  const written = files.filter(file => existsSync(join(stopped, file.path))).length;
+  assert.ok(written < files.length - 1 && written <= installed, 'no file was written after the abort');
 });

@@ -1464,6 +1464,10 @@ its checks run on GitHub Actions; this path remains in code. Completion retains 
 owner, registration session, runner fingerprint (runtime plus environment), and
 `reuseKey`. The reuse key is explicitly null until Q3 supplies the hosted content
 key; it is not evidence reuse permission. Final acceptance copies this receipt.
+The runner installs the checkout in slices of about 25 ms of work between event-loop turns,
+so the 20 s lease heartbeat and the 60 s local deadline run during a 62k-file install, and a
+lost lease stops the install at its next file. The install skips the per-file fsync: the
+private root is removed after the run and rebuilt after any crash.
 
 The single server-side sufficiency rule in `requireHostedCheckEvidence` allows Mac
 evidence for owner-controlled work under trusted/autonomous acceptance, including

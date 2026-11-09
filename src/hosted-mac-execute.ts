@@ -199,7 +199,11 @@ export async function executeHostedMacCheck(
     signal.throwIfAborted();
     const checkout = join(root, 'source');
     await mkdir(checkout, { mode: 0o700 });
-    installHostedCheckout(checkout, cache.objects, state.files, () => signal.throwIfAborted());
+    // The root is private and removed after the run; a crash discards it, so no file needs an fsync.
+    await installHostedCheckout(checkout, cache.objects, state.files, {
+      interrupt: () => signal.throwIfAborted(),
+      durable: false,
+    });
     // Fetched once per run into this run's private root; removed with it. A refusal
     // fails the run through the ordinary result path, naming path, commit and URL.
     const submodules =

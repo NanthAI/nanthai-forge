@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync } from 'node
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { windowsPowerShell } from '../dist/local-process.js';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, mkdir } from 'node:fs/promises';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { digest } from '../dist/hash.js';
@@ -19,6 +19,7 @@ import { executeHostedMacCheck } from '../dist/hosted-mac-execute.js';
 import { deliverMacCallback } from '../dist/hosted-mac-delivery.js';
 import { workerCli, workerConfiguration } from '../dist/worker-cli.js';
 import { runHostedMacWorker, HostedMacProvider } from '../dist/hosted-mac-worker.js';
+import { installHostedCheckout } from '../dist/hosted-checkout-files.js';
 import { signMacHeartbeat, hostedMacRuntime } from '../dist/hosted-mac-lease.js';
 const worker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
 const lease = await import(moduleUrl('../convex/projectHostedCheckLease.ts'));
@@ -821,6 +822,106 @@ test('a hung heartbeat cannot keep execution alive beyond its last acknowledged 
   await running;
 });
 
+// Issue 57a557e9: a 62k-file install was one synchronous loop, so no 20 s heartbeat could fire and
+// the 60 s lease expired mid-install. Model time passing during a long install with mock timers;
+// a renewal only completes if the install gives the event loop a turn.
+async function installUnderWorker(t, { heartbeat, tickEvery, tick }) {
+  const f = await fixture(t),
+    queued = await f.enqueue();
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.now() });
+  const directory = mkdtempSync(join(tmpdir(), 'forge-install-lease-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const objects = join(directory, 'objects'),
+    blob = digest('body');
+  await mkdir(objects);
+  await writeFile(join(objects, blob), 'body', { mode: 0o600 });
+  const files = Array.from({ length: 200 }, (_, index) => ({
+    path: `d${index % 9}/f${index}.txt`,
+    mode: 'file',
+    blob,
+  }));
+  const seen = { interrupts: 0, outcome: undefined };
+  const stop = new AbortController();
+  const running = runHostedMacWorker(
+    {
+      sessionId: f.address.sessionId,
+      key: f.key,
+      work: update => {
+        update([queued.id]);
+        return () => {};
+      },
+      watch: () => () => {},
+      control: f.control,
+      heartbeat: heartbeat(f),
+      execute: async (_, signal) => {
+        try {
+          await installHostedCheckout(join(directory, 'source'), objects, files, {
+            interrupt: () => {
+              seen.interrupts++;
+              if (seen.interrupts % tickEvery === 0) tick(t);
+              signal.throwIfAborted();
+            },
+            sliceMs: 0,
+          });
+          seen.outcome = 'installed';
+        } catch (error) {
+          seen.outcome = error.name;
+        }
+      },
+      close: async () => {},
+    },
+    stop.signal,
+  );
+  return { seen, files, stop, running, directory };
+}
+
+test('a long source install keeps the runner lease alive: heartbeats complete while files install (Issue 57a557e9)', async t => {
+  const counts = { started: 0, done: 0 };
+  const { seen, files, stop, running } = await installUnderWorker(t, {
+    heartbeat: f => async (callback, signature) => {
+      counts.started++;
+      const renewed = JSON.parse(
+        await f.call('macHeartbeat', worker.heartbeat, {
+          projectId: f.projectId,
+          callback: JSON.stringify(callback),
+          signature,
+        }),
+      );
+      counts.done++;
+      return renewed;
+    },
+    tickEvery: 10,
+    // Nine minutes of install in 20 s steps, each step only once the last renewal has been acknowledged.
+    tick: t => {
+      if (counts.started === counts.done) t.mock.timers.tick(20_000);
+    },
+  });
+  while (seen.outcome === undefined) await immediate();
+  assert.equal(seen.outcome, 'installed', 'the lease never lapsed, so nothing aborted the install');
+  assert.ok(seen.interrupts === files.length);
+  assert.ok(counts.done >= 5, `renewals completed during the install: ${counts.done}`);
+  stop.abort();
+  await running;
+});
+
+test('a lost lease stops the install within the lease instead of writing on (Issue 57a557e9)', async t => {
+  const { seen, files, stop, running, directory } = await installUnderWorker(t, {
+    heartbeat: () => () => new Promise(() => {}),
+    tickEvery: 20,
+    // The heartbeat never answers; the local deadline of the last acknowledged lease fires.
+    tick: t => t.mock.timers.tick(60_001),
+  });
+  while (seen.outcome === undefined) await immediate();
+  assert.equal(seen.outcome, 'AbortError');
+  assert.equal(seen.interrupts, 20, 'the install ended at the first check after the deadline');
+  const written = readdirSync(join(directory, 'source'), { recursive: true }).filter(name =>
+    name.endsWith('.txt'),
+  );
+  assert.ok(written.length < files.length && written.length <= 19, 'no file was written after the abort');
+  stop.abort();
+  await running;
+});
+
 test('replacement execution can pass after the expired execution already reported a shard', async t => {
   const f = await fixture(t),
     id = (await f.enqueue()).id;
@@ -889,6 +990,18 @@ test('unknown callback replies retry the retained event while definitive denials
     code('PROJECT_UNAVAILABLE'),
   );
   assert.equal(calls, 1);
+  // A lost reply that exhausted the client's own attempts (Issue 57a557e9) retries the same payload too.
+  calls = 0;
+  const exhausted = await deliverMacCallback(async () => {
+    calls++;
+    if (calls === 1)
+      throw Object.assign(new Error('mutation projectHostedCheckWorker:control failed after 4 attempts'), {
+        code: 'EXCHANGE_REQUEST_FAILED',
+      });
+    return event;
+  });
+  assert.equal(exhausted, event);
+  assert.equal(calls, 2);
 });
 
 test('lease failure settles after requester access is revoked without returning private data', async t => {

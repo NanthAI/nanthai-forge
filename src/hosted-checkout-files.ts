@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { chmod, copyFile, open, rm } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { checkoutIo } from './checkout-io.js';
 import { mapExchange } from './exchange-parallel.js';
 import { digest } from './hash.js';
@@ -34,7 +35,7 @@ export function checkoutPathExists(path: string) {
   }
 }
 export { cleanHostedCheckout } from './hosted-checkout-clean.js';
-export function installHostedFile(stage: string, objects: string, file: NativeFile) {
+export function installHostedFile(stage: string, objects: string, file: NativeFile, durable = true) {
   const target = join(stage, file.path),
     source = join(objects, file.blob);
   mkdirSync(dirname(target), { recursive: true });
@@ -50,7 +51,7 @@ export function installHostedFile(stage: string, objects: string, file: NativeFi
     // A clone shares blocks until edited (APFS/Btrfs); other filesystems copy.
     copyFileSync(source, target, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
     chmodSync(target, file.mode === 'executable' ? 0o755 : 0o644);
-    syncFile(target);
+    if (durable) syncFile(target);
   }
 }
 /** How the volume under `directory` folds names, observed with two probe files that are removed again. */
@@ -80,23 +81,45 @@ export function refuseFoldedCollisions(directory: string, files: readonly { path
     `Source paths share one name on this volume (case or Unicode folding): ${collisions.slice(0, 3).join(', ')}${collisions.length > 3 ? ', …' : ''}.`,
   );
 }
+/** Longest the install runs before it gives the event loop a turn. The worker's lease heartbeat
+ * (every 20 s, lease 60 s) and its abort deadline are timers: a synchronous loop over every file
+ * of a 62k-file State starves both (Issue 57a557e9). */
+export const installSliceMs = 25;
 /** Place a whole State into an empty directory: refuse folded name collisions, create every directory
  * and check it resolves inside the root, install regular files, and only then the links. A link is
- * never in place while a file is written, and nothing is ever written through one. */
-export function installHostedCheckout(
+ * never in place while a file is written, and nothing is ever written through one. Between slices of
+ * work the event loop runs, so timers and replies are served; `interrupt` is checked per file and
+ * throws as soon as the caller's lease is lost, which ends the install without further writes. */
+export async function installHostedCheckout(
   checkout: string,
   objects: string,
   files: readonly NativeFile[],
-  interrupt?: () => void,
+  {
+    interrupt,
+    sliceMs = installSliceMs,
+    durable = true,
+  }: {
+    interrupt?: () => void;
+    sliceMs?: number;
+    /** False for a throwaway checkout (the machine runner's private temp root, removed after the run
+     * and rebuilt from scratch after any crash): no fsync per file, which at 62k files was most of the
+     * install time. */
+    durable?: boolean;
+  } = {},
 ) {
   mkdirSync(checkout, { recursive: true });
   refuseFoldedCollisions(checkout, files);
   const root = realpathSync(checkout);
   const verified = new Set<string>();
+  let sliceStart = Date.now();
   for (const file of [
     ...files.filter(file => file.mode !== 'symlink'),
     ...files.filter(file => file.mode === 'symlink'),
   ]) {
+    if (Date.now() - sliceStart >= sliceMs) {
+      await nextTurn();
+      sliceStart = Date.now();
+    }
     interrupt?.();
     const directory = dirname(file.path);
     if (!verified.has(directory)) {
@@ -109,7 +132,7 @@ export function installHostedCheckout(
       );
       verified.add(directory);
     }
-    installHostedFile(checkout, objects, file);
+    installHostedFile(checkout, objects, file, durable);
   }
 }
 /** Working-tree files follow git (fea47345 round 3): a checkout materialized from the verified
