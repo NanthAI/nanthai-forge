@@ -39,6 +39,7 @@ import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
 import { markLandStep } from './land-timing.js';
+import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
 import type { StepTimer } from './sync-timing.js';
 import { operationWait } from './agent-operation-wait.js';
 import { parseHostedResponse } from './hosted-response.js';
@@ -81,6 +82,8 @@ export type SaveContract = {
    * submitted; the server settles it and the caller's next command reports the outcome. Only the
    * plain agent save asks for it: land, finish and lifecycle saves need their settled head. */
   settleBackground?: boolean;
+  /** upload-packs: several new small objects go up as one pack (one PUT). */
+  uploadPacks?: boolean;
 };
 export const saveContract = (capabilities: {
   overlapEvidenceVersion?: 1 | undefined;
@@ -91,6 +94,7 @@ export const saveContract = (capabilities: {
   submitRun: capabilities.features?.includes('source-submit-run') ?? false,
   prepareTargets: capabilities.features?.includes('prepare-upload-targets') ?? false,
   runPublish: capabilities.features?.includes('source-run-publish') ?? false,
+  uploadPacks: capabilities.features?.includes('upload-packs') ?? false,
 });
 
 const blobName = /^[0-9a-f]{64}$/;
@@ -185,7 +189,8 @@ async function saveOnce(
   timing?: StepTimer,
   observe?: (reply: unknown) => void,
 ) {
-  const { overlapEvidence, submitPage, submitRun, then, prepareTargets, runPublish } = contract;
+  const { overlapEvidence, submitPage, submitRun, then, prepareTargets, runPublish } = contract,
+    pack = contract.uploadPacks === true;
   saveCommandSchema.parse(command);
   invariant(!lstatSync(root).isSymbolicLink(), 'UNSAFE_PATH', 'Checkout directory must be real.');
   root = realpathSync(root);
@@ -257,12 +262,12 @@ async function saveOnce(
     // A retry before the commit below re-sends the staged bytes it still holds: stored members are
     // skipped, and an uncommitted one is prepared again under its create-only key.
     if (deferred && !direct && !checkoutPathExists(acknowledged))
-      await uploadCapturedFiles(capture, directory, exchange, new Set(), deferred);
+      await uploadCapturedFiles(capture, directory, exchange, new Set(), deferred, pack);
   } else {
     const changes: SaveChange[] = structuredClone(capture.changes);
     if (direct && files.length + buildSavePages(changes).pages.length > directUploads) direct = false;
     const raw = new Set<string>(direct ? files.map(file => file.pin.sha256) : []);
-    if (!direct) await uploadCapturedFiles(capture, directory, exchange, raw, deferred);
+    if (!direct) await uploadCapturedFiles(capture, directory, exchange, raw, deferred, pack);
     const replacements = changes.filter(change => change.after && !raw.has(change.after.blob));
     for (let offset = 0; offset < replacements.length; offset += 100) {
       const window = replacements.slice(offset, offset + 100);
@@ -332,6 +337,9 @@ async function saveOnce(
         ...pages.map(page => ({ pin: page.pin, read: () => Buffer.from(saveBytes(page.value)) })),
       ]
     : null;
+  // upload-packs: the changed blobs and pages go up as one pack, named before the prepare signs it.
+  const built =
+    uploads && pack ? await buildUploadPack(uploads, uploadPackMembers(uploads.map(({ pin }) => pin))) : null;
   let prepared;
   try {
     prepared = JSON.parse(
@@ -339,6 +347,7 @@ async function saveOnce(
         projectId: exchange.projectId,
         request: canonicalPayload(request),
         ...(uploads ? { uploads: uploads.map(({ pin }) => ({ digest: pin.sha256, size: pin.size })) } : {}),
+        ...(built ? { uploadPack: built.proposal } : {}),
       }),
     );
   } catch (error) {
@@ -392,6 +401,7 @@ async function saveOnce(
       [...uploads, { pin: savePin(input), read: () => Buffer.from(saveBytes(input)) }],
       prepared.targets,
       deferred!,
+      ...(built ? [{ digest: built.proposal.digest, bytes: built.bytes }] : []),
     );
   } else if (exchange.uploadLazyBatch && prepared.input) {
     const metadata = [...pages.map(page => page.value), prepared.input];
@@ -400,7 +410,7 @@ async function saveOnce(
         pin: savePin(value),
         read: () => Buffer.from(saveBytes(value)),
       })),
-      { batchSize: 100, ...(deferred ? { deferCommit: deferred } : {}) },
+      { batchSize: 100, ...(deferred ? { deferCommit: deferred } : {}), ...(pack ? { pack } : {}) },
     );
   }
   // A server with save-submit-page stages the last page inside submit: one call fewer per save.
@@ -496,6 +506,7 @@ async function uploadCapturedFiles(
   exchange: SaveExchange,
   raw: Set<string>,
   deferred: { id: string }[] | undefined,
+  pack = false,
 ) {
   const unique = new Map(capture.files.map(file => [file.pin.sha256, file]));
   const candidates = [...unique.values()];
@@ -512,7 +523,12 @@ async function uploadCapturedFiles(
           pin: file.pin,
           read: () => readFileSync(join(directory, file.path)),
         })),
-        { batchSize: 100, onRaw: id => raw.add(id), ...(deferred ? { deferCommit: deferred } : {}) },
+        {
+          batchSize: 100,
+          onRaw: id => raw.add(id),
+          ...(deferred ? { deferCommit: deferred } : {}),
+          ...(pack ? { pack } : {}),
+        },
       );
     const large = window.filter(file => !exchange.uploadLazyBatch || file.pin.size > 2 * 1024 * 1024);
     if (large.length) {

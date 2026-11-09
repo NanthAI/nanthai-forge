@@ -387,3 +387,48 @@ test('a large chunked file in an opted-in project round trips through R2 leaves'
   assert.ok(readFileSync(join(dir, 'pulled', 'big.bin')).equals(big));
   assert.equal(readFileSync(join(dir, 'pulled', 'small.txt'), 'utf8'), 'small\n');
 });
+
+test('mixed history: import packs, raw rows and upload packs read back exact in one clone, one GET per run (98ee14e8)', async t => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { ImportUpload } = await import(moduleUrl('../convex/projectGithubImportUpload.ts'));
+  const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
+  const { HostedCheckoutDownloads } = await import('../dist/hosted-checkout-downloads.js');
+  const { s, fake } = await setup(t),
+    writer = client(s);
+  // An import window (catalog rows in one server-built pack), raw rows, and a client upload pack.
+  const imported = ['import a', 'import b', 'import c'],
+    raw = ['raw a', 'raw b'],
+    packed = ['save a', 'save b', 'save c'];
+  const stored = new Map(),
+    upload = new ImportUpload(s.ctx, 'project', 'owner', 8, { stored, record: async () => {} });
+  for (const value of imported) upload.put(Buffer.from(value));
+  await upload.drain(true);
+  for (const page of catalogPages([...stored.values()]))
+    s.tables.projectObjectCatalog.set(`catalog-${page.first}`, {
+      _id: `catalog-${page.first}`,
+      projectId: 'project',
+      origin: 'github-import:synthetic',
+      ...page,
+    });
+  await writer.uploadBatch(content(raw));
+  await writer.uploadLazyBatch(
+    content(packed).map(({ pin, bytes }) => ({ pin, read: () => bytes })),
+    { batchSize: 100, pack: true },
+  );
+  const all = [...imported, ...raw, ...packed],
+    wanted = pins(all);
+  const exchange = {
+    projectId: 'project',
+    client: { mutation: (_ref, args) => downloads.describe._handler(s.ctx, args) },
+  };
+  const transfer = new HostedCheckoutDownloads(exchange);
+  await transfer.objects(wanted.map(pin => pin.sha256));
+  const directory = mkdtempSync(join(tmpdir(), 'forge-mixed-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const before = fake.requests.filter(r => r.method === 'GET').length;
+  await transfer.downloadFiles(wanted.map(pin => ({ pin, path: join(directory, pin.sha256) })));
+  for (const [i, pin] of wanted.entries())
+    assert.equal(readFileSync(join(directory, pin.sha256), 'utf8'), all[i]);
+  // One run for the import window, one for the upload pack, one GET for each raw row.
+  assert.equal(fake.requests.filter(r => r.method === 'GET').length - before, 4);
+});

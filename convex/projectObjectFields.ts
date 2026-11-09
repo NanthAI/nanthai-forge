@@ -19,6 +19,10 @@ export const objectFields = {
   r2PreparedAt: v.optional(v.number()),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   pack: v.optional(objectPack),
+  /** A pending upload pack (feature upload-packs): its members in byte order. Member rows are
+   * written only by the commit that read the pack and checked each member digest; then this is
+   * cleared. */
+  packMembers: v.optional(v.array(v.object({ digest: v.string(), size: v.number() }))),
   removed: v.boolean(),
   sourceReferenced: v.optional(v.boolean()),
 };

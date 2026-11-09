@@ -17,6 +17,17 @@ const savePinOfText = (text: string) => {
   return { sha256: digest(bytes), size: bytes.length };
 };
 
+/** Checked pack members that are exact UTF-8 text (delta pages are JSON), as preloaded entries. */
+function heldText(held: Map<string, Uint8Array>) {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  return [...held].flatMap(([sha256, bytes]) => {
+    try {
+      return [{ sha256, size: bytes.length, text: decoder.decode(bytes) }];
+    } catch {
+      return [];
+    }
+  });
+}
 /** One call per save, sync or compose job (contract feature source-submit-run): commit the caller's
  * deferred uploads, submit with the dispatch in the same transaction, and run the first step here
  * instead of waiting for the scheduler. The step keeps its own budgets: a job it does not finish
@@ -63,7 +74,9 @@ export const submit = action({
         'Only a save settles in the background.',
       );
       const { objects, input: text, progress: shaped, settle, ...submit } = input;
-      const verified = objects?.length ? await commitObjects(ctx, user.subject, objects) : [];
+      // Upload-pack members the commit read and checked; the step reads small ones from memory.
+      const held = new Map<string, Uint8Array>();
+      const verified = objects?.length ? await commitObjects(ctx, user.subject, objects, held) : [];
       const submitted: { payload: string; run: string | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceRunStore:submit'), {
           ...submit,
@@ -82,7 +95,7 @@ export const submit = action({
             chain: input.kind === 'save',
             verified,
             // Keyed by its own digest: only the text whose pin the job names is ever served.
-            ...(text !== undefined ? { preloaded: [{ ...savePinOfText(text), text }] } : {}),
+            preloaded: [...(text !== undefined ? [{ ...savePinOfText(text), text }] : []), ...heldText(held)],
           },
         );
       } catch {

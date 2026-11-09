@@ -91,6 +91,12 @@ export const hostedContractFeatures = [
   /** projectHostedSync:prepare takes `stackOn` (D2): stack an unstacked Lane on an open peer's
    * pending head. Without it the CLI refuses stackOn and the stacking:auto setting does nothing. */
   'sync-stack-on',
+  /** Upload packs (Issue 98ee14e8): projectObjects:prepareBatch takes `pack` and
+   * projectHostedSaves:prepare takes `uploadPack` (src/object-pack-upload.ts), so several new small
+   * objects go up as one pack with one PUT; the commit reads the pack and checks every member digest
+   * before it writes their rows, which then read back with one ranged GET per run. Without it the
+   * CLI PUTs each object. */
+  'upload-packs',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

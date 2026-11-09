@@ -57,7 +57,8 @@ export function controls(t, s) {
   let storageCalls = 0;
   const blobs = new Map(),
     // Every R2 object GET by digest: a step that re-downloads what its own call wrote shows here.
-    r2Gets = [];
+    r2Gets = [],
+    r2Puts = [];
   const storage = {
     async get(id) {
       storageCalls++;
@@ -141,12 +142,20 @@ export function controls(t, s) {
       else for await (const part of body) parts.push(part);
       const bytes = Buffer.concat(parts);
       assert.equal(digest(bytes), id);
+      r2Puts.push(id);
       s.objects.set(id, bytes);
       return new Response(null);
     }
     const bytes = s.objects.get(id);
     if (init.method !== 'HEAD') r2Gets.push(id);
     if (!bytes) return new Response(null, { status: 404 });
+    // A pack member's signed exact Range (object-pack-range.ts) reads its interval, as R2 does.
+    const range = /^bytes=(\d+)-(\d+)$/.exec(new Headers(init.headers).get('range') ?? '');
+    if (range && init.method !== 'HEAD')
+      return new Response(bytes.subarray(Number(range[1]), Number(range[2]) + 1), {
+        status: 206,
+        headers: { 'content-range': `bytes ${range[1]}-${range[2]}/${bytes.length}` },
+      });
     if (init.method === 'HEAD')
       return new Response(null, {
         headers: {
@@ -182,6 +191,7 @@ export function controls(t, s) {
     context,
     storageCalls: () => storageCalls,
     r2Gets,
+    r2Puts,
   };
 }
 export const ref = name => makeFunctionReference(name);

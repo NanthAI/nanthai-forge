@@ -10,6 +10,8 @@ import { report } from './errors';
 import { r2Config, r2Key, presignPut, type R2Config } from './r2';
 import { findObject, objectRow } from './projectObjectFind';
 import { chargeStorage, checkObjectSize } from './abuseLimits';
+import { preparePack, uploadPackProposal } from './projectObjectPacks';
+import type { UploadPackProposal } from '../src/object-pack-upload';
 const pin = v.object({ digest: v.string(), size: v.number() });
 const valid = (digest: string, size: number) =>
   /^[0-9a-f]{64}$/.test(digest) && Number.isSafeInteger(size) && size >= 0;
@@ -51,6 +53,9 @@ const preparedObject = v.object({
     v.object({ kind: v.literal('r2'), url: v.string(), headers: v.record(v.string(), v.string()) }),
   ),
   contentType: v.string(),
+  /** Feature upload-packs: this object is a member of the upload pack whose pending row is `id`;
+   * the first member carries the pack's one PUT target. */
+  pack: v.optional(v.object({ digest: v.string(), size: v.number(), offset: v.number() })),
 });
 async function prepareObject(
   ctx: MutationCtx,
@@ -141,13 +146,18 @@ export const prepare = mutation({
   },
 });
 export const prepareBatch = mutation({
-  args: { projectId: v.id('hostedProjects'), objects: v.array(pin) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    objects: v.array(pin),
+    /** Feature upload-packs: send these objects as one pack (see src/object-pack-upload.ts). */
+    pack: v.optional(uploadPackProposal),
+  },
   returns: v.array(preparedObject),
-  handler: async (ctx, { projectId, objects }) => {
+  handler: async (ctx, { projectId, objects, pack }) => {
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to exchange project source.');
-      return await prepareObjectTargets(ctx, projectId, user.subject, objects);
+      return await prepareObjectTargets(ctx, projectId, user.subject, objects, pack);
     } catch (error) {
       return report(error);
     }
@@ -156,12 +166,14 @@ export const prepareBatch = mutation({
 export type PreparedObject = Infer<typeof preparedObject>;
 /** The `prepareBatch` transaction for an authenticated actor, also run inside a save or sync
  * prepare that hands back its upload targets (feature prepare-upload-targets): one row per pin, in
- * order, each stored or with its create-only, checksum-bound R2 PUT target. */
+ * order, each stored or with its create-only, checksum-bound R2 PUT target. With an eligible
+ * `pack` (feature upload-packs), its members (and repeats of their digests) are pack rows instead. */
 export async function prepareObjectTargets(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   actor: string,
   objects: readonly { digest: string; size: number }[],
+  pack?: UploadPackProposal,
 ): Promise<PreparedObject[]> {
   invariant(
     objects.length <= 100 && objects.every(p => valid(p.digest, p.size)),
@@ -174,9 +186,16 @@ export async function prepareObjectTargets(
   // Every project writes R2, including legacy projects created before R2 was the only path.
   const r2 = r2Config();
   if (!project.r2StorageUsed) await ctx.db.patch(projectId, { r2StorageUsed: true });
-  const result = [],
-    reserved: number[] = [];
+  const packed = pack ? await preparePack(ctx, projectId, objects, pack, r2) : null;
+  const result: PreparedObject[] = [],
+    reserved: number[] = [...(packed?.reserved ?? [])];
   for (const pin of objects) {
+    const member = packed?.byDigest.get(pin.digest);
+    if (member) {
+      // The pack's one PUT target rides on its first row; a repeated digest names the same offset.
+      result.push(result.some(prior => prior.pack) ? member : { ...member, target: packed!.target });
+      continue;
+    }
     const prepared = await prepareObject(ctx, { projectId, ...pin }, true, r2);
     if (prepared.created) reserved.push(pin.size);
     result.push(prepared);

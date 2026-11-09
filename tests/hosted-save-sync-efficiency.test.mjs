@@ -647,6 +647,57 @@ test('a direct small save writes the same State bytes as the described save path
   assert.equal(readHostedLaneCheckout(direct.root).tree, readHostedLaneCheckout(described.root).tree);
 });
 
+test('a direct save with upload-packs sends its blobs and page as one pack PUT that a clone reads in one run (98ee14e8)', async t => {
+  const plain = await changedSave(t, false, true, 'convex', directContract);
+  const run = await changedSave(t, false, true, 'convex', { ...directContract, uploadPacks: true });
+  const count = (calls, name) => calls.filter(value => value === name).length;
+  // Same calls as the direct save: prepare and the one submit action; no prepareBatch, no describe.
+  for (const name of [
+    'projectHostedSaves:prepare',
+    'projectSourceRun:submit',
+    'projectObjects:prepareBatch',
+    'projectObjectDownloads:describe',
+  ])
+    assert.equal(count(run.calls, name), count(plain.calls, name), name);
+  assert(run.stats.totalCalls <= plain.stats.totalCalls, JSON.stringify([run.stats, plain.stats]));
+  // The client PUT 10 blobs, 1 page and the input; now the pack and the input (the step's own
+  // State and tree outputs are the same in both).
+  const changed = run.files.slice(0, 10).map(file => digest(`first\nchanged-${file.path}\nlast\n`));
+  assert.deepEqual(
+    changed.filter(id => plain.c.r2Puts.includes(id)),
+    changed,
+  );
+  assert.equal(run.c.r2Puts.length, plain.c.r2Puts.length - 10);
+  const pack = [...run.s.tables.projectObjects.values()].find(row => row.digest === changed[0]).pack.digest;
+  assert(run.c.r2Puts.includes(pack));
+  assert.deepEqual(
+    changed.filter(id => run.c.r2Puts.includes(id)),
+    [],
+  );
+  // The commit read the pack once and checked every member; the step re-read none of them.
+  assert.deepEqual(
+    run.c.r2Gets.filter(id => id === pack || changed.includes(id)),
+    [pack],
+  );
+  const rows = changed.map(id => [...run.s.tables.projectObjects.values()].find(row => row.digest === id));
+  assert(rows.every(row => row.r2Committed && row.pack?.digest === pack));
+  const physical = [...run.s.tables.projectObjects.values()].find(row => row.digest === pack);
+  assert.equal(physical.r2Committed, true);
+  assert.equal(physical.packMembers, undefined, 'the member list is cleared once bound');
+  // The same State bytes as the unpacked save.
+  const files = r => JSON.parse(r.s.objects.get(r.first.outcome.result.head)).files;
+  assert.deepEqual(files(run), files(plain));
+  // A clone's describe groups the save's blobs into one run: one ranged GET instead of ten.
+  const described = await run.c.call('projectObjectDownloads:describe', {
+    projectId: run.s.projectId,
+    digests: changed,
+    signed: true,
+    runs: true,
+  });
+  assert.equal(new Set(described.map(row => row.run?.id)).size, 1);
+  assert.equal(described.filter(row => row.run?.url).length, 1);
+});
+
 test('a direct save whose changed blob is stored only as a recipe is refused before any operation and saves the described way', async t => {
   const refusals = [];
   const run = await changedSave(t, false, true, 'convex', directContract, {

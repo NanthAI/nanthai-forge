@@ -5,6 +5,7 @@ import { modules } from './project-exchange-fixture.mjs';
 import { fakeR2Config } from './fake-r2.mjs';
 import { digest } from '../dist/hash.js';
 import { putR2 } from '../dist/exchange-blobs.js';
+import { buildUploadPack, uploadPackMembers } from '../dist/object-pack-upload.js';
 
 import { setup, client, pinOf, pendingConvexRow } from './r2-harness.mjs';
 const objects = modules.projectObjects,
@@ -261,4 +262,143 @@ test('the fake rejects bad signatures, other keys and existing objects like R2 d
   assert.equal((await put(row.target.url)).status, 200);
   assert.equal((await put(row.target.url)).status, 412);
   assert.equal(fake.objects.size, 1);
+});
+
+// Upload packs (feature upload-packs, Issue 98ee14e8).
+const lazy = values => content(values).map(({ pin, bytes }) => ({ pin, read: () => bytes }));
+const methods = (fake, method) => fake.requests.filter(r => r.method === method).length;
+const charged = s =>
+  [...(s.tables.projectStorageUsage?.values() ?? [])].reduce((sum, row) => sum + row.bytes, 0);
+
+test('an upload pack goes up in one PUT; its commit reads it once and binds every member to its range', async t => {
+  const { s, fake } = await setup(t),
+    exchange = client(s),
+    values = ['packed one', 'packed two', 'packed three', ''];
+  const sent = await exchange.uploadLazyBatch(lazy(values), { batchSize: 100, pack: true });
+  assert.deepEqual(sent, { uploadedObjects: 4, uploadedBytes: 32 });
+  // The three non-empty objects share one PUT; the empty one keeps its own.
+  assert.equal(methods(fake, 'PUT'), 2);
+  assert.equal(methods(fake, 'GET'), 1, 'the commit read the pack once');
+  assert.equal(methods(fake, 'HEAD'), 1, 'only the raw object needed a HEAD');
+  const pack = rows(s).find(row => row.digest === digest('packed onepacked twopacked three'));
+  assert.equal(pack.r2Committed, true);
+  assert.equal(pack.packMembers, undefined);
+  let offset = 0;
+  for (const value of values.slice(0, 3)) {
+    const row = rows(s).find(row => row.digest === digest(value));
+    assert.deepEqual(row.pack, { digest: pack.digest, size: 32, offset });
+    assert.equal(row.r2Key, pack.r2Key);
+    assert.equal(row.r2Committed, true);
+    offset += value.length;
+  }
+  assert.deepEqual(
+    await objects.missing._handler(s.ctx, { projectId: 'project', objects: values.map(pinOf) }),
+    [],
+  );
+  // Members read back exactly through their signed ranges.
+  const bytes = await exchange.downloadBatch(
+    values.map(value => ({ sha256: digest(value), size: value.length })),
+  );
+  assert.deepEqual(
+    bytes.map(value => value.toString()),
+    values,
+  );
+  // Stored members dedupe: a second upload sends nothing.
+  const puts = methods(fake, 'PUT');
+  assert.equal(
+    (await exchange.uploadLazyBatch(lazy(values), { batchSize: 100, pack: true })).uploadedObjects,
+    0,
+  );
+  assert.equal(methods(fake, 'PUT'), puts);
+});
+
+test('a planted bad pack member fails closed and binds nothing; a later honest upload of that digest succeeds', async t => {
+  const { s, fake } = await setup(t),
+    exchange = client(s),
+    honest = ['first member', 'second member'],
+    planted = Buffer.from('first memberSECOND MEMBER'),
+    pins = honest.map(pinOf);
+  // The pack's checksum is right for its bytes, so R2 takes it; the second member's bytes are not
+  // the declared digest's.
+  const [row] = await objects.prepareBatch._handler(s.ctx, {
+    projectId: 'project',
+    objects: pins,
+    pack: { digest: digest(planted), size: planted.length, members: [0, 1] },
+  });
+  assert.equal(rows(s).length, 1, 'only the pending pack row exists before its commit');
+  await putR2(row.target, planted);
+  await assert.rejects(
+    commit.commitBatch._handler(s.ctx, { objects: [{ id: row.id }] }),
+    e => e.data?.code === 'R2_OBJECT_CHECKSUM_MISMATCH',
+  );
+  assert.deepEqual(
+    rows(s).map(row => [row.digest, row.r2Committed]),
+    [[digest(planted), undefined]],
+    'no member row, and the pack stays pending for the sweep',
+  );
+  assert.deepEqual(
+    await objects.missing._handler(s.ctx, { projectId: 'project', objects: pins }),
+    pins.map(pin => pin.digest),
+  );
+  // Readers never see the planted bytes: the digests are not stored.
+  await assert.rejects(exchange.downloadBatch([{ sha256: pins[1].digest, size: pins[1].size }]));
+  // An honest pack of the same digests, and an honest raw upload, both store and read back.
+  await exchange.uploadLazyBatch(lazy(honest), { batchSize: 100, pack: true });
+  assert.deepEqual(
+    (await exchange.downloadBatch(pins.map(pin => ({ sha256: pin.digest, size: pin.size })))).map(String),
+    honest,
+  );
+  const raw = await objects.prepareBatch._handler(s.ctx, {
+    projectId: 'project',
+    objects: [pinOf('third member'), pinOf('fourth member')],
+    pack: { digest: digest('third memberFOURTH MEMBER'), size: 25, members: [0, 1] },
+  });
+  await putR2(raw[0].target, Buffer.from('third memberFOURTH MEMBER'));
+  await assert.rejects(commit.commitBatch._handler(s.ctx, { objects: [{ id: raw[0].id }] }));
+  assert.equal((await exchange.uploadBatch(content(['fourth member']))).uploadedObjects, 1);
+  assert.deepEqual(
+    String((await exchange.downloadBatch([{ sha256: digest('fourth member'), size: 13 }]))[0]),
+    'fourth member',
+  );
+  assert.ok(fake.requests.some(r => r.method === 'GET'));
+});
+
+test('a pack with a stored member falls back to per-object uploads, and a retried pack is charged once', async t => {
+  const { s, fake } = await setup(t),
+    exchange = client(s);
+  await exchange.uploadBatch(content(['already kept']));
+  const puts = methods(fake, 'PUT');
+  await exchange.uploadLazyBatch(lazy(['already kept', 'new alpha', 'new beta']), {
+    batchSize: 100,
+    pack: true,
+  });
+  // The stored member would be kept twice inside a pack: the two new objects go up one by one.
+  assert.equal(methods(fake, 'PUT') - puts, 2);
+  assert.ok(rows(s).every(row => !row.pack && !row.packMembers));
+  // A retried prepare of the same pack reuses its pending row and charges its members once.
+  const values = ['retry alpha', 'retry beta'],
+    built = await buildUploadPack(lazy(values), [0, 1]),
+    args = { projectId: 'project', objects: values.map(pinOf), pack: built.proposal },
+    before = charged(s),
+    first = await objects.prepareBatch._handler(s.ctx, args),
+    again = await objects.prepareBatch._handler(s.ctx, args);
+  assert.equal(charged(s) - before, built.bytes.length);
+  assert.equal(first[0].id, again[0].id);
+  assert.ok(first[0].target && !first[1].target, 'one PUT target, on the first member');
+  assert.deepEqual(
+    first.map(row => row.pack.offset),
+    [0, values[0].length],
+  );
+  // Clients pack only distinct, non-empty, source-sized members within the pack bound.
+  const pin = size => ({ sha256: digest(String(size)), size });
+  assert.deepEqual(uploadPackMembers([pin(10), pin(0), pin(300 * 1024), pin(10), pin(20)]), [0, 4]);
+  assert.deepEqual(uploadPackMembers([pin(10), pin(300 * 1024)]), []);
+  // A malformed proposal is refused before anything is prepared.
+  await assert.rejects(
+    objects.prepareBatch._handler(s.ctx, {
+      ...args,
+      pack: { ...built.proposal, size: built.proposal.size + 1 },
+    }),
+    e => e.data?.code === 'BAD_ARGUMENT',
+  );
 });

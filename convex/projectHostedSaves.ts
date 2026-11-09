@@ -27,6 +27,8 @@ import type { Id } from './_generated/dataModel';
 import { findObject } from './projectObjectFind';
 import { isR2Object, isStored } from './projectObjectFields';
 import { prepareObjectTargets } from './projectObjects';
+import { uploadPackProposal } from './projectObjectPacks';
+import type { UploadPackProposal } from '../src/object-pack-upload';
 
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(
@@ -62,11 +64,15 @@ async function saveTargets(
   auth: SaveIdentity,
   uploads: readonly { digest: string; size: number }[],
   input: { sha256: string; size: number } | null,
+  pack: UploadPackProposal | undefined,
 ) {
-  return prepareObjectTargets(ctx, auth.projectId, auth.actor, [
-    ...uploads,
-    ...(input ? [{ digest: input.sha256, size: input.size }] : []),
-  ]);
+  return prepareObjectTargets(
+    ctx,
+    auth.projectId,
+    auth.actor,
+    [...uploads, ...(input ? [{ digest: input.sha256, size: input.size }] : [])],
+    pack,
+  );
 }
 export const prepare = mutation({
   args: {
@@ -76,6 +82,8 @@ export const prepare = mutation({
      * delta pages, at most 99); the reply's `targets` prepares them and the save input, so the CLI
      * makes no `projectObjects:prepareBatch` call. Its raw blobs must not be recipe-only objects. */
     uploads: v.optional(v.array(uploadPin)),
+    /** Feature upload-packs: send these `uploads` (indexes into them) as one pack. */
+    uploadPack: v.optional(uploadPackProposal),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -130,7 +138,15 @@ export const prepare = mutation({
           terminal: prepared.operation.terminal,
           input: replayInput,
           ...(input.uploads && !prepared.operation.terminal
-            ? { targets: await saveTargets(ctx, auth, input.uploads, replayInput && savePin(replayInput)) }
+            ? {
+                targets: await saveTargets(
+                  ctx,
+                  auth,
+                  input.uploads,
+                  replayInput && savePin(replayInput),
+                  input.uploadPack,
+                ),
+              }
             : {}),
         });
       }
@@ -166,7 +182,15 @@ export const prepare = mutation({
         terminal: null,
         input: saveInput,
         ...(input.uploads
-          ? { targets: await saveTargets(ctx, auth, input.uploads, saveInput && savePin(saveInput)) }
+          ? {
+              targets: await saveTargets(
+                ctx,
+                auth,
+                input.uploads,
+                saveInput && savePin(saveInput),
+                input.uploadPack,
+              ),
+            }
           : {}),
       });
     } catch (error) {

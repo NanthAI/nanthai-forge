@@ -16,7 +16,7 @@ import { ConvexError } from 'convex/values';
 import { networkFailure } from './network-fetch.js';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
-import { putPreparedObjects, uploadPhysicalObjects } from './exchange-upload.js';
+import { putPreparedObjects, uploadPhysicalObjects, type BuiltPack } from './exchange-upload.js';
 import { ConvexExchangeBlobs } from './exchange-blobs.js';
 import { invariant } from './errors.js';
 import { digest } from './hash.js';
@@ -143,17 +143,31 @@ export class ConvexExchange implements ExchangeTransport {
       /** Collect the raw objects this call PUT instead of committing them; the caller commits them
        * with others in one `commitObjects` call. Large (recipe) members still commit themselves. */
       deferCommit?: { id: string }[];
+      /** Feature upload-packs: each hosting window's new small objects go up as one pack. */
+      pack?: boolean;
     } = {},
   ) {
     if (objects.every(object => !chunked(object.pin)))
-      return this.uploadPhysical(objects, options.batchSize, options.onRaw, options.deferCommit);
+      return this.uploadPhysical(
+        objects,
+        options.batchSize,
+        options.onRaw,
+        options.deferCommit,
+        options.pack,
+      );
     let uploadedObjects = 0,
       uploadedBytes = 0,
       uploadedLogicalObjects = 0;
     for (const object of objects) {
       const sent = chunked(object.pin)
         ? await this.uploadChunked(object.pin, await object.read())
-        : await this.uploadPhysical([object], options.batchSize, options.onRaw, options.deferCommit);
+        : await this.uploadPhysical(
+            [object],
+            options.batchSize,
+            options.onRaw,
+            options.deferCommit,
+            options.pack,
+          );
       uploadedObjects += sent.uploadedObjects;
       uploadedBytes += sent.uploadedBytes;
       uploadedLogicalObjects += (
@@ -238,8 +252,9 @@ export class ConvexExchange implements ExchangeTransport {
     objects: { pin: ContentPin; read: () => Buffer | Promise<Buffer> }[],
     rows: Parameters<typeof putPreparedObjects>[1],
     deferCommit: { id: string }[],
+    built?: BuiltPack,
   ) {
-    return putPreparedObjects(objects, rows, deferCommit, this.blobs);
+    return putPreparedObjects(objects, rows, deferCommit, this.blobs, built);
   }
   /** Commit raw uploads collected with `deferCommit`: one verifying action per 100 objects. */
   async commitObjects(objects: { id: string }[]) {
@@ -255,12 +270,14 @@ export class ConvexExchange implements ExchangeTransport {
     batchSize = this.uploadBatchSize,
     onRaw?: (sha256: string) => void,
     deferCommit?: { id: string }[],
+    pack?: boolean,
   ) {
     return uploadPhysicalObjects(this.client, this.projectId, objects, {
       blobs: this.blobs,
       ...(batchSize ? { batchSize } : {}),
       ...(onRaw ? { onRaw } : {}),
       ...(deferCommit ? { deferCommit } : {}),
+      ...(pack ? { pack } : {}),
     });
   }
   private async uploadRawBatch(

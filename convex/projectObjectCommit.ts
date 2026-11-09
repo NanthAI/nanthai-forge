@@ -4,15 +4,22 @@ import { action, internalQuery, internalMutation, type ActionCtx } from './cliSe
 import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { activeProject } from './projectAuthority';
-import { r2Config, headObject, checksumOf, type HeadResult } from './r2';
+import { r2Config, headObject, checksumOf, presignGet, type HeadResult } from './r2';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { bindPackMembers } from './projectObjectPacks';
+import { readExactObject } from './projectR2ExactRead';
+import { uploadPackMismatch } from '../src/object-pack-upload';
+import { mapExchange } from '../src/exchange-parallel';
 
+const member = v.object({ digest: v.string(), size: v.number() });
 const pending = v.object({
   id: v.id('projectObjects'),
   digest: v.string(),
   size: v.number(),
   key: v.string(),
+  /** An upload pack's members (feature upload-packs), checked by reading the pack. */
+  members: v.optional(v.array(member)),
 });
 /** Rows of this caller's R2 uploads that still need a HEAD check. */
 export const pendingRows = internalQuery({
@@ -36,7 +43,13 @@ export const pendingRows = internalQuery({
           'Prepare this abandoned upload again before committing.',
         );
         if (!row.removed && !row.r2Committed)
-          rows.push({ id, digest: row.digest, size: row.size, key: row.r2Key });
+          rows.push({
+            id,
+            digest: row.digest,
+            size: row.size,
+            key: row.r2Key,
+            ...(row.packMembers ? { members: row.packMembers } : {}),
+          });
       }
       return rows;
     } catch (error) {
@@ -68,8 +81,22 @@ export const markCommitted = internalMutation({
         row.location === 'r2' &&
         !row.removed &&
         !row.r2Committed
-      )
-        await ctx.db.patch(id, { r2Committed: true });
+      ) {
+        if (expected.members) {
+          // The members this commit read and checked are the ones the row still names.
+          invariant(
+            JSON.stringify(row.packMembers) === JSON.stringify(expected.members),
+            'R2_OBJECT_MISSING',
+            'Prepare this upload pack again: its members changed.',
+          );
+          await bindPackMembers(
+            ctx,
+            { projectId: row.projectId, digest: row.digest, size: row.size, r2Key: expected.key },
+            expected.members,
+          );
+        }
+        await ctx.db.patch(id, { r2Committed: true, packMembers: undefined });
+      }
     }
     return null;
   },
@@ -103,38 +130,99 @@ export const commitBatch = action({
     }
   },
 });
+/** An upload pack (feature upload-packs) is read once, whole: R2's checksum covers the pack, not
+ * its members, so every member digest is checked here before any member row exists. A mismatch
+ * fails closed and binds nothing; the pending pack is swept like any abandoned upload, and a later
+ * upload of the same digests prepares afresh. */
+async function packMismatch(
+  config: ReturnType<typeof r2Config>,
+  row: { key: string; size: number; members: { digest: string; size: number }[] },
+  held?: Map<string, Uint8Array>,
+) {
+  let bytes: Uint8Array;
+  try {
+    bytes = await readExactObject(
+      { url: await presignGet(config, row.key), size: row.size },
+      {
+        failed: 'Object storage could not read an upload pack. Retry.',
+        exceeds: 'An upload pack is larger than declared.',
+      },
+    );
+  } catch {
+    return ['R2_VERIFY_FAILED', 'Object storage could not read an upload pack. Retry.'];
+  }
+  if (uploadPackMismatch(bytes, row))
+    return ['R2_OBJECT_CHECKSUM_MISMATCH', 'An upload pack member differs from its declared digest.'];
+  // A save packs its blobs first and its pages (and input) last: hold from the end.
+  let end = row.size;
+  for (const member of [...row.members].reverse()) {
+    const total = [...(held?.values() ?? [])].reduce((sum, value) => sum + value.length, 0);
+    if (held && total + member.size <= heldBytes)
+      held.set(member.digest, bytes.slice(end - member.size, end));
+    end -= member.size;
+  }
+  return null;
+}
+/** Checked members the caller's step may read from memory (a save's delta page and input). */
+const heldBytes = 128 * 1024;
 /** The commit round of `commitBatch`, also run by `projectSourceRun:submit` before its submit.
  * Returns the pins this call committed after its HEAD matched their exact size AND their sha256
- * checksum (rows already committed, or a HEAD without a checksum, are not listed). */
+ * checksum (rows already committed, or a HEAD without a checksum, are not listed), and the members
+ * of each upload pack it read and checked. `held` collects the small checked members' bytes. */
 export async function commitObjects(
   ctx: ActionCtx,
   actor: string,
   objects: readonly { id: Id<'projectObjects'> }[],
+  held?: Map<string, Uint8Array>,
 ): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
   if (!objects.length) return [];
-  const rows: { id: Id<'projectObjects'>; digest: string; size: number; key: string }[] = await ctx.runQuery(
-    internal.projectObjectCommit.pendingRows,
-    {
-      actor,
-      ids: objects.map(object => object.id),
-    },
-  );
+  const rows: {
+    id: Id<'projectObjects'>;
+    digest: string;
+    size: number;
+    key: string;
+    members?: { digest: string; size: number }[];
+  }[] = await ctx.runQuery(internal.projectObjectCommit.pendingRows, {
+    actor,
+    ids: objects.map(object => object.id),
+  });
   if (!rows.length) return [];
   const config = r2Config();
-  const results = await Promise.all(
-    rows.map(async row => {
-      const head = await headObject(config, row.key);
-      return { row, head, failure: mismatch(row, head) };
-    }),
-  );
+  // Raw rows HEAD all at once; pack reads hold at most two packs (2 x 8 MiB) in memory.
+  const [heads, packs] = await Promise.all([
+    Promise.all(
+      rows
+        .filter(row => !row.members)
+        .map(async row => {
+          const head = await headObject(config, row.key);
+          return {
+            row,
+            checked: head.status === 'ok' && head.checksum === checksumOf(row.digest),
+            failure: mismatch(row, head),
+          };
+        }),
+    ),
+    mapExchange(
+      rows.filter(row => row.members),
+      2,
+      async row => {
+        const failure = await packMismatch(config, { ...row, members: row.members! }, held);
+        return { row, checked: !failure, failure };
+      },
+    ),
+  ]);
+  const results = [...heads, ...packs];
   const verified = results.filter(r => !r.failure).map(r => r.row);
   if (verified.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
   const failed = results.find(r => r.failure);
   invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
-  return results.flatMap(({ row, head }) =>
-    head.status === 'ok' && head.checksum === checksumOf(row.digest)
-      ? [{ sha256: row.digest, size: row.size }]
+  return results.flatMap(({ row, checked }) =>
+    checked
+      ? [
+          { sha256: row.digest, size: row.size },
+          ...(row.members ?? []).map(member => ({ sha256: member.digest, size: member.size })),
+        ]
       : [],
   );
 }
