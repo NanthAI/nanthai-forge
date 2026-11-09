@@ -16,6 +16,8 @@ import {
   hostedOperationRequestSchema,
   hostedOperationSchema,
   hostedTerminalReceiptSchema,
+  HOSTED_OPERATION_PRUNE_BATCH,
+  HOSTED_OPERATION_RETENTION_MS,
   type HostedTerminalReceipt,
 } from '../src/hosted-source-operation';
 
@@ -31,6 +33,29 @@ export const hostedOperationRow = (
       q.eq('projectId', projectId).eq('actor', actor).eq('operationId', operationId),
     )
     .unique();
+
+/** Remove this project's receipts past the retention value, oldest first, at most one batch per call.
+ * Runs only inside the write that adds a new receipt, so an idle project does nothing and no timer
+ * exists. The index skips legacy cancel receipts (metrics still read those by creation time), so the
+ * scan reads only rows it can delete. A receipt this old belongs to a finished or dead operation: every
+ * job and watchdog ends within hours, and a retry after expiry starts a new operation. */
+export async function pruneExpiredHostedOperations(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  now: number,
+) {
+  const expired = await ctx.db
+    .query('projectHostedOperations')
+    .withIndex('by_project_and_metric_action', q =>
+      q
+        .eq('projectId', projectId)
+        .eq('metricMutation.action', undefined)
+        .lt('_creationTime', now - HOSTED_OPERATION_RETENTION_MS),
+    )
+    .take(HOSTED_OPERATION_PRUNE_BATCH);
+  for (const row of expired) await ctx.db.delete(row._id);
+  return expired.length;
+}
 
 /** Persist original IDs/time before any external work. Authorization precedes
  * even a completed replay; callers must resolve actor from their trusted boundary. */
@@ -85,6 +110,7 @@ export async function beginHostedOperation(
       ...(metricActorKind ? { metricActorKind } : {}),
       value: canonicalPayload(prepared.operation),
     });
+    await pruneExpiredHostedOperations(ctx, input.projectId, Date.now());
   }
   return prepared;
 }

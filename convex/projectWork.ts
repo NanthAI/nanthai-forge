@@ -27,6 +27,9 @@ import { internal } from './_generated/api';
 import { report } from './errors';
 import { emitChange, workChange } from './coordinationWrite';
 
+/** The project record every open tab subscribes to (name, owner, selected source). It does not read the
+ * Work head row, so a journal write does not re-run it for each tab; `work.revision` here is the seed
+ * value, not the live one. The live revision is `projectWorkIndex:workspace` (and the internal `get`). */
 export const state = query({
   args: { projectId: v.id('hostedProjects') },
   returns: projectDocument,
@@ -34,7 +37,7 @@ export const state = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
-      return await workProject(ctx, await accessibleProject(ctx, projectId, user.subject));
+      return await accessibleProject(ctx, projectId, user.subject);
     } catch (error) {
       return report(error);
     }

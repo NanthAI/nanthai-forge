@@ -4,6 +4,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
+/** Index fields may name a nested path such as `metricMutation.action`. */
+const at = (row, key) => key.split('.').reduce((value, part) => value?.[part], row);
 const size = value => (value === null ? 0 : Buffer.byteLength(JSON.stringify(value)));
 
 /** Indexed metadata fake. Counts the matched provider range, not a JS table scan.
@@ -15,6 +17,7 @@ export function recordsFixture() {
     indexes = new Map(),
     counts = [];
   let serial = 0,
+    creationClock = 0,
     meter = null,
     undo = null;
   const invalidate = table => {
@@ -24,14 +27,14 @@ export function recordsFixture() {
     for (const [cacheKey, cache] of indexes) {
       if (!cacheKey.startsWith(`${table}:`)) continue;
       if (old) {
-        const key = JSON.stringify(cache.fields.map(k => old[k]));
+        const key = JSON.stringify(cache.fields.map(k => at(old, k)));
         const group = cache.groups.get(key);
         if (group) {
           const i = group.findIndex(r => r._id === old._id);
           if (i >= 0) group.splice(i, 1);
         }
       }
-      const key = JSON.stringify(cache.fields.map(k => row[k]));
+      const key = JSON.stringify(cache.fields.map(k => at(row, k)));
       if (!cache.groups.has(key)) cache.groups.set(key, []);
       const group = cache.groups.get(key);
       group.push(row);
@@ -83,8 +86,33 @@ export function recordsFixture() {
       },
       insert: async (table, row) => {
         const id = `record-${serial++}`;
-        write(id, table, insertedDocument(schema, table, row, id, serial));
+        // Creation time follows Date (mockable) and never repeats, as in Convex, so retention windows can age rows.
+        write(
+          id,
+          table,
+          insertedDocument(
+            schema,
+            table,
+            row,
+            id,
+            (creationClock = Math.max(Date.now(), creationClock + 0.01)),
+          ),
+        );
         return id;
+      },
+      delete: async id => {
+        const table = locations.get(id),
+          old = tables[table]?.get(id);
+        assert(old, 'delete targets an existing document');
+        undo?.push(() => {
+          tables[table].set(id, old);
+          locations.set(id, table);
+          invalidate(table);
+        });
+        if (meter) meter.writes++;
+        tables[table].delete(id);
+        locations.delete(id);
+        invalidate(table);
       },
       replace: async (id, row) => {
         const table = locations.get(id),
@@ -105,7 +133,8 @@ export function recordsFixture() {
             const definition = schema.tables[table].export().indexes.find(x => x.indexDescriptor === index);
             assert(definition, `${table}.${index} exists`);
             const equalities = [];
-            let upper = null;
+            let upper = null,
+              before = null;
             const bounds = {
               eq: (field, value) => {
                 assert.equal(field, definition.fields[equalities.length], 'index equality order');
@@ -117,19 +146,32 @@ export function recordsFixture() {
                 upper = { field, value };
                 return bounds;
               },
+              // Creation time is the implicit last key of every index, after all declared fields.
+              lt: (field, value) => {
+                assert.equal(field, '_creationTime', 'only creation time takes a strict upper bound');
+                assert.equal(
+                  equalities.length,
+                  definition.fields.length,
+                  'creation time follows every field',
+                );
+                before = value;
+                return bounds;
+              },
             };
             build(bounds);
             const cacheKey = `${table}:${index}:${equalities.length}`;
             if (!indexes.has(cacheKey)) {
               const groups = new Map();
               for (const row of tables[table].values()) {
-                const key = JSON.stringify(definition.fields.slice(0, equalities.length).map(k => row[k]));
+                const key = JSON.stringify(
+                  definition.fields.slice(0, equalities.length).map(k => at(row, k)),
+                );
                 if (!groups.has(key)) groups.set(key, []);
                 groups.get(key).push(row);
               }
               const compare = (a, b) => {
                 for (const k of [...definition.fields, '_creationTime']) {
-                  if (a[k] !== b[k]) return a[k] < b[k] ? -1 : 1;
+                  if (at(a, k) !== at(b, k)) return at(a, k) < at(b, k) ? -1 : 1;
                 }
                 return 0;
               };
@@ -142,6 +184,7 @@ export function recordsFixture() {
             }
             selected = indexes.get(cacheKey).groups.get(JSON.stringify(equalities)) ?? [];
             if (upper) selected = selected.filter(row => row[upper.field] <= upper.value);
+            if (before !== null) selected = selected.filter(row => row._creationTime < before);
             return q;
           },
           order: order => {

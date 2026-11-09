@@ -121,8 +121,12 @@ export function lanesFixture() {
             const id = `${table}-${++serial}`;
             // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
             // Answer retention (Issue b78ca196) compares creation times with Date.now(), so answer rows get
-            // wall-clock times like real ones; every other table keeps its serial order.
-            const at = table === 'projectHostedOverlapAcks' || table === 'projectHostedAckBatches';
+            // wall-clock times like real ones; every other table keeps its serial order. Operation receipts
+            // (expiry at 90 days) get them too, or every receipt would look expired.
+            const at =
+              table === 'projectHostedOverlapAcks' ||
+              table === 'projectHostedAckBatches' ||
+              table === 'projectHostedOperations';
             put(
               table,
               id,

@@ -3,6 +3,13 @@ import { z } from 'zod';
 import { digest } from './portable-hash.js';
 import { invariant } from './errors.js';
 
+/** How long an operation receipt answers a retry of its operation id (same value as overlap answers).
+ * Longer than any retry or dormant-Lane resume rule. */
+export const HOSTED_OPERATION_RETENTION_MS = 90 * 24 * 3_600_000;
+/** Most expired receipts one new operation removes. A new operation adds one row and the table ages out about
+ * one per new operation, so a small batch keeps it bounded and drains a backlog a few rows at a time. */
+export const HOSTED_OPERATION_PRUNE_BATCH = 4;
+
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 /** Exact resource observations; a new observation belongs to a named child attempt. */

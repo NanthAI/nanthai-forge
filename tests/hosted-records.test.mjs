@@ -4,7 +4,12 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 import { recordsFixture } from './hosted-records-fixture.mjs';
-import { canonicalPayload, hostedPayloadHash } from '../dist/hosted-source-operation.js';
+import {
+  canonicalPayload,
+  hostedPayloadHash,
+  HOSTED_OPERATION_PRUNE_BATCH,
+  HOSTED_OPERATION_RETENTION_MS,
+} from '../dist/hosted-source-operation.js';
 import {
   hostedRecordRef,
   hostedRecordIndex,
@@ -263,6 +268,80 @@ test('persisted operation envelopes retain original IDs/time and terminal result
   );
   await s.ctx.db.patch(s.auth.projectId, { removal: 'deleted' });
   await assert.rejects(operations.beginHostedOperation(s.ctx, input), code('PROJECT_UNAVAILABLE'));
+});
+
+test('operation receipts expire after 90 days, a few per new operation, and a retry after expiry starts a new operation', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-11-09T00:00:00Z') });
+  const day = 24 * 3_600_000;
+  const s = recordsFixture(),
+    auth = await s.setup();
+  assert.equal(HOSTED_OPERATION_RETENTION_MS, 90 * day);
+  const expected = { authorityEpoch: 1, head: hash },
+    payload = { lane: randomUUID() };
+  const begin = (operationId = randomUUID()) =>
+    s
+      .run('begin-operation', () =>
+        operations.beginHostedOperation(s.ctx, {
+          ...auth,
+          request: {
+            schema: 1,
+            projectId: auth.projectId,
+            actor: auth.actor,
+            operationId,
+            expected,
+            payloadHash: hostedPayloadHash(payload, expected),
+          },
+          payload,
+          firstAttempt: {
+            projectId: auth.projectId,
+            operationId,
+            id: randomUUID(),
+            parentAttemptId: null,
+            at,
+            expected,
+            ids: { lane: payload.lane },
+          },
+        }),
+      )
+      .then(result => ({ operationId, ...result }));
+  const rows = () => [...s.tables.projectHostedOperations.values()];
+  const first = await begin();
+  for (let i = 0; i < 5; i++) await begin();
+  // A legacy cancel receipt that metrics read by creation time is never removed.
+  const legacy = rows()[1];
+  await s.ctx.db.patch(legacy._id, {
+    metricMutation: { action: 'cancel', actor: auth.actor, operationId: legacy.operationId, at },
+  });
+  t.mock.timers.tick(89 * day);
+  await begin();
+  const quiet = s.counts.at(-1);
+  assert.equal(rows().length, 7, 'inside 90 days nothing is removed');
+  t.mock.timers.tick(2 * day);
+  await begin();
+  const sweep = s.counts.at(-1);
+  // Five expired receipts besides the legacy one: a batch of 4 goes, and the new receipt is added.
+  assert.equal(rows().length, 7 + 1 - HOSTED_OPERATION_PRUNE_BATCH);
+  assert(
+    rows().some(row => row._id === legacy._id),
+    'the legacy cancel receipt is kept',
+  );
+  assert.equal(sweep.ranges, quiet.ranges, 'the sweep is the same single indexed range, empty or not');
+  assert(
+    sweep.documents - quiet.documents <= HOSTED_OPERATION_PRUNE_BATCH,
+    'and reads only rows it can remove',
+  );
+  await begin();
+  assert.equal(
+    rows().length,
+    7 + 1 - HOSTED_OPERATION_PRUNE_BATCH,
+    'the last expired one goes, one is added',
+  );
+  await begin();
+  assert.equal(rows().length, 7 + 2 - HOSTED_OPERATION_PRUNE_BATCH, 'nothing expired: only the new row');
+  // Inside the window a retry reconciles; after expiry the same id is a new operation.
+  const fresh = await begin();
+  assert.equal((await begin(fresh.operationId)).replayed, true);
+  assert.equal((await begin(first.operationId)).replayed, false);
 });
 
 test('stage 10,050 immutable records, lose a page/final reply, rebuild disposable rows, and select exactly once within read/range/byte budgets', async t => {

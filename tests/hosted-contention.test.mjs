@@ -62,8 +62,9 @@ test('hosted note contention and reactive read-set measurement', async t => {
   const invalidated = tracking.invalidated(dependencies);
   assert.equal(
     invalidated,
-    4,
-    'Work state, workspace, Intent list and notes page change; unrelated pages stay subscribed',
+    // 4 -> 3 (435c7c2f): the project state every tab holds no longer reads the Work head row.
+    3,
+    'Workspace, Intent list and notes page change; the project state and unrelated pages stay subscribed',
   );
   assert.deepEqual(await send({ ...firstInput, revision: 0 }), first, 'retry does not depend on revision');
   await assert.rejects(

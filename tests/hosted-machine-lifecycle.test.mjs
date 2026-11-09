@@ -50,7 +50,9 @@ test('Q4 selected reconnect stays bounded with dogfood source and twice retained
   assert(result.functionTransactions <= 50, 'selected lifecycle transaction budget');
   assert(result.documentsRead <= 500, 'no collection/history hydration');
   assert(result.sourceDocumentsWritten <= 160, 'bounded selected lifecycle writes');
-  assert(result.sourceMaxDocumentsPerTransaction <= 60, 'bounded transaction window');
+  // 60 -> 62 (435c7c2f): the largest transaction begins two operations, each first looking, through one indexed
+  // range, for receipts older than 90 days to delete (the fixture counts an empty range as one document).
+  assert(result.sourceMaxDocumentsPerTransaction <= 62, 'bounded transaction window');
   assert(result.peakRssMiB <= 1024, 'synthetic provider snapshot harness memory budget');
 });
 test('Q4 hosted acceptance is recoverable on a clean root with no native acceptance owner', async t => {
