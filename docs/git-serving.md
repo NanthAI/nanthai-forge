@@ -10,7 +10,13 @@ git clone https://<deployment>.convex.site/git/<handle>/<slug>.git
 git clone https://<deployment>.convex.site/git/<projectId>.git   # same project by id
 ```
 
-`<handle>/<slug>` is the project's web route; `.git` is optional.
+`<handle>/<slug>` is the project's web route; `.git` is optional. A deployment with the
+large-pack Worker also answers on the Worker's address, with the same paths and access, and
+one backend round trip fewer per command (see [Large packs](#large-packs)):
+
+```sh
+git clone https://<worker-origin>/git/<handle>/<slug>.git
+```
 
 ## Access
 
@@ -118,7 +124,8 @@ project, history row, at most 256 pack rows and two small pins; for members also
 50 built Lane rows with their Lane rows (a listing) or the rows of the wanted commits (a
 fetch). A clone is three requests
 (six calls), whatever the file or commit count; a fetch with nothing new is two requests
-(four calls) and reads nothing from R2. Pack bytes are one presigned R2 GET per 32 MiB
+(four calls) and reads nothing from R2. Through the Worker's own address the v2 advertisement
+costs no backend call: a clone is two requests, a fetch with nothing new one. Pack bytes are one presigned R2 GET per 32 MiB
 chunk and leave through the HTTP action (Convex data egress). Gzipped request bodies
 (Git compresses requests over 1 KiB) cost one extra Node action call to decode, bounded
 at 1 MiB. Nothing runs while no one uses Git: no timers, scheduling or polling.
@@ -166,6 +173,16 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   ls-refs and fetch requests that follow are rechecked. A path segment
   `unpublished-landings` in the redirect says hosted main is ahead of the newest Git commit
   (a v2 fetch also prints the `remote:` line; v0 has no side-band for it).
+- **The Worker's own address.** Git can also clone `https://<worker-origin>/git/…` directly.
+  The Worker answers the protocol v2 capability advertisement (the same fixed text) and
+  forwards every other request, with the login git presents, to the backend's direct `/git/`
+  route, which checks it and current access on every request exactly as for a direct client.
+  No redirect and no session: a no-op fetch is one backend request instead of two, a clone two
+  instead of three. The Worker marks what it forwards (`x-forge-git-worker`); the mark only
+  lets the backend answer a fetch of a project whose clones the Worker serves with a byte plan
+  instead of streaming the pack, and grants no access. A private project's first ls-refs
+  answers `401`, so git sends its login. v0 clients get the backend's ref advertisement
+  through the Worker, which for a large project is the session redirect above.
 - **Lane refs.** Members get the same Lane refs here, under the same rules: a session signed
   for a member's login lists and serves them. On a public project git's first request sends
   no login, so the session is anonymous; a listing that names a Lane then answers `401`, git
@@ -198,9 +215,11 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   project, 10,000 packs and 100 GiB in all. The ref listing checks the same counters before
   redirecting. Past a cap Git prints `GIT_BYTE_LIMIT` with the reset time. Usage rows older
   than 7 days are deleted when their scope is next written.
-- **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 3 Worker requests). R2
+- **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 3 Worker requests, the
+  same whether git was redirected or cloned the Worker's address). R2
   egress is free; R2 reads are one per 32 MiB chunk, inside R2's included 10 million a month
-  at the caps. Per large clone the backend makes 3 HTTP actions, 3 queries and 1 mutation
+  at the caps. Per large clone the backend makes 3 HTTP actions, 3 queries and 1 mutation (2
+  and 2 through the Worker's address)
   (plus 1 more mutation and one read of the set the first time a joined set is served
   unprepared). Preparing a recorded pack is 1 background action, 1 query and 1-2 mutations:
   one read and one framed write of the new pack and, with several packs, one read of the set

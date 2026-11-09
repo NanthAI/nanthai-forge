@@ -9,7 +9,11 @@
  * names (never one from the client), in the stored-object key space. It answers the Git
  * protocol v2 capability advertisement itself: that reply is fixed text with no repository
  * data, and every request that returns refs or bytes still goes to the backend, which
- * rechecks the session and current access (one backend round trip fewer per clone). */
+ * rechecks the session and current access (one backend round trip fewer per clone).
+ * Git can also clone the Worker's own /git/<handle>/<slug>.git address (Issue ae7ceb1b):
+ * the Worker answers the v2 advertisement and forwards the rest to the backend's direct
+ * /git/ route, which checks the presented login and current access on every request as it
+ * does for any client, and answers large fetches with byte plans. No redirect, no session. */
 
 type Env = {
   /** The Forge backend's HTTP actions origin, for example https://NAME.convex.site. */
@@ -48,6 +52,9 @@ export const v2Advertisement = ['version 2', 'agent=forge/1', 'ls-refs', 'fetch'
   .join('')
   .concat('0000');
 const v2Request = /(^|[:\s])version=2($|[:\s])/;
+/** Equal to workerViaHeader in src/git-worker-plan.ts (tests/hosted-history.test.mjs). It only
+ * lets the direct route answer a large fetch with a byte plan; it grants no access. */
+export const viaHeader = 'x-forge-git-worker';
 
 const plain = (status: number, text: string) =>
   new Response(`${text}\n`, { status, headers: { 'content-type': 'text/plain; charset=utf-8' } });
@@ -94,7 +101,8 @@ async function pump(plan: Plan, bucket: Env['FORGE_R2'], writable: WritableStrea
 export default {
   fetch: async (request: Request, env: Env, context: Context): Promise<Response> => {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith('/gitw/')) return plain(404, 'Repository not found.');
+    const direct = url.pathname.startsWith('/git/');
+    if (!direct && !url.pathname.startsWith('/gitw/')) return plain(404, 'Repository not found.');
     if (request.method !== 'GET' && request.method !== 'POST') return plain(405, 'Method not allowed.');
     if (
       request.method === 'GET' &&
@@ -113,6 +121,7 @@ export default {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);
     }
+    if (direct) headers.set(viaHeader, '1');
     const upstream = await globalThis.fetch(`${env.FORGE_CONVEX_SITE}${url.pathname}${url.search}`, {
       method: request.method,
       headers,

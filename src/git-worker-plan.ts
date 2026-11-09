@@ -10,6 +10,10 @@ import { utf8ToBytes } from '@noble/hashes/utils.js';
 
 /** Content type of a byte plan; only Convex sends it, only the Worker reads it. */
 export const bytePlanType = 'application/x-forge-git-byte-plan';
+/** Set by the Worker on requests it forwards to the direct /git/ route (git cloned the
+ * Worker's address). It only selects a byte plan instead of a streamed pack for a large
+ * fetch; access is checked from the presented login exactly as without it. */
+export const workerViaHeader = 'x-forge-git-worker';
 /** A redirected session token lives 5 minutes; every request rechecks current access. */
 export const workerTokenMs = 5 * 60_000;
 /** The Worker makes at most this many R2 reads per pack (Workers Free: 1,000 reads of

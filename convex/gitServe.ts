@@ -37,6 +37,7 @@ import {
   type FetchArgs,
 } from '../src/git-serve-protocol';
 import { namedLanes, selectFetch } from '../src/git-serve-lane-refs';
+import { workerViaHeader } from '../src/git-worker-plan';
 
 /** Read-only Git smart HTTP (Issue 09367fb2): /git/<handle>/<slug>.git or /git/<projectId>.git.
  * Serves the stored history packs (GitHub's own bytes in R2, same commit ids). Pushes go
@@ -457,8 +458,15 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
     }
     const ready = loaded as Loaded;
     const served = (args: FetchArgs, version: 2 | 0) => {
-      if (!session) return fetchReply(ready, args, version);
       const { packs, lanes, gap } = servedRefs(ready);
+      // Git cloned the Worker's own address (Issue ae7ceb1b): access was checked above from the
+      // presented login, as on any direct request; the header only picks a byte plan for a
+      // project whose clones the Worker serves, exactly as the redirect would have.
+      const viaWorker =
+        !!worker &&
+        request.headers.get(workerViaHeader) === '1' &&
+        workerServes(worker, packs.length ? new PackJoiner(packs).bytes : 0);
+      if (!session && !viaWorker) return fetchReply(ready, args, version);
       return workerFetch(
         ctx,
         ready.projectId,

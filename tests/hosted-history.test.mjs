@@ -1076,6 +1076,42 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
     ['*', 4, 4 * pack.bytes],
     [projectId, 4, 4 * pack.bytes],
   ]);
+  // Git can clone the Worker's own address (Issue ae7ceb1b): no redirect; the Worker answers the
+  // v2 advertisement and forwards ls-refs and fetch to the direct route, which checks access as
+  // for any client and answers the fetch with a byte plan. A no-op fetch is one backend request.
+  const direct = join(work, 'direct');
+  worker.reads.length = 0;
+  before = host.snapshot();
+  const viaWorker = await client(['clone', `${worker.base}/git/${projectId}.git`, direct]);
+  assert.doesNotMatch(String(viaWorker.stderr), /redirecting/);
+  assert.equal(log(direct), log(source.repo));
+  await client(['fsck', '--full'], direct);
+  assert.deepEqual(host.since(before), { http: 2, query: 2, mutation: 1, action: 0 });
+  assert.deepEqual(
+    worker.reads,
+    pack.framed.map(chunk => ({ key: `v1/p/${projectId}/o/${chunk.sha256}` })),
+  );
+  before = host.snapshot();
+  await client(['fetch', '-q'], direct);
+  assert.deepEqual(host.since(before), { http: 1, query: 1, mutation: 0, action: 0 }, 'no-op fetch');
+  before = host.snapshot();
+  await client(['fetch', '-q'], join(work, 'one'));
+  assert.deepEqual(host.since(before), { http: 2, query: 2, mutation: 0, action: 0 }, 'redirected no-op');
+  const { viaHeader } = await import('../dist/git-byte-worker.js');
+  assert.equal(viaHeader, (await import('../dist/git-worker-plan.js')).workerViaHeader);
+  // Without the Worker's header the direct route streams the pack itself, as before.
+  const streamed = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
+    method: 'POST',
+    headers: { 'git-protocol': 'version=2' },
+    body: protocol.concatBytes([
+      protocol.pkt('command=fetch\n'),
+      protocol.delimPkt,
+      protocol.pkt(`want ${source.head}\n`),
+      protocol.pkt('done\n'),
+      protocol.flushPkt,
+    ]),
+  });
+  assert.match(streamed.headers.get('content-type'), /x-git-upload-pack-result/);
 
   // A mirror move adds a catch-up pack; a fetch takes only it, a fresh clone joins both.
   commit(source.repo, { 'src/new.go': 'package main\n' }, 'Forge landing one');
@@ -1187,10 +1223,26 @@ test('a Worker session rechecks the credential and current access on every reque
   const listed = await lsRefs(sign('cred-owner'));
   assert.match(Buffer.from(await listed.arrayBuffer()).toString('latin1'), new RegExp(`${source.head} HEAD`));
   assert.equal((await lsRefs(sign(''))).status, 404, 'v2 anonymous session on a private project');
+  // Git cloned the Worker's own address (Issue ae7ceb1b): the header the Worker adds only picks
+  // byte plans; access is the direct route's, from the presented login, on every request.
+  const viaWorker = authorization =>
+    host.handle(`/git/${projectId}.git/git-upload-pack`, {
+      method: 'POST',
+      headers: {
+        'git-protocol': 'version=2',
+        'x-forge-git-worker': '1',
+        ...(authorization ? { authorization } : {}),
+      },
+      body: Buffer.concat([protocol.pkt('command=ls-refs\n'), protocol.delimPkt, protocol.flushPkt]),
+    });
+  assert.equal((await viaWorker()).status, 401, 'anonymous, private project: Basic challenge');
+  const member = await viaWorker(`Bearer ${login}`);
+  assert.match(Buffer.from(await member.arrayBuffer()).toString('latin1'), new RegExp(`${source.head} HEAD`));
   const [credential] = [...s.tables.cliCredentials.values()];
   s.tables.cliCredentials.set(credential._id, { ...credential, revoked: true });
   assert.equal((await host.handle(refs(sign('cred-owner')))).status, 403, 'revocation applies at once');
   assert.equal((await lsRefs(sign('cred-owner'))).status, 403, 'and to v2 requests');
+  assert.equal((await viaWorker(`Bearer ${login}`)).status, 401, 'and on the Worker address');
 });
 
 // Lane refs (Issue 09367fb2 line 3): a member's fetch of refs/forge/lanes/<laneId> builds one
