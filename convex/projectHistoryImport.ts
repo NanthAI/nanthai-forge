@@ -156,6 +156,9 @@ export async function recordHistoryPack(
     const worker = workerConfig();
     if (recorded === 'recorded' && worker && workerServes(worker, historyBytes))
       await ctx.scheduler.runAfter(0, internal.gitServeFrame.prepare, { projectId });
+    // The pack's tree index, ahead of the first Lane build that lists from it (Issue 3bd4a8e9).
+    if (recorded === 'recorded')
+      await ctx.scheduler.runAfter(0, internal.gitServeTrees.indexPacks, { projectId });
     return recorded;
   } finally {
     if (recorded !== 'recorded') await discardHistoryChunks(ctx, projectId, stored.created);

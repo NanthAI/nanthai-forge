@@ -11,7 +11,16 @@ import { digest } from '../src/portable-hash';
 import { published } from '../src/hosted-github-mirror';
 import { gitHash } from '../src/hosted-github-git';
 import { laneCommitBytes, type PackObject } from '../src/git-lane-objects';
-import { TreeWork, packListing, readR2, stepIds, storePack, type Alias, type Chunk } from './gitServeTrees';
+import {
+  TreeWork,
+  packListing,
+  readR2,
+  stepIds,
+  storePack,
+  type Alias,
+  type Chunk,
+  type IndexedPack,
+} from './gitServeTrees';
 
 /** Builds one Lane's Git commit (Issue 09367fb2) the way main's GitHub mirror writes main's:
  * the same published paths, LFS pointers and gitlinks, so the base tree must equal the tree
@@ -27,8 +36,8 @@ type Plan = {
   parent: { commit: string; tree: string; legacy: boolean };
   author: { name: string; email: string };
   aliases: Chunk | null;
-  /** History packs' chunks, newest pack first. */
-  packs?: Chunk[][];
+  /** History packs (chunks and tree index), newest pack first. */
+  packs?: IndexedPack[];
 };
 
 export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>, laneId: string, plan: Plan) {
@@ -49,6 +58,7 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
     scan: async () => {
       const found = await packListing(projectId, plan.packs ?? [], parent.tree);
       work.metric.packScanned = found.scanned;
+      work.metric.packIndexed = found.indexed;
       return found.listing;
     },
     code: 'GIT_LANE_TREE',

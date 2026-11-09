@@ -158,6 +158,7 @@ export const record = internalMutation({
     for (const row of merged as Doc<'projectHistoryPacks'>[]) {
       discard.push(...[...row.chunks, ...(row.framed ?? [])].map(chunk => chunk.sha256));
       if (row.objectSet) discard.push(row.objectSet.sha256);
+      if (row.trees) discard.push(row.trees.sha256);
       if (row.main) discard.push(row.main.listing.sha256);
       await ctx.db.delete(row._id);
     }

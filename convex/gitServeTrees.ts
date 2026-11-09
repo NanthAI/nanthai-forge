@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
-import type { ActionCtx } from './_generated/server';
+import { v } from 'convex/values';
+import { internalAction, type ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { projectSource } from './projectGithubMirror';
 import { storeSourceBytes } from './projectSourceBytes';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { presignGet, r2Config, r2Key } from './r2';
+import { deleteR2Object } from './r2Operations';
 import { historyChunkBytes } from './projectHistoryFields';
 import { createHash } from 'node:crypto';
 import { digest } from '../src/portable-hash';
@@ -64,10 +66,10 @@ async function pool<T>(items: T[], run: (item: T) => Promise<void>) {
 }
 /** Feeds packs (each a list of R2 chunks, read one ahead) to `scan`, newest first, until `done`
  * says so after a chunk; false when a chunk is unreadable or the scan fails. */
-/** Range reads per chunk in flight while a scan parses: one GET of a whole 32 MiB chunk from a
- * Convex action is network-bound (about 10 s for this repository's import pack, Issue
- * 3bd4a8e9), so a chunk is read as ranges of rangeBytes, rangesAhead at a time, and parsed in
- * order as they arrive. */
+/** A scan reads each chunk as ranges of rangeBytes, rangesAhead in flight, and parses them in
+ * order as they arrive, so reading overlaps parsing and a stopped scan reads no further. The
+ * scan itself (every object inflated) is CPU-bound in a Convex action, about 10 s for this
+ * repository's 25 MB import pack, which is why listings read tree indexes (Issue 3bd4a8e9). */
 export const rangeBytes = 4 * 1024 * 1024,
   rangesAhead = 6;
 async function readRange(projectId: string, sha256: string, start: number, end: number) {
@@ -135,14 +137,63 @@ export async function scanPacks(
   }
   return true;
 }
-/** A commit tree's listing from the history packs, stopping once every tree under `root` is
- * found; null when a tree is missing, a chunk is unreadable or the scan passes its budget. */
-export async function packListing(projectId: string, packs: Chunk[][], root: string) {
+/** A history pack as listings read it: its chunks and its tree index, once built. */
+export type IndexedPack = { chunks: Chunk[]; trees?: Chunk | null };
+/** A commit tree's listing from the history packs (newest first), stopping once every tree
+ * under `root` is found: each pack's tree index when it has one, else a scan of the pack. Null
+ * when a tree is missing, a chunk is unreadable or the scan passes its budget. */
+export async function packListing(projectId: string, packs: IndexedPack[], root: string) {
   const scan = new PackTrees(treeBudget);
   let listing: TreeListing | null = null;
-  await scanPacks(projectId, packs, scan, () => !!(listing = listTree(scan, root)));
-  return { listing, scanned: scan.scanned };
+  const done = () => !!(listing = listTree(scan, root));
+  let indexed = 0;
+  for (const pack of packs) {
+    const index = pack.trees ? await readR2(projectId, pack.trees.sha256) : null;
+    if (index && scan.loadIndex(index)) indexed++;
+    else if (!(await scanPacks(projectId, [pack.chunks], scan, done))) break;
+    if (done()) break;
+  }
+  return { listing, scanned: scan.scanned, indexed };
 }
+
+/** Builds the tree index of every imported and catch-up pack without one (scheduled when a
+ * pack is recorded, so no Git request waits): one scan of each such pack, one R2 PUT of its
+ * trees (about 1.4 MiB for this repository's 25 MB import pack) and one mutation. A pack over
+ * the tree budget gets none; listings then scan it. */
+export const indexPacks = internalAction({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.null(),
+  handler: async (ctx, { projectId }): Promise<null> => {
+    const started = Date.now();
+    const packs: { tip: string; chunks: Chunk[] }[] = await ctx.runQuery(
+      internal.gitServeLaneStore.unindexed,
+      { projectId },
+    );
+    const built: { tip: string; trees: Chunk }[] = [];
+    let scanned = 0;
+    for (const pack of packs) {
+      const one = new PackTrees(treeBudget);
+      const ok = await scanPacks(projectId, [pack.chunks], one);
+      scanned += one.scanned;
+      if (!ok) continue;
+      const bytes = one.treeIndex();
+      const pin = { sha256: digest(bytes), size: bytes.length };
+      await storeSourceBytes(ctx, projectId, bytes, pin);
+      built.push({ tip: pack.tip, trees: pin });
+    }
+    if (!built.length) return null;
+    const unused: string[] = await ctx.runMutation(internal.gitServeLaneStore.setTreeIndex, {
+      projectId,
+      packs: built,
+    });
+    for (const sha256 of new Set(unused))
+      await deleteR2Object(r2Config(), r2Key(projectId, sha256)).catch(() => {});
+    console.log(
+      `FORGE_GIT_TREES_METRIC ${JSON.stringify({ projectId, packs: built.length, scanned, indexBytes: built.reduce((sum, pack) => sum + pack.trees.size, 0), ms: Date.now() - started })}`,
+    );
+    return null;
+  },
+});
 /** Stores a pack (objects, or its bytes) as content-addressed R2 chunks of at most
  * historyChunkBytes. */
 export async function storePack(
@@ -177,7 +228,14 @@ export async function storePack(
 }
 
 export class TreeWork {
-  readonly metric = { readBytes: 0, readBlobs: 0, resolveCalls: 0, listing: 0, packScanned: 0 };
+  readonly metric = {
+    readBytes: 0,
+    readBlobs: 0,
+    resolveCalls: 0,
+    listing: 0,
+    packScanned: 0,
+    packIndexed: 0,
+  };
   /** Bytes read that a pack may need (changed files and `.gitattributes`). */
   readonly contents = new Map<string, Buffer>();
   private readonly attributes = new Map<string, string>();

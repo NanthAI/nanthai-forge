@@ -1643,6 +1643,17 @@ test('pack trees list a commit tree from ofs- and ref-delta packs fed in small p
     }
     assert.deepEqual(listing, expected, flags.join() || 'ref-delta');
     assert.equal(packTrees.listTree(scan, 'f'.repeat(40)), null, 'unknown tree');
+    // The tree index: the same trees (whole or deltas), loaded without the pack.
+    const index = scan.treeIndex();
+    const loaded = new packTrees.PackTrees(1 << 20);
+    assert.equal(loaded.loadIndex(index), true);
+    assert.deepEqual(packTrees.listTree(loaded, tree), expected, 'the index lists the same tree');
+    assert.equal(
+      new packTrees.PackTrees(1 << 20).loadIndex(index.subarray(0, -1)),
+      false,
+      'a cut index fails',
+    );
+    assert.equal(new packTrees.PackTrees(16).loadIndex(index), false, 'an index over budget fails');
     const tight = new packTrees.PackTrees(64);
     tight.startPack();
     assert.equal(tight.push(pack, true), false, 'over budget stops the scan');
@@ -1755,6 +1766,24 @@ test('a first Lane build lists the parent tree from the history packs and reads 
   assert.equal(again, fast);
   assert.deepEqual([metrics[2].listing, metrics[2].packScanned, metrics[2].readBlobs], [0, 0, 3]);
   assert.equal(s.tables.projectGitLaneCommits.size, 1);
+
+  // Recording the import scheduled its tree index; once built, a first build reads the index
+  // (trees only) instead of scanning the pack, and makes the same commit.
+  const index = s.scheduled.filter(task => getFunctionName(task.fn) === 'gitServeTrees:indexPacks');
+  assert.equal(index.length, 1, 'one index run per recorded pack');
+  await modules.gitServeTrees.indexPacks._handler(s.ctx, index[0].args);
+  const [row] = historyPacks(s, projectId);
+  assert.ok(row.trees && row.trees.size < row.bytes, 'the index holds trees only');
+  const cold = { ...plan, aliases: null, packs: [{ chunks: row.chunks, trees: row.trees }] };
+  assert.equal(await modules.gitServeLane.buildLane(s.ctx, projectId, laneId, cold), fast);
+  assert.deepEqual(
+    [metrics[3].listing, metrics[3].packIndexed, metrics[3].packScanned, metrics[3].readBlobs],
+    [1, 1, row.trees.size, 4],
+  );
+  // A second run finds nothing to index.
+  const before = s.tables.projectHistoryPacks.get(row._id).trees;
+  await modules.gitServeTrees.indexPacks._handler(s.ctx, index[0].args);
+  assert.deepEqual(s.tables.projectHistoryPacks.get(row._id).trees, before);
 });
 
 // Forge-built main commits (Issue 3bd4a8e9 line 3): an imported project without a mirror serves

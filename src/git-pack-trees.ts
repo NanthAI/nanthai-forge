@@ -9,6 +9,8 @@ import { gitHash } from './hosted-github-git.js';
  * (whole, or deltas against a tree) are kept. Commits and blobs are skipped. */
 export type TreeListing = Map<string, { mode: string; sha: string }>;
 
+const indexMagic = 'FTI1',
+  noBase = '0'.repeat(40);
 const commit = 1,
   tree = 2,
   ofsDelta = 6,
@@ -78,6 +80,41 @@ export class PackTrees {
       this.cache.delete(old);
       this.cached -= value.length;
     }
+  }
+
+  /** The trees kept, as one tree index a later listing loads instead of scanning the pack
+   * (Issue 3bd4a8e9): "FTI1", then per tree its id, its base tree id (zeros: whole tree), the
+   * data length and the data (the tree, or its delta). Bases come before their deltas. */
+  treeIndex() {
+    const parts: Buffer[] = [Buffer.from(indexMagic, 'latin1')];
+    for (const [id, entry] of this.entries) {
+      const head = Buffer.alloc(44);
+      head.write(id, 0, 'hex');
+      if (entry.base) head.write(entry.base, 20, 'hex');
+      head.writeUInt32BE(entry.data.length, 40);
+      parts.push(head, entry.data);
+    }
+    return Buffer.concat(parts);
+  }
+  /** Adds an index's trees; false when it is malformed or passes the budget. */
+  loadIndex(bytes: Buffer) {
+    if (bytes.toString('latin1', 0, 4) !== indexMagic) return false;
+    this.scanned += bytes.length;
+    for (let at = 4; at < bytes.length;) {
+      if (at + 44 > bytes.length) return false;
+      const id = bytes.toString('hex', at, at + 20),
+        base = bytes.toString('hex', at + 20, at + 40),
+        length = bytes.readUInt32BE(at + 40);
+      at += 44;
+      if (at + length > bytes.length) return false;
+      if (!this.entries.has(id)) {
+        this.entries.set(id, { data: bytes.subarray(at, at + length), base: base === noBase ? null : base });
+        this.kept += length;
+      }
+      at += length;
+      if (this.kept > this.budget) return false;
+    }
+    return true;
   }
 
   /** Starts the next pack; deltas never cross packs (stored packs are not thin). */

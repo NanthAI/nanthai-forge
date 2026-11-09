@@ -156,7 +156,7 @@ export const plan = internalQuery({
       parent: { commit: parent.commit, tree: parent.tree, legacy: parent.publication !== 'tracked' },
       author: laneAuthor(account?.handle ?? null, lane.agent),
       aliases: history?.laneAliases ?? null,
-      packs: packs.map(pack => pack.chunks),
+      packs: packs.map(pack => ({ chunks: pack.chunks, ...(pack.trees ? { trees: pack.trees } : {}) })),
     };
   },
 });
@@ -226,5 +226,42 @@ export const record = internalMutation({
       await ctx.db.delete(row._id);
     }
     return { recorded, discard };
+  },
+});
+
+/** Imported and catch-up packs without a tree index (Lane listings read those packs). */
+export const unindexed = internalQuery({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.array(v.object({ tip: v.string(), chunks: v.array(historyChunk) })),
+  handler: async (ctx, { projectId }) =>
+    (
+      await ctx.db
+        .query('projectHistoryPacks')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .take(historyPackPage)
+    )
+      .filter(pack => pack.source !== 'forge' && !pack.trees)
+      .map(pack => ({ tip: pack.tip, chunks: pack.chunks })),
+});
+
+/** Records tree indexes on their pack rows (by tip). Returns the index objects nothing pins:
+ * a pack row gone, or one another run indexed first. */
+export const setTreeIndex = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    packs: v.array(v.object({ tip: v.string(), trees: historyChunk })),
+  },
+  returns: v.array(v.string()),
+  handler: async (ctx, { projectId, packs }) => {
+    const unused: string[] = [];
+    for (const { tip, trees } of packs) {
+      const [row] = await ctx.db
+        .query('projectHistoryPacks')
+        .withIndex('by_project_and_tip', q => q.eq('projectId', projectId).eq('tip', tip))
+        .take(1);
+      if (row && !row.trees) await ctx.db.patch(row._id, { trees });
+      else if (row?.trees?.sha256 !== trees.sha256) unused.push(trees.sha256);
+    }
+    return unused;
   },
 });

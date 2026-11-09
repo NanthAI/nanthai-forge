@@ -62,6 +62,9 @@ export const historyTables = {
     /** The same pack framed as side-band pkt-lines for Git protocol v2 on the Worker path,
      * written once on its first v2 Worker fetch (src/git-worker-plan.ts PackFramer). */
     framed: v.optional(v.array(historyChunk)),
+    /** The pack's trees only (whole or as deltas), built once after the pack is recorded: a Lane
+     * build lists its parent commit's tree from it instead of scanning the pack (Issue 3bd4a8e9). */
+    trees: v.optional(historyChunk),
     bytes: v.number(),
     objects: v.number(),
     packSha1: v.string(),

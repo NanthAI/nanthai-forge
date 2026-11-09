@@ -129,13 +129,13 @@ commit, plus the trees and blobs its parent lacks), the pack's side-band framed 
 protocol v2 on the Worker path) and an alias object (SHA-256 to Git blob id for the base and
 head). It reads the bytes of the files the Lane changed. File Git ids
 come from the alias object; when it lacks more than 32 of the base's (a project's first
-build, or a base far from the last one built), the build reads the history packs from R2
-once instead and lists the parent commit's tree from them (only trees are kept: about
-1.4 MiB for this repository's 25 MB pack), rather than reading every file. Each 32 MiB chunk
-is read as 4 MiB ranges, six in flight while earlier ones are parsed: one whole-chunk GET
-from a Convex action took about 10 s of this repository's 14 s first build. A
+build, or a base far from the last one built), the build lists the parent commit's tree from
+the history packs instead of reading every file: from each pack's tree index (its trees only,
+whole or as deltas: 1.65 MB for this repository's 25 MB import pack), else by scanning the
+pack (every object inflated; about 10 s of a 14 s first build in a Convex action here). A
 scan that finds no such tree, or keeps more than 128 MiB of trees, falls back to reading
-the files. Later fetches of the same head read the cached row. A Lane fetch sends history after the newest stored commit the client has,
+the files. Each recorded import or catch-up pack schedules one background action that scans
+it once and stores its index (one R2 PUT, one mutation), so no Git request waits for it. Later fetches of the same head read the cached row. A Lane fetch sends history after the newest stored commit the client has,
 plus the Lane pack. Into a repository without main, that history can repeat an object of
 the Lane pack, which `transfer.fsckObjects` rejects; fetch main first.
 

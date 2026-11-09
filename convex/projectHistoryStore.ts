@@ -241,6 +241,7 @@ export const referencedChunks = internalQuery({
               ...pack.chunks,
               ...(pack.framed ?? []),
               ...(pack.objectSet ? [pack.objectSet] : []),
+              ...(pack.trees ? [pack.trees] : []),
               ...(pack.main ? [pack.main.listing] : []),
             ].map(chunk => chunk.sha256),
           )
