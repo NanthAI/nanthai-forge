@@ -63,6 +63,7 @@ export const autonomyPolicy = v.object({
     mode: v.union(v.literal('review'), v.literal('auto-on-pass')),
     gate: v.optional(v.union(v.literal('full'), v.literal('contract'))),
     disjointFastPath: v.optional(v.boolean()),
+    autoRevert: v.optional(v.boolean()),
     hostedCrossHeadReuse: v.optional(v.boolean()),
     scopedRecheck: v.optional(v.boolean()),
     landing: v.optional(v.union(v.literal('batched'), v.literal('optimistic'), v.literal('serial'))),

@@ -43,6 +43,9 @@ export const autonomyPolicySchema = z.object({
     /** Absent preserves the full hosted gate. */
     gate: z.enum(['full', 'contract']).optional(),
     disjointFastPath: z.boolean().optional(),
+    /** Hosted red-main recovery: `false` stops the automatic revert of a proven culprit (the flake
+     * guard still runs and the failure becomes a "Fix main" Intent); absent means on, as always. */
+    autoRevert: z.boolean().optional(),
     /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
     hostedCrossHeadReuse: z.boolean().optional(),
     /** Hosted main-race recheck under the contract gate: run only tests affected by

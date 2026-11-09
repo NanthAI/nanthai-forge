@@ -131,13 +131,28 @@ once instead of at the landing-count cadence; one audit run covers every landing
 since the last green main, in place of the rechecks they skipped. Automatic
 recovery never guesses and never loses code:
 
-- It bisects to a single proven culprit and reverts it with an ordinary landing
-  (a reverse Candidate through the same queue, on current main, with a full
-  check). Main never rewinds; later landings keep their bytes. The reverse
+- It first re-runs only the failing test files on the failing head. If they pass it
+  records a flake and changes nothing. Otherwise it bisects the coalesced range, re-running
+  only those files (a single landing is the culprit with no bisect; at most
+  `1 + ceil(log2(n+1))` probes for n landings) to a single proven culprit and reverts it
+  with an ordinary landing (a reverse Candidate through the same queue, on current main,
+  with a full check). Main never rewinds, history is never rewritten and later landings
+  keep their bytes. The culprit's Intent is reopened with its Lane and work intact and
+  carries one notice (shown in Needs you and in the agent's next read); the reverse
   receipt says why, names the re-land command (`nforge agent ROOT start
   '{"intentId":"…"}'` opens a Lane at the culprit's saved head) and how to undo.
 - With several suspects, unclear evidence, or a reverse that conflicts, it
   reverts nothing and opens a fix-forward Intent.
+- **Protected paths.** When the culprit's changed paths or the reverse's changed paths
+  match the landing rule for the owner's agent (owner-approval or `acceptance.protectedPaths`,
+  or path coverage is unavailable), the reverse is never auto-landed. It is prepared as a
+  Candidate with no check and no landing; the culprit's Intent shows a Needs you notice naming
+  the Candidate and the paths, and a person reviews, checks and accepts it.
+- **`acceptance.autoRevert`.** Absent means on. `false` keeps the flake guard, stops
+  before any bisect probe and opens only the fix-forward Intent; nothing is reverted.
+  No preset sets it: `nforge x ROOT set-policy '{"operationId":"UUID","acceptance":{"autoRevert":false}}'`.
+  Per red event it adds no Convex call beyond the existing recovery steps, and a green path
+  costs nothing.
 
 While main is red no change lands on its first check (recheck reason
 `main-red`). A contract attempt ready during red main waits with `MAIN_RED` and
@@ -259,7 +274,9 @@ a full main check automatically after acceptance. Pending main checks coalesce o
 the newest accepted head. A red result stays in Needs you and creates one
 “Fix main: <check> failed after <landing>” Intent per failing head, linking the run
 and a copyable agent prompt. Repair from current main and check and accept the new
-Candidate normally; the worker never rewinds or auto-reverts accepted work. The option
+Candidate normally. This native post-accept worker only opens the Fix main Intent; it never
+rewinds or reverts accepted work. A hosted project's main audit also finds and reverts a proven
+culprit (see [hosted acceptance gate](#hosted-acceptance-gate); `acceptance.autoRevert`). The option
 does not change supervised person review, trusted passing-check requirements,
 protected paths or actor selection. Scoped standard-check acceptances also schedule full main checks
 while this option is off. See [agent workflow](agents/workflow.md#disjoint-fast-path-landing)

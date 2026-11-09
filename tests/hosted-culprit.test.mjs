@@ -16,6 +16,7 @@ import {
   probeVerdict,
   fixBrief,
 } from '../dist/culprit-bisect.js';
+import { effectivePolicy } from '../dist/autonomy-policy.js';
 const culprit = await import(moduleUrl('../convex/projectHostedCulprit.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const start = await import(moduleUrl('../convex/projectHostedStart.ts'));
@@ -352,6 +353,44 @@ test('seeded flake never prepares a reverse and six replays reserve exactly one 
   assert.deepEqual(new Set(states.map(state => state.audit.id)), new Set([origin, shared.audit.id]));
   assert(states.every(state => state.stage === 'done'));
   assert.equal(shared.tables.projectHostedSyncs.size, 0);
+});
+
+test('acceptance.autoRevert:false runs the flake guard, names no culprit and opens Fix main without bisecting', async () => {
+  const f = await fixture();
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...effectivePolicy(f.tables.hostedProjects.get(f.projectId)),
+      acceptance: { mode: 'auto-on-pass', gate: 'contract', protectedPaths: [], autoRevert: false },
+    },
+  });
+  await f.runCulprit();
+  assert.equal(f.probes().length, 1, 'only the flake guard probe is spent');
+  await f.complete(f.probes()[0], true);
+  assert.equal(f.probes().length, 1, 'no bisect probes after a reproduced failure');
+  const state = JSON.parse(f.recovery().recovery);
+  assert.equal(state.stage, 'done');
+  assert.match(state.reason, /Automatic revert is off/);
+  assert.equal(f.tables.projectHostedSyncs.size, 0);
+  assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+  const fix = culprit.needsFix(f.tables.hostedProjects.get(f.projectId));
+  assert.equal(fix.length, 1);
+  assert.equal(fix[0].state, 'needs-fix');
+  assert.match((await f.readIntent(fix[0].intentId)).needsFix.summary, /Automatic revert is off/);
+});
+
+test('acceptance.autoRevert:false still records a flake: the failed tests pass on the audited head', async () => {
+  const f = await fixture();
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...effectivePolicy(f.tables.hostedProjects.get(f.projectId)),
+      acceptance: { mode: 'auto-on-pass', gate: 'contract', protectedPaths: [], autoRevert: false },
+    },
+  });
+  await f.runCulprit();
+  await f.complete(f.probes()[0], false);
+  assert.equal(f.tables.projectHostedMainAudits.get(f.auditRow).red, undefined);
+  assert.equal(culprit.needsFix(f.tables.hostedProjects.get(f.projectId)).length, 0);
+  assert.match(JSON.parse(f.recovery().value).terminal.outcome.result.reason, /recorded a flake/);
 });
 
 test('mixed or absent probe evidence creates one fix-forward and persistent notices', async () => {
@@ -750,12 +789,14 @@ function firstCheckCulprit(f) {
   f.receipts[574] = next;
   return next;
 }
-for (const [firstCheck, conflict] of [
-  [false, false],
-  [true, false],
-  [true, true],
+for (const [firstCheck, conflict, held] of [
+  [false, false, undefined],
+  [true, false, undefined],
+  [true, true, undefined],
+  [false, false, 'protected'],
+  [false, false, 'unknown'],
 ])
-  test(`system reverse advances from retained source results to one full-gated check and landing${firstCheck ? ' (culprit landed on its first check)' : ''}${conflict ? ': a reverse that conflicts with later work reverts nothing and opens fix-forward' : ''}`, async () => {
+  test(`system reverse advances from retained source results to one full-gated check and landing${firstCheck ? ' (culprit landed on its first check)' : ''}${conflict ? ': a reverse that conflicts with later work reverts nothing and opens fix-forward' : ''}${held ? `: a ${held}-path reverse is prepared as a Candidate and never auto-landed` : ''}`, async () => {
     const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
     const f = await fixture(1);
     const culpritReceipt = firstCheck ? firstCheckCulprit(f) : f.receipts[574];
@@ -836,6 +877,10 @@ for (const [firstCheck, conflict] of [
       inputs: compose.request.inputs.root,
       dependencies: compose.request.dependencies.root,
       algorithm: 'native@fixture',
+      // A real clean compose retains the changed paths the reverse touches.
+      ...(conflict || held === 'unknown'
+        ? {}
+        : { governance: { version: 1, paths: ['src/file-1.ts'], ownerInputs: true } }),
       result: conflict
         ? { status: 'conflict', conflicts: compose.request.inputs.root }
         : { status: 'clean', head: f.heads[0] },
@@ -881,7 +926,64 @@ for (const [firstCheck, conflict] of [
       };
       ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
     });
+    if (held)
+      f.patch('hostedProjects', f.projectId, {
+        autonomyPolicy: {
+          ...effectivePolicy(f.tables.hostedProjects.get(f.projectId)),
+          acceptance: { mode: 'auto-on-pass', gate: 'contract', protectedPaths: ['src/file-1.ts'] },
+        },
+      });
     await f.transaction('advanceFull', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
+    if (held) {
+      // Never auto-landed: no check, no landing, main and receipts untouched; the prepared
+      // Candidate waits for a person and the culprit's Intent says so (Needs you).
+      const state = JSON.parse(f.recovery().recovery);
+      assert.equal(state.stage, 'done');
+      assert.equal(state.held.candidateId, compose.candidateId);
+      assert.match(
+        state.held.reason,
+        held === 'protected' ? /protected paths: src\/file-1\.ts/ : /coverage is unavailable/,
+      );
+      assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+      assert.equal(
+        [...f.tables.projectHostedCheckRuns.values()].filter(r =>
+          JSON.parse(r.value).gate?.reason?.startsWith('culprit-revert:'),
+        ).length,
+        0,
+      );
+      assert.deepEqual(
+        [...f.tables.projectHostedAcceptances.values()].map(r => r.value),
+        receiptsBefore,
+      );
+      assert.equal([...f.tables.projectHostedChannels.values()][0].selection, mainBefore);
+      const intent = await f.readIntent(f.intents[574].id);
+      assert.equal(intent.status, 'active', 'the culprit Intent is reopened and its work kept');
+      assert.equal(intent.needsFix.state, 'needs-fix');
+      assert.match(intent.needsFix.summary, new RegExp(`Candidate ${compose.candidateId} but not landed`));
+      assert.equal(culprit.needsFix(f.tables.hostedProjects.get(f.projectId)).length, 1);
+      // A retried continuation changes nothing and sends no second notice.
+      const before = JSON.stringify([...f.tables.projectHostedRecordHeads.values()]);
+      await f.transaction('replayHeld', culprit.advance, { projectId: f.projectId, runId: f.audit.id });
+      assert.equal(JSON.stringify([...f.tables.projectHostedRecordHeads.values()]), before);
+      assert.equal(f.tables.projectHostedLandingRequests.size, 0);
+      // The person accepts the held Candidate: the notice becomes "reverted" with an undo receipt.
+      const accepted = {
+        ...state.target,
+        id: randomUUID(),
+        candidate: { ...state.target.candidate, id: compose.candidateId },
+        snapshot: { ...state.target.snapshot, revision: 581 },
+      };
+      await f.transaction(
+        'personAccepted',
+        { _handler: ctx => culprit.onRecoveryAccepted(ctx, accepted) },
+        {},
+      );
+      const reverted = (await f.readIntent(f.intents[574].id)).needsFix;
+      assert.equal(reverted.state, 'reverted');
+      assert.equal(reverted.revertReceiptId, accepted.id);
+      assert.equal(JSON.parse(f.recovery().recovery).held, undefined);
+      return;
+    }
     if (conflict) {
       // No blind revert: nothing is queued, main and every receipt stay as they
       // are, and the culprit's Intent carries one fix-forward notice.

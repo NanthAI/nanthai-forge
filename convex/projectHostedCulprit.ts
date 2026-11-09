@@ -12,6 +12,8 @@ import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './proje
 import { prepareHostedRevert } from './projectHostedRevert';
 import { armAudit, auditSettings } from './projectHostedMainAuditState';
 import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
+import { effectivePolicy } from '../src/autonomy-policy';
+import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
 import { hostedStartMain } from './projectHostedChannels';
 import { saveObject } from './projectHostedSaveStore';
 import { hostedSyncInput, loadSync, writeSyncState, type SyncState } from './projectHostedSyncStore';
@@ -54,6 +56,8 @@ type Recovery = {
   undo?: string;
   target?: HostedAcceptance;
   intentId?: string;
+  /** A prepared reverse Candidate that was not landed because it waits for a person. */
+  held?: { candidateId: string; reason: string };
   syncOperationId?: string;
   composeOperationId?: string;
   landingOperationId?: string;
@@ -222,14 +226,17 @@ export function revertMessage(summary: string, intentId: string | null) {
   const fits = new TextEncoder().encode(summary).length <= room;
   return `${fits ? summary : `${summary.slice(0, Math.floor((room - 3) / 3))}...`}${reland}${undo}`;
 }
-async function candidateIntent(ctx: MutationCtx, project: Doc<'hostedProjects'>, receipt: HostedAcceptance) {
+async function candidateRecord(ctx: MutationCtx, project: Doc<'hostedProjects'>, receipt: HostedAcceptance) {
   const row = await readHostedRecord(ctx, {
     projectId: project._id,
     actor: project.owner,
     kind: 'candidate',
     key: receipt.candidate.id,
   });
-  return row ? hostedRecordSchema.options[3].parse(JSON.parse(row.value)).intentId : null;
+  return row ? hostedRecordSchema.options[3].parse(JSON.parse(row.value)) : null;
+}
+async function candidateIntent(ctx: MutationCtx, project: Doc<'hostedProjects'>, receipt: HostedAcceptance) {
+  return (await candidateRecord(ctx, project, receipt))?.intentId ?? null;
 }
 async function fixForward(
   ctx: MutationCtx,
@@ -617,6 +624,15 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       'The failed tests passed on the audited head; recorded a flake and cleared this red episode. No source was changed.';
     return retain(ctx, row!, state);
   }
+  if (pending.flake && !autoRevertEnabled(effectivePolicy(project)))
+    // The flake guard ran: the failure reproduced. Stop here, spend no bisect minutes.
+    return fixForward(
+      ctx,
+      project,
+      row!,
+      state,
+      'Automatic revert is off (acceptance.autoRevert:false); the failure reproduced on the audited head, so it is not a flake. Nothing was reverted.',
+    );
   if (!pending.flake) {
     if (verdict === 'pass') {
       state.low = pending.index;
@@ -855,6 +871,33 @@ async function finishSystemRevert(
       state,
       'Main changed before the reverse finish; preserve its newer accepted work.',
     );
+  const policy = effectivePolicy(project);
+  if (!autoRevertEnabled(policy))
+    return fixForward(
+      ctx,
+      project,
+      row,
+      state,
+      'Automatic revert was turned off before the reverse landed (acceptance.autoRevert:false); nothing was reverted.',
+    );
+  const held = autoRevertHold({
+    project,
+    policy,
+    culpritPaths: (await candidateRecord(ctx, project, state.target!))?.governance?.paths ?? null,
+    reversePaths: candidate.governance?.paths ?? null,
+    checks: [state.audit.check, ...(project.checkEntries ?? [])],
+  });
+  if (held) {
+    // Never auto-landed: the prepared reverse waits as a Candidate for a person, shown in Needs you
+    // on the culprit's Intent. No check is spent and nothing is enqueued.
+    state.held = { candidateId: candidate.id, reason: held };
+    state.reason = `The reverse was prepared as Candidate ${candidate.id} but not landed: ${held}. A person reviews and accepts it; it needs its full check first. Nothing in main changed.`;
+    const original = await candidateIntent(ctx, project, state.target!);
+    if (original) await notice(ctx, project, original, report(state, state.target!, 'needs-fix'));
+    state.stage = 'done';
+    await retain(ctx, row, state);
+    return;
+  }
   const gate = { mode: 'full' as const, reason: `culprit-revert:${state.audit.id}` };
   const operationId = culpritId({ fullRevertCheck: state.audit.id });
   const request = {
@@ -1196,6 +1239,20 @@ export async function onRecoveryAccepted(ctx: MutationCtx, receipt: HostedAccept
         });
       }
     }
+    return;
+  }
+  if (state.stage === 'done' && state.held && state.intentId === intentId && state.target) {
+    // A person accepted the held reverse: the culprit's notice now says it was reverted.
+    const original = await candidateIntent(ctx, project, state.target);
+    if (original)
+      await notice(ctx, project, original, {
+        ...report(state, state.target, 'reverted', receipt.id),
+        sequence: receipt.snapshot.revision,
+      });
+    state.undo = `nforge agent ROOT revert '${JSON.stringify({ target: { kind: 'receipt', receiptId: receipt.id } })}'`;
+    state.reason = `Reverted by a person after review: Candidate ${state.held.candidateId} landed as receipt ${receipt.id}. Undo: ${state.undo}`;
+    delete state.held;
+    await retain(ctx, row, state);
     return;
   }
   if (state.stage !== 'landing' || state.intentId !== intentId || !state.target) return;

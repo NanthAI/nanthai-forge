@@ -1237,8 +1237,12 @@ run and acceptance; its description and decision note contain a copyable agent
 prompt with the log command and Intent ID. Start the repair Lane on current main,
 preserve later accepted work, and check and accept the fix normally. Worker
 restarts and repeated observations reuse that Intent, even if it was closed.
-Creating the handoff never changes source, rewinds main or automatically reverts a
-landing. Abandon the Intent to close the handoff; reopen it to resume.
+Creating the handoff never changes source or rewinds main. The native post-accept worker
+never reverts a landing. On a hosted project the main-audit recovery may land a reverse of a
+single proven culprit through the normal queue and checks, unless `acceptance.autoRevert` is
+`false` or the culprit or reverse touches protected paths (then it waits for a person; see
+[hosted acceptance gate](../workflows.md#hosted-acceptance-gate)). Abandon the Intent to close
+the handoff; reopen it to resume.
 
 Fast-path does not grant acceptance authority. Under supervised settings an agent
 still returns a checked Candidate for person review. Under trusted settings an agent
