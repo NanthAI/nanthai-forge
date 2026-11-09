@@ -874,7 +874,9 @@ environment with failing tests still receives `PREFLIGHT_REQUIRED` when the
 project declared its runner; a runner Forge inferred only advises. A program the
 run needs that is not installed here (not on `PATH`, exit 127, `ENOENT`) records
 `ENVIRONMENT / TOOLCHAIN_MISSING` the same advisory way, naming the `missing`
-programs. No service restart happens automatically.
+programs. A failed test file whose declared dependency is not installed in the Lane records
+`ENVIRONMENT / DEPENDENCIES_MISSING` the same way, naming the `missing` packages. No service
+restart happens automatically.
 
 Measurement-hold waits use the isolated helper and a one-second local removal check only while a hold exists. Degraded hints report `ENVIRONMENT` and `nforge doctor .`; an active hold remains in force. No hold means no watcher, timer or server call.
 

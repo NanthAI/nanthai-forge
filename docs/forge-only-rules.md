@@ -149,6 +149,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/project-test-runner.ts` | `js-extension` | 2 | node, vitest and jest runner inference and module-name matching for JS runners | a declared runner; per-ecosystem inference in 1f2121cb |
 | `src/tested-docs.ts` | `js-extension` | 1 | Forge's standard selector scans these files for Markdown readers | declared `docsPaths` |
 | `src/dependency-link.ts` | `package-json-config` | 1 | reads the `bin` field of a JS workspace package to link its bins into the Lane's `node_modules/.bin` (de6620eb) | non-JS repositories have no `node_modules` link |
+| `src/preflight-dependencies.ts` | `package-json-config` | 1 | reads the dependency sections of a JS package's manifest to tell a declared-but-uninstalled package (setup gap) from an undeclared import (real failure) (9ab983fd) | non-JS repositories have no `node_modules` check |
 | `src/hosted-actions-job-plan.ts` | `package-json-config` | 1 | the project test runner declaration for the Actions shard plan (any-ecosystem slice F, e89be958) | `forge.json` first, then package.json |
 | `src/install-script-allowlist.ts` | `package-json-config` | 5 | reads npm/pnpm/Bun install-script allowlists where those tools keep them | the same; other ecosystems run no install scripts here |
 | `src/package-graph-dotnet-js.ts` | `package-json-config` | 5 | the JS workspace part of the any-ecosystem package graph reads its manifests as data | each ecosystem's own manifest |

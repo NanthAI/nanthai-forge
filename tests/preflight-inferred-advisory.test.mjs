@@ -231,3 +231,89 @@ test('a wrapper script in the tree (gradlew, mvnw) runs in preflight only when t
   assert.equal(plan.status, 'unavailable');
   assert.match(plan.reason, /forge\.json preflight\.wrappers is true or false/);
 });
+
+// 9ab983fd (electron-store, wave-2 run): the test file imports a package the manifest declares but
+// the Lane never installed (Forge installs from a lockfile only, and this project has none). The
+// run failed with exit 1 and the gate then refused every landing of a comment-only test change.
+const electronStore = {
+  'package.json': JSON.stringify({
+    name: 'electron-store',
+    type: 'module',
+    dependencies: { conf: '^1.0.0' },
+    devDependencies: { electron: '^30.0.0' },
+  }),
+  'index.js': "import Conf from 'conf';\nexport default Conf;\n",
+  'test.js': "import test from 'node:test';\nimport electron from 'electron';\ntest('x', () => electron);\n",
+};
+
+test('a test change whose declared dependencies are not installed in the Lane is not refused', t => {
+  const { root } = repo(t, electronStore);
+  const advice = changed(['test.js']);
+  const plan = preflightPlan(root, advice.changedPaths);
+  assert.deepEqual(plan.tests, ['test.js']);
+  const receipt = runPreflight(root, lane.laneId, lane.head, plan);
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.environment.code, 'DEPENDENCIES_MISSING');
+  assert.deepEqual(receipt.environment.missing, ['electron']);
+  assert.deepEqual(receipt.environment.units, ['test.js']);
+  assert.match(receipt.environment.message, /Declared but not installed in this Lane: electron/);
+  assert.equal(receipt.failure, undefined);
+  // The default policy no longer refuses: the gate reports the setup gap and names the package.
+  const gate = finishGates(root, require, lane, advice);
+  assert.equal(gate.preflight.status, 'environment');
+  assert.equal(gate.preflight.code, 'DEPENDENCIES_MISSING');
+  assert.deepEqual(gate.preflight.missing, ['electron']);
+});
+
+test('an import no manifest declares, or an installed package, is still a real failure', t => {
+  // Undeclared (a typo or a deleted dependency): the change's own failure, so it stays required.
+  const typo = repo(t, {
+    ...electronStore,
+    'test.js': "import test from 'node:test';\nimport nope from 'electrno';\ntest('x', () => nope);\n",
+  });
+  const advice = changed(['test.js']);
+  const receipt = runPreflight(
+    typo.root,
+    lane.laneId,
+    lane.head,
+    preflightPlan(typo.root, advice.changedPaths),
+  );
+  assert.equal(receipt.environment, undefined);
+  assert.equal(receipt.exitCode, 1);
+  assert.deepEqual(receipt.failure.files, ['test.js']);
+  assert.throws(
+    () => finishGates(typo.root, require, lane, advice),
+    error =>
+      code('PREFLIGHT_REQUIRED')(error) &&
+      error.message.includes('Its last run failed.') &&
+      error.message.includes('Exit 1 on test.js:') &&
+      error.message.includes('forge.json'),
+  );
+  // Declared and installed, but the test itself fails: a real failure, never an environment result.
+  const real = repo(t, {
+    ...electronStore,
+    'node_modules/electron/package.json': '{"name":"electron","main":"index.js"}',
+    'node_modules/electron/index.js': 'module.exports = {};\n',
+    'test.js':
+      "import test from 'node:test';\nimport assert from 'node:assert';\ntest('x', () => assert.equal(1, 2));\n",
+  });
+  const run = runPreflight(real.root, lane.laneId, lane.head, preflightPlan(real.root, advice.changedPaths));
+  assert.equal(run.environment, undefined);
+  assert.match(run.failure.excerpt, /AssertionError|1 == 2/);
+  assert.throws(() => finishGates(real.root, require, lane, advice), code('PREFLIGHT_REQUIRED'));
+});
+
+test('a missing dependency does not hide a second, real failure', t => {
+  const { root } = repo(t, {
+    ...electronStore,
+    'a.test.js':
+      "import test from 'node:test';\nimport electron from 'electron';\ntest('a', () => electron);\n",
+    'b.test.js':
+      "import test from 'node:test';\nimport assert from 'node:assert';\ntest('b', () => assert.equal(1, 2));\n",
+  });
+  const advice = changed(['a.test.js', 'b.test.js']);
+  const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice.changedPaths));
+  assert.equal(receipt.environment, undefined, 'b.test.js is unexplained by the missing package');
+  assert.equal(receipt.passed, false);
+  assert.throws(() => finishGates(root, require, lane, advice), code('PREFLIGHT_REQUIRED'));
+});

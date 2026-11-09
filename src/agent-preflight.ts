@@ -27,7 +27,8 @@ import {
 } from '../scripts/test-impact.mjs';
 import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
-import { spawnMeasured } from './agent-preflight-measure.js';
+import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
+import { dependenciesEnvironmentSchema, dependenciesMissing } from './preflight-dependencies.js';
 import {
   runStaticChecks,
   selectGuards,
@@ -124,7 +125,15 @@ export const preflightReceiptSchema = z
     passed: z.boolean(),
     durationMs: z.number().nonnegative(),
     at: z.string(),
-    environment: z.union([filesystemEnvironmentSchema, toolchainEnvironmentSchema]).optional(),
+    environment: z
+      .union([filesystemEnvironmentSchema, toolchainEnvironmentSchema, dependenciesEnvironmentSchema])
+      .optional(),
+    /** Why a failed run failed (not an environment result): the files and the start of its error
+     * output, so the refusal and the advice name the cause and not only an exit code (9ab983fd). */
+    failure: z
+      .object({ files: z.array(z.string()).max(10), excerpt: z.string().max(700) })
+      .strict()
+      .optional(),
     evidence: z
       .string()
       .regex(/^[a-f0-9]{64}$/)
@@ -1203,6 +1212,9 @@ export function runPreflight(
   // Units whose program is not installed here: an environment result, never a failed run.
   const missingPrograms: string[] = [];
   const environmentUnits: string[] = [];
+  // The group whose run failed and the start of its error output (file-pinned failures replace the group).
+  let failingGroup: string[] = [];
+  let failureTail: string | undefined;
   let buildMs: number | undefined;
   let testMs: number | undefined;
   let peakRssMb: number | null = null;
@@ -1292,7 +1304,7 @@ export function runPreflight(
                 continue;
               }
               const started = Date.now();
-              const run = spawnMeasured(command.argv[0]!, command.argv.slice(1), {
+              const run = spawnCaptured(command.argv[0]!, command.argv.slice(1), {
                 cwd,
                 env,
                 stdio: ['ignore', 2, 2],
@@ -1309,6 +1321,7 @@ export function runPreflight(
               if (run.status === 0 || noTestsCollected(command.argv, run.status)) passedTests.push(unit);
               else {
                 failedFiles.push(unit);
+                failureTail ??= run.tail;
                 if (exitCode === 0) exitCode = run.status ?? 1;
                 if (run.status === null) process.stderr.write(`preflight: ${command.argv[0]} was stopped\n`);
                 stopped.push(...group.slice(at + 1));
@@ -1331,7 +1344,7 @@ export function runPreflight(
                 '--test-reporter-destination=stdout',
                 ...testArgs(root, group),
               ];
-          const run = spawnMeasured(argv[0]!, argv.slice(1), {
+          const run = spawnCaptured(argv[0]!, argv.slice(1), {
             cwd: root,
             env: { ...env, FORGE_PREFLIGHT_REPORT: report },
             stdio: ['ignore', 2, 2],
@@ -1344,7 +1357,11 @@ export function runPreflight(
             return Date.now() - groupStarted;
           }
           ran += group.length;
-          if (run.status !== 0 && exitCode === 0) exitCode = run.status;
+          if (run.status !== 0 && exitCode === 0) {
+            exitCode = run.status;
+            failingGroup = group;
+            failureTail ??= run.tail;
+          }
           if (run.peakRssMb !== null) peakRssMb = Math.max(peakRssMb ?? 0, run.peakRssMb);
           if (plan.runner) {
             if (run.status === 0) passedTests.push(...group);
@@ -1407,6 +1424,17 @@ export function runPreflight(
   }
   if (!environment && missingPrograms.length)
     environment = toolchainEnvironment(missingPrograms, environmentUnits, environmentNext);
+  // Test files that could not load because a declared package is not installed in the Lane are the
+  // Lane's setup, not a failing test; only when no failed file is left unexplained (9ab983fd).
+  if (!environment && exitCode && !plan.packageCommands) {
+    environment =
+      dependenciesMissing(root, failedFiles.length ? failedFiles : failingGroup, environmentNext) ??
+      undefined;
+    if (environment) {
+      environmentUnits.push(...environment.units);
+      failedFiles.length = 0;
+    }
+  }
   if (plan.tests.length && (Object.keys(fileMs).length || failedFiles.length))
     recordFileStats(root, { passed: passedTests, failed: failedFiles, ms: fileMs });
   // A failure here is evidence that these tests matter for these paths: the next plan protects them.
@@ -1471,6 +1499,14 @@ export function runPreflight(
     passed: exitCode === 0 && !environment && !incomplete,
     ...(incomplete ? { incomplete } : {}),
     ...(environment ? { environment, exitCode: exitCode || null } : {}),
+    ...(!environment && exitCode && failureTail !== undefined
+      ? {
+          failure: {
+            files: (failedFiles.length ? failedFiles : failingGroup).slice(0, 10),
+            excerpt: failureExcerpt(failureTail),
+          },
+        }
+      : {}),
     durationMs: Date.now() - started,
     at: new Date().toISOString(),
   };

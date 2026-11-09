@@ -432,6 +432,14 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   exit of 127 or a spawn `ENOENT` (any runner) records `ENVIRONMENT / TOOLCHAIN_MISSING` with the
   `missing` programs and the `units` not run. The receipt never claims a pass, and landing treats
   it as advice; the hosted check runs those tests with its own setup.
+- **A declared package that is not installed is environment, not failure.** Forge installs a Lane's
+  dependencies only from a lockfile. When a run fails and every failed test file imports (directly or
+  through its relative imports) a package that a `package.json` declares but no `node_modules` holds,
+  the receipt records `ENVIRONMENT / DEPENDENCIES_MISSING` with the `missing` packages and the test
+  `units` it could not judge; landing treats it as advice, so a comment-only change to a test file
+  lands. An import no manifest declares, an installed package, or any failed file the missing package
+  does not explain stays a real failure (`PREFLIGHT_REQUIRED`). A refusal after a real failure names
+  the exit code, the failed files, the start of the error output and the ways forward.
 - **Package-command estimates.** A unit this machine already ran is priced at its smoothed time; the
   rest at the median of the project's recent hosted check durations (land and wait record them from
   the landing timing they already hold: no extra call), else 60 s per command. `estimateBasis`

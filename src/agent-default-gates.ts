@@ -125,7 +125,25 @@ export function finishGates(
           ...(plan.local ? { local: plan.local.summary } : {}),
           run,
         };
-        const failed = sameSource ? ' Its last run failed.' : '';
+        // A failed run names its cause (exit code, files, the start of its error output) and the two
+        // ways forward, never a bare "failed" (9ab983fd).
+        const failed =
+          sameSource && receipt && !receipt.passed
+            ? ` Its last run failed.${
+                receipt.exitCode || receipt.failure
+                  ? ` ${[
+                      receipt.exitCode ? `Exit ${receipt.exitCode}` : '',
+                      receipt.failure
+                        ? `on ${receipt.failure.files.join(', ') || 'the selected tests'}: ${receipt.failure.excerpt}`
+                        : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}`
+                  : ''
+              } Fix that failure and run preflight again. If it is this Lane's setup and not your change (a dependency, service or fixture only CI has), declare the project's own runner with preflight.tests in forge.json, or set the project preflight policy to advise.`
+            : sameSource
+              ? ' Its last run failed.'
+              : '';
         // A command Forge inferred (no declared runner) is advice: it can need setup only the
         // project's CI does, so its result is reported and never required.
         const lastRun =
