@@ -70,6 +70,9 @@ const toolchainCases = [
   ],
   ['ruby', { tool: 'ruby', version: '3.3' }, { tool: 'ruby', versionFile: 'app/.ruby-version' }],
   ['php', { tool: 'php', version: '8.3' }, { tool: 'php', versionFile: '.php-version' }],
+  // setup-dart reads no version file; Flutter reads pubspec.yaml, and a channel name picks a channel.
+  ['dart', { tool: 'dart', version: '3.5' }, undefined],
+  ['flutter', { tool: 'flutter', version: '3.24.5' }, { tool: 'flutter', versionFile: 'app/pubspec.yaml' }],
 ];
 test('generated workflow snapshot per toolchain, by version and from a file', () => {
   assert.deepEqual(
@@ -469,6 +472,54 @@ test('declared-setup step check: undefined skips, a workflow needs every generat
   assert.equal(declaredStepsInstalled(blocks.join('\n')), true);
   assert.equal(declaredStepsInstalled(blocks.slice(1).join('\n')), false);
   for (const block of blocks) assert.deepEqual(actionPinFindings('block', block), []);
+  // Tools added later (Dart, Flutter) have blocks of their own: a workflow installed before them still
+  // runs checks that declare only the first tools, and refuses one that declares a later tool.
+  const { hostedLateToolBlocks, HOSTED_LATE_TOOLS } = await import('../dist/actions-toolchains-hosted.js');
+  const first = blocks.join('\n');
+  const go = { toolchains: [{ tool: 'go', version: '1.23' }] };
+  const dart = {
+    toolchains: [
+      { tool: 'go', version: '1.23' },
+      { tool: 'dart', version: '3.5' },
+    ],
+  };
+  assert.equal(declaredStepsInstalled(first, go), true);
+  assert.equal(declaredStepsInstalled(first, dart), false);
+  assert.equal(declaredStepsInstalled([...hostedLateToolBlocks('dart'), first].join('\n'), dart), true);
+  for (const tool of HOSTED_LATE_TOOLS)
+    for (const block of hostedLateToolBlocks(tool)) {
+      assert.deepEqual(actionPinFindings(tool, block), []);
+      assert.ok(!blocks.some(old => old.includes(block)), `${tool} steps are not in the first blocks`);
+    }
+});
+
+test('Dart takes a version only, Flutter a version, a channel or pubspec.yaml', () => {
+  const parse = toolchains => actionsToolchainsSchema.safeParse(toolchains).success;
+  assert.equal(parse([{ tool: 'dart', version: 'stable' }]), true);
+  assert.equal(parse([{ tool: 'dart', versionFile: 'pubspec.yaml' }]), false);
+  assert.equal(parse([{ tool: 'flutter', versionFile: 'app/pubspec.yaml' }]), true);
+  assert.equal(parse([{ tool: 'flutter', versionFile: '.flutter-version' }]), false);
+  assert.match(
+    githubActionsWorkflow('ubuntu-latest', { toolchains: [{ tool: 'flutter', version: 'beta' }] }),
+    /subosito\/flutter-action@[0-9a-f]{40} # v2\.23\.0\n {8}with:\n {10}channel: "beta"\n/,
+  );
+  assert.deepEqual(
+    hostedToolchains({
+      toolchains: [
+        { tool: 'flutter', version: 'beta' },
+        { tool: 'dart', version: '3.5' },
+      ],
+    }),
+    {
+      flutter: { version: '', versionFile: '', channel: 'beta' },
+      dart: { version: '3.5', versionFile: '' },
+    },
+  );
+  assert.deepEqual(hostedToolchains({ toolchains: [{ tool: 'flutter', version: '3.24.5' }] }).flutter, {
+    version: '3.24.5',
+    versionFile: '',
+    channel: 'stable',
+  });
 });
 
 test("this repository's forge-check.yml installs every declared-setup block and plan output", async () => {

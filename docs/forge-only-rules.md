@@ -166,6 +166,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/first-check-risk.ts` | `ecosystem-lockfile` | 1 | risk rule v1 is frozen (plans pin the rule version); a new ecosystem adds its inputs in the next rule version | the same rule for every repository |
 | `src/package-ci-flags.ts` | `ecosystem-extensions` | 1 | the CI-flag reader: words that name test targets in Python, Go, Rust and .NET commands | — (lexical reading of their own CI) |
 | `src/package-graph-python.ts` | `ecosystem-lockfile` | 2 | the Python reader runs pytest through `uv` or `poetry` from its own lockfile | the same for every Python repository |
+| `src/package-graph-jvm.ts` | `ecosystem-folders` | 1 | Gradle and Kotlin plugin ids (`org.gradle.*`, `org.jetbrains.kotlin.*`) read like folder names | the same for every repository |
 | `src/package-graph-python.ts` | `ecosystem-folders` | 1 | the Python reader skips Python build and virtualenv folders | each ecosystem skips its own |
 | `src/junit-report.ts` | `js-extension` | 1 | labels code files of every listed language, JS/TS among them (written out: the module ships self-contained) | the same |
 | `src/junit-report.ts` | `ecosystem-extensions` | 1 | ships self-contained in the check payload (no local imports); a test keeps it equal to the registry's code extensions | the same for every repository |

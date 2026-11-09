@@ -9,23 +9,26 @@
  */
 import { globPattern } from './autonomy-policy.js';
 import { isStandardForgeCheck, STANDARD_CHECK_INPUTS } from './standard-check.js';
-import { HARNESS_RISK_V4, proseRootText } from './first-check-risk-v4.js';
+import { HARNESS_RISK_V4, MOBILE_BUILD_RISK_V6, proseRootText } from './first-check-risk-v4.js';
 
 /** Proofs pin the rule they were decided under: v1 receipts keep v1 decisions, v2 added nested
  * non-JS build inputs, database schema files and sequence folders; v3 keeps v2's list and places a
  * manifest or lockfile inside a package of the pinned package graph (src/package-placement.ts); v4
  * adds test-harness, runner and build files of every ecosystem by shape (src/first-check-risk-v4.ts)
  * and counts a root `.txt` as prose only by name; v5 adds shared fixture and snapshot folders to the
- * sequence-folder rule (Issue c6b81429). Declared `globalRiskPaths` join the check entries. */
+ * sequence-folder rule (Issue c6b81429); v6 adds Xcode project, Gradle script and Swift/Dart tool
+ * configuration files (src/first-check-risk-v4.ts, Issue 870791c3). Declared `globalRiskPaths` join
+ * the check entries. */
 export const FIRST_CHECK_RISK_RULES = [
   'first-check-risk-v1',
   'first-check-risk-v2',
   'first-check-risk-v3',
   'first-check-risk-v4',
   'first-check-risk-v5',
+  'first-check-risk-v6',
 ] as const;
 export type FirstCheckRiskRule = (typeof FIRST_CHECK_RISK_RULES)[number];
-export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v5';
+export const FIRST_CHECK_RISK_RULE: FirstCheckRiskRule = 'first-check-risk-v6';
 /** True when `rule` is `from` or a later rule. */
 export const riskRuleSince = (rule: FirstCheckRiskRule, from: FirstCheckRiskRule) =>
   FIRST_CHECK_RISK_RULES.indexOf(rule) >= FIRST_CHECK_RISK_RULES.indexOf(from);
@@ -90,6 +93,7 @@ const patterns: { reason: string; test: RegExp; since?: FirstCheckRiskRule }[] =
     since: 'first-check-risk-v4' as const,
     test,
   })),
+  { reason: 'build, lint or test configuration', since: 'first-check-risk-v6', test: MOBILE_BUILD_RISK_V6 },
 ];
 
 /** A check entry: an exact path, or a glob where `*` stays inside one path

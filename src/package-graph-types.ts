@@ -12,6 +12,9 @@ export const PACKAGE_ECOSYSTEMS = [
   'mix',
   'bundler',
   'composer',
+  'swiftpm',
+  'xcode',
+  'pub',
 ] as const;
 export type Ecosystem = (typeof PACKAGE_ECOSYSTEMS)[number];
 

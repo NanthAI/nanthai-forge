@@ -88,8 +88,8 @@ configured check (no `configure-check`) skips it and queues as before.
 
 ### Global-risk files
 
-One list, in `src/first-check-risk.ts` (rule `first-check-risk-v5`; a proof pins the
-rule it was decided under, so older receipts keep their v1 to v4 decisions). The
+One list, in `src/first-check-risk.ts` (rule `first-check-risk-v6`; a proof pins the
+rule it was decided under, so older receipts keep their v1 to v5 decisions). The
 same list decides which older landing a newer one may overtake. A change or a main
 delta touching any of these always rechecks, except a placed manifest (below). When a
 shape is in doubt it is on the list: a wrong match costs one recheck, a miss lands a
@@ -135,6 +135,10 @@ change on a check that never ran the new harness.
   unexpected snapshot, so two disjoint files in one folder can still break a test that
   neither side ran with the other's file. A fixture changed on one side only stays
   reusable;
+- from v6, Apple, Android and Dart build inputs v1 to v5 do not name: Xcode project and
+  workspace contents (`*.xcodeproj/**`, `*.xcworkspace/**`, shared schemes), `*.xcconfig`,
+  `*.xctestplan`, Gradle script plugins (`*.gradle`, `*.gradle.kts` at any depth),
+  `proguard-rules.pro`, `dart_test.yaml` and `build_runner`'s `build.yaml` (Issue 870791c3);
 - from v4 (`src/first-check-risk-v4.ts`), test-harness, runner and build files of every
   ecosystem by shape, at any depth: runner setup files (`vitest.setup.ts`,
   `jest.preset.js`, `vitest.workspace.ts`, `setupTests.ts`, `global-setup.ts`,

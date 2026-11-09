@@ -9,6 +9,8 @@ import { sourceLanguage } from './languages.js';
 import { positionIn } from './structural-positions.js';
 import { goUnmodelledBinding, goVisibleFrom } from './structural-go.js';
 import { csharpAnalysis, CSHARP_PROVIDER } from './structural-csharp.js';
+import { braceAnalysis, BRACE_PROVIDERS, isBraceLanguage } from './structural-brace.js';
+import type { BraceLanguage } from './structural-brace-scan.js';
 import {
   SCANNED_LANGUAGES,
   SCANNED_PROVIDERS,
@@ -76,6 +78,7 @@ export const STRUCTURAL_PROVIDERS = [
     ],
   },
   CSHARP_PROVIDER,
+  ...BRACE_PROVIDERS,
   ...SCANNED_PROVIDERS,
 ];
 export function structuralAnalysis(
@@ -100,12 +103,14 @@ export function structuralAnalysis(
   const retainedPaths = new Set<string>();
   const visibleFrom = new Map<string, number>();
   const csharp: { file: string; text: string }[] = [];
+  const braces: { file: string; text: string; language: BraceLanguage }[] = [];
   const scanned: { file: string; text: string; language: ScannedLanguage }[] = [];
   for (const [file, text] of snapshot.content) {
     const language = sourceLanguage(file);
     if (language === 'csharp') csharp.push({ file, text });
     else if (language && SCANNED_LANGUAGES.has(language))
       scanned.push({ file, text, language: language as ScannedLanguage });
+    else if (isBraceLanguage(language)) braces.push({ file, text, language });
     if (
       !language ||
       language === 'typescript' ||
@@ -113,7 +118,8 @@ export function structuralAnalysis(
       language === 'csharp' ||
       language === 'ruby' ||
       language === 'php' ||
-      language === 'elixir'
+      language === 'elixir' ||
+      isBraceLanguage(language)
     )
       continue;
     retainedPaths.add(file);
@@ -220,7 +226,11 @@ export function structuralAnalysis(
   const resolved = structuralImports(files, snapshot);
   issues.push(...resolved.issues);
   references.push(...resolved.references);
-  for (const result of [csharpAnalysis(csharp, snapshot), scannedAnalysis(scanned, snapshot)]) {
+  for (const result of [
+    csharpAnalysis(csharp, snapshot),
+    scannedAnalysis(scanned, snapshot),
+    braceAnalysis(braces, snapshot),
+  ]) {
     nodes.push(...result.nodes);
     resolved.imports.push(...result.imports);
     issues.push(...result.issues);

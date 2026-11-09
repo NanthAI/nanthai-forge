@@ -1,0 +1,12 @@
+{
+  ".gitignore": ".gradle/\n.kotlin/\nbuild/\n",
+  "app/build.gradle.kts": "plugins {\n  id(\"com.android.application\")\n  kotlin(\"android\")\n}\n\nandroid {\n  namespace = \"com.acme.app\"\n}\n\ndependencies {\n  implementation(project(\":core\"))\n}\n",
+  "app/src/main/kotlin/com/acme/app/MainActivity.kt": "package com.acme.app\n\nimport com.acme.core.Point\nimport com.acme.core.origin\n\nclass MainActivity {\n  fun start(): Point = origin()\n}\n",
+  "app/src/test/kotlin/com/acme/app/MainActivityTest.kt": "package com.acme.app\n\nimport kotlin.test.Test\n\nclass MainActivityTest {\n  @Test\n  fun starts() { MainActivity().start() }\n}\n",
+  "build.gradle.kts": "plugins {\n  kotlin(\"jvm\") version \"2.0.21\" apply false\n  id(\"com.android.application\") version \"8.7.2\" apply false\n}\n",
+  "core/build.gradle.kts": "plugins {\n  kotlin(\"jvm\")\n}\n\ndependencies {\n  testImplementation(kotlin(\"test\"))\n}\n",
+  "core/src/main/kotlin/com/acme/core/Point.kt": "package com.acme.core\n\ndata class Point(val x: Int) {\n  fun moved(by: Int): Point = Point(x + by)\n  private val label = \"${x} }\"\n}\n\nfun origin(): Point = Point(0)\n",
+  "core/src/test/kotlin/com/acme/core/PointTest.kt": "package com.acme.core\n\nimport kotlin.test.Test\nimport kotlin.test.assertEquals\n\nclass PointTest {\n  @Test\n  fun moves() = assertEquals(Point(2), Point(1).moved(1))\n}\n",
+  "gradle/wrapper/gradle-wrapper.properties": "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10-bin.zip\n",
+  "settings.gradle.kts": "rootProject.name = \"acme\"\ninclude(\":core\", \":app\")\n"
+}

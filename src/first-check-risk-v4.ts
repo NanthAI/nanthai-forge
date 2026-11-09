@@ -68,6 +68,19 @@ export const HARNESS_RISK_V4: readonly RegExp[] = [
   ]),
 ];
 
+/** Rule v6: build inputs of Apple, Android and Dart projects that v1-v5 do not name.
+ * Xcode project and workspace contents (`project.pbxproj`, shared schemes, test plans) and
+ * `.xcconfig` files change every build of their targets; a Gradle script plugin (`gradle/x.gradle`,
+ * applied with `apply from:`) configures every project that applies it. */
+export const MOBILE_BUILD_RISK_V6 = any([
+  // Xcode
+  '[^/]+\\.xc(?:odeproj|workspace)/.+|[^/]+\\.xcconfig|[^/]+\\.xctestplan',
+  // Gradle script plugins, Android shrinker rules
+  '[^/]+\\.gradle(?:\\.kts)?|proguard-rules\\.pro',
+  // Dart and Flutter tool configuration
+  'dart_test\\.yaml|build\\.yaml',
+]);
+
 /** Root `.txt` names that are prose; any other root `.txt` is a build or dependency input. */
 const PROSE_ROOT_TEXT =
   /^(?:README|LICEN[CS]E|COPYING|NOTICE|THIRD[_-]PARTY[_-]NOTICES|CHANGELOG|CHANGES|HISTORY|AUTHORS|CONTRIBUTORS|CREDITS|SECURITY|CODE_OF_CONDUCT|llms(?:-full)?|robots|humans)(?:[._-][^/]*)?\.txt$/i;

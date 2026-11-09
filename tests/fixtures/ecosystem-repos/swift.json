@@ -1,0 +1,13 @@
+{
+  ".gitignore": ".build/\n.swiftpm/\nDerivedData/\n",
+  "App/App.xcodeproj/project.pbxproj": "// !$*UTF8*$!\n{\n\tarchiveVersion = 1;\n\tobjects = {\n\t};\n\trootObject = 0;\n}\n",
+  "App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Scheme version = \"1.7\">\n</Scheme>\n",
+  "App/App/ContentView.swift": "import SwiftUI\nimport Feature\n\nstruct ContentView: View {\n  var body: some View { Text(\"home\") }\n}\n",
+  "Packages/Core/Package.swift": "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(\n  name: \"Core\",\n  products: [.library(name: \"Core\", targets: [\"Core\"])],\n  targets: [\n    .target(name: \"Core\"),\n    .testTarget(name: \"CoreTests\", dependencies: [\"Core\"]),\n  ]\n)\n",
+  "Packages/Core/Sources/Core/Point.swift": "public struct Point: Equatable {\n  public let x: Int\n  public init(x: Int) { self.x = x }\n  public func moved(by d: Int) -> Point { Point(x: x + d) }\n}\n\nfileprivate let secret = \"\\(1 + 1) }\"\n",
+  "Packages/Core/Tests/CoreTests/PointTests.swift": "import XCTest\n@testable import Core\n\nfinal class PointTests: XCTestCase {\n  func testMoved() { XCTAssertEqual(Point(x: 1).moved(by: 1), Point(x: 2)) }\n}\n",
+  "Packages/Feature/Package.resolved": "{\n  \"pins\" : [],\n  \"version\" : 2\n}\n",
+  "Packages/Feature/Package.swift": "// swift-tools-version:5.9\nimport PackageDescription\n\nlet package = Package(\n  name: \"Feature\",\n  dependencies: [\n    .package(path: \"../Core\"),\n    .package(url: \"https://github.com/apple/swift-algorithms\", from: \"1.2.0\"),\n  ],\n  targets: [\n    .target(name: \"Feature\", dependencies: [\"Core\"]),\n    .testTarget(name: \"FeatureTests\", dependencies: [\"Feature\"]),\n  ]\n)\n",
+  "Packages/Feature/Sources/Feature/Route.swift": "import Core\n\npublic enum Route {\n  case home\n  public static func start() -> Point { Point(x: 0) }\n}\n",
+  "Packages/Feature/Tests/FeatureTests/RouteTests.swift": "import XCTest\n@testable import Feature\n\nfinal class RouteTests: XCTestCase {\n  func testStart() { XCTAssertEqual(Route.start().x, 0) }\n}\n"
+}

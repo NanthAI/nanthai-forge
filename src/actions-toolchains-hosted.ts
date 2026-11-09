@@ -2,6 +2,7 @@
 import { digest } from './hash.js';
 import { globPattern } from './autonomy-policy.js';
 import {
+  FLUTTER_CHANNELS,
   TOOLCHAIN_ACTIONS,
   cacheKeyPrefix,
   cacheLockfiles,
@@ -15,8 +16,8 @@ import {
  * recipe and writes these two outputs; the workflow's steps run only for declared tools. */
 export type HostedToolchains = Partial<
   Record<
-    'go' | 'python' | 'java' | 'dotnet' | 'zig' | 'cmake',
-    { version: string; versionFile: string; distribution?: string }
+    'go' | 'python' | 'java' | 'dotnet' | 'zig' | 'cmake' | 'dart' | 'flutter',
+    { version: string; versionFile: string; distribution?: string; channel?: string }
   > &
     Record<'rust', { version: string; directory: string }>
 >;
@@ -24,10 +25,20 @@ export type HostedDepsCache =
   | { key: string; paths: string; save: boolean; seed: string }
   | Record<string, never>;
 
-/** Tools the fixed workflow has steps for (Zig and CMake through their own blocks, below). Elixir,
+/** Tools the fixed workflow has steps for (Zig, CMake, Dart and Flutter through their own blocks, below). Elixir,
  * Ruby and PHP run in an exported workflow; on the App/OIDC path planning refuses them by name
  * instead of running without them. */
-export const HOSTED_TOOLS = ['go', 'python', 'java', 'dotnet', 'rust', 'zig', 'cmake'] as const;
+export const HOSTED_TOOLS = [
+  'go',
+  'python',
+  'java',
+  'dotnet',
+  'rust',
+  'zig',
+  'cmake',
+  'dart',
+  'flutter',
+] as const;
 const hosted = (tool: string): tool is (typeof HOSTED_TOOLS)[number] =>
   (HOSTED_TOOLS as readonly string[]).includes(tool);
 /** Declared tools the fixed workflow cannot set up. */
@@ -46,6 +57,14 @@ export function hostedToolchains(declaration: ActionsDeclaration | undefined): H
       out.rust = {
         version: t.version ?? '',
         directory: file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : file ? '.' : '',
+      };
+    } else if (t.tool === 'flutter') {
+      // A channel name selects that channel's latest release; anything else is a version.
+      const channel = FLUTTER_CHANNELS.includes(t.version ?? '');
+      out.flutter = {
+        version: channel ? '' : (t.version ?? ''),
+        versionFile: t.versionFile ?? '',
+        channel: channel ? t.version! : 'stable',
       };
     } else
       out[t.tool] = {
@@ -154,18 +173,23 @@ export const hostedWorkflowBlocks = () => [
   hostedDeclaredSteps('needs.hosted-plan.outputs') +
     hostedSeedSteps('needs.hosted-plan.outputs', "matrix.shard == 'static' && "),
 ];
-/** Setup steps of tools added after the workflow blocks above were installed (Zig, CMake). They are
+/** Setup steps of tools added after the workflow blocks above were installed (Zig, CMake, Dart, Flutter). They are
  * separate blocks so the blocks above, and every installed `forge-check.yml`, stay byte-identical:
  * a declaration that names such a tool needs these in the workflow, any other declaration does not.
  * One block per job kind, in the same places as the blocks above (before the cache restore). */
-export const HOSTED_LATE_TOOLS = ['zig', 'cmake'] as const;
+export const HOSTED_LATE_TOOLS = ['zig', 'cmake', 'dart', 'flutter'] as const;
 export function hostedLateToolBlocks(tool: (typeof HOSTED_LATE_TOOLS)[number]) {
   const block = (outputs: string, when: string) => {
     const t = `fromJSON(${outputs}.toolchains || '{}')`;
     const inputs =
       tool === 'zig'
         ? `          version: \${{ ${t}.zig.version }}\n          use-cache: false\n`
-        : `          cmakeVersion: \${{ ${t}.cmake.version }}\n          useCloudCache: false\n`;
+        : tool === 'cmake'
+          ? `          cmakeVersion: \${{ ${t}.cmake.version }}\n          useCloudCache: false\n`
+          : tool === 'dart'
+            ? `          sdk: \${{ ${t}.dart.version }}\n`
+            : `          channel: \${{ ${t}.flutter.channel }}\n          flutter-version: \${{ ${t}.flutter.version }}\n` +
+              `          flutter-version-file: \${{ ${t}.flutter.versionFile && format('{0}/candidate/{1}', runner.temp, ${t}.flutter.versionFile) || '' }}\n`;
     return `      - if: ${when}${t}.${tool}\n        uses: ${TOOLCHAIN_ACTIONS[tool]}\n        with:\n${inputs}`;
   };
   return [block('steps.plan.outputs', HOSTED_PLAN_WHEN), block('needs.hosted-plan.outputs', '')];

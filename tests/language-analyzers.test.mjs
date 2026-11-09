@@ -32,7 +32,21 @@ test('every analyser exposes source-backed declarations, imports and supported r
     pack = indexRepository(root).pack;
   assert.deepEqual(
     pack.analysis.languages.map(item => item.language),
-    ['typescript', 'javascript', 'python', 'java', 'rust', 'go', 'csharp', 'ruby', 'php', 'elixir'],
+    [
+      'typescript',
+      'javascript',
+      'python',
+      'java',
+      'rust',
+      'go',
+      'csharp',
+      'swift',
+      'kotlin',
+      'dart',
+      'ruby',
+      'php',
+      'elixir',
+    ],
   );
   assert.equal(pack.analysis.coverage, 'partial');
   assert.equal(existsSync(join(root, 'should-not-exist')), false);

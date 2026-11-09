@@ -9,6 +9,8 @@ import { cargoGraph, goGraph } from './package-graph-go-rust.js';
 import { pythonGraph, pythonManifest } from './package-graph-python.js';
 import { gradleGraph, jvmManifest, mavenGraph } from './package-graph-jvm.js';
 import { dotnetGraph, dotnetImport, dotnetManifest, jsWorkspaceGraph } from './package-graph-dotnet-js.js';
+import { swiftpmGraph, xcodeGraph } from './package-graph-swift.js';
+import { pubGraph } from './package-graph-pub.js';
 import { mixGraph } from './package-graph-mix.js';
 import { bundlerGraph, composerGraph, gemspecManifest } from './package-graph-ruby-php.js';
 import { parseForgeJson } from './project-config.js';
@@ -23,7 +25,7 @@ import {
 export type { Ecosystem, GraphPackage, PackageCommand } from './package-graph-types.js';
 
 /** Manifest-level package graph for affected tests in any ecosystem (Go, Rust, Python, Gradle,
- * Maven, .NET, JS/TS workspaces, Mix, Bundler, Composer). It reads manifests only, never runs repository code, and is a
+ * Maven, .NET, JS/TS workspaces, Mix, Bundler, Composer, SwiftPM, Xcode, Dart/Flutter pub). It reads manifests only, never runs repository code, and is a
  * selector, not an independence proof: a changed path maps to its owning package, which runs with
  * every package that depends on it. Anything it cannot place (a root file, an unreadable manifest,
  * no unambiguous test command) makes the selection full, with the reason. When unsure it widens,
@@ -115,6 +117,9 @@ const READERS = [
   mixGraph,
   bundlerGraph,
   composerGraph,
+  swiftpmGraph,
+  xcodeGraph,
+  pubGraph,
 ];
 
 /** The graph of one head: `allPaths` are its file paths, `read` returns a manifest's text. */
@@ -171,7 +176,7 @@ export function buildPackageGraph(allPaths: Iterable<string>, read: ManifestRead
             0,
             400,
           )
-        : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json, mix.exs, Gemfile, *.gemspec, composer.json)',
+        : 'no package manifests Forge can read (go.mod, Cargo.toml, pyproject.toml, settings.gradle, pom.xml, *.csproj, package.json, mix.exs, Gemfile, *.gemspec, composer.json, Package.swift, *.xcodeproj, pubspec.yaml)',
     };
   return {
     status: 'available',

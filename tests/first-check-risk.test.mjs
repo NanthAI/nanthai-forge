@@ -168,7 +168,6 @@ test('a proof keeps the rule it was decided under: v3 receipts stay valid, v4 re
 // Hermeticity (Issue c6b81429): a folder tests read as a whole (snapshots, fixtures, golden files,
 // test data) is risk when both sides changed a file in the same one, like a migrations folder.
 test('v5: both sides changing the same fixture or snapshot folder is risk; apart they stay reusable', () => {
-  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v5');
   for (const [a, b, folder] of [
     ['tests/fixtures/a.json', 'tests/fixtures/b.json', 'tests/fixtures'],
     ['src/__snapshots__/a.test.ts.snap', 'src/__snapshots__/b.test.ts.snap', 'src/__snapshots__'],
@@ -202,4 +201,35 @@ test('v5: both sides changing the same fixture or snapshot folder is risk; apart
   });
   assert.equal(validCrossHeadProof(proof('first-check-risk-v4')), true);
   assert.equal(validCrossHeadProof(proof('first-check-risk-v5')), false);
+});
+
+// Issue 870791c3: Xcode project contents, Gradle script plugins and Swift/Dart tool configuration.
+test('v6: Xcode, Gradle script and Dart tool configuration are risk; v5 proofs keep their decision', () => {
+  assert.equal(FIRST_CHECK_RISK_RULE, 'first-check-risk-v6');
+  for (const path of [
+    'App/App.xcodeproj/project.pbxproj',
+    'App.xcworkspace/contents.xcworkspacedata',
+    'App/App.xcodeproj/xcshareddata/xcschemes/App.xcscheme',
+    'Config/Debug.xcconfig',
+    'App/AppTests.xctestplan',
+    'gradle/publish.gradle',
+    'app/proguard-rules.pro',
+    'packages/core/dart_test.yaml',
+    'app/build.yaml',
+  ]) {
+    assert.equal(globalRiskBetween([path], ['src/cart.ts']), true, path);
+    assert.equal(globalRiskBetween([path], ['src/cart.ts'], [], 'first-check-risk-v5'), false, `v5 ${path}`);
+  }
+  for (const path of ['Sources/App/View.swift', 'lib/build.dart', 'docs/l10n.md', 'app/src/main/App.kt'])
+    assert.equal(globalRiskBetween([path], ['src/cart.ts']), false, path);
+  const proof = riskRule => ({
+    algorithm: 'clean-disjoint-v2',
+    candidatePaths: ['App/App.xcodeproj/project.pbxproj'],
+    mainPaths: ['src/cart.ts'],
+    docsOverlap: [],
+    checkEntries: [],
+    riskRule,
+  });
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v5')), true);
+  assert.equal(validCrossHeadProof(proof('first-check-risk-v6')), false);
 });

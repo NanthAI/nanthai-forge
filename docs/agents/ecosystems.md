@@ -137,3 +137,36 @@ writer.
   keep them in the project's `.gitignore`.
 - A Delphi build file (`.dproj`, `.groupproj`) is not yet a first-check risk input
   (`first-check-risk-v4` names none), so a first check after one changes is not flagged.
+
+## Swift, Kotlin and Dart
+
+Issue 870791c3; fixtures in `tests/fixtures/ecosystem-repos/{swift,kotlin,dart}.json` (path → text
+trees, so this repository holds no live manifest), tests in `tests/ecosystem-fixtures.test.mjs`.
+
+| | Swift | Kotlin / Android | Dart / Flutter |
+| --- | --- | --- | --- |
+| Entry | `swift` | the `jvm` entry (one per toolchain) | `dart` |
+| Detection | `Package.swift`, `Package.resolved` (pinned), `*.xcodeproj`, `Podfile.lock` (unpinned) | Gradle Kotlin DSL, `settings.gradle.kts`, Android modules | `pubspec.yaml`, `pubspec.lock` (pinned) |
+| Package graph | `src/package-graph-swift.ts`: literal `.package(path:)` edges; an Xcode project depends on every SwiftPM package | `src/package-graph-jvm.ts`: `project(":x")` edges | `src/package-graph-pub.ts`: `path:` dependencies, overrides, `workspace:` members |
+| Test command | `swift test` per package; Xcode has none Forge can read (scheme, simulator) and names the `preflight.tests` declaration with an `xcodebuild test` example | `gradle :p:test` (`*Test.kt`, `src/test`, `src/androidTest`) | `flutter test` when the package takes `sdk: flutter`, else `dart test` (`test/*_test.dart`; `integration_test/` needs a device) |
+| Regenerable | `.build`, `.swiftpm`, `DerivedData`, `Pods` | `.gradle`, `.kotlin`, `.cxx` | `.dart_tool` |
+| Actions | runner image's Swift (no setup action); `swiftpm` cache preset | `java` tool; `gradle` preset | `dart` and `flutter` tools (`dart-lang/setup-dart`, `subosito/flutter-action`, pinned digests); `pub` preset |
+| Check env | — | `KONAN_DATA_DIR`, `ANDROID_HOME` when installed at the default place | `PUB_CACHE`: a fresh run home with `hosted/` and `git/` linked from the shared cache |
+| Code map | declaration scanner (`src/structural-brace*.ts`): types, functions, properties; `import M` → `Sources/M/` | the same scanner for `.kt`/`.kts`; imports → package or declaring file | the same scanner; relative and `package:` imports |
+
+A macOS runner is used only when the project's Actions runner sets `runsOn` to a macOS label (public
+repositories run free). Xcode project contents, `*.xcconfig`, Gradle script plugins and Dart tool
+configuration are build inputs from `first-check-risk-v6`.
+
+### Install scripts and build code
+
+Forge never runs repository code to read a repository: `Package.swift`, `build.gradle(.kts)`,
+`settings.gradle(.kts)` and `pubspec.yaml` are read as text, never evaluated. Lane `start` shares JS
+installs only (`npm ci --ignore-scripts`); it never runs `swift`, `gradle` or `pub`. The SwiftPM,
+Gradle and pub caches are restore-only presets with no seed step.
+
+SwiftPM package plugins (`.plugin(`, `plugins:`), Gradle build scripts, script plugins and
+`buildSrc/`, CocoaPods `Podfile` hooks and Dart build hooks (`hook/build.dart`) are repository code.
+They run only inside the repository's own declared check, in the check environment, like any build
+script the check command runs; nothing runs them elsewhere, and a change to them makes the first
+check risky.

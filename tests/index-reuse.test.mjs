@@ -28,7 +28,7 @@ test('unchanged indexing retains both byte captures, reuses the exact graph and 
   assert.deepEqual(next.pack, first.pack);
   assert.equal(
     first.pack.analysis.version,
-    'typescript@5.9.3;@lezer/python@1.1.19;@lezer/java@1.1.5;@lezer/rust@1.0.3;@lezer/go@1.0.1;forge-csharp-declaration-scanner@1;forge-ruby-declaration-scanner@1;forge-php-declaration-scanner@1;forge-elixir-declaration-scanner@1',
+    'typescript@5.9.3;@lezer/python@1.1.19;@lezer/java@1.1.5;@lezer/rust@1.0.3;@lezer/go@1.0.1;forge-csharp-declaration-scanner@1;forge-swift-declaration-scanner@1;forge-kotlin-declaration-scanner@1;forge-dart-declaration-scanner@1;forge-ruby-declaration-scanner@1;forge-php-declaration-scanner@1;forge-elixir-declaration-scanner@1',
   );
   assert.deepEqual(readFileSync(path), bytes);
   assert.equal(statSync(path).mtimeMs, before.mtimeMs);

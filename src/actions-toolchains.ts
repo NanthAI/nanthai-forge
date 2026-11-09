@@ -18,6 +18,8 @@ export const ACTIONS_TOOLS = [
   'elixir',
   'ruby',
   'php',
+  'dart',
+  'flutter',
 ] as const;
 export type ActionsTool = (typeof ACTIONS_TOOLS)[number];
 /** Full commit SHAs of released tags at least two weeks old when pinned. */
@@ -28,13 +30,17 @@ export const TOOLCHAIN_ACTIONS: Record<Exclude<ActionsTool, 'rust'>, string> = {
   dotnet: 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0',
   zig: 'mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1',
   cmake: 'lukka/get-cmake@fffaaafeea488556c2c12dad60690008bc1caacb # v4.4.2',
+  dart: 'dart-lang/setup-dart@6afc89df92d6eb3834022f73cd65adc8cdfcb92d # v1.8.1',
+  flutter: 'subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0',
   elixir: 'erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1',
   // Never `bundler-cache`: it runs `bundle install`, which runs the Gemfile and builds extensions.
   ruby: 'ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0',
   php: 'shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0',
 };
 /** Tools whose setup step takes a `version` only (no version file the action reads from the Candidate). */
-export const VERSION_ONLY_TOOLS: readonly ActionsTool[] = ['zig', 'cmake'];
+export const VERSION_ONLY_TOOLS: readonly ActionsTool[] = ['zig', 'cmake', 'dart'];
+/** Flutter channels: a `version` naming one selects the channel's latest release. */
+export const FLUTTER_CHANNELS = ['stable', 'beta', 'master', 'main'];
 /** Version files the setup action reads by name (setup-ruby from its working directory; setup-beam
  * with `version-type: strict`). */
 const VERSION_FILES: Partial<Record<ActionsTool, readonly string[]>> = {
@@ -72,6 +78,8 @@ export const CACHE_PRESET_NAMES = [
   'zig',
   'vcpkg',
   'conan',
+  'swiftpm',
+  'pub',
   'hex',
   'bundler',
   'composer',
@@ -127,11 +135,18 @@ export const actionsToolchainSchema = z
     message: 'Only java takes a distribution.',
   })
   .refine(t => !VERSION_ONLY_TOOLS.includes(t.tool) || t.version !== undefined, {
-    message: 'Zig and CMake declare a version; they read no version file.',
+    message:
+      'Zig, CMake and Dart declare a version (Dart: stable, beta or a release such as 3.5); they read no version file.',
   })
   .refine(t => (t.tool === 'elixir' && t.version !== undefined) === (t.otpVersion !== undefined), {
     message: 'Elixir by version also takes otpVersion; only elixir takes one.',
   })
+  .refine(
+    t => t.tool !== 'flutter' || t.versionFile === undefined || /(?:^|\/)pubspec\.yaml$/.test(t.versionFile),
+    {
+      message: 'Flutter reads its version from pubspec.yaml (environment.flutter).',
+    },
+  )
   .refine(
     t =>
       t.versionFile === undefined ||
@@ -152,14 +167,14 @@ export const actionsToolchainSchema = z
 export const actionsToolchainsSchema = z
   .array(actionsToolchainSchema)
   .min(1)
-  .max(10) // ACTIONS_TOOLS.length; schema snapshots read literals only
+  .max(12) // ACTIONS_TOOLS.length; schema snapshots read literals only
   .refine(list => unique(list.map(t => t.tool)), { message: 'Declare each tool once.' });
 export const actionsCacheSchema = z
   .object({
     presets: z
       .array(z.enum(presetNames))
       .min(1)
-      .max(17) // CACHE_PRESET_NAMES.length
+      .max(19) // CACHE_PRESET_NAMES.length
       .refine(unique, { message: 'Declare each preset once.' }),
     lockfiles: z
       .array(lockfileGlob)
@@ -243,6 +258,13 @@ export function declaredSetupSteps(declaration: ActionsDeclaration | undefined) 
     else if (t.tool === 'zig') text += `          version: ${q(t.version!)}\n          use-cache: false\n`;
     else if (t.tool === 'cmake')
       text += `          cmakeVersion: ${q(t.version!)}\n          useCloudCache: false\n`;
+    else if (t.tool === 'dart') text += `          sdk: ${q(t.version!)}\n`;
+    else if (t.tool === 'flutter')
+      text += !t.version
+        ? `          flutter-version-file: ${q(t.versionFile!)}\n`
+        : FLUTTER_CHANNELS.includes(t.version)
+          ? `          channel: ${q(t.version)}\n`
+          : `          flutter-version: ${q(t.version)}\n`;
     else
       text += t.version
         ? `          dotnet-version: ${q(t.version)}\n`

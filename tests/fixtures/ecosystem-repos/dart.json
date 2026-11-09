@@ -1,0 +1,12 @@
+{
+  ".gitignore": ".dart_tool/\nbuild/\n",
+  "app/lib/home.dart": "import 'package:flutter/widgets.dart';\nimport 'package:core/point.dart';\n\nclass Home extends StatelessWidget {\n  final Point start;\n  const Home({super.key, required this.start});\n  @override\n  Widget build(BuildContext context) => const SizedBox();\n}\n",
+  "app/lib/main.dart": "import 'package:flutter/material.dart';\nimport 'package:core/point.dart';\nimport 'home.dart';\n\nvoid main() => runApp(const Home(start: Point(0)));\n",
+  "app/pubspec.lock": "packages: {}\nsdks:\n  dart: \">=3.5.0 <4.0.0\"\n",
+  "app/pubspec.yaml": "name: app\nenvironment:\n  sdk: ^3.5.0\n  flutter: \">=3.24.0\"\n\ndependencies:\n  flutter:\n    sdk: flutter\n  core:\n    path: ../packages/core\n\ndev_dependencies:\n  flutter_test:\n    sdk: flutter\n",
+  "app/test/home_test.dart": "import 'package:flutter_test/flutter_test.dart';\nimport 'package:app/home.dart';\n\nvoid main() {\n  testWidgets('builds', (tester) async {});\n}\n",
+  "packages/core/lib/point.dart": "class Point {\n  final int x;\n  const Point(this.x);\n  Point moved(int by) => Point(x + by);\n}\n\nconst _hidden = '\\${1} }';\n",
+  "packages/core/pubspec.lock": "packages: {}\nsdks:\n  dart: \">=3.5.0 <4.0.0\"\n",
+  "packages/core/pubspec.yaml": "name: core\nenvironment:\n  sdk: ^3.5.0\n\ndev_dependencies:\n  test: ^1.25.0\n",
+  "packages/core/test/point_test.dart": "import 'package:core/point.dart';\nimport 'package:test/test.dart';\n\nvoid main() {\n  test('moves', () => expect(Point(1).moved(1).x, 2));\n}\n"
+}

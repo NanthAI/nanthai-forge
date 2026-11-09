@@ -1,0 +1,65 @@
+name: Forge check
+run-name: forge-check/${{ inputs.runId }}
+on:
+  workflow_dispatch:
+    inputs:
+      runId:
+        required: true
+        type: string
+      plan:
+        required: true
+        type: string
+permissions:
+  contents: read
+jobs:
+  shard:
+    if: ${{ inputs.plan != '[]' }}
+    name: forge-shard-${{ matrix.shard }}
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.plan) }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: forge-deps-v1-swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Package.resolved') }}
+      - run: node scripts/forge-check.mjs
+        env:
+          FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
+          FORGE_ACTIONS_SHARD: ${{ matrix.shard }}
+  static:
+    name: forge-static
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - id: forge-deps
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            ~/.cache/org.swift.swiftpm
+          key: forge-deps-v1-swiftpm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('**/Package.resolved') }}
+      - run: node scripts/forge-check.mjs
+        env:
+          FORGE_ACTIONS_PLAN: .github/forge-check-plan.json
+          FORGE_ACTIONS_SHARD: static

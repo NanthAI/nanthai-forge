@@ -23,7 +23,10 @@ export type SourceLanguage =
   | 'csharp'
   | 'ruby'
   | 'php'
-  | 'elixir';
+  | 'elixir'
+  | 'swift'
+  | 'kotlin'
+  | 'dart';
 /** Readers of the module graph (src/module-graph.ts). */
 export type ModuleGraphLanguage = 'python' | 'go' | 'rust' | 'java' | 'kotlin';
 
@@ -85,7 +88,7 @@ export type EcosystemEntry = {
   /** Folders the module graph never reads as code. */
   nonSourceDirs?: readonly string[];
   /** GitHub Actions: the setup action (`ACTIONS_TOOLS` in src/actions-toolchains.ts) and cache presets. */
-  actions?: { tool?: string; cache?: Readonly<Record<string, EcosystemCachePreset>> };
+  actions?: { tool?: string | readonly string[]; cache?: Readonly<Record<string, EcosystemCachePreset>> };
   /** Per-run check environment (src/check-ecosystem-env.ts). Paths only, never credentials. */
   checkEnv?: {
     /** Pure content caches: `[variable, folder]`, segmented per project. */
@@ -335,7 +338,8 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     id: 'jvm',
     code: 'java|kts?|scala',
     managers: [{ name: 'maven' }, { name: 'gradle', unpinned: ['gradle.lockfile'] }],
-    regenerableDirs: ['.gradle'],
+    // Gradle's project cache, Kotlin 2's project folder and the Android native build folder.
+    regenerableDirs: ['.gradle', '.kotlin', '.cxx'],
     actions: {
       tool: 'java',
       cache: {
@@ -355,10 +359,19 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
           content: ['caches', 'wrapper'],
         },
       ],
+      // Kotlin/Native compilers and the Android SDK at their default places (macOS, then Linux).
+      toolchains: [
+        ['KONAN_DATA_DIR', ['.konan']],
+        ['ANDROID_HOME', ['Library', 'Android', 'sdk']],
+        ['ANDROID_HOME', ['Android', 'Sdk']],
+      ],
     },
     mergeGate: { extensions: 'java', grammar: 'java' },
     importFixup: { extensions: 'java', language: 'java' },
-    codeMap: [{ extensions: 'java', language: 'java' }],
+    codeMap: [
+      { extensions: 'java', language: 'java' },
+      { extensions: 'kts?', language: 'kotlin' },
+    ],
     moduleGraph: [
       { extensions: 'java', language: 'java' },
       { extensions: 'kt', language: 'kotlin' },
@@ -382,7 +395,27 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     importFixup: { extensions: 'cs', language: 'csharp' },
     codeMap: [{ extensions: 'cs', language: 'csharp' }],
   },
-  { id: 'swift', code: 'swift' },
+  {
+    id: 'swift',
+    code: 'swift',
+    managers: [
+      { name: 'swiftpm', manifests: ['Package.swift'], lockfiles: ['Package.resolved'] },
+      // Xcode projects (`*.xcodeproj`) are patterned names: src/package-graph-swift.ts reads them.
+      { name: 'cocoapods', unpinned: ['Podfile.lock'] },
+    ],
+    regenerableDirs: ['.build', '.swiftpm', 'DerivedData', 'Pods'],
+    nonSourceDirs: ['DerivedData', 'Pods', 'Carthage'],
+    actions: {
+      // The runner image's Swift (Xcode on macOS runners, swift.org on Ubuntu): no setup action.
+      cache: {
+        swiftpm: {
+          paths: ['~/Library/Caches/org.swift.swiftpm', '~/.cache/org.swift.swiftpm'],
+          lockfiles: ['**/Package.resolved'],
+        },
+      },
+    },
+    codeMap: [{ extensions: 'swift', language: 'swift' }],
+  },
   {
     id: 'elixir',
     code: 'exs?',
@@ -409,7 +442,22 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
     checkEnv: { toolchains: [['MIX_HOME', ['.mix']]] },
     codeMap: [{ extensions: 'exs?', language: 'elixir' }],
   },
-  { id: 'dart', code: 'dart' },
+  {
+    id: 'dart',
+    code: 'dart',
+    managers: [{ name: 'pub', manifests: ['pubspec.yaml'], lockfiles: ['pubspec.lock'] }],
+    regenerableDirs: ['.dart_tool'],
+    actions: {
+      // Flutter apps and packages (`sdk: flutter`) take Flutter, which bundles its own Dart.
+      tool: ['dart', 'flutter'],
+      cache: { pub: { paths: ['~/.pub-cache'], lockfiles: ['**/pubspec.lock'] } },
+    },
+    checkEnv: {
+      // The pub cache also holds globally activated executables (`bin/`): only packages link in.
+      homes: [{ name: 'PUB_CACHE', leaf: 'check-pub-cache', run: 'pub-cache', content: ['hosted', 'git'] }],
+    },
+    codeMap: [{ extensions: 'dart', language: 'dart' }],
+  },
   {
     // C and C++ (Issue 345ebcb9). No package graph: the build file is a manifest Forge does not read, so
     // affected tests widen to a full run with the stated reason (docs/agents/ecosystems.md).
@@ -573,7 +621,7 @@ export const cachePresets = (entries = ECOSYSTEMS) =>
   new Map(all(entry => Object.entries(entry.actions?.cache ?? {}), entries));
 /** Actions setup tools named by entries. */
 export const actionsTools = (entries = ECOSYSTEMS) =>
-  all(entry => (entry.actions?.tool ? [entry.actions.tool] : []), entries);
+  all(entry => [entry.actions?.tool ?? []].flat(), entries);
 export const checkEnvCaches = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.caches, entries);
 export const checkEnvHomes = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.homes, entries);
 export const checkEnvToolchains = (entries = ECOSYSTEMS) => all(entry => entry.checkEnv?.toolchains, entries);

@@ -83,6 +83,7 @@ export function validateArtifact(input: unknown): GraphPack {
     multi &&
     (!Array.isArray(a.languages) ||
       a.languages.length < 5 ||
+      a.languages.length > LANGUAGES.size ||
       new Set(a.languages.map(v => (record(v) ? v.language : ''))).size !== a.languages.length ||
       !a.languages.every(
         v =>

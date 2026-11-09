@@ -2,6 +2,9 @@
 // One synthetic fixture repository per registry ecosystem (tests/fixtures/ecosystems/ID), read the
 // way Forge reads a real one. Each case also shows that dropping the entry from the registry
 // (src/ecosystems.ts) loses what the fixture needs.
+// Swift, Kotlin and Dart use path → text trees instead (tests/fixtures/ecosystem-repos/ID.json):
+// detection, pins, folders, test names, the package graph and its commands, the code map and the
+// check environment, each failing when the ecosystem's entry is missing.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -26,6 +29,22 @@ import { indexRepository } from '../dist/index.js';
 import { validateArtifact } from '../dist/artifact-validation.js';
 import { fixture } from './helpers.mjs';
 import { sourceLanguage } from '../dist/languages.js';
+import {
+  ECOSYSTEMS,
+  codeMapLanguages,
+  dependencyDirs,
+  ecosystemEntry,
+  knownLockfiles,
+  manifestNames,
+  pinLockfiles,
+  regenerableDirs,
+} from '../dist/ecosystems.js';
+import { packageManifestPath } from '../dist/package-graph.js';
+import { testStem } from '../dist/hosted-landing-suspect.js';
+import { ecosystemCheckEnvironment } from '../dist/check-ecosystem-env.js';
+import { readPubspec } from '../dist/package-graph-pub.js';
+import { scanBraces } from '../dist/structural-brace-scan.js';
+import { packagePlacement, pinnedPackagePlacement } from '../dist/package-placement.js';
 
 const FIXTURES = new URL('./fixtures/ecosystems/', import.meta.url);
 function fixtureFiles(id) {
@@ -373,4 +392,299 @@ test('the fixed App/OIDC workflow refuses Elixir, Ruby and PHP toolchains by nam
     }),
     [],
   );
+});
+
+// Swift, Kotlin/Android and Dart/Flutter (Issue 870791c3).
+const repo = id =>
+  JSON.parse(readFileSync(new URL(`./fixtures/ecosystem-repos/${id}.json`, import.meta.url), 'utf8'));
+const treeGraph = tree => buildPackageGraph(Object.keys(tree), path => tree[path]);
+const commands = selection => (selection.commands ?? []).map(c => [c.cwd || '.', ...c.argv].join(' '));
+const symbols = (pack, file) =>
+  pack.nodes
+    .filter(n => n.locator.file === file && n.kind !== 'File')
+    .map(n => `${n.kind}:${n.name}${n.exported ? '' : ' (private)'}`);
+const edges = (pack, file) => pack.imports.filter(i => i.from === file).map(i => i.target ?? i.resolution);
+function codeMap(t, tree) {
+  const { pack } = indexRepository(fixture(t, tree));
+  validateArtifact(pack);
+  return pack;
+}
+/** The placement pin round-trips the ecosystem (the first-check proof reads it in Convex). */
+function pinRoundTrip(graph) {
+  const pinned = pinnedPackagePlacement({ packagePlacement: packagePlacement(graph) });
+  assert.ok(pinned, 'pinned placement');
+  assert.deepEqual(
+    pinned.packages.map(p => `${p.ecosystem}:${p.dir}`),
+    graph.packages.map(p => `${p.ecosystem}:${p.dir}`),
+  );
+}
+
+test('Swift: SwiftPM and Xcode are detected, pinned, cleaned and tested from the registry entry', t => {
+  const tree = repo('swift');
+  const entry = ecosystemEntry('swift');
+  assert.ok(manifestNames().has('Package.swift'));
+  assert.ok(pinLockfiles().includes('Package.resolved'));
+  assert.ok(knownLockfiles().includes('Podfile.lock'));
+  for (const dir of ['.build', '.swiftpm', 'DerivedData', 'Pods']) assert.ok(regenerableDirs().has(dir), dir);
+  assert.ok(packageManifestPath('Packages/Core/Package.swift'));
+  assert.equal(sourceLanguage('Packages/Core/Sources/Core/Point.swift'), 'swift');
+  assert.equal(testStem('Packages/Core/Tests/CoreTests/PointTests.swift'), 'point');
+  assert.ok(entry.actions.cache.swiftpm.lockfiles.includes('**/Package.resolved'));
+
+  // Without the Xcode app, a Core change runs `swift test` in Core and in Feature, which uses it.
+  const packages = Object.fromEntries(Object.entries(tree).filter(([path]) => !path.startsWith('App/')));
+  const graph = treeGraph(packages);
+  assert.equal(graph.status, 'available');
+  assert.deepEqual(
+    graph.packages.map(p => [p.ecosystem, p.dir, p.dependsOn]),
+    [
+      ['swiftpm', 'Packages/Core', []],
+      ['swiftpm', 'Packages/Feature', ['swiftpm:Packages/Core']],
+    ],
+  );
+  pinRoundTrip(graph);
+  const core = packageSelection(graph, ['Packages/Core/Sources/Core/Point.swift']);
+  assert.equal(core.scope, 'scoped');
+  assert.deepEqual(commands(core), ['Packages/Core swift test', 'Packages/Feature swift test']);
+  assert.deepEqual(commands(packageSelection(graph, ['Packages/Feature/Sources/Feature/Route.swift'])), [
+    'Packages/Feature swift test',
+  ]);
+  // A local package Forge cannot place, or a computed path, reaches the package from every change.
+  const missing = treeGraph({
+    ...packages,
+    'Packages/Feature/Package.swift': packages['Packages/Feature/Package.swift'].replace(
+      '../Core',
+      '../Gone',
+    ),
+  });
+  assert.match(missing.packages[1].unresolved, /Packages\/Gone, which has no Package.swift/);
+  // Test sources with no test target are run some other way: the selection is full.
+  const hidden = treeGraph({
+    ...packages,
+    'Packages/Core/Package.swift': packages['Packages/Core/Package.swift'].replace(
+      /\.testTarget\([^)]*\),/,
+      '',
+    ),
+  });
+  assert.equal(packageSelection(hidden, ['Packages/Core/Sources/Core/Point.swift']).scope, 'full');
+
+  // The Xcode app depends on every local package and names the declaration it needs.
+  const app = treeGraph(tree);
+  assert.deepEqual(app.packages.at(-1).dependsOn, ['swiftpm:Packages/Core', 'swiftpm:Packages/Feature']);
+  const full = packageSelection(app, ['App/App/ContentView.swift']);
+  assert.equal(full.scope, 'full');
+  assert.match(full.reason, /"xcodebuild","test","-project","App.xcodeproj","-scheme","App"/);
+  pinRoundTrip(app);
+
+  // Code map: declarations and `import Module` edges to the SwiftPM target folder.
+  const pack = codeMap(t, tree);
+  assert.ok(pack.analysis.languages.some(l => l.language === 'swift'));
+  assert.deepEqual(symbols(pack, 'Packages/Core/Sources/Core/Point.swift'), [
+    'StructDeclaration:Point',
+    'PropertyDeclaration:x',
+    'MethodDeclaration:moved',
+    'VariableDeclaration:secret (private)',
+  ]);
+  assert.deepEqual(edges(pack, 'Packages/Feature/Sources/Feature/Route.swift'), [
+    'Packages/Core/Sources/Core/Point.swift',
+  ]);
+  assert.deepEqual(edges(pack, 'App/App/ContentView.swift'), [
+    'external',
+    'Packages/Feature/Sources/Feature/Route.swift',
+  ]);
+});
+
+test('Kotlin and Android: Gradle Kotlin DSL projects, .kt/.kts code map and Android toolchain homes', t => {
+  const tree = repo('kotlin');
+  const jvm = ecosystemEntry('jvm');
+  for (const path of ['a.kt', 'build.gradle.kts'])
+    assert.deepEqual(
+      codeMapLanguages()
+        .filter(([pattern]) => pattern.test(path))
+        .map(([, language]) => language),
+      ['kotlin'],
+      path,
+    );
+  assert.equal(sourceLanguage('app/src/main/kotlin/com/acme/app/MainActivity.kt'), 'kotlin');
+  assert.equal(testStem('core/src/test/kotlin/com/acme/core/PointTest.kt'), 'point');
+  for (const dir of ['.gradle', '.kotlin', '.cxx']) assert.ok(regenerableDirs().has(dir), dir);
+  assert.ok(knownLockfiles().includes('gradle.lockfile'));
+  assert.ok(packageManifestPath('app/build.gradle.kts'));
+
+  const graph = treeGraph(tree);
+  assert.deepEqual(
+    graph.packages.map(p => [p.dir, p.dependsOn]),
+    [
+      ['core', []],
+      ['app', ['gradle:core']],
+    ],
+  );
+  assert.deepEqual(commands(packageSelection(graph, ['core/src/main/kotlin/com/acme/core/Point.kt'])), [
+    '. gradle :app:test :core:test',
+  ]);
+  assert.deepEqual(commands(packageSelection(graph, ['app/src/main/kotlin/com/acme/app/MainActivity.kt'])), [
+    '. gradle :app:test',
+  ]);
+
+  const pack = codeMap(t, tree);
+  assert.ok(pack.analysis.languages.some(l => l.language === 'kotlin'));
+  assert.deepEqual(symbols(pack, 'core/src/main/kotlin/com/acme/core/Point.kt'), [
+    'ClassDeclaration:Point',
+    'MethodDeclaration:moved',
+    'PropertyDeclaration:label (private)',
+    'FunctionDeclaration:origin',
+  ]);
+  // `import a.b.C` reaches the files of package a.b that declare C.
+  assert.deepEqual(edges(pack, 'app/src/main/kotlin/com/acme/app/MainActivity.kt'), [
+    'core/src/main/kotlin/com/acme/core/Point.kt',
+    'core/src/main/kotlin/com/acme/core/Point.kt',
+  ]);
+
+  // Kotlin/Native and the Android SDK pass into checks only where installed at their default place.
+  const home = mkdtempSync(join(tmpdir(), 'forge-eco-home-'));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  assert.equal(ecosystemCheckEnvironment(undefined, home, 'p', '/run').env.ANDROID_HOME, undefined);
+  for (const dir of ['.konan', 'Android/Sdk']) mkdirSync(join(home, dir), { recursive: true });
+  const env = ecosystemCheckEnvironment(undefined, home, 'p', '/run').env;
+  assert.equal(env.KONAN_DATA_DIR, join(home, '.konan'));
+  assert.equal(env.ANDROID_HOME, join(home, 'Android/Sdk'));
+  assert.deepEqual(
+    jvm.checkEnv.toolchains.map(([name]) => name),
+    ['KONAN_DATA_DIR', 'ANDROID_HOME', 'ANDROID_HOME'],
+  );
+});
+
+test('Dart and Flutter: pub path dependencies, dart test or flutter test, pub cache home, code map', t => {
+  const tree = repo('dart');
+  assert.ok(manifestNames().has('pubspec.yaml'));
+  assert.ok(pinLockfiles().includes('pubspec.lock'));
+  assert.ok(regenerableDirs().has('.dart_tool'));
+  assert.ok(dependencyDirs().has('.dart_tool'));
+  assert.equal(sourceLanguage('app/lib/main.dart'), 'dart');
+  assert.equal(testStem('packages/core/test/point_test.dart'), 'point');
+  assert.deepEqual(ecosystemEntry('dart').actions.tool, ['dart', 'flutter']);
+
+  const graph = treeGraph(tree);
+  assert.deepEqual(
+    graph.packages.map(p => [p.dir, p.name, p.dependsOn, p.testable]),
+    [
+      ['app', 'app', ['pub:packages/core'], true],
+      ['packages/core', 'core', [], true],
+    ],
+  );
+  pinRoundTrip(graph);
+  // A core change runs `dart test` there and `flutter test` in the Flutter app that takes it by path.
+  assert.deepEqual(commands(packageSelection(graph, ['packages/core/lib/point.dart'])), [
+    'app flutter test',
+    'packages/core dart test',
+  ]);
+  assert.deepEqual(commands(packageSelection(graph, ['app/lib/home.dart'])), ['app flutter test']);
+  const gone = treeGraph({
+    ...tree,
+    'app/pubspec.yaml': tree['app/pubspec.yaml'].replace('../packages/core', '../gone'),
+  });
+  assert.match(gone.packages[0].unresolved, /takes core from gone, which has no pubspec.yaml/);
+  // Workspace members, flow-style paths and hosted dependencies named like a repository package.
+  const spec = readPubspec(
+    'name: root\nworkspace:\n  - packages/a\n  - "packages/b"\ndependencies:\n  a: {path: packages/a}\n  b: ^1.0.0 # hosted\n',
+  );
+  assert.deepEqual(
+    [spec.name, spec.workspace, [...spec.dependencies]],
+    [
+      'root',
+      ['packages/a', 'packages/b'],
+      [
+        ['a', 'packages/a'],
+        ['b', null],
+      ],
+    ],
+  );
+  const workspace = treeGraph({
+    'pubspec.yaml': 'name: root\nworkspace:\n  - packages/a\n  - packages/b\n',
+    'packages/a/pubspec.yaml': 'name: a\nresolution: workspace\n',
+    'packages/a/test/a_test.dart': 'void main() {}\n',
+    'packages/b/pubspec.yaml': 'name: b\nresolution: workspace\ndependencies:\n  a: any\n',
+    'packages/b/test/b_test.dart': 'void main() {}\n',
+  });
+  assert.deepEqual(
+    workspace.packages.map(p => [p.dir, p.declared, p.dependsOn]),
+    [
+      ['packages/a', true, []],
+      ['packages/b', true, ['pub:packages/a']],
+      ['', false, []],
+    ],
+  );
+  assert.deepEqual(commands(packageSelection(workspace, ['packages/a/lib/a.dart'])), [
+    'packages/a dart test',
+    'packages/b dart test',
+  ]);
+
+  // The pub cache holds globally activated executables too: only package content links in.
+  const env = ecosystemCheckEnvironment(undefined, tmpdir(), 'p', '/run');
+  assert.equal(env.env.PUB_CACHE, '/run/pub-cache');
+  assert.deepEqual(
+    env.links.filter(link => link.link.startsWith('/run/pub-cache/')).map(link => link.link),
+    ['/run/pub-cache/hosted', '/run/pub-cache/git'],
+  );
+
+  const pack = codeMap(t, tree);
+  assert.ok(pack.analysis.languages.some(l => l.language === 'dart'));
+  assert.deepEqual(symbols(pack, 'packages/core/lib/point.dart'), [
+    'ClassDeclaration:Point',
+    'PropertyDeclaration:x',
+    'MethodDeclaration:Point',
+    'MethodDeclaration:moved',
+    'VariableDeclaration:_hidden (private)',
+  ]);
+  // Relative and package: imports reach captured files; SDK packages are external.
+  assert.deepEqual(edges(pack, 'app/lib/main.dart'), [
+    'external',
+    'packages/core/lib/point.dart',
+    'app/lib/home.dart',
+  ]);
+});
+
+test('the declaration scanner masks strings and comments and never reads function bodies', () => {
+  const swift = scanBraces(
+    'let a = #"raw \\(x) "quoted" "#\n/* outer /* nested */ class Fake {} */\nfunc f() { class Inner {} }\nclass func g() {}\n',
+    'swift',
+  );
+  assert.deepEqual(
+    swift.symbols.map(s => s.name),
+    ['a', 'f', 'g'],
+  );
+  const kotlin = scanBraces(
+    'package a.b\nimport x.y.Z as W\nval s = "${"}"} class Fake"\nfun <T> List<T>.second(): T = this[1]\nfun interface Act { fun run() }\n',
+    'kotlin',
+  );
+  assert.equal(kotlin.packageName, 'a.b');
+  assert.deepEqual(
+    kotlin.imports.map(i => i.specifier),
+    ['x.y.Z'],
+  );
+  assert.deepEqual(
+    kotlin.symbols.map(s => s.name),
+    ['s', 'second', 'Act', 'run'],
+  );
+  const dart = scanBraces(
+    "import 'a.dart' show b;\npart of 'lib.dart';\nvar r = r'\\${not}';\nfinal int n = 1;\nint get twice => n * 2;\nextension on String { bool get blank => isEmpty; }\n",
+    'dart',
+  );
+  assert.deepEqual(
+    dart.imports.map(i => i.specifier),
+    ['a.dart'],
+  );
+  assert.deepEqual(
+    dart.symbols.map(s => s.name),
+    ['r', 'n', 'twice', 'blank'],
+  );
+  assert.equal(scanBraces('class A {', 'swift').ok, false);
+});
+
+test('the Swift and Dart fixture repositories are registry entries', () => {
+  for (const id of ['swift', 'dart'])
+    assert.ok(
+      ECOSYSTEMS.some(entry => entry.id === id),
+      id,
+    );
 });

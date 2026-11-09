@@ -1177,16 +1177,20 @@ reading every check:
   | `rust` | `rustup toolchain install` (rustup 1.28 or later, preinstalled on GitHub images) | `rust-toolchain.toml`, `rust-toolchain` |
   | `zig` | `mlugg/setup-zig` v2.2.1, its own cache off | none: `version` only |
   | `cmake` | `lukka/get-cmake` v4.4.2 (CMake and Ninja), its own cache off | none: `version` only |
+  | `dart` | `dart-lang/setup-dart` v1.8.1; `version` only (`3.5.4`, `stable`, `beta`, `dev`) | — |
+  | `flutter` | `subosito/flutter-action` v2.23.0; `version` is a release (`3.24.5`) or a channel (`stable`, `beta`, `master`, `main`) | `pubspec.yaml` (its `environment.flutter`) |
   | `elixir` | `erlef/setup-beam` v1.24.1; a `version` (Elixir) also takes `otpVersion`; a file is read strictly | `.tool-versions`, `mise.toml` |
   | `ruby` | `ruby/setup-ruby` v1.335.0, read from the file's folder; never `bundler-cache` (it runs `bundle install`) | `.ruby-version`, `.tool-versions`, `mise.toml` |
   | `php` | `shivammathur/setup-php` 2.40.0 with an empty `github-token`, so no token lands in Composer's `auth.json` | `.php-version` |
+
+  Swift needs no entry: the runner image's Swift (Xcode on macOS, swift.org on Ubuntu) runs.
 
   `elixir`, `ruby` and `php` run in an exported workflow. The fixed App/OIDC `forge-check.yml`
   has no steps for them yet, so planning a check that declares one fails with
   `ACTIONS_TOOL_UNSUPPORTED`, naming the tools, instead of running without them.
 
 - **`actionsCache`**: `presets` from `go`, `cargo`, `pip`, `uv`, `poetry`, `maven`, `gradle`, `nuget`,
-  `npm`, `pnpm`, `yarn`, `zig`, `vcpkg`, `conan`, `hex`, `bundler` and `composer`. One entry holds the presets' download caches under the runner's home
+  `npm`, `pnpm`, `yarn`, `zig`, `vcpkg`, `conan`, `hex`, `bundler`, `composer`, `swiftpm` and `pub`. One entry holds the presets' download caches under the runner's home
   directory, never build output or Candidate source. Its key is the presets, the runner OS and
   architecture and a hash of the lockfiles: each preset's defaults (for example `**/go.sum`,
   `**/Cargo.lock`), or the `lockfiles` globs the declaration lists instead. Entries use the free
@@ -1216,8 +1220,8 @@ Candidate user too. A seed that fails skips that lockfile and never fails the ch
 | `composer` | `composer install --no-scripts --no-plugins --no-autoloader --ignore-platform-reqs` beside `composer.lock` and `composer.json` |
 
 The other presets (`cargo`, `uv`, `poetry`, `maven`, `gradle`, `nuget`, `yarn`, `vcpkg`, `conan`, `hex`,
-`bundler`) are restored only: their resolvers can run repository code or configured programs (a
-Gemfile and a mix.exs are code), so Forge does not seed them yet, and
+`bundler`, `swiftpm`, `pub`) are restored only: their resolvers can run repository code or configured
+programs (a Gemfile, a mix.exs and a Package.swift are code), so Forge does not seed them yet, and
 a check that declares them downloads its own dependencies on every run. Every other check restores
 read-only. Lane code never writes an entry that another Lane restores.
 
@@ -1232,9 +1236,13 @@ read-only. Lane code never writes an entry that another Lane restores.
   `hostedWorkflowBlocks()` (`src/actions-toolchains-hosted.ts`) run only for declared tools,
   after the Candidate is in place and before the check step. If the installed workflow lacks those steps, planning a
   declared check fails with `ACTIONS_WORKFLOW_OUTDATED` instead of running without its
-  toolchains. The `zig` and `cmake` tools have their own blocks (`hostedLateToolBlocks()`), required
-  only by a declaration that names them, so a runner repository that predates them keeps working for
-  every other declaration.
+  toolchains. The `zig`, `cmake`, `dart` and `flutter` tools have their own blocks
+  (`hostedLateToolBlocks()`), required only by a declaration that names them, so a runner repository
+  that predates them keeps working for every other declaration.
+
+Xcode and iOS simulators need a macOS runner: the project owner sets the runner's `runsOn` to a
+macOS label (`macos-15`); Forge never picks one by itself, and every other project keeps
+`ubuntu-latest`. Public repositories run macOS jobs free; private ones pay GitHub's macOS rate.
 
 A connected repository reinstalls `forge-check.yml` only when one of its checks declares
 toolchains or cache. Undeclared checks generate byte-identical workflows and need no
