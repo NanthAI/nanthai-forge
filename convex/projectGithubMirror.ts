@@ -27,7 +27,15 @@ import { networkFailure } from '../src/network-fetch';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
-export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
+export const mirrorSource = (ctx: ActionCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) =>
+  projectSource(ctx, ids =>
+    ctx.runQuery(makeFunctionReference<'query'>('projectGithubMirrorObjects:resolve'), {
+      ...input,
+      digests: ids,
+    }),
+  );
+/** The verified reader over any resolver that returns resolveObjects windows. */
+export function projectSource(ctx: ActionCtx, resolve: (digests: string[]) => Promise<string>) {
   type Location = {
     descriptor: WorkerObject;
     storageId: Id<'_storage'> | null;
@@ -37,12 +45,7 @@ export function mirrorSource(ctx: ActionCtx, input: { jobId: Id<'projectGithubMi
   const locations = new Map<string, Location>();
   const source = new MemoryMergeSource({});
   const describe = async (ids: string[]) => {
-    const rows: Location[] = JSON.parse(
-      await ctx.runQuery(makeFunctionReference<'query'>('projectGithubMirrorObjects:resolve'), {
-        ...input,
-        digests: ids,
-      }),
-    );
+    const rows: Location[] = JSON.parse(await resolve(ids));
     for (const row of rows) locations.set(row.descriptor.object.sha256, row);
     return rows.map(row => row.descriptor);
   };

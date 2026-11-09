@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
-import { defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
+import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import {
   FetchResponseParser,
   PackVerifier,
@@ -34,6 +34,8 @@ for (const name of [
   'projectHistoryRead',
   'gitServeStore',
   'gitServeInflate',
+  'gitServeLane',
+  'gitServeLaneStore',
   'gitServeWorkerStore',
 ])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
@@ -630,14 +632,21 @@ async function gitHost(t, s) {
     const body = [];
     for await (const part of req) body.push(part);
     const headers = new Headers(Object.entries(req.headers).filter(([, value]) => typeof value === 'string'));
-    const response = await gitServe.serve._handler(
-      s.ctx,
-      new Request(`https://forge.example${req.url}`, {
-        method: req.method,
-        headers,
-        ...(req.method === 'POST' ? { body: Buffer.concat(body) } : {}),
-      }),
-    );
+    // A throwing HTTP action answers 500, as Convex does, so git never waits on it.
+    let response;
+    try {
+      response = await gitServe.serve._handler(
+        s.ctx,
+        new Request(`https://forge.example${req.url}`, {
+          method: req.method,
+          headers,
+          ...(req.method === 'POST' ? { body: Buffer.concat(body) } : {}),
+        }),
+      );
+    } catch (error) {
+      console.error('git serve threw', error);
+      response = new Response(String(error), { status: 500 });
+    }
     res.writeHead(response.status, Object.fromEntries(response.headers));
     if (response.body) for await (const part of response.body) res.write(part);
     res.end();
@@ -1092,4 +1101,287 @@ test('a Worker session rechecks the credential and current access on every reque
   const [credential] = [...s.tables.cliCredentials.values()];
   s.tables.cliCredentials.set(credential._id, { ...credential, revoked: true });
   assert.equal((await host.handle(refs(sign('cred-owner')))).status, 403, 'revocation applies at once');
+});
+
+// Lane refs (Issue 09367fb2 line 3): a member's fetch of refs/forge/lanes/<laneId> builds one
+// deterministic commit for the saved head on main's mirror commit, cached per Lane.
+/** Stores bytes as a committed R2 project object, as a save does. */
+function storeObject(s, projectId, bytes) {
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  const key = `v1/p/${projectId}/o/${digest}`;
+  defaultR2Objects.set(`${defaultR2Config.bucket}/${key}`, Buffer.from(bytes));
+  if (
+    ![...s.tables.projectObjects.values()].some(row => row.projectId === projectId && row.digest === digest)
+  )
+    s.ctx.db.insert('projectObjects', {
+      projectId,
+      digest,
+      size: bytes.length,
+      nonce: '',
+      location: 'r2',
+      r2Key: key,
+      r2Committed: true,
+      removed: false,
+      sourceReferenced: true,
+    });
+  return digest;
+}
+/** A Forge State with the files of a Git commit, plus edits ({path: text | null | [text, mode]}). */
+function storeState(s, projectId, repo, commit, edits = {}, message = 'main') {
+  const files = new Map();
+  for (const line of git(repo, ['ls-tree', '-r', commit]).toString().trim().split('\n')) {
+    const [meta, path] = line.split('\t');
+    const [mode, , sha] = meta.split(' ');
+    const kind = mode === '100755' ? 'executable' : mode === '120000' ? 'symlink' : 'file';
+    files.set(path, {
+      path,
+      mode: kind,
+      blob: storeObject(s, projectId, git(repo, ['cat-file', 'blob', sha])),
+    });
+  }
+  for (const [path, edit] of Object.entries(edits)) {
+    if (edit === null) files.delete(path);
+    else {
+      const [text, mode] = Array.isArray(edit) ? edit : [edit, 'file'];
+      files.set(path, { path, mode, blob: storeObject(s, projectId, Buffer.from(text)) });
+    }
+  }
+  const value = {
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [],
+    files: [...files.values()].sort((a, b) => (a.path < b.path ? -1 : 1)),
+    message,
+    at: '2026-11-09T07:00:00.000Z',
+  };
+  return storeObject(s, projectId, Buffer.from(JSON.stringify(value)));
+}
+function credentialFor(s, credentialId, owner) {
+  const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const value = `${encode({ alg: 'RS256' })}.${encode({ sub: owner, forgeCredential: credentialId })}.sig`;
+  s.ctx.db.insert('cliCredentials', {
+    owner,
+    name: 'Synthetic CLI',
+    scope: 'cli',
+    credentialId,
+    tokenHash: createHash('sha256').update(value).digest('hex'),
+    issuedAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+    revoked: false,
+  });
+  return value;
+}
+
+test('members fetch Lane refs as built commits; git diff main...lane equals the Lane; strangers never see them', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  for (const table of ['projectGithubMirrorJobs', 'projectHostedOverlapLanes', 'projectGitLaneCommits'])
+    s.tables[table] ??= new Map();
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  await mirrorAt(s, projectId, source.head);
+  const base = storeState(s, projectId, source.repo, source.head);
+  const tree = git(source.repo, ['rev-parse', `${source.head}^{tree}`])
+    .toString()
+    .trim();
+  const job = (receiptId, state, mapping) =>
+    s.ctx.db.insert('projectGithubMirrorJobs', {
+      projectId,
+      receiptId,
+      sequence: 1,
+      repository: 'example/repo',
+      authorityEpoch: 1,
+      status: 'done',
+      state,
+      step: 2,
+      cursor: null,
+      mapping: JSON.stringify({
+        publication: 'tracked',
+        operationId: crypto.randomUUID(),
+        state,
+        acceptanceId: receiptId,
+        viewId: crypto.randomUUID(),
+        commit: source.head,
+        parent: '',
+        tree,
+        message: 'main',
+        author: { name: 'Forge', email: 'forge@example.invalid' },
+        committer: { name: 'Forge', email: 'forge@example.invalid' },
+        seconds: clock,
+        ...mapping,
+      }),
+    });
+  const mainReceipt = crypto.randomUUID(),
+    otherReceipt = crypto.randomUUID();
+  await job(mainReceipt, base);
+  const laneId = crypto.randomUUID();
+  const edits = {
+    'src/app.go': 'package main // edited in the Lane\n',
+    'src/lane.go': 'package main\n',
+    'docs/guide.md': null,
+    'scripts/run.sh': ['#!/bin/sh\necho run\n', 'executable'],
+    'private-artifacts/notes.md': 'Forge metadata: never published\n',
+    '.gitattributes': '*.psd filter=lfs diff=lfs merge=lfs -text\n',
+    'art/logo.psd': 'binary layers\n',
+  };
+  const head = storeState(s, projectId, source.repo, source.head, edits, 'Lane save: edit app');
+  const lane = await s.ctx.db.insert('projectHostedOverlapLanes', {
+    projectId,
+    laneId,
+    intentId: crypto.randomUUID(),
+    actor: 'owner',
+    agent: 'cosmic-toucan',
+    intent: 'Synthetic Lane',
+    head,
+    baseHead: base,
+    baseReceiptId: mainReceipt,
+    baseSequence: 1,
+    recordVersion: 2,
+    open: true,
+    changes: '[]',
+    complete: false,
+  });
+  await s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  const owner = credentialFor(s, 'cred-owner', 'owner'),
+    stranger = credentialFor(s, 'cred-stranger', 'stranger');
+  const host = await gitHost(t, s);
+  const url = token => `${host.base.replace('http://', `http://git:${token}@`)}/git/${projectId}.git`;
+  const ref = `refs/forge/lanes/${laneId}`;
+  const work = scratch(t, 'forge-git-lane-');
+  const repo = join(work, 'member');
+
+  await client(['clone', '-q', url(owner), repo]);
+  let before = host.snapshot();
+  await client(['fetch', '-q', 'origin', `${ref}:refs/remotes/origin/lane`], repo);
+  // info/refs, ls-refs (401: git then sends the token), ls-refs with the build, fetch.
+  const first = host.since(before);
+  assert.equal(first.http, 4);
+  assert.equal(first.action, 1, 'one build');
+  assert.equal(first.mutation, 1, 'one record');
+  const diff = git(repo, ['diff', '--name-status', 'origin/main...origin/lane']).toString();
+  assert.equal(
+    diff,
+    'A\t.gitattributes\nA\tart/logo.psd\nD\tdocs/guide.md\nA\tscripts/run.sh\nM\tsrc/app.go\nA\tsrc/lane.go\n',
+  );
+  // An LFS path holds its pointer, as the mirror publishes it; the bytes stay in Forge.
+  const logo = createHash('sha256').update('binary layers\n').digest('hex');
+  assert.equal(
+    git(repo, ['cat-file', 'blob', 'origin/lane:art/logo.psd']).toString(),
+    `version https://git-lfs.github.com/spec/v1\noid sha256:${logo}\nsize 14\n`,
+  );
+  assert.equal(git(repo, ['show', 'origin/lane:src/app.go']).toString(), edits['src/app.go']);
+  assert.match(git(repo, ['ls-tree', 'origin/lane', 'scripts/run.sh']).toString(), /^100755 blob /);
+  assert.equal(
+    git(repo, ['rev-parse', 'origin/lane^']).toString().trim(),
+    source.head,
+    'parent = main commit',
+  );
+  const commitText = git(repo, ['cat-file', 'commit', 'origin/lane']).toString();
+  assert.match(
+    commitText,
+    /^author synthetic-owner\/cosmic-toucan <synthetic-owner@users\.noreply\.forge> /m,
+  );
+  assert.match(
+    commitText,
+    new RegExp(`Lane save: edit app\n\nForge-Lane: ${laneId}\nForge-State: ${head}\n$`),
+  );
+  await client(['fsck', '--full', '--strict'], repo);
+  const built = [...s.tables.projectGitLaneCommits.values()];
+  assert.equal(built.length, 1);
+  const commit = git(repo, ['rev-parse', 'origin/lane']).toString().trim();
+  assert.equal(built[0].commit, commit);
+  assert.equal(built[0].pack.objects, 1 + 5 + 5, 'commit, root/art/docs/src/scripts trees, five new blobs');
+
+  // Cached: the same head is listed and fetched with no build; a strict fresh clone needs no duplicates.
+  // Anonymous reads of a public project send no token: a listing sends it when told to.
+  const member = ['-c', `http.extraHeader=Authorization: Bearer ${owner}`];
+  const remote = `${host.base}/git/${projectId}.git`;
+  before = host.snapshot();
+  const listed = (await client([...member, 'ls-remote', remote])).stdout;
+  assert.match(listed, new RegExp(`^${commit}\t${ref}$`, 'm'));
+  await client(['fetch', '-q', 'origin', ref], repo);
+  const cached = host.since(before);
+  // At most one query per request (the 401 that asks git for the token costs none), no build.
+  assert.ok(cached.query <= cached.http && cached.query >= cached.http - 1);
+  assert.deepEqual([cached.mutation, cached.action], [0, 0]);
+  const strict = join(work, 'strict');
+  await client(['-c', 'transfer.fsckObjects=true', 'clone', '-q', url(owner), strict]);
+  await client(['-c', 'transfer.fsckObjects=true', 'fetch', '-q', 'origin', ref], strict);
+  const empty = join(work, 'empty');
+  git(work, ['init', '-q', empty]);
+  await client(['fetch', '-q', url(owner), `${ref}:refs/heads/lane`], empty);
+  assert.equal(git(empty, ['rev-parse', 'lane']).toString().trim(), commit, 'history and Lane in one pack');
+  await client(['fsck', '--full'], empty);
+
+  // Strangers and anonymous readers of this public project get main only, never the Lane.
+  for (const token of [stranger, null]) {
+    const remote = token ? url(token) : `${host.base}/git/${projectId}.git`;
+    assert.doesNotMatch((await client(['ls-remote', remote])).stdout, /refs\/forge|lanes/);
+    // A stranger signs in and finds no such ref; an anonymous reader is asked to sign in.
+    await refused(
+      ['-C', repo, 'fetch', remote, ref],
+      token ? /couldn't find remote ref/ : /Username|Authentication/,
+    );
+  }
+  const direct = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
+    method: 'POST',
+    headers: {
+      'git-protocol': 'version=2',
+      authorization: `Basic ${Buffer.from(`git:${stranger}`).toString('base64')}`,
+    },
+    body: protocol.concatBytes([
+      protocol.pkt('command=fetch\n'),
+      protocol.delimPkt,
+      protocol.pkt('ofs-delta\n'),
+      protocol.pkt(`want ${commit}\n`),
+      protocol.pkt('done\n'),
+      protocol.flushPkt,
+    ]),
+  });
+  assert.match(Buffer.from(await direct.arrayBuffer()).toString('latin1'), /ERR GIT_NOT_OUR_REF/);
+
+  // A new save moves the ref: the next fetch builds a new commit and drops the old pack.
+  const oldPack = built[0].pack.chunks[0].sha256;
+  const moved = storeState(s, projectId, source.repo, source.head, {
+    ...edits,
+    'src/lane.go': 'package lane\n',
+  });
+  await s.ctx.db.patch(lane, { head: moved });
+  assert.doesNotMatch(
+    (await client([...member, 'ls-remote', remote])).stdout,
+    /refs\/forge/,
+    'a moved head is not listed until built',
+  );
+  await client(['fetch', '-q', 'origin', `+${ref}:refs/remotes/origin/lane`], repo);
+  assert.equal(git(repo, ['show', 'origin/lane:src/lane.go']).toString(), 'package lane\n');
+  assert.equal(defaultR2Objects.has(`${defaultR2Config.bucket}/v1/p/${projectId}/o/${oldPack}`), false);
+  await s.ctx.db.patch(lane, { open: false });
+  assert.doesNotMatch(
+    (await client([...member, 'ls-remote', remote])).stdout,
+    /refs\/forge/,
+    'closed Lanes are not listed',
+  );
+
+  // A base main never published, or a base tree that differs from the mirror's, is a named error.
+  const other = crypto.randomUUID();
+  await s.ctx.db.insert('projectHostedOverlapLanes', {
+    projectId,
+    laneId: other,
+    intentId: crypto.randomUUID(),
+    actor: 'owner',
+    intent: 'Unpublished base',
+    head,
+    baseHead: head,
+    baseReceiptId: otherReceipt,
+    baseSequence: 2,
+    recordVersion: 1,
+    open: true,
+    changes: '[]',
+    complete: false,
+  });
+  await refused(['-C', repo, 'fetch', 'origin', `refs/forge/lanes/${other}`], /GIT_LANE_BASE_UNPUBLISHED/);
+  await job(otherReceipt, head, { tree: 'e'.repeat(40) });
+  await refused(['-C', repo, 'fetch', 'origin', `refs/forge/lanes/${other}`], /GIT_LANE_TREE/);
 });

@@ -24,11 +24,11 @@ import {
   parseV0Request,
   parseV2Request,
   pkt,
-  selectPacks,
   sideband,
   sidebandData,
   type FetchArgs,
 } from '../src/git-serve-protocol';
+import { namedLanes, selectFetch } from '../src/git-serve-lane-refs';
 
 /** Read-only Git smart HTTP (Issue 09367fb2): /git/<handle>/<slug>.git or /git/<projectId>.git.
  * Serves the stored history packs (GitHub's own bytes in R2, same commit ids). Pushes go
@@ -91,16 +91,16 @@ const gitReply = (kind: 'advertisement' | 'result', body: BodyInit) =>
     headers: { 'Content-Type': `application/x-git-upload-pack-${kind}`, ...noCache },
   });
 
-type Pack = {
-  tip: string;
-  bytes: number;
-  objects: number;
-  packSha1: string;
-  chunks: { sha256: string; size: number }[];
-};
+/** A stored pack's bytes; history packs also carry their Git pack name. */
+type PackBytes = { tip: string; bytes: number; objects: number; chunks: { sha256: string; size: number }[] };
+type Pack = PackBytes & { packSha1: string };
+type LaneArgs = { list: boolean; named: string[]; commits: string[] };
+type LaneRow = { laneId: string; commit: string; pack: PackBytes | null };
 type Loaded = {
   status: 'ok';
   projectId: Id<'hostedProjects'>;
+  member: boolean;
+  lanes: LaneRow[];
   mainHead: string | null;
   history: null | {
     row: {
@@ -152,11 +152,26 @@ export function servedRefs(loaded: Loaded) {
     loaded.mainHead && tipState !== loaded.mainHead
       ? `Forge main (State ${loaded.mainHead.slice(0, 12)}) has landings not yet published as Git commits; refs/heads/main is ${tip.slice(0, 12)}, the newest published one.`
       : null;
-  return { refs: { main: tip }, packs, gap };
+  // Lane commits' parents are main mirror commits, all inside the stored packs once they reach
+  // the mirror's current commit; until then no Lane ref is listed or served.
+  const lanes = covered ? loaded.lanes : [];
+  return {
+    refs: { main: tip, lanes: lanes.map(({ laneId, commit }) => ({ laneId, commit })) },
+    packs,
+    lanes,
+    lanesReady: !!covered,
+    gap,
+  };
 }
 
-/** Seeds history from the mirror once, or adds the coalesced catch-up pack, before listing refs. */
-async function preparedRefs(ctx: ActionCtx, loaded: Loaded, reload: () => Promise<Loaded>) {
+/** Seeds history from the mirror once, or adds the coalesced catch-up pack, before listing refs;
+ * then builds the Lane commits a member's listing names that are not built yet. */
+async function preparedRefs(
+  ctx: ActionCtx,
+  loaded: Loaded,
+  reload: () => Promise<Loaded>,
+  named: string[] = [],
+) {
   if (!loaded.history || loaded.history.row.status === 'pending') {
     if (!loaded.history && !loaded.mirror) throw unavailable();
     const attempt = await ctx.runMutation(internal.projectHistoryStore.seedFromMirror, {
@@ -178,10 +193,28 @@ async function preparedRefs(ctx: ActionCtx, loaded: Loaded, reload: () => Promis
     await ctx.runAction(internal.projectHistoryImport.catchUp, { projectId: loaded.projectId });
     loaded = await reload();
   }
+  const missing = loaded.member
+    ? named.filter(laneId => !loaded.lanes.some(lane => lane.laneId === laneId))
+    : [];
+  if (missing.length) {
+    if (!servedRefs(loaded).lanesReady)
+      throw new ForgeError(
+        'GIT_HISTORY_PREPARING',
+        "Forge is storing main's newest Git commit, which Lane refs build on; retry in a minute.",
+      );
+    for (const laneId of missing)
+      try {
+        await ctx.runAction(internal.gitServeLane.build, { projectId: loaded.projectId, laneId });
+      } catch (error) {
+        // A Lane that is not open here is simply not listed, like any missing ref.
+        if (failure(error).code !== 'GIT_LANE_UNAVAILABLE') throw error;
+      }
+    loaded = await reload();
+  }
   return servedRefs(loaded);
 }
 
-async function* packStream(projectId: string, packs: Pack[], frame: (bytes: Uint8Array) => Uint8Array) {
+async function* packStream(projectId: string, packs: PackBytes[], frame: (bytes: Uint8Array) => Uint8Array) {
   if (!packs.length) {
     yield frame(emptyPack());
     return;
@@ -219,9 +252,10 @@ async function* packStream(projectId: string, packs: Pack[], frame: (bytes: Uint
 /** One fetch: acknowledgments when the client is still negotiating, then the packs after
  * the newest stored tip it has, streamed from R2 in side-band pkt-lines. */
 function fetchReply(loaded: Loaded, args: FetchArgs, version: 2 | 0) {
-  const { packs, gap } = servedRefs(loaded);
-  const { from, to, common } = selectPacks(packs, args.wants, args.haves);
-  const chosen = packs.slice(from, to + 1);
+  const { packs, lanes, gap } = servedRefs(loaded);
+  const selected = selectFetch(packs, lanes, args.wants, args.haves);
+  const { from, to, common } = selected;
+  const chosen = [...packs.slice(from, to + 1), ...selected.lanes.map(i => lanes[i]!.pack!)];
   const ack = pkt(common ? `ACK ${common}\n` : 'NAK\n');
   if (version === 0 && !args.done) return gitReply('result', ack);
   const bytes = chosen.length ? new PackJoiner(chosen).bytes : emptyPack().length;
@@ -322,13 +356,46 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   const credential = session ? null : presentedCredential(request.headers.get('authorization'));
   if (credential === 'invalid')
     return unauthorized('Use a Forge login token (nforge login) as the password.');
+  const v2 = !session && /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
+  const kind = route.service === 'info/refs' ? 'advertisement' : 'result';
+  const gzipped = /gzip/i.test(request.headers.get('content-encoding') ?? '');
+  let body = route.service === 'info/refs' ? new Uint8Array(0) : new Uint8Array(await request.arrayBuffer());
+  // Signed-in requests read Lane refs in the same query: the built page for a listing (plus the
+  // Lanes it names), or a fetch's wanted commits. Bodies that do not parse answer after access.
+  const laneArgs = (): LaneArgs | undefined => {
+    if (!credential) return undefined;
+    if (route.service === 'info/refs') return v2 ? undefined : { list: true, named: [], commits: [] };
+    try {
+      if (!v2) return { list: false, named: [], commits: parseV0Request(body).wants };
+      const command = parseV2Request(body);
+      if (command.command === 'ls-refs') return { list: true, named: namedLanes(command.args), commits: [] };
+      if (command.command === 'fetch')
+        return { list: false, named: [], commits: parseFetchArgs(command.args).wants };
+    } catch {}
+    return undefined;
+  };
+  let lanes = gzipped ? undefined : laneArgs();
+  // Git sends no credentials while anonymous reads work (public projects). A listing that names
+  // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is.
+  if (!credential && v2 && !gzipped && route.service === 'git-upload-pack') {
+    let named: string[] = [];
+    try {
+      const command = parseV2Request(body);
+      if (command.command === 'ls-refs') named = namedLanes(command.args);
+    } catch {}
+    if (named.length)
+      return unauthorized(
+        'Lane refs are for project members: sign in with a Forge login token (nforge login) as the password.',
+      );
+  }
   const reload = async () =>
     (await ctx.runQuery(internal.gitServeStore.load, {
       ...route.project,
       ...(credential ? { credential } : {}),
+      ...(lanes ? { lanes } : {}),
       ...(session?.c ? { sessionCredentialId: session.c } : {}),
     })) as Loaded | { status: 'bad-credential' } | { status: 'not-found'; signedIn: boolean };
-  const loaded = await reload();
+  let loaded = await reload();
   if (session && loaded.status !== 'ok')
     return loaded.status === 'not-found' ? text(404, 'Repository not found.') : sessionEnded();
   if (loaded.status === 'bad-credential')
@@ -337,8 +404,6 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   if (loaded.status === 'not-found')
     return loaded.signedIn ? text(404, 'Repository not found.') : unauthorized();
   const again = reload as () => Promise<Loaded>;
-  const v2 = !session && /(^|[:\s])version=2($|[:\s])/.test(request.headers.get('git-protocol') ?? '');
-  const kind = route.service === 'info/refs' ? 'advertisement' : 'result';
   try {
     if (route.service === 'info/refs') {
       if (session) return gitReply(kind, advertiseV0((await preparedRefs(ctx, loaded, again)).refs, false));
@@ -351,11 +416,14 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       if (v2) return gitReply(kind, advertiseV2());
       return gitReply(kind, advertiseV0((prepared ?? (await preparedRefs(ctx, loaded, again))).refs));
     }
-    let body = new Uint8Array(await request.arrayBuffer());
-    if (/gzip/i.test(request.headers.get('content-encoding') ?? ''))
+    if (gzipped) {
       body = new Uint8Array(
         await ctx.runAction(internal.gitServeInflate.gunzip, { body: body.slice().buffer }),
       );
+      // Members only: a gzipped body names its Lanes after decoding, so they cost one more query.
+      lanes = loaded.member ? laneArgs() : undefined;
+      if (lanes) loaded = (await reload()) as Loaded;
+    }
     if (session) {
       const reply = await workerFetch(
         ctx,
@@ -369,7 +437,10 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
     if (!v2) return fetchReply(loaded, parseV0Request(body), 0);
     const command = parseV2Request(body);
     if (command.command === 'ls-refs')
-      return gitReply(kind, lsRefs((await preparedRefs(ctx, loaded, again)).refs, command.args));
+      return gitReply(
+        kind,
+        lsRefs((await preparedRefs(ctx, loaded, again, namedLanes(command.args))).refs, command.args),
+      );
     if (command.command === 'fetch') return fetchReply(loaded, parseFetchArgs(command.args), 2);
     throw new ForgeError('GIT_UNSUPPORTED', `Forge does not serve the Git "${command.command}" command.`);
   } catch (error) {

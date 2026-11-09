@@ -64,7 +64,7 @@ export type MirrorPlan = {
 /** Paths a mirror commit's tree holds: every tracked path except Forge metadata
  * (`tracked`), or, for a commit an older mirror wrote, also without credential-looking
  * names (`legacy`, `sourceExclusion`). Gitlinks are always published. */
-const published = (rule: 'tracked' | 'legacy') => (file: NativeFile) =>
+export const published = (rule: 'tracked' | 'legacy') => (file: NativeFile) =>
   file.mode === 'gitlink' || !(rule === 'tracked' ? publicationExclusion : sourceExclusion)(file.path);
 function diff(files: NativeFile[], next: NativeFile[]) {
   const old = new Map(files.map(file => [file.path, file]));

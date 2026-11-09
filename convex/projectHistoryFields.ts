@@ -39,6 +39,10 @@ export const historyTables = {
     error: v.optional(v.object({ code: v.string(), message: v.string() })),
     /** A read is fetching the catch-up pack for `tip`; other reads wait for it or the lease end. */
     catchUp: v.optional(v.object({ tip: v.string(), until: v.number() })),
+    /** Git blob ids of source objects (Lane refs, Issue 09367fb2): one R2 JSON object mapping
+     * SHA-256 → [git blob id, size, gitlink commit, is an LFS pointer], rewritten per Lane build
+     * for the blobs of that Lane's head and base only, so it stays about two States in size. */
+    laneAliases: v.optional(historyChunk),
     /** SHA-1 trailer of one joined pack set, for the Worker byte path (it does not hash);
      * `key` is the digest of the set's pack SHA-1s. */
     joined: v.optional(v.object({ key: v.string(), sha1: v.string() })),
@@ -63,6 +67,23 @@ export const historyTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_project_and_tip', ['projectId', 'tip']),
+  /** One built Git commit per Lane, made on the first Git fetch of its saved head and replaced
+   * when the head moves (Issue 09367fb2). Never written by a save. The pack holds the commit and
+   * the trees and blobs its parent commit lacks; absent when the head equals its base. */
+  projectGitLaneCommits: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    /** The saved head State and base receipt this commit was built from. */
+    head: v.string(),
+    baseReceiptId: v.string(),
+    commit: v.string(),
+    parent: v.string(),
+    pack: v.optional(v.object({ chunks: v.array(historyChunk), bytes: v.number(), objects: v.number() })),
+    at: v.number(),
+  })
+    .index('by_project', ['projectId'])
+    .index('by_project_and_lane', ['projectId', 'laneId'])
+    .index('by_project_and_commit', ['projectId', 'commit']),
   /** Worker byte-path use per UTC day: `scope` is a project id, or '*' for every project. */
   gitWorkerUsage: defineTable({
     scope: v.string(),

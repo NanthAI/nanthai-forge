@@ -27,14 +27,45 @@ git clone https://<deployment>.convex.site/git/<projectId>.git   # same project 
 
 ## Refs
 
-Forge lists `HEAD` (a symbolic ref to `refs/heads/main`) and `refs/heads/main`, nothing
-else. `refs/heads/main` is the newest commit Forge stores Git objects for. When hosted
-main has landings not yet published as Git commits, a fetch prints a `remote:` line
-naming the gap; main is never silently stale.
+Forge lists `HEAD` (a symbolic ref to `refs/heads/main`) and `refs/heads/main` to
+everyone who can read the project. `refs/heads/main` is the newest commit Forge stores
+Git objects for. When hosted main has landings not yet published as Git commits, a fetch
+prints a `remote:` line naming the gap; main is never silently stale.
 
-Lane refs are not served yet: a Lane is a Forge State without Git commit objects.
-When they are, they will be named `refs/forge/lanes/<laneId>` and listed only to
-project members.
+### Lane refs
+
+Project members (the owner, contributors and readers the project granted) also get one
+read-only ref per open Lane: `refs/forge/lanes/<laneId>`. Anonymous readers and signed-in
+strangers of a public project never see them.
+
+```sh
+git fetch origin refs/forge/lanes/<laneId>:refs/remotes/origin/lane
+git diff origin/main...origin/lane     # the Lane's saved change
+```
+
+A Lane has no Git commits of its own, so the first fetch that names a Lane makes one for
+its saved head and caches it per Lane:
+
+- **Parent:** main's Git commit for the Lane's base (the commit main's GitHub mirror
+  published for that State). Forge builds the base tree from the base State and checks it
+  equals that commit's tree; otherwise the fetch fails with `GIT_LANE_TREE` and no ref is
+  made. A base main has no Git commit yet: `GIT_LANE_BASE_UNPUBLISHED` (sync the Lane or
+  retry once the mirror publishes it).
+- **Tree:** the saved files, published exactly as the mirror publishes main (Forge
+  metadata paths left out, Git LFS paths as pointers, submodules as gitlinks).
+- **Author and committer:** the Lane owner's public Forge handle (`handle/agent` when an
+  agent saved it) at `<handle>@users.noreply.forge`, at the save time. The message is the
+  save message with `Forge-Lane:` and `Forge-State:` trailers. The same saved head always
+  gives the same commit id.
+
+A save writes no Git objects. A ref moves only when it is fetched again after a save; a
+moved Lane is not listed until a fetch names it. Closed Lanes are not listed. Listings
+show the Lanes already built (newest 50) plus the ones named; a fetch names at most 8.
+
+Git sends no credentials while anonymous reads work, as on a public project. A listing
+that names a Lane ref answers `401`, so Git retries with the member's token. A plain
+`git ls-remote` of a public project stays anonymous; add the token to see Lane refs, for
+example `git -c "http.extraHeader=Authorization: Bearer <token>" ls-remote <url>`.
 
 ## What is served
 
@@ -62,12 +93,23 @@ are refused (`GIT_UNSUPPORTED`).
 ## Cost and limits
 
 Each HTTP request is one Convex HTTP action and one query that reads the credential,
-project, history row, at most 256 pack rows and two small pins. A clone is three requests
+project, history row, at most 256 pack rows and two small pins; for members also at most
+50 built Lane rows with their Lane rows (a listing) or the rows of the wanted commits (a
+fetch). A clone is three requests
 (six calls), whatever the file or commit count; a fetch with nothing new is two requests
 (four calls) and reads nothing from R2. Pack bytes are one presigned R2 GET per 32 MiB
 chunk and leave through the HTTP action (Convex data egress). Gzipped request bodies
 (Git compresses requests over 1 KiB) cost one extra Node action call to decode, bounded
 at 1 MiB. Nothing runs while no one uses Git: no timers, scheduling or polling.
+
+The first fetch of a Lane head adds one build action: one query for the plan, one query
+per 100 source objects it reads, one record mutation, and R2 PUTs for the Lane pack (the
+commit, plus the trees and blobs its parent lacks) and an alias object. It reads the bytes
+of blobs whose Git id is not cached yet (the first build of a project reads every file of
+the base and head once) and of the Lane's new blobs. Later fetches of the same head read
+the cached row. A Lane fetch sends history after the newest stored commit the client has,
+plus the Lane pack. Into a repository without main, that history can repeat an object of
+the Lane pack, which `transfer.fsckObjects` rejects; fetch main first.
 
 A Convex HTTP response is at most 100 MiB. Without the large-pack Worker, a fetch whose pack
 is larger returns `GIT_PACK_TOO_LARGE` with its size.
@@ -86,7 +128,7 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   then, on every request, the credential row (revoked, expired, scope) and current project
   access, exactly like the direct route. A path segment `unpublished-landings` in the
   redirect says hosted main is ahead of the newest Git commit (this path has no `remote:`
-  line).
+  line). Lane refs are not listed on this route yet: a large project serves main only.
 - **Bytes.** On this route the backend speaks protocol v0 without side-band, so the pack is
   raw bytes. For the final fetch it returns a byte plan instead of the pack: the ACK/NAK
   line, the R2 object keys (whole chunks, or ranges that drop each pack's header and

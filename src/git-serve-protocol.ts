@@ -69,8 +69,11 @@ export function parsePktLines(bytes: Uint8Array): PktLine[] {
   return lines;
 }
 
-/** What the server lists: HEAD points at refs/heads/main. */
-export type GitRefs = { main: string };
+/** What the server lists: HEAD points at refs/heads/main; project members also see
+ * the Lane refs already built (refs/forge/lanes/<laneId>). */
+export type LaneRef = { laneId: string; commit: string };
+export type GitRefs = { main: string; lanes?: LaneRef[] };
+export const laneRefName = (laneId: string) => `refs/forge/lanes/${laneId}`;
 export const agent = 'agent=forge/1';
 
 /** v2 capability advertisement (GET info/refs with Git-Protocol: version=2). Only
@@ -95,6 +98,7 @@ export function advertiseV0(refs: GitRefs, sideband = true) {
     flushPkt,
     pkt(`${refs.main} HEAD\0${capabilities}\n`),
     pkt(`${refs.main} refs/heads/main\n`),
+    ...(refs.lanes ?? []).map(lane => pkt(`${lane.commit} ${laneRefName(lane.laneId)}\n`)),
     flushPkt,
   ]);
 }
@@ -119,13 +123,17 @@ export function parseV2Request(bytes: Uint8Array): V2Request {
   return { command, capabilities, args };
 }
 
-/** v2 ls-refs reply: HEAD (symref to main) and refs/heads/main, filtered by ref-prefix. */
+/** v2 ls-refs reply: HEAD (symref to main), refs/heads/main and any Lane refs, filtered by ref-prefix. */
 export function lsRefs(refs: GitRefs, args: string[]) {
   const prefixes = args.filter(arg => arg.startsWith('ref-prefix ')).map(arg => arg.slice(11));
   const symrefs = args.includes('symrefs');
   const listed = [
     { name: 'HEAD', line: `${refs.main} HEAD${symrefs ? ' symref-target:refs/heads/main' : ''}\n` },
     { name: 'refs/heads/main', line: `${refs.main} refs/heads/main\n` },
+    ...(refs.lanes ?? []).map(lane => ({
+      name: laneRefName(lane.laneId),
+      line: `${lane.commit} ${laneRefName(lane.laneId)}\n`,
+    })),
   ].filter(ref => !prefixes.length || prefixes.some(prefix => ref.name.startsWith(prefix)));
   return concatBytes([...listed.map(ref => pkt(ref.line)), flushPkt]);
 }
