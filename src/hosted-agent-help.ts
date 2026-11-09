@@ -36,6 +36,8 @@ export const hostedAgentHelpEntries = [
 export function hostedAgentHelp(action?: string) {
   const canonical =
     action === 'checkpoint' ? 'save' : action === 'run' ? 'check' : action === 'landing' ? 'observe' : action;
+  if (canonical === 'log')
+    return 'nforge agent ROOT log \'{"runId":"RUN_ID","tail":8192}\'\nPrints the retained, redacted output of a hosted check run (a bounded tail of what Forge keeps, at most 64 KiB per job): the output on stdout, one line about it on stderr. runId is the check run in a status, observe or wait receipt. Optional: tail (bytes, 1 to 65536, default 8192), stream "stdout"|"stderr", shard, attempt, json:true (structured result with streams, status and provider link). Same access as the run: project members, or anyone for a public project. The full log stays with the provider (the stderr line names its link). One manifest query, one per 50 streams and one signed download per chunk read; idle 0.\n';
   const entries = canonical
     ? hostedAgentHelpEntries.filter(entry => entry.action === canonical)
     : hostedAgentHelpEntries;

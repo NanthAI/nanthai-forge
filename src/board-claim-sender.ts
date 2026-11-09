@@ -11,12 +11,14 @@ import {
   claimSpoolPending,
   drainClaimSpool,
   releaseClaimLock,
+  spawnSender,
+  type SpawnSender,
 } from './board-claim-queue.js';
 import { clientCacheRoot } from './root-paths.js';
 
 /** First writes within this window share one claim mutation. */
 export const CLAIM_BATCH_WINDOW_MS = 1_500;
-/** At most this many windows per sender process (then the next first write starts a new one). */
+/** At most this many windows per sender process (then it hands a pending spool to a fresh sender). */
 export const CLAIM_SENDER_ROUNDS = 8;
 const BATCH = 10;
 
@@ -49,7 +51,7 @@ const sleep = (ms: number) => new Promise(done => setTimeout(done, ms));
 /** Runs while holding the lock. Returns the mutations made (one per ≤10 paths per window). */
 export async function runClaimSender(
   lane: { root: string; laneId: string; project: string; url: string },
-  options: { mutate?: ClaimMutate; windowMs?: number; rounds?: number } = {},
+  options: { mutate?: ClaimMutate; windowMs?: number; rounds?: number; handoff?: SpawnSender } = {},
 ) {
   let calls = 0,
     held = true,
@@ -84,6 +86,13 @@ export async function runClaimSender(
       } catch {
         /* Advisory: drop this batch. */
       }
+    }
+    // Rounds spent. First writes spooled during the last window found the lock held and queued
+    // behind it; releasing now would leave them unsent until some later first write. Pass the lock
+    // on to a fresh sender instead (the lock file stays; the successor owns it).
+    if (claimSpoolPending(lane.root, lane.laneId)) {
+      (options.handoff ?? spawnSender)(lane);
+      held = false;
     }
     return calls;
   } finally {

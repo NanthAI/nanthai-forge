@@ -237,13 +237,21 @@ function briefSync(result: Json): Json | undefined {
   };
 }
 
-/** A flaky file that passed on retry: its name and the start of its first error (attempt timings are --detail). */
+/** A flaky file: its name, whether the retry passed, and the start of its first error (attempt timings are
+ * --detail). A file is listed as flaky only when it failed an attempt and then ended passing, so `retry` is
+ * `passed`; it reads the last recorded attempt when the report has them, never assuming. */
 function briefFlaky(entry: unknown): unknown {
   const flaky = obj(entry),
     report = obj(flaky?.report);
   if (!flaky || !report) return entry;
   const error = typeof report.firstError === 'string' ? report.firstError.slice(0, 160) : undefined;
-  return { file: flaky.file, ...(error ? { firstError: error } : {}) };
+  const attempts = Array.isArray(report.attempts) ? report.attempts : [],
+    last = obj(attempts.at(-1));
+  return {
+    file: flaky.file,
+    retry: last?.failed === true ? 'failed' : 'passed',
+    ...(error ? { firstError: error } : {}),
+  };
 }
 
 /** A landing that reached `landed`: the receipt and State, plus failed or flaky test files if any. */

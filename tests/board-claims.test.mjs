@@ -394,6 +394,50 @@ test('claim queue + sender: one sender per Lane, first writes in one window shar
   });
 });
 
+test('incident replay (flaky board-claims): first writes spooled in the sender’s last window are handed on, not stranded', async () => {
+  await withState(async root => {
+    const lane = { root, laneId: randomUUID(), project: 'p1', url: 'https://fixture.invalid' };
+    const lock = join(clientCacheRoot(root), 'board', `${lane.laneId}.claims.lock`);
+    assert.equal(
+      queueBoardClaim({ ...lane, path: 'first.ts' }, () => {}),
+      'started',
+    );
+    const sent = [],
+      handed = [];
+    // Two rounds only. A first write lands during each send: the first is taken by round two; the one
+    // during round two's send finds the lock held, queues, and no round is left to take it.
+    const calls = await runClaimSender(lane, {
+      windowMs: 5,
+      rounds: 2,
+      handoff: value => handed.push(value),
+      mutate: async args => {
+        sent.push(args.paths);
+        assert.equal(
+          queueBoardClaim({ ...lane, path: `late-${sent.length}.ts` }, () => assert.fail('lock is held')),
+          'queued',
+        );
+      },
+    });
+    assert.equal(calls, 2);
+    assert.deepEqual(sent, [['first.ts'], ['late-1.ts']]);
+    assert.deepEqual(handed, [lane], 'a fresh sender takes over the pending claim');
+    assert.equal(existsSync(lock), true, 'the lock passes to the successor, never dropped in between');
+    assert.deepEqual(drainClaimSpool(root, lane.laneId), ['late-2.ts']);
+    // Nothing pending after the last round: no successor, the lock is released.
+    rmSync(lock, { force: true });
+    queueBoardClaim({ ...lane, path: 'last.ts' }, () => {});
+    const none = [];
+    await runClaimSender(lane, {
+      windowMs: 5,
+      rounds: 1,
+      handoff: value => none.push(value),
+      mutate: async () => {},
+    });
+    assert.deepEqual(none, []);
+    assert.equal(existsSync(lock), false);
+  });
+});
+
 test('real hook with claims on: one query, CPU p95 under 200 ms, claims batched by the detached sender', t => {
   const measured = runResourceWorker('./board-claims-budget-worker.mjs');
   t.diagnostic(JSON.stringify(measured));

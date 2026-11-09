@@ -94,7 +94,7 @@ export const claimSpoolPending = (root: string, laneId: string) => {
 
 export type SpawnSender = (target: Omit<ClaimTarget, 'path'>) => void;
 const senderScript = () => join(dirname(fileURLToPath(import.meta.url)), 'board-claim-sender.js');
-const spawnSender: SpawnSender = target => {
+export const spawnSender: SpawnSender = target => {
   const child = spawn(
     process.execPath,
     [senderScript(), target.root, target.laneId, target.project, target.url],

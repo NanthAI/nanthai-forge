@@ -663,6 +663,14 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       return;
     return await (await import('./hosted-history-output.js')).hostedHistoryCli(root, selected, hosted);
   }
+  if (action === 'log' && hosted) {
+    if (
+      options.beforeDispatch &&
+      !(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))
+    )
+      return;
+    return await (await import('./hosted-check-log-output.js')).hostedCheckLogCli(root, selected, hosted);
+  }
   invariant(
     selected.action === undefined ||
       (typeof selected.action === 'string' && canonical(selected.action) === action),

@@ -452,8 +452,12 @@ test('anything that is not a healthy outcome keeps its detail', t => {
     ],
   };
   const kept = slimReceipt(flaky).result.submissions[0].submission.testFiles.flaky[0];
-  assert.deepEqual(Object.keys(kept), ['file', 'firstError']);
+  assert.deepEqual(Object.keys(kept), ['file', 'retry', 'firstError']);
+  assert.equal(kept.retry, 'passed', 'the landing result says the retry passed');
   assert.equal(kept.firstError.length, 160);
+  // Without recorded attempts the file is still only listed because it ended passing.
+  flaky.result.submissions[0].submission.testFiles.flaky[0].report = { firstError: 'x' };
+  assert.equal(slimReceipt(flaky).result.submissions[0].submission.testFiles.flaky[0].retry, 'passed');
   const queued = structuredClone(healthy.land);
   queued.result.submission.phase = 'ready';
   delete queued.result.submission.acceptance;

@@ -14,7 +14,7 @@ export function hostedActionAlternative(action: string) {
   if (['land-ready', 'land'].includes(action))
     return 'Use land --save with the full original request to submit or resume (--no-wait returns after submission); use wait {operationIds:[ORIGINAL_UUID]} to wait.';
   if (action === 'log')
-    return 'Use observe {runId} for check status and the returned CI provider link for logs.';
+    return 'Use log {runId} for the retained tail of a check run, observe {runId} for check status and the returned CI provider link for the full log.';
   if (['records', 'candidates', 'candidate', 'views', 'view'].includes(action))
     return 'Use status {laneId} for a Lane or planning for the hosted backlog.';
   return 'Use capabilities for deployment actions and nforge agent ROOT --help in a hosted checkout for accepted parameters.';

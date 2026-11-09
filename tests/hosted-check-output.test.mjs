@@ -12,6 +12,7 @@ import {
   signOutput,
   outputMessageSchema,
 } from '../dist/hosted-check-output.js';
+import { hostedCheckLog } from '../dist/hosted-check-log.js';
 const pin = value => ({
   sha256: createHash('sha256').update(value).digest('hex'),
   size: Buffer.byteLength(value),
@@ -334,4 +335,55 @@ test('log PUT retries one transient 403 once and a second 403 is a storage refus
   assert.deepEqual(await run([403, 200]), { result: 'stored', puts: 2, waits: 1 });
   assert.deepEqual(await run([403, 403, 200]), { result: 'R2_VERIFY_FAILED', puts: 2, waits: 1 });
   assert.deepEqual(await run([500]), { result: 'R2_VERIFY_FAILED', puts: 1, waits: 0 });
+});
+
+test('one command returns a hosted check run’s retained output as a bounded tail, with the same access rules (friction f5ca5653)', async () => {
+  const s = await outputFixture();
+  const parts = ['AAAA\n', 'BBBB\n', 'CCCC\n'];
+  for (const [i, text] of parts.entries()) await s.apply(chunk(s, i, text, i * 5));
+  await s.apply(seal(s, 3, parts.join('')));
+  const downloads = [];
+  const transport = (actor = 'owner') => ({
+    query: async (name, args) => {
+      if (name === 'projectHostedOutputRead:manifest') return s.manifest(actor);
+      assert.equal(name, 'projectHostedOutputRead:streams');
+      return s.streams(args.cursor, actor);
+    },
+    mutation: async (name, args) => {
+      assert.equal(name, 'projectHostedOutputRead:download');
+      downloads.push(args.sequence);
+      return { object: pin(parts[args.sequence]), url: `https://r2.invalid/${args.sequence}` };
+    },
+  });
+  const request = async url => new Response(parts[Number(new URL(url).pathname.slice(1))]);
+  // The default is a tail; a small one reads only the newest chunks, never the whole log.
+  const tail = await hostedCheckLog({ runId: s.check.id, tail: 8 }, transport(), request);
+  assert.equal(tail.text, 'BB\nCCCC\n');
+  assert.equal(tail.truncated, true);
+  assert.deepEqual(downloads, [2, 1], 'newest chunks first, stopping once the tail is full');
+  downloads.length = 0;
+  const all = await hostedCheckLog({ runId: s.check.id }, transport(), request);
+  assert.equal(all.text, parts.join(''));
+  assert.equal(all.truncated, false);
+  assert.deepEqual(downloads.sort(), [0, 1, 2]);
+  assert.deepEqual(all.streams, [
+    { shard: 0, attempt: 0, stream: 'stdout', bytes: 15, sealed: true, retired: false },
+  ]);
+  assert.equal(
+    (await hostedCheckLog({ runId: s.check.id, stream: 'stderr' }, transport(), request)).text,
+    '',
+  );
+  // Corrupt bytes never print; a caller without access to the project is refused as for the web view.
+  await assert.rejects(
+    hostedCheckLog({ runId: s.check.id }, transport(), async () => new Response('XXXX\n')),
+    error => error.code === 'R2_OBJECT_CHECKSUM_MISMATCH',
+  );
+  await assert.rejects(
+    hostedCheckLog({ runId: s.check.id }, transport('stranger'), request),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  await assert.rejects(
+    hostedCheckLog({ runId: 'nope' }, transport(), request),
+    error => error.name === 'ZodError',
+  );
 });
