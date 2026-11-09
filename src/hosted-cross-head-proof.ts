@@ -1,7 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { FIRST_CHECK_RISK_RULES, globalRiskBetween, riskRuleSince } from './first-check-risk.js';
+import {
+  FIRST_CHECK_RISK_RULES,
+  globalRiskBetween,
+  orderSensitiveRisk,
+  riskRuleSince,
+} from './first-check-risk.js';
+import { FAST_RELAXED } from './landing-mode.js';
 import { markdownPath, TESTED_DOCS_RULE } from './tested-docs.js';
 import { validPlacedRisk } from './package-placement.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
@@ -74,17 +80,38 @@ const cleanDisjointProof = z
       .optional(),
   })
   .strict();
+/** Fast landing mode (Issue 81d12a32): clean-disjoint-v2's composition rules, but the named refusal
+ * classes were relaxed because the project has earned fast mode and its main audit was fresh. Never
+ * holds an order-sensitive risk path. The main audit verifies the new head at once. */
+const fastFirstCheckProof = z
+  .object({
+    algorithm: z.literal('fast-first-check-v1'),
+    ...cleanDisjointV1,
+    docsOverlap: z.array(z.string()),
+    testedDocsRule: z.literal(TESTED_DOCS_RULE),
+    relaxed: z.array(z.enum(FAST_RELAXED)).min(1).max(FAST_RELAXED.length),
+    /** The global-risk paths that were relaxed (first 32). */
+    riskPaths: z.array(z.string().min(1)).max(32),
+  })
+  .strict();
 /** Server analysis of verified immutable bytes, never a client assertion. */
 export const crossHeadProofSchema = z.discriminatedUnion('algorithm', [
   conservativeImpactProof,
   cleanDisjointProofV1,
   cleanDisjointProof,
+  fastFirstCheckProof,
 ]);
+export type FastFirstCheckProof = z.infer<typeof fastFirstCheckProof>;
+/** A proof that needs the project's earned fast mode and a fresh audit when it is published. */
+export const fastProof = (proof: CrossHeadProof | undefined): proof is FastFirstCheckProof =>
+  proof?.algorithm === 'fast-first-check-v1';
 export type CrossHeadProof = z.infer<typeof crossHeadProofSchema>;
 export type CleanDisjointProof = z.infer<typeof cleanDisjointProof>;
-/** A proof that landed a change on its first check (any clean-disjoint version). */
+/** A proof that landed a change on its first check (any clean-disjoint version, or fast mode). */
 export const firstCheckProof = (proof: CrossHeadProof | undefined) =>
-  proof?.algorithm === 'clean-disjoint-v1' || proof?.algorithm === 'clean-disjoint-v2';
+  proof?.algorithm === 'clean-disjoint-v1' ||
+  proof?.algorithm === 'clean-disjoint-v2' ||
+  proof?.algorithm === 'fast-first-check-v1';
 /** True when a path of one list equals, contains or sits inside a path of the other. Linear in the
  * total path depth: each path checks its own ancestors against the other list's set. */
 export function pathsOverlap(a: string[], b: string[]) {
@@ -98,13 +125,30 @@ export function pathsOverlap(a: string[], b: string[]) {
   return a.some(x => inB.has(x) || underAny(x, inB)) || b.some(y => underAny(y, inA));
 }
 export function validCrossHeadProof(proof: CrossHeadProof) {
-  const docs = proof.algorithm === 'clean-disjoint-v2' ? proof.docsOverlap : [];
+  const docs =
+    proof.algorithm === 'clean-disjoint-v2' || proof.algorithm === 'fast-first-check-v1'
+      ? proof.docsOverlap
+      : [];
   const rest = (paths: string[]) => paths.filter(path => !docs.includes(path));
   if (
     pathsOverlap(rest(proof.candidatePaths), proof.mainPaths) ||
     pathsOverlap(proof.candidatePaths, rest(proof.mainPaths))
   )
     return false;
+  if (proof.algorithm === 'fast-first-check-v1')
+    return (
+      proof.candidatePaths.length > 0 &&
+      proof.mainPaths.length > 0 &&
+      docs.every(
+        path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
+      ) &&
+      // A relaxed class is named for what it relaxed, and nothing order-sensitive is ever relaxed.
+      (!proof.relaxed.includes('tested-doc') || docs.length > 0) &&
+      proof.relaxed.includes('global-risk') ===
+        globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule) &&
+      orderSensitiveRisk(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule).length ===
+        0
+    );
   if (proof.algorithm !== 'conservative-impact-v1')
     return (
       proof.candidatePaths.length > 0 &&

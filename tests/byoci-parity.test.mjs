@@ -117,7 +117,7 @@ const scenarios = [
   ],
   [
     'a change to the check entry rechecks',
-    ['global-risk'],
+    ['order-sensitive'],
     check => ({
       memberPaths: [entry(check), 'packages/b/src/b.ts'],
       fileCount: 2,
@@ -185,8 +185,8 @@ test('parity: the setup action entry is global-risk like the check entry', async
     fileCount: 2,
     noOwnerApproval: true,
   });
-  assert.deepEqual(outcome.decisions, ['global-risk']);
-  assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'global-risk' });
+  assert.deepEqual(outcome.decisions, ['order-sensitive']);
+  assert.deepEqual(outcome.firstCheck[1], { landedOn: 'recheck', reason: 'order-sensitive' });
   // Listed difference: the standard check's extra inputs are its own; the project's are what it names.
   assert.deepEqual(checkRunEntryPaths(project), ['ci/check.sh', 'ci/setup.sh']);
   assert(checkRunEntryPaths(standard).includes('scripts/forge-check.mjs'));

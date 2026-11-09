@@ -182,6 +182,62 @@ The Lane check never re-runs because main moved. Re-running it would race main
 again (model finding 5, moving-main starvation) and add a full run per move; the
 combined check verifies the same interaction once per cohort.
 
+## Landing modes
+
+`acceptance.landingMode` chooses what a moved main costs. Absent is `strict`. The rule is
+`src/landing-mode.ts`, one derive shared by the server, the CLI and the web.
+
+| Mode | What it promises | When a moved main needs the second check |
+| --- | --- | --- |
+| `strict` (default) | A change lands on a check of exactly its content, or on its own check when it is proved disjoint from what main gained. With `hostedCrossHeadReuse:false` only the exact check lands. | Every refusal of the first-check rule above. |
+| `fast` | A change lands on its own check; main is verified after the landing and recovers fast: the audit finds a break, Forge reverts the one proven culprit or opens a fix. Fast mode does not promise that main is always green. | `path-overlap`, `order-sensitive`, a text conflict, a scoped first run, a changed link, unreadable evidence, and any time fast mode is not in effect. |
+
+Fast mode relaxes two refusal classes and nothing else: `tested-doc` (a clean text merge of a
+Markdown file that a test reads) and `global-risk` that is not order-sensitive (manifests,
+lockfiles, build and test-runner setup, other root files). The receipt's proof is
+`fast-first-check-v1`; it names the classes it relaxed (`relaxed`) and the risk paths.
+
+**Order-sensitive risk always gets the second check**, in both modes, and is recorded as
+`order-sensitive`: database schema files; a migration, fixture or snapshot folder both sides
+changed; the check's own entry files, check contract and declared `globalRiskPaths`; CI
+configuration; lint, format and type-rule configuration (`tsconfig*.json`, ESLint, Oxlint,
+Prettier, Biome, Ruff, RuboCop, Clippy and similar). To keep any other path on the second
+check, declare it in the check's `globalRiskPaths`.
+
+**Fast is earned per project.** The policy is the owner's consent; the project's own audit
+history is the evidence. Fast mode carries a landing only while all three hold:
+
+1. the policy is `fast`;
+2. the project has earned it: 200 audited landings since the last red audit, fewer than 5% of
+   landings whose audit gave no clean verdict, and one red audit on record that was detected
+   and recovered (a red-audit drill, or a real one);
+3. the main audit is fresh: main is not red, no audit newer than the last green ended
+   without a verdict, at most 10 landings are unaudited and the oldest of them is at most
+   60 minutes old. Freshness is checked when the proof is decided and again in the
+   transaction that publishes it. A change that lands on main's own exact full check has no
+   lag to bound.
+
+Otherwise the landing gets the second check, and a passed second check is itself a full audit
+of main. A red audit takes the earned state away: the count restarts from zero. Counters
+halve at 800 landings, so the share follows recent history. They live on the project's main
+audit row and are written only by transactions that already write it.
+
+**Flake policy.** A failed audit re-runs its failing files once on the same head. A pass there
+vouches for the audit: it is recorded as a `flake`, main is not red and fast mode is not lost.
+Each flaky or stalled audit counts as "no clean verdict"; at 5% fast mode is un-earned, because
+a flaky suite turns red audits into false culprit hunts. The retry count is fixed at one.
+
+**Advice.** Forge never edits the policy. `check-settings` (`mainAudit.landing`), the web
+project settings and the next land receipt show the mode, what is in effect, progress toward
+earning, and one next step only when the project should switch: on once earned, off after a
+red audit or when audits are often stalled or flaky.
+
+```sh
+nforge x ROOT set-policy '{"acceptance":{"landingMode":"fast"}}'
+```
+
+Switching the mode never invalidates a queued landing: it is read when a proof is decided.
+
 ## Three test tiers
 
 Each tier answers a different question. None depends on a particular CI provider.

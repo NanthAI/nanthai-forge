@@ -70,6 +70,13 @@ npm run model:landing-queue -- firstcheck-revert      # expected: the single cul
 npm run model:landing-queue -- firstcheck-two         # two suspects: nothing reverted, fixed forward
 npm run model:landing-queue -- firstcheck-two-fix     # expected: the fix-forward path is taken (witness)
 npm run model:landing-queue -- firstcheck-mixed       # two breaks among three changes
+npm run model:landing-queue -- fast                   # fast landing mode: earned, fresh, one audit stall (81d12a32)
+npm run model:landing-queue -- fast-witness           # expected: a relaxed-class change is carried (witness)
+npm run model:landing-queue -- fast-decision          # expected: freshness checked only at decision publishes on a stale audit
+npm run model:landing-queue -- fast-break             # a relaxed-class break: audit, revert or fix, fast lost, no lost work
+npm run model:landing-queue -- fast-strict            # policy strict: a relaxed class is never carried
+npm run model:landing-queue -- fast-unearned          # policy fast, not earned: nothing is carried
+npm run model:landing-queue -- fast-earn              # expected: drill, audited landing, then a fast carry (witness)
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -274,6 +281,44 @@ break reaches main.
   `Incidents` litmus reductions model abstract heads and entry phases, not
   accepted content, so `NoLostWork` has no meaning there; they were re-run
   unchanged.
+
+## Landing modes (Issue 81d12a32)
+
+`Fast` is the project policy (`acceptance.landingMode: "fast"`). `Relaxed` names changes the
+first-check rule refuses only for a class fast mode relaxes (a tested-doc overlap, or global
+risk that is not order-sensitive); an order-sensitive or overlapping change is in neither
+`Independent` nor `Relaxed` and always takes the second check. `Carries(s)` replaces the
+`Independent` test in `Reuse`, `LaneRefused` and `EarlyRefusal`: a group carries when it is
+`Independent`, or when `FastOK` and it is `Independent` or `Relaxed`.
+
+- `Earned`: `q.audited >= EarnAfter` (audited landings since the last red audit) and
+  `q.drilled` (a red audit was recovered by `Revert` or `FixForward`). Code: 200 landings,
+  under 5% unclear audits, a drill on record (`src/landing-mode.ts`); the unclear share is
+  not modelled.
+- `Fresh`: main not red, no stalled audit, at most `StaleAfter` unaudited landings. Code adds
+  the age bound of the oldest unaudited landing; time is not modelled.
+- A carried landing (`Reuse`) is audit debt (`q.unaudited`); an exact check of the new head
+  is its own audit and counts toward earning, as does `AuditGreen`. `AuditRed` sets
+  `q.audited` to 0. `AuditStall` (at most `Stalls` times, not fair) ends an audit without a
+  verdict; `AuditRetry` (fair) clears it.
+- `FreshAt = "publish"` is the code: `Publish` requires `FastOK` again for a group that was
+  carried by a relaxation (`b.fast`), and `LaneRefused` returns a lapsed fast group to the
+  second check. `"decision"` is the litmus.
+
+Properties: `FastSound` (every landing carried by a relaxation was published while the policy
+was fast, the project had earned it and the audit was fresh), `LostOnRed` (a red main is never
+earned), `NeverFast` (holds in strict and unearned configurations; the witness elsewhere), and
+the existing S1, S3, `NoLostWork`, `NoBlindRevert`, `MainRecovers`, L1 and L2.
+
+Finding 10. **Freshness checked only when the proof is decided is not enough.** In
+`fast-decision` a stalled or red audit, or new audit debt, between `Reuse` and `Publish` lets
+a fast landing publish on a stale audit (`FastSound` violated). Fix: the publication
+transaction checks earned and fresh again (`convex/projectHostedAcceptancePublish.ts`,
+`fastLanding`); replayed in `tests/hosted-first-check-landing.test.mjs` ("refused at
+publication once the audit has stalled").
+
+With `Fast = FALSE` the new state never changes: `fast-strict` explores exactly the states of
+`prequeue-early` (152,165 generated, 50,065 distinct).
 
 ## Model-to-code map and simplifications
 

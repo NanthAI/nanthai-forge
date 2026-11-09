@@ -7,8 +7,9 @@ import { loadCompose } from './projectHostedComposeStore';
 import { hostedWriteProject } from './projectHostedRecords';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import { saveObject } from './projectHostedSaveStore';
-import { mainGate } from './projectHostedMainAuditState';
-import { auditRow } from './projectHostedMainAuditState';
+import { mainGate, auditRow, auditFreshness, VERIFIED_MAIN } from './projectHostedMainAuditState';
+import { fastEffective } from '../src/landing-mode';
+import { fastProof } from '../src/hosted-cross-head-proof';
 import { acceptanceRow } from './projectHostedAcceptanceStore';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { hostedAcceptanceSchema } from '../src/hosted-acceptance';
@@ -189,6 +190,12 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     selection: run.plan.selection.sha256,
     // The project's own check and setup-action entry files are global-risk (any runner).
     checkEntries: checkRunEntryPaths(run.check),
+    // Fast landing mode: the policy asks for it, the project has earned it, the audit is fresh.
+    fast: fastEffective(
+      policy.acceptance.landingMode,
+      savedAudit?.earned,
+      sourceKind === 'main-receipt' ? VERIFIED_MAIN : auditFreshness(savedAudit, audit),
+    ),
     basis: {
       checked,
       checkedBase,
@@ -262,7 +269,10 @@ export const complete = internalMutation({
     // The same decision reuseContext makes; a refusal keeps its own reason.
     const decision = await reuseDecision(ctx, input);
     const current = 'reason' in decision ? null : decision;
-    const proof = input.proof && current ? crossHeadProofSchema.parse(JSON.parse(input.proof)) : undefined;
+    const analysed = input.proof && current ? crossHeadProofSchema.parse(JSON.parse(input.proof)) : undefined;
+    // A fast proof stands only while fast mode is still effective in this transaction.
+    const lapsed = fastProof(analysed) && !current?.fast ? analysed : undefined;
+    const proof = lapsed ? undefined : analysed;
     if (proof && current)
       invariant(
         Object.entries(current.basis).every(
@@ -282,7 +292,11 @@ export const complete = internalMutation({
       value,
       proof || undefined,
       undefined,
-      proof ? undefined : 'reason' in decision ? decision.reason : (input.reason ?? 'source-unavailable'),
+      proof
+        ? undefined
+        : 'reason' in decision
+          ? decision.reason
+          : (lapsed?.relaxed[0] ?? input.reason ?? 'source-unavailable'),
     );
     return null;
   },

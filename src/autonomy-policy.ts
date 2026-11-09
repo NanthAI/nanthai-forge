@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
@@ -48,6 +49,10 @@ export const autonomyPolicySchema = z.object({
     autoRevert: z.boolean().optional(),
     /** Hosted clean-recomposition proof; absent means on. Independent of native fast path. */
     hostedCrossHeadReuse: z.boolean().optional(),
+    /** Hosted landing mode (src/landing-mode.ts); absent is strict. `fast` also lands a change on its
+     * own check across a tested-doc or non-order-sensitive global-risk overlap, only while the project
+     * has earned it and the main audit is fresh. Read live, so a change never invalidates a landing. */
+    landingMode: landingModeSchema.optional(),
     /** Hosted main-race recheck under the contract gate: run only tests affected by
      * both the main delta and this change; absent means on. */
     scopedRecheck: z.boolean().optional(),

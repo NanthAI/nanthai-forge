@@ -19,6 +19,7 @@ import { settingsHref } from './SettingsLayout';
 import { Panel, Button, Avatar } from '../ui/primitives';
 import HostedGuidance from './HostedGuidance';
 import { Autonomy } from './Autonomy';
+import { LandingMode } from './LandingMode';
 import HostedChecks from './HostedChecks';
 import { SettingsLayout, type SettingsItem } from './SettingsLayout';
 export default function HostedSettings({
@@ -171,7 +172,10 @@ export default function HostedSettings({
       )}
       {section === 'autonomy' &&
         (policy ? (
-          <Autonomy policy={policy} editable={owner} save={save} hosted />
+          <>
+            <Autonomy policy={policy} editable={owner} save={save} hosted />
+            <LandingMode projectId={projectId} owner={owner} save={save} />
+          </>
         ) : (
           <p role="status">Reading autonomy…</p>
         ))}

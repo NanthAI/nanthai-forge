@@ -79,6 +79,17 @@ export function agentSourceOutcome(value: unknown) {
 }
 /** The journal key holding the public-logs notice of the runner a check was selected on. */
 export const checkLogsKey = 'check-logs';
+/** The journal key holding the landing-mode advice of the project (src/landing-mode.ts), when it should switch. */
+export const landingAdviceKey = 'landing-advice';
+/** The advice the server derived for `check-settings` (`mainAudit.landing`): its next step when the
+ * project should switch landing mode, else null. Read from a reply the caller already has. */
+export function landingAdvice(mainAudit: unknown): string | null {
+  const parsed = z
+    .object({ landing: z.object({ advice: z.object({}).loose().nullable(), nextStep: z.string() }).loose() })
+    .loose()
+    .safeParse(mainAudit);
+  return parsed.success && parsed.data.landing.advice ? parsed.data.landing.nextStep.slice(0, 800) : null;
+}
 export async function checkSelection(
   session: HostedAgentSession,
   command: z.infer<typeof hostedAgentCommandSchemas.finish>['check'],
@@ -129,6 +140,9 @@ export async function checkSelection(
   // From the settings row this selection already read: the receipt names public logs plainly.
   const { checkLogs } = checkLogsField(settings.configuration);
   if (checkLogs) await session.journal.retain(checkLogsKey, () => checkLogs);
+  // The same settings row carries the project's landing mode: the next agent's next step (81d12a32).
+  const advice = landingAdvice(settings.mainAudit);
+  if (advice) await session.journal.retain(landingAdviceKey, () => advice);
   return {
     kind: 'request' as const,
     checkId: command.checkId,

@@ -294,7 +294,8 @@ The list of codes and their kind lives in `src/fallback-reasons.ts`:
 
 Reuse codes: `not-eligible`, `not-tried`, `cohort`, `reuse-policy`, `main-red`,
 `audit-debt`, `text-conflict`, `check-evidence`, `audit-baseline`, `path-overlap`,
-`tested-doc`, `global-risk`, `composition-not-exact`, `unsupported-mode`,
+`tested-doc`, `global-risk`, `order-sensitive` (global risk that the
+[fast landing mode](pre-queue-checks.md#landing-modes) never relaxes), `composition-not-exact`, `unsupported-mode`,
 `checked-not-full`, `audit-not-full`, `source-unavailable`, `analysis-expired`.
 
 A **limitation** is a fallback where Forge could not use its fast path for this repository

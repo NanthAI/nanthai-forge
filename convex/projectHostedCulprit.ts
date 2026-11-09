@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { earnedAfterUnclear } from '../src/landing-mode';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
@@ -621,6 +622,8 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
         unaudited: { count, firstAt },
         debt: count ? auditDebt(count, firstAt, settings) : false,
         ...(!count ? { wake: undefined } : {}),
+        // Flake policy (81d12a32): the later pass vouches for the audit, the flake is counted.
+        earned: earnedAfterUnclear(auditRow.earned, covered),
       });
       if (count) await armAudit(ctx, auditRow, auditDue(count, firstAt, settings));
       await ctx.scheduler.runAfter(

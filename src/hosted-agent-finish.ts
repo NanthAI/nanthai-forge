@@ -13,7 +13,12 @@ import { composeAgentSource, composedRevertOf, selectAgentLane } from './hosted-
 import { recoverHostedCandidate } from './hosted-agent-resolution.js';
 import { settleCheckOnlyCompose } from './hosted-check-only-compose.js';
 import { inPlaceResolution, refuseUnsavedResolution } from './hosted-conflict-precheck.js';
-import { agentSourceOutcome, checkLogsKey, checkSelection } from './hosted-agent-actions.js';
+import {
+  agentSourceOutcome,
+  checkLogsKey,
+  checkSelection,
+  landingAdviceKey,
+} from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
 import { shellQuote } from './agent-brief-render.js';
@@ -222,9 +227,12 @@ export async function executeHostedFinish(session: HostedAgentSession, input: un
   const notSaved = session.journal.get<NotSaved>(finishNotSavedKey);
   // Retained by the check selection (no extra read): the runner's logs are public.
   const checkLogs = session.journal.get<string>(checkLogsKey);
+  // Present only when the project should switch landing mode (earned fast, or fast after a red audit).
+  const landingAdvice = session.journal.get<string>(landingAdviceKey);
   const receipt = {
     ...(result as Record<string, unknown>),
     ...(checkLogs ? { checkLogs } : {}),
+    ...(landingAdvice ? { landingAdvice } : {}),
     ...(defaults ? { defaults } : {}),
     ...(notSaved ? { notSaved } : {}),
     // Changed paths this landing carries against the Lane's base; null when the base manifest is not cached.

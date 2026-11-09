@@ -54,6 +54,7 @@ export const prove = internalAction({
           );
         },
         context.checkEntries,
+        context.fast === true,
       );
     } catch (error) {
       // No partial certificate authorizes reuse. Transport/parse errors retain the

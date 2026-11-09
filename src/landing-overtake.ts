@@ -78,6 +78,7 @@ export function sealedOlder(target: SealedTarget) {
 const DEPENDENT_REFUSALS = new Set([
   'path-overlap',
   'global-risk',
+  'order-sensitive',
   'tested-doc',
   'composition-not-exact',
   'text-conflict',

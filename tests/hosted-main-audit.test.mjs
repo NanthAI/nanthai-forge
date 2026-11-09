@@ -169,6 +169,37 @@ test('full-gate failure requests early audit; a failed contract does not', async
   assert.equal(f.pending().length, 1);
 });
 
+test('audit history earns fast landing: green verdicts count, a stalled audit is unclear, a recovered red is the drill and costs the count (81d12a32)', async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  assert.deepEqual(f.row().earned, { audited: 1, unclear: 0 }, 'an exact full landing audits itself');
+  for (let i = 0; i < 12; i++) await f.land();
+  await f.tick(f.pending()[0]);
+  await f.terminal();
+  assert.deepEqual(f.row().earned, { audited: 13, unclear: 0 }, 'one green audit covers all twelve');
+  await f.land();
+  await f.start();
+  await f.terminal('runner-unavailable');
+  assert.deepEqual(f.row().earned, { audited: 13, unclear: 1 });
+  // Its one retry fails: main is red. The stalled landing is not counted a second time.
+  await f.tick(f.pending()[0]);
+  await f.terminal('failed');
+  assert.deepEqual(f.row().earned, { audited: 13, unclear: 1 });
+  assert.equal((await readStatus(f)).landing.effective, 'strict');
+  // A full-gated fix ends the red episode: the drill is on record, and earning restarts from zero.
+  const fix = await f.land('full');
+  const earned = f.row().earned;
+  assert.deepEqual([earned.audited, earned.unclear, earned.lost.reason], [0, 0, 'red']);
+  assert.deepEqual(earned.drill, {
+    at: fix.receipt.at,
+    sequence: fix.receipt.snapshot.revision,
+    reverted: false,
+  });
+  const landing = (await readStatus(f)).landing;
+  assert.deepEqual([landing.mode, landing.state, landing.advice], ['strict', 'strict', null]);
+  assert.deepEqual(landing.progress, { audited: 0, needed: 200, unclearShare: 0, drill: true });
+});
+
 test('identical content is never dispatched twice and an unavailable audit retries only once', async () => {
   const f = await auditFixture();
   await f.land();

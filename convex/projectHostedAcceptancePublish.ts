@@ -3,7 +3,7 @@ import { scheduleLandingPrecompose } from './projectHostedLandingPrecompose';
 import { trackHostedOverlapMain } from './projectHostedOverlapStore';
 import { hostedAcceptGate, holdMainRed } from './projectHostedGate';
 import { protectedGatePaths, protectedPathMatches, reducedEvidenceActor } from '../src/contract-gate-policy';
-import { noteMainLanding, mainGate } from './projectHostedMainAuditState';
+import { noteMainLanding, mainGate, fastLanding } from './projectHostedMainAuditState';
 import { noteTrustLanding, trustGateReader } from './projectHostedTrust';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { enqueueGithubMirror } from './projectGithubMirrorQueue';
@@ -35,7 +35,7 @@ import { scheduleWouldConflict } from './projectHostedLandingWouldConflict';
 import { governanceReason, requiresGovernedCheck } from '../src/public-governance';
 import { landingDocsUndo } from '../src/docs-resolution';
 import { invariant } from '../src/errors';
-import { validCrossHeadProof } from '../src/hosted-cross-head-proof';
+import { validCrossHeadProof, fastProof } from '../src/hosted-cross-head-proof';
 import { requireReuseAudit } from './projectHostedReuseAudit';
 import { acceptedLandingMessage } from './projectHostedLandingMessage';
 import { alertSecretAllowAdded } from './projectHostedSecretAllow';
@@ -164,6 +164,13 @@ export async function publishAcceptance(
       !audit.debt && audit.status !== 'red',
       'CHECK_EVIDENCE_REFRESH',
       'Main audit changed; prepare fresh evidence.',
+    );
+    // A fast-mode proof is published only while the project has earned fast mode and the audit is
+    // fresh, checked here again in the publication transaction (81d12a32, review note N2).
+    invariant(
+      !fastProof(reuse) || (await fastLanding(ctx, project, audit, reuse.audit.source === 'main-receipt')),
+      'CHECK_EVIDENCE_REFRESH',
+      'Fast landing is not in effect now; prepare fresh evidence.',
     );
     await requireReuseAudit(ctx, {
       projectId: claim.projectId,

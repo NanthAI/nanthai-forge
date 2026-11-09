@@ -45,6 +45,16 @@ export const mainAuditFields = {
   /** Newest main revision that landed on its first check (7fe54c7c); audited promptly. */
   firstCheck: v.optional(v.number()),
   wake: v.optional(v.object({ taskId: v.id('_scheduled_functions'), at: v.number() })),
+  /** What the project's audit history has earned toward fast landing mode (src/landing-mode.ts,
+   * 81d12a32). Written only in transactions that already write this row. */
+  earned: v.optional(
+    v.object({
+      audited: v.number(),
+      unclear: v.number(),
+      drill: v.optional(v.object({ at: v.string(), sequence: v.number(), reverted: v.boolean() })),
+      lost: v.optional(v.object({ at: v.string(), reason: v.literal('red') })),
+    }),
+  ),
   /** Consecutive audit starts that could not run (53b07031); cleared once one does. */
   startFailure: v.optional(
     v.object({ attempts: v.number(), code: v.string(), message: v.string(), at: v.string() }),

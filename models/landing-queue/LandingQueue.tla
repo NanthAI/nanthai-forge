@@ -21,6 +21,17 @@ CONSTANTS Hold
 \* on main (a path-disjoint semantic break). Only the main audit sees it after a
 \* first-check landing; recovery reverts one proven culprit or fixes forward.
 CONSTANTS Breaks
+\* Landing modes (81d12a32). Fast: the project policy asks for fast mode. Relaxed:
+\* changes the first-check rule refuses only for a class fast mode relaxes
+\* (tested-doc, or global-risk that is not order-sensitive). Fast carries them on
+\* their own Lane run only while the project has earned it (EarnAfter audited
+\* landings since the last red audit and one recovered red on record) and the
+\* audit is fresh (main not red, no stalled audit, at most StaleAfter unaudited
+\* landings). Earned0: the project starts earned. Stalls: how many audits may end
+\* without a verdict. FreshAt "publish" is the code (freshness is checked again in
+\* the publication transaction); "decision" is the litmus that checks it only
+\* when the proof is decided. With Fast = FALSE nothing below changes state.
+CONSTANTS Fast, Relaxed, EarnAfter, StaleAfter, Earned0, Stalls, FreshAt
 OneCohort == [e \in 1..N |-> 1]
 Entries == 1..N
 SingletonCohorts == [e \in Entries |-> e]
@@ -40,7 +51,7 @@ vars == <<q, main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 \* Entry reasons, accepted counts, actual main and fresh receipt names remain.
 Empty == [phase |-> "idle", members |-> {}, included |-> {}, rejected |-> {},
           base |-> {}, rev |-> 0, head |-> {}, proof |-> <<>>, retries |-> 0, pred |-> 0, receipt |-> 0,
-          lane |-> FALSE]
+          lane |-> FALSE, fast |-> FALSE]
 
 Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
                                   THEN IF PreQueue THEN "checking" ELSE "queued" ELSE "new"],
@@ -53,14 +64,22 @@ Init == /\ q = [phase |-> [e \in Entries |-> IF InitiallyQueued
                 lbase |-> [e \in Entries |-> {}], lrev |-> [e \in Entries |-> 0],
                 lretries |-> [e \in Entries |-> 0], tried |-> {},
                 expired |-> {}, early |-> FALSE,
-                red |-> FALSE, reverted |-> {}, fixed |-> {}]
+                red |-> FALSE, reverted |-> {}, fixed |-> {},
+                unaudited |-> 0, audited |-> IF Earned0 THEN EarnAfter ELSE 0,
+                stalled |-> FALSE, stalls |-> 0, drilled |-> Earned0]
         /\ main = {} /\ stamp = 0 /\ moves = 0
-        /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE]
+        /\ counts = [e \in Entries |-> 0] /\ audit = [cas |-> TRUE, exact |-> TRUE, authorized |-> TRUE, fresh |-> TRUE, used |-> FALSE]
         /\ running = TRUE /\ crashes = 0 /\ claim = 0 /\ fence = 0
 Live == {e \in Entries : q.phase[e] \notin Terminal \cup {"new"}}
 \* A composed head fails its check when an unfixed break sits beside other content.
 Fails(h) == \E e \in (h \cap Breaks) \ q.fixed : h \ {e} # {}
 Broken == (main \cap Breaks) \ q.fixed
+\* Fast mode is effective only while earned and fresh; otherwise the second check runs.
+Earned == q.audited >= EarnAfter /\ q.drilled
+Fresh == ~q.red /\ ~q.stalled /\ q.unaudited <= StaleAfter
+FastOK == Fast /\ Earned /\ Fresh
+Carries(s) == s \subseteq Independent \/ (FastOK /\ s \subseteq Independent \cup Relaxed)
+Least(a, b) == IF a <= b THEN a ELSE b
 \* An admitted entry deciding its own proof: not tried yet, or in its one-member
 \* Lane group (exact, proved reuse or refused). A refused member waits for them.
 Deciding == {e \in Entries : PreQueue /\ q.phase[e] = "queued" /\ q.lane[e] = "passed"
@@ -112,7 +131,7 @@ Exact(g) == q.batches[g].base = main /\ q.batches[g].rev = stamp
 PredOK(g) == Exact(g)
 Proof(b) == <<b.base, b.rev, b.head, b.included>>
 Reset(b) == [b EXCEPT !.phase = "composing", !.included = b.members,
-                     !.rejected = {}, !.proof = <<>>, !.pred = 0]
+                     !.rejected = {}, !.proof = <<>>, !.pred = 0, !.fast = FALSE]
 \* Ordinary solo recovery can coexist with a train. Retire only groups whose
 \* pinned predecessor chain depends on the changed generation, not neighbors.
 RECURSIVE Descendants(_, _)
@@ -180,7 +199,7 @@ LaneAdopt(g) ==
 \* member or in a Lane group that publication must refuse, all of one cohort,
 \* and no non-Lane group is active (none can move main before that cohort).
 RefusableLane(h) == q.batches[h].lane /\ q.batches[h].phase = "ready"
-                    /\ ~Exact(h) /\ ~(q.batches[h].included \subseteq Independent)
+                    /\ ~Exact(h) /\ ~Carries(q.batches[h].included)
 EarlyRefusal(g, older) ==
   /\ Hold = "early"
   /\ ~\E h \in Active : ~q.batches[h].lane
@@ -191,7 +210,9 @@ EarlyRefusal(g, older) ==
 \* check, keeping its rank; Claim never waits for its own speculative suffix.
 LaneRefused(g) ==
   /\ PreQueue /\ running /\ claim = 0 /\ q.batches[g].lane /\ q.batches[g].phase = "ready"
-  /\ ~Exact(g) /\ ~(q.batches[g].included \subseteq Independent)
+  \* A fast carry whose earned or fresh condition lapsed is refused like any other.
+  /\ \/ ~Exact(g) /\ ~Carries(q.batches[g].included)
+     \/ q.batches[g].fast /\ ~FastOK
   \* In code the refusal happens at publication, after the order claim. The
   \* earlier configurations ("none") keep the simpler unordered refusal.
   /\ (Hold # "none" =>
@@ -332,13 +353,19 @@ Publish(g) ==
   /\ running /\ claim = g /\ q.batches[g].phase = "ready" /\ Exact(g) /\ PredOK(g)
   /\ LET b == q.batches[g] IN
      /\ (b.proof = Proof(b) \/ (AllowReuse /\ Len(b.proof) = 4))
+     /\ (FreshAt = "publish" /\ b.fast => FastOK)
      /\ main' = b.head /\ stamp' = b.receipt
      /\ counts' = [e \in Entries |-> counts[e] + IF e \in b.included THEN 1 ELSE 0]
      /\ audit' = [cas |-> audit.cas /\ main \subseteq b.head /\ b.base = main /\ b.rev = stamp,
                   exact |-> audit.exact /\ b.proof = <<main, stamp, main', b.included>>,
                   authorized |-> audit.authorized /\ Len(b.proof) = 4 /\
-                    b.proof[3] \subseteq main' /\ b.proof[4] = b.included]
+                    b.proof[3] \subseteq main' /\ b.proof[4] = b.included,
+                  fresh |-> audit.fresh /\ (b.fast => FastOK), used |-> audit.used \/ b.fast]
+     \* An exact full check of the new head is its own audit; a carried landing is audit debt.
      /\ q' = [q EXCEPT !.batches[g] = Empty,
+               !.unaudited = IF ~Fast \/ b.proof = Proof(b) THEN 0 ELSE @ + 1,
+               !.audited = IF Fast /\ b.proof = Proof(b) THEN Least(EarnAfter, @ + q.unaudited + 1) ELSE @,
+               !.stalled = @ /\ ~(b.proof = Proof(b)),
                !.phase = [e \in Entries |-> IF e \in b.included THEN "landed" ELSE q.phase[e]],
                !.train = Keep(@, Range(@) \ {g})]
   /\ claim' = 0
@@ -368,29 +395,43 @@ Restart == /\ ~running /\ running' = TRUE /\ claim' = 0 /\ fence' = fence + 1
 Reuse(g) == /\ AllowReuse /\ running /\ claim = 0 /\ ~Exact(g) /\ ~q.red
             /\ q.batches[g].phase = "ready" /\ q.batches[g].pred = 0
             /\ q.batches[g].base \subseteq main
-            /\ (PreQueue => q.batches[g].included \subseteq Independent)
+            /\ (PreQueue => Carries(q.batches[g].included))
             /\ q' = [q EXCEPT !.batches[g].base = main, !.batches[g].rev = stamp,
+                              !.batches[g].fast = PreQueue /\ ~(q.batches[g].included \subseteq Independent),
                               !.batches[g].head = main \cup q.batches[g].included]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 \* The coalesced main audit, armed at once after a first-check landing, finds the
 \* break on main (the audit's own CI run replaces the skipped recheck).
-AuditRed == /\ running /\ ~q.red /\ Fails(main)
-            /\ q' = [q EXCEPT !.red = TRUE]
+AuditRed == /\ running /\ ~q.red /\ ~q.stalled /\ Fails(main)
+            \* A red audit loses earned fast mode: the project re-earns it from zero.
+            /\ q' = [q EXCEPT !.red = TRUE, !.audited = 0]
             /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 \* One proven culprit: its reverse is an ordinary landing on current main (new
 \* receipt, same CAS) that removes only that change's content. Main never
 \* rewinds; every other landing stays. The culprit's Lane and Intent are kept.
 Revert(e) == /\ running /\ claim = 0 /\ q.red /\ Broken = {e}
              /\ main' = main \ {e} /\ stamp' = FreshReceipt
-             /\ q' = [q EXCEPT !.reverted = @ \cup {e}, !.red = Fails(main \ {e})]
+             /\ q' = [q EXCEPT !.reverted = @ \cup {e}, !.red = Fails(main \ {e}),
+                               !.drilled = @ \/ ~Fails(main \ {e}),
+                               !.unaudited = IF Fails(main \ {e}) THEN @ ELSE 0]
              /\ UNCHANGED <<moves, counts, audit, running, crashes, claim, fence>>
 \* Several suspects, or a reverse that conflicts (any red main may take this
 \* path): nothing is reverted; a fix-forward lands on top, keeping every change.
 FixForward == /\ running /\ claim = 0 /\ q.red
               /\ main' = main \cup {0} /\ stamp' = FreshReceipt
-              /\ q' = [q EXCEPT !.fixed = @ \cup Broken, !.red = FALSE]
+              /\ q' = [q EXCEPT !.fixed = @ \cup Broken, !.red = FALSE, !.drilled = TRUE, !.unaudited = 0]
               /\ UNCHANGED <<moves, counts, audit, running, crashes, claim, fence>>
-Recover == AuditRed \/ (\E e \in Entries : Revert(e)) \/ FixForward
+\* The audit of a healthy main covers every unaudited landing; they count toward earning.
+AuditGreen == /\ Fast /\ running /\ ~q.red /\ ~q.stalled /\ q.unaudited > 0 /\ ~Fails(main)
+              /\ q' = [q EXCEPT !.unaudited = 0, !.audited = Least(EarnAfter, @ + q.unaudited)]
+              /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* An audit that ends without a verdict (runner outage). Its one retry is fair; the stall is not.
+AuditStall == /\ Fast /\ running /\ ~q.stalled /\ q.stalls < Stalls /\ q.unaudited > 0
+              /\ q' = [q EXCEPT !.stalled = TRUE, !.stalls = @ + 1]
+              /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+AuditRetry == /\ running /\ q.stalled /\ q' = [q EXCEPT !.stalled = FALSE]
+              /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+Recover == AuditRed \/ (\E e \in Entries : Revert(e)) \/ FixForward \/ AuditGreen \/ AuditRetry
 StaleClaim(g) == /\ running /\ claim = g /\ (~Exact(g) \/ q.batches[g].phase # "ready") /\ claim' = 0
                  /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
 \* The hold's one-shot wake at its bound (HOSTED_TRAIN_HOLD_MS). Not fair here, so
@@ -404,7 +445,7 @@ Driver(g) == Admit(g) \/ AdmissionFailure(g) \/ LaneAdopt(g) \/ LaneRefused(g)
              \/ (\E o \in {"pass", "test", "infra"} : Check(g, o))
 Next == (\E e \in Entries : Submit(e) \/ Gate(e) \/ Precompose(e) \/ Cancel(e) \/ HoldExpire(e))
         \/ (\E g \in Entries : Driver(g) \/ Reuse(g) \/ Fallback(g) \/ (\E e \in Entries : CancelBatch(g,e)))
-        \/ MoveMain \/ Crash \/ Restart \/ Recover
+        \/ MoveMain \/ Crash \/ Restart \/ Recover \/ AuditStall
 Spec == Init /\ [][Next]_vars /\ WF_vars(Restart) /\ WF_vars(Recover)
         /\ \A g \in Entries : WF_vars(Driver(g))
 \* Focused seven-entry scenario reaches six occupied pipeline slots, then
@@ -433,6 +474,8 @@ TypeOK == /\ main \subseteq Entries \cup {0} /\ stamp \in ReceiptNames
           /\ q.tried \subseteq Entries /\ q.expired \subseteq Entries /\ q.early \in BOOLEAN
           /\ q.suspect \subseteq Entries /\ q.unstacked \subseteq Entries
           /\ q.red \in BOOLEAN /\ q.reverted \subseteq Entries /\ q.fixed \subseteq Entries
+          /\ q.unaudited \in 0..N /\ q.audited \in 0..EarnAfter /\ q.stalls \in 0..Stalls
+          /\ q.stalled \in BOOLEAN /\ q.drilled \in BOOLEAN
 S1 == audit.cas /\ {e \in Entries : counts[e] > 0} \ q.reverted \subseteq main
 \* No lost code (owner 2026-11-06): every accepted change is on main, or it was
 \* the one proven culprit of a red main and is recorded as reverted (its Lane and
@@ -447,6 +490,13 @@ NeverFixed == q.fixed = {}
 \* A red main always recovers (revert or fix-forward), and no main stays broken.
 MainRecovers == (Fails(main) \/ q.red) ~> (~Fails(main) /\ ~q.red)
 S2 == audit.exact
+\* Every landing carried by a fast relaxation was published while the policy was
+\* fast, the project had earned it and the audit was fresh (81d12a32, review note N2).
+FastSound == audit.fresh
+\* Strict mode never carries a relaxed class; in a fast config this is the witness (expected to fail).
+NeverFast == ~audit.used
+\* A red audit always costs the earned state.
+LostOnRed == q.red => ~Earned
 AuthorizedEvidence == audit.authorized
 S3 == \A e \in Entries : counts[e] <= 1
 UniqueRanks == Cardinality({q.rank[e] : e \in {x \in Entries : q.rank[x] > 0}}) =

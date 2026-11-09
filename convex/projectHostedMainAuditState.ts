@@ -21,6 +21,14 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
+import {
+  earnedAfterGreen,
+  earnedAfterUnclear,
+  fastEffective,
+  landingModeView,
+  type AuditFreshness,
+} from '../src/landing-mode';
+import { effectivePolicy } from '../src/autonomy-policy';
 
 export const auditRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) =>
   ctx.db
@@ -64,6 +72,47 @@ export async function mainGate(
       (pending.count > 0 && auditDebt(pending.count, pending.firstAt, await auditSettings(ctx, projectId))),
     hold: row?.red ? 'main-red' : null,
   });
+}
+/** Audit freshness for fast landing mode (review note N2): the gate, plus whether an audit newer
+ * than the last green ended without a verdict or could not start. From rows already read. */
+export function auditFreshness(
+  row: Doc<'projectHostedMainAudits'> | null,
+  gate: Pick<MainGate, 'status' | 'unaudited'>,
+): AuditFreshness {
+  const inconclusive =
+    !!row?.audit &&
+    hostedCheckTerminal(row.audit) &&
+    row.audit.status !== 'failed' &&
+    (row.lastGreen?.sequence ?? -1) < row.audit.sequence;
+  return {
+    status: gate.status,
+    unaudited: gate.unaudited,
+    stalled: inconclusive || Boolean(row?.startFailure && row.unaudited?.count),
+  };
+}
+/** Main's current head is itself an exact full pass (the proof's `main-receipt` baseline): verified
+ * at this head, so there is no audit lag to bound. */
+export const VERIFIED_MAIN: AuditFreshness = {
+  status: 'green',
+  unaudited: { count: 0, firstAt: null },
+  stalled: false,
+};
+/** Whether a fast-mode proof may carry a landing right now: policy, earned history and a fresh
+ * audit. `verifiedMain`: the proof's baseline is the current main receipt, re-checked by its caller. */
+export async function fastLanding(
+  ctx: QueryCtx | MutationCtx,
+  project: Doc<'hostedProjects'>,
+  gate: MainGate,
+  verifiedMain: boolean,
+) {
+  const mode = effectivePolicy(project).acceptance.landingMode;
+  if (mode !== 'fast') return false;
+  const row = await auditRow(ctx, project._id);
+  return fastEffective(
+    mode,
+    row?.earned,
+    verifiedMain && gate.status !== 'red' ? VERIFIED_MAIN : auditFreshness(row, gate),
+  );
 }
 export async function mainRed(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   return Boolean((await auditRow(ctx, projectId))?.red);
@@ -196,6 +245,14 @@ export async function noteMainLanding(
       debt: false,
       wake: undefined,
       startFailure: undefined,
+      // An exact full pass audits this landing and every unaudited one below it.
+      earned: earnedAfterGreen(
+        row.earned,
+        (row.unaudited?.count ?? 0) + 1,
+        row.red
+          ? { at: receipt.at, sequence: receipt.snapshot.revision, reverted: Boolean(row.red.culprit) }
+          : undefined,
+      ),
     });
     if (row.red) {
       await auditEvent(
@@ -291,6 +348,11 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       red: undefined,
       debt: false,
       ...(count ? {} : { startFailure: undefined }),
+      earned: earnedAfterGreen(
+        row.earned,
+        meta.count,
+        row.red ? { at, sequence: meta.sequence, reverted: Boolean(row.red.culprit) } : undefined,
+      ),
     });
     await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence);
     await releaseMainHolds(ctx, projectId);
@@ -323,7 +385,11 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
       meta.firstAt && (!row.unaudited?.firstAt || meta.firstAt < row.unaudited.firstAt)
         ? meta.firstAt
         : row.unaudited!.firstAt;
-    await ctx.db.patch(row._id, { unaudited: { count: row.unaudited!.count, firstAt } });
+    await ctx.db.patch(row._id, {
+      unaudited: { count: row.unaudited!.count, firstAt },
+      // Counted once per audit, not again for its retry.
+      ...(meta.attempt === 0 ? { earned: earnedAfterUnclear(row.earned, meta.count) } : {}),
+    });
     await auditEvent(ctx, row, 'stalled', at, run.request.expectedHead, run.id, meta.sequence);
     // A reduced pass is inconclusive, not a runner outage. Keep the actual run
     // result and debt; the next landing re-evaluates cadence without a hot retry.
@@ -379,6 +445,7 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     if (firstAt && (!pending.firstAt || firstAt < pending.firstAt)) pending.firstAt = firstAt;
   }
   const green = row?.lastGreen && row.lastGreen.sequence >= (row.audit?.sequence ?? -1);
+  const project = await ctx.db.get(projectId);
   const failedStart =
     row?.startFailure &&
     row.startFailure.attempts >= mainAuditStartNoticeAttempts &&
@@ -393,6 +460,15 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     redMinutes: row?.red ? Math.max(0, Date.now() - Date.parse(row.red.since)) / 60_000 : 0,
     lastGreen: row?.lastGreen ?? null,
     unaudited: pending,
+    // One derive of the landing mode for status, the CLI and the web (src/landing-mode.ts).
+    landing: landingModeView(
+      project ? effectivePolicy(project).acceptance.landingMode : undefined,
+      row?.earned,
+      auditFreshness(row, {
+        status: row?.red ? 'red' : row?.lastGreen ? 'green' : 'unknown',
+        unaudited: pending,
+      }),
+    ),
     alarm: failedStart
       ? { code: 'MAIN_AUDIT_STALLED', step: failedStart.code, runId: null, message: failedStart.message }
       : retainedStall || overdue

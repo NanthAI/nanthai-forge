@@ -7,8 +7,15 @@ import {
   pathsOverlap,
   type CleanDisjointProof,
   type CrossHeadProof,
+  type FastFirstCheckProof,
 } from './hosted-cross-head-proof.js';
-import { FIRST_CHECK_RISK_RULE, globalRiskBetween } from './first-check-risk.js';
+import {
+  FIRST_CHECK_RISK_RULE,
+  firstCheckRiskPaths,
+  globalRiskBetween,
+  orderSensitiveRisk,
+} from './first-check-risk.js';
+import type { FastRelaxed } from './landing-mode.js';
 import { markdownPath, pinnedTestedDocs, TESTED_DOCS_RULE } from './tested-docs.js';
 import { pinnedPackagePlacement, placeableRisk, placedRiskBetween } from './package-placement.js';
 
@@ -22,12 +29,15 @@ export type FirstCheckRecheck =
   | 'path-overlap'
   | 'tested-doc'
   | 'global-risk'
+  | 'order-sensitive'
   | 'composition-not-exact'
   | 'unsupported-mode'
   | 'checked-not-full'
   | 'audit-not-full'
   | 'source-unavailable';
-export type FirstCheckDecision = { proof: CleanDisjointProof } | { reason: FirstCheckRecheck };
+export type FirstCheckDecision =
+  | { proof: CleanDisjointProof | FastFirstCheckProof }
+  | { reason: FirstCheckRecheck };
 const entries = (state: NativeState) => new Map(state.files.map(file => [file.path, file]));
 // Entries are strict {path, blob, mode} records, so equal blob and mode is the whole equality; comparing
 // the fields avoids a schema-validated canonical encoding of every entry of every manifest.
@@ -50,12 +60,18 @@ const json = (bytes: Uint8Array | undefined, pin: string): Record<string, unknow
  * is a Markdown file that no test or script reads (the checked selection's pinned
  * list) and the server composed it as a clean text merge. A manifest or lockfile
  * inside a package is risk only for the packages the checked selection's pinned
- * package graph says it reaches. Any doubt returns a recheck reason. */
+ * package graph says it reaches. Any doubt returns a recheck reason.
+ *
+ * `fast` (the project's earned, fresh fast landing mode, src/landing-mode.ts) relaxes two
+ * refusals: a tested-doc overlap, and global risk that is not order-sensitive. Risk that is
+ * order-sensitive is refused as `order-sensitive` in both modes, so the reason class says what
+ * fast mode would and would not have carried. */
 export async function analyzeCrossHeadReuse(
   basis: Basis,
   selectionPin: string,
   read: Reader,
   checkEntries: readonly string[] = [],
+  fast = false,
 ): Promise<FirstCheckDecision> {
   const heads = [basis.checkedBase.head, basis.checked.head, basis.main.head, basis.head];
   const manifestBytes = await read(heads);
@@ -76,7 +92,12 @@ export async function analyzeCrossHeadReuse(
   // A manifest or lockfile inside a package may still be placed by the checked run's package graph
   // (rule v3, Issue 5cfcca4b); every other risk path decides here, on paths alone.
   const risky = globalRiskBetween(candidatePaths, mainPaths, checkEntries);
-  if (risky && !placeableRisk(candidatePaths, mainPaths, checkEntries)) return { reason: 'global-risk' };
+  const sensitive = risky && orderSensitiveRisk(candidatePaths, mainPaths, checkEntries).length > 0;
+  const riskRefusal = sensitive ? ('order-sensitive' as const) : ('global-risk' as const);
+  const relaxRisk = fast && risky && !sensitive;
+  const relaxed: FastRelaxed[] = [];
+  if (risky && !relaxRisk && !placeableRisk(candidatePaths, mainPaths, checkEntries))
+    return { reason: riskRefusal };
   // The recomposition must be precisely the union of both deltas, including modes/deletions.
   // An overlapping Markdown file is the server's clean text merge: it exists on all four
   // sides as a plain file (no add, delete or mode change) and takes the composed bytes.
@@ -125,20 +146,33 @@ export async function analyzeCrossHeadReuse(
   const checkedScope = selection.scope;
   if (checkedScope !== 'full' && checkedScope !== 'docs') return { reason: 'checked-not-full' };
   if (audit.scope !== 'full') return { reason: 'audit-not-full' };
-  const placed = risky
+  // A placed manifest is the stronger evidence, so it is tried first even in fast mode.
+  const placement = risky
     ? placedRiskBetween(candidatePaths, mainPaths, checkEntries, pinnedPackagePlacement(selection))
     : [];
-  if (!placed) return { reason: 'global-risk' };
+  if (!placement && !relaxRisk) return { reason: riskRefusal };
+  if (!placement) relaxed.push('global-risk');
+  const placed = placement ?? [];
   if (docsOverlap.length) {
     // Tested on the checked source, or on the audited main (when its run pinned a list).
     const checkedDocs = pinnedTestedDocs(selection),
       auditDocs = pinnedTestedDocs(audit);
-    if (!checkedDocs || docsOverlap.some(path => checkedDocs.has(path) || auditDocs?.has(path)))
-      return { reason: 'tested-doc' };
+    if (!checkedDocs || docsOverlap.some(path => checkedDocs.has(path) || auditDocs?.has(path))) {
+      if (!fast) return { reason: 'tested-doc' };
+      relaxed.push('tested-doc');
+    }
   }
   const proof = crossHeadProofSchema.parse({
     ...basis,
-    algorithm: 'clean-disjoint-v2',
+    ...(relaxed.length
+      ? {
+          algorithm: 'fast-first-check-v1',
+          relaxed,
+          riskPaths: relaxed.includes('global-risk')
+            ? firstCheckRiskPaths([...candidatePaths, ...mainPaths], checkEntries).slice(0, 32)
+            : [],
+        }
+      : { algorithm: 'clean-disjoint-v2', ...(placed.length ? { placedRisk: placed } : {}) }),
     candidatePaths,
     mainPaths,
     docsOverlap,
@@ -148,8 +182,7 @@ export async function analyzeCrossHeadReuse(
     riskRule: FIRST_CHECK_RISK_RULE,
     checkEntries: [...checkEntries],
     checkedScope,
-    ...(placed.length ? { placedRisk: placed } : {}),
-  }) as CleanDisjointProof;
+  }) as CleanDisjointProof | FastFirstCheckProof;
   return Buffer.byteLength(canonicalPayload(proof)) <= 128 * 1024
     ? { proof }
     : { reason: 'source-unavailable' };

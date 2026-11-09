@@ -283,6 +283,7 @@ export async function finishFixture(
         context.selection,
         async hashes => hashes.map(hash => c.objects.get(hash) ?? f.rawChecks?.objectBytes?.get(hash)),
         context.checkEntries,
+        context.fast === true,
       );
     } catch (error) {
       if (!(error instanceof Error)) throw error;

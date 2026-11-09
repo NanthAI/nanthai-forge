@@ -226,6 +226,34 @@ export function firstCheckRiskPaths(
   return paths.filter(path => riskOf(path, entries, rule) !== null);
 }
 
+/** Lint, format and type-rule configuration: rules every file is judged by. A new rule on one side
+ * and new code on the other is the classic combination failure, so it is order-sensitive. */
+const RULE_CONFIG =
+  /(?:^|\/)(?:tsconfig[^/]*\.json|jsconfig\.json|\.oxlintrc[^/]*|\.oxfmtrc[^/]*|\.eslintrc[^/]*|eslint\.config\.[^/]+|\.prettierrc[^/]*|prettier\.config\.[^/]+|\.editorconfig|biome\.jsonc?|\.stylelintrc[^/]*|\.rubocop(?:_todo)?\.yml|\.?pylintrc|\.flake8|\.?ruff\.toml|mypy\.ini|pyrightconfig\.json|analysis_options\.yaml|\.?clippy\.toml|\.?rustfmt\.toml|\.golangci\.ya?ml|\.swiftlint\.yml|\.clang-(?:tidy|format)|checkstyle\.xml|detekt\.yml|\.scalafmt\.conf|phpcs\.xml(?:\.dist)?|phpstan\.neon(?:\.dist)?)$/;
+const ORDER_SENSITIVE_REASONS = new Set([
+  'check script or check contract',
+  'CI configuration',
+  'database schema',
+]);
+/** The order-sensitive part of the two sides' global risk (Issue 81d12a32): what the fast landing
+ * mode never relaxes. The check's own entry files, contract and declared `globalRiskPaths`, CI
+ * configuration, database schema, lint/format/type-rule configuration, and a sequence or shared
+ * test folder both sides changed (returned by its folder). Empty means the risk, if any, is of the
+ * relaxable kind: manifests, lockfiles, build and test-runner setup, other root files. */
+export function orderSensitiveRisk(
+  candidatePaths: readonly string[],
+  mainPaths: readonly string[],
+  checkEntries: readonly string[] = [],
+  rule: FirstCheckRiskRule = FIRST_CHECK_RISK_RULE,
+): string[] {
+  const entries = checkEntries.map(entryMatcher);
+  const sensitive = [...candidatePaths, ...mainPaths].filter(path => {
+    const reason = riskOf(path, entries, rule);
+    return reason !== null && (ORDER_SENSITIVE_REASONS.has(reason) || RULE_CONFIG.test(path));
+  });
+  return [...new Set([...sensitive, ...sharedSequenceFolders(candidatePaths, mainPaths, rule)])];
+}
+
 /** True when the two sides' changes together are global-risk under `rule`. */
 export function globalRiskBetween(
   candidatePaths: readonly string[],

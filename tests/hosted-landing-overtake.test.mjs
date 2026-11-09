@@ -173,6 +173,7 @@ test('unsealedBy: only refusals no dependent change caused, and scoped re-checks
   for (const reason of [
     'path-overlap',
     'global-risk',
+    'order-sensitive',
     'tested-doc',
     'composition-not-exact',
     'text-conflict',

@@ -73,6 +73,13 @@ if (config === 'all') {
     'firstcheck-mixed',
     'progresswake',
     'progresswake-fixed',
+    'fast',
+    'fast-witness',
+    'fast-decision',
+    'fast-break',
+    'fast-strict',
+    'fast-unearned',
+    'fast-earn',
   ]) {
     const code = await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [fileURLToPath(import.meta.url), name], { stdio: 'inherit' });

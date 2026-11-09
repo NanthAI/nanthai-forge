@@ -36,6 +36,7 @@ const REUSE = {
   'path-overlap': G,
   'tested-doc': G,
   'global-risk': G,
+  'order-sensitive': G,
   'composition-not-exact': L,
   'unsupported-mode': L,
   'checked-not-full': L,
