@@ -1293,25 +1293,6 @@ export const accepted = internalMutation({
   },
 });
 
-/** A flake has cleared this hold; continue in finite indexed windows, never poll. */
-export const releaseHolds = internalMutation({
-  args: { projectId: v.id('hostedProjects') },
-  returns: v.null(),
-  handler: async (ctx, input) => {
-    const audit = await ctx.db
-      .query('projectHostedMainAudits')
-      .withIndex('by_project', q => q.eq('projectId', input.projectId))
-      .unique();
-    if (audit?.red) return null;
-    await ctx.scheduler.runAfter(
-      0,
-      makeFunctionReference<'mutation'>('projectHostedMainAudit:releaseHeld'),
-      input,
-    );
-    return null;
-  },
-});
-
 /** B2.3 schedules this after the terminal run commits, avoiding a module cycle. */
 export const terminal = internalMutation({
   args: identity,
