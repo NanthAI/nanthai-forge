@@ -103,8 +103,8 @@ only from places that code cannot write (Issue 432164bf). For every CI adapter:
   the toolchains under the home come back (the toolchains read-only, from their install roots, so a
   toolchain nested in another one is bound once). Folders a declared toolchain writes into its own
   install while it runs come as private copies: `ruby` gets its gem folder (`lib/ruby/gems`) and
-  `bin`, so `bundle install` and `gem install` work unchanged; `flutter` gets its SDK's `bin/cache`;
-  `elixir` gets the runner's `~/.mix` (Hex and rebar3 from `setup-beam`). The sandbox copies each
+  `bin`, so `bundle install` and `gem install` work unchanged; `flutter` gets its SDK's `bin/cache`
+  and `packages/flutter_tools` (the tool's first `pub get` writes its `.dart_tool` there); `elixir` gets the runner's `~/.mix` (Hex and rebar3 from `setup-beam`). The sandbox copies each
   folder once per job into `/var/lib/forge-check/state` and mounts the copy, owned by `forge-check`,
   at the original path in the Candidate's view only; the install itself is never made writable or
   changed. Only installs in the runner's tool cache, job temp folder or home count, never a system

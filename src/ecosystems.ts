@@ -505,8 +505,12 @@ export const ECOSYSTEMS: readonly EcosystemEntry[] = [
       // Flutter apps and packages (`sdk: flutter`) take Flutter, which bundles its own Dart.
       tool: ['dart', 'flutter'],
       cache: { pub: { paths: ['~/.pub-cache'], lockfiles: ['**/pubspec.lock'] } },
-      // The flutter tool writes stamps, locks and downloaded engine artifacts into its SDK.
-      state: [{ tool: 'flutter', root: { binary: 'flutter' }, paths: ['bin/cache'] }],
+      // The flutter tool writes stamps, locks and downloaded engine artifacts into its SDK, and its
+      // first `pub get` resolves the tool's own packages into packages/flutter_tools/.dart_tool, which
+      // release archives leave out (checked against 3.47.9 with a read-only SDK).
+      state: [
+        { tool: 'flutter', root: { binary: 'flutter' }, paths: ['bin/cache', 'packages/flutter_tools'] },
+      ],
     },
     checkEnv: {
       // The pub cache also holds globally activated executables (`bin/`): only packages link in.

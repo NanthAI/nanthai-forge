@@ -659,6 +659,8 @@ test('Ruby and Flutter: the toolchain writes go to private copies, the install s
     `${ruby}/bin`,
     `${ruby}/lib/ruby/gems/3.4.0/gems`,
     `${flutter}/bin/cache/dart-sdk/bin`,
+    // Release archives ship the tool's sources but not its .dart_tool, which its first pub get writes.
+    `${flutter}/packages/flutter_tools/lib`,
     `${flutter}/.git`,
     home,
   ])
@@ -681,7 +683,12 @@ test('Ruby and Flutter: the toolchain writes go to private copies, the install s
     ].join(':'),
   };
   assert.deepEqual(toolchainState(env, ['ruby', 'flutter']), {
-    copies: [join(flutter, 'bin/cache'), join(ruby, 'bin'), join(ruby, 'lib/ruby/gems')].sort(),
+    copies: [
+      join(flutter, 'bin/cache'),
+      join(flutter, 'packages/flutter_tools'),
+      join(ruby, 'bin'),
+      join(ruby, 'lib/ruby/gems'),
+    ].sort(),
     gitSafe: [flutter],
   });
   assert.deepEqual(toolchainState({ ...env, PATH: join(system, 'bin') }, ['ruby']), {
@@ -693,6 +700,7 @@ test('Ruby and Flutter: the toolchain writes go to private copies, the install s
     join(ruby, 'lib/ruby/gems/3.4.0/gems/x'),
     join(flutter, 'bin/flutter'),
     join(flutter, 'bin/cache/dart-sdk/bin/dart'),
+    join(flutter, 'packages/flutter_tools/lib/executable.dart'),
   ]);
   const copies = toolchainState(env, ['ruby', 'flutter']).copies;
   const { steps, mounts } = simulate({ home, real: '/r', files, copies });
