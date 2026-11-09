@@ -207,6 +207,7 @@ export const archiveProgress = internalMutation({
     totalBytes: v.number(),
     submodules: v.number(),
     objects: v.array(catalogEntry),
+    state: v.optional(v.object({ sha256: v.string(), size: v.number() })),
     githubRequests: v.optional(githubRequests),
   },
   returns: v.boolean(),
@@ -226,6 +227,7 @@ export const archiveProgress = internalMutation({
       totalKnown: true,
       phase: 'importing',
       error: undefined,
+      ...(input.state ? { stateObject: input.state } : {}),
       ...(input.githubRequests ? { githubRequests: input.githubRequests } : {}),
     });
     return true;

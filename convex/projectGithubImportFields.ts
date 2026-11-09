@@ -25,6 +25,9 @@ export const githubImportFields = {
       root: v.string(),
     }),
   ),
+  /** Archive imports: the portable State object (path -> blob map) once it is stored, so a
+   * publication retry rebuilds its rows from stored objects instead of streaming the archive. */
+  stateObject: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   visibility: v.union(v.literal('public'), v.literal('private')),
   owner: v.string(),
   operationId: v.string(),

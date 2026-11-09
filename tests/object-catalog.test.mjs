@@ -154,11 +154,59 @@ test('import progress rows are deleted in bounded pages once main is published (
       value: '{}',
     });
   await catalog.purgeInventory(s.ctx, 'job', 'owner');
-  assert.equal(s.tables.projectGithubImportInventory.size, 700);
+  assert.equal(s.tables.projectGithubImportInventory.size, 200, 'tiny rows stop at the 1,000-row cap');
   for (let run = 0; run < 5 && s.scheduled.length; run++) {
     const task = s.scheduled.shift();
     await catalog.purge._handler(s.ctx, task.args);
   }
   assert.equal(s.tables.projectGithubImportInventory.size, 0);
   assert.equal(s.scheduled.length, 0, 'the chain stops when nothing is left');
+});
+
+test('a large inventory (135 KB window rows, 40 MB) is purged in pages that each read under 8 MiB', async () => {
+  const s = state([]);
+  s.tables.projectGithubImports.set('job', {
+    _id: 'job',
+    projectId: 'project',
+    owner: 'owner',
+    phase: 'ready',
+  });
+  const value = 'x'.repeat(135 * 1024);
+  for (let i = 0; i < 300; i++)
+    s.tables.projectGithubImportInventory.set(`row-${i}`, {
+      _id: `row-${i}`,
+      projectId: 'project',
+      jobId: 'job',
+      part: 'objects',
+      key: String(i).padStart(5, '0'),
+      position: 0,
+      value,
+    });
+  let read = 0;
+  const query = s.ctx.db.query;
+  s.ctx.db.query = table => {
+    const q = query(table);
+    if (table !== 'projectGithubImportInventory') return q;
+    const iterate = async function* (indexed) {
+      for await (const row of indexed) {
+        read += JSON.stringify(row).length;
+        yield row;
+      }
+    };
+    return {
+      withIndex: (...args) => iterate(q.withIndex(...args)),
+    };
+  };
+  const pages = [];
+  await catalog.purge._handler(s.ctx, { id: 'job', actor: 'owner' });
+  pages.push(read);
+  while (s.scheduled.length) {
+    read = 0;
+    await catalog.purge._handler(s.ctx, s.scheduled.shift().args);
+    pages.push(read);
+    assert.ok(pages.length < 100, 'the purge chain converges');
+  }
+  assert.equal(s.tables.projectGithubImportInventory.size, 0);
+  assert.ok(Math.max(...pages) < 8 * 1024 * 1024, `a page read ${Math.max(...pages)} bytes`);
+  assert.ok(pages.length >= 9, `${pages.length} pages: bounded by bytes, not one 500-row page of ~66 MB`);
 });

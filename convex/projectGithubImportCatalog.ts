@@ -9,6 +9,8 @@ import { objectCatalogPage } from './projectObjectFind';
 import { importPageFiles } from '../src/github-import-pages';
 import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { purgePageBudget, documentBytes } from './projectPurgeBudget';
 import { objectPack } from './projectObjectFields';
 import type { ObjectPack } from '../src/object-pack-range';
 
@@ -38,6 +40,8 @@ const catalogRow = v.object({
   ),
 });
 const pin = /^[0-9a-f]{64}$/;
+/** Field order is not identity: a stored row and a rebuilt page compare by sorted keys. */
+const same = (a: unknown, b: unknown) => canonicalPayload(a ?? []) === canonicalPayload(b ?? []);
 const validEntry = (entry: Entry) =>
   pin.test(entry.digest) &&
   Number.isSafeInteger(entry.size) &&
@@ -164,10 +168,10 @@ export const publish = internalMutation({
         invariant(
           previous.digests === page.digests &&
             previous.last === page.last &&
-            JSON.stringify(previous.sizes) === JSON.stringify(page.sizes) &&
-            JSON.stringify(previous.recipes) === JSON.stringify(page.recipes) &&
-            JSON.stringify(previous.packs ?? []) === JSON.stringify(page.packs ?? []) &&
-            JSON.stringify(previous.stateGenerations ?? []) === JSON.stringify(page.stateGenerations ?? []),
+            same(previous.sizes, page.sizes) &&
+            same(previous.recipes, page.recipes) &&
+            same(previous.packs, page.packs) &&
+            same(previous.stateGenerations, page.stateGenerations),
           'IMPORT_PAGE_CHANGED',
           'Immutable catalog changed.',
         );
@@ -182,17 +186,26 @@ export const publish = internalMutation({
     return null;
   },
 });
-/** Import progress rows are transient: deleted once main is published. */
+/** Import progress rows are transient: deleted once main is published. A page is
+ * bounded by bytes read, not by a row count (a window row is about 135 KB at 1,000
+ * objects): rows stream in key order and the page stops after 4 MiB or 1,000 rows, so
+ * it reads under 8 MiB however large the repository is, then continues itself. */
 export async function purgeInventory(ctx: MutationCtx, jobId: Id<'projectGithubImports'>, actor: string) {
-  const rows = await ctx.db
+  let rows = 0,
+    bytes = 0;
+  const query = ctx.db
     .query('projectGithubImportInventory')
-    .withIndex('by_job_and_part_and_key', q => q.eq('jobId', jobId))
-    .take(inventoryPurgePage);
-  for (const row of rows) await ctx.db.delete(row._id);
-  if (rows.length === inventoryPurgePage)
-    await ctx.scheduler.runAfter(0, internal.projectGithubImportCatalog.purge, { id: jobId, actor });
+    .withIndex('by_job_and_part_and_key', q => q.eq('jobId', jobId));
+  for await (const row of query) {
+    if (rows >= purgePageBudget.rows || bytes >= purgePageBudget.bytes) {
+      await ctx.scheduler.runAfter(0, internal.projectGithubImportCatalog.purge, { id: jobId, actor });
+      return;
+    }
+    rows++;
+    bytes += documentBytes(row);
+    await ctx.db.delete(row._id);
+  }
 }
-export const inventoryPurgePage = 500;
 export const purge = internalMutation({
   args: jobIdentity,
   returns: v.null(),

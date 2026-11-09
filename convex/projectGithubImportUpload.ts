@@ -36,7 +36,7 @@ export type CatalogEntry = {
  * rows. Each window is one receipt; publication writes the sorted catalog. */
 export type ImportCatalog = {
   stored: Map<string, CatalogEntry>;
-  record: (objects: CatalogEntry[]) => Promise<void>;
+  record: (objects: CatalogEntry[], state?: { sha256: string; size: number }) => Promise<void>;
 };
 /** Retains one bounded source window plus its pack copy and one stream chunk. */
 export class ImportUpload {
@@ -208,10 +208,10 @@ export class ImportUpload {
       `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: this.projectId, phase: 'upload', at: Date.now(), objects: pending.length, putAttempts: this.putAttempts, putBytes: this.putBytes, uploadMillis: this.uploadMillis, peakBufferedBytes: this.peakBufferedBytes })}`,
     );
   }
-  async commit() {
+  async commit(state?: { sha256: string; size: number }) {
     if (this.catalog) {
       const objects = this.catalogReceipt();
-      if (objects.length) await this.catalog.record(objects);
+      if (objects.length) await this.catalog.record(objects, state);
       return;
     }
     if (!this.completions.length && !this.recipes.length) return;
@@ -257,8 +257,9 @@ export class ImportUpload {
       recipeSize: ref.size,
     });
   }
-  /** Stream arbitrarily large logical metadata without a whole-repository buffer. */
-  async stream(parts: AsyncIterable<Buffer>, stateGeneration?: number) {
+  /** Stream arbitrarily large logical metadata without a whole-repository buffer.
+   * `markState` records the finished object on the import job with its last window. */
+  async stream(parts: AsyncIterable<Buffer>, stateGeneration?: number, markState = false) {
     const hash = createHash('sha256');
     let size = 0;
     const builder = new ObjectRecipeBuilder(this.put);
@@ -272,7 +273,7 @@ export class ImportUpload {
     const recipe = builder.finish({ sha256: pin.blob, size });
     this.recipe(pin, recipe.bytes, stateGeneration);
     await this.drain(true);
-    await this.commit();
+    await this.commit(markState ? { sha256: pin.blob, size } : undefined);
     return { sha256: pin.blob, size };
   }
 }

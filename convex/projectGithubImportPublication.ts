@@ -10,7 +10,7 @@ import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { digest } from '../src/portable-hash';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
-import { purgeInventory } from './projectGithubImportCatalog';
+import { internal } from './_generated/api';
 import { invariant } from '../src/errors';
 import { selectBornMain } from './projectHostedBirth';
 import { beginHistory } from './projectHistoryStore';
@@ -171,7 +171,11 @@ export const finish = internalMutation({
     });
     // Git history (log, blame, old versions) follows in its own bounded run.
     await beginHistory(ctx, job, publication.head);
-    await purgeInventory(ctx, job._id, job.owner);
+    // Transient inventory is deleted in byte-bounded pages of its own; finish scans none of it.
+    await ctx.scheduler.runAfter(0, internal.projectGithubImportCatalog.purge, {
+      id: job._id,
+      actor: job.owner,
+    });
     return null;
   },
 });

@@ -33,7 +33,7 @@ import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { LfsImport } from '../src/github-lfs-import';
 import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
-import { windowEntries } from './projectGithubImportCatalog';
+import { resumePublication, storedObjects } from './projectGithubImportResume';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
 import type { GithubHostedFile } from '../src/hosted-github-bootstrap';
 
@@ -55,6 +55,8 @@ export async function runArchiveImport(
   input: Identity,
   meter: ImportRequestMeter,
 ) {
+  // Every file is stored and the State is pinned: a publication retry never streams again.
+  if (await resumePublication(ctx, job, input, meter)) return;
   const started = Date.now(),
     cursor = archiveCursorSchema.parse(JSON.parse(job.cursor));
   const github = meter.wrap(networkFetch);
@@ -77,19 +79,14 @@ export async function runArchiveImport(
   );
   const listed = new Map(listing.files.map(file => [file.path, file]));
   // Progress is the stored objects themselves: one receipt per earlier window.
-  const stored = new Map<string, CatalogEntry>();
-  for (let after = ''; ;) {
-    const rows = await ctx.runQuery(internal.projectGithubImportCatalog.stored, { ...input, after });
-    if (!rows.length) break;
-    for (const row of rows) for (const entry of windowEntries(row.value)) stored.set(entry.digest, entry);
-    after = rows.at(-1)!.key;
-  }
-  const saveWindow = async (objects: CatalogEntry[]) => {
+  const stored = await storedObjects(ctx, input);
+  const saveWindow = async (objects: CatalogEntry[], state?: { sha256: string; size: number }) => {
     await ctx.runMutation(internal.projectGithubImportStore.archiveProgress, {
       ...input,
       step: job.step,
       ...counters(),
       objects,
+      ...(state ? { state } : {}),
       githubRequests: meter.counts,
     });
   };

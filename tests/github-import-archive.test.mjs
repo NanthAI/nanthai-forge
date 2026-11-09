@@ -7,6 +7,8 @@ import { pagedFixture } from './github-import-pages-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
+import { readFileSync } from 'node:fs';
+import { getFunctionName } from 'convex/server';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const agent = await import(moduleUrl('../convex/projectHostedAgent.ts'));
@@ -188,7 +190,17 @@ async function importArchive(s, options = {}, expect = 'ready') {
     await s.worker(id);
   const job = s.tables.projectGithubImports.get(id);
   assert.equal(job.phase, expect, JSON.stringify(job.error));
+  if (expect === 'ready') await drainPurge(s);
   return job;
+}
+/** Ready schedules the byte-bounded inventory purge; run its chain like the scheduler would. */
+async function drainPurge(s) {
+  const next = () =>
+    s.scheduled.findIndex(task => getFunctionName(task.fn) === 'projectGithubImportCatalog:purge');
+  for (let run = 0; run < 200 && next() >= 0; run++) {
+    const [task] = s.scheduled.splice(next(), 1);
+    await s.modules.projectGithubImportCatalog.purge._handler(s.ctx, task.args);
+  }
 }
 /** Exact accepted main State and a byte reader for its objects. */
 async function mainFiles(s, bucket, projectId) {
@@ -454,4 +466,126 @@ test('Git LFS objects over the import limit refuse before any download; 0 keeps 
   const digestOf = bytes => createHash('sha256').update(bytes).digest('hex');
   assert.equal(files.get('model.bin').blob, digestOf(pointer(repo.model)));
   assert.equal(counts.lfsBatch, undefined);
+});
+
+/** Fail one named mutation once with the uncoded error a Convex limit raises inside it. */
+function failOnce(s, name, message) {
+  const run = s.ctx.runMutation,
+    state = { failed: 0, running: false };
+  s.ctx.runMutation = async (ref, args) => {
+    if (getFunctionName(ref) !== name) return run(ref, args);
+    if (!state.failed++) throw new Error(message);
+    return run(ref, args);
+  };
+  return state;
+}
+
+test('a publication failure is coded, not an interrupted worker, and the retry publishes without streaming again', async t => {
+  const repo = repository({ files: 40, directories: 4, submodules: 1 }),
+    counts = {},
+    s = pagedFixture();
+  const bucket = await serve(t, repo, counts);
+  const operationId = randomUUID();
+  failOnce(s, 'projectGithubImportPublication:finish', 'Too many bytes read in a single function execution');
+  const id = await s.modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'fixture/arch' });
+  for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
+    await s.worker(id);
+  const failed = s.tables.projectGithubImports.get(id);
+  assert.equal(failed.phase, 'error');
+  assert.equal(failed.error.code, 'GITHUB_IMPORT_PUBLICATION_FAILED');
+  assert.notEqual(failed.error.code, 'GITHUB_IMPORT_INTERRUPTED');
+  assert.match(failed.error.message, /Retry the original operation: it resumes publication/);
+  assert.match(failed.error.message, /Too many bytes read/);
+  assert.ok(failed.stateObject, 'the stored State is pinned on the job');
+  assert.deepEqual(
+    { archive: counts.archive, tarball: counts.tarball, trees: counts.trees },
+    { archive: 1, tarball: 1, trees: 2 },
+  );
+  const before = { ...counts };
+  // Original-operation retry: no listing, tarball or archive request, and the same main.
+  assert.equal(
+    await s.modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'fixture/arch' }),
+    id,
+  );
+  for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
+    await s.worker(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+  assert.deepEqual(counts, before, 'the retry made no GitHub archive, tree, tarball or blob request');
+  await drainPurge(s);
+  assert.equal(s.tables.projectGithubImportInventory.size, 0);
+  const { files } = await mainFiles(s, bucket, job.projectId);
+  assert.equal(files.size, repo.files);
+  assert.equal(files.get('vendor-0').mode, 'gitlink');
+  assert.equal(
+    files.get('rewritten.txt').blob,
+    createHash('sha256')
+      .update(repo.bodies.get(gitSha(Buffer.from('$Format:%H$ expands in archives only\n'))))
+      .digest('hex'),
+  );
+});
+
+test('a publication failure before the catalog is written resumes from the stored State too', async t => {
+  const repo = repository({ files: 12, directories: 2, submodules: 0 }),
+    counts = {},
+    s = pagedFixture();
+  await serve(t, repo, counts);
+  const operationId = randomUUID();
+  failOnce(s, 'projectGithubImportCatalog:publish', 'Too many documents read in a single function execution');
+  const id = await s.modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'fixture/arch' });
+  for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
+    await s.worker(id);
+  assert.equal(s.tables.projectGithubImports.get(id).error.code, 'GITHUB_IMPORT_PUBLICATION_FAILED');
+  const before = { ...counts };
+  await s.modules.projectGithubImport.start._handler(s.ctx, { operationId, url: 'fixture/arch' });
+  await s.worker(id);
+  assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
+  assert.deepEqual(counts, before);
+});
+
+test('finish scans no inventory: the scheduled purge deletes the progress rows', async t => {
+  const repo = repository({ files: 6, directories: 1, submodules: 0 }),
+    s = pagedFixture();
+  await serve(t, repo, {});
+  const scans = [];
+  let inFinish = false;
+  const run = s.ctx.runMutation,
+    query = s.ctx.db.query;
+  s.ctx.runMutation = async (ref, args) => {
+    if (getFunctionName(ref) !== 'projectGithubImportPublication:finish') return run(ref, args);
+    inFinish = true;
+    try {
+      return await run(ref, args);
+    } finally {
+      inFinish = false;
+    }
+  };
+  s.ctx.db.query = table => {
+    if (inFinish) scans.push(table);
+    return query(table);
+  };
+  const job = await importArchive(s);
+  assert.equal(job.phase, 'ready');
+  assert.ok(scans.length > 0, 'the probe saw finish run');
+  assert.ok(!scans.includes('projectGithubImportInventory'), `finish read: ${[...new Set(scans)]}`);
+  assert.equal(
+    s.tables.projectGithubImportInventory.size,
+    0,
+    'the scheduled purge removed every progress row',
+  );
+});
+
+test('class guard: publication-path mutations never page a repository-sized collection by row count', () => {
+  const modules = ['Publication', 'Catalog', 'Inventory', 'Store', 'Batch', 'Objects', 'Upload', 'Publish'];
+  const allowed = /^(?:[0-9]|1[0-9]|20|purgePageBudget\.chunk)$/;
+  for (const name of modules) {
+    const source = readFileSync(new URL(`../convex/projectGithubImport${name}.ts`, import.meta.url), 'utf8');
+    assert.ok(!/\.collect\(\)/.test(source), `projectGithubImport${name} must not collect a collection`);
+    for (const [, count] of source.matchAll(/\.take\(([^)]*)\)/g))
+      assert.match(
+        count.trim(),
+        allowed,
+        `projectGithubImport${name}: .take(${count}) pages by row count. Rows here grow with repository size (an inventory window is ~135 KB): bound the page by bytes like purgeInventory, or keep it at most 20.`,
+      );
+  }
 });

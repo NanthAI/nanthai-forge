@@ -14,7 +14,7 @@ import { authorizeGithub } from '../src/github-access';
 import { networkFetch } from '../src/network-fetch';
 import { ImportRequestMeter } from '../src/github-import-meter';
 import { githubConfig } from './access';
-import { invariant } from '../src/errors';
+import { ForgeError, invariant } from '../src/errors';
 import { importPageFiles } from '../src/github-import-pages';
 
 const stagedPageBytes = 2 * 1024 * 1024;
@@ -25,6 +25,30 @@ export type ImportRows = Record<'imported' | 'blobs', { key: string; value: stri
  * State string, manifest string or projection crosses an RPC boundary. Archive
  * imports pass their verified rows in key order instead of an inventory. */
 export async function publishImport(
+  ctx: ActionCtx,
+  job: Doc<'projectGithubImports'>,
+  memory?: ImportRows,
+  catalog?: ImportCatalog,
+  meter = new ImportRequestMeter(job.githubRequests),
+) {
+  try {
+    await publishRows(ctx, job, memory, catalog, meter);
+  } catch (error) {
+    throw publicationFailure(error);
+  }
+}
+/** A failure after every object is stored is a publication failure, not an interrupted
+ * worker: it names its own code and what to do next. Errors a mutation throws reach the
+ * action without their code, so anything uncoded is mapped here. */
+export function publicationFailure(error: unknown) {
+  if (error instanceof ForgeError) return error;
+  const cause = (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 240);
+  return new ForgeError(
+    'GITHUB_IMPORT_PUBLICATION_FAILED',
+    `Publication failed after every source object was stored; main was not published (${cause}). Retry the original operation: it resumes publication from the stored objects and does not stream the archive again. If it fails again, report this code with the project id.`,
+  );
+}
+async function publishRows(
   ctx: ActionCtx,
   job: Doc<'projectGithubImports'>,
   memory?: ImportRows,
@@ -71,7 +95,7 @@ export async function publishImport(
       `],"message":${JSON.stringify(`Imported GitHub commit ${job.commit}`)},"at":${JSON.stringify(job.at)}}`,
     );
   }
-  const state = await upload.stream(stateBytes(), 1),
+  const state = await upload.stream(stateBytes(), 1, true),
     head = state.sha256;
   const data = githubImportedWork(job.operationId, job.at, head);
   const workText = JSON.stringify(data, null, 2),
