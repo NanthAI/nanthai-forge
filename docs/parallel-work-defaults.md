@@ -149,8 +149,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   is `none` with a `reason`, and the Lane opens without `node_modules`.
 - A repository with workspaces gets real `node_modules` directories of links into the shared install
   (the root for npm; the root and each workspace package for pnpm, yarn and bun), and a link to a sibling
-  workspace package points at that package's source in your Lane, not at the cached manifest. A cache hit
-  only relinks (local symlinks, no install). The root `node_modules` is one link when the repository has
+  workspace package points at that package's source in your Lane, not at the cached manifest. The same
+  holds for `node_modules/.bin`: a bin of a workspace package runs your Lane's file (the install sees only
+  manifests, so Forge adds the bins each workspace `package.json` declares beside the workspace link),
+  while third-party bins stay shared. A cache hit only relinks (local symlinks and small shim copies, one
+  per `.bin` entry, no install). The root `node_modules` is one link when the repository has
   no workspaces.
 - Not shared, with a `reason` and no install: a repository whose install runs repository code (a pnpm
   `.pnpmfile.cjs`, Yarn plugins in `.yarnrc.yml`) and Yarn Berry Plug'n'Play, which has no `node_modules`

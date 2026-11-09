@@ -11,12 +11,15 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  symlinkSync,
   realpathSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { linkInstall } from '../dist/dependency-link.js';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { detectPackageManager, managerWorkspaceFolders } from '../dist/package-manager.js';
 import { dependencyKey, shareDependencies, installScriptsNotice } from '../dist/shared-dependencies.js';
@@ -79,7 +82,7 @@ function repo(directory, name, files) {
   return root;
 }
 const workspaces = {
-  'packages/a/package.json': { name: 'a', version: '1.0.0' },
+  'packages/a/package.json': { name: 'a', version: '1.0.0', bin: { a: 'cli.js' } },
   'packages/b/package.json': { name: 'b', version: '1.0.0', dependencies: { a: 'workspace:*' } },
 };
 const pnpmFiles = (extra = {}, manifest = {}) => ({
@@ -367,6 +370,12 @@ for (const [name, files, prepare] of [
       const lanes = ['one', 'two'].map(lane => {
         const root = join(directory, lane);
         cpSync(source, root, { recursive: true });
+        // Each Lane edits workspace package a's CLI; its bin must run that edit, not a cached copy.
+        writeFileSync(
+          join(root, 'packages', 'a', 'cli.js'),
+          `#!/usr/bin/env node\nconsole.log('lane ${lane}');\n`,
+        );
+        chmodSync(join(root, 'packages', 'a', 'cli.js'), 0o755);
         return root;
       });
       const results = [];
@@ -388,8 +397,162 @@ for (const [name, files, prepare] of [
         );
         assert.ok(link, `${name}: workspace dependency linked`);
         assert.equal(realpathSync(link), realpathSync(join(root, 'packages', 'a')));
+        const bin = [
+          join(root, 'packages', 'b', 'node_modules', '.bin', 'a'),
+          join(root, 'node_modules', '.bin', 'a'),
+        ].find(path => existsSync(path));
+        assert.ok(bin, `${name}: workspace bin linked`);
+        assert.equal(
+          execFileSync(bin, { encoding: 'utf8' }).trim(),
+          `lane ${root.endsWith('one') ? 'one' : 'two'}`,
+        );
       }
       assert.ok(existsSync(join(cache, `${name}-${results[0].key}`, '.forge-complete')));
     },
   );
 }
+
+// Issue de6620eb: `.bin` entries of workspace packages must run the Lane's own source, not the
+// manifest-only copy in the shared install. The cached layouts below mirror what each manager writes.
+function binScratch(t) {
+  const directory = mkdtempSync(join(tmpdir(), 'forge-deps-bins-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return directory;
+}
+const binPut = (path, content = '', mode) => {
+  mkdirSync(join(path, '..'), { recursive: true });
+  writeFileSync(join(path, ''), content);
+  if (mode) chmodSync(path, mode);
+};
+const binLink = (target, path) => {
+  mkdirSync(join(path, '..'), { recursive: true });
+  symlinkSync(target, path);
+};
+const binScript = marker => `#!/usr/bin/env node\nconsole.log(${JSON.stringify(marker)});\n`;
+/** A Lane whose workspace package `packages/tool` has been edited; the cache holds only its manifest. */
+function binPair(directory) {
+  const entry = join(directory, 'cache', 'entry'),
+    root = join(directory, 'lane');
+  for (const base of [entry, root]) {
+    binPut(join(base, 'packages', 'tool', 'package.json'), '{"name":"tool","bin":"cli.js"}');
+    binPut(join(base, 'packages', 'app', 'package.json'), '{"name":"app"}');
+  }
+  binPut(join(root, 'packages', 'tool', 'cli.js'), binScript('lane edit'), 0o755);
+  binPut(join(entry, 'node_modules', 'jest', 'bin.js'), binScript('shared jest'), 0o755);
+  return { entry, root };
+}
+const binRun = path => execFileSync(path, { encoding: 'utf8' }).trim();
+
+test('npm: a workspace bin symlink beside the workspace link runs the Lane source; third-party stays shared', t => {
+  const { entry, root } = binPair(binScratch(t));
+  binLink('../packages/tool', join(entry, 'node_modules', 'tool'));
+  binLink('../tool/cli.js', join(entry, 'node_modules', '.bin', 'tool'));
+  binLink('../jest/bin.js', join(entry, 'node_modules', '.bin', 'jest'));
+  linkInstall(entry, root, ['packages/tool']);
+  assert.equal(binRun(join(root, 'node_modules', '.bin', 'tool')), 'lane edit');
+  assert.equal(binRun(join(root, 'node_modules', '.bin', 'jest')), 'shared jest');
+  assert.match(readlinkSync(join(root, 'node_modules', '.bin', 'tool')), /^\.\.\/.*packages\/tool\/cli\.js$/);
+  assert.ok(lstatSync(join(root, 'node_modules', '.bin')).isDirectory(), '.bin is a Lane directory of links');
+});
+
+for (const name of ['yarn', 'bun']) {
+  test(`${name}: a bin symlink that goes through the repository to a workspace file runs the Lane source`, t => {
+    const { entry, root } = binPair(binScratch(t));
+    binLink('../../packages/tool/cli.js', join(entry, 'node_modules', '.bin', 'tool'));
+    binLink('../jest/bin.js', join(entry, 'node_modules', '.bin', 'jest'));
+    // A workspace's own node_modules/.bin links to a sibling workspace the same way.
+    binLink('../../../tool/cli.js', join(entry, 'packages', 'app', 'node_modules', '.bin', 'tool'));
+    linkInstall(entry, root, ['packages/tool', 'packages/app']);
+    assert.equal(binRun(join(root, 'node_modules', '.bin', 'tool')), 'lane edit');
+    assert.equal(binRun(join(root, 'packages', 'app', 'node_modules', '.bin', 'tool')), 'lane edit');
+    assert.equal(binRun(join(root, 'node_modules', '.bin', 'jest')), 'shared jest');
+  });
+}
+
+test('pnpm: a shell shim that finds the workspace package next to .bin runs the Lane source', t => {
+  const { entry, root } = binPair(binScratch(t));
+  // `..` is followed physically by the shell (Node would collapse it lexically and hide the bug).
+  binPut(join(root, 'packages', 'tool', 'cli.sh'), 'echo "lane edit"\n');
+  const shim = `#!/bin/sh\nbasedir=$(dirname "$0")\nexec sh "$basedir/../tool/cli.sh" "$@"\n`;
+  binLink('../../tool', join(entry, 'packages', 'app', 'node_modules', 'tool'));
+  binPut(join(entry, 'packages', 'app', 'node_modules', '.bin', 'tool'), shim, 0o755);
+  linkInstall(entry, root, ['packages/tool', 'packages/app']);
+  // Run it as a command (not `sh FILE`): the system resolves a link to a script before it starts.
+  assert.equal(binRun(join(root, 'packages', 'app', 'node_modules', '.bin', 'tool')), 'lane edit');
+});
+
+test('relinking costs one link per .bin entry and leaves no entry pointing into a workspace cache copy', t => {
+  const { entry, root } = binPair(binScratch(t));
+  for (const name of ['a', 'b', 'c']) binLink('../tool/cli.js', join(entry, 'node_modules', '.bin', name));
+  binLink('../packages/tool', join(entry, 'node_modules', 'tool'));
+  linkInstall(entry, root, ['packages/tool']);
+  for (const name of ['a', 'b', 'c'])
+    assert.equal(binRun(join(root, 'node_modules', '.bin', name)), 'lane edit');
+});
+
+// Real managers install from manifests alone, so they write no bin for a workspace package whose
+// file is missing (observed: npm and bun create none; pnpm creates an empty .bin). The Lane's own
+// package.json declares it, so the relink adds it beside the workspace link.
+for (const name of ['npm', 'yarn', 'bun']) {
+  test(`${name}: a workspace bin the cached install never made is linked to the Lane source`, t => {
+    const { entry, root } = binPair(binScratch(t));
+    binLink('../packages/tool', join(entry, 'node_modules', 'tool'));
+    binLink('../jest/bin.js', join(entry, 'node_modules', '.bin', 'jest'));
+    linkInstall(entry, root, ['packages/tool', 'packages/app']);
+    assert.equal(binRun(join(root, 'node_modules', '.bin', 'tool')), 'lane edit');
+    assert.equal(binRun(join(root, 'node_modules', '.bin', 'jest')), 'shared jest');
+  });
+}
+
+test('pnpm: a workspace dependency gets its bin in the dependent package, from the Lane manifest', t => {
+  const { entry, root } = binPair(binScratch(t));
+  binLink('../../tool', join(entry, 'packages', 'app', 'node_modules', 'tool'));
+  mkdirSync(join(entry, 'packages', 'app', 'node_modules', '.bin'), { recursive: true });
+  linkInstall(entry, root, ['packages/tool', 'packages/app']);
+  assert.equal(binRun(join(root, 'packages', 'app', 'node_modules', '.bin', 'tool')), 'lane edit');
+});
+
+test('bins come from the declared names only: scoped and object forms, no unsafe names or files', t => {
+  const { entry, root } = binPair(binScratch(t));
+  writeFileSync(
+    join(root, 'packages', 'tool', 'package.json'),
+    JSON.stringify({
+      name: '@scope/tool',
+      bin: {
+        ok: 'cli.js',
+        '../evil': 'cli.js',
+        '.hidden': 'cli.js',
+        'a/b': 'cli.js',
+        outside: '../app/package.json',
+      },
+    }),
+  );
+  mkdirSync(join(entry, 'node_modules', '@scope'), { recursive: true });
+  binLink('../../packages/tool', join(entry, 'node_modules', '@scope', 'tool'));
+  linkInstall(entry, root, ['packages/tool', 'packages/app']);
+  assert.equal(binRun(join(root, 'node_modules', '.bin', 'ok')), 'lane edit');
+  assert.deepEqual(readdirSync(join(root, 'node_modules', '.bin')).sort(), ['ok']);
+  writeFileSync(join(root, 'packages', 'tool', 'package.json'), '{"name":"@scope/tool","bin":"cli.js"}');
+});
+
+test('a package nothing links, and an existing third-party bin of the same name, are left alone', t => {
+  const { entry, root } = binPair(binScratch(t));
+  binPut(join(entry, 'node_modules', 'tool', 'real.js'), binScript('third party'), 0o755);
+  binLink('../tool/real.js', join(entry, 'node_modules', '.bin', 'tool'));
+  linkInstall(entry, root, ['packages/tool']);
+  assert.equal(binRun(join(root, 'node_modules', '.bin', 'tool')), 'third party');
+  const other = binScratch(t),
+    second = binPair(other);
+  mkdirSync(join(second.entry, 'node_modules'), { recursive: true });
+  linkInstall(second.entry, second.root, ['packages/tool']);
+  assert.equal(
+    (() => {
+      try {
+        return readdirSync(join(second.root, 'node_modules', '.bin'));
+      } catch {
+        return [];
+      }
+    })().length,
+    0,
+  );
+});
