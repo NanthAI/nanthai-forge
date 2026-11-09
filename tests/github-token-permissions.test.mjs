@@ -35,9 +35,15 @@ test('mirror, check and import token requests each carry explicit minimal permis
   await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.mirrorPermissions, request);
   await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.actionsPermissions, request);
   await tokens.importReadToken('synthetic/repo', 42, request);
+  await tokens.installationToken({}, 'p1', 'synthetic/repo', tokens.inboundReadPermissions, request);
   assert.deepEqual(
     requests.map(r => r.permissions),
-    [{ contents: 'write' }, { actions: 'write', contents: 'read' }, { contents: 'read', metadata: 'read' }],
+    [
+      { contents: 'write' },
+      { actions: 'write', contents: 'read' },
+      { contents: 'read', metadata: 'read' },
+      { contents: 'read' },
+    ],
   );
   assert(requests.every(r => !('repository_ids' in r) || r.repository_ids.length === 1));
 });

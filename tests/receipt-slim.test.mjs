@@ -392,6 +392,21 @@ test('a healthy brief still names what the next step needs', () => {
   assert.equal(start.result.path, laneRoot);
   assert.deepEqual(start.result.checkout, { downloadedObjects: 0 }, 'the warm-start proof stays');
   assert.deepEqual(start.localLanes, { idle: 2 }, 'the stderr hint lists them; the count stays');
+  // A start whose checkout did not finish keeps its reason and continuation, never a bare `{}`.
+  const continuation = { reason: 'failed', path: laneRoot, command: 'nforge agent ROOT start …' };
+  const stalled = slimReceipt({
+    ...healthy.start,
+    result: {
+      ...healthy.start.result,
+      checkout: { status: 'incomplete', reason: 'failed', code: 'CHECKOUT_FAILED', message: 'Synthetic.' },
+      dependencies: { status: 'pending' },
+      continuation,
+    },
+  });
+  assert.equal(stalled.result.checkout.status, 'incomplete');
+  assert.equal(stalled.result.checkout.code, 'CHECKOUT_FAILED');
+  assert.deepEqual(stalled.result.continuation, continuation);
+  assert.deepEqual(stalled.result.dependencies, { status: 'pending' });
   const saved = slimReceipt(healthy.save);
   assert.equal(saved.result.outcome.result.head, sha);
   const synced = slimReceipt(healthy.sync);

@@ -56,6 +56,7 @@ const claims = (changes = {}) => ({
   run_id: '123',
   run_attempt: '1',
   runner_environment: 'github-hosted',
+  repository_visibility: 'private',
   ...changes,
 });
 function variables(t, values) {
@@ -72,6 +73,11 @@ function oidc(value = claims()) {
   const data = `${encode({ alg: 'RS256', kid: 'synthetic-key' })}.${encode(value)}`;
   return `${data}.${sign('RSA-SHA256', Buffer.from(data), privateKey).toString('base64url')}`;
 }
+/** GitHub's repository read: a private project dispatches only after it proves private. */
+const repositoryRead = (url, visibility = 'private') =>
+  url === `https://api.github.com/repos/${repository}`
+    ? Response.json({ full_name: repository, private: visibility !== 'public', visibility })
+    : null;
 const jwks = () =>
   Response.json({
     keys: [
@@ -83,7 +89,7 @@ const jwks = () =>
       },
     ],
   });
-async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
+async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, runnerExtra = {}) {
   variables(t, {
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
@@ -114,6 +120,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
     runsOn,
     runtime: hostedActionsRuntime,
     environmentFingerprint: s.runner.environmentFingerprint,
+    ...runnerExtra,
   };
   bindRepository(t, s.projectId, repository);
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
@@ -280,6 +287,8 @@ test('concurrent dispatch reservation and lost reply send one GitHub dispatch wi
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (url.endsWith('/installation')) return Response.json({ id: 9 });
     if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const read = repositoryRead(url);
+    if (read) return read;
     assert(url.endsWith('/forge-check.yml/dispatches'));
     const body = JSON.parse(init.body);
     assert.equal(body.ref, 'main');
@@ -309,6 +318,8 @@ test('dispatch retains custom and array runner labels, and self-hosted OIDC comp
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (url.endsWith('/installation')) return Response.json({ id: 9 });
     if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const read = repositoryRead(url);
+    if (read) return read;
     assert(url.endsWith('/forge-check.yml/dispatches'));
     assert.deepEqual(JSON.parse(JSON.parse(init.body).inputs.runs_on), expected);
     return Response.json({ workflow_run_id: 123 });
@@ -817,8 +828,8 @@ test('HTTP submodule access mints one read-only token per owner-allowed reposito
     },
   };
   // GitHub signs the run repository's visibility into the OIDC token.
-  const signed = visibility =>
-    `Bearer ${oidc(claims(visibility ? { repository_visibility: visibility } : {}))}`;
+  // An undefined value leaves the claim out of the signed token.
+  const signed = visibility => `Bearer ${oidc(claims({ repository_visibility: visibility }))}`;
   const send = (repositories, authorization = signed('private')) =>
     handle._handler(
       ctx,
@@ -867,7 +878,8 @@ test('HTTP submodule access mints one read-only token per owner-allowed reposito
   assert.equal(github[0].path, '/repos/synthetic/project/installation', 'anchored on the run repository');
   assert(!github.some(call => call.path.startsWith('/repos/synthetic/unlisted')));
   // A run repository not proven private has public logs: no token without a public-logs grant,
-  // and nothing reaches GitHub.
+  // and nothing reaches GitHub. (A public project; a private one is refused outright, below.)
+  s.patch('hostedProjects', s.projectId, { visibility: 'public' });
   for (const visibility of ['public', 'internal', undefined]) {
     github.length = 0;
     assert.deepEqual(await (await send(['synthetic/priv'], signed(visibility))).json(), {
@@ -875,6 +887,7 @@ test('HTTP submodule access mints one read-only token per owner-allowed reposito
     });
     assert.deepEqual(github, []);
   }
+  s.patch('hostedProjects', s.projectId, { visibility: undefined });
   // The owner's current publicLogs acceptance also counts, even for a private run repository.
   const flagged = await s.configure(
     {
@@ -896,6 +909,11 @@ test('HTTP submodule access mints one read-only token per owner-allowed reposito
   });
   assert.deepEqual(github, []);
   assert.equal((await send(['../x/y'])).status, 403);
+  // Issue 6ba1539d: a private project in a runner repository not proven private is refused
+  // before the allowlist is read, with no GitHub call.
+  github.length = 0;
+  assert.equal((await send(['synthetic/priv'], signed('public'))).status, 403);
+  assert.deepEqual(github, []);
 });
 
 test('OIDC HTTP commits one bounded log with its shard result and reconciles a lost reply', async t => {
@@ -1071,17 +1089,28 @@ test('App runner configuration derives runtime and environment without installat
     expected: s.run.request.expectedConfiguration,
     repository,
   };
+  const visibilities = await import(moduleUrl('../convex/githubRepositoryVisibility.ts'));
   const ctx = {
     auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
-    runMutation: (_ref, input) => s.transaction('direct-configure', definitions.configure, input),
+    runMutation: (ref, input) =>
+      getFunctionName(ref) === 'githubRepositoryVisibility:record'
+        ? s.call(visibilities, 'record', input)
+        : s.transaction('direct-configure', definitions.configure, input),
   };
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs1', format: 'pem' }),
   });
   let lookups = 0;
-  t.mock.method(globalThis, 'fetch', async url => {
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
     lookups++;
+    if (url.endsWith('/access_tokens')) {
+      // Connect proves the binding with a metadata-only token; no Actions write token.
+      assert.deepEqual(JSON.parse(init.body).permissions, { metadata: 'read' });
+      return Response.json({ token: 'synthetic-token' });
+    }
+    const read = repositoryRead(url);
+    if (read) return read;
     assert.equal(url, 'https://api.github.com/repos/synthetic/project/installation');
     return Response.json({ id: 9, permissions: { actions: 'write', contents: 'write' } });
   });
@@ -1110,8 +1139,10 @@ test('App runner configuration derives runtime and environment without installat
     configure.configure._handler(
       {
         auth: { getUserIdentity: async () => ({ subject: 'other' }) },
-        runMutation: (_ref, args) =>
-          s.transaction('direct-configure-denied', definitions.configure, args, 'other'),
+        runMutation: (ref, args) =>
+          getFunctionName(ref) === 'githubRepositoryVisibility:record'
+            ? s.transaction('direct-visibility-denied', visibilities.record, args, 'other')
+            : s.transaction('direct-configure-denied', definitions.configure, args, 'other'),
       },
       input,
     ),
@@ -1834,15 +1865,20 @@ test('failed shard evidence still fails the check when a later infrastructure jo
 
 const reconcileModule = await import(moduleUrl('../convex/projectHostedCheckReconcile.ts'));
 /** One GitHub App fake: dispatch answers `dispatch`, the run listing answers `runs`. */
-function github(t, s, { dispatch, runs = [] }) {
+function github(t, s, { dispatch, runs = [], visibility = 'private' }) {
   variables(t, {
     GITHUB_APP_ID: '12345',
     GITHUB_APP_PRIVATE_KEY: privateKey.export({ type: 'pkcs8', format: 'pem' }),
   });
-  const calls = { dispatch: 0, list: 0 };
+  const calls = { dispatch: 0, list: 0, repository: 0 };
   t.mock.method(globalThis, 'fetch', async url => {
     if (url.endsWith('/installation')) return Response.json({ id: 9 });
     if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    const read = repositoryRead(url, visibility);
+    if (read) {
+      calls.repository++;
+      return read;
+    }
     if (url.endsWith('/forge-check.yml/dispatches')) {
       calls.dispatch++;
       return dispatch();
@@ -1880,7 +1916,11 @@ test('incident a7de3a93 replay: a dispatch that throws is reconciled by run-name
   assert.equal(direct.directActionsAckMs, 5 * 60_000);
   assert.equal(reconcileTasks(s).length, 1);
   await direct.reconcile._handler(ctx, task.input);
-  assert.deepEqual(calls, { dispatch: 1, list: 1 }, 'one lookup; the dispatch itself is never resent');
+  assert.deepEqual(
+    calls,
+    { dispatch: 1, list: 1, repository: 1 },
+    'one lookup and one visibility read; the dispatch itself is never resent',
+  );
   run = await s.status(s.run.id);
   assert.equal(run.status, 'interrupted', 'terminal, so the landing platform retry re-dispatches');
   assert.match(run.failureReason, /never acknowledged \(network; lookup absent\)/);
@@ -2211,4 +2251,160 @@ test('shard pool: claim cleanup is best effort and never throws', async t => {
   await cleanPoolClaims('project', '00000000-0000-4000-8000-000000000000');
   t.mock.method(globalThis, 'fetch', async () => new Response('<Error/>', { status: 500 }));
   await cleanPoolClaims('project', '00000000-0000-4000-8000-000000000000');
+});
+
+const { requirePrivateRunner, repositoryVisibility, runnerVisibilityTtlMs } =
+  await import('../dist/runner-visibility.js');
+const visibilityRows = s => [...s.tables.githubRepositoryVisibility.values()];
+test('Issue 6ba1539d: only a private runner repository may run a private project; public projects are unchanged', () => {
+  assert.equal(repositoryVisibility({ private: false }), 'public');
+  assert.equal(repositoryVisibility({ private: true, visibility: 'internal' }), 'internal');
+  assert.equal(repositoryVisibility({}), 'unknown');
+  for (const visibility of ['public', 'internal', 'unknown', undefined])
+    assert.throws(
+      () => requirePrivateRunner('private', 'synthetic/project', visibility),
+      code('RUNNER_REPOSITORY_PUBLIC'),
+    );
+  // A project without an explicit visibility is private, as for every read.
+  assert.throws(
+    () => requirePrivateRunner(undefined, 'synthetic/project', 'public'),
+    code('RUNNER_REPOSITORY_PUBLIC'),
+  );
+  requirePrivateRunner('private', 'synthetic/project', 'private');
+  for (const visibility of ['public', 'private', undefined])
+    requirePrivateRunner('public', 'NanthAI/nanthai-forge', visibility);
+});
+test('Issue 6ba1539d: a private project never dispatches to a public runner repository; one cached read per expiry', async t => {
+  const refused = await fixture(t);
+  let gh = github(t, refused, {
+    dispatch: () => Response.json({ workflow_run_id: 123 }),
+    visibility: 'public',
+  });
+  await direct.dispatch._handler(gh.ctx, refused.id);
+  let run = await refused.status(refused.run.id);
+  assert.deepEqual(gh.calls, { dispatch: 0, list: 0, repository: 1 }, 'no workflow starts, so no log exists');
+  assert.equal(run.status, 'runner-unavailable');
+  assert.match(
+    run.failureReason,
+    /^Runner repository synthetic\/project is public, but this project is private: .*No source was sent\. .*configure-runner/,
+  );
+  assert.equal(reconcileTasks(refused).length, 0, 'a refusal before dispatch needs no lookup');
+  assert.deepEqual(
+    visibilityRows(refused).map(row => [row.repository, row.visibility]),
+    [['synthetic/project', 'public']],
+  );
+
+  // A private repository dispatches after one read, recorded by the existing observe call.
+  t.mock.restoreAll();
+  const allowed = await fixture(t);
+  gh = github(t, allowed, { dispatch: () => Response.json({ workflow_run_id: 123 }) });
+  await direct.dispatch._handler(gh.ctx, allowed.id);
+  assert.equal((await allowed.status(allowed.run.id)).executionId, '123');
+  assert.deepEqual(gh.calls, { dispatch: 1, list: 0, repository: 1 });
+  assert.deepEqual(
+    visibilityRows(allowed).map(row => row.visibility),
+    ['private'],
+  );
+
+  // A fresh read is reused with no GitHub call (a cached public one refuses at once);
+  // an expired one is read again.
+  for (const [cached, age, reads, dispatches] of [
+    ['private', 0, 0, 1],
+    ['public', 0, 0, 0],
+    ['private', runnerVisibilityTtlMs + 1, 1, 1],
+  ]) {
+    t.mock.restoreAll();
+    const s = await fixture(t);
+    s.insert('githubRepositoryVisibility', {
+      repository: 'synthetic/project',
+      visibility: cached,
+      checkedAt: Date.now() - age,
+    });
+    gh = github(t, s, { dispatch: () => Response.json({ workflow_run_id: 123 }) });
+    await direct.dispatch._handler(gh.ctx, s.id);
+    assert.deepEqual([gh.calls.repository, gh.calls.dispatch], [reads, dispatches], `${cached} ${age}`);
+    if (!dispatches) assert.equal((await s.status(s.run.id)).status, 'runner-unavailable');
+  }
+
+  // A public project reads nothing: the zoo and bench projects keep their public runner.
+  t.mock.restoreAll();
+  const open = await fixture(t);
+  open.patch('hostedProjects', open.projectId, { visibility: 'public' });
+  gh = github(t, open, { dispatch: () => Response.json({ workflow_run_id: 123 }), visibility: 'public' });
+  await direct.dispatch._handler(gh.ctx, open.id);
+  assert.deepEqual(gh.calls, { dispatch: 1, list: 0, repository: 0 });
+  assert.equal(visibilityRows(open).length, 0);
+});
+test('Issue 6ba1539d: a runner repository made public after connecting is refused at the next check before any source', async t => {
+  const s = await fixture(t);
+  // Connected while private; the cached read is still fresh, so dispatch reads nothing.
+  s.insert('githubRepositoryVisibility', {
+    repository: 'synthetic/project',
+    visibility: 'private',
+    checkedAt: Date.now(),
+  });
+  const gh = github(t, s, { dispatch: () => Response.json({ workflow_run_id: 123 }) });
+  await direct.dispatch._handler(gh.ctx, s.id);
+  assert.equal(gh.calls.repository, 0);
+  // GitHub signs the visibility the workflow actually ran in.
+  const flipped = s.input({ claims: JSON.stringify(claims({ repository_visibility: 'public' })) });
+  for (const [module, name, extra] of [
+    [sessions, 'session', {}],
+    [source, 'resolve', { digests: ['b'.repeat(64)] }],
+  ])
+    await assert.rejects(s.call(module, name, { ...flipped, ...extra }), code('RUNNER_REPOSITORY_PUBLIC'));
+  const missing = claims();
+  delete missing.repository_visibility;
+  await assert.rejects(
+    s.call(sessions, 'session', s.input({ claims: JSON.stringify(missing) })),
+    code('RUNNER_REPOSITORY_PUBLIC'),
+    'fails closed without the claim',
+  );
+  // Over HTTP the runner gets the usual safe 403; the run settles with the reason and
+  // the next dispatch refuses from the cache without starting a workflow.
+  t.mock.restoreAll();
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const names = [];
+  const ctx = {
+    runMutation: (ref, args) => {
+      const name = getFunctionName(ref).split(':')[1];
+      names.push(name);
+      return s.call(sessions, name, args);
+    },
+  };
+  const response = await handle._handler(
+    ctx,
+    new Request(`${audience}/checks/actions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${oidc(claims({ repository_visibility: 'public' }))}` },
+      body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+    }),
+  );
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).reason, 'authorization');
+  assert.deepEqual(names, ['session', 'refusePublicRunner']);
+  const run = await s.status(s.run.id);
+  assert.equal(run.status, 'runner-unavailable');
+  assert.match(run.failureReason, /synthetic\/project is public, but this project is private/);
+  // Remembered, so the next dispatch refuses from the cache (covered above).
+  assert.equal(visibilityRows(s)[0].visibility, 'public');
+});
+test('Issue 6ba1539d: the owner opt-in publicLogs lets a private project run in a public runner repository', async t => {
+  const s = await fixture(t, 2, 'ubuntu-latest', null, { publicLogs: true });
+  const gh = github(t, s, { dispatch: () => Response.json({ workflow_run_id: 123 }), visibility: 'public' });
+  await direct.dispatch._handler(gh.ctx, s.id);
+  // Accepted: no visibility read, no cache row, the workflow starts.
+  assert.deepEqual(gh.calls, { dispatch: 1, list: 0, repository: 0 });
+  assert.equal((await s.status(s.run.id)).executionId, '123');
+  assert.equal(visibilityRows(s).length, 0);
+  // The signed public visibility claim is accepted for this pinned runner too.
+  const session = await s.call(
+    sessions,
+    'session',
+    s.input({ claims: JSON.stringify(claims({ repository_visibility: 'public' })) }),
+  );
+  assert(session);
+  const run = await s.status(s.run.id);
+  assert.notEqual(run.status, 'runner-unavailable');
+  assert.equal(run.configuration.publicLogs, true);
 });

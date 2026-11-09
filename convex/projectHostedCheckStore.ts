@@ -106,8 +106,14 @@ export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckI
 export type LoadedHostedCheck = Awaited<ReturnType<typeof writableHostedCheck>>;
 export async function writableHostedCheck(ctx: MutationCtx, input: CheckIdentity) {
   const selected = await loadHostedCheck(ctx, input);
-  await hostedWriteProject(ctx, input.projectId, selected.run.actor, selected.run.request.authorityEpoch);
-  return selected;
+  const project = await hostedWriteProject(
+    ctx,
+    input.projectId,
+    selected.run.actor,
+    selected.run.request.authorityEpoch,
+  );
+  // The project row is already read for authority; callers reuse its visibility.
+  return { ...selected, project };
 }
 export async function writeHostedCheck(
   ctx: MutationCtx,

@@ -124,6 +124,7 @@ this repository, so the table shows what Forge asks of each token.
 | Check dispatch, run lookup, cancel | `actions: write`, `contents: read` | A hosted check on an App runner (dispatch `forge-check.yml` on `main`, list its runs, cancel a run) | `actionsPermissions`; `projectHostedActionsDirect.ts`, `projectHostedActionsWebhook.ts` |
 | Runner setup preflight | None minted; reads the installation's accepted permissions | `configure-runner` | `requireInstallationPermissions`; `projectHostedActionsConfigure.ts` |
 | Mirror push | `contents: write` (Git data API only; GitHub adds `metadata: read`), one repository; also `workflows: write` when the step's plan adds, changes or removes a path under `.github/workflows/`, or when no plan exists yet (unverified bootstrap) | One job per accepted landing | `mirrorPermissionsFor`; `projectGithubMirror.ts` `step`, `src/hosted-github-mirror.ts` |
+| Two-way read | `contents: read`, one repository | A GitHub `push` webhook to `main` on a two-way project | `inboundReadPermissions`; `projectGithubInboundRun.ts` |
 
 The mirror is the only operation that writes source to GitHub. Check dispatch
 writes only Actions state (a workflow run); Forge checks themselves run with
@@ -166,6 +167,46 @@ All of these must hold:
   branch protection on `main` also applies to the `PATCH`; a block surfaces as a
   retained `GITHUB_SYNC_API` failure. That last point is GitHub behavior this
   repository does not test.
+
+### Two-way sync
+
+Opt in per project with `githubMirror.inbound: true` (needs `autoPush: true`),
+for example `set-policy {"githubMirror":{"repo":"owner/name","autoPush":true,"laneRefs":false,"inbound":true}}`.
+Forge still owns `main`: a change merged or pushed on GitHub comes back in as an
+ordinary Forge landing and passes the same checks and review rules.
+
+- **Trigger:** the App's `push` webhook for `refs/heads/main`
+  (`projectGithubInboundQueue:receive`). A push whose head is the mirror's own last
+  commit writes nothing; a one-way project writes nothing. There is no polling.
+- **One job per push:** the inbound job shares the mirror queue, so publishes and
+  inbound work never race. Pushes that arrive while it waits coalesce into it. A
+  publish that finds GitHub `main` moved (`GITHUB_SYNC_CHANGED`) yields to an
+  inbound job instead of failing.
+- **What comes in:** the job reads GitHub `main`, diffs its tree against the last
+  mirrored commit by walking only changed directories, stores the changed bytes
+  in R2 (windows of 99 objects, never one Convex call per file), and submits a
+  Lane whose base is the accepted State the mirror last matched. Forge composes it
+  onto current `main`. The landing is attributed to the project owner as agent
+  `github-inbound`, and it claims no owner review bypass: protected paths still
+  need their reviewers.
+- **Limits:** 500 changed directories and 5,000 changed files per push. Larger
+  pushes, unsupported modes, or a path that both GitHub and Forge changed since
+  the last mirror fail the job visibly (`GITHUB_INBOUND_TOO_LARGE`,
+  `GITHUB_INBOUND_MODE`, `GITHUB_INBOUND_CONFLICT`); nothing is half-applied.
+- **When the landing fails** (a check or review blocks it): the Lane is kept, the
+  job fails with `GITHUB_INBOUND_FAILED` and the mirror status names the Lane.
+  Nothing is held: the next Forge landing publishes Forge `main` over the GitHub
+  commit, and its commit message says which GitHub commit it takes out. Fix and
+  land that Lane to bring the change back.
+- **When it lands:** the GitHub commit becomes the mirror's recorded commit for
+  that tree, and the next publish builds on it, so GitHub history is kept.
+- **Cost:** idle is zero. One push costs a handful of Convex mutations plus one
+  per 99 changed files, and GitHub calls grow with changed directories, not
+  repository size.
+- **Keeping `main` from diverging** (branch protection that requires the Forge
+  check on GitHub) needs the App to hold Commit statuses and Administration write.
+  That setup is tracked as a follow-up; until then a direct push to GitHub `main`
+  is brought in, or published over with a note, as above.
 
 ### Token guard
 

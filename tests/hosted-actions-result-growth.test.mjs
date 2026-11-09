@@ -43,6 +43,7 @@ const claims = () => ({
   run_id: '123',
   run_attempt: '1',
   runner_environment: 'github-hosted',
+  repository_visibility: 'private',
 });
 function oidc() {
   const encode = input => Buffer.from(JSON.stringify(input)).toString('base64url');

@@ -226,3 +226,134 @@ test('5,000 pointer bumps use 50 descriptor windows and four GitHub metadata cal
     }),
   );
 });
+
+test('two-way: the GitHub tree diff walks only changed directories and builds the exact Lane State', async () => {
+  const { diffGithubTrees, applyInbound, inboundConflicts } = await import('../dist/github-inbound.js');
+  const { inboundMessage } = await import('../dist/github-inbound-job.js');
+  const { parseNativeState } = await import('../dist/native-state-format.js');
+  const trees = new Map();
+  const sha = value => gitHash('blob', Buffer.from(value));
+  /** Store a flat {path: [mode, text]} map as nested GitHub trees; returns the root SHA. */
+  const build = files => {
+    const node = new Map();
+    for (const [path, entry] of Object.entries(files)) {
+      const [head, ...rest] = path.split('/');
+      if (rest.length) {
+        if (!node.has(head)) node.set(head, {});
+        node.get(head)[rest.join('/')] = entry;
+      } else node.set(head, entry);
+    }
+    const tree = [...node].map(([name, value]) =>
+      Array.isArray(value)
+        ? {
+            path: name,
+            mode: value[0],
+            type: value[0] === '160000' ? 'commit' : 'blob',
+            sha: value[0] === '160000' ? value[1] : sha(value[1]),
+          }
+        : { path: name, mode: '040000', type: 'tree', sha: build(value) },
+    );
+    const id = gitHash('tree', Buffer.from(JSON.stringify(tree)));
+    trees.set(id, tree);
+    return id;
+  };
+  const calls = [];
+  const api = async path => {
+    calls.push(path);
+    const id = path.split('/').at(-1);
+    return { tree: trees.get(id), truncated: false };
+  };
+  const unchanged = {};
+  for (let i = 0; i < 50; i++) unchanged[`vendor/lib-${i}/index.js`] = ['100644', `lib ${i}`];
+  const pinned = 'a'.repeat(40);
+  const before = build({
+    ...unchanged,
+    'README.md': ['100644', 'hello'],
+    'src/a.ts': ['100644', 'a1'],
+    'src/old/x.ts': ['100644', 'x'],
+    'bin/run': ['100644', 'run'],
+    docs: ['100644', 'docs file becomes a directory'],
+    '.forge/meta': ['100644', 'never imported'],
+  });
+  const after = build({
+    ...unchanged,
+    'README.md': ['100644', 'hello'],
+    'src/a.ts': ['100644', 'a2'],
+    'src/new/y.ts': ['100644', 'y'],
+    'bin/run': ['100755', 'run'],
+    'docs/index.md': ['100644', 'docs'],
+    'deps/sub': ['160000', pinned],
+    '.forge/meta': ['100644', 'changed but never imported'],
+  });
+  const diff = await diffGithubTrees(api, 'synthetic/mirror', before, after);
+  assert.deepEqual(
+    diff.changes.map(c => [c.path, c.after?.mode ?? null]),
+    [
+      ['bin/run', 'executable'],
+      ['deps/sub', 'gitlink'],
+      ['docs', null],
+      ['docs/index.md', 'file'],
+      ['src/a.ts', 'file'],
+      ['src/new/y.ts', 'file'],
+      ['src/old/x.ts', null],
+    ],
+  );
+  assert.equal(diff.skipped, 1, 'Forge metadata never round-trips');
+  assert(calls.length <= 12, `changed directories only: ${calls.length} tree reads for 50 unchanged`);
+  assert(
+    !calls.some(path => path.includes(build({ 'index.js': ['100644', 'lib 0'] }))),
+    'unchanged subtrees are not read',
+  );
+  assert.deepEqual(await diffGithubTrees(api, 'synthetic/mirror', after, after), {
+    changes: [],
+    skipped: 0,
+    directories: 0,
+  });
+  const file = (path, blob, mode = 'file') => ({ path, blob, mode });
+  const base = {
+    schema: 1,
+    kind: 'forge-source-state',
+    parents: [],
+    files: [
+      file('README.md', '1'.repeat(64)),
+      file('src/a.ts', '2'.repeat(64)),
+      file('src/old/x.ts', '3'.repeat(64)),
+      file('docs', '4'.repeat(64)),
+      file('private-artifacts/keep', '5'.repeat(64)),
+    ],
+    message: 'base',
+    at: '2026-01-01T00:00:00.000Z',
+  };
+  const applied = diff.changes.map(change => ({
+    path: change.path,
+    after: change.after && { mode: change.after.mode, blob: '9'.repeat(64) },
+  }));
+  const parent = '8'.repeat(64);
+  const lane = applyInbound(base, parent, applied, 'Merge pull request #1', '2026-01-02T00:00:00.000Z');
+  const state = parseNativeState(lane.bytes);
+  assert.deepEqual(state.parents, [parent], 'the merge base is the accepted State GitHub matched');
+  assert.deepEqual(
+    state.files.map(f => f.path),
+    [
+      'README.md',
+      'bin/run',
+      'deps/sub',
+      'docs/index.md',
+      'private-artifacts/keep',
+      'src/a.ts',
+      'src/new/y.ts',
+    ],
+  );
+  assert.equal(lane.pin.size, lane.bytes.length);
+  // Forge changed src/a.ts after the State GitHub matched: that path cannot be brought in by path.
+  const moved = {
+    ...base,
+    files: base.files.map(f => (f.path === 'src/a.ts' ? { ...f, blob: '7'.repeat(64) } : f)),
+  };
+  assert.deepEqual(inboundConflicts(base, moved, diff.changes), ['src/a.ts']);
+  assert.deepEqual(inboundConflicts(base, base, diff.changes), []);
+  assert.match(
+    inboundMessage({ commit: pinned, message: 'Merge pull request #1\n\nbody', repository: 'o/r' }),
+    /^Merge pull request #1\n\nBrought in from GitHub o\/r main at a{40}\.\nGitHub-Commit: a{40}$/,
+  );
+});

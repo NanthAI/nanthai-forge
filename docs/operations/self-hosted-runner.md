@@ -9,6 +9,13 @@ one exact machine per project, rather than choosing from a pool by label.
 You pay nothing to Forge for runner compute; hardware, electricity, hosting and
 backend/object-storage usage remain yours.
 
+A self-hosted machine runner keeps logs in Forge, visible only to the project's
+readers. Self-hosted GitHub Actions runners (`runsOn` labels on a `github-actions`
+runner) still run in the runner repository, whose Actions logs are as visible as the
+repository: a private project refuses a runner repository that is not private unless
+its owner accepted public logs with `publicLogs:true` (`RUNNER_REPOSITORY_PUBLIC`, at connect, dispatch and each runner call; see
+[security](../security.md#hosted-check-authorization)).
+
 ## Start on Linux or macOS
 
 Use Node **24.22.1+ (24.x)** and a built Forge source package. Install dependencies

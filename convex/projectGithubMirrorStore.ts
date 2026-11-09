@@ -12,6 +12,9 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { mirrorMessage } from '../src/landing-message';
 import { missingObjectDelays } from '../src/hosted-github-retry';
+import { inboundBegin } from './projectGithubInbound';
+import { inboundOutcomeSchema, yieldToInbound } from './projectGithubInboundQueue';
+import { effectivePolicy } from '../src/autonomy-policy';
 const identity = { jobId: v.id('projectGithubMirrorJobs'), step: v.number() };
 async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJobs'>; step: number }) {
   const active = await mirrorJob(ctx, input);
@@ -72,13 +75,24 @@ async function seed(ctx: MutationCtx, input: { jobId: Id<'projectGithubMirrorJob
     'GITHUB_SYNC_IDENTITY',
     'Configure the existing noreply sync identity with FORGE_GITHUB_SYNC_NAME and FORGE_GITHUB_SYNC_EMAIL, or retain it in githubSync.',
   );
-  const message = mirrorMessage({
+  const published = mirrorMessage({
     ...receipt,
     fallback,
     state: receipt.candidate.head,
     acceptanceId: receipt.id,
     viewId: receipt.candidate.id,
   });
+  // The first publish after a failed inbound landing says it takes that GitHub change out here.
+  const outcome = queue.inbound ? inboundOutcomeSchema.parse(JSON.parse(queue.inbound)) : null;
+  const note =
+    outcome?.note &&
+    `This publish takes GitHub commit ${outcome.commit.slice(0, 12)} out of main: it did not land on Forge (Lane ${outcome.laneId.slice(0, 8)}). Fix and land that Lane to bring it back.`;
+  const split = published.indexOf('\n\n');
+  const message = !note
+    ? published
+    : split < 0
+      ? `${published}\n\n${note}`
+      : `${published.slice(0, split)}\n\n${note}${published.slice(split)}`;
   const value = {
     cursor: null,
     repository: job.repository,
@@ -105,6 +119,10 @@ export const begin = internalMutation({
   args: identity,
   returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
+    if ((await ctx.db.get(input.jobId))?.inbound) {
+      const inbound = await inboundBegin(ctx, input);
+      return inbound && canonicalPayload(inbound);
+    }
     const value = await seed(ctx, input);
     const job = value && (await ctx.db.get(input.jobId));
     // The action binds its App token to the job's project.
@@ -142,10 +160,12 @@ export const commit = internalMutation({
         )
         .order('asc')
         .take(1);
+      const outcome = queue.inbound ? inboundOutcomeSchema.parse(JSON.parse(queue.inbound)) : null;
       await ctx.db.patch(queue._id, {
         mapping: canonicalPayload(mapping),
         mirroredAt: Date.now(),
         activeId: next[0]?._id ?? null,
+        ...(outcome?.note ? { inbound: canonicalPayload({ ...outcome, note: false }) } : {}),
       });
       if (next[0]) await scheduleMirror(ctx, next[0]);
     } else {
@@ -181,6 +201,13 @@ export const failed = internalMutation({
     if (!job || job.step !== input.step || ['done', 'failed'].includes(job.status)) return null;
     const queue = await mirrorRow(ctx, job.projectId);
     if (queue?.activeId !== job._id) return null;
+    if (input.code === 'GITHUB_SYNC_CHANGED' && !job.inbound) {
+      const project = await ctx.db.get(job.projectId);
+      if (project && effectivePolicy(project).githubMirror?.inbound) {
+        await yieldToInbound(ctx, project, queue, job);
+        return null;
+      }
+    }
     // A checkpointed advance selects a different immutable request. Bound
     // consecutive failures of that request, not failures accumulated while
     // successfully publishing other blobs in the same window.

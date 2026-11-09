@@ -1,27 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { makeFunctionReference } from 'convex/server';
-import type { MutationCtx, QueryCtx } from './_generated/server';
-import type { Doc, Id } from './_generated/dataModel';
+import type { MutationCtx } from './_generated/server';
+import type { Doc } from './_generated/dataModel';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { effectivePolicy } from '../src/autonomy-policy';
-import { invariant } from '../src/errors';
-export const mirrorRow = (ctx: MutationCtx | QueryCtx, projectId: Id<'hostedProjects'>) =>
-  ctx.db
-    .query('projectGithubMirrors')
-    .withIndex('by_project', q => q.eq('projectId', projectId))
-    .unique();
-export async function scheduleMirror(
-  ctx: MutationCtx,
-  job: Pick<Doc<'projectGithubMirrorJobs'>, '_id' | 'step'>,
-  delay = 0,
-) {
-  const scheduledId = await ctx.scheduler.runAfter(
-    delay,
-    makeFunctionReference<'action'>('projectGithubMirror:step'),
-    { jobId: job._id, step: job.step },
-  );
-  await ctx.db.patch(job._id, { scheduledId });
-}
+import { settleInbound } from './projectGithubInboundQueue';
+import { mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
+export { mirrorJob, mirrorRow, scheduleMirror } from './projectGithubMirrorRows';
 /** Publication and wake are one transaction. No watcher, timer or idle job. */
 export async function enqueueGithubMirror(
   ctx: MutationCtx,
@@ -40,11 +24,15 @@ export async function enqueueGithubMirror(
     const id = await ctx.db.insert('projectGithubMirrors', {
       projectId: project._id,
       repository: policy.repo,
+      repositoryKey: policy.repo.toLowerCase(),
       activeId: null,
       mapping: null,
     });
     queue = (await ctx.db.get(id))!;
-  }
+  } else if (queue.repositoryKey !== queue.repository.toLowerCase())
+    await ctx.db.patch(queue._id, { repositoryKey: queue.repository.toLowerCase() });
+  // Two-way sync: an inbound job holding the queue settles with the acceptance that landed it.
+  if (queue.activeId && (await settleInbound(ctx, queue, receipt))) queue = (await ctx.db.get(queue._id))!;
   const jobId = await ctx.db.insert('projectGithubMirrorJobs', {
     projectId: project._id,
     receiptId: receipt.id,
@@ -61,29 +49,4 @@ export async function enqueueGithubMirror(
     await ctx.db.patch(queue._id, { activeId: jobId });
     await scheduleMirror(ctx, { _id: jobId, step: 0 });
   }
-}
-export async function mirrorJob(
-  ctx: MutationCtx | QueryCtx,
-  input: { jobId: Id<'projectGithubMirrorJobs'>; step: number },
-) {
-  const job = await ctx.db.get(input.jobId);
-  if (!job || job.step !== input.step || ['done', 'failed'].includes(job.status)) return null;
-  const queue = await mirrorRow(ctx, job.projectId);
-  if (queue?.activeId !== job._id) return null;
-  const project = await ctx.db.get(job.projectId);
-  invariant(
-    project &&
-      !project.removal &&
-      project.sourceAuthority?.mode === 'server' &&
-      project.sourceAuthority.epoch === job.authorityEpoch,
-    'SOURCE_AUTHORITY_CHANGED',
-    'Hosted mirror authority changed. Retain this job for reconciliation.',
-  );
-  const policy = effectivePolicy(project).githubMirror;
-  invariant(
-    policy?.autoPush && policy.repo === job.repository,
-    'GITHUB_SYNC_DISABLED',
-    'Hosted mirror policy changed.',
-  );
-  return { job, queue, project };
 }

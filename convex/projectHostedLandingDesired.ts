@@ -5,7 +5,9 @@ import { desiredWatchdogMs } from '../src/hosted-landing-stall';
 import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { receiptMutation, internalMutation, internalAction } from './cliServer';
+import { receiptMutation, internalMutation, internalAction, type MutationCtx } from './cliServer';
+import type { Id } from './_generated/dataModel';
+import type { z } from 'zod';
 import { acceptanceActor } from './projectAutonomy';
 import { landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
@@ -38,170 +40,182 @@ export const submit = receiptMutation({
     try {
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, true);
-      const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
-      const request = canonicalPayload(command);
-      const old = await ctx.db
-        .query('projectHostedLandingDesired')
-        .withIndex('by_project_and_actor_and_operation', q =>
-          q.eq('projectId', input.projectId).eq('actor', actor.id).eq('operationId', command.operationId),
-        )
-        .unique();
-      if (old) {
-        invariant(old.request === request, 'WORK_OPERATION_CHANGED', 'Replay the original desired landing.');
-        const canonical = await landingRow(ctx, old);
-        return canonical?.value ?? old.value;
-      }
-      const alias = await landingAlias(ctx, {
-        projectId: input.projectId,
-        actor: actor.id,
-        operationId: command.operationId,
-      });
-      if (alias) {
-        invariant(
-          alias.requestHash === digest(request),
-          'WORK_OPERATION_CHANGED',
-          'Replay the original desired landing.',
-        );
-        const canonical = await landingRow(ctx, alias);
-        const desired = canonical ? null : await desiredLanding(ctx, alias);
-        invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
-        return canonical?.value ?? desired!.value;
-      }
-      const source = await loadCompose(ctx, {
-        projectId: input.projectId,
-        actor: actor.id,
-        operationId: command.composeOperationId,
-      });
-      invariant(
-        ['submitted', 'completed', 'failed'].includes(source.state.status),
-        'WORK_STALE',
-        'Submit the staged source job first.',
-      );
-      invariant(
-        source.state.request.authorityEpoch === command.authorityEpoch,
-        'SOURCE_AUTHORITY_CHANGED',
-        'Retain the original source authority.',
-      );
-      const selectionKey = digest(
-        canonicalPayload({
-          channel: 'main',
-          message: command.message ?? null,
-          ...(command.priority === 'urgent' ? { priority: 'urgent' } : {}),
-          agent: true,
-          check: command.check,
-          inputs: source.state.request.inputs.root,
-          dependencies: source.state.request.dependencies.root,
-          after: command.after,
-        }),
-      );
-      const [queued] = await ctx.db
-        .query('projectHostedLandingRequests')
-        .withIndex('by_project_and_selection', q =>
-          q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
-        )
-        .order('desc')
-        .take(1);
-      const queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
-      if (queued && queuedState?.observation.state !== 'terminal-failed') {
-        await ctx.db.insert('projectHostedLandingAliases', {
-          projectId: input.projectId,
-          actor: actor.id,
-          operationId: command.operationId,
-          requestHash: digest(request),
-          submissionId: queued.submissionId,
-        });
-        return queued.value;
-      }
-      const [existing] = await ctx.db
-        .query('projectHostedLandingDesired')
-        .withIndex('by_project_and_selection', q =>
-          q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
-        )
-        .order('desc')
-        .take(1);
-      const existingCanonical = existing && (await landingRow(ctx, existing));
-      const existingState =
-        existing && hostedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
-      if (existing && existingState?.observation.state !== 'terminal-failed') {
-        await ctx.db.insert('projectHostedLandingAliases', {
-          projectId: input.projectId,
-          actor: actor.id,
-          operationId: command.operationId,
-          requestHash: digest(request),
-          submissionId: existing.submissionId,
-        });
-        return existingCanonical?.value ?? existing.value;
-      }
-      const previous = queuedState ?? existingState;
-      const id = crypto.randomUUID(),
-        attemptId = crypto.randomUUID(),
-        at = new Date().toISOString();
-      const state = hostedLandingStateSchema.parse({
-        schema: 1,
-        projectId: input.projectId,
-        id,
-        operationId: command.operationId,
-        actor: actor.id,
-        at,
-        sequence: 0,
-        ...landingPriority(project, actor, command.priority),
-        priorityVersion: 0,
-        version: 0,
-        firstAttemptId: attemptId,
-        attemptId,
-        phase: 'composing',
-        preparing: true,
-        ...(previous?.observation.state === 'terminal-failed'
-          ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other' }
-          : {}),
-        observation: landingObservation('queued'),
-        error: null,
-        timing: { submittedAt: at, composeStartedAt: source.operation.firstAttempt.at },
-        request: {
-          ...(command.governanceVersion ? { governanceVersion: command.governanceVersion } : {}),
-          operationId: command.operationId,
-          authorityEpoch: command.authorityEpoch,
-          channel: 'main',
-          ...(command.message === undefined ? {} : { message: command.message }),
-          expectedMain: source.state.request.expectedMain,
-          candidateId: source.state.candidateId,
-          expectedHead: null,
-          agent: true,
-          ...(command.priority ? { priority: command.priority } : {}),
-          check: command.check,
-          ...(command.retryReason ? { retryReason: command.retryReason } : {}),
-          ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
-          ...(command.closes === undefined ? {} : { closes: command.closes }),
-          ...(command.revertOf ? { revertOf: command.revertOf } : {}),
-          finish: { composeOperationId: command.composeOperationId, after: command.after },
-        },
-      });
-      const key = await ctx.db.insert('projectHostedLandingDesired', {
-        projectId: input.projectId,
-        actor: actor.id,
-        operationId: command.operationId,
-        submissionId: id,
-        composeOperationId: command.composeOperationId,
-        selectionKey,
-        request,
-        value: canonicalPayload(state),
-        // The enqueue below receives this row as its input and copies the run to the landing row.
-        ...landingAgentRun(input.agent),
-        wake: null,
-      });
-      // A source job still running cannot finish this goal: its completion wakes
-      // the goal at once (notifyDesiredCompose), so an immediate drive would claim
-      // and advance to nothing. Arm the same watchdog that drive's claim would
-      // have armed a moment later; terminal sources still drive immediately.
-      const running = source.state.status === 'submitted' && !source.operation.terminal;
-      await schedule(ctx, (await ctx.db.get(key))!, running ? desiredWatchdogMs(state) : 0);
-      await scheduleLandingAlarm(ctx, state);
-      return canonicalPayload(state);
+      return await submitDesiredLanding(ctx, input.projectId, command, actor, input.agent);
     } catch (error) {
       return report(error);
     }
   },
 });
+/** The desired-landing submit for an already authenticated (or trusted system) actor; the
+ * public mutation and two-way GitHub sync (convex/projectGithubInbound.ts) share it. */
+export async function submitDesiredLanding(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  command: z.infer<typeof hostedLandingDesiredSchema>,
+  actor: { id: string; kind: 'agent' | 'person' },
+  agent?: string,
+): Promise<string> {
+  const input = { projectId, agent };
+  const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
+  const request = canonicalPayload(command);
+  const old = await ctx.db
+    .query('projectHostedLandingDesired')
+    .withIndex('by_project_and_actor_and_operation', q =>
+      q.eq('projectId', input.projectId).eq('actor', actor.id).eq('operationId', command.operationId),
+    )
+    .unique();
+  if (old) {
+    invariant(old.request === request, 'WORK_OPERATION_CHANGED', 'Replay the original desired landing.');
+    const canonical = await landingRow(ctx, old);
+    return canonical?.value ?? old.value;
+  }
+  const alias = await landingAlias(ctx, {
+    projectId: input.projectId,
+    actor: actor.id,
+    operationId: command.operationId,
+  });
+  if (alias) {
+    invariant(
+      alias.requestHash === digest(request),
+      'WORK_OPERATION_CHANGED',
+      'Replay the original desired landing.',
+    );
+    const canonical = await landingRow(ctx, alias);
+    const desired = canonical ? null : await desiredLanding(ctx, alias);
+    invariant(canonical || desired, 'SOURCE_UNAVAILABLE', 'Original desired landing is unavailable.');
+    return canonical?.value ?? desired!.value;
+  }
+  const source = await loadCompose(ctx, {
+    projectId: input.projectId,
+    actor: actor.id,
+    operationId: command.composeOperationId,
+  });
+  invariant(
+    ['submitted', 'completed', 'failed'].includes(source.state.status),
+    'WORK_STALE',
+    'Submit the staged source job first.',
+  );
+  invariant(
+    source.state.request.authorityEpoch === command.authorityEpoch,
+    'SOURCE_AUTHORITY_CHANGED',
+    'Retain the original source authority.',
+  );
+  const selectionKey = digest(
+    canonicalPayload({
+      channel: 'main',
+      message: command.message ?? null,
+      ...(command.priority === 'urgent' ? { priority: 'urgent' } : {}),
+      agent: true,
+      check: command.check,
+      inputs: source.state.request.inputs.root,
+      dependencies: source.state.request.dependencies.root,
+      after: command.after,
+    }),
+  );
+  const [queued] = await ctx.db
+    .query('projectHostedLandingRequests')
+    .withIndex('by_project_and_selection', q =>
+      q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
+    )
+    .order('desc')
+    .take(1);
+  const queuedState = queued && hostedLandingStateSchema.parse(JSON.parse(queued.value));
+  if (queued && queuedState?.observation.state !== 'terminal-failed') {
+    await ctx.db.insert('projectHostedLandingAliases', {
+      projectId: input.projectId,
+      actor: actor.id,
+      operationId: command.operationId,
+      requestHash: digest(request),
+      submissionId: queued.submissionId,
+    });
+    return queued.value;
+  }
+  const [existing] = await ctx.db
+    .query('projectHostedLandingDesired')
+    .withIndex('by_project_and_selection', q =>
+      q.eq('projectId', input.projectId).eq('selectionKey', selectionKey),
+    )
+    .order('desc')
+    .take(1);
+  const existingCanonical = existing && (await landingRow(ctx, existing));
+  const existingState =
+    existing && hostedLandingStateSchema.parse(JSON.parse(existingCanonical?.value ?? existing.value));
+  if (existing && existingState?.observation.state !== 'terminal-failed') {
+    await ctx.db.insert('projectHostedLandingAliases', {
+      projectId: input.projectId,
+      actor: actor.id,
+      operationId: command.operationId,
+      requestHash: digest(request),
+      submissionId: existing.submissionId,
+    });
+    return existingCanonical?.value ?? existing.value;
+  }
+  const previous = queuedState ?? existingState;
+  const id = crypto.randomUUID(),
+    attemptId = crypto.randomUUID(),
+    at = new Date().toISOString();
+  const state = hostedLandingStateSchema.parse({
+    schema: 1,
+    projectId: input.projectId,
+    id,
+    operationId: command.operationId,
+    actor: actor.id,
+    at,
+    sequence: 0,
+    ...landingPriority(project, actor, command.priority),
+    priorityVersion: 0,
+    version: 0,
+    firstAttemptId: attemptId,
+    attemptId,
+    phase: 'composing',
+    preparing: true,
+    ...(previous?.observation.state === 'terminal-failed'
+      ? { supersedes: previous.id, retryReason: command.retryReason ?? 'other' }
+      : {}),
+    observation: landingObservation('queued'),
+    error: null,
+    timing: { submittedAt: at, composeStartedAt: source.operation.firstAttempt.at },
+    request: {
+      ...(command.governanceVersion ? { governanceVersion: command.governanceVersion } : {}),
+      operationId: command.operationId,
+      authorityEpoch: command.authorityEpoch,
+      channel: 'main',
+      ...(command.message === undefined ? {} : { message: command.message }),
+      expectedMain: source.state.request.expectedMain,
+      candidateId: source.state.candidateId,
+      expectedHead: null,
+      agent: true,
+      ...(command.priority ? { priority: command.priority } : {}),
+      check: command.check,
+      ...(command.retryReason ? { retryReason: command.retryReason } : {}),
+      ...(command.keepOpen === undefined ? {} : { keepOpen: command.keepOpen }),
+      ...(command.closes === undefined ? {} : { closes: command.closes }),
+      ...(command.revertOf ? { revertOf: command.revertOf } : {}),
+      finish: { composeOperationId: command.composeOperationId, after: command.after },
+    },
+  });
+  const key = await ctx.db.insert('projectHostedLandingDesired', {
+    projectId: input.projectId,
+    actor: actor.id,
+    operationId: command.operationId,
+    submissionId: id,
+    composeOperationId: command.composeOperationId,
+    selectionKey,
+    request,
+    value: canonicalPayload(state),
+    // The enqueue below receives this row as its input and copies the run to the landing row.
+    ...landingAgentRun(input.agent),
+    wake: null,
+  });
+  // A source job still running cannot finish this goal: its completion wakes
+  // the goal at once (notifyDesiredCompose), so an immediate drive would claim
+  // and advance to nothing. Arm the same watchdog that drive's claim would
+  // have armed a moment later; terminal sources still drive immediately.
+  const running = source.state.status === 'submitted' && !source.operation.terminal;
+  await schedule(ctx, (await ctx.db.get(key))!, running ? desiredWatchdogMs(state) : 0);
+  await scheduleLandingAlarm(ctx, state);
+  return canonicalPayload(state);
+}
 /** Claim and advance are separate transactions: a killed action leaves a fenced
  * watchdog. Only pending goals own a timer; source publication also wakes them. */
 export const claim = internalMutation({

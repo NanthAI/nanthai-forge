@@ -70,6 +70,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `imports`, `importArtifacts`, `importReaders`, `importRemovalOperations`, `teamImports`, `sourceZones`, `zoneChanges`, `zoneReaders`, `derivedArtifacts`, `artifactBlobs` | Indexed public imports, Zones, derivatives and `r2blob:` metadata. | Repo size, per import |
 | `forgeAccounts`, `accountHandles`, `accountItems`, `accountOperations`, `handleOperations`, `cliCredentials`, `deviceCodes`, `deviceAttempts`, `agentGrants`, `agentEvents`, `agentUserSettings`, `agentGuidanceOperations`, `agentGuidanceMaintainerOperations`, `teams`, `teamMembers`, `savedViews`, `interestChanges`, `clientErrors` | Accounts, credentials, agent grants, teams and settings. | Fixed |
 | `githubBindingInstallations`, `githubBindingOperations`, `githubBindingRemovals`, `githubBindingWebhookReceipts`, `githubDeliveries` | GitHub App installations and webhook receipts. | Activity |
+| `githubRepositoryVisibility` | Last GitHub visibility read per runner repository (private projects only), overwritten in place and reused for 5 minutes. | Fixed, one row per runner repository |
 | `secretObjects`, `secretVersions`, `secretGrants`, `secretEvents`, `secretDeletions` | Encrypted Secret Objects and grants. | Fixed |
 
 ## Planning search

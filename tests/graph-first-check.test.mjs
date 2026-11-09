@@ -467,6 +467,8 @@ async function server(t, { check = ci(), main = 'green', paths = ['crates/a/src/
     nbf: Date.now() / 1000 - 30,
     iat: Date.now() / 1000 - 30,
     repository: repo,
+    // A private project's runner proves a private repository on every call (Issue 6ba1539d).
+    repository_visibility: 'private',
     workflow_ref: `${repo}/.github/workflows/forge-check.yml@refs/heads/main`,
     workflow_sha: 'a'.repeat(40),
     ref: 'refs/heads/main',

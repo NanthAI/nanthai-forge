@@ -20,6 +20,7 @@ const definitions = await import(moduleUrl('../convex/projectHostedCheckDefiniti
 const imports = await import(moduleUrl('../convex/projectHostedCheckImport.ts'));
 const autonomy = await import(moduleUrl('../convex/projectAutonomy.ts'));
 const actionsConfigure = await import(moduleUrl('../convex/projectHostedActionsConfigure.ts'));
+const visibilities = await import(moduleUrl('../convex/githubRepositoryVisibility.ts'));
 
 /** Owner-proven repository bindings are a deployment setting; tests bind their own synthetic project. */
 const bindRepository = (t, projectId, repo) => {
@@ -308,8 +309,10 @@ function cli(t, fixture) {
       return actionsConfigure.configure._handler(
         {
           auth: { getUserIdentity: async () => ({ subject: state.actor }) },
-          runMutation: (_ref, input) =>
-            fixture.s.call('configure', definitions.configure, input, state.actor),
+          runMutation: (ref, input) =>
+            getFunctionName(ref) === 'githubRepositoryVisibility:record'
+              ? fixture.s.call('visibility', visibilities.record, input, state.actor)
+              : fixture.s.call('configure', definitions.configure, input, state.actor),
         },
         args,
       );
@@ -486,9 +489,13 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
       else process.env[name] = value;
   });
   let permissions = { actions: 'write', contents: 'write', metadata: 'read' };
+  let visibility = 'public';
   const github = [];
   t.mock.method(globalThis, 'fetch', async (url, init) => {
-    github.push([url, init.method]);
+    github.push([url, init.method ?? 'GET', init.body && JSON.parse(init.body).permissions]);
+    if (url.endsWith('/access_tokens')) return Response.json({ token: 'synthetic-token' });
+    if (url === 'https://api.github.com/repos/NanthAI/nanthai-forge')
+      return Response.json({ private: visibility === 'private', visibility });
     assert.equal(url, 'https://api.github.com/repos/NanthAI/nanthai-forge/installation');
     return Response.json({ id: 77, permissions });
   });
@@ -516,6 +523,18 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
   assert.equal(settings(fixture.s).length, 0);
   permissions = { actions: 'write', contents: 'write', metadata: 'read' };
 
+  // Issue 6ba1539d: this private project's logs would be public in a public runner repository.
+  await assert.rejects(
+    run('configure-runner', {
+      provider: 'github-actions',
+      repository: 'NanthAI/nanthai-forge',
+      operationId: randomUUID(),
+    }),
+    error => code('RUNNER_REPOSITORY_PUBLIC')(error) && /private runner repository/.test(error.message),
+  );
+  assert.equal(settings(fixture.s).length, 0);
+  visibility = 'private';
+
   const operationId = randomUUID();
   const configured = await run('configure-runner', {
     provider: 'github-actions',
@@ -533,9 +552,13 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
   assert.equal(configured.value.installationId, undefined);
   assert.equal(configured.value.credential, undefined);
   assert.equal(configured.digest, checkPin(configured.value));
-  // Installation lookup only: no token is minted to configure.
-  assert.deepEqual(github.at(-1), ['https://api.github.com/repos/NanthAI/nanthai-forge/installation', 'GET']);
-  assert(!github.some(([url]) => url.includes('access_tokens')));
+  // One metadata-only token proves the binding and reads visibility; no Actions token at connect.
+  assert.deepEqual(github.at(-1), ['https://api.github.com/repos/NanthAI/nanthai-forge', 'GET', undefined]);
+  assert(
+    github
+      .filter(([url]) => url.includes('access_tokens'))
+      .every(([, , granted]) => JSON.stringify(granted) === JSON.stringify({ metadata: 'read' })),
+  );
   // The same operation replays its receipt without a second settings version.
   assert.deepEqual(
     await run('configure-runner', {
@@ -661,7 +684,7 @@ test('CLI configure-runner github-actions routes to the App action, derives the 
   );
 });
 
-test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by false or a new repository, shown on settings', async t => {
+test('publicLogs: owner-only opt-in lets a private project use a public runner, kept with its repository, shown on settings', async t => {
   const fixture = project();
   const { state, run } = cli(t, fixture);
   bindRepository(t, fixture.projectId, 'NanthAI/nanthai-forge');
@@ -678,30 +701,48 @@ test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by fals
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
   });
-  const github = [];
-  t.mock.method(globalThis, 'fetch', async url => {
-    github.push(url);
+  const granted = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (url.endsWith('/access_tokens')) {
+      granted.push(JSON.parse(init.body).permissions);
+      return Response.json({ token: 'synthetic-token' });
+    }
+    // nanthai-forge is public (like the dogfood runner); other-runner is private.
+    const repo = /^https:\/\/api\.github\.com\/repos\/NanthAI\/(nanthai-forge|other-runner)$/.exec(url)?.[1];
+    if (repo)
+      return Response.json(repo === 'other-runner' ? { visibility: 'private' } : { visibility: 'public' });
     assert.match(
       url,
       /^https:\/\/api\.github\.com\/repos\/NanthAI\/(nanthai-forge|other-runner)\/installation$/,
     );
     return Response.json({ id: 77, permissions: { actions: 'write', contents: 'write', metadata: 'read' } });
   });
-  const plain = await run('configure-runner', {
-    provider: 'github-actions',
-    repository: 'NanthAI/nanthai-forge',
-    operationId: randomUUID(),
-  });
-  assert.equal(plain.value.publicLogs, undefined); // default: no acceptance recorded
+  // Default refuses, and the refusal names both fixes.
+  await assert.rejects(
+    run('configure-runner', {
+      provider: 'github-actions',
+      repository: 'NanthAI/nanthai-forge',
+      operationId: randomUUID(),
+    }),
+    error =>
+      code('RUNNER_REPOSITORY_PUBLIC')(error) &&
+      /private runner repository/.test(error.message) &&
+      error.message.includes('"repository":"NanthAI/nanthai-forge","publicLogs":true'),
+  );
+  assert.equal(settings(fixture.s).length, 0);
 
   // A member (contributor) cannot record the owner's acceptance; nothing is written.
-  const versions = settings(fixture.s).length;
   state.actor = 'peer';
   await assert.rejects(
-    run('configure-runner', { provider: 'github-actions', publicLogs: true, operationId: randomUUID() }),
+    run('configure-runner', {
+      provider: 'github-actions',
+      repository: 'NanthAI/nanthai-forge',
+      publicLogs: true,
+      operationId: randomUUID(),
+    }),
     code('PROJECT_UNAVAILABLE'),
   );
-  assert.equal(settings(fixture.s).length, versions);
+  assert.equal(settings(fixture.s).length, 0);
   state.actor = 'owner';
   await assert.rejects(
     run('configure-runner', { provider: 'self-hosted', publicLogs: true, operationId: randomUUID() }),
@@ -710,14 +751,15 @@ test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by fals
 
   const accepted = await run('configure-runner', {
     provider: 'github-actions',
+    repository: 'NanthAI/nanthai-forge',
     publicLogs: true,
     operationId: randomUUID(),
   });
   assert.equal(accepted.value.publicLogs, true);
   assert.equal(accepted.value.repository, 'NanthAI/nanthai-forge');
-  assert.notEqual(accepted.digest, plain.digest);
   assert.equal(accepted.digest, checkPin(accepted.value));
-  assert.equal(accepted.value.environmentFingerprint, plain.value.environmentFingerprint);
+  const { publicLogs: _accepted, ...plainValue } = accepted.value;
+  assert.notEqual(accepted.digest, checkPin(plainValue));
   const shown = await run('check-settings');
   assert.match(shown.actions.logs, /^Check logs are public: this runner runs in NanthAI\/nanthai-forge/);
   assert.equal(shown.runner.configuration.publicLogs, true);
@@ -729,16 +771,14 @@ test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by fals
     operationId: randomUUID(),
   });
   assert.equal(budgeted.value.publicLogs, true);
-  // ...withdrawn by publicLogs:false, back to the plain digest's shape.
-  const withdrawn = await run('configure-runner', {
-    provider: 'github-actions',
-    publicLogs: false,
-    operationId: randomUUID(),
-  });
-  assert.equal(withdrawn.value.publicLogs, undefined);
-  assert.match((await run('check-settings')).actions.logs, /^as visible as NanthAI\/nanthai-forge/);
-  // An acceptance names one repository: switching repositories drops it.
-  await run('configure-runner', { provider: 'github-actions', publicLogs: true, operationId: randomUUID() });
+  // ...and publicLogs:false withdraws it, so the public runner is refused again.
+  const versions = settings(fixture.s).length;
+  await assert.rejects(
+    run('configure-runner', { provider: 'github-actions', publicLogs: false, operationId: randomUUID() }),
+    code('RUNNER_REPOSITORY_PUBLIC'),
+  );
+  assert.equal(settings(fixture.s).length, versions);
+  // An acceptance names one repository: a private runner repository drops it.
   const moved = await run('configure-runner', {
     provider: 'github-actions',
     repository: 'NanthAI/other-runner',
@@ -746,7 +786,9 @@ test('publicLogs: owner-only opt-in, kept with its repository, withdrawn by fals
   });
   assert.equal(moved.value.repository, 'NanthAI/other-runner');
   assert.equal(moved.value.publicLogs, undefined);
-  assert(!github.some(url => url.includes('access_tokens'))); // no token minted to opt in
+  assert.match((await run('check-settings')).actions.logs, /^as visible as NanthAI\/other-runner/);
+  // Connect mints metadata-only tokens: never Actions write to opt in.
+  assert(granted.length && granted.every(p => JSON.stringify(p) === JSON.stringify({ metadata: 'read' })));
 });
 
 test('submodules: owner-only allowlist, empty by default, merged, kept with its repository, shown on settings', async t => {
@@ -767,8 +809,16 @@ test('submodules: owner-only allowlist, empty by default, merged, kept with its 
       else process.env[name] = value;
   });
   const github = [];
-  t.mock.method(globalThis, 'fetch', async url => {
+  const granted = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
     github.push(url);
+    // Connect mints a metadata-only token and reads the (private) runner repository.
+    if (url.endsWith('/access_tokens')) {
+      granted.push(JSON.parse(init.body).permissions);
+      return Response.json({ token: 'synthetic-token' });
+    }
+    if (/^https:\/\/api\.github\.com\/repos\/NanthAI\/[\w.-]+$/.test(url))
+      return Response.json({ visibility: 'private' });
     return Response.json({ id: 77, permissions: { actions: 'write', contents: 'write', metadata: 'read' } });
   });
   const plain = await run('configure-runner', {
@@ -849,7 +899,10 @@ test('submodules: owner-only allowlist, empty by default, merged, kept with its 
     operationId: randomUUID(),
   });
   assert.equal(moved.value.submodules, undefined);
-  assert(!github.some(url => url.includes('access_tokens'))); // no token minted to allow
+  // No contents or Actions token is minted to allow: only connect's metadata-only proofs.
+  assert(
+    granted.length > 0 && granted.every(permissions => JSON.stringify(permissions) === '{"metadata":"read"}'),
+  );
 });
 
 test('CLI self-hosted labels remain pinned on replay and explicit empty labels clear the selection metadata', async t => {

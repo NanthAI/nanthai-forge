@@ -20,6 +20,7 @@ import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format
 import { ForgeError, invariant } from '../src/errors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStorage } from './projectConvexSourceStorage';
+import { runInbound } from './projectGithubInboundRun';
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Same recipe-aware verified reader as the fixed source worker, with one
  * logical-file cache. Descriptors and storage grants are per 100-object window. */
@@ -105,6 +106,9 @@ export const step = internalAction({
       const raw: string | null = await ctx.runMutation(mutation('projectGithubMirrorStore:begin'), input);
       if (!raw) return null;
       const loaded = JSON.parse(raw);
+      // Two-way sync: an inbound job shares this queue, fence and failure policy.
+      if (loaded.inbound)
+        return (await runInbound(ctx, input, loaded, mirrorSource(ctx, input).states), null);
       durable = sourceStorage(ctx, loaded.projectId);
       // The binding is proved before any source read. The one token per step is
       // minted once the plan names the changed paths (708b6943), or on the first

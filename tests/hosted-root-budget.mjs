@@ -71,7 +71,12 @@ export async function measureRootBudget(t, f, { nodeArgs = [] } = {}) {
   // Keep the budget on actual client attempts, including those failed requests.
   assert(cloned.rpcCalls >= cloneCalls);
   const started = await run(['agent', f.root, 'start', JSON.stringify({ outcome: 'Warm cache start' })]);
-  assert.equal(started.result.result.checkout.downloadedObjects, 0);
+  // The message names why a warm start's checkout did not complete (status, reason, code).
+  assert.equal(
+    started.result.result.checkout.downloadedObjects,
+    0,
+    JSON.stringify(started.result.result.checkout).slice(0, 2000),
+  );
   const calls = f.calls.length;
   assert(started.rpcCalls >= calls - cloneCalls);
   await new Promise(resolve => setImmediate(resolve));

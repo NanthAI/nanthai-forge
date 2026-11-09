@@ -44,6 +44,13 @@ export const githubBindingTables = {
     .index('by_project_and_operation', ['projectId', 'operationId'])
     .index('by_state', ['state']),
   githubBindingWebhookReceipts: defineTable({ delivery: v.string() }).index('by_delivery', ['delivery']),
+  /** Last GitHub visibility read of a runner repository (lowercase OWNER/NAME), reused
+   * for `runnerVisibilityTtlMs`; one row per repository, overwritten in place. */
+  githubRepositoryVisibility: defineTable({
+    repository: v.string(),
+    visibility: v.string(),
+    checkedAt: v.number(),
+  }).index('by_repository', ['repository']),
   githubBindingRemovals: defineTable({
     projectId: v.id('hostedProjects'),
     operationId: v.string(),

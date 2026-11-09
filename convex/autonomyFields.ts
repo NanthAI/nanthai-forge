@@ -100,7 +100,14 @@ export const autonomyPolicy = v.object({
     closeOnLand: v.optional(v.union(v.literal('declared'), v.literal('off'))),
   }),
   notify: v.object({ awaySummary: v.boolean() }),
-  githubMirror: v.optional(v.object({ repo: v.string(), autoPush: v.boolean(), laneRefs: v.literal(false) })),
+  githubMirror: v.optional(
+    v.object({
+      repo: v.string(),
+      autoPush: v.boolean(),
+      laneRefs: v.literal(false),
+      inbound: v.optional(v.boolean()),
+    }),
+  ),
 });
 export const automaticAction = v.object({
   actor: v.string(),

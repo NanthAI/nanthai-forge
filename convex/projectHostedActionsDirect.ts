@@ -12,6 +12,17 @@ import {
 import { hostedCheckTerminal, checkPin, type HostedCheckRun } from '../src/hosted-check';
 import { installationToken, githubAppRequest, actionsPermissions } from './githubAppToken';
 import { invariant } from '../src/errors';
+import {
+  runnerVisibilityRequired,
+  requirePrivateRunner,
+  runnerPublicCode,
+  runnerPublicReason,
+} from '../src/runner-visibility';
+import {
+  cachedRepositoryVisibility,
+  readRepositoryVisibility,
+  recordRepositoryVisibility,
+} from './githubRepositoryVisibility';
 export const directActionsWatchdogMs = 12 * 60 * 60_000;
 /** Incident a7de3a93: a dispatch whose reply was lost has no executionId until the
  * workflow_run webhook binds it. GitHub lists a dispatched run within about a
@@ -67,6 +78,7 @@ export function classifyDispatchFailure(
 }
 /** The followable reason a refused dispatch settles with; it reaches the landing error. */
 export function dispatchFailureReason(failure: string | undefined, repository: string) {
+  if (failure?.startsWith('public-runner')) return runnerPublicReason(repository, failure.slice(14));
   if (failure?.startsWith('auth'))
     return (
       `GitHub App dispatch was refused (${failure.slice(5)}). Check that the Forge GitHub App is installed on ` +
@@ -133,7 +145,7 @@ export async function settleDirectActions(
  * An unknown dispatch is never resubmitted: GitHub has no idempotency key. */
 export async function reserveDirectActions(ctx: MutationCtx, input: CheckIdentity, now = Date.now()) {
   const selected = await writableHostedCheck(ctx, input),
-    { row, run } = selected;
+    { row, run, project } = selected;
   invariant(directActions(run), 'RUNNER_UNAVAILABLE', 'Select the Convex GitHub App runner.');
   if (hostedCheckTerminal(run) || run.cancelRequested || run.dispatchStarted) return null;
   run.fence++;
@@ -150,7 +162,15 @@ export async function reserveDirectActions(ctx: MutationCtx, input: CheckIdentit
     ),
   };
   await writeHostedCheck(ctx, row._id, run);
-  return run;
+  // A private project dispatches only to a repository proven private (unless its owner
+  // accepted public logs on this runner): a fresh
+  // cached read, or 'unchecked' so dispatch reads GitHub once and records it.
+  const runnerVisibility =
+    !runnerVisibilityRequired(project.visibility, run.configuration) ||
+    run.configuration.provider !== 'github-actions'
+      ? 'not-required'
+      : ((await cachedRepositoryVisibility(ctx, run.configuration.repository, now)) ?? 'unchecked');
+  return Object.assign(run, { runnerVisibility });
 }
 // JSON text (Issue 0c457ae4): a run value never crosses a function boundary as an object.
 export const reserve = internalMutation({
@@ -166,6 +186,7 @@ export const observe = internalMutation({
     executionId: v.optional(v.string()),
     failure: v.optional(v.string()),
     retryAfterMs: v.optional(v.number()),
+    visibility: v.optional(v.string()),
   },
   returns: v.null(),
   handler: async (ctx, input) => {
@@ -176,6 +197,8 @@ export const observe = internalMutation({
       'WORK_STALE',
       'Actions dispatch fence changed.',
     );
+    if (input.visibility && run.configuration.provider === 'github-actions')
+      await recordRepositoryVisibility(ctx, run.configuration.repository, input.visibility);
     if (hostedCheckTerminal(run) && run.status !== 'cancelled') return null;
     run.actions.outcome = input.outcome;
     if (input.failure) run.actions.failure = input.failure.slice(0, 80);
@@ -251,13 +274,14 @@ export const dispatch = internalAction({
   args: identity,
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
-    const run: HostedCheckRun | null = JSON.parse(
+    const run: (HostedCheckRun & { runnerVisibility?: string }) | null = JSON.parse(
       await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reserve'), input),
     );
     if (!run) return null;
     invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');
     let outcome: 'accepted' | 'unknown' | 'rejected' = 'rejected',
       executionId: string | undefined,
+      visibility: string | undefined,
       failed: DispatchFailure | undefined,
       seen: Response | undefined,
       stage: 'setup' | 'dispatch' = 'setup';
@@ -274,6 +298,12 @@ export const dispatch = internalAction({
         run.configuration.repository,
         actionsPermissions,
       );
+      if (run.runnerVisibility && run.runnerVisibility !== 'not-required') {
+        // The Actions token carries metadata read: one GitHub call per expiry.
+        if (run.runnerVisibility === 'unchecked')
+          visibility = await readRepositoryVisibility(run.configuration.repository, token);
+        requirePrivateRunner('private', run.configuration.repository, visibility ?? run.runnerVisibility);
+      }
       // Mark unknown before the non-idempotent call. Never retry a lost response.
       outcome = 'unknown';
       stage = 'dispatch';
@@ -300,7 +330,13 @@ export const dispatch = internalAction({
       outcome = 'accepted';
     } catch (error) {
       // Status or error class only: never provider bodies, credentials or messages.
-      failed = classifyDispatchFailure(seen, error, stage);
+      failed =
+        (error as { code?: string })?.code === runnerPublicCode
+          ? {
+              outcome: 'rejected',
+              failure: `public-runner ${visibility ?? run.runnerVisibility}`,
+            }
+          : classifyDispatchFailure(seen, error, stage);
       outcome = failed.outcome;
       console.warn(
         'FORGE_ACTIONS_DISPATCH_FAILED',
@@ -314,6 +350,7 @@ export const dispatch = internalAction({
       ...(executionId ? { executionId } : {}),
       ...(failed ? { failure: failed.failure } : {}),
       ...(failed?.retryAfterMs !== undefined ? { retryAfterMs: failed.retryAfterMs } : {}),
+      ...(visibility ? { visibility } : {}),
     });
     return null;
   },

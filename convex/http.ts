@@ -59,6 +59,7 @@ http.route({
     const delivery = request.headers.get('x-github-delivery');
     if (!delivery) return new Response('Missing delivery ID', { status: 400 });
     let repository: string | undefined;
+    let push: { ref: string; after: string } | undefined;
     let repositories: string[] = [];
     let invalidation: { installationId: number; removed: boolean; repoIds: number[] } | undefined;
     try {
@@ -69,6 +70,8 @@ http.route({
         repository = payload.repository?.full_name;
         if (typeof repository !== 'string' || !/^[\w.-]+\/[\w.-]+$/.test(repository))
           throw new Error('Invalid repository');
+        if (typeof payload.ref === 'string' && typeof payload.after === 'string' && payload.deleted !== true)
+          push = { ref: payload.ref, after: payload.after };
       } else if (typeof payload.action !== 'string') throw new Error('Missing action');
       else if (event !== 'github_app_authorization') repositories = installationRepositories(payload);
       if (
@@ -106,6 +109,12 @@ http.route({
     }
     // Store only the reconciliation trigger, never source, commit messages or the raw payload.
     if (repository) await ctx.runMutation(internal.sync.receive, { delivery, event, repository });
+    // Two-way GitHub sync: a push to a mirrored main comes back in as a Forge landing.
+    if (repository && push)
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectGithubInboundQueue:receive'), {
+        repository,
+        ...push,
+      });
     // Installation-level events refresh only the repositories they name, in capped pages.
     for (let offset = 0; offset < repositories.length; offset += INSTALLATION_EVENT_PAGE)
       await ctx.runMutation(internal.sync.receiveRepositories, {

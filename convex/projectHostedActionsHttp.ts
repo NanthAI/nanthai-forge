@@ -16,6 +16,7 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { convexValueLimit } from '../src/convex-value-limit';
+import { runnerPublicCode } from '../src/runner-visibility';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
 import type { SessionInput } from './projectHostedActionsSession';
@@ -89,6 +90,7 @@ export async function cleanPoolClaims(projectId: string, runId: string, now = Da
 }
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' | 'limit' = 'authorization';
+  let verified: SessionInput | undefined;
   try {
     const site = process.env.CONVEX_SITE_URL;
     invariant(
@@ -128,6 +130,7 @@ export const handle = httpAction(async (ctx, request) => {
       projectId: id.projectId as Id<'hostedProjects'>,
       claims: canonicalPayload(claims),
     };
+    verified = input;
     reason = 'authorization';
     let value: unknown;
     if (command.kind === 'source')
@@ -294,6 +297,16 @@ export const handle = httpAction(async (ctx, request) => {
     const code =
       (error as { data?: { code?: string }; code?: string })?.data?.code ??
       (error as { code?: string })?.code;
+    // Rare refusal path only: settle with the reason; the runner gets the same 403.
+    if (code === runnerPublicCode && verified)
+      await ctx
+        .runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:refusePublicRunner'), {
+          projectId: verified.projectId,
+          runId: verified.runId,
+          claims: verified.claims,
+          ...(verified.fence !== undefined ? { fence: verified.fence } : {}),
+        })
+        .catch(() => console.error('Actions request refused', 'refusal settlement failed'));
     const unavailable =
       !limit &&
       (reason === 'storage' ||

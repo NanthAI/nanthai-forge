@@ -462,7 +462,11 @@ It accepts no installation ID or credential secret. Before writing, it derives t
 repository's App installation (one read-only GitHub call, no token minted) and
 refuses with `GITHUB_APP_PERMISSIONS` when the accepted installation permissions
 lack Actions write or Contents read, for example while a permission request is
-still pending approval. The CLI routes
+still pending approval. It then reads the repository's visibility with a metadata-only token (Actions write is
+never minted to connect) and refuses with `RUNNER_REPOSITORY_PUBLIC` when the project is
+private and the repository is not: a private project needs a private runner repository
+or its owner's `publicLogs:true` (below), which dispatch and the runner's OIDC session recheck on every check
+([security](../security.md#hosted-check-authorization)). The CLI routes
 `nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/NAME"}'`
 to this action; the Mac provider continues through its existing configuration
 path. `check-settings` reports the selected runner under `actions` (`app-direct`

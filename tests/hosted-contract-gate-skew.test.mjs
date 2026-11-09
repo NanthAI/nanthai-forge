@@ -147,6 +147,7 @@ async function fixture(t, gate) {
     run_id: '123',
     run_attempt: '1',
     runner_environment: 'github-hosted',
+    repository_visibility: 'private',
   };
   return {
     ...f,
@@ -245,6 +246,7 @@ test('3k-file contract selection and complete metadata run stay below 60 functio
     run_id: '123',
     run_attempt: '1',
     runner_environment: 'github-hosted',
+    repository_visibility: 'private',
   };
   let terminal;
   for (let index = 0; index < run.plan.shardCount; index++)

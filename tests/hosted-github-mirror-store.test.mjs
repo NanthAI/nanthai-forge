@@ -448,3 +448,165 @@ for (const { files, gitlinks = false } of [
       }),
     );
   });
+
+const inboundModule = await import(moduleUrl('../convex/projectGithubInboundQueue.ts'));
+/** Two-way sync on the same synthetic project, with one published mirror commit recorded. */
+async function twoWayFixture(inbound = true) {
+  const f = fixture();
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      githubMirror: { repo: 'Synthetic/Mirror', autoPush: true, laneRefs: false, inbound },
+    },
+  });
+  const first = f.receipt();
+  await f.enqueue(first);
+  const entry = { ...mirrorFixture().root, acceptanceId: first.id, state: first.candidate.head };
+  await f.run('commitMirror', store.commit._handler, {
+    ...f.scheduled[0].args,
+    cursor: null,
+    mapping: JSON.stringify(entry),
+  });
+  const receive = after =>
+    f.run('inboundReceive', inboundModule.receive._handler, {
+      repository: 'synthetic/mirror',
+      ref: 'refs/heads/main',
+      after,
+    });
+  const queueRow = () => [...f.tables.projectGithubMirrors.values()][0];
+  const jobs = () => [...f.tables.projectGithubMirrorJobs.values()];
+  return { ...f, entry, first, receive, queueRow, jobs };
+}
+test('two-way: a GitHub push queues one inbound job; Forge pushes and one-way mirrors write nothing', async () => {
+  const f = await twoWayFixture();
+  assert.equal(f.queueRow().repositoryKey, 'synthetic/mirror');
+  const scheduled = f.scheduled.length;
+  await f.receive(f.entry.commit);
+  const own = f.counts.at(-1);
+  assert.equal(own.writes, 0, 'Forge’s own push writes nothing');
+  assert(own.documents <= 2, `own push reads ${own.documents}`);
+  await f.run('inboundReceive', inboundModule.receive._handler, {
+    repository: 'synthetic/mirror',
+    ref: 'refs/heads/other',
+    after: 'b'.repeat(40),
+  });
+  assert.equal(f.scheduled.length, scheduled);
+  await f.receive('b'.repeat(40));
+  await f.receive('c'.repeat(40));
+  const inbound = f.jobs().filter(job => job.inbound);
+  assert.equal(inbound.length, 1, 'pushes coalesce while the job waits');
+  assert.equal(inbound[0].sequence, 0);
+  assert.equal(f.queueRow().activeId, inbound[0]._id);
+  assert.equal(f.scheduled.length, scheduled + 1, 'one wake, no poller');
+  assert.equal(f.scheduled.at(-1).name, 'projectGithubMirror:step');
+  const oneWay = await twoWayFixture(false);
+  const before = oneWay.scheduled.length;
+  await oneWay.receive('b'.repeat(40));
+  assert.equal(oneWay.counts.at(-1).writes, 0);
+  assert.equal(oneWay.scheduled.length, before);
+});
+test('two-way: a publish that finds GitHub main moved yields to an inbound job instead of failing', async () => {
+  const f = await twoWayFixture();
+  const second = f.receipt();
+  await f.enqueue(second);
+  const publish = f.scheduled.at(-1).args;
+  await f.run('mirrorFailed', store.failed._handler, {
+    ...publish,
+    code: 'GITHUB_SYNC_CHANGED',
+    detail: 'GitHub main moved unexpectedly.',
+  });
+  const job = f.tables.projectGithubMirrorJobs.get(publish.jobId);
+  assert.equal(job.status, 'queued');
+  assert.equal(job.error, undefined);
+  assert.equal(job.seed, undefined, 'it re-seeds from the mapping the inbound job records');
+  const inbound = f.jobs().find(row => row.inbound);
+  assert.equal(f.queueRow().activeId, inbound._id);
+  assert.deepEqual(f.scheduled.at(-1).args, { jobId: inbound._id, step: 0 });
+});
+test('two-way: the inbound landing settles with the acceptance that landed it', async () => {
+  for (const phase of ['landed', 'terminal-failed']) {
+    const f = await twoWayFixture();
+    // A Forge landing accepted while the inbound one was in flight waits behind it.
+    await f.receive('b'.repeat(40));
+    const job = f.jobs().find(row => row.inbound);
+    const waiting = f.receipt();
+    await f.enqueue(waiting);
+    const older = f.jobs().find(row => row.receiptId === waiting.id);
+    assert.equal(older.status, 'queued');
+    const submissionId = randomUUID(),
+      laneId = randomUUID();
+    f.patch('projectGithubMirrorJobs', job._id, {
+      status: 'running',
+      inbound: JSON.stringify({
+        phase: 'landing',
+        commit: 'b'.repeat(40),
+        tree: 'd'.repeat(40),
+        message: 'Merge pull request #1',
+        equivalent: 'e'.repeat(64),
+        base: { head: f.first.candidate.head, receiptId: f.first.id },
+        laneId,
+        landingOperationId: randomUUID(),
+        submissionId,
+      }),
+    });
+    const landing = 'landing-row';
+    // Pending: an acceptance changes nothing but queues its publish.
+    f.tables.projectHostedLandingRequests.set(landing, {
+      _id: landing,
+      _creationTime: 1,
+      projectId: f.projectId,
+      submissionId,
+      phase: 'checking',
+      value: JSON.stringify({ phase: 'checking', error: null }),
+    });
+    const pendingReceipt = f.receipt();
+    await f.enqueue(pendingReceipt);
+    assert.equal(f.queueRow().activeId, job._id, 'the inbound job holds the queue while it lands');
+    f.tables.projectHostedLandingRequests.set(landing, {
+      ...f.tables.projectHostedLandingRequests.get(landing),
+      phase,
+      value: JSON.stringify({
+        phase,
+        error: phase === 'landed' ? null : { code: 'CHECK_NOT_PASSED', message: 'A test failed.' },
+      }),
+    });
+    const base = f.receipt();
+    const settled = {
+      ...base,
+      candidate: { ...base.candidate, id: randomUUID() },
+      snapshot: { revision: 100 },
+    };
+    await f.enqueue(settled);
+    const done = f.tables.projectGithubMirrorJobs.get(job._id);
+    const mapping = JSON.parse(f.queueRow().mapping);
+    assert.equal(mapping.commit, 'b'.repeat(40));
+    assert.equal(mapping.tree, 'd'.repeat(40));
+    assert.equal(mapping.state, 'e'.repeat(64), 'GitHub’s commit stands for its own tree');
+    assert.equal(mapping.parent, f.entry.commit);
+    const outcome = JSON.parse(f.queueRow().inbound);
+    if (phase === 'landed') {
+      assert.equal(done.status, 'done');
+      assert.equal(mapping.acceptanceId, settled.id);
+      for (const id of [waiting.id, pendingReceipt.id])
+        assert.equal(
+          f.jobs().find(row => row.receiptId === id).status,
+          'done',
+          'older publishes are contained',
+        );
+      const next = f.jobs().find(row => row.receiptId === settled.id);
+      assert.equal(f.queueRow().activeId, next._id);
+      assert.equal(outcome.note, undefined);
+    } else {
+      assert.equal(done.status, 'failed');
+      assert.equal(done.error, 'GITHUB_INBOUND_FAILED');
+      assert.match(done.detail, /did not land on Forge/);
+      assert.equal(mapping.acceptanceId, f.first.id, 'the next inbound Lane starts from accepted main');
+      const older2 = f.jobs().find(row => row.receiptId === waiting.id);
+      assert.equal(f.queueRow().activeId, older2._id, 'older publishes run first, in order');
+      assert.equal(f.jobs().find(row => row.receiptId === settled.id).status, 'queued');
+      assert.equal(outcome.note, true);
+      assert.equal(outcome.error, 'CHECK_NOT_PASSED: A test failed.');
+    }
+  }
+});

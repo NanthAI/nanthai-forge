@@ -13,6 +13,9 @@ import { submoduleDecision, type SubmoduleAllow } from '../src/submodule-allowli
 export type GithubAppPermissions = Record<string, 'read' | 'write'>;
 /** Least privilege for check dispatch/cancel; checks create no refs or commits. */
 export const actionsPermissions: GithubAppPermissions = { actions: 'write', contents: 'read' };
+/** Two-way sync reads GitHub main's tree and changed blobs of the bound repository; it never
+ * writes (the mirror publishes Forge main afterwards with its own token). */
+export const inboundReadPermissions: GithubAppPermissions = { contents: 'read' };
 /** Submodule fetches read file contents of one other repository, nothing else. */
 export const submoduleReadPermissions: GithubAppPermissions = { contents: 'read' };
 /** Repositories one submodule-access request may name. */
@@ -242,11 +245,6 @@ async function repositoryScope(
     'GITHUB_REPOSITORY_UNBOUND',
     'Connect this repository to this Forge project with nforge github connect.',
   );
-}
-/** Configure preflight proves identity before allowing the runner setting. */
-export async function requireRepositoryBinding(ctx: ActionCtx, projectId: string, repo: string) {
-  const { api, installation } = await appInstallation(repo, convexFetch, Date.now());
-  await repositoryScope(ctx, projectId, repo, api, installation.id, convexFetch);
 }
 /** Proves the installation and the repository binding first, then mints tokens
  * for that one repository. The mirror picks its permissions after the proof,

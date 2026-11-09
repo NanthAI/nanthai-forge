@@ -43,6 +43,15 @@ export function runnerPublicReason(repository: string, visibility: string | unde
 }
 /** Projects without an explicit `public` visibility are private, as everywhere else. */
 export const privateProject = (visibility: string | undefined) => visibility !== 'public';
+/** Whether a check on this pinned runner must prove a private runner repository: a private
+ * project on a GitHub Actions runner whose owner has not accepted public logs. */
+export const runnerVisibilityRequired = (
+  projectVisibility: string | undefined,
+  configuration: { provider: string; publicLogs?: unknown },
+) =>
+  privateProject(projectVisibility) &&
+  configuration.provider === 'github-actions' &&
+  configuration.publicLogs !== true;
 /** Refuses a private project's checks in any runner repository not proven private,
  * unless the project owner accepted public check logs on this runner. */
 export function requirePrivateRunner(

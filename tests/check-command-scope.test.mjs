@@ -277,6 +277,7 @@ async function server(t, check, gate) {
     run_id: '123',
     run_attempt: '1',
     runner_environment: 'github-hosted',
+    repository_visibility: 'private',
   };
   const planFor = (paths, mainPaths) =>
     actionsGateSelection(

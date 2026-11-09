@@ -161,6 +161,15 @@ function briefLocalLanes(out: Json) {
   else delete out.localLanes;
 }
 
+/** A start whose checkout or dependency step did not finish keeps its whole result: the reason
+ * (`checkout.status`, `code`, `message`) and the exact `continuation` are the next step. */
+function startFinished(result: Json): boolean {
+  const checkout = obj(result.checkout);
+  return (
+    result.continuation === undefined &&
+    (!checkout || (checkout.status === undefined && typeof checkout.downloadedObjects === 'number'))
+  );
+}
 /** `start`: the Lane and its path; defaults (linked dependencies, a quiet checkout) are not repeated. */
 function briefStart(result: Json): Json {
   const lane = obj(result.lane);
@@ -347,7 +356,7 @@ function brief(out: Json): Json {
   if (!result) return out;
   const action = out.action;
   const slim =
-    action === 'start' && obj(result.lane) && typeof result.path === 'string'
+    action === 'start' && obj(result.lane) && typeof result.path === 'string' && startFinished(result)
       ? briefStart(result)
       : action === 'save'
         ? briefSave(result)

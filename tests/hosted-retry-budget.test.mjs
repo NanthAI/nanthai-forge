@@ -66,6 +66,7 @@ async function fixture(t, shardCount) {
     run_id: run.executionId,
     run_attempt: '1',
     runner_environment: 'github-hosted',
+    repository_visibility: 'private',
   };
   const send = async result =>
     JSON.parse(

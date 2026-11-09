@@ -151,7 +151,7 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
     const failed = run.counts.failed > 0 || Object.values(run.contractReports!).some(report => report.failed);
     // The row this transaction just wrote, exactly as a reload would parse it, without reading its
     // full reports back (Issue 75cb5074). actionsSession authorized the write.
-    const loaded = { row, run: storedHostedCheck(run) };
+    const loaded = { row, run: storedHostedCheck(run), project: selected.project };
     // A failure or cancellation settles now; a pass also needs the provider's own conclusion,
     // which the job that ran the Candidate cannot write (Issue 432164bf).
     run =

@@ -24,7 +24,12 @@ import { WorkStore } from '../dist/work-store.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { currentChannelHead } from '../dist/agent-defaults.js';
-import { editedPolicy, policyPreset, protectedMatches } from '../dist/autonomy-policy.js';
+import {
+  autonomyPolicySchema,
+  editedPolicy,
+  policyPreset,
+  protectedMatches,
+} from '../dist/autonomy-policy.js';
 import { syncTestHooks } from '../dist/agent-sync.js';
 import { execFileSync } from 'node:child_process';
 import { localAgent } from '../dist/work-autonomy.js';
@@ -463,6 +468,7 @@ test('owner refresh, runner and GitHub policy edits each mark custom and preserv
     { ownerRootUpdates: false },
     { checks: { runner: 'github-actions', repo: 'synthetic/checks' } },
     { githubMirror: { ...githubMirror, autoPush: false } },
+    { githubMirror: { ...githubMirror, inbound: true } },
   ]) {
     const edited = editedPolicy(previous, {
       action: 'set-policy',
@@ -478,4 +484,8 @@ test('owner refresh, runner and GitHub policy edits each mark custom and preserv
     );
     assert.deepEqual(edited.githubMirror, fields.githubMirror ?? previous.githubMirror);
   }
+  // Two-way sync rides on the mirror: inbound without autoPush is refused.
+  const mirror = autonomyPolicySchema.shape.githubMirror;
+  assert(!mirror.safeParse({ ...githubMirror, autoPush: false, inbound: true }).success);
+  assert(mirror.safeParse({ ...githubMirror, inbound: false, autoPush: false }).success);
 });

@@ -26,7 +26,10 @@ export const autonomyPolicySchema = z.object({
         .refine(value => value.split('/').every(part => part !== '.' && part !== '..')),
       autoPush: z.boolean(),
       laneRefs: z.literal(false),
+      /** Two-way sync: a push to GitHub main comes back in as a Forge landing (needs autoPush). */
+      inbound: z.boolean().optional(),
     })
+    .refine(value => !value.inbound || value.autoPush, 'Two-way sync needs autoPush.')
     .optional(),
   autoExchange: autoExchangeSchema.optional(),
   checkLogs: checkLogsSchema.optional(),

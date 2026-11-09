@@ -9,7 +9,13 @@ export const githubMirrorTables = {
     // githubSyncCommitSchema payload, shared with the native Mac pusher.
     mapping: v.union(v.string(), v.null()),
     mirroredAt: v.optional(v.number()),
-  }).index('by_project', ['projectId']),
+    /** Lowercased repository name, so a signed push webhook finds its mirror (two-way sync). */
+    repositoryKey: v.optional(v.string()),
+    /** The last inbound landing's outcome (convex/projectGithubInbound.ts inboundOutcomeSchema). */
+    inbound: v.optional(v.string()),
+  })
+    .index('by_project', ['projectId'])
+    .index('by_repository_key', ['repositoryKey']),
   projectGithubMirrorJobs: defineTable({
     projectId: v.id('hostedProjects'),
     receiptId: v.string(),
@@ -36,6 +42,9 @@ export const githubMirrorTables = {
     apiOperation: v.optional(v.string()),
     requestBytes: v.optional(v.number()),
     mapping: v.optional(v.string()),
+    /** Two-way sync: this job brings GitHub main in as a Forge landing (src/github-inbound-job.ts
+     * JSON) instead of publishing an accepted State. Sequence 0 runs it before queued publishes. */
+    inbound: v.optional(v.string()),
   })
     .index('by_project_and_state', ['projectId', 'state'])
     .index('by_project_and_receipt', ['projectId', 'receiptId'])

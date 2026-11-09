@@ -9,11 +9,9 @@ import { hostedActionsRuntime } from '../src/hosted-actions';
 import { report } from './errors';
 import { invariant } from '../src/errors';
 import { submoduleAllowListSchema } from '../src/submodule-allowlist';
-import {
-  actionsPermissions,
-  requireRepositoryBinding,
-  requireInstallationPermissions,
-} from './githubAppToken';
+import { actionsPermissions, installationToken, requireInstallationPermissions } from './githubAppToken';
+import { readRepositoryVisibility } from './githubRepositoryVisibility';
+import { requirePrivateRunner } from '../src/runner-visibility';
 const requestSchema = z
   .object({
     operationId: z.uuid(),
@@ -44,9 +42,18 @@ export const configure = action({
       );
       const { repository, runsOn, concurrencyBudget, publicLogs, submodules, ...request } = parsed.data;
       // Derive the installation via the App now so a missing install or a pending
-      // Actions permission approval fails here, not on the first dispatch.
-      await requireRepositoryBinding(ctx, input.projectId, repository);
+      // Actions permission approval fails here, not on the first dispatch. The
+      // metadata token proves the binding before any name-scoped token exists.
+      const token = await installationToken(ctx, input.projectId, repository, { metadata: 'read' });
       await requireInstallationPermissions(repository, actionsPermissions);
+      // A private project's logs must not land in a public runner repository unless
+      // its owner (the only caller the record and configure mutations accept) opts in.
+      const visibility = await readRepositoryVisibility(repository, token);
+      const project: string = await ctx.runMutation(
+        makeFunctionReference<'mutation'>('githubRepositoryVisibility:record'),
+        { projectId: input.projectId, repository, visibility },
+      );
+      requirePrivateRunner(project, repository, visibility, publicLogs === true);
       return await ctx.runMutation(
         makeFunctionReference<'mutation', { projectId: typeof input.projectId; request: string }, string>(
           'projectHostedCheckDefinitions:configure',
