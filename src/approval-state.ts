@@ -116,18 +116,31 @@ const words = {
   (kind: ApprovalKind) => { label: string; tone: ApprovalTone; nextStep: string }
 >;
 
+/**
+ * Branch order, the same for the approval pages, Needs you and `wait {approval}`: a decision outranks how
+ * the request ended (a granted request that then landed or was applied says so; a granted fork run
+ * request whose head later settled is still Granted, and a declined one is still Declined). Only an
+ * undecided request is named by how it ended.
+ */
 export function deriveApproval(record: ApprovalRecord): ApprovalState {
   const kind = approvalKind(record);
-  const state: ApprovalPhase = record.ended
-    ? has(endedPhases, record.ended.kind)
-      ? endedPhases[record.ended.kind]
-      : 'unknown'
-    : has(statusPhases, record.status)
-      ? // A Lane request that holds no landing and is not ended fits no writer: do not call it open.
-        kind === 'lane' && !record.live
-        ? 'unknown'
-        : statusPhases[record.status]
-      : 'unknown';
+  const decided = record.status === 'granted' || record.status === 'declined';
+  const state: ApprovalPhase = decided
+    ? record.ended && !has(endedPhases, record.ended.kind)
+      ? 'unknown'
+      : record.ended?.kind === 'landed' || record.ended?.kind === 'applied'
+        ? endedPhases[record.ended.kind]
+        : statusPhases[record.status as 'granted' | 'declined']
+    : record.ended
+      ? has(endedPhases, record.ended.kind)
+        ? endedPhases[record.ended.kind]
+        : 'unknown'
+      : has(statusPhases, record.status)
+        ? // A Lane request that holds no landing and is not ended fits no writer: do not call it open.
+          kind === 'lane' && !record.live
+          ? 'unknown'
+          : statusPhases[record.status]
+        : 'unknown';
   const open = !record.ended && state !== 'unknown';
   return {
     kind,
@@ -136,4 +149,17 @@ export function deriveApproval(record: ApprovalRecord): ApprovalState {
     needsOwner: open && state === 'requested',
     ...words[state](kind),
   };
+}
+
+/**
+ * What `wait {approval}` does with an observed request: a decision settles `decided` (the same decision
+ * branch as `deriveApproval`), a request nothing will decide (none, or closed without a decision)
+ * settles `none`, and an open one keeps waiting. `live` is absent on older reads; only false closes it.
+ */
+export function approvalWait(record: { status: string; live?: boolean | undefined }) {
+  return record.status === 'granted' || record.status === 'declined'
+    ? ('decided' as const)
+    : record.status === 'none' || record.live === false
+      ? ('none' as const)
+      : ('waiting' as const);
 }

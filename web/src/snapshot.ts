@@ -6,6 +6,13 @@ export const hostedError = (e: unknown) =>
   e instanceof ConvexError && typeof e.data === 'object' && e.data && 'message' in e.data
     ? String(e.data.message)
     : (e as Error).message;
+/** The server's structured error code (`AUTH_EXPIRED`, `SECRET_CHANGED`…), or undefined for anything else. */
+export const hostedErrorCode = (e: unknown): string | undefined =>
+  e instanceof ConvexError && typeof e.data === 'object' && e.data && 'code' in e.data
+    ? typeof e.data.code === 'string'
+      ? e.data.code
+      : undefined
+    : undefined;
 export function hostedRetryAt(error: unknown): number | undefined {
   const data = error instanceof ConvexError ? error.data : error;
   if (

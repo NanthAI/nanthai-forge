@@ -184,9 +184,19 @@ async function notice(ctx: MutationCtx, project: Doc<'hostedProjects'>, intentId
         head: n.head,
         summary: n.summary.slice(0, 240),
         undo: n.undo,
+        ...noticeTests(n.failed),
       }),
     },
   });
+}
+/** The failing files as fields, so no reader parses the summary: at most three names, then how many more. */
+export function noticeTests(failed: readonly { file: string }[]) {
+  return failed.length
+    ? {
+        tests: failed.slice(0, 3).map(item => item.file.slice(0, 240)),
+        ...(failed.length > 3 ? { moreTests: failed.length - 3 } : {}),
+      }
+    : {};
 }
 function report(
   state: Recovery,

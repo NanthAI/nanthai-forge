@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { filterIntents, intentReady, type IntentRow } from './model';
+import { laneNeedsYou } from '../cockpit/needs-you';
 
 /** Presentation buckets only. Landing has no recorded state and shares Ready. */
 export const boardColumns = ['planned', 'working', 'checking', 'ready', 'done'] as const;
@@ -32,9 +33,8 @@ export function recentDone(rows: readonly IntentRow[], now: number) {
 export function intentFlags(row: IntentRow) {
   return {
     paused: row.open.some(lane => lane.paused || lane.label === 'Paused'),
-    needsYou: row.open.some(
-      lane => lane.tone === 'conflict' || lane.tone === 'waiting' || lane.tone === 'passed',
-    ),
+    // The same rule as the Needs you panel, so a pill never shows without an item behind it.
+    needsYou: row.open.some(laneNeedsYou),
     failed: row.open.some(lane => lane.tone === 'failed'),
   };
 }

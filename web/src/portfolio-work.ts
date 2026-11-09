@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { plannedLinkIds } from '../../src/work-planning-lifecycle';
 import type { WorkData, Lane, PlanningItem } from '../../src/work-types';
+import { cockpitLanes } from './cockpit/model';
+import { laneNeedsYou } from './cockpit/needs-you';
 export type PortfolioItem = {
   id: string;
   title: string;
@@ -19,7 +21,7 @@ export type PortfolioInput = {
   views: WorkData['views'];
   plans: PlanningItem[];
 };
-/** Attention reflects explicit recorded states; an active item is not an inferred request for human intervention. */
+/** Attention is the Lanes the Needs you panel would list; an active item is not an inferred request for human intervention. */
 export function portfolioWork({ intents, lanes, views, plans }: PortfolioInput) {
   const intentItems: PortfolioItem[] = intents.map(intent => ({
     id: `intent:${intent.id}`,
@@ -42,11 +44,6 @@ export function portfolioWork({ intents, lanes, views, plans }: PortfolioInput) 
       intents.find(intent => intent.id === lane.intentId)?.outcome ?? 'Linked Intent',
     ].join(' · '),
   }));
-  const latestViews = new Map<string, WorkData['views'][number]>();
-  for (const view of views) {
-    const current = latestViews.get(view.intentId);
-    if (!current || view.at >= current.at) latestViews.set(view.intentId, view);
-  }
   const viewItems: PortfolioItem[] = views.map(view => ({
     id: `view:${view.id}`,
     title: intents.find(intent => intent.id === view.intentId)?.outcome ?? 'Retained source Candidate',
@@ -58,19 +55,15 @@ export function portfolioWork({ intents, lanes, views, plans }: PortfolioInput) 
     detail:
       view.status === 'conflict' ? 'Source composition has unresolved conflicts' : 'Combined source recorded',
   }));
-  const activeIntents = new Set(
-    intents.filter(intent => ['active', 'ready'].includes(intent.status)).map(intent => intent.id),
+  // Home counts exactly what the Needs you panel lists for a Lane (cockpit/needs-you), over the records
+  // Home already reads. Review and failed-landing items need the project's check runs and landing
+  // entries, which Home does not subscribe to, so Home's number can be lower than the panel's, never higher.
+  const needsYou = new Set(
+    cockpitLanes({ intents, lanes, views, runs: [] })
+      .filter(laneNeedsYou)
+      .map(lane => lane.id),
   );
-  const attention = [
-    ...intentItems.filter(item => item.status === 'ready'),
-    ...laneItems.filter(item => item.status === 'ready'),
-    ...viewItems.filter(
-      item =>
-        item.status === 'conflict' &&
-        activeIntents.has(item.intentId!) &&
-        latestViews.get(item.intentId!)?.id === item.viewId,
-    ),
-  ];
+  const attention = laneItems.filter(item => needsYou.has(item.laneId!));
   const active = [
     ...intentItems.filter(item => ['active', 'ready'].includes(item.status)),
     ...laneItems.filter(item => item.status !== 'completed'),

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { Glyph } from '../ui/Glyph';
 import { ErrorToast } from '../ui/Toast';
 import { OwnerReviewActions, type OwnerReview } from '../lane/OwnerReviewActions';
+import { deriveApproval, type ApprovalPhase } from '../../../src/approval-state';
 
 /** One Lane's approval request as projectHostedApprovals:observe {detail:1} returns it. */
 export type LaneApprovalRead = {
@@ -25,6 +26,26 @@ export type LaneApprovalRead = {
   /** The change as the agent sent it (the owner's read only). */
   change?: unknown;
 };
+type Words = { title: string; lead: string; tone: 'passed' | 'plain' };
+/** Lane approval wording for every state that is not an open or granted request. */
+const LANE_WORDS = {
+  requested: { title: 'Grant this Lane?', lead: 'The request is open.', tone: 'plain' },
+  granted: { title: 'Granted', lead: 'This exact Lane work can land.', tone: 'passed' },
+  declined: { title: 'Declined', lead: 'You declined this request.', tone: 'plain' },
+  landed: { title: 'Landed', lead: 'This Lane landed with your approval.', tone: 'passed' },
+  applied: { title: 'Granted', lead: 'Your grant was applied.', tone: 'passed' },
+  withdrawn: { title: 'Request closed', lead: 'The builder withdrew this request.', tone: 'plain' },
+  settled: {
+    title: 'Request closed',
+    lead: 'Nothing waits on this request any more; the work it covered settled.',
+    tone: 'plain',
+  },
+  unknown: {
+    title: 'Approval request',
+    lead: 'This request is in a state this page cannot confirm. Reload, or ask the builder.',
+    tone: 'plain',
+  },
+} satisfies Record<ApprovalPhase, Words>;
 const SETTING_LABEL: Record<NonNullable<LaneApprovalRead['setting']>['origin'], string> = {
   policy: 'project policy',
   'check-definition': 'check definition',
@@ -102,49 +123,57 @@ export function LaneApproval({
         )}
       </dl>
     );
-    const fork = approval.pullRequest !== undefined;
-    body = fork ? (
-      forkBody(approval, head, facts, full, review)
-    ) : !approval.live ? (
-      head(
-        approval.ended?.kind === 'landed' ? 'Landed' : 'Request closed',
-        approval.ended?.kind === 'landed'
-          ? 'This Lane landed with your approval.'
-          : 'The builder withdrew this request.',
-        approval.ended?.kind === 'landed' ? 'passed' : 'plain',
-      )
-    ) : approval.status === 'granted' ? (
-      <>
-        {head('Granted', 'This exact Lane work can land. A later save needs your approval again.', 'passed')}
-        {facts}
-        {full}
-      </>
-    ) : (
-      <>
-        {head(
-          approval.status === 'declined' ? 'Declined — grant instead?' : 'Grant this Lane?',
-          `Requested by ${who}. Landing it holds until you grant it.`,
-        )}
-        {facts}
-        {approval.status === 'declined' && approval.decision?.reason && (
-          <p className="fx-dv-lead fx-dv-untrusted">You said: {approval.decision.reason}</p>
-        )}
-        <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
-        {full}
-      </>
-    );
+    const state = deriveApproval(approval).state;
+    body =
+      approval.pullRequest !== undefined ? (
+        forkBody(approval, state, head, facts, full, review)
+      ) : state === 'requested' || (state === 'declined' && approval.live) ? (
+        <>
+          {head(
+            state === 'declined' ? 'Declined — grant instead?' : 'Grant this Lane?',
+            `Requested by ${who}. Landing it holds until you grant it.`,
+          )}
+          {facts}
+          {state === 'declined' && approval.decision?.reason && (
+            <p className="fx-dv-lead fx-dv-untrusted">You said: {approval.decision.reason}</p>
+          )}
+          <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
+          {full}
+        </>
+      ) : state === 'granted' ? (
+        <>
+          {head(
+            'Granted',
+            'This exact Lane work can land. A later save needs your approval again.',
+            'passed',
+          )}
+          {facts}
+          {full}
+        </>
+      ) : (
+        (() => {
+          const words = LANE_WORDS[state];
+          return head(words.title, words.lead, words.tone);
+        })()
+      );
   }
   function settingBody(approval: LaneApprovalRead) {
     const what = SETTING_LABEL[approval.setting!.origin];
     const who = approval.requester
       ? `@${approval.requester}${approval.agent ? `/${approval.agent}` : ''}`
       : 'an agent';
-    if (approval.status === 'granted')
+    const state = deriveApproval(approval).state;
+    if (state === 'granted' || state === 'applied' || state === 'landed')
       return head('Applied', `You granted this ${what} change and it is in effect.`, 'passed');
-    if (approval.status === 'declined')
-      return head('Declined', `The ${what} change was not applied.`, 'plain');
-    if (!approval.live)
-      return head('Request closed', 'The agent withdrew or replaced this request.', 'plain');
+    if (state === 'declined') return head('Declined', `The ${what} change was not applied.`, 'plain');
+    if (state !== 'requested')
+      return head(
+        'Request closed',
+        state === 'unknown'
+          ? 'This request is in a state this page cannot confirm. Reload to read it again.'
+          : 'The agent withdrew or replaced this request.',
+        'plain',
+      );
     return (
       <>
         {head(
@@ -176,13 +205,14 @@ export function LaneApproval({
  * runner; its result is the PR's forge/verify status. */
 function forkBody(
   approval: LaneApprovalRead,
+  state: ApprovalPhase,
   head: (title: string, lead?: ReactNode, tone?: 'brand' | 'passed' | 'plain') => ReactNode,
   facts: ReactNode,
   full: ReactNode,
   review: OwnerReview,
 ) {
   const pr = `fork PR #${approval.pullRequest}`;
-  if (approval.status === 'granted')
+  if (state === 'granted' || state === 'applied' || state === 'landed')
     return (
       <>
         {head(
@@ -193,13 +223,15 @@ function forkBody(
         {full}
       </>
     );
-  if (approval.status === 'declined') return head('Declined', `You declined the check of ${pr}.`, 'plain');
-  if (!approval.live)
+  if (state === 'declined') return head('Declined', `You declined the check of ${pr}.`, 'plain');
+  if (state !== 'requested')
     return head(
       'Request closed',
-      approval.ended?.kind === 'withdrawn'
+      state === 'withdrawn'
         ? 'The request was withdrawn.'
-        : 'A newer push replaced this pull request head, or the request expired.',
+        : state === 'unknown'
+          ? 'This request is in a state this page cannot confirm. Reload to read it again.'
+          : 'A newer push replaced this pull request head, or the request expired.',
       'plain',
     );
   return (

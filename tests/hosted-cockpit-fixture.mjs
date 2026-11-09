@@ -131,6 +131,7 @@ export function recoveryNoticesFixture() {
       receiptId: randomUUID(),
       head: 'b'.repeat(64),
       summary: `Reverted receipt ${randomUUID()}: tests/r2-range.test.mjs, tests/hosted-source-bytes.test.mjs failed on ${'b'.repeat(64)}`,
+      tests: ['tests/r2-range.test.mjs', 'tests/hosted-source-bytes.test.mjs'],
       undo: `nforge agent ROOT revert '{"receiptId":"retained-reverse"}'`,
     },
     {
@@ -139,6 +140,7 @@ export function recoveryNoticesFixture() {
       auditRunId: randomUUID(),
       head: 'c'.repeat(64),
       summary: `Fix needed for receipt ${randomUUID()}: tests/http-limits.test.mjs failed on ${'c'.repeat(64)}`,
+      tests: ['tests/http-limits.test.mjs'],
       undo: 'nforge agent ROOT start fix-forward',
     },
   ];

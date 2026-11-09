@@ -100,6 +100,8 @@ export function NeedsYou({
   answered,
   quiet,
   complete = true,
+  loading = false,
+  failed = false,
 }: {
   items: readonly DecisionItem[];
   now: number;
@@ -110,8 +112,14 @@ export function NeedsYou({
   /** The all-clear's second line, e.g. "4 agents are working." */
   quiet?: string;
   complete?: boolean;
+  /** The records the decisions come from are still arriving: an empty list is not an all-clear. */
+  loading?: boolean;
+  /** A record read failed or was refused: an empty list is not an all-clear. */
+  failed?: boolean;
 }) {
   const { shown, notNow } = useVisibleDecisions(items);
+  // Unknown is its own state: with nothing listed yet, say what is unknown rather than "Nothing needs you."
+  const unknown = shown.length === 0 ? (failed ? 'failed' : loading ? 'loading' : null) : null;
   const render = (item: DecisionItem) => {
     const link = href?.(item);
     const subtitle =
@@ -211,10 +219,10 @@ export function NeedsYou({
           </details>
         )}
         {item.kind === 'revert' || item.kind === 'needs-fix' ? (
-          answers(item, { notNow: notNow(item.id) })
+          answers(item, { notNow: notNow(item) })
         ) : (
           <div className="fx-answers">
-            {answers(item, { notNow: notNow(item.id) })}
+            {answers(item, { notNow: notNow(item) })}
             {item.hint && <span className="fx-hint">{item.hint}</span>}
           </div>
         )}
@@ -224,13 +232,18 @@ export function NeedsYou({
   return (
     <Panel
       title="Needs you"
-      count={shown.length}
+      {...(unknown ? {} : { count: shown.length })}
       hot
       className="fx-needs-panel"
       labelId="fx-needs-title"
       actions={answered && <span className="fx-faint">{answered}</span>}
     >
-      {shown.length === 0 ? (
+      {unknown ? (
+        <div className="fx-allclear" role="status">
+          <b>{unknown === 'failed' ? 'Can’t read what needs you.' : 'Reading what needs you…'}</b>
+          {unknown === 'failed' && <span className="fx-muted">Reload to try again.</span>}
+        </div>
+      ) : shown.length === 0 ? (
         <div className="fx-allclear">
           <b>Nothing needs you.</b>
           {quiet && <span className="fx-muted">{quiet}</span>}
@@ -253,6 +266,9 @@ export function NeedsYou({
         <PagedList rows={shown} render={render} className="fx-decisions" size={5} />
       )}
       {!complete && <p className="fx-panel-note">Showing the most recent items only.</p>}
+      {failed && shown.length > 0 && (
+        <p className="fx-panel-note">Some records could not be read, so this list may be incomplete.</p>
+      )}
     </Panel>
   );
 }

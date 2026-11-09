@@ -9,7 +9,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { finishFixture, code } from './hosted-finish-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { landSummary } from '../dist/hosted-land-summary.js';
-import { deriveApproval } from '../dist/approval-state.js';
+import { approvalWait, deriveApproval } from '../dist/approval-state.js';
 import { openApprovalsReply } from '../dist/hosted-agent-approval.js';
 const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const review = await import(moduleUrl('../convex/projectHostedOwnerReview.ts'));
@@ -827,4 +827,84 @@ test('M3 surfaces: Needs you gets an approval item for the owner and the CLI lis
   assert.match(reply.next, /1 approval request waits for the project owner/);
   assert.match(openApprovalsReply({ requests: [], complete: false }).next, /can't confirm/);
   assert.match(openApprovalsReply({ requests: [], complete: true }).next, /No approval request is waiting/);
+});
+
+test('W7: a decision outranks how the request ended, in the same branch order as `wait {approval}`', () => {
+  const lane = { status: 'granted', live: false };
+  const phase = (record, state) => assert.equal(deriveApproval(record).state, state, JSON.stringify(record));
+  // The old Lane page read `!live` first: a granted request that had ended said the builder withdrew it.
+  phase({ ...lane, ended: { kind: 'settled' } }, 'granted');
+  phase({ ...lane, ended: { kind: 'withdrawn' } }, 'granted');
+  phase({ ...lane, ended: { kind: 'landed' } }, 'landed');
+  phase({ ...lane, ended: { kind: 'applied' } }, 'applied');
+  phase({ status: 'declined', live: false, ended: { kind: 'withdrawn' } }, 'declined');
+  phase({ status: 'requested', live: false, ended: { kind: 'withdrawn' } }, 'withdrawn');
+  phase({ status: 'requested', live: false, ended: { kind: 'settled' } }, 'settled');
+  phase({ status: 'requested', live: true, pullRequest: 7, ended: { kind: 'settled' } }, 'settled');
+  phase({ status: 'granted', live: false, pullRequest: 7, ended: { kind: 'settled' } }, 'granted');
+  // An ended request is not open, whatever was decided; an undecided open one waits for the owner.
+  assert.equal(deriveApproval({ ...lane, ended: { kind: 'settled' } }).open, false);
+  assert.equal(deriveApproval({ status: 'requested', live: true }).needsOwner, true);
+  // The CLI wait before this change, and now: one branch order for every row.
+  const oracle = read =>
+    read.status === 'granted' || read.status === 'declined'
+      ? 'decided'
+      : read.status === 'none' || read.live === false
+        ? 'none'
+        : 'waiting';
+  const decisionPhases = new Set(['granted', 'declined', 'landed', 'applied']);
+  for (const status of ['none', 'requested', 'granted', 'declined'])
+    for (const live of [undefined, true, false])
+      for (const ended of [undefined, 'landed', 'withdrawn', 'settled', 'applied'])
+        for (const extra of [{}, { pullRequest: 7 }, { setting: { origin: 'policy' } }]) {
+          const read = { status, live, ...(ended ? { ended: { kind: ended } } : {}), ...extra };
+          assert.equal(approvalWait(read), oracle(read), JSON.stringify(read));
+          // `landed` and `applied` follow a grant; no writer ends an undecided request that way.
+          if (status !== 'none' && !(status === 'requested' && ['landed', 'applied'].includes(ended)))
+            assert.equal(
+              approvalWait(read) === 'decided',
+              decisionPhases.has(deriveApproval({ ...read, live: live ?? true }).state),
+              `wait and page agree on ${JSON.stringify(read)}`,
+            );
+        }
+});
+
+test('W7: the Lane, fork and setting pages decide in the same order and word every ended.kind correctly', () => {
+  const noop = { accept() {}, decline() {} };
+  const render = approval =>
+    renderToStaticMarkup(
+      createElement(LaneApproval, { phase: { kind: 'read', approval }, review: noop, signIn: null }),
+    );
+  const base = { laneId: randomUUID(), reason: 'why', requester: 'thevarsek', landing: null };
+  const lane = (status, live, ended) => ({
+    ...base,
+    status,
+    live,
+    ...(ended ? { ended: { kind: ended } } : {}),
+  });
+  // Old main read `!live` first on the Lane page, so a granted request that ended said "withdrew".
+  for (const ended of ['settled', 'applied']) {
+    const html = render(lane('granted', false, ended));
+    assert.doesNotMatch(html, /withdrew/, `granted + ${ended}`);
+    assert.match(html, /Granted|Landed/);
+  }
+  assert.match(render(lane('declined', false, 'withdrawn')), /Declined/);
+  assert.doesNotMatch(render(lane('declined', false, 'withdrawn')), /withdrew/);
+  assert.match(render(lane('requested', false, 'withdrawn')), /The builder withdrew this request/);
+  const settled = render(lane('requested', false, 'settled'));
+  assert.doesNotMatch(settled, /withdrew/);
+  assert.match(settled, /Request closed/);
+  assert.match(render(lane('requested', false, 'settled')), /work it covered settled/);
+  assert.match(render(lane('requested', false)), /cannot confirm/);
+  assert.match(render(lane('surprising', true)), /cannot confirm/);
+  // The same row reads the same on the setting page: a grant is Applied whatever ended it.
+  const setting = (status, live, ended) => ({ ...lane(status, live, ended), setting: { origin: 'policy' } });
+  assert.match(render(setting('granted', false, 'applied')), /Applied/);
+  assert.match(render(setting('granted', false)), /Applied/);
+  assert.match(render(setting('declined', false, 'withdrawn')), /Declined/);
+  assert.match(render(setting('requested', false, 'withdrawn')), /withdrew or replaced/);
+  // And on the fork page: Granted beats ended, as on the Lane page.
+  const fork = (status, live, ended) => ({ ...lane(status, live, ended), pullRequest: 7 });
+  assert.match(render(fork('granted', false, 'settled')), /Granted/);
+  assert.match(render(fork('requested', false, 'withdrawn')), /was withdrawn/);
 });

@@ -263,3 +263,17 @@ test('a thrown Intent write keeps its draft and sends its error to a toast', asy
   assert.equal(error.props.error, 'Failed to fetch');
   h.clear();
 });
+
+test('W18: a refused GitHub import start frees the form; an unknown outcome keeps its operation id', async () => {
+  const { importAttemptAfterStartError } = await import(moduleUrl('../web/src/import-attempt.ts'));
+  const attempt = { operationId: 'op-1', url: 'https://github.com/o/r' };
+  // Old main never cleared the attempt, so both inputs stayed disabled until a reload.
+  assert.equal(importAttemptAfterStartError(attempt, 'BAD_ARGUMENT'), null);
+  assert.equal(importAttemptAfterStartError(attempt, 'GITHUB_REPOSITORY_NOT_FOUND'), null);
+  assert.equal(
+    importAttemptAfterStartError(attempt, undefined),
+    attempt,
+    'a dropped reply is retried with the same id',
+  );
+  assert.equal(importAttemptAfterStartError(null, undefined), null);
+});

@@ -3,7 +3,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 const { portfolioWork, projectWorkLink } = await import(moduleUrl('../web/src/portfolio-work.ts'));
-test('attention excludes old conflicts and completed Intents while keeping independent Lane states honest', () => {
+test('Home attention counts the Lanes the Needs you panel lists, never Lane or Intent "ready" words (M16)', () => {
+  const conflict = {
+    id: 'c',
+    name: 'Conflict',
+    intentId: 'a',
+    state: 'active',
+    pendingMerge: { conflicts: [{ path: 'a.ts' }] },
+  };
   const data = {
     intents: [
       { id: 'a', outcome: 'A', status: 'active' },
@@ -13,6 +20,7 @@ test('attention excludes old conflicts and completed Intents while keeping indep
     lanes: [
       { id: 'l', name: 'Still active', intentId: 'b', state: 'active' },
       { id: 'r', name: 'Ready', intentId: 'a', state: 'ready' },
+      conflict,
     ],
     views: [
       { id: 'v1', intentId: 'a', status: 'conflict', at: '2026-01-01' },
@@ -23,9 +31,11 @@ test('attention excludes old conflicts and completed Intents while keeping indep
   };
   const before = structuredClone(data),
     result = portfolioWork(data);
+  // Old main counted intent:c (status ready), lane:r (state ready) and the conflict Views, and missed
+  // the hosted conflict Lane that the panel lists.
   assert.deepEqual(
     result.attention.map(item => item.id),
-    ['intent:c', 'lane:r'],
+    ['lane:c'],
   );
   assert.equal(result.active.find(item => item.laneId === 'l').detail, 'Nobody working · B');
   assert.deepEqual(
@@ -34,8 +44,6 @@ test('attention excludes old conflicts and completed Intents while keeping indep
   );
   assert.equal(result.recent[0].viewId, 'v3');
   assert.deepEqual(data, before);
-  data.views.push({ id: 'v4', intentId: 'a', status: 'conflict', at: '2026-01-04' });
-  assert.equal(portfolioWork(data).attention.at(-1).viewId, 'v4');
 });
 test('links keep project and exact contribution identity without inheriting another project selection', () => {
   const a = new URL(projectWorkLink('project-a', { laneId: 'lane-a' }), 'https://example.test/');

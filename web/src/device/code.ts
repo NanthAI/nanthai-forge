@@ -28,10 +28,14 @@ export function scopeWords(scope: string): string {
     : 'Coordination only: report activity and messages for your projects';
 }
 
-/** Server messages that mean the code can no longer be used, and what to do about it. */
-export function codeProblem(message: string): 'expired' | 'used' | null {
-  if (/expired|unavailable/i.test(message)) return 'expired';
-  if (/already has a decision/i.test(message)) return 'used';
+/**
+ * What a refused device-code call means, from the server's error code (never its wording): the code
+ * expired or is unknown (`AUTH_EXPIRED`), or already has a decision (`AUTH_CODE_USED`). Any other
+ * code, or none, is not a code problem; the caller shows the server's message and lets the person retry.
+ */
+export function codeProblem(code: string | undefined): 'expired' | 'used' | null {
+  if (code === 'AUTH_EXPIRED') return 'expired';
+  if (code === 'AUTH_CODE_USED') return 'used';
   return null;
 }
 

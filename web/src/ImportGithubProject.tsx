@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { useEffect, useRef, useState } from 'react';
-import { useConvex, useQuery } from 'convex/react';
+import { useConvex } from 'convex/react';
+import { useSafeQuery } from './safe-query';
 import { api } from '../../convex/_generated/api';
 import type { Id } from '../../convex/_generated/dataModel';
-import { hostedError } from './snapshot';
+import { hostedError, hostedErrorCode } from './snapshot';
+import { importAttemptAfterStartError } from './import-attempt';
 import { ErrorToast } from './ui/Toast';
 
 export default function ImportGithubProject({ created }: { created: (id: Id<'hostedProjects'>) => void }) {
@@ -15,7 +17,11 @@ export default function ImportGithubProject({ created }: { created: (id: Id<'hos
   const [id, setId] = useState<Id<'projectGithubImports'> | null>(null);
   // Retain the full original request on every retry, including worker errors.
   const attempt = useRef<{ operationId: string; url: string; ref?: string } | null>(null);
-  const progress = useQuery(api.projectGithubImportProgress.current, id ? { id } : 'skip');
+  // A refused progress read is shown as an error with a way out; it never crashes the page.
+  const { value: progress, error: readError } = useSafeQuery(
+    api.projectGithubImportProgress.current,
+    id ? { id } : 'skip',
+  );
   const completed = useRef(false);
   useEffect(() => {
     if (progress?.phase === 'ready' && !completed.current) {
@@ -34,12 +40,21 @@ export default function ImportGithubProject({ created }: { created: (id: Id<'hos
     try {
       setId(await client.action(api.projectGithubImport.start, attempt.current));
     } catch (error) {
+      // A coded refusal was not executed, so its operation id is spent; only an unknown outcome is retried.
+      attempt.current = importAttemptAfterStartError(attempt.current, hostedErrorCode(error));
       setError(hostedError(error));
     } finally {
       setBusy(false);
     }
   }
   const failed = progress?.phase === 'error';
+  // The way out of a failed import: drop the retained request and start over with other inputs.
+  function startOver() {
+    attempt.current = null;
+    completed.current = false;
+    setId(null);
+    setError('');
+  }
   return (
     <form
       className="fx-new-project"
@@ -48,8 +63,12 @@ export default function ImportGithubProject({ created }: { created: (id: Id<'hos
         void submit();
       }}
     >
-      {(error || progress?.error) && (
-        <ErrorToast retry={() => void submit()}>{error || progress?.error?.message}</ErrorToast>
+      {(error || progress?.error || readError) && (
+        <ErrorToast retry={() => void submit()}>
+          {error ||
+            progress?.error?.message ||
+            'Could not read the import’s progress. Reload to check on it, or use a different repository.'}
+        </ErrorToast>
       )}
       <label htmlFor="github-project-url">GitHub repository URL</label>
       <input
@@ -77,6 +96,11 @@ export default function ImportGithubProject({ created }: { created: (id: Id<'hos
       <button className="fx-btn fx-btn-primary" disabled={busy || !url.trim() || (!!id && !failed)}>
         {busy ? 'Starting…' : attempt.current ? 'Resume import' : 'Import from GitHub'}
       </button>
+      {attempt.current && !busy && (failed || error || readError) && (
+        <button type="button" className="fx-btn" onClick={startOver}>
+          Use a different repository
+        </button>
+      )}
     </form>
   );
 }

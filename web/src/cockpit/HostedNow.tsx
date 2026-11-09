@@ -75,6 +75,8 @@ type Live = {
   unackedComplete: boolean;
   claims: { actor: string; sessionId?: string; paths: string[]; laneId?: string }[];
   sessionsLoading: boolean;
+  /** The inbox, claims and overlap answers have not all answered yet. */
+  initialLoading?: boolean;
   sessionsComplete?: boolean;
   eventsComplete?: boolean;
   eventsLoading?: boolean;
@@ -94,6 +96,7 @@ export function HostedNowView({
   records,
   live,
   loading,
+  failed = false,
   ack,
   newIntent,
   laneHref = hostedLaneHref,
@@ -116,6 +119,8 @@ export function HostedNowView({
   records: Records;
   live: Live;
   loading: boolean;
+  /** A record read failed or was refused, so the decisions below may be missing some. */
+  failed?: boolean;
   ack: Pick<Answers, 'acknowledge' | 'reply' | 'busy' | 'error' | 'retrying'> &
     Partial<Pick<Answers, 'tell' | 'publish'>> &
     FixNoticeActions &
@@ -164,7 +169,9 @@ export function HostedNowView({
     now,
     lanes.filter(lane => !lane.open).map(lane => lane.id),
   );
-  const empty = !loading && records.intents.length === 0;
+  const empty = !loading && !failed && records.intents.length === 0;
+  // Needs you and the situation line wait for every record they derive from: loading is not an all-clear.
+  const reading = failed ? 'failed' : loading || live.initialLoading === true ? 'loading' : undefined;
   if (activity)
     return (
       <Activity
@@ -203,6 +210,7 @@ export function HostedNowView({
             <>
               <NowSituation
                 firstRun={empty}
+                {...(reading ? { reading } : {})}
                 facts={{
                   decisions: shown.length,
                   open: open.filter(
@@ -242,6 +250,8 @@ export function HostedNowView({
             <>
               <NeedsYou
                 items={decisions}
+                loading={reading === 'loading'}
+                failed={reading === 'failed'}
                 now={now}
                 complete={
                   live.unackedComplete && live.overlapsComplete !== false && attention.overlapsComplete
@@ -415,6 +425,7 @@ function LiveNow({
             hostedMoves.loading ||
             localMoves.loading
           }
+          failed={[intents, lanes, views, runs, hostedMoves, localMoves].some(read => read.failed)}
           ack={{ ...ack, startFix: fix.startFix, closeFix: fix.closeFix, error: fix.error || ack.error }}
           capabilities={workspace.capabilities}
           resumeMirror={resumeMirror}

@@ -1224,6 +1224,7 @@ test('recovery decisions map workspace notices without invented ages and keep re
       receiptId: 'receipt-one',
       head: 'h',
       summary: 'Reverted receipt r: tests/a.test.mjs, tests/b.test.mjs failed on h',
+      tests: ['tests/a.test.mjs', 'tests/b.test.mjs'],
       undo: 'undo-one',
     },
     {
@@ -1232,6 +1233,7 @@ test('recovery decisions map workspace notices without invented ages and keep re
       auditRunId: 'audit-two',
       head: 'h',
       summary: 'Fix needed for receipt r: tests/c.test.mjs failed on h',
+      tests: ['tests/c.test.mjs'],
       undo: 'undo-two',
     },
   ];
@@ -1287,7 +1289,7 @@ test('a hand-run revert (no main audit) reads as reverted, never as a failed aud
   assert.match(item.exact.undo, /start --reopen/);
 });
 
-test('recovery tests cap at three, retain the server remainder, and never parse a truncated path', () => {
+test('recovery tests come from the structured fields: the remainder is kept and the summary prose is never parsed (SM-B W19)', () => {
   const notice = {
     intentId: 'i',
     state: 'reverted',
@@ -1295,6 +1297,8 @@ test('recovery tests cap at three, retain the server remainder, and never parse 
     head: 'h',
     undo: 'undo',
     summary: 'Reverted receipt r: a.test.mjs, b.test.mjs, c.test.mjs (+9 more) failed on h',
+    tests: ['a.test.mjs', 'b.test.mjs', 'c.test.mjs'],
+    moreTests: 9,
   };
   const [item] = attention.needsFixDecisions([notice], []);
   assert.equal(item.subtitle, 'main audit failed 12 tests after it landed');
@@ -1303,13 +1307,109 @@ test('recovery tests cap at three, retain the server remainder, and never parse 
   );
   assert.match(html, /href="#intent">\+9 more/);
   assert.equal((html.match(/<code>/g) ?? []).length, 4);
+  // A notice recorded before the server wrote the fields has an unknown count, even when its summary
+  // reads like a list: a wording change in the producer can never change the list or the count.
   for (const summary of [
     'Main audit r failed. Missing receipt range',
-    notice.summary.slice(0, 50),
+    notice.summary,
     'Reverted receipt r: static/unknown failure failed on h',
   ]) {
-    const [unknown] = attention.needsFixDecisions([{ ...notice, summary }], []);
+    const { tests, moreTests, ...legacy } = notice;
+    const [unknown] = attention.needsFixDecisions([{ ...legacy, summary }], []);
     assert.deepEqual(unknown.tests, []);
     assert.equal(unknown.subtitle, 'main audit failed after it landed');
   }
+  // Structured fields win over a summary that says something else.
+  const [other] = attention.needsFixDecisions(
+    [{ ...notice, summary: 'unrelated wording', tests: ['x.test.mjs'], moreTests: undefined }],
+    [],
+  );
+  assert.deepEqual(other.tests, ['x.test.mjs']);
+  assert.equal(other.subtitle, 'main audit failed 1 test after it landed');
+});
+
+const visible = await import(moduleUrl('../web/src/shell/visible-decisions.ts'));
+const { NowSituation } = await import(moduleUrl('../web/src/cockpit/NowLayout.tsx'));
+const boardModel = await import(moduleUrl('../web/src/intents/board-model.ts'));
+
+test('W4: Needs you and the situation line never say all-clear while records load or fail to load', () => {
+  const empty = { items: [], now: 0, answers: () => null };
+  const loading = renderToStaticMarkup(h(NeedsYou, { ...empty, loading: true }));
+  assert.match(loading, /Reading what needs you/);
+  assert.doesNotMatch(loading, /Nothing needs you/);
+  assert.doesNotMatch(loading, /fx-panel-count|fx-count/, 'no zero count while unknown');
+  const failed = renderToStaticMarkup(h(NeedsYou, { ...empty, failed: true }));
+  assert.match(failed, /Can’t read what needs you/);
+  assert.doesNotMatch(failed, /Nothing needs you/);
+  assert.match(renderToStaticMarkup(h(NeedsYou, empty)), /Nothing needs you/);
+  // Items that did arrive stay visible while the rest load.
+  const [item] = attention.laneDecisions([lane('ready', { tone: 'passed' })]);
+  const partial = renderToStaticMarkup(h(NeedsYou, { ...empty, items: [item], loading: true }));
+  assert.match(partial, /ready/);
+  assert.doesNotMatch(partial, /Reading what needs you/);
+  const facts = { decisions: 0, open: 0, overlaps: 0 };
+  assert.match(renderToStaticMarkup(h(NowSituation, { facts })), /Nothing needs you/);
+  const reading = renderToStaticMarkup(h(NowSituation, { facts, reading: 'loading' }));
+  assert.match(reading, /Reading what needs you/);
+  assert.doesNotMatch(reading, /Nothing needs you|No work in motion/);
+  assert.match(
+    renderToStaticMarkup(h(NowSituation, { facts, reading: 'failed' })),
+    /Can’t read what needs you/,
+  );
+});
+
+test('W3: Not now is keyed by the head or run, so a new failure on the same Lane is not hidden', () => {
+  const at = head =>
+    attention.laneDecisions([lane('L', { tone: 'passed', head })]).map(item => visible.dismissalKey(item))[0];
+  assert.notEqual(at('h1'), at('h2'), 'a new saved head is a new decision');
+  const failedLane = runId =>
+    lane('L', {
+      tone: 'failed',
+      queue: { state: 'failed', runId, text: 'failed', decisionSubtitle: 'failed' },
+    });
+  const [failed1] = attention.laneDecisions([failedLane('run-1')]);
+  const [failed2] = attention.laneDecisions([failedLane('run-2')]);
+  assert.equal(failed1.id, failed2.id);
+  assert.notEqual(visible.dismissalKey(failed1), visible.dismissalKey(failed2));
+  // A dismissal for the old run no longer hides the new one, and is pruned once the new one is listed.
+  const stored = [visible.dismissalKey(failed1), 'unrelated:other-project@x'];
+  assert.deepEqual(visible.pruneDismissed(stored, [failed2]), ['unrelated:other-project@x']);
+  assert.deepEqual(visible.pruneDismissed(stored, [failed1]), stored, 'the current dismissal stays');
+  assert.deepEqual(visible.pruneDismissed(stored, []), stored, 'nothing listed yet: nothing is dropped');
+  const many = Array.from({ length: visible.NOT_NOW_LIMIT + 25 }, (_, n) => `x:${n}`);
+  assert.equal(visible.pruneDismissed(many, []).length, visible.NOT_NOW_LIMIT);
+  assert.equal(visible.pruneDismissed(many, []).at(-1), many.at(-1), 'the oldest go first');
+  // A second needs-fix notice for the same Intent is a new decision.
+  const notice = (auditRunId, receiptId) => ({
+    intentId: 'i',
+    state: 'needs-fix',
+    auditRunId,
+    receiptId,
+    head: 'h',
+    summary: 's',
+    undo: 'u',
+  });
+  const [first] = attention.needsFixDecisions([notice('audit-1', 'r1')], []);
+  const [second] = attention.needsFixDecisions([notice('audit-2', 'r2')], []);
+  assert.equal(first.id, second.id);
+  assert.notEqual(visible.dismissalKey(first), visible.dismissalKey(second));
+});
+
+test('M16: the Intent board pill, the panel and Home count the same Lanes', () => {
+  const mk = (id, tone, label, queue) => lane(id, { tone, label, ...(queue ? { queue } : {}) });
+  const lanes = [
+    mk('conflict', 'conflict', 'Conflict'),
+    mk('passed', 'passed', 'Ready'),
+    mk('queued', 'waiting', 'Queued'),
+    mk('behind', 'waiting', 'Needs update'),
+    mk('paused', 'waiting', 'Paused'),
+    mk('review', 'waiting', 'Waiting', { state: 'review', text: 'waiting for review' }),
+    mk('landing', 'passed', 'Ready', { state: 'landing', text: 'landing' }),
+  ];
+  const panel = new Set(attention.laneDecisions(lanes).map(item => item.laneId));
+  for (const each of lanes) {
+    const pill = boardModel.intentFlags({ open: [each] }).needsYou;
+    assert.equal(pill, panel.has(each.id), `${each.id}: board pill and panel agree`);
+  }
+  assert.deepEqual([...panel].sort(), ['conflict', 'passed', 'review']);
 });

@@ -7,7 +7,7 @@ import { Button } from './ui/primitives';
 import { Shell } from './shell/Shell';
 import { handleSeed } from './shell/viewer';
 import { useNow } from './shell/StatusBar';
-import { hostedError } from './snapshot';
+import { hostedError, hostedErrorCode } from './snapshot';
 import { codeComplete, codeProblem, formatCode } from './device/code';
 import { DeviceApproval, type DevicePhase } from './device/DeviceApproval';
 export { DeviceCredentials } from './device/DeviceList';
@@ -34,7 +34,7 @@ export default function DeviceLogin() {
 
   const fail = (e: unknown, fallback: DevicePhase) => {
     const message = hostedError(e);
-    const problem = codeProblem(message);
+    const problem = codeProblem(hostedErrorCode(e));
     if (problem) {
       setPhase({ kind: 'problem', problem });
       setError('');
@@ -49,9 +49,8 @@ export default function DeviceLogin() {
     try {
       const request = await client.action(api.deviceActions.inspect, { code });
       decision.current = null;
-      setPhase(
-        request.state === 'pending' ? { kind: 'review', request } : { kind: 'problem', problem: 'used' },
-      );
+      // A code that already has a decision still opens its card, which says who decided what.
+      setPhase({ kind: 'review', request });
     } catch (e) {
       fail(e, { kind: 'enter' });
     }

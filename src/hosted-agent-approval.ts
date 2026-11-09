@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { markerIdentity } from './lane-prune.js';
 import { ForgeError, invariant } from './errors.js';
-import { deriveApproval } from './approval-state.js';
+import { approvalWait, deriveApproval } from './approval-state.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';
@@ -100,11 +100,11 @@ export async function observeApproval(
               typeof value === 'string' ? JSON.parse(value) : value,
             );
             latest = parsed;
-            if (parsed.status === 'granted' || parsed.status === 'declined')
-              settle({ status: 'decided', approval: parsed });
-            // No request, or one withdrawn before a decision: nothing will decide it.
-            else if (parsed.status === 'none' || parsed.live === false)
-              settle({ status: 'none', approval: parsed });
+            // The same branch order as the approval pages (approval-state): a decision first, then a
+            // request nothing will decide (none, or closed before a decision).
+            const next = approvalWait(parsed);
+            if (next === 'decided') settle({ status: 'decided', approval: parsed });
+            else if (next === 'none') settle({ status: 'none', approval: parsed });
           } catch (error) {
             release();
             reject(

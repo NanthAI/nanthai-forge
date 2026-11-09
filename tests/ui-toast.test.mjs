@@ -65,9 +65,9 @@ test('connection loss has one toast across observers, suppresses query noise and
 test('transport details and server codes never appear in error toasts', () => {
   for (const text of [
     'Error: private stack at method()',
-    'WORK_STALE',
     'TypeError: Failed to fetch',
     'Request id: secret',
+    'ConvexError: AUTH_REVOKED Your access was revoked',
   ])
     assert.equal(toastErrorText(text), "Couldn't reach Forge. Try again.");
   assert.equal(toastErrorText('Could not copy. Select the command.'), 'Could not copy. Select the command.');
@@ -160,4 +160,18 @@ test('provider shares one store with consumers and renders three accessible esca
   assert.match(html, /Could not render &lt;img src=x&gt;/);
   assert.match(html, /<span hidden="" id="forge-toast-1">/);
   assert.doesNotMatch(html, /<img/);
+});
+
+test('W21: a coded server refusal keeps its words; only network failures read as an outage', () => {
+  // Old main mapped any text with an upper-case code to "Couldn't reach Forge".
+  assert.equal(toastErrorText('AUTH_REVOKED: Your access was revoked.'), 'Your access was revoked.');
+  assert.equal(
+    toastErrorText('WORK_STALE The Lane moved; reload and save again.'),
+    'The Lane moved; reload and save again.',
+  );
+  const bare = toastErrorText('WORK_STALE');
+  assert.doesNotMatch(bare, /reach Forge/, 'a bare code is not an outage');
+  assert.doesNotMatch(bare, /WORK_STALE/, 'the code itself is not shown');
+  for (const outage of ['Failed to fetch', 'Network connection failed', 'Request timed out'])
+    assert.equal(toastErrorText(outage), "Couldn't reach Forge. Try again.");
 });

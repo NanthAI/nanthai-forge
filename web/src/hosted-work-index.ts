@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useReadRetry } from './ui/read-retry';
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { type ConvexReactClient, useConvex, usePaginatedQuery, useQuery } from 'convex/react';
+import { type ConvexReactClient, useConvex, useQuery } from 'convex/react';
+import { useSafePaginatedQuery } from './safe-query';
 import { makeFunctionReference, type PaginationOptions, type PaginationResult } from 'convex/server';
 import type { Id } from '../../convex/_generated/dataModel';
 import type { WorkData } from '../../src/work-types';
@@ -121,7 +122,10 @@ function useWorkRows(
   // Match the server's existing 100-row window. Smaller pages kept the same
   // complete histories but multiplied queries and ancestry/authority reads.
   const initialNumItems = 100;
-  const { results, status, loadMore } = usePaginatedQuery(workIndex.records, selection, { initialNumItems });
+  // A refused or failed page is `status: 'Error'`, reported as `failed`, not thrown into the root boundary.
+  const { results, status, loadMore } = useSafePaginatedQuery(workIndex.records, selection, {
+    initialNumItems,
+  });
   // Convex splits any page longer than twice `initialNumItems` into two new subscriptions; larger
   // continuation pages would each be re-read and split twice before the page settles.
   const pageSize = Math.min(100, initialNumItems * 2);
@@ -131,11 +135,19 @@ function useWorkRows(
   return {
     rows: useMemo(() => [...results].sort((a, b) => a.position - b.position), [results]),
     complete: status === 'Exhausted',
-    loading: enabled && !!workspace && status !== 'Exhausted',
+    failed: status === 'Error',
+    loading: enabled && !!workspace && status !== 'Exhausted' && status !== 'Error',
     initialLoading: enabled && (!workspace || status === 'LoadingFirstPage'),
   };
 }
-type RecordPage = { records: unknown[]; complete: boolean; loading: boolean; initialLoading: boolean };
+type RecordPage = {
+  records: unknown[];
+  complete: boolean;
+  loading: boolean;
+  initialLoading: boolean;
+  /** A page of this collection failed or was refused; `records` holds the pages read before it. */
+  failed?: boolean;
+};
 export const WorkRecordsContext = createContext<{
   projectId: string;
   generationId: string;
@@ -160,7 +172,13 @@ export function useWorkRecords<T>(
   const records = useMemo(() => result.rows.map(row => JSON.parse(row.value) as T), [result.rows]);
   return shared
     ? { ...shared, records: shared.records as T[] }
-    : { records, complete: result.complete, loading: result.loading, initialLoading: result.initialLoading };
+    : {
+        records,
+        complete: result.complete,
+        loading: result.loading,
+        initialLoading: result.initialLoading,
+        failed: result.failed,
+      };
 }
 export function useResolvedWorkValue<T>(
   projectId: Id<'hostedProjects'>,

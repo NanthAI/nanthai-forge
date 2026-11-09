@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // A hook-only React host and a fake Convex client that counts server subscriptions.
 // Components under test render null-equivalent trees; no layout or DOM behaviour is modelled.
-import { convexToJson } from 'convex/values';
+import { ConvexError, convexToJson } from 'convex/values';
 import { getFunctionName } from 'convex/server';
 
 const noop = () => {};
@@ -69,7 +69,12 @@ const tokenOf = (name, args) => `${name}:${JSON.stringify(convexToJson(args ?? {
  * midpoint `splitCursor` like the hosted backend. Every server subscription (Add) is counted; an
  * Add for a token whose value was already computed counts as a cached call.
  */
-export function fakeConvex({ resolve = () => null, collections = {}, generationId = 'g1' } = {}) {
+export function fakeConvex({
+  resolve = () => null,
+  collections = {},
+  generationId = 'g1',
+  refuseRecords = () => false,
+} = {}) {
   const live = new Map(); // token -> { name, args, listeners:Set, value }
   const computed = new Set();
   const journals = new Map();
@@ -105,6 +110,8 @@ export function fakeConvex({ resolve = () => null, collections = {}, generationI
     let value;
     entry.error = undefined;
     try {
+      if (entry.name === 'projectWorkIndex:records' && refuseRecords(entry.args))
+        throw new ConvexError({ code: 'PROJECT_UNAVAILABLE', message: 'Contributor access is required.' });
       value =
         entry.name === 'projectWorkIndex:records'
           ? page(entry.args, entry.token)

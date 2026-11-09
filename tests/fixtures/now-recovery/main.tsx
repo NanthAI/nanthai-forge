@@ -22,9 +22,11 @@ const head = 'b'.repeat(64), now = Date.parse('2026-10-14T10:20:00Z');
 const notices = [
   { at: '2026-10-14T10:02:00Z', intentId, state: 'reverted' as const, auditRunId: audit, receiptId: receipt, head,
     summary: `Reverted receipt ${receipt}: tests/r2-range.test.mjs, tests/hosted-source-bytes.test.mjs failed on ${head}`,
+    tests: ['tests/r2-range.test.mjs', 'tests/hosted-source-bytes.test.mjs'],
     undo: `nforge agent ROOT revert '{"receiptId":"${receipt}"}'` },
   { at: '2026-10-14T09:20:00Z', intentId: otherIntentId, state: 'needs-fix' as const, auditRunId: id(6), head,
     summary: `Fix needed for receipt ${receipt}: tests/http-limits.test.mjs failed on ${head}`,
+    tests: ['tests/http-limits.test.mjs'],
     undo: `nforge agent ROOT start '{"intentId":"${otherIntentId}"}'` },
 ];
 const calls: { name: string; args: any }[] = [];

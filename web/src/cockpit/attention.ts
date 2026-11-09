@@ -5,12 +5,18 @@ import type { CockpitWork } from './model';
 import type { CockpitLane } from './model';
 import { checkMeaning } from './check-meaning';
 import type { ApprovalKind } from '../../../src/approval-state';
+import { laneNeedsYou } from './needs-you';
 export { overlapDecisions } from './overlap-decisions';
 export { needsFixDecisions } from './needs-fix';
 
 /** Something that needs a decision from the viewer, with its one-click answers. */
 export type DecisionItem = {
   id: string;
+  /**
+   * What the decision is about right now: the Lane head, the failed run or the notice. "Not now" is keyed by
+   * `id` and `version`, so a new head, run or notice for the same Lane is never hidden by an old dismissal.
+   */
+  version?: string;
   githubMirror?: boolean;
   queue?: QueueFact;
   kind:
@@ -104,80 +110,76 @@ export function laneDecisions(
   lanes: readonly CockpitLane[],
   overlaps: ReadonlyMap<string, number> = new Map(),
 ): DecisionItem[] {
-  return lanes
-    .filter(
-      lane =>
-        lane.open &&
-        (lane.tone === 'conflict' ||
-          (lane.queue ? ['review', 'failed'].includes(lane.queue.state) : lane.tone === 'passed')),
-    )
-    .map(lane => {
-      const owner = ownerOf(lane);
-      const continues = lane.session
+  return lanes.filter(laneNeedsYou).map(lane => {
+    const owner = ownerOf(lane);
+    const continues = lane.session
+      ? {
+          name: lane.session.name,
+          ...(lane.session.environment ? { environment: lane.session.environment } : {}),
+          ...(lane.session.harness ? { harness: lane.session.harness } : {}),
+          ...(lane.session.id ? { recipient: lane.session.id } : {}),
+        }
+      : lane.startedBy?.kind === 'agent'
         ? {
-            name: lane.session.name,
-            ...(lane.session.environment ? { environment: lane.session.environment } : {}),
-            ...(lane.session.harness ? { harness: lane.session.harness } : {}),
-            ...(lane.session.id ? { recipient: lane.session.id } : {}),
+            name: lane.startedBy.name,
+            ...(lane.startedBy.tool ? { environment: lane.startedBy.tool } : {}),
           }
-        : lane.startedBy?.kind === 'agent'
-          ? {
-              name: lane.startedBy.name,
-              ...(lane.startedBy.tool ? { environment: lane.startedBy.tool } : {}),
-            }
-          : undefined;
-      const base = {
-        laneId: lane.id,
-        ...(lane.queue ? { queue: lane.queue } : {}),
-        subject: { tone: lane.tone, label: lane.label, lane: lane.name, intent: lane.intent },
-        ...(lane.lastAt ? { at: lane.lastAt } : {}),
-        ...(owner ? { owner } : {}),
-        ...(continues ? { continues } : {}),
-      };
-      if (lane.queue?.state === 'failed')
-        return {
-          ...base,
-          id: `failed:${lane.id}`,
-          kind: 'failed' as const,
-          title: lane.name,
-          subtitle: lane.queue.decisionSubtitle ?? lane.queue.text,
-          runId: lane.queue.runId,
-          viewId: lane.queue.viewId,
-          hint: 'Retained output stays with this Candidate.',
-        };
-      if (lane.tone === 'passed') {
-        const changes = lane.changes;
-        return {
-          ...base,
-          id: `review:${lane.id}`,
-          kind: 'review' as const,
-          title: lane.intent,
-          subtitle:
-            lane.queue?.handoff ?? [lane.name !== lane.intent && lane.name, owner].filter(Boolean).join(', '),
-          gates: {
-            overlaps: overlaps.get(lane.id) ?? 0,
-            ...(lane.queue?.since ? { queuedAt: lane.queue.since } : {}),
-            ...(lane.mainIncluded !== undefined ? { main: lane.mainIncluded } : {}),
-          },
-          ...(changes?.add !== undefined
-            ? {
-                hint: `${changes.files} ${changes.files === 1 ? 'file' : 'files'} · +${changes.add} −${changes.del ?? 0}`,
-              }
-            : {}),
-          ...(lane.viewId ? { viewId: lane.viewId } : {}),
-        };
-      }
-      const [first, ...rest] = lane.conflicts;
+        : undefined;
+    const base = {
+      laneId: lane.id,
+      ...(lane.queue ? { queue: lane.queue } : {}),
+      subject: { tone: lane.tone, label: lane.label, lane: lane.name, intent: lane.intent },
+      ...(lane.lastAt ? { at: lane.lastAt } : {}),
+      ...(owner ? { owner } : {}),
+      ...(continues ? { continues } : {}),
+    };
+    if (lane.queue?.state === 'failed')
       return {
         ...base,
-        id: `conflict:${lane.id}`,
-        kind: 'conflict' as const,
-        title: `${lane.name} can't update from main`,
-        body: first
-          ? `${first}${rest.length ? ` and ${rest.length} more` : ''} changed on main and in this Lane.`
-          : lane.fact,
+        id: `failed:${lane.id}`,
+        version: lane.queue.runId ?? lane.queue.viewId ?? lane.head,
+        kind: 'failed' as const,
+        title: lane.name,
+        subtitle: lane.queue.decisionSubtitle ?? lane.queue.text,
+        runId: lane.queue.runId,
+        viewId: lane.queue.viewId,
+        hint: 'Retained output stays with this Candidate.',
       };
-    });
+    if (lane.tone === 'passed') {
+      const changes = lane.changes;
+      return {
+        ...base,
+        id: `review:${lane.id}`,
+        version: lane.head,
+        kind: 'review' as const,
+        title: lane.intent,
+        subtitle:
+          lane.queue?.handoff ?? [lane.name !== lane.intent && lane.name, owner].filter(Boolean).join(', '),
+        gates: {
+          overlaps: overlaps.get(lane.id) ?? 0,
+          ...(lane.queue?.since ? { queuedAt: lane.queue.since } : {}),
+          ...(lane.mainIncluded !== undefined ? { main: lane.mainIncluded } : {}),
+        },
+        ...(changes?.add !== undefined
+          ? {
+              hint: `${changes.files} ${changes.files === 1 ? 'file' : 'files'} · +${changes.add} −${changes.del ?? 0}`,
+            }
+          : {}),
+        ...(lane.viewId ? { viewId: lane.viewId } : {}),
+      };
+    }
+    const [first, ...rest] = lane.conflicts;
+    return {
+      ...base,
+      id: `conflict:${lane.id}`,
+      version: lane.head,
+      kind: 'conflict' as const,
+      title: `${lane.name} can't update from main`,
+      body: first
+        ? `${first}${rest.length ? ` and ${rest.length} more` : ''} changed on main and in this Lane.`
+        : lane.fact,
+    };
+  });
 }
 
 type LocalRecords = {

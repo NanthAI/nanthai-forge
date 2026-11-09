@@ -337,7 +337,7 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   the owner grants it, landing that Lane holds after its check (`REVIEW_REQUIRED`,
   naming your reason). `wait {"approval":"LANE_ID"}` holds one subscription to that
   request and returns when the owner grants or declines it (exit 0); a held landing's
-  own wait also returns on their decision. A grant covers the exact Lane head the
+  own wait also returns on their decision. The approval pages, Needs you and this wait read the request in one order (`src/approval-state.ts`): a decision first (a grant that then landed or was applied still counts as decided), then a request nothing will decide (none, or closed without a decision) as `none`; exit codes are unchanged. A grant covers the exact Lane head the
   owner saw; a later save or sync needs the owner again (their one click on the held
   landing). `{"withdraw":true}` drops your request. Agents can request, never grant.
 - The owner finds requests without a board note: Needs you shows an approval item for each

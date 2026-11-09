@@ -40,6 +40,8 @@ export function overlapDecisions(
     return [
       {
         id: `overlap:${lane.id}`,
+        // A notice newer than the one dismissed is a new decision.
+        ...(at ? { version: at } : {}),
         kind: 'overlap' as const,
         laneId: lane.id,
         title: lane.name,

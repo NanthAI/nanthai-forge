@@ -11,6 +11,7 @@ const { createRoot } = await import('react-dom/client');
 const { ConvexProvider } = await import('convex/react');
 const { HostedAttention } = await import(moduleUrl('../web/src/shell/Attention.tsx'));
 const { useCoordination } = await import(moduleUrl('../web/src/cockpit/coordination.ts'));
+const { useWorkRecords } = await import(moduleUrl('../web/src/hosted-work-index.ts'));
 test.after(() => host.restore());
 
 const workspace = JSON.stringify({
@@ -120,3 +121,39 @@ for (const [panel, suffix] of [
     assert.equal(fake.stats.adds + fake.stats.executions, 0, 'idle stays at zero calls');
     await React.act(async () => root.unmount());
   });
+
+test('W4: a refused Work record page is a failed read, not a crash and not a spinner or an empty all-clear', async () => {
+  const fake = fakeConvex({
+    resolve: (name, args) => {
+      if (name === 'projectWorkIndex:workspace') return workspace;
+      if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
+      return null;
+    },
+    refuseRecords: args => args.collection === 'runs',
+  });
+  const ws = JSON.parse(workspace);
+  const seen = {};
+  function Page() {
+    seen.runs = useWorkRecords('p', ws, 'runs');
+    seen.lanes = useWorkRecords('p', ws, 'lanes');
+    return null;
+  }
+  const crashed = [];
+  const root = createRoot(host.container, { onUncaughtError: error => crashed.push(error) });
+  await React.act(async () =>
+    root.render(
+      React.createElement(
+        ConvexProvider,
+        { client: fake.client },
+        React.createElement(HostedAttention, { projectId: 'p' }, React.createElement(Page)),
+      ),
+    ),
+  );
+  await settle();
+  assert.deepEqual(crashed, [], 'old main threw the refusal into the app boundary');
+  assert.equal(seen.runs.failed, true);
+  assert.equal(seen.runs.loading, false, 'a failed page is settled, not an endless spinner');
+  assert.equal(seen.runs.complete, false, 'and never reported as the complete list');
+  assert.equal(seen.lanes.failed, false, 'the other collections still answer');
+  await React.act(async () => root.unmount());
+});

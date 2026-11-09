@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { SignInButton } from '@clerk/react';
 import { useConvex, useConvexAuth } from 'convex/react';
 import { makeFunctionReference } from 'convex/server';
@@ -71,18 +71,23 @@ function LaneApprove() {
   );
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
+  // An unfinished attempt keeps its operation id, so a retry after an unknown reply is one decision.
+  const attempt = useRef<{ key: string; operationId: string } | null>(null);
   const decide = async (decision: 'grant' | 'decline', why = '') => {
     if (!read?.currentHead) return;
+    const key = JSON.stringify([decision, read.currentHead, why.trim()]);
+    if (attempt.current?.key !== key) attempt.current = { key, operationId: crypto.randomUUID() };
     setBusy(true);
     setError('');
     try {
       await io.mutation('projectHostedApprovals:decide', {
-        operationId: crypto.randomUUID(),
+        operationId: attempt.current.operationId,
         laneId,
         decision,
         head: read.currentHead,
         ...(why.trim() ? { reason: why.trim() } : {}),
       });
+      attempt.current = null;
     } catch (e) {
       setError(hostedError(e));
     } finally {

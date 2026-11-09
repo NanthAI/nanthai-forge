@@ -74,18 +74,22 @@ export class ToastStore {
   };
 }
 
-/** Preserve mapped prose, but never expose transport errors, server codes or stack traces. */
+const TRANSPORT =
+  /\b(?:Error|TypeError|ConvexError):|\bat \S+\s*\(|stack|request id|https?:\/\/|fetch|network|offline|connection|timed? ?out/i;
+const SERVER_CODE = /\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b:?/g;
+
+/**
+ * Preserve mapped prose, but never expose transport errors, server codes or stack traces. Only a network
+ * or transport failure reads as "Couldn't reach Forge": a refusal the server explained keeps its words
+ * (the code itself is dropped), and a bare code, which says nothing a person can act on, gets a plain
+ * sentence that is not about the connection.
+ */
 export function toastErrorText(text: string): string {
   const message = text.replace(/\s+/g, ' ').trim();
   if (/unknown (?:write |reply|outcome)|not sure|may have|did not return success/i.test(message))
     return feedbackError(message);
-  if (
-    !message ||
-    /\b[A-Z]+_[A-Z_]+\b/.test(message) ||
-    /\b(?:Error|TypeError|ConvexError):|\bat \S+\s*\(|stack|request id|https?:\/\/|fetch|network|offline|connection|timed? ?out/i.test(
-      message,
-    )
-  )
-    return "Couldn't reach Forge. Try again.";
-  return message;
+  if (!message || TRANSPORT.test(message)) return "Couldn't reach Forge. Try again.";
+  const prose = message.replace(SERVER_CODE, ' ').replace(/\s+/g, ' ').trim();
+  if (prose === message) return message;
+  return /[A-Za-z]{3,}/.test(prose) ? prose : 'Forge could not do that. Try again, or reload if it repeats.';
 }

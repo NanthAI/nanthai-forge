@@ -25,9 +25,24 @@ export type NowFacts = {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** One sentence: what needs the viewer first, then movement, people, overlaps and today's acceptances. */
-export function NowSituation({ facts, firstRun = false }: { facts: NowFacts; firstRun?: boolean }) {
+export function NowSituation({
+  facts,
+  firstRun = false,
+  reading,
+}: {
+  facts: NowFacts;
+  firstRun?: boolean;
+  /** Records are still arriving (loading) or could not be read (failed): never claim an all-clear. */
+  reading?: 'loading' | 'failed';
+}) {
   const { decisions, open, acceptedToday = 0, working, overlaps, unanswered = 0 } = facts;
   if (firstRun) return <Situation lead="Nothing is in progress yet.">Start with one Intent.</Situation>;
+  if (reading && decisions === 0)
+    return reading === 'failed' ? (
+      <Situation lead="Can’t read what needs you.">Reload to try again.</Situation>
+    ) : (
+      <Situation lead="Reading what needs you…" />
+    );
   if (open === 0 && decisions === 0 && !working?.total && !acceptedToday && !overlaps && !unanswered)
     return <Situation lead="Nothing needs you.">No work in motion.</Situation>;
   const parts: ReactNode[] = [];

@@ -14,9 +14,10 @@ test('device codes are paste-tolerant and grouped like the terminal prints them'
   assert.equal(code.formatCode('qk7'), 'QK7');
   assert.equal(code.codeComplete('QK7PM2XDHT'), true);
   assert.equal(code.codeComplete('QK7PM-2XD'), false);
-  assert.equal(code.codeProblem('This device code expired or is unavailable.'), 'expired');
-  assert.equal(code.codeProblem('This device code already has a decision.'), 'used');
-  assert.equal(code.codeProblem('Network down'), null);
+  assert.equal(code.codeProblem('AUTH_EXPIRED'), 'expired');
+  assert.equal(code.codeProblem('AUTH_CODE_USED'), 'used');
+  assert.equal(code.codeProblem('AUTH_SLOW_DOWN'), null);
+  assert.equal(code.codeProblem(undefined), null);
   assert.equal(code.expiresIn(Date.now() + 8 * 60_000, Date.now()), 'in 8 min');
 });
 
@@ -108,4 +109,39 @@ test('a code that arrived in a link needs the code typed before Approve unlocks 
   const confirmed = render({ kind: 'review', request }, { requireTyped: true, typed: 'qk7pm 2xdht' });
   assert.doesNotMatch(approve(confirmed), /disabled/);
   assert.doesNotMatch(/<button[^>]*>Deny<\/button>/.exec(fromLink)[0], /disabled/, 'Deny is never gated');
+});
+
+test('W8/W22: the device page classifies a refusal by its server code, never by its words', async () => {
+  const { ConvexError } = await import('convex/values');
+  const { hostedErrorCode } = await import(moduleUrl('../web/src/snapshot.ts'));
+  const refused = (code, message) => new ConvexError({ code, message });
+  assert.equal(hostedErrorCode(refused('AUTH_EXPIRED', 'x')), 'AUTH_EXPIRED');
+  assert.equal(hostedErrorCode(new Error('AUTH_EXPIRED')), undefined, 'a plain Error has no code');
+  assert.equal(hostedErrorCode(new ConvexError('text')), undefined);
+  // A service error whose text happens to say "unavailable" is not an expired code (old regex: expired).
+  const outage = refused('SERVICE_UNAVAILABLE', 'The device service is unavailable.');
+  assert.equal(code.codeProblem(hostedErrorCode(outage)), null);
+  // A reworded expiry message is still an expired code.
+  assert.equal(code.codeProblem(hostedErrorCode(refused('AUTH_EXPIRED', 'Please start over.'))), 'expired');
+  assert.equal(code.codeProblem(hostedErrorCode(refused('AUTH_CODE_USED', 'Taken.'))), 'used');
+});
+
+test('W8: a code that already has a decision opens its card and says what was decided; an expired code stops offering Approve', () => {
+  const soon = Date.now() + 60_000;
+  const request = state => ({ name: 'dino-mbp', scope: 'cli', expiresAt: soon, state });
+  const approved = render({ kind: 'review', request: request('approved') });
+  assert.match(approved, /already approved/);
+  assert.doesNotMatch(approved, />Approve<|>Deny</);
+  assert.match(render({ kind: 'review', request: request('consumed') }), /already approved/);
+  const denied = render({ kind: 'review', request: request('denied') });
+  assert.match(denied, /was denied/);
+  assert.doesNotMatch(denied, />Approve<|>Deny</);
+  assert.match(render({ kind: 'review', request: request('other') }), /already has a decision/);
+  const lapsed = render(
+    { kind: 'review', request: { ...request('pending'), expiresAt: Date.now() - 1000 } },
+    { now: Date.now() },
+  );
+  assert.match(lapsed, /This code has expired/);
+  assert.doesNotMatch(lapsed, />Approve<|>Deny</);
+  assert.match(render({ kind: 'review', request: request('pending') }), />Approve</);
 });

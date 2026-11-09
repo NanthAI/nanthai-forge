@@ -16,6 +16,14 @@ export type DevicePhase =
   | { kind: 'denied'; name: string }
   | { kind: 'problem'; problem: 'expired' | 'used' };
 
+/** What a code that already has a decision says, by the state the server recorded. */
+function decidedWords(state: string) {
+  if (state === 'approved' || state === 'consumed')
+    return 'This code was already approved. Return to your terminal; it signs in on its own.';
+  if (state === 'denied') return 'This code was denied. Run nforge login again for a new one.';
+  return 'This code already has a decision.';
+}
+
 /**
  * The /device approval card. Pure: the container supplies the phase, the code and the actions, so
  * every state renders the same in review fixtures and in the signed-in app.
@@ -166,7 +174,16 @@ export function DeviceApproval({
               </dd>
             </div>
           </dl>
-          {request.state === 'pending' ? (
+          {request.state !== 'pending' ? (
+            <Callout tone="info">{decidedWords(request.state)}</Callout>
+          ) : request.expiresAt <= now ? (
+            <>
+              <Callout tone="info">This code has expired. Run nforge login again for a new one.</Callout>
+              <div className="fx-dv-actions">
+                <Button onClick={restart}>Enter another code</Button>
+              </div>
+            </>
+          ) : (
             <>
               {requireTyped && (
                 <div className="fx-dv-form">
@@ -193,8 +210,6 @@ export function DeviceApproval({
                 </Button>
               </div>
             </>
-          ) : (
-            <Callout tone="info">This code already has a decision.</Callout>
           )}
         </>
       );

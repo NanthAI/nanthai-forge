@@ -288,6 +288,12 @@ test('one of five culprits is named; bounded probes and one range page at dogfoo
     Number.isFinite(Date.parse(capabilities.needsFix[0].at)),
     'workspace notice retains its actual publication time',
   );
+  // W19: the failing tests travel as fields, so no reader parses the summary prose (old main: absent).
+  assert.deepEqual(
+    capabilities.needsFix[0].tests,
+    intent.needsFix.failed.slice(0, 3).map(item => item.file),
+  );
+  assert.equal(capabilities.needsFix[0].moreTests, undefined);
   const metrics = f.counts.slice(before);
   t.diagnostic(
     JSON.stringify({
@@ -1543,4 +1549,16 @@ test('flake recovery retains newer audit debt and cadence when covered receipts 
     );
     assert.equal(audit.wake.at, next.args.wakeAt);
   }
+});
+
+test('W19: the notice records at most three failing files and how many more', () => {
+  const file = n => ({ file: `tests/t${n}.test.mjs` });
+  assert.deepEqual(culprit.noticeTests([]), {});
+  assert.deepEqual(culprit.noticeTests([file(1)]), { tests: ['tests/t1.test.mjs'] });
+  assert.deepEqual(culprit.noticeTests([1, 2, 3].map(file)).moreTests, undefined);
+  assert.deepEqual(culprit.noticeTests([1, 2, 3, 4, 5, 6].map(file)), {
+    tests: ['tests/t1.test.mjs', 'tests/t2.test.mjs', 'tests/t3.test.mjs'],
+    moreTests: 3,
+  });
+  assert.equal(culprit.noticeTests([{ file: 'x'.repeat(500) }]).tests[0].length, 240);
 });

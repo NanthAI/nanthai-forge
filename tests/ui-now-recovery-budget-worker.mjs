@@ -30,6 +30,7 @@ export default async function recoveryBudget() {
       auditRunId: 'audit',
       head: 'a'.repeat(64),
       summary: 'Reverted receipt r: a.test.mjs failed on h',
+      tests: ['a.test.mjs'],
       undo: 'undo',
     })),
   );
