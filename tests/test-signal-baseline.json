@@ -112,15 +112,13 @@
       "docs": 2
     },
     "tests/cli-canary.test.mjs": {
-      "sleep": 4,
-      "elapsed": 2
+      "sleep": 4
     },
     "tests/cli-measurement-hold-scope.test.mjs": {
       "sleep": 1
     },
     "tests/cli-update.test.mjs": {
-      "sleep": 7,
-      "elapsed": 1
+      "sleep": 7
     },
     "tests/compute-calls.test.mjs": {
       "sleep": 1
@@ -187,7 +185,7 @@
       "sleep": 1
     },
     "tests/heavy-fairness.test.mjs": {
-      "sleep": 8
+      "sleep": 4
     },
     "tests/host-progress.test.mjs": {
       "sleep": 2
@@ -231,9 +229,6 @@
     },
     "tests/hosted-contributors.test.mjs": {
       "sleep": 1
-    },
-    "tests/hosted-cross-head-cost.test.mjs": {
-      "elapsed": 1
     },
     "tests/hosted-finish.test.mjs": {
       "elapsed": 1
@@ -372,8 +367,7 @@
       "sleep": 4
     },
     "tests/native-git-export-waits.test.mjs": {
-      "sleep": 4,
-      "elapsed": 1
+      "sleep": 4
     },
     "tests/native-git.test.mjs": {
       "sleep": 1
