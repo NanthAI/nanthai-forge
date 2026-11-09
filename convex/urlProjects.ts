@@ -4,6 +4,34 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { accountFor } from './urlIdentity';
+import type { QueryCtx } from './server';
+
+/** A project id from its id, an old slug~id path or handle/slug. Access is not checked here. */
+export async function resolveProjectId(
+  ctx: QueryCtx,
+  input: { handle?: string; slug?: string; projectId?: string },
+) {
+  let id = input.projectId ? ctx.db.normalizeId('hostedProjects', input.projectId) : null;
+  // Old slug~id paths remain valid independently of their old display-name prefix.
+  if (!id && input.slug?.includes('~'))
+    id = ctx.db.normalizeId('hostedProjects', input.slug.split('~').at(-1)!);
+  if (!id && input.handle && input.slug) {
+    const account = await ctx.db
+      .query('accountHandles')
+      .withIndex('by_handle', q => q.eq('handle', input.handle!.toLowerCase()))
+      .unique();
+    if (account) {
+      const alias = await ctx.db
+        .query('projectSlugs')
+        .withIndex('by_owner_and_slug', q =>
+          q.eq('owner', account.owner).eq('slug', input.slug!.toLowerCase()),
+        )
+        .unique();
+      id = alias?.projectId ?? null;
+    }
+  }
+  return id;
+}
 export const resolve = query({
   args: { handle: v.optional(v.string()), slug: v.optional(v.string()), projectId: v.optional(v.string()) },
   returns: v.union(
@@ -11,25 +39,7 @@ export const resolve = query({
     v.null(),
   ),
   handler: async (ctx, input) => {
-    let id = input.projectId ? ctx.db.normalizeId('hostedProjects', input.projectId) : null;
-    // Old slug~id paths remain valid independently of their old display-name prefix.
-    if (!id && input.slug?.includes('~'))
-      id = ctx.db.normalizeId('hostedProjects', input.slug.split('~').at(-1)!);
-    if (!id && input.handle && input.slug) {
-      const account = await ctx.db
-        .query('accountHandles')
-        .withIndex('by_handle', q => q.eq('handle', input.handle!.toLowerCase()))
-        .unique();
-      if (account) {
-        const alias = await ctx.db
-          .query('projectSlugs')
-          .withIndex('by_owner_and_slug', q =>
-            q.eq('owner', account.owner).eq('slug', input.slug!.toLowerCase()),
-          )
-          .unique();
-        id = alias?.projectId ?? null;
-      }
-    }
+    const id = await resolveProjectId(ctx, input);
     if (!id) return null;
     const user = await ctx.auth.getUserIdentity();
     let project;

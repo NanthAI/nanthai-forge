@@ -4,7 +4,11 @@
 // source repository. Synthetic repository, fake GitHub and the in-memory R2 bucket.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { createServer } from 'node:http';
+import { promisify } from 'node:util';
+import { gzipSync } from 'node:zlib';
 import { mkdtempSync, realpathSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,8 +28,17 @@ import { hostedHistoryCli } from '../dist/hosted-history-output.js';
 import { cachedPacks, ensureHistoryRepository, indexPack } from '../dist/history-git.js';
 
 const modules = {};
-for (const name of ['projectHistoryStore', 'projectHistoryImport', 'projectHistoryRead'])
+for (const name of [
+  'projectHistoryStore',
+  'projectHistoryImport',
+  'projectHistoryRead',
+  'gitServeStore',
+  'gitServeInflate',
+])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
+
+const gitServe = await import(moduleUrl('../convex/gitServe.ts'));
+const protocol = await import('../dist/git-serve-protocol.js');
 
 function scratch(t, prefix) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
@@ -581,4 +594,305 @@ test('concurrent reads after a mirror move fetch the catch-up pack once and late
   const later = JSON.parse(await open());
   assert.equal(later.catchUp, undefined);
   assert.equal(f.fetches.length, 2, 'a later read reuses the stored pack');
+});
+
+// Hosted Git serving (Issue 09367fb2): plain git clone/fetch from Forge's HTTP endpoint.
+const run = promisify(execFile);
+const gitEnv = { ...env, GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '', SSH_ASKPASS: '' };
+const client = (args, cwd) =>
+  run('git', ['-c', 'credential.helper=', ...args], { env: gitEnv, cwd, maxBuffer: 64 << 20 });
+const refused = async (args, pattern) => {
+  const error = await client(args).then(
+    () => assert.fail(`git ${args[0]} should fail`),
+    e => e,
+  );
+  assert.match(String(error.stderr), pattern);
+};
+/** Serves the HTTP action on a local port and counts every Convex call it makes. */
+async function gitHost(t, s) {
+  const counts = { http: 0, query: 0, mutation: 0, action: 0 };
+  for (const [kind, key] of [
+    ['query', 'runQuery'],
+    ['mutation', 'runMutation'],
+    ['action', 'runAction'],
+  ]) {
+    const inner = s.ctx[key];
+    s.ctx[key] = (ref, args) => {
+      counts[kind]++;
+      return inner(ref, args);
+    };
+  }
+  const server = createServer(async (req, res) => {
+    counts.http++;
+    const body = [];
+    for await (const part of req) body.push(part);
+    const headers = new Headers(Object.entries(req.headers).filter(([, value]) => typeof value === 'string'));
+    const response = await gitServe.serve._handler(
+      s.ctx,
+      new Request(`https://forge.example${req.url}`, {
+        method: req.method,
+        headers,
+        ...(req.method === 'POST' ? { body: Buffer.concat(body) } : {}),
+      }),
+    );
+    res.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) for await (const part of response.body) res.write(part);
+    res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const snapshot = () => ({ ...counts });
+  const since = before =>
+    Object.fromEntries(Object.keys(counts).map(key => [key, counts[key] - before[key]]));
+  const handle = (path, init = {}) =>
+    gitServe.serve._handler(s.ctx, new Request(`https://forge.example${path}`, init));
+  return { base, counts, snapshot, since, handle };
+}
+const mirrorAt = (s, projectId, tip, message = 'Forge landing') =>
+  s.ctx.db.insert('projectGithubMirrors', {
+    projectId,
+    repository: 'example/repo',
+    activeId: null,
+    mapping: JSON.stringify({
+      operationId: crypto.randomUUID(),
+      state: 'd'.repeat(64),
+      acceptanceId: crypto.randomUUID(),
+      viewId: crypto.randomUUID(),
+      commit: tip,
+      parent: '',
+      tree: 'e'.repeat(40),
+      message,
+      author: { name: 'Forge', email: 'forge@example.invalid' },
+      committer: { name: 'Forge', email: 'forge@example.invalid' },
+      seconds: clock,
+    }),
+  });
+const publish = (s, projectId) => {
+  const row = s.tables.hostedProjects.get(projectId);
+  s.tables.hostedProjects.set(projectId, { ...row, visibility: 'public' });
+};
+const log = (repo, ref = 'HEAD') => git(repo, ['log', '--format=%H %s', ref]).toString();
+
+test('stock git clones and fetches a public project from Forge with GitHub commit ids, constant calls', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const host = await gitHost(t, s);
+  const url = `${host.base}/git/${projectId}.git`;
+  const work = scratch(t, 'forge-git-clone-');
+  let before = host.snapshot();
+  await client(['clone', '-q', url, join(work, 'one')]);
+  assert.equal(log(join(work, 'one')), log(source.repo), 'same commits, same ids as the source');
+  // Anonymous clone: info/refs, ls-refs, fetch; one query each, no mutation or action.
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 0, action: 0 });
+  before = host.snapshot();
+  const noop = await client(['fetch', '-v'], join(work, 'one'));
+  assert.match(String(noop.stderr), /up to date/);
+  assert.deepEqual(host.since(before), { http: 2, query: 2, mutation: 0, action: 0 });
+  const listed = (await client(['ls-remote', url])).stdout.trim().split('\n');
+  assert.deepEqual(
+    listed,
+    [`${source.head}\tHEAD`, `${source.head}\trefs/heads/main`],
+    'no Lane or other refs',
+  );
+
+  // Main moves on GitHub's mirror: the next fetch adds one catch-up pack and gets only it.
+  commit(source.repo, { 'src/new.go': 'package main\n' }, 'Forge landing one');
+  const tip = commit(source.repo, { 'src/new.go': 'package main\n// two\n' }, 'Forge landing two');
+  await mirrorAt(s, projectId, tip);
+  before = host.snapshot();
+  await client(['fetch', '-q'], join(work, 'one'));
+  assert.equal(git(join(work, 'one'), ['rev-parse', 'origin/main']).toString().trim(), tip);
+  assert.equal(f.fetches.length, 2);
+  assert.deepEqual(f.fetches[1].haves, [source.head]);
+  assert.equal(host.since(before).http, 3);
+  before = host.snapshot();
+  await client(['fetch', '-q'], join(work, 'one'));
+  assert.deepEqual(host.since(before), { http: 2, query: 2, mutation: 0, action: 0 }, 'catch-up runs once');
+
+  // A fresh clone joins both stored packs into one verified pack; v0 clients work too.
+  await client(['clone', '-q', url, join(work, 'two')]);
+  assert.equal(log(join(work, 'two')), log(source.repo, tip));
+  await client(['fsck', '--full'], join(work, 'two'));
+  await client(['-c', 'protocol.version=0', 'clone', '-q', url, join(work, 'v0')]);
+  assert.equal(log(join(work, 'v0')), log(source.repo, tip));
+  writeFileSync(join(work, 'two', 'local.txt'), 'x\n');
+  git(join(work, 'two'), ['add', 'local.txt']);
+  git(join(work, 'two'), ['commit', '-q', '-m', 'local']);
+  await client(['-c', 'protocol.version=0', 'fetch', '-q'], join(work, 'two'));
+  // Handle/slug URLs resolve like the web route; shallow clones and pushes are refused.
+  await refused(['clone', '--depth', '1', url, join(work, 'shallow')], /shallow|full clones/);
+  await refused(['-C', join(work, 'two'), 'push', 'origin', 'HEAD:main'], /pushes go through Lanes/i);
+  await s.ctx.db.insert('accountHandles', { owner: 'owner', handle: 'synthetic-owner' });
+  await s.ctx.db.insert('projectSlugs', { owner: 'owner', slug: 'synthetic', projectId });
+  const named = (await client(['ls-remote', `${host.base}/git/Synthetic-Owner/synthetic.git`])).stdout;
+  assert.match(named, new RegExp(`^${tip}\tHEAD`));
+  const unknown = await host.handle('/git/nobody/nothing.git/info/refs?service=git-upload-pack');
+  assert.equal(unknown.status, 401);
+  assert.match(unknown.headers.get('www-authenticate'), /^Basic /);
+});
+
+test('private projects need a current Forge login; non-members learn nothing and Lane refs never list', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source, { visibility: 'private' }),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const host = await gitHost(t, s);
+  const token = (credentialId, owner, extra = {}) => {
+    const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const value = `${encode({ alg: 'RS256' })}.${encode({ sub: owner, forgeCredential: credentialId })}.sig`;
+    s.ctx.db.insert('cliCredentials', {
+      owner,
+      name: 'Synthetic CLI',
+      scope: 'cli',
+      credentialId,
+      tokenHash: createHash('sha256').update(value).digest('hex'),
+      issuedAt: Date.now(),
+      expiresAt: Date.now() + 60_000,
+      revoked: false,
+      ...extra,
+    });
+    return value;
+  };
+  const owner = token('cred-owner', 'owner'),
+    stranger = token('cred-stranger', 'stranger'),
+    revoked = token('cred-revoked', 'owner', { revoked: true }),
+    coordination = token('cred-coord', 'owner', { scope: 'coordination' });
+  const refs = `/git/${projectId}.git/info/refs?service=git-upload-pack`;
+  const basic = value => ({ authorization: `Basic ${Buffer.from(`git:${value}`).toString('base64')}` });
+  const anonymous = await host.handle(refs);
+  assert.equal(anonymous.status, 401);
+  assert.match(anonymous.headers.get('www-authenticate'), /^Basic realm="Forge"/);
+  const foreign = await host.handle(refs, { headers: basic(stranger) });
+  assert.equal(foreign.status, 404, 'a signed-in non-member gets "not found", never the refs');
+  assert.doesNotMatch(await foreign.text(), new RegExp(source.head));
+  for (const value of [revoked, coordination, 'not-a-token', owner.replace(/sig$/, 'forged')])
+    assert.equal((await host.handle(refs, { headers: basic(value) })).status, 401);
+  const forged = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
+    method: 'POST',
+    headers: { 'git-protocol': 'version=2', ...basic(stranger) },
+    body: protocol.concatBytes([
+      protocol.pkt('command=fetch\n'),
+      protocol.delimPkt,
+      protocol.pkt(`want ${source.head}\n`),
+      protocol.pkt('done\n'),
+      protocol.flushPkt,
+    ]),
+  });
+  assert.equal(forged.status, 404, 'a direct fetch is checked like the ref listing');
+  const work = scratch(t, 'forge-git-private-');
+  await refused(
+    ['clone', `${host.base}/git/${projectId}.git`, join(work, 'anon')],
+    /Username|401|Authentication/i,
+  );
+  const authed = `${host.base.replace('http://', `http://git:${owner}@`)}/git/${projectId}.git`;
+  await client(['clone', '-q', authed, join(work, 'owner')]);
+  assert.equal(log(join(work, 'owner')), log(source.repo));
+  const listed = (await client(['ls-remote', authed])).stdout;
+  assert.doesNotMatch(listed, /refs\/forge|lanes/);
+  assert.equal(listed.trim().split('\n').length, 2);
+});
+
+test('a mirrored project without imported history seeds it once from the mirror; no history is a named error', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await s.ctx.db.insert('hostedProjects', {
+    key: 'born',
+    name: 'Born',
+    currentBackup: null,
+    revision: 0,
+    owner: 'owner',
+    visibility: 'public',
+    sourceAuthority: { mode: 'server', epoch: 1 },
+  });
+  const host = await gitHost(t, s);
+  const work = scratch(t, 'forge-git-seed-');
+  const url = `${host.base}/git/${projectId}.git`;
+  await refused(['clone', url, join(work, 'none')], /GIT_HISTORY_UNAVAILABLE/);
+  await mirrorAt(s, projectId, source.head);
+  await client(['clone', '-q', url, join(work, 'seeded')]);
+  assert.equal(log(join(work, 'seeded')), log(source.repo));
+  const row = historyRow(s, projectId);
+  assert.equal(row.status, 'ready');
+  assert.equal(row.importCommit, source.head);
+  assert.equal(row.visibility, 'public', 'a public project seeds only from a public repository');
+  assert.equal(f.fetches.length, 1);
+  await client(['clone', '-q', url, join(work, 'again')]);
+  assert.equal(f.fetches.length, 1, 'seeded once');
+});
+
+test('pack selection, joining, gzip requests and the main gap are explicit', async t => {
+  const packs = [
+    { tip: 'a'.repeat(40), bytes: 100, objects: 3 },
+    { tip: 'b'.repeat(40), bytes: 50, objects: 1 },
+    { tip: 'c'.repeat(40), bytes: 60, objects: 2 },
+  ];
+  assert.deepEqual(protocol.selectPacks(packs, ['c'.repeat(40)], []), { from: 0, to: 2, common: null });
+  assert.deepEqual(protocol.selectPacks(packs, ['c'.repeat(40)], ['f'.repeat(40), 'a'.repeat(40)]), {
+    from: 1,
+    to: 2,
+    common: 'a'.repeat(40),
+  });
+  assert.throws(
+    () => protocol.selectPacks(packs, ['d'.repeat(40)], []),
+    e => e.code === 'GIT_NOT_OUR_REF',
+  );
+  assert.equal(new protocol.PackJoiner(packs).bytes, 12 + (100 + 50 + 60 - 96) + 20);
+  assert.throws(
+    () => protocol.parseFetchArgs(['want ' + 'a'.repeat(40), 'ofs-delta', 'deepen 1']),
+    e => e.code === 'GIT_UNSUPPORTED',
+  );
+  const loaded = gap => ({
+    status: 'ok',
+    projectId: 'p',
+    mainHead: gap ? 'f'.repeat(64) : 'd'.repeat(64),
+    history: {
+      row: {
+        status: 'ready',
+        repository: 'example/repo',
+        importCommit: 'a'.repeat(40),
+        importState: 'c'.repeat(64),
+      },
+      packs,
+    },
+    mirror: null,
+  });
+  assert.match(gitServe.servedRefs(loaded(true)).gap, /not yet published as Git commits/);
+  assert.equal(gitServe.servedRefs(loaded(true)).refs.main, 'c'.repeat(40));
+
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const host = await gitHost(t, s);
+  const haves = Array.from({ length: 40 }, (_, i) =>
+    protocol.pkt(`have ${i.toString(16).padStart(40, '0')}\n`),
+  );
+  const body = protocol.concatBytes([
+    protocol.pkt('command=fetch\n'),
+    protocol.delimPkt,
+    protocol.pkt('ofs-delta\n'),
+    protocol.pkt(`want ${source.head}\n`),
+    ...haves,
+    protocol.flushPkt,
+  ]);
+  assert.ok(body.length > 1024);
+  const before = host.snapshot();
+  const reply = await host.handle(`/git/${projectId}.git/git-upload-pack`, {
+    method: 'POST',
+    headers: { 'git-protocol': 'version=2', 'content-encoding': 'gzip' },
+    body: gzipSync(body),
+  });
+  const bytes = Buffer.from(await reply.arrayBuffer());
+  assert.match(bytes.subarray(0, 40).toString('latin1'), /acknowledgments\n.*NAK\n/s);
+  assert.ok(bytes.includes(Buffer.from('PACK')));
+  assert.deepEqual(host.since(before), { http: 0, query: 1, mutation: 0, action: 1 }, 'one gunzip action');
 });

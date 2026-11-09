@@ -191,7 +191,9 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   stored packs and reports `HISTORY_CATCH_UP_RUNNING`, so readers never multiply GitHub fetches. Packs
   download once per machine into `~/.cache/forge/history` (`FORGE_HISTORY_CACHE`)
   and the local `git` reads them (`GIT_REQUIRED` without Git). Forge landings that
-  were not mirrored to GitHub are not in this history yet. Owners set the
+  were not mirrored to GitHub are not in this history yet. A mirrored project without
+  imported history gets it from the mirror on its first plain `git clone` from Forge
+  ([Git serving](../git-serving.md)). Owners set the
   per-project limit with `op:"limit"` (`bytes`, default 1 GiB, at most 8 GiB) and
   re-run a failed or over-limit import with `op:"retry"`; above the limit no history
   is stored and reads return `HISTORY_OVER_LIMIT`.

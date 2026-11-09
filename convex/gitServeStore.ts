@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: Apache-2.0
+import { v } from 'convex/values';
+import { internalQuery } from './server';
+import { accessibleProject } from './projectAuthority';
+import { resolveProjectId } from './urlProjects';
+import { loadHistory, mirrorMapping } from './projectHistoryStore';
+import { hostedStartMain } from './projectHostedChannels';
+import { ForgeError } from '../src/errors';
+
+/** Everything one Git smart-HTTP request needs, in one query: the presented Forge
+ * credential (hash-checked against its row), current project access, stored history
+ * packs, main's mirror mapping and hosted main's head. Never per object or per commit. */
+export const load = internalQuery({
+  args: {
+    projectId: v.optional(v.string()),
+    handle: v.optional(v.string()),
+    slug: v.optional(v.string()),
+    credential: v.optional(v.object({ credentialId: v.string(), tokenHash: v.string() })),
+  },
+  returns: v.any(),
+  handler: async (ctx, input) => {
+    let actor = '';
+    if (input.credential) {
+      const row = await ctx.db
+        .query('cliCredentials')
+        .withIndex('by_credentialId', q => q.eq('credentialId', input.credential!.credentialId))
+        .unique();
+      if (
+        !row ||
+        row.revoked ||
+        row.expiresAt <= Date.now() ||
+        row.scope !== 'cli' ||
+        row.tokenHash !== input.credential.tokenHash
+      )
+        return { status: 'bad-credential' };
+      actor = row.owner;
+    }
+    const id = await resolveProjectId(ctx, input);
+    if (!id) return { status: 'not-found', signedIn: !!actor };
+    try {
+      await accessibleProject(ctx, id, actor);
+    } catch (error) {
+      if (error instanceof ForgeError && error.code === 'PROJECT_UNAVAILABLE')
+        return { status: 'not-found', signedIn: !!actor };
+      throw error;
+    }
+    let mainHead: string | null = null;
+    try {
+      mainHead = (await hostedStartMain(ctx, id)).head;
+    } catch {
+      mainHead = null;
+    }
+    const history = await loadHistory(ctx, id);
+    return {
+      status: 'ok',
+      projectId: id,
+      mainHead,
+      history,
+      mirror: history ? history.mirror : await mirrorMapping(ctx, id),
+    };
+  },
+});

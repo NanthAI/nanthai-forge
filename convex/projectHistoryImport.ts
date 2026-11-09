@@ -15,6 +15,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { fetchGitPack, PackLimitError } from '../src/git-upload-pack';
 import { historyChunkBytes } from './projectHistoryFields';
 import { historyLimit } from './projectHistoryStore';
+import { githubSyncCommitSchema } from '../src/github-sync-types';
 
 /** Read credential for one github.com repository: the App's own read token when
  * installed, else the importer's authorized one (public: the server read token). */
@@ -199,5 +200,84 @@ export const run = internalAction({
       });
     }
     return null;
+  },
+});
+
+type Loaded = NonNullable<Awaited<ReturnType<typeof import('./projectHistoryStore').loadHistory>>>;
+/** When main's GitHub mirror publishes to the history repository and moved past stored
+ * history: at most one coalesced catch-up pack (one reader per mirror move fetches; the
+ * others read what is stored). Shared by history reads and Git serving. */
+export async function catchUpHistory(ctx: ActionCtx, projectId: Id<'hostedProjects'>, loaded: Loaded) {
+  const { row } = loaded;
+  let packs = [...loaded.packs],
+    addedBytes = 0;
+  let main: { commit: string; state: string } | null = null;
+  let catchUp: { code: string; message: string } | null = null;
+  if (row.status === 'ready' && loaded.mirror?.repository.toLowerCase() === row.repository.toLowerCase()) {
+    const mapping = githubSyncCommitSchema.parse(JSON.parse(loaded.mirror.mapping));
+    main = { commit: mapping.commit, state: mapping.state };
+    if (!packs.some(pack => pack.tip === mapping.commit) && mapping.commit !== row.importCommit) {
+      try {
+        invariant(
+          !loaded.morePacks,
+          'HISTORY_PACKS_FULL',
+          'This project has too many history packs to add one.',
+        );
+        invariant(
+          await ctx.runMutation(internal.projectHistoryStore.claimCatchUp, {
+            projectId,
+            tip: mapping.commit,
+          }),
+          'HISTORY_CATCH_UP_RUNNING',
+          'Newer history is being fetched by another read; retry in a minute.',
+        );
+        const haves = [...new Set(packs.map(pack => pack.tip))];
+        const stored = await storeHistoryPack(ctx, projectId, {
+          repository: row.repository,
+          want: mapping.commit,
+          haves,
+          token: await historyReadToken(row.repository, row.owner, row.visibility),
+          limitBytes: historyLimit(row) - row.bytes,
+        });
+        const recorded = await recordHistoryPack(ctx, projectId, stored, {
+          tip: mapping.commit,
+          haves,
+          source: 'catch-up',
+        });
+        if (recorded === 'recorded') {
+          packs.push({ tip: mapping.commit, ...stored.pack, at: Date.now() });
+          addedBytes = stored.pack.bytes;
+        } else if (recorded === 'duplicate') {
+          const again = await ctx.runQuery(internal.projectHistoryStore.load, { projectId });
+          packs = [...(again?.packs ?? [])];
+        }
+      } catch (error) {
+        // Stored history stays readable; the reply names what is missing.
+        catchUp = {
+          code:
+            error instanceof PackLimitError
+              ? 'HISTORY_OVER_LIMIT'
+              : error instanceof ForgeError
+                ? error.code
+                : 'HISTORY_CATCH_UP_FAILED',
+          message:
+            error instanceof ForgeError
+              ? error.message
+              : 'Fetching history after the import failed; retry the read.',
+        };
+      }
+    }
+  }
+  return { packs, addedBytes, main, catchUp };
+}
+
+/** Git serving's catch-up step (the HTTP action already checked access). */
+export const catchUp = internalAction({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.union(v.null(), v.object({ code: v.string(), message: v.string() })),
+  handler: async (ctx, { projectId }): Promise<{ code: string; message: string } | null> => {
+    const loaded = await ctx.runQuery(internal.projectHistoryStore.load, { projectId });
+    if (!loaded) return null;
+    return (await catchUpHistory(ctx, projectId, loaded)).catchUp;
   },
 });

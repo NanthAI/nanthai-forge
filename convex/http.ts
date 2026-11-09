@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
+import { serve as gitServe } from './gitServe';
 import { makeFunctionReference } from 'convex/server';
 import { httpRouter } from 'convex/server';
 import { httpAction } from './_generated/server';
@@ -12,6 +13,8 @@ import { INSTALLATION_EVENT_PAGE, installationRepositories } from './sync';
 const http = httpRouter();
 http.route({ path: '/github/oauth/callback', method: 'GET', handler: githubOAuthCallback });
 http.route({ path: '/checks/actions', method: 'POST', handler: actionsHttp });
+// Read-only Git smart HTTP (clone/fetch); pushes go through Lanes.
+for (const method of ['GET', 'POST'] as const) http.route({ pathPrefix: '/git/', method, handler: gitServe });
 for (const operation of ['prepare', 'update', 'uploadTarget'] as const)
   http.route({
     path: `/worker/${operation}`,

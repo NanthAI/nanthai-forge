@@ -12,7 +12,7 @@ code at the same time. Start with the guide that matches your task.
 - [Lead playbook](agents/lead.md): plan, delegate, verify, measure cost and release.
 - [Agent workflow](agents/workflow.md): work in a Lane, coordinate and finish through the project's runner.
 - [Agents](agents.md) and [briefings](agents/briefings.md): CLI/MCP tools and generated agent context.
-- [Workflows](workflows.md) and [gh-compatible commands](gh-cli.md): native and Git usage.
+- [Workflows](workflows.md) and [gh-compatible commands](gh-cli.md): native and Git usage; [Git serving](git-serving.md): plain `git clone` and `git fetch` from hosted Forge.
 - [Architecture](architecture.md) and [decisions](decisions.md): how Forge is built.
 - [Operations](operations.md): hosting, source exchange and check runners.
 - [Hosted landing ownership contract](operations/hosted-landing-contract.md): shared submission/fencing rules and deferred native-owner migration gaps.

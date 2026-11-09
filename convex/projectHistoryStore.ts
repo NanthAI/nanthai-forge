@@ -8,6 +8,7 @@ import { accessibleProject } from './projectAuthority';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { defaultHistoryLimitBytes, historyChunk, maxHistoryLimitBytes } from './projectHistoryFields';
+import { githubSyncCommitSchema } from '../src/github-sync-types';
 
 /** Pack rows a read loads at most; catch-up packs coalesce, so this bounds a
  * project that read history after more than this many separate mirror moves. */
@@ -72,29 +73,78 @@ export const load = internalQuery({
   ),
   handler: async (ctx, input) => {
     if (input.actor !== undefined) await accessibleProject(ctx, input.projectId, input.actor);
-    const row = await historyRow(ctx, input.projectId);
-    if (!row) return null;
-    const packs = await ctx.db
-      .query('projectHistoryPacks')
-      .withIndex('by_project', q => q.eq('projectId', input.projectId))
-      .take(historyPackPage + 1);
-    const mirror = await ctx.db
-      .query('projectGithubMirrors')
-      .withIndex('by_project', q => q.eq('projectId', input.projectId))
-      .take(1);
-    return {
-      row,
-      packs: packs.slice(0, historyPackPage).map(pack => ({
-        tip: pack.tip,
-        chunks: pack.chunks,
-        bytes: pack.bytes,
-        objects: pack.objects,
-        packSha1: pack.packSha1,
-        at: pack.at,
-      })),
-      morePacks: packs.length > historyPackPage,
-      mirror: mirror[0]?.mapping ? { repository: mirror[0].repository, mapping: mirror[0].mapping } : null,
-    };
+    return loadHistory(ctx, input.projectId);
+  },
+});
+
+/** History row, its first pack page and main's mirror mapping: one bounded read. */
+export async function loadHistory(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const row = await historyRow(ctx, projectId);
+  if (!row) return null;
+  const packs = await ctx.db
+    .query('projectHistoryPacks')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .take(historyPackPage + 1);
+  return {
+    row,
+    packs: packs.slice(0, historyPackPage).map(pack => ({
+      tip: pack.tip,
+      chunks: pack.chunks,
+      bytes: pack.bytes,
+      objects: pack.objects,
+      packSha1: pack.packSha1,
+      at: pack.at,
+    })),
+    morePacks: packs.length > historyPackPage,
+    mirror: await mirrorMapping(ctx, projectId),
+  };
+}
+export async function mirrorMapping(ctx: QueryCtx, projectId: Id<'hostedProjects'>) {
+  const [mirror] = await ctx.db
+    .query('projectGithubMirrors')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .take(1);
+  return mirror?.mapping ? { repository: mirror.repository, mapping: mirror.mapping } : null;
+}
+
+/** A pending history run older than this has outlived the 10-minute action limit. */
+export const historyRunLeaseMs = 11 * 60 * 1000;
+/** A project with main's GitHub mirror but no imported history (born on Forge, or imported
+ * before history was stored) gets its history from the mirror repository once, through the
+ * same row, run and limit as an import. Returns the attempt its caller runs now, or null when
+ * there is nothing to seed or a fresh run owns it; a pending run past its lease is retried. */
+export const seedFromMirror = internalMutation({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.union(v.null(), v.number()),
+  handler: async (ctx, { projectId }) => {
+    const project = await ctx.db.get(projectId);
+    if (!project || project.removal) return null;
+    const now = Date.now();
+    const row = await historyRow(ctx, projectId);
+    if (row) {
+      if (row.status !== 'pending' || now - row.updatedAt < historyRunLeaseMs) return null;
+      const attempt = row.attempt + 1;
+      await ctx.db.patch(row._id, { attempt, updatedAt: now });
+      return attempt;
+    }
+    const mirror = await mirrorMapping(ctx, projectId);
+    if (!mirror) return null;
+    const mapping = githubSyncCommitSchema.parse(JSON.parse(mirror.mapping));
+    await ctx.db.insert('projectHistory', {
+      projectId,
+      repository: mirror.repository,
+      // A public project serves its history anonymously, so it seeds only from a public repository.
+      visibility: project.visibility === 'public' ? 'public' : 'private',
+      owner: project.owner,
+      importCommit: mapping.commit,
+      importState: mapping.state,
+      status: 'pending',
+      bytes: 0,
+      packs: 0,
+      attempt: 1,
+      updatedAt: now,
+    });
+    return 1;
   },
 });
 
