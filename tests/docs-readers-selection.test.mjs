@@ -4,6 +4,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { docsReaders } from '../scripts/docs-readers.mjs';
+import { scanReaders } from '../scripts/test-tree-scanners.mjs';
 import { selectPreflightTests, sourceFiles, standardSelection } from '../scripts/test-impact.mjs';
 
 // Paths are built at run time: a literal repo path here would make this file a reader of it.
@@ -67,8 +68,10 @@ test('replay: a docs-only change to the brief rules selects the check-brief fixt
     assert.ok(selection.tests.includes(reader), `${reader} reads ${doc}`);
   assert.deepEqual(selection.tests, [...docsReaders(files, [doc]).keys()].sort());
   assert.ok(selection.tests.length <= 6, `${selection.tests.length} readers`);
-  // A document nothing in the repository reads adds no test.
-  const lonely = standardSelection({ files, paths: [at('docs', 'no-test-reads-this-document.md')] });
+  // A document no test names adds only the repo-wide guards that scan its folder (Issue ec7960f9).
+  const unnamed = at('docs', 'no-test-reads-this-document.md');
+  const lonely = standardSelection({ files, paths: [unnamed] });
   assert.equal(lonely.scope, 'docs');
-  assert.deepEqual(lonely.tests, []);
+  assert.deepEqual(lonely.tests, [...scanReaders(files, [unnamed]).keys()].sort());
+  for (const test of lonely.tests) assert.match(lonely.reasons[test].detail, /^Scans docs\//);
 });

@@ -2,7 +2,9 @@
 // Tests that read a changed Markdown file. A test that reads a document's text can fail on a docs-only
 // edit (a removed phrase it asserts, a renamed heading it parses), so that test is the document's
 // coverage. Everything else a docs-only change can break is a static check (the documents check,
-// format), which runs on every Candidate. Text only: no graph parse, no process, no server call.
+// format), which runs on every Candidate. A test that scans a folder holding the document (a repo-wide
+// rules guard) reads it too. Repository bytes only: no import graph, no process, no server call.
+import { scanReaders } from './test-tree-scanners.mjs';
 
 const testFile = path => /^tests\/[^/]+\.test\.mjs$/.test(path);
 // Packagers and their manifests list every document; the documents check runs them.
@@ -28,7 +30,7 @@ const mentions = doc => {
 /** Test files that read one of `docs`: they name it, or load a test helper or script that names it
  * (one hop, by file name; a doubtful match selects the test). Product code that names a document
  * links to it in a message; it does not read its text. Returns test -> the document and the file that
- * names it. */
+ * names it (`scan` holds the folder when the test reads it by scanning that folder). */
 export function docsReaders(files, docs) {
   const found = new Map();
   if (!docs.length) return found;
@@ -45,5 +47,7 @@ export function docsReaders(files, docs) {
   for (const { path, doc, loaded } of carriers)
     for (const test of tests)
       if (!found.has(test) && loaded.test(files.get(test))) found.set(test, { doc, via: path });
+  for (const [test, scan] of scanReaders(files, docs))
+    if (!found.has(test)) found.set(test, { doc: scan.path, via: test, scan: scan.folder });
   return found;
 }

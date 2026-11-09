@@ -11,6 +11,7 @@ import {
   smokeTests,
   sourceFiles,
 } from '../scripts/test-impact.mjs';
+import { scanReaders } from '../scripts/test-tree-scanners.mjs';
 
 const files = sourceFiles(new URL('..', import.meta.url).pathname);
 // None of these paths is a script, so every case parses the same graph: one parse serves them all.
@@ -111,6 +112,88 @@ test('eb0491bb: direct importers of changed job modules run before any recent fa
   t.diagnostic(`recent ${recentTier.join(' ') || 'none'}; local ${fit.tests.length}`);
 });
 
+test('e5e6fca8: the four files a wide source change broke are selected and protected', t => {
+  // The Lane head whose landing check failed (State 6a607387): 39 changed paths across the source
+  // publish path. Preflight passed after 74 files; the check then failed these four.
+  const paths = [
+    ...[
+      'projectConvexSource.ts',
+      'projectConvexSourceNode.ts',
+      'projectConvexSourceStore.ts',
+      'projectConvexSourceTransport.ts',
+      'projectHostedComposeJobs.ts',
+      'projectHostedComposePublish.ts',
+      'projectHostedResolveChain.ts',
+      'projectHostedResolveChainStore.ts',
+      'projectHostedSaveJobs.ts',
+      'projectHostedSavePublish.ts',
+      'projectHostedSaveStore.ts',
+      'projectHostedSaves.ts',
+      'projectHostedSync.ts',
+      'projectHostedSyncJobs.ts',
+      'projectHostedSyncPublish.ts',
+      'projectObjectCommit.ts',
+      'projectObjects.ts',
+      'projectSourceBeginReads.ts',
+      'projectSourcePublishInline.ts',
+      'projectSourceRun.ts',
+      'projectSourceStepFields.ts',
+    ].map(name => at('convex', name)),
+    ...['architecture.md'].map(name => at('docs', name)),
+    ...[
+      'exchange-client.ts',
+      'exchange-upload.ts',
+      'hosted-agent-resolution.ts',
+      'hosted-agent-source-wait.ts',
+      'hosted-agent-source.ts',
+      'hosted-agent-transport.ts',
+      'hosted-contract-features.ts',
+      'hosted-save-client.ts',
+      'hosted-source-small-save.ts',
+    ].map(name => at('src', name)),
+    ...[
+      'convex-source-inline-step.test.mjs',
+      'convex-source-provider.test.mjs',
+      'hosted-finish-fixture.mjs',
+      'hosted-finish.test.mjs',
+      'hosted-resolve-chain.test.mjs',
+      'hosted-save-sync-efficiency.test.mjs',
+      'hosted-source-efficiency-fixture.mjs',
+      'hosted-source-small-save.test.mjs',
+      'hosted-source-submit-run.test.mjs',
+    ].map(name => at('tests', name)),
+  ];
+  const plan = select(paths);
+  const failed = [
+    at('tests', 'landing-failure-injection.test.mjs'),
+    at('tests', 'hosted-landing-batches.test.mjs'),
+    at('tests', 'convex-source-ancestry-scale.test.mjs'),
+    at('tests', 'convex-source-dbio-budget.test.mjs'),
+  ];
+  const direct = tier(plan, 'direct');
+  for (const test of failed) assert.ok(direct.includes(test), `${test} runs a changed module: direct`);
+  assert.ok(protectedTiers.has('direct'));
+  // So wide a change protects far more than the local budget: the plan says so instead of trimming.
+  const fit = fitPreflightBudget({ tiers: plan.tiers, budgetSeconds: 180, secondsPerFile: 4 });
+  assert.equal(fit.protectedOverBudget, true);
+  for (const test of failed) assert.ok(fit.tests.includes(test), `${test} is never trimmed`);
+  t.diagnostic(`direct ${direct.length}; ${failed.map(test => direct.indexOf(test)).join(' ')}`);
+});
+
+test('de6620eb: a new literal in a scanned source file selects the repo-wide guard', () => {
+  // Lane d5576468 added a literal to one product module; only the landing check ran the rules guard
+  // that scans every product file.
+  const guard = at('tests', 'forge-only-rules.test.mjs');
+  const changed = at('src', 'dependency-link.ts');
+  const plan = select([changed]);
+  assert.ok(tier(plan, 'mandatory').includes(guard), 'the guard scans the changed folder');
+  assert.deepEqual(selectTests({ files, paths: [changed] }).reasons[guard], {
+    kind: 'explicit',
+    changedPath: changed,
+    detail: `Scans src/, which holds changed ${changed}`,
+  });
+});
+
 test('425ecd74: a data fixture, its test and a doc select only that test and mandatory checks', t => {
   const paths = [
     at('docs', 'agents', 'regression-ladder.md'),
@@ -125,10 +208,12 @@ test('425ecd74: a data fixture, its test and a doc select only that test and man
     )
     .map(([path]) => path);
   assert.deepEqual(readers, [at('tests', 'incident-replays.test.mjs')]);
+  // Repo-wide guards that scan the docs or tests folder read these files too (Issue ec7960f9).
+  const scanners = [...scanReaders(files, paths).keys()];
   assert.deepEqual(
     [...plan.tests].sort(),
-    [...new Set([...readers, ...smokeTests])].sort(),
-    'local tiers hold the fixture reader and the fixed smoke set only',
+    [...new Set([...readers, ...smokeTests, ...scanners])].sort(),
+    'local tiers hold the fixture reader, the folder scanners and the fixed smoke set only',
   );
   t.diagnostic(`local ${plan.tests.length}, deferred to pre-queue ${plan.deferredTests.length}`);
 });

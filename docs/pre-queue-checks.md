@@ -198,6 +198,13 @@ Each tier answers a different question. None depends on a particular CI provider
    no test reads still runs no test file, and the docs scope keeps its rules (no full
    re-check, the main-audit skip: a docs-only pass that also passes its readers still
    inherits a green parent).
+   A repo-wide guard (a rules or lint-style test that lists a folder and checks every
+   file in it) is explicit coverage of each file in that folder, in every tier and for
+   code and documents alike: `scripts/test-tree-scanners.mjs` finds tests whose
+   `readdir`, `opendir` or `glob` argument is built from the repository base
+   (`import.meta` or `process.cwd()`) and takes the folder names that flow into it.
+   No import edge reaches such a test, so before this a new literal in a scanned
+   file could fail only the landing check.
 2. **Pre-queue Lane check (project runner, any CI): the complete consumer set,
    off the builder's machine.** It runs the project's configured check on the
    project's runner. Forge's `verify` selects either the full suite or every

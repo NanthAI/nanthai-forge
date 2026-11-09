@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+// Explicit Work runs write the check queue: a focused `node --test` run without the preload must still
+// use a private HOME, or the real-user-state guard fails the run (friction c804f164).
+import './check-runtime.mjs';
 import { runDetails } from '../dist/work-detail-store.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';

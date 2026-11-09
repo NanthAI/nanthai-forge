@@ -8,6 +8,7 @@ import { heavySlots, readClientSettings } from './client-settings.js';
 import { watchLocal, type LocalWatcher } from './local-watcher.js';
 import { invariant } from './errors.js';
 import { ensureCoreBuild } from './heavy-build.js';
+import { missingTestPreloads, preloadNotice } from './heavy-test-preloads.js';
 import { processAlive } from './local-process.js';
 import {
   estimateWaitMs,
@@ -335,6 +336,8 @@ export async function heavyCli(
     if (nodeTestPathCount(args)) {
       const built = await ensureCoreBuild(process.cwd());
       if (built !== 0) return built;
+      const missing = missingTestPreloads(args, process.cwd());
+      if (missing.length) process.stderr.write(preloadNotice(missing));
     }
     return await new Promise<number>((resolve, reject) => {
       const child = spawn(args[0]!, args.slice(1), { stdio: 'inherit' });

@@ -223,6 +223,7 @@
     "scripts/test-tiebreak.mjs",
     "scripts/test-tiebreak.d.mts",
     "scripts/docs-readers.mjs",
+    "scripts/test-tree-scanners.mjs",
     "scripts/convex-function-names.mjs",
     "scripts/test-directory-path.mjs",
     "scripts/test-coverage.mjs",

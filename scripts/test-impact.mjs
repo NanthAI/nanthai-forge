@@ -10,6 +10,7 @@ import { classifyCheckPath, webTest } from './check-path-scopes.mjs';
 import { guardSelection } from './selection-guard.mjs';
 import { docsPackager, docsWrapper, scriptPath, scriptSelectionReason } from './script-impact.mjs';
 import { docsReaders } from './docs-readers.mjs';
+import { scanDetail, scanReaders } from './test-tree-scanners.mjs';
 
 export const smokeTests = [
   'tests/files.test.mjs',
@@ -510,6 +511,12 @@ function selectWithGraph(
   // Changed documents beside code: the tests that read them are their coverage.
   const readers = docsReaders(files, paths.filter(documentation));
   for (const test of readers.keys()) explicit.add(test);
+  // Repo-wide guards that scan a folder holding a changed file read it, with no import edge.
+  const scans = scanReaders(
+    files,
+    paths.filter(path => !documentation(path)),
+  );
+  for (const test of scans.keys()) explicit.add(test);
   const selected = tests.filter(
     path =>
       affected.has(path) || smokeTests.includes(path) || explicit.has(path) || (webChanged && webTest(path)),
@@ -538,14 +545,10 @@ function selectWithGraph(
         const reader = readers.get(test);
         // Reading a changed document is direct evidence, stronger than any import chain to code.
         if (reader && affected.get(test)?.kind !== 'changed')
-          return [
-            test,
-            {
-              kind: 'explicit',
-              changedPath: reader.doc,
-              detail: `Reads changed document ${reader.doc}${reader.via === test ? '' : ` through ${reader.via}`}`,
-            },
-          ];
+          return [test, { kind: 'explicit', changedPath: reader.doc, detail: readerDetail(reader, test) }];
+        const scan = scans.get(test);
+        if (scan && affected.get(test)?.kind !== 'changed')
+          return [test, { kind: 'explicit', changedPath: scan.path, detail: scanDetail(scan) }];
         return [
           test,
           affected.get(test) ??
@@ -564,6 +567,11 @@ function selectWithGraph(
     ),
   };
 }
+
+const readerDetail = (reader, test) =>
+  reader.scan !== undefined
+    ? scanDetail({ path: reader.doc, folder: reader.scan })
+    : `Reads changed document ${reader.doc}${reader.via === test ? '' : ` through ${reader.via}`}`;
 
 const productSource = path => /^(?:src|web\/src|convex|netlify)\//.test(path);
 
@@ -635,15 +643,8 @@ function withDocsReaders(selection, files, paths) {
   selection.tests = [...readers.keys()].sort();
   selection.reasons = Object.fromEntries(
     selection.tests.map(test => {
-      const { doc, via } = readers.get(test);
-      return [
-        test,
-        {
-          kind: 'explicit',
-          changedPath: doc,
-          detail: `Reads changed document ${doc}${via === test ? '' : ` through ${via}`}`,
-        },
-      ];
+      const reader = readers.get(test);
+      return [test, { kind: 'explicit', changedPath: reader.doc, detail: readerDetail(reader, test) }];
     }),
   );
   selection.reason = `${selection.reason}; plus the ${selection.tests.length} test file(s) that read a changed document`;

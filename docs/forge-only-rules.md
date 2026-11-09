@@ -78,6 +78,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/project-test-runner.ts` | `tests-folder` | 1 | `FORGE_TEST_GLOB`, the glob of Forge's Node test layout | a declared runner or inferred vitest, jest and pytest globs |
 | `scripts/docs-readers.mjs` | `forge-folders` | 1 | Forge's tested-docs reader scan over its tests and scripts | declared `docsPaths` on their check definition |
 | `scripts/docs-readers.mjs` | `tests-folder` | 1 | Forge's tested-docs reader scan | declared `docsPaths` on their check definition |
+| `scripts/test-tree-scanners.mjs` | `tests-folder` | 1 | Forge's node selector: which of its test files scan a repository folder | changed, named and imported tests (`runnerSelection`); no folder-scan detection yet |
 | `scripts/selection-guard.mjs` | `tests-folder` | 1 | Forge's selection guard over its test layout | their command's own selection |
 | `scripts/test-closeness.mjs` | `tests-folder` | 4 | Forge's preflight ranking over its test layout | changed, named and imported tests in that order |
 | `scripts/test-coverage.mjs` | `tests-folder` | 5 | Forge's per-test coverage records | full checks; no per-test coverage |
@@ -104,6 +105,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-graph-dotnet-js.ts` | `npm-lockfile` | 1 | npm's lockfile among the JS workspace's lockfiles in the package graph | pnpm, Yarn and Bun lockfiles beside it |
 | `src/project-test-runner.ts` | `node-test` | 2 | recognises `node --test` in any project's test script | the same inference for vitest and jest |
 | `src/heavy-slots.ts` | `node-test` | 1 | `nforge heavy` refuses an unscoped `node --test` | the same guard for any project |
+| `src/heavy-test-preloads.ts` | `node-test` | 1 | finds the preloads a project's test script passes to `node --test` | the same notice for any project whose test script runs `node --test` |
 | `src/work-docs-admission.ts` | `forge-folders` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/work-docs-admission.ts` | `npm-lockfile` | 1 | docs admission of a native standard-check run | declared `docsPaths` |
 | `src/integration-preview-checks.ts` | `npm-lockfile` | 2 | integration previews install with `npm ci` only for npm-locked projects | their check sets up its own dependencies |
@@ -124,6 +126,7 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/cli-update.ts` | `package-json-config` | 1 | Forge's own CLI package manifest | not used |
 | `src/explicit-test-runner.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/heavy-build.ts` | `package-json-config` | 1 | Forge's own CLI build | not used |
+| `src/heavy-test-preloads.ts` | `package-json-config` | 1 | reads the project's own `test` script to name preloads a focused run skips | the same notice for any project with a `test` script |
 | `src/hosted-mac-execute.ts` | `package-json-config` | 1 | the project test runner declaration for union tests (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/integration-preview-checks.ts` | `package-json-config` | 2 | native integration previews infer static checks from package.json scripts (audit 875a57cc finding 14) | explicitly marked static checks |
 | `src/intent-contract-selection.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |

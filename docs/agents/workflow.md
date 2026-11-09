@@ -2232,6 +2232,8 @@ batches under heavy, dev servers directly.
 
 `heavy node --test FILES` first runs `npm run build:core` when `dist/` is missing or older than `src/`
 (one stat pass when fresh; a failed build stops the batch and prints the command).
+It also names any `--import`/`--require` preload that the project's own `test` script passes to
+`node --test` and the command leaves out, since tests that depend on that setup can fail only there.
 
 Pull preserves ROOT and surviving directory inodes; see [recovery](../operations/source-exchange.md#hosted-main-client-checkout).
 `CWD_UNAVAILABLE` precedes hooks and gives `cd` advice: `cd /`, then
