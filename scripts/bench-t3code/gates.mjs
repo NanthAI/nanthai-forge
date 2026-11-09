@@ -90,7 +90,9 @@ export async function gates(
   // A dry run cannot freeze other builders' landings: main-tracking readings are warnings.
   const liveMain = dry;
   const warnings = [];
-  refusals.push(...snapshotProblems(start, { requireFreeze: !dry, liveMain }));
+  // In a batch the driver brought the held CLI to main at batch start; main may move since.
+  const inBatch = Boolean(pinFile);
+  refusals.push(...snapshotProblems(start, { requireFreeze: !dry, liveMain, inBatch }));
   if (liveMain)
     warnings.push(...snapshotProblems(start, { requireFreeze: false }).filter(p => !refusals.includes(p)));
   let runPin = null;
@@ -102,7 +104,7 @@ export async function gates(
   const inFlight = await forgeInFlight().catch(e => [{ error: e.message }]);
   if (inFlight.length)
     (liveMain ? warnings : refusals).push(
-      `nanthai-forge has ${inFlight.length} run(s) queued or in progress (dogfood landing, deploy or check)`,
+      `nanthai-forge has ${inFlight.length} Convex deploy run(s) queued or in progress`,
     );
   const usage = usageGate(agentOf(config).provider);
   if (!dry) {

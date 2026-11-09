@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-// Freeze coordination (97c7a123). The driver's hold stops new dogfood landings from starting,
-// but a submission admitted before the hold is invisible to the GitHub Actions read until its
-// check is dispatched, and can still accept mid-cell. Under the hold the driver therefore also
-// waits for the dogfood project's hosted landing queue to be empty. It only reads: nothing is
-// cancelled, superseded or restricted, so an admitted request keeps its Lane and its work and
-// simply finishes first. A queue that does not empty in time releases the hold and retries.
+// Freeze coordination (97c7a123). Under its hold the driver waits until the runs it is given
+// are gone: since the exit plan's "Quiet rule and deploys" (lead 2026-11-09) that is only a
+// Convex deploy in flight; dogfood landings keep going and their main moves are recorded.
+// It only reads: nothing is cancelled, superseded or restricted. A wait that does not end in
+// time releases the hold and retries. `hostedQueueEntries` reads the dogfood queue for reports.
 import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 import { promisify } from 'node:util';

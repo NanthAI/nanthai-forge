@@ -5,6 +5,7 @@ import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { accountFor } from './urlIdentity';
 import { historyChunk } from './projectHistoryFields';
+import { historyPackPage } from './projectHistoryStore';
 import { resolveObjects } from './projectGithubMirrorObjects';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { laneAuthor } from '../src/git-serve-lane-refs';
@@ -137,12 +138,20 @@ export const plan = internalQuery({
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .unique();
     const account = await accountFor(ctx, lane.actor);
+    // History packs, newest first: the parent commit's trees are read from them when the
+    // alias object lacks the base's Git ids (a first build), instead of every file.
+    const packs = await ctx.db
+      .query('projectHistoryPacks')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .order('desc')
+      .take(historyPackPage);
     return {
       status: 'build',
       lane: { head: lane.head, baseHead: lane.baseHead, baseReceiptId: lane.baseReceiptId },
       parent: { commit: parent.commit, tree: parent.tree, legacy: parent.publication !== 'tracked' },
       author: laneAuthor(account?.handle ?? null, lane.agent),
       aliases: history?.laneAliases ?? null,
+      packs: packs.map(pack => pack.chunks),
     };
   },
 });

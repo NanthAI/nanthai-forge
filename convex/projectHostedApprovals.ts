@@ -13,6 +13,7 @@ import {
   APPROVAL_LIVE_LIMIT,
   approvalRow,
   approvalView,
+  fitNote,
   noteDecision,
   writeApproval,
 } from './projectHostedApprovalStore';
@@ -93,7 +94,11 @@ export const request = mutation({
         fromLaneId: lane.id,
         author: actor.id,
         ...(agent ? { agent } : {}),
-        text: `Approval requested on Lane ${lane.id.slice(0, 8)}: ${reason}${url ? ` Owner: ${url}` : ''}`,
+        text: fitNote(
+          `Approval requested on Lane ${lane.id.slice(0, 8)}: `,
+          reason,
+          url ? ` Owner: ${url}` : '',
+        ),
         now,
       });
       return canonicalPayload(requestReply((await approvalRow(ctx, input.projectId, lane.id))!, input));

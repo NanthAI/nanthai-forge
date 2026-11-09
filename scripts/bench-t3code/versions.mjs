@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // B1.5d version record (B2/B3/S6): everything that defines the system under test, read at
-// cell start and end. Any difference voids the cell; the driver also holds every cell of a
-// run to the first cell's record (the run pin), so cells compare like with like.
+// cell start and end. Any difference voids the cell, except the readings that only follow
+// nanthai-forge main (RECORDED_KEYS: builders keep landing during scored batches, exit plan
+// "Quiet rule and deploys"); the driver also holds every cell of a run to the first cell's
+// record (the run pin), so cells compare like with like.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createHash } from 'node:crypto';
@@ -199,24 +201,47 @@ const KEYS = [
   ['harness.filesSha256', s => s.harness?.filesSha256],
   ['agent', s => s.agent],
 ];
-// Readings that follow nanthai-forge main. Scored cells run with landings frozen, so any
-// change voids. Dry runs happen while builders still land: these are recorded as waived.
-export const LIVE_MAIN_KEYS = ['githubMain', 'deploy.headSha', 'convexTree.deploy', 'checkWorkflow.forge'];
-/** Keys whose values differ (an unreadable value on either side counts as a difference).
- * `unpinned` (dry runs from a Lane root only): a harness with no git commit on both sides
- * is the expected reading, not a difference; its file hash still has to match. */
-export function differences(a, b, { liveMain = false, unpinned = false } = {}) {
-  return KEYS.filter(([k]) => !(liveMain && LIVE_MAIN_KEYS.includes(k)))
+// Readings that follow nanthai-forge main. Builders keep landing while a scored batch runs
+// (lead 2026-11-09, exit plan "Quiet rule and deploys"): main and the deploy head moving are
+// recorded (`moved`), never voids. The deployed convex/ tree (the server the agents land on)
+// and forge-check.yml (the Forge arm's check) still void a scored cell when they change.
+// Dry runs waive all four.
+export const RECORDED_KEYS = ['githubMain', 'deploy.headSha'];
+export const LIVE_MAIN_KEYS = [...RECORDED_KEYS, 'convexTree.deploy', 'checkWorkflow.forge'];
+const diff = (a, b, keys, unpinned) =>
+  keys
     .filter(([k, get]) => !(unpinned && k === 'harness.commit' && get(a) == null && get(b) == null))
     .filter(([, get]) => get(a) == null || get(b) == null || get(a) !== get(b))
     .map(([k, get]) => `${k}: ${get(a)} -> ${get(b)}`);
+/** Keys whose values differ (an unreadable value on either side counts as a difference),
+ * without the recorded main readings. `unpinned` (dry runs from a Lane root only): a harness
+ * with no git commit on both sides is the expected reading, not a difference; its file hash
+ * still has to match. */
+export function differences(a, b, { liveMain = false, unpinned = false } = {}) {
+  const skip = liveMain ? LIVE_MAIN_KEYS : RECORDED_KEYS;
+  return diff(
+    a,
+    b,
+    KEYS.filter(([k]) => !skip.includes(k)),
+    unpinned,
+  );
 }
+/** The recorded main readings that moved between two snapshots (reported, not voids). */
+export const moved = (a, b) =>
+  diff(
+    a,
+    b,
+    KEYS.filter(([k]) => RECORDED_KEYS.includes(k)),
+    false,
+  );
 
 /** Problems with one snapshot by itself (the GO rules that need no second reading). */
-export function snapshotProblems(s, { requireFreeze, liveMain = false }) {
+/** `inBatch`: a cell inside a batch whose start already brought the held CLI to main; main
+ * may have moved since (recorded), so only the deployed convex/ must still match the CLI's. */
+export function snapshotProblems(s, { requireFreeze, liveMain = false, inBatch = false }) {
   const p = [];
   if (!s.cli.commit) p.push('CLI commit unreadable');
-  else if (!liveMain && s.cli.commit !== s.githubMain && (s.cli.git ?? null) !== s.githubMain)
+  else if (!liveMain && !inBatch && s.cli.commit !== s.githubMain && (s.cli.git ?? null) !== s.githubMain)
     p.push(
       `CLI ${s.cli.commit} is not GitHub main ${s.githubMain}` +
         (s.cli.git ? ` (mirror maps it to Git ${s.cli.git})` : ' (no mirror mapping for this State head)'),
@@ -229,17 +254,19 @@ export function snapshotProblems(s, { requireFreeze, liveMain = false }) {
   return p;
 }
 
-/** Runs queued or in progress on nanthai-forge (a dogfood landing, deploy or check). */
-export async function forgeInFlight() {
+/** Runs queued or in progress on nanthai-forge; `workflow` (a workflow file, such as
+ * config.forge.deployWorkflow) limits it to that workflow. 2 `gh` calls. */
+export async function forgeInFlight({ workflow = null } = {}, exec = out) {
   const runs = [];
   for (const status of ['queued', 'in_progress'])
     runs.push(
       ...JSON.parse(
-        await out('gh', [
+        await exec('gh', [
           'run',
           'list',
           '-R',
           FORGE,
+          ...(workflow ? ['--workflow', workflow] : []),
           '--status',
           status,
           '-L',
@@ -250,4 +277,55 @@ export async function forgeInFlight() {
       ),
     );
   return runs;
+}
+
+/** The batch quiet rule (exit plan "Quiet rule and deploys"): only a Convex deploy in flight
+ * holds a batch start; dogfood landings, Verify Forge and forge-check runs do not. */
+export const deployInFlight = (config, exec) =>
+  forgeInFlight({ workflow: config.forge.deployWorkflow }, exec);
+
+/** Deploy runs (config.forge.deployWorkflow) that overlap [from, to] (ISO times): id, head,
+ * created/updated times, status and conclusion. One `gh` call of the last 30 runs; a run still
+ * going at `to` counts. Unreadable: { error }. */
+export async function deploysDuring(config, from, to, exec = out) {
+  try {
+    const list = JSON.parse(
+      await exec('gh', [
+        'run',
+        'list',
+        '-R',
+        FORGE,
+        '--workflow',
+        config.forge.deployWorkflow,
+        '-L',
+        '30',
+        '--json',
+        'databaseId,headSha,createdAt,updatedAt,status,conclusion',
+      ]),
+    );
+    return overlapping(list, from, to);
+  } catch (error) {
+    return { error: String(error.message ?? error).slice(0, 200) };
+  }
+}
+
+/** Runs whose [createdAt, updatedAt] (updatedAt open while not completed) overlaps [from, to]. */
+export function overlapping(runs, from, to) {
+  const a = Date.parse(from),
+    b = Date.parse(to);
+  return runs
+    .filter(r => {
+      const s = Date.parse(r.createdAt),
+        e = r.status === 'completed' ? Date.parse(r.updatedAt) : Infinity;
+      return s <= b && e >= a;
+    })
+    .map(r => ({
+      id: r.databaseId,
+      headSha: r.headSha,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+      status: r.status,
+      conclusion: r.conclusion ?? null,
+    }))
+    .sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
 }

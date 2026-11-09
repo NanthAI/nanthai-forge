@@ -150,6 +150,22 @@ test('CLI wait {approval} is one subscription with no other call; it returns on 
   }
 });
 
+test('CLI wait {approval} returns when the request is withdrawn before a decision', async t => {
+  const { s, subs } = environment(t);
+  const root = join(dirname(s.root), 'clone');
+  const address = { url: s.address.url, projectId: s.address.projectId };
+  const laneId = randomUUID();
+  const waiting = agentCli([root, 'wait', JSON.stringify({ ...address, approval: laneId })], binary);
+  await until(() => subs.length > 0);
+  subs.at(-1).next(JSON.stringify({ laneId, status: 'requested', live: true, version: 1 }));
+  await turn();
+  subs.at(-1).next(JSON.stringify({ laneId, status: 'requested', live: false, version: 2 }));
+  const response = await waiting;
+  assert.equal(response.result.status, 'terminal');
+  assert.match(response.result.next, /withdrawn/);
+  assert.equal(process.exitCode, 0);
+});
+
 test('CLI request-approval defaults to the checkout Lane: one mutation with a generated operationId', async t => {
   const { s } = environment(t);
   await s.transport().dispatch('open', { laneId: s.lane.laneId });

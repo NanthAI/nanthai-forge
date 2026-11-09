@@ -14,7 +14,7 @@ import { digest } from '../src/portable-hash';
 import { invariant } from '../src/errors';
 import type { NativeFile, NativeState } from '../src/native-state-format';
 import { published } from '../src/hosted-github-mirror';
-import { gitHash } from '../src/hosted-github-git';
+import { gitHash, gitMode } from '../src/hosted-github-git';
 import { gitlinkCommit } from '../src/gitlink';
 import {
   formatLfsPointer,
@@ -25,6 +25,7 @@ import {
   parseLfsPointer,
   type LfsRule,
 } from '../src/github-lfs';
+import { PackTrees, listTree, type TreeListing } from '../src/git-pack-trees';
 import {
   laneCommitBytes,
   treeObjects,
@@ -35,17 +36,26 @@ import {
 
 /** Builds one Lane's Git commit (Issue 09367fb2) the way main's GitHub mirror writes main's:
  * the same published paths, LFS pointers and gitlinks, so the base tree must equal the tree
- * the mirror recorded for the parent commit (checked, never assumed). Bytes are read only for
- * blobs with no cached Git id and for blobs the parent commit lacks. */
+ * the mirror recorded for the parent commit (checked, never assumed). Git ids come from the
+ * alias object, else from the parent commit's trees in the stored history packs (Issue
+ * 3bd4a8e9); bytes are read only for blobs the Lane changed and blobs neither knows. */
 type Alias = [sha1: string, size: number, gitlink: string, pointer: 0 | 1];
 const window = 100,
   parallel = 16;
+/** Base blobs missing from the alias object past which the parent's trees are read from the
+ * history packs instead of the files. */
+export const listingThreshold = 32;
+/** Tree bytes one pack scan keeps; past it the build reads files instead. */
+const treeBudget = 128 * 1024 * 1024;
+type Chunk = { sha256: string; size: number };
 type Plan = {
   status: 'build';
   lane: { head: string; baseHead: string; baseReceiptId: string };
   parent: { commit: string; tree: string; legacy: boolean };
   author: { name: string; email: string };
-  aliases: { sha256: string; size: number } | null;
+  aliases: Chunk | null;
+  /** History packs' chunks, newest pack first. */
+  packs?: Chunk[][];
 };
 
 async function readR2(projectId: string, sha256: string) {
@@ -64,31 +74,68 @@ async function pool<T>(items: T[], run: (item: T) => Promise<void>) {
   };
   await Promise.all(Array.from({ length: Math.min(parallel, items.length) }, worker));
 }
+/** The parent commit's tree listing from the history packs, newest pack first, stopping once
+ * every tree under `root` is found; null when a tree is missing, a chunk is unreadable or the
+ * scan passes its budget. Chunks of one pack are read ahead one at a time. */
+export async function packListing(projectId: string, packs: Chunk[][], root: string) {
+  const scan = new PackTrees(treeBudget);
+  for (const chunks of packs) {
+    scan.startPack();
+    let next = chunks.length ? readR2(projectId, chunks[0]!.sha256) : null;
+    for (let i = 0; i < chunks.length; i++) {
+      const bytes = await next;
+      next = i + 1 < chunks.length ? readR2(projectId, chunks[i + 1]!.sha256) : null;
+      if (!bytes || !scan.push(bytes, i === chunks.length - 1)) {
+        await next?.catch(() => null);
+        return { listing: null, scanned: scan.scanned };
+      }
+      const listing = listTree(scan, root);
+      if (listing) {
+        await next?.catch(() => null);
+        return { listing, scanned: scan.scanned };
+      }
+    }
+  }
+  return { listing: null, scanned: scan.scanned };
+}
 
 export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>, laneId: string, plan: Plan) {
-  const metric = { aliasesMissing: 0, readBytes: 0, resolveCalls: 0 };
+  const started = Date.now();
+  const metric = {
+    aliasesMissing: 0,
+    readBytes: 0,
+    readBlobs: 0,
+    resolveCalls: 0,
+    listing: 0,
+    packScanned: 0,
+  };
   const source = projectSource(ctx, ids => {
     metric.resolveCalls++;
     return ctx.runQuery(internal.gitServeLaneStore.resolve, { projectId, digests: ids });
   });
   const stored = plan.aliases ? await readR2(projectId, plan.aliases.sha256) : null;
-  const aliases = new Map<string, Alias>(stored ? Object.entries(JSON.parse(stored.toString('utf8'))) : []);
+  const storedAliases = new Map<string, Alias>(
+    stored ? Object.entries(JSON.parse(stored.toString('utf8'))) : [],
+  );
+  const aliases = new Map(storedAliases);
   const { lane, parent } = plan;
   const [base, head] = (await source.states([lane.baseHead, lane.head])) as [NativeState, NativeState];
   invariant(base && head, 'SOURCE_UNAVAILABLE', 'The Lane source States are unavailable.');
   const baseFiles = base.files.filter(published(parent.legacy ? 'legacy' : 'tracked'));
   const headFiles = head.files.filter(published('tracked'));
 
-  // Reads blob bytes in windows of one query each; `keep` holds the bytes the pack needs.
-  const read = async (blobs: string[], keep?: Map<string, Buffer>) => {
+  // Reads blob bytes in windows of one query each; `keep` holds the bytes the pack needs and
+  // `small` reads only blobs up to that size.
+  const read = async (blobs: string[], keep?: Map<string, Buffer>, small?: number) => {
     for (let at = 0; at < blobs.length; at += window) {
       const ids = blobs.slice(at, at + window);
       const objects = await source.blobs(ids);
       await pool(
-        ids.map((id, i) => ({ id, object: objects[i]! })),
+        ids.map((id, i) => ({ id, object: objects[i]! })).filter(item => !small || item.object.size <= small),
         async ({ id, object }) => {
           const bytes = await object.read();
           metric.readBytes += bytes.length;
+          metric.readBlobs++;
           let link = '';
           try {
             link = gitlinkCommit(bytes);
@@ -100,21 +147,14 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
       );
     }
   };
-  const used = [...new Set([...baseFiles, ...headFiles].map(file => file.blob))];
-  const missing = used.filter(blob => !aliases.has(blob));
-  metric.aliasesMissing = missing.length;
-  await read(missing);
   // `.gitattributes` texts up to 1 MiB, as the mirror reads them; every other is empty.
   const attributes = new Map<string, string>();
   const attributeBlobs = [...baseFiles, ...headFiles]
     .filter(file => file.mode === 'file' && isGitattributesPath(file.path))
     .map(file => file.blob);
-  const texts = new Map<string, Buffer>();
-  await read(
-    [...new Set(attributeBlobs)].filter(blob => aliases.get(blob)![1] <= 1024 * 1024),
-    texts,
-  );
-  for (const [blob, bytes] of texts) attributes.set(blob, bytes.toString('utf8'));
+  const contents = new Map<string, Buffer>();
+  await read([...new Set(attributeBlobs)], contents, 1024 * 1024);
+  for (const [blob, bytes] of contents) attributes.set(blob, bytes.toString('utf8'));
   const rules = (files: NativeFile[]) =>
     lfsRules(
       files
@@ -123,22 +163,60 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
     );
   const lfsPath = (file: NativeFile, lfs: LfsRule[]) =>
     lfs.length > 0 && (file.mode === 'file' || file.mode === 'executable') && isLfsPath(lfs, file.path);
-  const entries = (files: NativeFile[]) => {
-    const lfs = rules(files);
-    return files.map(file => {
-      const [sha1, size, link, pointer] = aliases.get(file.blob)!;
-      if (file.mode === 'gitlink') {
-        invariant(link, 'INVALID_GITLINK', `${file.path} is not a valid submodule pointer.`);
-        return { entry: { path: file.path, mode: file.mode, sha: link }, pointer: null };
-      }
-      if (lfsPath(file, lfs) && !pointer) {
-        const bytes = formatLfsPointer({ oid: file.blob, size });
-        return { entry: { path: file.path, mode: file.mode, sha: gitHash('blob', bytes) }, pointer: bytes };
-      }
-      return { entry: { path: file.path, mode: file.mode, sha: sha1 }, pointer: null };
-    });
+  const baseRules = rules(baseFiles),
+    headRules = rules(headFiles);
+  // An alias answers a file when it has what that file's entry uses: the gitlink commit, the
+  // size of an LFS path, else the blob id (aliases taken from a tree listing have no size).
+  const answers = (file: NativeFile, lfs: LfsRule[]) => {
+    const alias = aliases.get(file.blob);
+    if (!alias) return false;
+    if (file.mode === 'gitlink') return !!alias[2];
+    return lfsPath(file, lfs) ? alias[1] >= 0 : !!alias[0];
   };
-  const baseEntries = entries(baseFiles);
+  const unknown = (files: NativeFile[], lfs: LfsRule[]) => [
+    ...new Set(files.filter(file => !answers(file, lfs)).map(file => file.blob)),
+  ];
+  const baseMissing = unknown(baseFiles, baseRules);
+  metric.aliasesMissing = baseMissing.length;
+
+  // Many unknown base blobs (a first build): list the parent commit's tree from the packs.
+  let listing: TreeListing | null = null;
+  if (baseMissing.length > listingThreshold && plan.packs?.length) {
+    const found = await packListing(projectId, plan.packs, parent.tree);
+    metric.packScanned = found.scanned;
+    const candidate = found.listing;
+    if (
+      candidate &&
+      candidate.size === baseFiles.length &&
+      baseFiles.every(file => candidate.get(file.path)?.mode === gitMode(file.mode))
+    )
+      listing = candidate;
+  }
+  if (listing) {
+    metric.listing = 1;
+    for (const file of baseFiles)
+      if (file.mode !== 'gitlink' && !lfsPath(file, baseRules) && !aliases.has(file.blob))
+        aliases.set(file.blob, [listing.get(file.path)!.sha, -1, '', 0]);
+  } else await read(baseMissing);
+
+  type Item = { entry: GitEntry; pointer: Buffer | null };
+  const entry = (file: NativeFile, lfs: LfsRule[]): Item => {
+    const [sha1, size, link, pointer] = aliases.get(file.blob)!;
+    if (file.mode === 'gitlink') {
+      invariant(link, 'INVALID_GITLINK', `${file.path} is not a valid submodule pointer.`);
+      return { entry: { path: file.path, mode: file.mode, sha: link }, pointer: null };
+    }
+    if (lfsPath(file, lfs) && !pointer) {
+      const bytes = formatLfsPointer({ oid: file.blob, size });
+      return { entry: { path: file.path, mode: file.mode, sha: gitHash('blob', bytes) }, pointer: bytes };
+    }
+    return { entry: { path: file.path, mode: file.mode, sha: sha1 }, pointer: null };
+  };
+  const baseEntries = baseFiles.map(file =>
+    listing
+      ? { entry: { path: file.path, mode: file.mode, sha: listing.get(file.path)!.sha }, pointer: null }
+      : entry(file, baseRules),
+  );
   const baseTree = treeObjects(baseEntries.map(item => item.entry));
   invariant(
     baseTree.root === parent.tree,
@@ -147,7 +225,23 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   );
   const known = new Set<string>([...baseTree.trees.keys()]);
   for (const item of baseEntries) known.add(item.entry.sha);
-  const headEntries = entries(headFiles);
+  // A head file the Lane left as it was (same blob, mode and LFS rule) keeps its base entry.
+  const baseByPath = new Map(baseFiles.map((file, i) => [file.path, { file, entry: baseEntries[i]!.entry }]));
+  const unchanged = (file: NativeFile) => {
+    const before = baseByPath.get(file.path);
+    return before &&
+      before.file.blob === file.blob &&
+      before.file.mode === file.mode &&
+      lfsPath(before.file, baseRules) === lfsPath(file, headRules)
+      ? before.entry
+      : null;
+  };
+  const changed = headFiles.filter(file => !unchanged(file));
+  await read(unknown(changed, headRules), contents);
+  const headEntries = headFiles.map(file => {
+    const same = unchanged(file);
+    return same ? { entry: same, pointer: null } : entry(file, headRules);
+  });
   const tree = treeObjects(headEntries.map(item => item.entry as GitEntry));
 
   // The pack: the commit, the trees and the blobs the parent commit lacks.
@@ -174,9 +268,12 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
       if (!known.has(sha) && !need.has(sha) && item.entry.mode !== 'gitlink')
         need.set(sha, { pointer: item.pointer, blob: headFiles[i]!.blob });
     });
-    const contents = new Map<string, Buffer>();
     await read(
-      [...new Set([...need.values()].filter(item => !item.pointer).map(item => item.blob))],
+      [
+        ...new Set(
+          [...need.values()].filter(item => !item.pointer && !contents.has(item.blob)).map(item => item.blob),
+        ),
+      ],
       contents,
     );
     for (const item of need.values())
@@ -192,9 +289,12 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
     pack = { chunks, bytes: packBytes.length, objects: objects.length };
   }
   // Aliases of these two States only, so the object stays about two States in size.
+  const used = [...new Set([...baseFiles, ...headFiles].map(file => file.blob))].filter(blob =>
+    aliases.has(blob),
+  );
   const kept = Object.fromEntries(used.map(blob => [blob, aliases.get(blob)!]));
   let aliasPin: { sha256: string; size: number } | undefined;
-  if (metric.aliasesMissing || !plan.aliases) {
+  if (!plan.aliases || used.some(blob => storedAliases.get(blob)?.join() !== aliases.get(blob)!.join())) {
     const bytes = Buffer.from(JSON.stringify(kept));
     aliasPin = { sha256: digest(bytes), size: bytes.length };
     await storeSourceBytes(ctx, projectId, bytes, aliasPin);
@@ -212,7 +312,7 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   for (const sha256 of new Set(discard))
     await deleteR2Object(r2Config(), r2Key(projectId, sha256)).catch(() => {});
   console.log(
-    `FORGE_GIT_LANE_METRIC ${JSON.stringify({ projectId, files: headFiles.length, objects: objects.length, packBytes: pack?.bytes ?? 0, ...metric })}`,
+    `FORGE_GIT_LANE_METRIC ${JSON.stringify({ projectId, files: headFiles.length, objects: objects.length, packBytes: pack?.bytes ?? 0, ms: Date.now() - started, ...metric })}`,
   );
   return commit;
 }

@@ -179,7 +179,7 @@ test('rep 3 rule: winner flip or a >25% spread runs rep 3; close reps do not', (
   assert.equal(primaryMetrics(cellResult({ times: [1, 2, 3, 4], landed: 3, strict: 2 })).timeToMain, 2);
 });
 
-test('batch guard: a fake landing or version change between batch start and end voids', () => {
+test('batch guard: a version change between batch start and end voids; main moving is recorded', () => {
   const s = {
     cli: { build: 'b', commit: 'c' },
     githubMain: 'c',
@@ -191,8 +191,16 @@ test('batch guard: a fake landing or version change between batch start and end 
     freeze: true,
   };
   assert.deepEqual(batchGuard(s, structuredClone(s)), []);
-  assert.match(batchGuard(s, { ...s, githubMain: 'landed' }).join(), /githubMain: c -> landed/);
-  assert.match(batchGuard(s, { ...s, deploy: { headSha: 'd-fake-landing' } }).join(), /deploy.headSha/);
+  // Quiet rule: builders land during a batch; main and the deploy head are recorded, not voids.
+  assert.deepEqual(batchGuard(s, { ...s, githubMain: 'landed' }), []);
+  assert.deepEqual(batchGuard(s, { ...s, deploy: { headSha: 'd-fake-landing' } }), []);
+  // A deploy that changed convex/ (the landing path) or the Forge arm's check still voids.
+  assert.match(batchGuard(s, { ...s, convexTree: { deploy: 't2' } }).join(), /convexTree.deploy: t -> t2/);
+  assert.match(
+    batchGuard(s, { ...s, checkWorkflow: { forge: 'f2', github: 'g' } }).join(),
+    /checkWorkflow.forge/,
+  );
+  assert.match(batchGuard(s, { ...s, cli: { build: 'b', commit: 'c-fake-update' } }).join(), /cli.commit/);
   assert.match(batchGuard(s, { ...s, freeze: false }).join(), /freeze file missing/);
   const lane = { ...s, harness: { commit: null, filesSha256: 'x' } };
   assert.equal(batchGuard(lane, lane).length, 1, 'a Lane-root harness has no commit: a difference');

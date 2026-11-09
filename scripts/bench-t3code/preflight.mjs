@@ -11,7 +11,14 @@ import { loadavg } from 'node:os';
 import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
 import { productCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
-import { snapshot, snapshotProblems, pinProblems, forgeInFlight, benchFreeze } from './versions.mjs';
+import {
+  snapshot,
+  snapshotProblems,
+  pinProblems,
+  forgeInFlight,
+  deployInFlight,
+  benchFreeze,
+} from './versions.mjs';
 import { hostedQueueEntries } from './drain.mjs';
 import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
@@ -161,23 +168,35 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
       config.qualifiedHarness === s.harness.commit,
       `config.qualifiedHarness ${config.qualifiedHarness?.slice?.(0, 12)} (a passing dry run of this exact harness)`,
     );
+  // Quiet rule (exit plan "Quiet rule and deploys"): only a Convex deploy in flight holds a
+  // batch start. Other nanthai-forge runs and admitted dogfood landings are reported only.
+  await tryRun('deploy in flight', async () => {
+    const f = await deployInFlight(config);
+    check(
+      'no Convex deploy in flight',
+      !f.length,
+      f.length
+        ? `${f.length} ${config.forge.deployWorkflow} run(s) queued/in progress (the driver waits for them)`
+        : `no ${config.forge.deployWorkflow} run queued or running`,
+      dry,
+    );
+  });
   await tryRun('in-flight', async () => {
     const f = await forgeInFlight();
     check(
-      'no in-flight landings',
-      !f.length,
+      'other nanthai-forge runs',
+      true,
       f.length
-        ? `${f.length} nanthai-forge run(s) queued/in progress: ${f.map(r => r.workflowName).join(', ')}`
+        ? `${f.length} run(s) queued/in progress, not waited for: ${f.map(r => r.workflowName).join(', ')}`
         : 'nanthai-forge has no queued or running workflow',
-      dry,
     );
   });
   check(
     'dogfood queue',
     Boolean(config.dogfood?.projectId),
     config.dogfood?.projectId
-      ? 'config.dogfood names the project whose admitted submissions the driver waits for under the hold'
-      : 'config.dogfood {projectId, url?} is missing: the driver cannot see submissions admitted before the hold (97c7a123)',
+      ? 'config.dogfood names the dogfood project (its mirror maps the CLI commit; its queue is reported)'
+      : 'config.dogfood {projectId, url?} is missing: the version record cannot map the CLI commit through the mirror',
     dry,
   );
   if (config.dogfood?.projectId)
@@ -189,12 +208,11 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
         root: join(B, '.dogfood-anchor'),
       });
       check(
-        'no admitted dogfood submissions',
-        !entries.length,
+        'dogfood submissions',
+        true,
         entries.length
-          ? `${entries.length} admitted: ${entries.join(', ')}`
+          ? `${entries.length} admitted, not waited for: ${entries.join(', ')}`
           : 'the dogfood landing queue is empty',
-        dry,
       );
     });
   const disk = diskFreeGb(),

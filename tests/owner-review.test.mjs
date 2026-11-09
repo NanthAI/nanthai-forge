@@ -266,7 +266,7 @@ const hold = async f => {
 };
 
 test('a builder requests approval on a saved Lane: one row, a project board note, a replay-safe reply', async t => {
-  const { f, laneId, ask, requested, read } = await requestedLane(t);
+  const { f, laneId, ask, requested, read, decide } = await requestedLane(t);
   assert.equal(requested.status, 'requested');
   assert.equal(requested.reason, ask.reason);
   assert.equal(requested.head, f.lane.head);
@@ -292,6 +292,19 @@ test('a builder requests approval on a saved Lane: one row, a project board note
     code('BAD_ARGUMENT'),
   );
   assert.equal(f.pending().length, 0, 'a request leaves no idle task');
+  // Real reasons and the owner link exceed one board note (240 chars): the reason is shortened, the
+  // note still posts with the whole link (live proof 2026-11-09: a 255-char note was skipped).
+  const long = 'x'.repeat(500);
+  await f.tx('requestLong', approvals.request, { ...ask, operationId: randomUUID(), reason: long }, device);
+  const second = [...f.tables.projectBoardMessages.values()].at(-1);
+  assert.equal(f.tables.projectBoardMessages.size, 2);
+  assert.ok([...second.body].length <= 240, second.body);
+  assert.ok(second.body.endsWith(` Owner: ${requested.url}`));
+  assert.match(second.body, /x…/);
+  await decide('decline', f.lane.head, 'owner', long);
+  const decision = [...f.tables.projectBoardMessages.values()].at(-1);
+  assert.equal(decision.targetKey, `lane:${laneId}`);
+  assert.ok([...decision.body].length <= 240 && decision.body.endsWith('request-approval again.'));
 });
 
 test('landing a Lane with an open request holds after its check, names the reason, and agents cannot decide', async t => {

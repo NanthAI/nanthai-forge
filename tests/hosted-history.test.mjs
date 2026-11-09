@@ -1385,3 +1385,160 @@ test('members fetch Lane refs as built commits; git diff main...lane equals the 
   await job(otherReceipt, head, { tree: 'e'.repeat(40) });
   await refused(['-C', repo, 'fetch', 'origin', `refs/forge/lanes/${other}`], /GIT_LANE_TREE/);
 });
+
+// Fast first build (Issue 3bd4a8e9 line 1): the parent commit's trees come from the stored
+// history packs, so a first build reads only the files the Lane changed.
+const packTrees = await import('../dist/git-pack-trees.js');
+function wideRepository(t) {
+  const repo = scratch(t, 'forge-history-wide-');
+  git(repo, ['init', '-q', '-b', 'main']);
+  const files = {};
+  for (let i = 0; i < 48; i++) files[`pkg/m${i % 6}/file${i}.txt`] = `file ${i}\n`.repeat(20);
+  files['art/a.psd'] = 'layers\n';
+  files['README.md'] = '# wide\n';
+  commit(repo, files, 'Wide tree');
+  commit(repo, { 'pkg/m1/file1.txt': 'changed\n', 'pkg/m2/new.txt': 'new\n' }, 'Edit');
+  const head = commit(repo, { 'README.md': '# wide, edited\n' }, 'Readme');
+  return { repo, head };
+}
+
+test('pack trees list a commit tree from ofs- and ref-delta packs fed in small parts', t => {
+  const { repo, head } = wideRepository(t);
+  const tree = git(repo, ['rev-parse', `${head}^{tree}`])
+    .toString()
+    .trim();
+  const expected = new Map(
+    git(repo, ['ls-tree', '-r', head])
+      .toString()
+      .trim()
+      .split('\n')
+      .map(line => {
+        const [meta, path] = line.split('\t');
+        const [mode, , sha] = meta.split(' ');
+        return [path, { mode, sha }];
+      }),
+  );
+  for (const flags of [['--delta-base-offset'], []]) {
+    const pack = git(repo, ['pack-objects', '--revs', '--stdout', '-q', ...flags], `${head}\n`);
+    const scan = new packTrees.PackTrees(1 << 20);
+    scan.startPack();
+    let listing = null;
+    for (let at = 0; at < pack.length && !listing; at += 7) {
+      assert.equal(scan.push(pack.subarray(at, at + 7), at + 7 >= pack.length), true);
+      listing = packTrees.listTree(scan, tree);
+    }
+    assert.deepEqual(listing, expected, flags.join() || 'ref-delta');
+    assert.equal(packTrees.listTree(scan, 'f'.repeat(40)), null, 'unknown tree');
+    const tight = new packTrees.PackTrees(64);
+    tight.startPack();
+    assert.equal(tight.push(pack, true), false, 'over budget stops the scan');
+    const cut = new packTrees.PackTrees(1 << 20);
+    cut.startPack();
+    assert.equal(cut.push(pack.subarray(0, pack.length - 30), true), false, 'a truncated pack fails');
+  }
+});
+
+test('a first Lane build lists the parent tree from the history packs and reads only changed files', async t => {
+  const source = wideRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  for (const table of ['projectGithubMirrorJobs', 'projectHostedOverlapLanes', 'projectGitLaneCommits'])
+    s.tables[table] ??= new Map();
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  await mirrorAt(s, projectId, source.head);
+  const base = storeState(s, projectId, source.repo, source.head);
+  const receiptId = crypto.randomUUID();
+  await s.ctx.db.insert('projectGithubMirrorJobs', {
+    projectId,
+    receiptId,
+    sequence: 1,
+    repository: 'example/repo',
+    authorityEpoch: 1,
+    status: 'done',
+    state: base,
+    step: 2,
+    cursor: null,
+    mapping: JSON.stringify({
+      publication: 'tracked',
+      operationId: crypto.randomUUID(),
+      state: base,
+      acceptanceId: receiptId,
+      viewId: crypto.randomUUID(),
+      commit: source.head,
+      parent: '',
+      tree: git(source.repo, ['rev-parse', `${source.head}^{tree}`])
+        .toString()
+        .trim(),
+      message: 'main',
+      author: { name: 'Forge', email: 'forge@example.invalid' },
+      committer: { name: 'Forge', email: 'forge@example.invalid' },
+      seconds: clock,
+    }),
+  });
+  // The Lane edits one file, adds one, and makes an unchanged file an LFS path.
+  const head = storeState(
+    s,
+    projectId,
+    source.repo,
+    source.head,
+    {
+      'pkg/m3/file3.txt': 'lane edit\n',
+      'pkg/lane.txt': 'added\n',
+      '.gitattributes': '*.psd filter=lfs diff=lfs merge=lfs -text\n',
+    },
+    'Lane save',
+  );
+  const laneId = crypto.randomUUID();
+  await s.ctx.db.insert('projectHostedOverlapLanes', {
+    projectId,
+    laneId,
+    intentId: crypto.randomUUID(),
+    actor: 'owner',
+    intent: 'Wide Lane',
+    head,
+    baseHead: base,
+    baseReceiptId: receiptId,
+    baseSequence: 1,
+    recordVersion: 1,
+    open: true,
+    changes: '[]',
+    complete: false,
+  });
+  const metrics = [];
+  const log = console.log;
+  console.log = (...args) =>
+    String(args[0]).startsWith('FORGE_GIT_LANE_METRIC ')
+      ? metrics.push(JSON.parse(String(args[0]).slice(22)))
+      : log(...args);
+  t.after(() => (console.log = log));
+  const plan = await modules.gitServeLaneStore.plan._handler(s.ctx, { projectId, laneId });
+  assert.equal(plan.packs.length, 1);
+  const fast = await modules.gitServeLane.buildLane(s.ctx, projectId, laneId, plan);
+  assert.equal(metrics[0].listing, 1, 'tree listed from the pack');
+  // .gitattributes, the edited and added files, and the file that became an LFS path.
+  assert.equal(metrics[0].readBlobs, 4);
+  // The same commit as a build that hashes every file (no packs, no aliases).
+  const slow = await modules.gitServeLane.buildLane(s.ctx, projectId, laneId, {
+    ...plan,
+    aliases: null,
+    packs: [],
+  });
+  assert.equal(slow, fast);
+  assert.equal(metrics[1].listing, 0);
+  assert.ok(metrics[1].readBlobs > 50, 'the fallback reads every file');
+  // The next build uses the alias object the last one stored: no pack scan; it reads only
+  // .gitattributes and the two new files its pack holds.
+  const again = await modules.gitServeLane.buildLane(
+    s.ctx,
+    projectId,
+    laneId,
+    await modules.gitServeLaneStore.plan
+      ._handler(s.ctx, { projectId, laneId })
+      .then(p => (p.status === 'cached' ? { ...plan, aliases: historyRow(s, projectId).laneAliases } : p)),
+  );
+  assert.equal(again, fast);
+  assert.deepEqual([metrics[2].listing, metrics[2].packScanned, metrics[2].readBlobs], [0, 0, 3]);
+  assert.equal(s.tables.projectGitLaneCommits.size, 1);
+});

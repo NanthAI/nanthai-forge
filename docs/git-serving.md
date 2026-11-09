@@ -104,10 +104,14 @@ at 1 MiB. Nothing runs while no one uses Git: no timers, scheduling or polling.
 
 The first fetch of a Lane head adds one build action: one query for the plan, one query
 per 100 source objects it reads, one record mutation, and R2 PUTs for the Lane pack (the
-commit, plus the trees and blobs its parent lacks) and an alias object. It reads the bytes
-of blobs whose Git id is not cached yet (the first build of a project reads every file of
-the base and head once) and of the Lane's new blobs. Later fetches of the same head read
-the cached row. A Lane fetch sends history after the newest stored commit the client has,
+commit, plus the trees and blobs its parent lacks) and an alias object (SHA-256 to Git blob
+id for the base and head). It reads the bytes of the files the Lane changed. File Git ids
+come from the alias object; when it lacks more than 32 of the base's (a project's first
+build, or a base far from the last one built), the build reads the history packs from R2
+once instead and lists the parent commit's tree from them (only trees are kept: about
+1.4 MiB for this repository's 25 MB pack, under 1 s), rather than reading every file. A
+scan that finds no such tree, or keeps more than 128 MiB of trees, falls back to reading
+the files. Later fetches of the same head read the cached row. A Lane fetch sends history after the newest stored commit the client has,
 plus the Lane pack. Into a repository without main, that history can repeat an object of
 the Lane pack, which `transfer.fsckObjects` rejects; fetch main first.
 

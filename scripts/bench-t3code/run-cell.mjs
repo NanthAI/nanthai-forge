@@ -36,7 +36,9 @@ import {
   differences,
   snapshotProblems,
   pinProblems,
-  forgeInFlight,
+  moved,
+  deployInFlight,
+  deploysDuring,
   benchFreeze,
   benchHoldText,
 } from './versions.mjs';
@@ -218,9 +220,9 @@ const gates = await cellGates({
   pinProblems,
   snapshotProblems,
   differences,
-  // In a batch the driver checked nanthai-forge before either cell started; the sibling
-  // Forge cell's own check runs would otherwise refuse this one.
-  forgeInFlight: batchDir ? async () => [] : forgeInFlight,
+  // In a batch the driver checked for a Convex deploy before either cell started; a cell run
+  // alone checks it itself (the quiet rule: only a deploy in flight holds a start).
+  forgeInFlight: batchDir ? async () => [] : () => deployInFlight(config),
   pinFile: flag('--pin'),
 });
 if (batchDir) gates.inFlightCheckedBy = 'batch';
@@ -718,7 +720,15 @@ const tokens = dry
       {},
     );
 writeResult({
-  versions: { start, end, changes: versionChanges, waivedWhileMainLive: waivedChanges },
+  versions: {
+    start,
+    end,
+    changes: versionChanges,
+    moved: moved(start, end),
+    waivedWhileMainLive: waivedChanges,
+  },
+  // Convex deploy runs that overlapped this cell (exit plan "Quiet rule and deploys").
+  deploys: await deploysDuring(config, start.at, end.at),
   startedAt: new Date(cellStart).toISOString(),
   endedAt: new Date(cellEnd).toISOString(),
   ...summary,

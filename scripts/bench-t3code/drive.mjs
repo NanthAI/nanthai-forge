@@ -18,10 +18,15 @@
 //   cell is graded (dogfood nforge land/finish wait meanwhile; the hold names the bench project, so
 //   the bench's own landings pass), and is released between
 //   batches. Versions (CLI, GitHub main, deployed Convex, check workflows, harness, agent) are
-//   recorded at batch start and end; any change voids the batch.
+//   recorded at batch start and end; any change voids the batch, except GitHub main and the
+//   deploy head, which builders move while a batch runs: those are recorded (versions.moved),
+//   with every deploy run that overlapped the batch (deploys). A deployed convex/ change voids.
 // - Resumable: a batch without batch.json whose driver is gone is closed as `interrupted`
 //   (void, re-run once). Re-run the same command after any stop. One driver at a time.
-// - Waits, never stops, on a usage window, a busy nanthai-forge or a gate refusal, printing one
+// - Quiet rule (exit plan "Quiet rule and deploys"): a batch starts once no Convex deploy
+//   (config.forge.deployWorkflow) is queued or running; dogfood landings, Verify Forge and
+//   forge-check runs are not waited for.
+// - Waits, never stops, on a usage window, a Convex deploy in flight or a gate refusal, printing one
 //   CELL line per change for the lead's Monitor. Stops on the Convex budget.
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -47,13 +52,15 @@ import {
   snapshot,
   snapshotProblems,
   differences,
-  forgeInFlight,
+  moved,
+  deployInFlight,
+  deploysDuring,
   benchFreeze,
   benchHoldText,
 } from './versions.mjs';
 import { benchRootOrExit } from './bench-root.mjs';
 import { productCli } from './cli-install.mjs';
-import { drainBatch, hostedQueueEntries } from './drain.mjs';
+import { drainBatch } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
 import { runnerFairness } from './runners.mjs';
@@ -216,21 +223,13 @@ async function main() {
         }
       }, 0);
 
-  /** Under the hold, wait until nanthai-forge has no workflow queued or running and the
-   * dogfood project has no admitted hosted submission (drain.mjs; nothing is cancelled). */
+  /** Under the hold, wait until no Convex deploy is queued or running on nanthai-forge (the
+   * quiet rule; drain.mjs; nothing is cancelled). Dogfood landings keep going. */
   const drain = key =>
     drainBatch({
       key,
-      runs: forgeInFlight,
-      queue: config.dogfood?.projectId
-        ? () =>
-            hostedQueueEntries({
-              cli: config.forge.cli,
-              url: config.dogfood.url ?? config.forge.url,
-              projectId: config.dogfood.projectId,
-              root: join(B, '.dogfood-anchor'),
-            })
-        : async () => [],
+      runs: () => deployInFlight(config),
+      queue: async () => [],
       deadlineMs: DRAIN_MS,
       pauseMs: Math.min(60_000, RETRY_MS),
       say,
@@ -313,7 +312,7 @@ async function main() {
       if (!drained) {
         release();
         say(
-          `WAIT ${b.key}: nanthai-forge did not drain within ${DRAIN_MS / 60_000} min under the hold; released, retry`,
+          `WAIT ${b.key}: a Convex deploy was still in flight after ${DRAIN_MS / 60_000} min under the hold; released, retry`,
         );
         await wait(RETRY_MS);
         continue;
@@ -407,7 +406,16 @@ async function main() {
         seed: b.seed,
         startedAt: start.at,
         endedAt: end.at,
-        versions: { start, end, changes, fakeVersionChange: fakeChange || undefined },
+        versions: {
+          start,
+          end,
+          changes,
+          moved: moved(start, end),
+          fakeVersionChange: fakeChange || undefined,
+        },
+        // Every Convex deploy run that overlapped the batch (lead 2026-11-09: void only cells that
+        // overlap a deploy which changed the landing path; a convex/ change voids via `changes`).
+        deploys: await deploysDuring(config, start.at, end.at),
         cells,
         runner,
         voided,

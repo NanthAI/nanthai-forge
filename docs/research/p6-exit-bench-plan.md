@@ -66,6 +66,28 @@ once, whole (`DESIGN.maxAttempts = 2`). A batch whose every cell crashed in setu
 agent ran is not an attempt; it is re-run up to `DESIGN.maxSetupRetries = 2` times and
 disclosed as setup-only in its `batch.json`.
 
+## Quiet rule and deploys (lead 2026-11-09, before the first scored cell)
+
+This replaces two sentences of B1.5d's "Versions" section: "A batch does not start while
+nanthai-forge has any workflow queued or running" and "Any difference between a batch's start
+and end (a landing, a deploy, a CLI swap) voids the batch". Builders keep landing while the bench
+runs; the bench project has its own queue, and dogfood checks run on another repository.
+
+- **Batch start:** under the hold, a batch starts once no Convex deploy run
+  (`config.forge.deployWorkflow`, Deploy dev Convex) is queued or running on nanthai-forge. The
+  dogfood landing queue, Verify Forge and forge-check runs are not waited for. The 45 min drain
+  timeout stays: a deploy still in flight then releases the hold and retries. The driver still
+  brings the held CLI to main first, and the start record must still have the CLI at main and the
+  deployed `convex/` equal to the CLI commit's.
+- **During a batch:** the CLI stays held by `.freeze`, as before. GitHub main and the deploy head
+  moving are **recorded, not voids** (`versions.moved`), with every deploy run that overlapped the
+  batch and each cell (`deploys`: id, head, start, end, status). A change in the **deployed
+  `convex/` tree** or in **`forge-check.yml`** (the Forge arm's check) still voids the cell and
+  its batch: that is "a deploy which changed the landing path", taken as any `convex/` change
+  (void when unsure). A cell inside a batch no longer needs the CLI to equal main at its own
+  start, only the deployed `convex/` to equal the CLI's.
+- If more than 1 in 4 cells are voided this way, the lead names landing windows instead.
+
 ## Outlier rule (new, 8c9b84fc)
 
 - After the regular reps of an N (reps 1-2 and rep 3 where it ran), each **valid** cell is

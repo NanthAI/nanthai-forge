@@ -50,6 +50,7 @@ export async function executeHostedApproval(
 const decisionSchema = z.looseObject({
   laneId: z.string(),
   status: z.enum(['none', 'requested', 'granted', 'declined']),
+  live: z.boolean().optional(),
   version: z.number(),
 });
 export type ApprovalOutcome = {
@@ -100,7 +101,9 @@ export async function observeApproval(
             latest = parsed;
             if (parsed.status === 'granted' || parsed.status === 'declined')
               settle({ status: 'decided', approval: parsed });
-            else if (parsed.status === 'none') settle({ status: 'none', approval: parsed });
+            // No request, or one withdrawn before a decision: nothing will decide it.
+            else if (parsed.status === 'none' || parsed.live === false)
+              settle({ status: 'none', approval: parsed });
           } catch (error) {
             release();
             reject(
@@ -132,7 +135,10 @@ export async function observeApproval(
 /** The wait's one-line next step for each outcome. */
 export function approvalNext(outcome: ApprovalOutcome, laneId: string) {
   const lane = laneId.slice(0, 8);
-  if (outcome.status === 'none') return `Lane ${lane} has no approval request. Ask with request-approval.`;
+  if (outcome.status === 'none')
+    return outcome.approval?.status === 'requested'
+      ? `The approval request on Lane ${lane} was withdrawn; it no longer holds its landings.`
+      : `Lane ${lane} has no approval request. Ask with request-approval.`;
   if (outcome.status !== 'decided') return null;
   return outcome.approval?.status === 'granted'
     ? `The owner granted Lane ${lane}. Land it now (land --save); a new save after the grant needs the owner again.`

@@ -4,6 +4,7 @@ import type { Doc, Id } from './_generated/dataModel';
 import { acceptancePage, acceptancePlan } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
 import { postSystemLaneNote } from './projectBoardSystem';
+import { BOARD_TEXT_CHARS } from '../src/board-text';
 
 /** Issue fe5bea80: builder approval requests on Lanes (table projectHostedApprovals). */
 export type ApprovalRow = Doc<'projectHostedApprovals'>;
@@ -146,6 +147,21 @@ export async function endLandedApprovals(ctx: MutationCtx, matched: { row: Appro
     if (row.live) await writeApproval(ctx, row, { live: false, ended: { kind: 'landed', at: Date.now() } });
 }
 
+/** Board notes are one line of at most BOARD_TEXT_CHARS: the free-text reason is shortened to fit
+ * around the fixed parts (a refused note would be skipped silently). */
+export function fitNote(before: string, reason: string, after: string) {
+  const room = BOARD_TEXT_CHARS - [...before].length - [...after].length;
+  const chars = [...reason];
+  if (chars.length <= room) return `${before}${reason}${after}`;
+  return `${before}${
+    room > 1
+      ? `${chars
+          .slice(0, room - 1)
+          .join('')
+          .trimEnd()}…`
+      : ''
+  }${after}`;
+}
 /** One note to the requester's Lane: it shows on their next action and ends a blocked wait. */
 export async function noteDecision(
   ctx: MutationCtx,
@@ -162,6 +178,10 @@ export async function noteDecision(
     toLaneId: row.laneId,
     fromLaneId: row.laneId,
     author: by,
-    text: `The project owner ${status === 'granted' ? 'granted' : 'declined'} the approval request on Lane ${row.laneId.slice(0, 8)}${reason ? `: ${reason}` : '.'}${status === 'granted' ? ' It can land now.' : ' Address it, then request-approval again.'}`,
+    text: fitNote(
+      `The project owner ${status === 'granted' ? 'granted' : 'declined'} the approval request on Lane ${row.laneId.slice(0, 8)}${reason ? ': ' : '.'}`,
+      reason ?? '',
+      `${reason ? '.' : ''}${status === 'granted' ? ' It can land now.' : ' Address it, then request-approval again.'}`,
+    ),
   });
 }
