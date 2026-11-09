@@ -555,7 +555,9 @@ if (JSON.stringify(actual) !== JSON.stringify(wanted)) throw new Error('paths ' 
 for (const [p, sha256, mode, target] of expected) {
   const stat = fs.lstatSync(p);
   if (mode === 'symlink') {
-    const ok = stat.isSymbolicLink() ? fs.readlinkSync(p) === target : win && fs.readFileSync(p, 'utf8') === target;
+    // Windows keeps a relative link target with its own separator (Node rewrites them).
+    const link = stat.isSymbolicLink() && fs.readlinkSync(p).split(path.sep).join('/');
+    const ok = stat.isSymbolicLink() ? link === target : win && fs.readFileSync(p, 'utf8') === target;
     if (!ok) throw new Error('link ' + p);
     continue;
   }
@@ -663,19 +665,16 @@ test('self-hosted runner checks one fixed commit exactly on this platform (14444
   const { f, run, failure, wallMs } = await exactSourceRun(t, fixedCommit);
   assert.equal(failure, null);
   const completed = await f.status(run.id);
-  assert.equal(completed.status, 'passed');
+  const logs = readdirSync(f.localLogs, { recursive: true })
+    .filter(name => String(name).endsWith('.log'))
+    .map(name => readFileSync(join(f.localLogs, name), 'utf8'))
+    .join('\n');
+  assert.equal(completed.status, 'passed', `check output: ${logs.slice(-2000)}`);
   assert.equal(completed.configuration.provider, 'self-hosted');
   assert.deepEqual(completed.configuration.platform, { os: process.platform, arch: process.arch });
   assert.equal(completed.plan.head, run.request.expectedHead);
   assert.equal(completed.macEvidence.machineId, f.configuration.machineId);
-  const logs = readdirSync(f.localLogs, { recursive: true }).filter(name => String(name).endsWith('.log'));
-  assert(
-    logs.some(name =>
-      readFileSync(join(f.localLogs, name), 'utf8').includes(
-        `exact source verified: 4 entries on ${process.platform}`,
-      ),
-    ),
-  );
+  assert(logs.includes(`exact source verified: 4 entries on ${process.platform}`));
   t.diagnostic(
     `qualification ${new Date().toISOString()} ${process.platform}/${process.arch} node ${process.version}` +
       ` container=${existsSync('/.dockerenv')} head ${run.request.expectedHead.slice(0, 12)}: passed in ${wallMs}ms`,

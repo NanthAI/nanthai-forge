@@ -124,7 +124,9 @@ places:
   refuses to create links (`EPERM`). The runner then writes a source link as a regular
   file holding its target, as Git does with `core.symlinks=false`, so the check command
   sees a file where Linux and macOS see a link. No error is shown; elsewhere a refused
-  link fails the run with `EPERM`.
+  link fails the run with `EPERM`. With link rights the link is real, but Windows
+  stores a relative target with `\`: reading the recorded `src/lib/value.txt` back
+  gives `src\lib\value.txt`.
 - **Descendant cleanup.** Windows has no process groups. On cancel, lease loss or
   when the result is in, the runner ends a still-running command with `taskkill /T /F`,
   which stops every process the command started. A process the command left running
