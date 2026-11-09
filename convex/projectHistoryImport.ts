@@ -15,6 +15,7 @@ import { ForgeError, invariant } from '../src/errors';
 import { fetchGitPack, PackLimitError } from '../src/git-upload-pack';
 import { historyChunkBytes } from './projectHistoryFields';
 import { historyLimit } from './projectHistoryStore';
+import { workerConfig, workerServes } from './gitServeWorker';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 
 /** Read credential for one github.com repository: the App's own read token when
@@ -134,14 +135,17 @@ export async function storeHistoryPack(
   }
 }
 
-/** Records one stored pack; chunks of a pack that was not recorded are deleted. */
+/** Records one stored pack; chunks of a pack that was not recorded are deleted. When the
+ * project's history (`historyBytes` after this pack) is served through the large-pack
+ * Worker, its Git protocol v2 copies and joined trailer are prepared now, not on a clone. */
 export async function recordHistoryPack(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   stored: Awaited<ReturnType<typeof storeHistoryPack>>,
   pack: { tip: string; haves: string[]; source: 'import' | 'catch-up' },
-  attempt?: number,
+  options: { historyBytes: number; attempt?: number },
 ) {
+  const { historyBytes, attempt } = options;
   let recorded: 'recorded' | 'duplicate' | 'stale' | undefined;
   try {
     recorded = await ctx.runMutation(internal.projectHistoryStore.record, {
@@ -149,6 +153,9 @@ export async function recordHistoryPack(
       ...(attempt === undefined ? {} : { attempt }),
       pack: { ...pack, ...stored.pack },
     });
+    const worker = workerConfig();
+    if (recorded === 'recorded' && worker && workerServes(worker, historyBytes))
+      await ctx.scheduler.runAfter(0, internal.gitServeFrame.prepare, { projectId });
     return recorded;
   } finally {
     if (recorded !== 'recorded') await discardHistoryChunks(ctx, projectId, stored.created);
@@ -178,7 +185,7 @@ export const run = internalAction({
         input.projectId,
         stored,
         { tip: row.importCommit, haves: [], source: 'import' },
-        input.attempt,
+        { historyBytes: stored.pack.bytes, attempt: input.attempt },
       );
       const pack = stored.pack;
       console.log(
@@ -239,11 +246,13 @@ export async function catchUpHistory(ctx: ActionCtx, projectId: Id<'hostedProjec
           token: await historyReadToken(row.repository, row.owner, row.visibility),
           limitBytes: historyLimit(row) - row.bytes,
         });
-        const recorded = await recordHistoryPack(ctx, projectId, stored, {
-          tip: mapping.commit,
-          haves,
-          source: 'catch-up',
-        });
+        const recorded = await recordHistoryPack(
+          ctx,
+          projectId,
+          stored,
+          { tip: mapping.commit, haves, source: 'catch-up' },
+          { historyBytes: row.bytes + stored.pack.bytes },
+        );
         if (recorded === 'recorded') {
           packs.push({ tip: mapping.commit, ...stored.pack, at: Date.now() });
           addedBytes = stored.pack.bytes;

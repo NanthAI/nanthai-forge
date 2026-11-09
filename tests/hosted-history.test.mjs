@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
+import { checkReturns } from './convex-args.mjs';
 import { state } from './hosted-fixture.mjs';
 import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default-r2.mjs';
 import {
@@ -127,8 +128,11 @@ function fixture(t, source, { visibility = 'public' } = {}) {
     s.ctx.runQuery =
       async (ref, args) => {
         const [name, fn] = getFunctionName(ref).split(':');
-        if (modules[name]) return modules[name][fn]._handler(s.ctx, args);
-        return original(ref, args);
+        if (!modules[name]) return original(ref, args);
+        // Returns are validated as Convex does: a field the validator lacks fails the call.
+        const value = await modules[name][fn]._handler(s.ctx, args);
+        checkReturns(modules[name][fn], value, `${name}:${fn}`);
+        return value;
       };
   const previous = globalThis.fetch;
   const fetches = [];
@@ -535,7 +539,7 @@ test('chunks of a fetch that stops over the limit are deleted; a failed delete i
       projectId,
       stale,
       { tip: source.head, haves: [], source: 'import' },
-      99,
+      { historyBytes: 0, attempt: 99 },
     ),
     'stale',
   );
@@ -547,7 +551,7 @@ test('chunks of a fetch that stops over the limit are deleted; a failed delete i
       projectId,
       kept,
       { tip: source.head, haves: [], source: 'import' },
-      1,
+      { historyBytes: 0, attempt: 1 },
     ),
     'recorded',
   );
@@ -1000,7 +1004,6 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
     { s } = f;
   const projectId = await importedProject(f, source.head);
   publish(s, projectId);
-  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
   const host = await gitHost(t, s);
   // The Worker reaches the local Convex host; the fixture's fetch refuses other hosts.
   const fixtureFetch = globalThis.fetch;
@@ -1010,6 +1013,14 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   const worker = await byteWorker(t, host.base);
   // Threshold 1 byte: every clone of this small repository takes the large-pack path.
   withEnv(t, { FORGE_GIT_WORKER_URL: worker.base, FORGE_GIT_WORKER_MIN_BYTES: '1' });
+  // Recording a pack the Worker serves schedules its v2 preparation: no clone waits for it.
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const prepare = s.scheduled.filter(task => getFunctionName(task.fn) === 'gitServeFrame:prepare');
+  assert.deepEqual(
+    prepare.map(task => task.args),
+    [{ projectId }],
+  );
+  await modules.gitServeFrame.prepare._handler(s.ctx, prepare[0].args);
   const url = `${host.base}/git/${projectId}.git`;
   const work = scratch(t, 'forge-git-worker-');
   let before = host.snapshot();
@@ -1026,8 +1037,8 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
     '1',
   );
   // Redirect (1 query), ls-refs (1 query), fetch (1 query + reserve); the Worker answers the
-  // v2 advertisement. Framing the pack once: 1 action + 1 mutation.
-  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 2, action: 1 });
+  // v2 advertisement. The pack was framed when it was recorded.
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 1, action: 0 });
   const [pack] = historyPacks(s, projectId);
   assert.ok(pack.framed?.length, 'the framed copy is recorded on the pack row');
   assert.deepEqual(
@@ -1036,6 +1047,14 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   );
   const { v2Advertisement } = await import('../dist/git-byte-worker.js');
   assert.equal(v2Advertisement, Buffer.from(protocol.advertiseV2()).toString('latin1'));
+  // A pack without a framed copy (recorded before this, or preparation failed) is framed on
+  // its first v2 fetch, once: 1 action + 1 mutation, then never again.
+  await s.ctx.db.patch(pack._id, { framed: undefined });
+  worker.reads.length = 0;
+  before = host.snapshot();
+  await client(['clone', '-q', url, join(work, 'lazy')]);
+  assert.equal(log(join(work, 'lazy')), log(source.repo));
+  assert.deepEqual(host.since(before), { http: 3, query: 3, mutation: 2, action: 1 });
   worker.reads.length = 0;
   before = host.snapshot();
   await client(['clone', '-q', url, join(work, 'again')]);
@@ -1053,8 +1072,8 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   );
   const usage = [...s.tables.gitWorkerUsage.values()];
   assert.deepEqual(usage.map(row => [row.scope, row.packs, row.bytes]).sort(), [
-    ['*', 3, 3 * pack.bytes],
-    [projectId, 3, 3 * pack.bytes],
+    ['*', 4, 4 * pack.bytes],
+    [projectId, 4, 4 * pack.bytes],
   ]);
 
   // A mirror move adds a catch-up pack; a fetch takes only it, a fresh clone joins both.
@@ -1063,6 +1082,11 @@ test('clones over the response limit go through the Worker: v2 framed once, v0 r
   await mirrorAt(s, projectId, tip);
   await client(['fetch', '-q'], join(work, 'one'));
   assert.equal(git(join(work, 'one'), ['rev-parse', 'origin/main']).toString().trim(), tip);
+  assert.equal(
+    s.scheduled.filter(task => getFunctionName(task.fn) === 'gitServeFrame:prepare').length,
+    2,
+    'a recorded catch-up pack schedules preparation too',
+  );
   worker.reads.length = 0;
   before = host.snapshot();
   await client(['clone', '-q', url, join(work, 'two')]);

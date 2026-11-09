@@ -175,13 +175,15 @@ session there. Nothing changes for the user: no extra step, setting or credentia
   byte-exact.
 - **Protocol v2 (Git's default).** v2 sends the pack in side-band pkt-lines, which the
   Worker cannot write within its CPU limit, so each pack served over v2 gets a framed copy:
-  the same bytes as band-1 pkt-lines, written to R2 once by the backend on the pack's first
-  v2 fetch (one read of the pack, one action and one mutation; the copy is about 0.008%
-  larger and is deleted with the project). The first frame holds the 12-byte header and the
-  last the 20-byte trailer, so joined sets drop them by range as with raw chunks. Serving
-  v2 matters for speed: Git keeps a v2 clone's pack and indexes it, while a v0 smart-HTTP
-  clone of a pack under `transfer.unpackLimit` (100) objects explodes it into loose objects,
-  about 4x slower on large blobs. v0 clients (`protocol.version=0`) still get raw chunks.
+  the same bytes as band-1 pkt-lines, written to R2 once by the backend (one read of the
+  pack; the copy is about 0.008% larger and is deleted with the project). When a pack of a
+  project the Worker serves is recorded (import or catch-up), a background action writes its
+  copy and the joined trailer, so no clone waits for them; a pack still without a copy is
+  framed on its first v2 fetch (one action and one mutation). The first frame holds the
+  12-byte header and the last the 20-byte trailer, so joined sets drop them by range as with
+  raw chunks. Serving v2 matters for speed: Git keeps a v2 clone's pack and indexes it,
+  while a v0 smart-HTTP clone of a pack under `transfer.unpackLimit` (100) objects explodes
+  it into loose objects, about 4x slower on large blobs. v0 clients (`protocol.version=0`) still get raw chunks.
 - **Caps.** Each served pack is counted before any byte flows, per project and for all
   projects per UTC day (`convex/gitServeWorkerStore.ts`): 1,000 packs and 20 GiB per
   project, 10,000 packs and 100 GiB in all. The ref listing checks the same counters before
@@ -190,10 +192,12 @@ session there. Nothing changes for the user: no extra step, setting or credentia
 - **Cost.** Workers Free: $0 (100,000 requests a day; a clone is 3 Worker requests). R2
   egress is free; R2 reads are one per 32 MiB chunk, inside R2's included 10 million a month
   at the caps. Per large clone the backend makes 3 HTTP actions, 3 queries and 1 mutation
-  (plus 1 more mutation and one read of the set the first time a joined set is served, and
-  1 action, 1 mutation, one read and one framed write of each pack the first time it is
-  served over v2). Framed copies add the size of the Worker-served history to R2 storage
-  ($0.015 per GB-month). Nothing runs while no one clones.
+  (plus 1 more mutation and one read of the set the first time a joined set is served
+  unprepared). Preparing a recorded pack is 1 background action, 1 query and 1-2 mutations:
+  one read and one framed write of the new pack and, with several packs, one read of the set
+  for its trailer. Packs are recorded only on import and by reads (one catch-up per mirror
+  move), so nothing runs while no one reads. Framed copies add the size of the Worker-served
+  history to R2 storage ($0.015 per GB-month).
 
 ### Operating the Worker
 

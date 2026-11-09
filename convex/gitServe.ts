@@ -9,7 +9,15 @@ import { digest } from '../src/portable-hash';
 import { ForgeError } from '../src/errors';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { overCap } from './gitServeWorkerStore';
-import { workerConfig, workerFetch, workerRedirect, workerRoute, type WorkerConfig } from './gitServeWorker';
+import {
+  tooLarge,
+  workerConfig,
+  workerFetch,
+  workerRedirect,
+  workerRoute,
+  workerServes,
+  type WorkerConfig,
+} from './gitServeWorker';
 import {
   PackJoiner,
   advertiseV0,
@@ -25,7 +33,6 @@ import {
   parseV2Request,
   pkt,
   sideband,
-  sidebandData,
   type FetchArgs,
 } from '../src/git-serve-protocol';
 import { namedLanes, selectFetch } from '../src/git-serve-lane-refs';
@@ -33,9 +40,7 @@ import { namedLanes, selectFetch } from '../src/git-serve-lane-refs';
 /** Read-only Git smart HTTP (Issue 09367fb2): /git/<handle>/<slug>.git or /git/<projectId>.git.
  * Serves the stored history packs (GitHub's own bytes in R2, same commit ids). Pushes go
  * through Lanes. Per request: this HTTP action and one query; bytes stream from R2. */
-export const gitResponseLimitBytes = 100 * 1024 * 1024; // Convex HTTP action response limit
-const framing = (bytes: number) => Math.ceil(bytes / sidebandData) * 5;
-const tooLarge = (bytes: number) => bytes + framing(bytes) + 4096 > gitResponseLimitBytes;
+export { gitResponseLimitBytes } from './gitServeWorker';
 const pushRefused =
   'Forge does not accept git push. Pushes go through Lanes: nforge agent ROOT start, then land.';
 
@@ -345,7 +350,7 @@ async function largeRedirect(
     throw error;
   }
   const bytes = prepared.packs.length ? new PackJoiner(prepared.packs).bytes : 0;
-  if (!(worker.minBytes ? bytes >= worker.minBytes : tooLarge(bytes))) return { prepared, redirect: null };
+  if (!workerServes(worker, bytes)) return { prepared, redirect: null };
   const refused = overCap(loaded.workerUsage, bytes);
   if (refused) throw new ForgeError(refused.code, refused.message);
   return { prepared, redirect: workerRedirect(worker, loaded.projectId, credentialId, !!prepared.gap) };

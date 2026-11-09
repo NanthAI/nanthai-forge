@@ -53,6 +53,7 @@ export async function beginHistory(
 const packView = v.object({
   tip: v.string(),
   chunks: v.array(historyChunk),
+  framed: v.optional(v.array(historyChunk)),
   bytes: v.number(),
   objects: v.number(),
   packSha1: v.string(),

@@ -15,6 +15,7 @@ import {
   pkt,
   selectPacks,
   sideband,
+  sidebandData,
   type FetchArgs,
 } from '../src/git-serve-protocol';
 import {
@@ -45,6 +46,14 @@ export type WorkerPack = {
   chunks: { sha256: string; size: number }[];
   framed?: { sha256: string; size: number }[];
 };
+/** Convex HTTP action response limit; a side-band reply over it cannot be served directly. */
+export const gitResponseLimitBytes = 100 * 1024 * 1024;
+const sidebandFraming = (bytes: number) => Math.ceil(bytes / sidebandData) * 5;
+export const tooLarge = (bytes: number) => bytes + sidebandFraming(bytes) + 4096 > gitResponseLimitBytes;
+/** Whether clones of `bytes` of history go through the Worker (operator threshold, else the limit). */
+export const workerServes = (config: WorkerConfig, bytes: number) =>
+  config.minBytes ? bytes >= config.minBytes : tooLarge(bytes);
+
 export function workerConfig() {
   const url = process.env.FORGE_GIT_WORKER_URL;
   if (!url) return null;
@@ -89,7 +98,7 @@ export function workerRoute(pathname: string, config: WorkerConfig | null) {
 const hex = (bytes: Uint8Array) => [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 /** Trailer of the joined set: reads its R2 bytes once through the joiner (Worker CPU is
  * too small to hash a large pack), then the history row caches it. */
-async function joinedTrailer(projectId: string, packs: WorkerPack[]) {
+export async function joinedTrailer(projectId: string, packs: WorkerPack[]) {
   const joiner = new PackJoiner(packs),
     config = r2Config();
   joiner.header();
@@ -129,8 +138,8 @@ async function reserve(ctx: ActionCtx, projectId: string, bytes: number) {
 }
 
 /** The joined set's trailer, from the history row's cache or computed (and cached) once. */
-async function setTrailer(
-  ctx: ActionCtx,
+export async function setTrailer(
+  ctx: Pick<ActionCtx, 'runMutation'>,
   projectId: string,
   chosen: WorkerPack[],
   joined: { key: string; sha1: string } | undefined,
