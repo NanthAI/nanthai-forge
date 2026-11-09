@@ -543,4 +543,123 @@ test('the /approve?lane card offers Grant and Decline only for a live request', 
   assert.doesNotMatch(render({ ...base, status: 'granted' }), />Grant</);
   assert.match(render({ ...base, live: false, status: 'granted', ended: { kind: 'landed' } }), /Landed/);
   assert.match(render({ ...base, status: 'none', live: false }), /no approval request/);
+  // Issue f7793473: a fork PR's run request names the PR and never promises a landing.
+  const fork = { ...base, pullRequest: 7, requester: 'thevarsek', agent: undefined };
+  const ask = render({ ...fork, status: 'requested' });
+  assert.match(ask, /Run the check of fork PR #7\?/);
+  assert.match(ask, />Grant</);
+  assert.match(ask, /without private submodules/);
+  assert.doesNotMatch(ask, /Landing it holds/);
+  assert.match(render({ ...fork, status: 'granted' }), /forge\/verify on the PR/);
+  assert.match(render({ ...fork, live: false, status: 'declined', ended: { kind: 'settled' } }), /Declined/);
+  assert.match(
+    render({ ...fork, live: false, status: 'requested', ended: { kind: 'settled' } }),
+    /newer push replaced this pull request head, or the request expired/,
+  );
+});
+
+test('a fork PR head asks the owner once; only the owner person grants, which starts its run', async t => {
+  syntheticR2(t);
+  const f = await finishFixture(t);
+  f.insert('projectContributors', { projectId: f.projectId, contributor: 'contributor' });
+  syntheticDevice(f);
+  const { forkGate } = await import(moduleUrl('../convex/projectGithubPullFork.ts'));
+  const { liveApprovals } = await import(moduleUrl('../convex/projectHostedApprovalStore.ts'));
+  const { forkStatus, forkApprovalTtlMs } = await import('../dist/github-pull-check.js');
+  const laneId = f.lane.laneId,
+    head = 'b'.repeat(40),
+    projectId = f.projectId;
+  const jobId = f.insert('projectGithubMirrorJobs', {
+    projectId,
+    receiptId: `pull:${randomUUID()}`,
+    sequence: 0.5,
+    repository: 'synthetic/mirror',
+    authorityEpoch: 1,
+    status: 'done',
+    step: 1,
+    cursor: null,
+    state: '0'.repeat(64),
+    pullKey: '7',
+    waitKey: randomUUID(),
+    inbound: JSON.stringify({ phase: 'checking', pull: { number: 7, head, fork: true }, laneId }),
+  });
+  const gate = label =>
+    f.tx(
+      label,
+      { _handler: async ctx => forkGate(ctx, await ctx.db.get(jobId), await ctx.db.get(projectId)) },
+      {},
+    );
+  const tasks = name => f.pending().filter(task => task.name === name);
+  assert.equal(await gate('forkAsk'), false, 'a fork head never runs before the grant');
+  const rows = () => [...f.tables.projectHostedApprovals.values()];
+  assert.equal(rows().length, 1);
+  const [row] = rows();
+  assert.equal(row.live, false, 'it holds no landing');
+  assert.equal(row.pullRequest, 7);
+  assert.equal(row.status, 'requested');
+  assert.equal(row.head, f.lane.head);
+  assert.match(row.reason, /GitHub PR #7 from a fork/);
+  const job = f.tables.projectGithubMirrorJobs.get(jobId);
+  const approval = JSON.parse(job.inbound).pull.approval;
+  assert.equal(job.waitKey, approval, 'the head waits on its request');
+  const url = `https://forge.example.invalid/approve?project=${encodeURIComponent(projectId)}&lane=${laneId}`;
+  assert.deepEqual(
+    tasks('projectGithubPullStatus:post').map(task => task.args[0]),
+    [
+      {
+        projectId,
+        repository: 'synthetic/mirror',
+        sha: head,
+        state: 'pending',
+        description: forkStatus.pending,
+        link: url,
+      },
+    ],
+    'one pending status with the approve link',
+  );
+  const [expiry] = tasks('projectGithubPullQueue:expire');
+  assert.deepEqual(expiry.args[0], { jobId, key: approval });
+  const notes = () => [...f.tables.projectBoardMessages.values()];
+  assert.equal(notes().length, 1);
+  assert.equal(notes()[0].targetKey, 'project');
+  assert.ok(notes()[0].body.endsWith(` Owner: ${url}`));
+  // Any other wake while it waits changes nothing.
+  assert.equal(await gate('forkWait'), false);
+  assert.equal(rows().length, 1);
+  assert.equal(notes().length, 1);
+  assert.equal(tasks('projectGithubPullStatus:post').length, 1);
+  // The landing gate never reads it.
+  assert.deepEqual(await f.tx('live', { _handler: ctx => liveApprovals(ctx, projectId) }, {}), []);
+  const read = JSON.parse(await f.tx('observe', approvals.observe, { projectId, laneId, detail: 1 }, device));
+  assert.equal(read.live, true, 'open on the approve page');
+  assert.equal(read.pullRequest, 7);
+  assert.equal(read.currentHead, f.lane.head);
+  assert.equal(read.url, url);
+  const decide = (decision, actor = 'owner') =>
+    f.tx(
+      'decide',
+      approvals.decide,
+      { projectId, operationId: randomUUID(), laneId, decision, head: f.lane.head },
+      actor,
+    );
+  for (const actor of [device, 'contributor'])
+    await assert.rejects(decide('grant', actor), code('PROJECT_UNAVAILABLE'));
+  assert.equal(tasks('projectGithubPull:start').length, 0);
+  const granted = JSON.parse(await decide('grant'));
+  assert.equal(granted.approval.status, 'granted');
+  assert.deepEqual(
+    tasks('projectGithubPull:start').map(task => task.args[0]),
+    [{ jobId, key: approval }],
+    'the grant starts the run',
+  );
+  assert.equal(notes().length, 1, 'the PR head status carries the decision, not a Lane note');
+  await assert.rejects(decide('decline'), code('WORK_STALE'));
+  // The started check closes the request and says it started.
+  assert.equal(await gate('forkRun'), true);
+  assert.equal(rows()[0].ended.kind, 'settled');
+  assert.equal(rows()[0].live, false);
+  assert.equal(tasks('projectGithubPullStatus:post').at(-1).args[0].description, forkStatus.started);
+  assert.equal(await gate('forkRunAgain'), false, 'one run per grant');
+  const [asked] = tasks('projectGithubPullStatus:post');
+  assert.equal(expiry.scheduledTime - asked.scheduledTime, forkApprovalTtlMs, 'expires in 30 days');
 });

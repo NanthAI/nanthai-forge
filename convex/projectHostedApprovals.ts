@@ -15,8 +15,10 @@ import {
   approvalView,
   fitNote,
   noteDecision,
+  openForkRequest,
   writeApproval,
 } from './projectHostedApprovalStore';
+import { notifyPullApproval } from './projectGithubPullQueue';
 import { isAgentSlug } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
@@ -143,9 +145,16 @@ export const decide = mutation({
         'Only the project owner, signed in as a person, can grant or decline approval.',
       );
       const row = await approvalRow(ctx, input.projectId, input.laneId);
-      invariant(row?.live, 'NOT_FOUND', `Lane ${input.laneId} has no open approval request.`);
+      const fork = openForkRequest(row);
+      invariant(row && (row.live || fork), 'NOT_FOUND', `Lane ${input.laneId} has no open approval request.`);
       if (row.decision?.operationId === input.operationId)
         return canonicalPayload({ approval: approvalView(row, row.laneId), landing: null });
+      // A fork PR run is decided once: a grant starts the run, a decline settles the PR head.
+      invariant(
+        !fork || row.status === 'requested',
+        'WORK_STALE',
+        `This fork PR run was already ${row.status}; a new push asks again.`,
+      );
       const lane = await saveLane(ctx, { projectId: input.projectId, actor: actor.id, laneId: input.laneId });
       invariant(
         lane.head === input.head,
@@ -165,7 +174,9 @@ export const decide = mutation({
           ...(reason ? { reason } : {}),
         },
       });
-      await noteDecision(ctx, row, status, actor.id, input.operationId, reason);
+      // A fork PR's Lane has no builder to tell; its PR head's forge/verify carries the decision.
+      if (fork) await notifyPullApproval(ctx, row, status);
+      else await noteDecision(ctx, row, status, actor.id, input.operationId, reason);
       // A held landing of this Lane takes the same decision now: one click, not two.
       const live = await liveLaneFinish(ctx, {
         projectId: input.projectId,
@@ -207,8 +218,10 @@ export const withdraw = mutation({
       const row = await approvalRow(ctx, input.projectId, input.laneId);
       invariant(row, 'NOT_FOUND', `Lane ${input.laneId} has no approval request.`);
       await requireMemberAuthorityById(ctx, input.projectId, row.requester, actor.id, 'Lane');
-      if (row.live)
+      const fork = openForkRequest(row);
+      if (row.live || fork)
         await writeApproval(ctx, row, { live: false, ended: { kind: 'withdrawn', at: Date.now() } });
+      if (fork) await notifyPullApproval(ctx, row, 'withdrawn');
       return canonicalPayload(
         approvalView(await approvalRow(ctx, input.projectId, input.laneId), input.laneId),
       );
@@ -232,7 +245,7 @@ export const observe = query({
       const row = await approvalRow(ctx, input.projectId, input.laneId);
       const view = approvalView(row, input.laneId);
       // Held for the landing: the Lane's live landing, when one waits for review, for the owner page.
-      const detail = Boolean(row?.live && input.detail);
+      const detail = Boolean((row?.live || openForkRequest(row)) && input.detail);
       const live = detail
         ? await liveLaneFinish(ctx, { projectId: input.projectId, laneId: input.laneId, headWrittenAt: '' })
         : null;

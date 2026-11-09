@@ -81,10 +81,15 @@ function sessionClaims(run: HostedCheckRun, input: SessionInput) {
 }
 /** The owner's current submodule policy for this run's runner: one settings read. The
  * current row, not the run's pinned copy, so a withdrawal applies to running checks; a
- * runner moved to another repository allows nothing for runs of the old one. Check logs
+ * runner moved to another repository allows nothing for runs of the old one. A fork pull
+ * request's run (Issue f7793473) is allowed nothing, whatever the allowlist says. Check logs
  * are public when the owner accepted that or the run's repository is not proven private
  * by the verified OIDC claims (`repository_visibility`; absent counts as public). */
-async function submodulePolicy(ctx: MutationCtx, input: SessionInput, run: { configuration: object }) {
+async function submodulePolicy(
+  ctx: MutationCtx,
+  input: SessionInput,
+  run: { configuration: object; request: { origin?: 'fork-pull' } },
+) {
   const row = await checkSetting(ctx, input.projectId, 'runner', 'runner');
   const current = row
     ? (JSON.parse(row.value) as {
@@ -100,7 +105,8 @@ async function submodulePolicy(ctx: MutationCtx, input: SessionInput, run: { con
     typeof current.repository === 'string' &&
     current.repository.toLowerCase() === pinned.repository?.toLowerCase();
   const listed = same ? submoduleAllowListSchema.safeParse(current.submodules) : null;
-  const submodules: SubmoduleAllow[] = listed?.success ? listed.data : [];
+  const submodules: SubmoduleAllow[] =
+    listed?.success && run.request.origin !== 'fork-pull' ? listed.data : [];
   const claimed = (JSON.parse(input.claims) as { repository_visibility?: unknown }).repository_visibility;
   const logsPublic =
     pinned.publicLogs === true ||

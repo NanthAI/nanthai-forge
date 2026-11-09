@@ -16,7 +16,9 @@ export type LaneApprovalRead = {
   head?: string;
   currentHead?: string;
   decision?: { by?: string; head: string; reason?: string; via: 'lane' | 'landing' };
-  ended?: { kind: 'landed' | 'withdrawn' };
+  /** A fork pull request's run request (Issue f7793473): granting runs its check, never lands. */
+  pullRequest?: number;
+  ended?: { kind: 'landed' | 'withdrawn' | 'settled' };
   landing: { submissionId: string; held: boolean } | null;
 };
 export type LaneApprovalPhase =
@@ -88,7 +90,10 @@ export function LaneApproval({
         )}
       </dl>
     );
-    body = !approval.live ? (
+    const fork = approval.pullRequest !== undefined;
+    body = fork ? (
+      forkBody(approval, head, facts, full, review)
+    ) : !approval.live ? (
       head(
         approval.ended?.kind === 'landed' ? 'Landed' : 'Request closed',
         approval.ended?.kind === 'landed'
@@ -124,5 +129,47 @@ export function LaneApproval({
         {error && <ErrorToast error={error} />}
       </section>
     </div>
+  );
+}
+/** A fork PR head's run request: the owner grants or declines one check-only run on the project's
+ * runner; its result is the PR's forge/verify status. */
+function forkBody(
+  approval: LaneApprovalRead,
+  head: (title: string, lead?: ReactNode, tone?: 'brand' | 'passed' | 'plain') => ReactNode,
+  facts: ReactNode,
+  full: ReactNode,
+  review: OwnerReview,
+) {
+  const pr = `fork PR #${approval.pullRequest}`;
+  if (approval.status === 'granted')
+    return (
+      <>
+        {head(
+          'Granted',
+          `The check of ${pr} runs on this project's runner; its result shows as forge/verify on the PR.`,
+          'passed',
+        )}
+        {full}
+      </>
+    );
+  if (approval.status === 'declined') return head('Declined', `You declined the check of ${pr}.`, 'plain');
+  if (!approval.live)
+    return head(
+      'Request closed',
+      approval.ended?.kind === 'withdrawn'
+        ? 'The request was withdrawn.'
+        : 'A newer push replaced this pull request head, or the request expired.',
+      'plain',
+    );
+  return (
+    <>
+      {head(
+        `Run the check of ${pr}?`,
+        "A pull request from a fork waits for you. Granting runs the Forge check on this project's runner, without private submodules.",
+      )}
+      {facts}
+      <OwnerReviewActions review={{ ...review, labels: { accept: 'Grant', decline: 'Decline' } }} />
+      {full}
+    </>
   );
 }

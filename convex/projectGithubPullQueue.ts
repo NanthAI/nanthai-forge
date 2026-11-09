@@ -14,7 +14,7 @@ import { accountFor } from './urlIdentity';
 import type { HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedProjectRoot } from '../src/project-routes';
-import { checkRunStatus, isPullOperation, type PullJob } from '../src/github-pull-check';
+import { checkRunStatus, forkStatus, isPullOperation, type PullJob } from '../src/github-pull-check';
 import type { InboundJob } from '../src/github-inbound-job';
 
 type Job = Doc<'projectGithubMirrorJobs'>;
@@ -61,6 +61,9 @@ export async function settlePull(ctx: MutationCtx, job: Job, result: Outcome, de
     inbound: canonicalPayload({ ...inbound, pull: { ...pull, outcome: result } } satisfies InboundJob),
     waitKey: undefined,
   });
+  // A fork head that never ran closes its approval request (one indexed read, forks only).
+  if (pull.approval && inbound.laneId)
+    await endForkApproval(ctx, job.projectId, inbound.laneId, pull.approval);
   if (!project || project.removal) return null;
   await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectGithubPullStatus:post'), {
     projectId: project._id,
@@ -78,6 +81,24 @@ export async function settlePull(ctx: MutationCtx, job: Job, result: Outcome, de
   return null;
 }
 
+/** Close a fork PR head's open approval request (its run started, or the head settled). */
+export async function endForkApproval(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  laneId: string,
+  operationId: string,
+) {
+  const row = await ctx.db
+    .query('projectHostedApprovals')
+    .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
+    .unique();
+  if (row?.pullRequest === undefined || row.operationId !== operationId || row.ended) return;
+  await ctx.db.patch(row._id, {
+    live: false,
+    ended: { kind: 'settled', at: Date.now() },
+    version: row.version + 1,
+  });
+}
 const waiting = (ctx: MutationCtx, projectId: Id<'hostedProjects'>, key: string) =>
   ctx.db
     .query('projectGithubMirrorJobs')
@@ -111,6 +132,34 @@ export async function notifyPullCheck(ctx: MutationCtx, run: HostedCheckRun) {
     runId: run.id,
   });
 }
+
+/** The owner decided a fork PR head's run request (projectHostedApprovals decide/withdraw): one
+ * indexed read. A grant starts the check-only run; a decline or withdrawal settles the head with
+ * that reason. A request whose head already settled finds no job and changes nothing. */
+export async function notifyPullApproval(
+  ctx: MutationCtx,
+  row: { projectId: Id<'hostedProjects'>; operationId: string },
+  status: 'granted' | 'declined' | 'withdrawn',
+) {
+  const [job] = await waiting(ctx, row.projectId, row.operationId);
+  if (!job) return;
+  if (status === 'granted')
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectGithubPull:start'), {
+      jobId: job._id,
+      key: row.operationId,
+    });
+  else await settlePull(ctx, job, 'error', forkStatus[status]);
+}
+/** A fork PR head nobody approved: scheduled once when it asked, a no-op once it ran or settled. */
+export const expire = internalMutation({
+  args: { jobId: v.id('projectGithubMirrorJobs'), key: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const job = await ctx.db.get(input.jobId);
+    if (!job || job.waitKey !== input.key) return null;
+    return settlePull(ctx, job, 'error', forkStatus.expired);
+  },
+});
 
 /** HMAC-verified pull_request webhook (convex/http.ts): one indexed mirror read; a repository
  * without two-way sync writes nothing. Redelivery of a known head is a no-op. */

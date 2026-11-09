@@ -1094,6 +1094,19 @@ test('HTTP submodule access mints one read-only token per owner-allowed reposito
   );
   assert.equal(github[0].path, '/repos/synthetic/project/installation', 'anchored on the run repository');
   assert(!github.some(call => call.path.startsWith('/repos/synthetic/unlisted')));
+  // Issue f7793473: a fork pull request's run gets no private submodule, whatever the allowlist
+  // says, and nothing reaches GitHub.
+  const runRow = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === s.run.id);
+  const plain = runRow.value;
+  const forked = JSON.parse(plain);
+  forked.request.origin = 'fork-pull';
+  s.patch('projectHostedCheckRuns', runRow._id, { value: JSON.stringify(forked) });
+  github.length = 0;
+  assert.deepEqual(await (await send(['synthetic/priv'])).json(), {
+    'synthetic/priv': { refused: 'not-allowed' },
+  });
+  assert.deepEqual(github, []);
+  s.patch('projectHostedCheckRuns', runRow._id, { value: plain });
   // A run repository not proven private has public logs: no token without a public-logs grant,
   // and nothing reaches GitHub. (A public project; a private one is refused outright, below.)
   s.patch('hostedProjects', s.projectId, { visibility: 'public' });

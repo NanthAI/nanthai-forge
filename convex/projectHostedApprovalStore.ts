@@ -19,13 +19,17 @@ export const approvalRow = (ctx: QueryCtx | MutationCtx, projectId: Id<'hostedPr
     .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
     .unique();
 
-/** What every reader sees (the requester and deciding person map to handles). */
+/** A fork PR run request that is still open: it is never `live` (it holds no landing). */
+export const openForkRequest = (row: ApprovalRow | null) => row?.pullRequest !== undefined && !row.ended;
+/** What every reader sees (the requester and deciding person map to handles). `live` reads as
+ * "open": a fork PR run request is open until it ends. */
 export function approvalView(row: ApprovalRow | null, laneId: string) {
   if (!row) return { laneId, status: 'none' as const, live: false, version: 0 };
   return {
     laneId: row.laneId,
     status: row.status,
-    live: row.live,
+    live: row.live || openForkRequest(row),
+    ...(row.pullRequest !== undefined ? { pullRequest: row.pullRequest } : {}),
     reason: row.reason,
     requester: row.requester,
     ...(row.agent ? { agent: row.agent } : {}),

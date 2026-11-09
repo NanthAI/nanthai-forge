@@ -110,7 +110,9 @@ export async function runInbound(
   let commit: string;
   if (pull) {
     commit = pull.head;
-    await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', loaded.link);
+    // A fork head's one pending status comes with its approve link, once its Lane exists.
+    if (!pull.fork)
+      await postPullStatus(api, loaded.repository, commit, 'pending', 'Forge check started.', loaded.link);
   } else {
     const ref = await api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
     commit = ref.object.sha;

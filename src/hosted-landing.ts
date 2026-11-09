@@ -21,7 +21,7 @@ const object = z.object({ sha256: hash, size: checkNumber }).strict();
 export const landingCheckSelectionSchema = z.union([
   z.object({ kind: z.literal('run'), runId: z.uuid() }).strict(),
   hostedCheckRequestSchema
-    .omit({ operationId: true, authorityEpoch: true, candidateId: true, expectedHead: true })
+    .omit({ operationId: true, authorityEpoch: true, candidateId: true, expectedHead: true, origin: true })
     .extend({ kind: z.literal('request') })
     .strict(),
 ]);

@@ -264,7 +264,7 @@ ordinary Forge landing and passes the same checks and review rules.
   per 99 changed files, and GitHub calls grow with changed directories, not
   repository size.
 - **Pull requests:** a `pull_request` event (opened, synchronize, reopened) into
-  `main`, fork PRs included, queues one PR job (`projectGithubPullQueue:receive`, one
+  `main` queues one PR job (`projectGithubPullQueue:receive`, one
   indexed read; a one-way project or a known head writes nothing). It reads the PR
   head like a push, but diffs from its merge base with the last mirrored GitHub
   `main`, so only the PR's own changes go into a Lane that Forge composes onto
@@ -274,7 +274,25 @@ ordinary Forge landing and passes the same checks and review rules.
   on the Candidate: nothing lands. The PR's change comes in through the push
   webhook once GitHub merges it. The Lane (agent `github-pull`) is abandoned when
   the head settles.
-- **`forge/verify`:** pending when the job starts, then exactly one final commit
+- **Fork pull requests** (the head repository is not the bound one) follow
+  GitHub's approve-and-run norm: they run only after a project owner approves.
+  The head is read and composed like any PR, so its Lane shows the changes, but
+  its check-only run waits on an approval request on that Lane
+  (`projectHostedApprovals`, the same request/decide path builders use; the row is
+  never `live`, so it holds no landing). `forge/verify` goes pending once with
+  "Fork PR: a project owner must approve this run." and links to the approve page
+  (`/approve?project=…&lane=…`); the project board gets one note with the same
+  link. Only the project owner, signed in as a person, can grant or decline; agents
+  and device sign-ins cannot. A grant starts the run (status "Forge check started
+  (fork PR approved by a project owner)."). A fork run never gets private
+  submodule access: its run carries `origin: fork-pull` and the runner session
+  allows no submodule, whatever the owner's allowlist says. A decline, a withdrawn
+  request, or 30 days without a decision settles `forge/verify` as error with that
+  reason; a newer push supersedes the head as usual and asks again. PRs from
+  branches of the bound repository (people with write access) run at once, as
+  above.
+- **`forge/verify`:** pending when the job starts (for a fork head: when it asks
+  for approval, and again when the approved run starts), then exactly one final commit
   status on the head: success, failure (the check failed, or the PR does not
   compose onto Forge `main`), or error (the job or check could not run, the check
   ended cancelled or without a runner, no check is configured). It links to the
@@ -285,9 +303,11 @@ ordinary Forge landing and passes the same checks and review rules.
 - **PR cost:** per head, 1 webhook mutation, the same GitHub reads and Convex calls
   as an inbound push (plus 1 compare read, and tree reads for what `main` changed
   when the PR is behind), the check-only run, about 4 small Convex calls to start
-  and settle it, and 2 status writes. Every composition and check-run completion
-  in the deployment reads one empty index range to find a waiting PR job. Idle is
-  zero; there is no polling.
+  and settle it, and 2 status writes. A fork head adds 1 approval row write, 1
+  board note, 1 status write, 1 scheduled expiry and 1 indexed read when the owner
+  decides. PR jobs' composition and check-run completions read one index range to
+  find a waiting PR job; other operations read nothing. Idle is zero; there is no
+  polling.
 
 ### Two-way protection: the ruleset you import once
 

@@ -11,6 +11,9 @@ export const pullJobSchema = z
     number: z.number().int().positive(),
     head: sha,
     fork: z.boolean(),
+    /** A fork head's approval request operation id (on its Lane's projectHostedApprovals row)
+     * while it waits for a project owner's grant; the check-only run starts only after it. */
+    approval: z.uuid().optional(),
     /** The check-only run once the composition is clean. */
     runId: z.uuid().optional(),
     /** Set once the final status is decided; later events for this head change nothing. */
@@ -29,8 +32,9 @@ export function pullOperationId() {
 export const isPullOperation = (id: string) => id[14] === '8';
 const pullActions = new Set(['opened', 'synchronize', 'reopened']);
 /** The PR events that start a check: opened, synchronize (a new head) and reopened, into main.
- * Forks included: the head commit is readable from the base repository. Null for every other
- * action or base branch. Throws on a malformed payload (the webhook answers 400). */
+ * A fork head (head repository is another one) is read like any other, but its check-only run
+ * waits for a project owner's grant (GitHub's approve-and-run norm, Issue f7793473). Null for
+ * every other action or base branch. Throws on a malformed payload (the webhook answers 400). */
 export function pullRequestEvent(payload: Record<string, unknown>) {
   const pr = payload.pull_request as
     | {
@@ -63,6 +67,19 @@ export function pullRequestEvent(payload: Record<string, unknown>) {
     fork: typeof from !== 'string' || from.toLowerCase() !== repository.toLowerCase(),
   };
 }
+/** A fork PR head waits this long for the owner's grant, then settles with a named reason. */
+export const forkApprovalTtlMs = 30 * 24 * 60 * 60_000;
+/** forge/verify descriptions of the fork approval path (GitHub caps descriptions at 140). */
+export const forkStatus = {
+  pending: 'Fork PR: a project owner must approve this run.',
+  started: 'Forge check started (fork PR approved by a project owner).',
+  declined: 'Fork PR: a project owner declined this run. Push again to ask again.',
+  withdrawn: 'Fork PR: the approval request was withdrawn. Push again to ask again.',
+  expired: 'Fork PR: no owner approved this run within 30 days. Push again to ask again.',
+} as const;
+/** The approval request the owner reads on the approve page and the board. */
+export const forkApprovalReason = (number: number, head: string) =>
+  `GitHub PR #${number} from a fork (head ${head.slice(0, 12)}) asks to run the Forge check on this project's runner. Review its changes first; the run gets no private submodules.`;
 export type PullStatus = { state: 'pending' | 'success' | 'failure' | 'error'; description: string };
 const clip = (text: string) => (text.length > 140 ? `${text.slice(0, 139)}…` : text);
 /** The commit status for a check run's terminal status (GitHub caps descriptions at 140). */

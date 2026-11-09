@@ -114,6 +114,9 @@ export const hostedCheckRequestSchema = z
     expectedDefinition: checkHash,
     expectedConfiguration: checkHash,
     expectedEnvironment: checkHash,
+    /** A fork pull request head's check-only run (Issue f7793473): it never gets private
+     * submodule access, whatever the runner's allowlist says. */
+    origin: z.literal('fork-pull').optional(),
   })
   .strict();
 /** The configured check's test shards were not affected by the change's paths, so

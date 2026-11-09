@@ -15,6 +15,10 @@ export const hostedApprovalTables = {
     requester: v.string(),
     /** The requesting agent session's word-list slug; absent for a person. */
     agent: v.optional(v.string()),
+    /** A fork pull request's run request (Issue f7793473): the PR number. Such a row is never
+     * `live` (a PR Lane never lands, so it holds no landing and costs other landings nothing);
+     * it is open until `ended`, and the owner's grant starts the PR head's check-only run. */
+    pullRequest: v.optional(v.number()),
     reason: v.string(),
     /** The Lane's saved head when the request was made. */
     head: v.string(),
@@ -33,9 +37,13 @@ export const hostedApprovalTables = {
         via: v.union(v.literal('lane'), v.literal('landing')),
       }),
     ),
-    /** Set when a landing carried the grant to main, or the requester withdrew it. */
+    /** Set when a landing carried the grant to main, the requester withdrew it, or (a fork PR
+     * request) its run started or the PR head settled without one. */
     ended: v.optional(
-      v.object({ kind: v.union(v.literal('landed'), v.literal('withdrawn')), at: v.number() }),
+      v.object({
+        kind: v.union(v.literal('landed'), v.literal('withdrawn'), v.literal('settled')),
+        at: v.number(),
+      }),
     ),
     version: v.number(),
   })

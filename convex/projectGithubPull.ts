@@ -3,7 +3,8 @@
 // becomes a mirror queue job (sequence 0.5: after an inbound push, before publishes) that reads
 // GitHub like an inbound push and stages a Lane and composition. It then releases the queue and
 // waits, by `waitKey`, for the composition and then a check-only run on its Candidate; nothing
-// lands. forge/verify goes pending when the job starts and gets one final status. A newer head
+// lands. forge/verify goes pending when the job starts and gets one final status. A fork head
+// waits for a project owner's grant before its run (convex/projectGithubPullFork.ts). A newer head
 // of the same PR supersedes the older job. Event-driven only: no poll, idle zero.
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
@@ -24,6 +25,7 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { checkRunStatus, pullOperationId } from '../src/github-pull-check';
 import { pullOf, settlePull } from './projectGithubPullQueue';
+import { forkGate } from './projectGithubPullFork';
 import type { InboundJob } from '../src/github-inbound-job';
 
 type Job = Doc<'projectGithubMirrorJobs'>;
@@ -148,6 +150,8 @@ export const startCheck = internalMutation({
       return settlePull(ctx, job, 'failure', 'Conflicts with Forge main; update the branch from main.');
     const check = await checkRequest(ctx, project._id);
     if (!check) return settlePull(ctx, job, 'error', 'This Forge project has no check configured.');
+    // A fork head runs only after the owner's grant, and never with private submodules.
+    if (pull.fork && !(await forkGate(ctx, job, project))) return null;
     const { kind: _kind, ...selected } = check;
     void _kind;
     const run = await enqueueHostedCheck(ctx, {
@@ -159,6 +163,7 @@ export const startCheck = internalMutation({
         candidateId: candidate.id,
         expectedHead: candidate.result.head,
         ...selected,
+        ...(pull.fork ? { origin: 'fork-pull' as const } : {}),
       },
     });
     await ctx.db.patch(job._id, {

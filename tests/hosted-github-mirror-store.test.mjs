@@ -766,3 +766,73 @@ test('two-way PR: the check run settles forge/verify once; a newer head supersed
     link: null,
   });
 });
+test('two-way PR fork: the owner decision starts or settles the waiting head; expiry and a newer head close the request', async () => {
+  const f = await twoWayFixture();
+  const { pullOperationId, forkStatus } = await import('../dist/github-pull-check.js');
+  const posts = () => f.scheduled.filter(row => row.name === 'projectGithubPullStatus:post');
+  /** A fork head waiting on its Lane's approval request, as the fork gate leaves it. */
+  const waitingFork = async (number, head) => {
+    await prHead(f, head, number);
+    const job = pullJobs(f, number).at(-1),
+      approval = pullOperationId(),
+      laneId = randomUUID();
+    f.patch('projectGithubMirrorJobs', job._id, {
+      status: 'done',
+      waitKey: approval,
+      inbound: JSON.stringify({ phase: 'checking', pull: { number, head, fork: true, approval }, laneId }),
+    });
+    const rowId = f.insert('projectHostedApprovals', {
+      projectId: f.projectId,
+      laneId,
+      operationId: approval,
+      requester: 'owner',
+      reason: 'fork',
+      head: 'a'.repeat(64),
+      at: 1,
+      status: 'requested',
+      live: false,
+      pullRequest: number,
+      version: 1,
+    });
+    return { job, approval, row: () => f.tables.projectHostedApprovals.get(rowId) };
+  };
+  // Granted: one indexed read, the run starts under the request's key, nothing is written.
+  const a = await waitingFork(7, 'b'.repeat(40));
+  await f.run('granted', ctx => pullQueue.notifyPullApproval(ctx, a.row(), 'granted'));
+  assert.deepEqual(f.scheduled.at(-1), {
+    name: 'projectGithubPull:start',
+    args: { jobId: a.job._id, key: a.approval },
+  });
+  assert.equal(f.counts.at(-1).writes, 0);
+  assert.equal(posts().length, 0);
+  // Nobody decided in 30 days: forge/verify settles error with that reason; the request closes.
+  await f.run('expire', pullQueue.expire._handler, { jobId: a.job._id, key: a.approval });
+  assert.deepEqual(
+    posts().map(row => [row.args.state, row.args.sha, row.args.description]),
+    [['error', 'b'.repeat(40), forkStatus.expired]],
+  );
+  assert.equal(a.row().live, false);
+  assert.equal(a.row().ended.kind, 'settled');
+  await f.run('expireAgain', pullQueue.expire._handler, { jobId: a.job._id, key: a.approval });
+  await f.run('lateDecline', ctx => pullQueue.notifyPullApproval(ctx, a.row(), 'declined'));
+  assert.equal(posts().length, 1, 'a settled head changes nothing more');
+  // Declined or withdrawn: settled error, named.
+  for (const [number, status] of [
+    [8, 'declined'],
+    [9, 'withdrawn'],
+  ]) {
+    const w = await waitingFork(number, String(number).repeat(40));
+    await f.run(status, ctx => pullQueue.notifyPullApproval(ctx, w.row(), status));
+    assert.equal(posts().at(-1).args.state, 'error');
+    assert.equal(posts().at(-1).args.description, forkStatus[status]);
+    assert.equal(pullOf(f.tables.projectGithubMirrorJobs.get(w.job._id)).outcome, 'error');
+    assert.equal(w.row().ended.kind, 'settled');
+  }
+  // A newer push supersedes the waiting head and closes its request; the new head asks again.
+  const s = await waitingFork(10, 'c'.repeat(40));
+  await prHead(f, 'd'.repeat(40), 10);
+  assert.equal(pullOf(f.tables.projectGithubMirrorJobs.get(s.job._id)).outcome, 'superseded');
+  assert.equal(s.row().ended.kind, 'settled');
+  assert.equal(f.tables.projectHostedApprovals.size, 4, 'fork requests are never live rows');
+  assert(![...f.tables.projectHostedApprovals.values()].some(row => row.live));
+});
