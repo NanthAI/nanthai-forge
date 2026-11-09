@@ -91,9 +91,21 @@ export async function laneRefs(
   return refs;
 }
 
-/** The parent of a Lane commit: main's Git commit for the Lane's base, as main's GitHub
- * mirror published it (the exact receipt first, else another publication of that State). */
-async function baseCommit(ctx: Ctx, projectId: Id<'hostedProjects'>, lane: Doc<'projectHostedOverlapLanes'>) {
+type Parent = {
+  commit: string;
+  tree: string | null;
+  legacy: boolean;
+  listing: Doc<'projectHistoryPacks'>['trees'] | null;
+};
+/** The parent of a Lane commit on a project whose main has a GitHub mirror: main's Git commit for
+ * the Lane's base, as the mirror published it (the exact receipt first, else another publication
+ * of that State). */
+async function mirrorParent(
+  ctx: Ctx,
+  projectId: Id<'hostedProjects'>,
+  lane: Doc<'projectHostedOverlapLanes'>,
+  mapping: string | null,
+): Promise<Parent | null> {
   const parse = (mapping: string | null | undefined) => {
     const value = mapping ? githubSyncCommitSchema.parse(JSON.parse(mapping)) : null;
     return value?.state === lane.baseHead ? value : null;
@@ -111,19 +123,40 @@ async function baseCommit(ctx: Ctx, projectId: Id<'hostedProjects'>, lane: Doc<'
       .order('desc')
       .take(8)),
   ];
-  for (const job of jobs) {
-    const value = job.status === 'done' && !job.inbound ? parse(job.mapping) : null;
-    if (value) return value;
-  }
-  const mirror = await ctx.db
-    .query('projectGithubMirrors')
-    .withIndex('by_project', q => q.eq('projectId', projectId))
-    .unique();
-  return parse(mirror?.mapping);
+  let value = null;
+  for (const job of jobs) if (!value && job.status === 'done' && !job.inbound) value = parse(job.mapping);
+  value ??= parse(mapping);
+  return value
+    ? { commit: value.commit, tree: value.tree, legacy: value.publication !== 'tracked', listing: null }
+    : null;
+}
+/** Without a mirror, main's Git commits are the imported commit and the commits Forge built for
+ * its landings (Issue 3bd4a8e9): the newest Forge pack's tip (with its tree listing) needs no
+ * read, an older one is one indexed read. The import commit's tree is found by the build. */
+async function forgeParent(
+  ctx: Ctx,
+  projectId: Id<'hostedProjects'>,
+  state: string,
+  history: Doc<'projectHistory'>,
+  packs: Doc<'projectHistoryPacks'>[],
+): Promise<Parent | null> {
+  const tip = packs.find(pack => pack.source === 'forge');
+  if (tip?.main?.state === state)
+    return { commit: tip.tip, tree: tip.main.tree, legacy: false, listing: tip.main.listing };
+  const [row] = await ctx.db
+    .query('projectGitMainCommits')
+    .withIndex('by_project_and_state', q => q.eq('projectId', projectId).eq('state', state))
+    .order('desc')
+    .take(1);
+  if (row) return { commit: row.commit, tree: row.tree, legacy: false, listing: null };
+  // History seeded from a mirror that is gone has main commits only from that mirror.
+  if (state === history.importState && !packs.some(pack => pack.source === 'catch-up'))
+    return { commit: history.importCommit, tree: null, legacy: false, listing: null };
+  return null;
 }
 
 /** What one build needs, in one query: the Lane's head and base, the parent commit and its
- * GitHub tree, the public author and the alias object. */
+ * Git tree, the public author and the alias object. */
 export const plan = internalQuery({
   args: { projectId: v.id('hostedProjects'), laneId: v.string() },
   returns: v.any(),
@@ -132,17 +165,10 @@ export const plan = internalQuery({
     invariant(lane?.open, 'GIT_LANE_UNAVAILABLE', `Lane ${laneId} is not an open Lane of this project.`);
     const cached = await commitRow(ctx, projectId, laneId);
     if (cached && current(cached, lane)) return { status: 'cached', commit: cached.commit };
-    const parent = await baseCommit(ctx, projectId, lane);
-    if (!parent)
-      throw new ForgeError(
-        'GIT_LANE_BASE_UNPUBLISHED',
-        `Lane ${laneId} starts from a main State (${lane.baseHead.slice(0, 12)}) that has no Git commit yet. Sync the Lane to current main, or retry once main's mirror has published it.`,
-      );
     const history = await ctx.db
       .query('projectHistory')
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .unique();
-    const account = await accountFor(ctx, lane.actor);
     // History packs, newest first: the parent commit's trees are read from them when the
     // alias object lacks the base's Git ids (a first build), instead of every file.
     const packs = await ctx.db
@@ -150,10 +176,29 @@ export const plan = internalQuery({
       .withIndex('by_project', q => q.eq('projectId', projectId))
       .order('desc')
       .take(historyPackPage);
+    const mirror = await ctx.db
+      .query('projectGithubMirrors')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .unique();
+    // The same rule as servedRefs: main's commits come from its mirror when the mirror publishes
+    // the repository the history holds, else from Forge.
+    const mirrored =
+      !!mirror?.mapping && mirror.repository.toLowerCase() === history?.repository.toLowerCase();
+    const parent = mirrored
+      ? await mirrorParent(ctx, projectId, lane, mirror.mapping)
+      : history
+        ? await forgeParent(ctx, projectId, lane.baseHead, history, packs)
+        : null;
+    if (!parent)
+      throw new ForgeError(
+        'GIT_LANE_BASE_UNPUBLISHED',
+        `Lane ${laneId} starts from a main State (${lane.baseHead.slice(0, 12)}) that has no Git commit yet. Sync the Lane to current main, or retry once main's Git commit for it is stored.`,
+      );
+    const account = await accountFor(ctx, lane.actor);
     return {
       status: 'build',
       lane: { head: lane.head, baseHead: lane.baseHead, baseReceiptId: lane.baseReceiptId },
-      parent: { commit: parent.commit, tree: parent.tree, legacy: parent.publication !== 'tracked' },
+      parent,
       author: laneAuthor(account?.handle ?? null, lane.agent),
       aliases: history?.laneAliases ?? null,
       packs: packs.map(pack => ({ chunks: pack.chunks, ...(pack.trees ? { trees: pack.trees } : {}) })),

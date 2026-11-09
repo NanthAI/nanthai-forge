@@ -138,7 +138,7 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   let commit = plan.parent.commit,
     state = plan.parent.state;
   const objects: PackObject[] = [];
-  let commits = 0;
+  const built: { state: string; commit: string; tree: string; sequence: number }[] = [];
   for (let at = 0; at < plan.landings.length; at += 10) {
     const page = plan.landings.slice(at, at + 10);
     const pageStates = [...new Set(page.map(landing => landing.state))];
@@ -164,10 +164,10 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
       commit = gitHash('commit', bytes);
       objects.push({ type: 'commit', bytes }, ...(await work.objects(step, known)));
       state = landing.state;
-      commits++;
+      built.push({ state, commit, tree: step.tree.root, sequence: landing.sequence });
     }
   }
-  if (!commits) return null;
+  if (!built.length) return null;
   const last = plan.landings.at(-1)!;
   const ids = objects.map(object => gitHash(object.type, object.bytes));
   // Geometric merge: the newest Forge packs join this one while they are at most twice its
@@ -217,6 +217,7 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
       },
     },
     merged: merged.map(row => row.id),
+    commits: built,
     objectSets: newSets,
   });
   for (const sha256 of new Set(recorded.discard))
@@ -227,7 +228,7 @@ export async function buildMain(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   if (recorded.recorded && worker && workerServes(worker, recorded.bytes))
     await ctx.scheduler.runAfter(0, internal.gitServeFrame.prepare, { projectId });
   console.log(
-    `FORGE_GIT_MAIN_METRIC ${JSON.stringify({ projectId, ...metric, merged: merged.length, commits, objects: objects.length, packBytes: pack.bytes, ms: Date.now() - started, ...work.metric })}`,
+    `FORGE_GIT_MAIN_METRIC ${JSON.stringify({ projectId, ...metric, merged: merged.length, commits: built.length, objects: objects.length, packBytes: pack.bytes, ms: Date.now() - started, ...work.metric })}`,
   );
   return recorded.recorded ? commit : null;
 }

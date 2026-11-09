@@ -52,11 +52,13 @@ git diff origin/main...origin/lane     # the Lane's saved change
 A Lane has no Git commits of its own, so the first fetch that names a Lane makes one for
 its saved head and caches it per Lane:
 
-- **Parent:** main's Git commit for the Lane's base (the commit main's GitHub mirror
-  published for that State). Forge builds the base tree from the base State and checks it
-  equals that commit's tree; otherwise the fetch fails with `GIT_LANE_TREE` and no ref is
-  made. A base main has no Git commit yet: `GIT_LANE_BASE_UNPUBLISHED` (sync the Lane or
-  retry once the mirror publishes it).
+- **Parent:** main's Git commit for the Lane's base: the commit main's GitHub mirror
+  published for that State or, on a project without a mirror, the imported commit or the
+  commit Forge built for that landing ([below](#main-landings-without-a-mirror)). Forge
+  builds the base tree from the base State and checks it equals that commit's tree;
+  otherwise the fetch fails with `GIT_LANE_TREE` and no ref is made. A base main has no Git
+  commit yet: `GIT_LANE_BASE_UNPUBLISHED` (sync the Lane, or retry once that commit is
+  stored).
 - **Tree:** the saved files, published exactly as the mirror publishes main (Forge
   metadata paths left out, Git LFS paths as pointers, submodules as gitlinks).
 - **Author and committer:** the Lane owner's public Forge handle (`handle/agent` when an
@@ -106,6 +108,8 @@ Forge packs merge into the next one while at most twice its size, so a project k
 log2(builds) Forge packs. One request builds per main move (a two-minute lease); others list
 the stored refs with the `remote:` gap line meanwhile. A build covers at most 100 landings;
 a longer backlog continues on the next listing. Forge packs count toward the history limit.
+Each built commit also gets one small row (its State, id and tree), so a Lane based on any
+landed State builds on that commit; the listing that names a Lane builds main first.
 Projects whose history came from a mirror get main's commits from that mirror instead.
 
 A clone streams every stored pack from R2 as one pack: a single pack passes through
@@ -151,7 +155,9 @@ plan query (the landings, at most 100 receipt rows, and the pack rows), one leas
 one query per 100 source objects it reads, one record mutation, R2 GETs for each pack's
 object set (or, the first time, the pack itself) and the previous tree listing, and R2 PUTs
 for the new pack, its object set and tree listing. A listing with no new landing adds
-nothing.
+nothing. A Lane build there finds its parent in the plan query: the newest Forge commit
+from the pack rows it already reads (and its tree listing, one R2 GET, instead of a scan),
+an older one by one indexed read, the imported commit by reading its pack up to that commit.
 
 A Convex HTTP response is at most 100 MiB. Without the large-pack Worker, a fetch whose pack
 is larger returns `GIT_PACK_TOO_LARGE` with its size.

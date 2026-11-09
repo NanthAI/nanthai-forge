@@ -124,6 +124,10 @@ export const record = internalMutation({
       main: v.object({ state: v.string(), tree: v.string(), sequence: v.number(), listing: pin }),
     }),
     merged: v.array(v.id('projectHistoryPacks')),
+    /** Every commit the pack adds, oldest first: Lanes based on their States build on them. */
+    commits: v.array(
+      v.object({ state: v.string(), commit: v.string(), tree: v.string(), sequence: v.number() }),
+    ),
     objectSets: v.array(v.object({ id: v.id('projectHistoryPacks'), objectSet: pin })),
   },
   returns: v.object({ recorded: v.boolean(), discard: v.array(v.string()), bytes: v.number() }),
@@ -175,6 +179,8 @@ export const record = internalMutation({
       main: pack.main,
       at: Date.now(),
     });
+    for (const commit of input.commits)
+      await ctx.db.insert('projectGitMainCommits', { projectId, ...commit });
     const bytes = history.bytes - freed + pack.bytes;
     await ctx.db.patch(history._id, {
       bytes,

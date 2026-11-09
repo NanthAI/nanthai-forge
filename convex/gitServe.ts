@@ -168,13 +168,15 @@ export function servedRefs(loaded: Loaded) {
       ? `Forge main (State ${loaded.mainHead.slice(0, 12)}) has landings not yet published as Git commits; refs/heads/main is ${tip.slice(0, 12)}, the newest published one.`
       : null;
   // Lane commits' parents are main mirror commits, all inside the stored packs once they reach
-  // the mirror's current commit; until then no Lane ref is listed or served.
-  const lanes = covered ? loaded.lanes : [];
+  // the mirror's current commit; until then no Lane ref is listed or served. Without a mirror they
+  // are the imported commit or Forge-built main commits, stored history by construction.
+  const lanesReady = !!covered || !main;
+  const lanes = lanesReady ? loaded.lanes : [];
   return {
     refs: { main: tip, lanes: lanes.map(({ laneId, commit }) => ({ laneId, commit })) },
     packs,
     lanes,
-    lanesReady: !!covered,
+    lanesReady,
     gap,
   };
 }
@@ -410,18 +412,22 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
   };
   let lanes = gzipped ? undefined : laneArgs();
   // Git sends no credentials while anonymous reads work (public projects). A listing that names
-  // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is.
-  if (!credential && !session?.c && v2 && !gzipped && route.service === 'git-upload-pack') {
-    let named: string[] = [];
+  // a Lane ref asks for them, whatever the Lane id, so git retries as the member it is; a gzipped
+  // listing (git compresses bodies over 1 KiB, as when a fetch names several refs) asks once decoded.
+  const asksLogin = (bytes: Uint8Array) => {
+    if (credential || session?.c || !v2 || route.service !== 'git-upload-pack') return false;
     try {
-      const command = parseV2Request(body);
-      if (command.command === 'ls-refs') named = namedLanes(command.args);
-    } catch {}
-    if (named.length)
-      return unauthorized(
-        'Lane refs are for project members: sign in with a Forge login token (nforge login) as the password.',
-      );
-  }
+      const command = parseV2Request(bytes);
+      return command.command === 'ls-refs' && namedLanes(command.args).length > 0;
+    } catch {
+      return false;
+    }
+  };
+  const laneLogin = () =>
+    unauthorized(
+      'Lane refs are for project members: sign in with a Forge login token (nforge login) as the password.',
+    );
+  if (!gzipped && asksLogin(body)) return laneLogin();
   const reload = async () =>
     (await ctx.runQuery(internal.gitServeStore.load, {
       ...route.project,
@@ -457,6 +463,7 @@ export const serve = httpAction(async (ctx, request): Promise<Response> => {
       body = new Uint8Array(
         await ctx.runAction(internal.gitServeInflate.gunzip, { body: body.slice().buffer }),
       );
+      if (asksLogin(body)) return laneLogin();
       // Members only: a gzipped body names its Lanes after decoding, so they cost one more query.
       lanes = loaded.member ? laneArgs() : undefined;
       if (lanes) loaded = (await reload()) as Loaded;

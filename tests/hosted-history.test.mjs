@@ -912,6 +912,7 @@ test('pack selection, joining, gzip requests and the main gap are explicit', asy
   const loaded = gap => ({
     status: 'ok',
     projectId: 'p',
+    lanes: [],
     mainHead: gap ? 'f'.repeat(64) : 'd'.repeat(64),
     history: {
       row: {
@@ -1999,6 +2000,124 @@ test('an unmirrored project serves its landings as Git commits on the imported h
     String(Number(git(source.repo, ['rev-list', '--count', 'HEAD']).toString()) + 6),
   );
   await client(['fsck', '--full', '--strict'], three);
+});
+// Incident (Issue 3bd4a8e9, 2026-11-09): on an imported project with no mirror, a member's Lane
+// fetch answered GIT_HISTORY_PREPARING forever, because Lane refs waited for a mirror commit.
+test('an unmirrored project lists and serves Lane refs on the imported and Forge-built main commits', async t => {
+  const source = sourceRepository(t),
+    f = fixture(t, source),
+    { s } = f;
+  for (const table of [
+    'projectHostedChannels',
+    'projectHostedAcceptances',
+    'projectHostedOverlapLanes',
+    'projectGitLaneCommits',
+    'projectGitMainCommits',
+  ])
+    s.tables[table] ??= new Map();
+  const projectId = await importedProject(f, source.head);
+  publish(s, projectId);
+  await modules.projectHistoryImport.run._handler(s.ctx, { projectId, attempt: 1 });
+  const imported = storeState(s, projectId, source.repo, source.head);
+  historyRow(s, projectId).importState = imported;
+  s.ctx.db.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  setMain(s, projectId, imported);
+  const owner = credentialFor(s, 'cred-owner', 'owner'),
+    stranger = credentialFor(s, 'cred-stranger', 'stranger');
+  const host = await gitHost(t, s);
+  const remote = token => `${host.base.replace('http://', `http://git:${token}@`)}/git/${projectId}.git`;
+  const lane = (baseHead, edits, message) => {
+    const laneId = crypto.randomUUID();
+    s.ctx.db.insert('projectHostedOverlapLanes', {
+      projectId,
+      laneId,
+      intentId: crypto.randomUUID(),
+      actor: 'owner',
+      agent: 'cosmic-toucan',
+      intent: 'Synthetic Lane',
+      head: storeState(s, projectId, source.repo, source.head, edits, message),
+      baseHead,
+      baseReceiptId: crypto.randomUUID(),
+      baseSequence: 1,
+      recordVersion: 2,
+      open: true,
+      changes: '[]',
+      complete: false,
+    });
+    return laneId;
+  };
+  const strict = ['-c', 'transfer.fsckObjects=true'];
+  const repo = join(scratch(t, 'forge-git-unmirrored-lane-'), 'member');
+  const rev = ref => git(repo, ['rev-parse', ref]).toString().trim();
+  const changed = range => git(repo, ['diff', '--name-only', range]).toString();
+
+  // A Lane on the imported main, before any landing: its parent is the imported commit.
+  const onImport = lane(imported, { 'src/lane.go': 'package main // on import\n' }, 'Lane on import');
+  await client([...strict, 'clone', '-q', remote(owner), repo]);
+  await client(
+    [...strict, 'fetch', '-q', 'origin', `refs/forge/lanes/${onImport}:refs/remotes/origin/a`],
+    repo,
+  );
+  assert.equal(rev('origin/a^'), source.head, 'built on the imported commit');
+  assert.equal(changed('origin/main...origin/a'), 'src/lane.go\n');
+
+  // Two landings, then Lanes on the newest and on the first: the fetch naming them builds main
+  // first, then each Lane on the Forge commit for its base.
+  const landed = { 'src/app.go': 'package main // landed\n' };
+  const first = storeState(s, projectId, source.repo, source.head, landed);
+  land(s, projectId, imported, first, 'Edit app on Forge');
+  const second = storeState(s, projectId, source.repo, source.head, {
+    ...landed,
+    'src/forge.go': 'package forge\n',
+  });
+  land(s, projectId, first, second, 'Add forge.go');
+  const onSecond = lane(
+    second,
+    { ...landed, 'src/forge.go': 'package forge // lane\n', 'src/lane.go': 'package main\n' },
+    'Lane on the newest main',
+  );
+  const onFirst = lane(
+    first,
+    { ...landed, 'src/old.go': 'package main // older base\n' },
+    'Lane on an older main',
+  );
+  const before = host.snapshot();
+  await client(
+    [
+      ...strict,
+      'fetch',
+      '-q',
+      'origin',
+      'main:refs/remotes/origin/main',
+      `refs/forge/lanes/${onSecond}:refs/remotes/origin/b`,
+      `refs/forge/lanes/${onFirst}:refs/remotes/origin/c`,
+    ],
+    repo,
+  );
+  // Naming three refs makes git gzip the listing: it is decoded (one action), asks for the login
+  // (401) and is decoded again as the member's, then main and each Lane are built.
+  assert.equal(host.since(before).action, 2 + 1 + 2, 'two decodes, one main build, one build per Lane');
+  assert.equal(rev('origin/main~2'), source.head);
+  assert.equal(rev('origin/b^'), rev('origin/main'), 'built on the newest Forge commit');
+  assert.equal(rev('origin/c^'), rev('origin/main~1'), 'built on the Forge commit of its older base');
+  assert.equal(changed('origin/main...origin/b'), 'src/forge.go\nsrc/lane.go\n');
+  assert.equal(changed('origin/main~1...origin/c'), 'src/old.go\n');
+  assert.equal(s.tables.projectGitMainCommits.size, 2, 'one row per built main commit');
+  await client(['fsck', '--full', '--strict'], repo);
+
+  // Members list every built Lane; a stranger lists none and cannot fetch one.
+  // (A plain ls-remote of a public project stays anonymous; the login goes in a header.)
+  const list = async token =>
+    (await client(['-c', `http.extraHeader=Authorization: Bearer ${token}`, 'ls-remote', remote(token)]))
+      .stdout;
+  const listed = await list(owner);
+  for (const laneId of [onImport, onSecond, onFirst])
+    assert.match(listed, new RegExp(`refs/forge/lanes/${laneId}\n`));
+  assert.doesNotMatch(await list(stranger), /refs\/forge/);
+  await refused(
+    ['-C', repo, 'fetch', remote(stranger), `refs/forge/lanes/${onSecond}`],
+    /couldn't find remote ref/,
+  );
 });
 const url = (host, projectId) => `${host.base}/git/${projectId}.git`;
 function lastState(s, projectId) {

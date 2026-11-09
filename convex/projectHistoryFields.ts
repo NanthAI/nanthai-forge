@@ -110,6 +110,15 @@ export const historyTables = {
     .index('by_project', ['projectId'])
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_commit', ['projectId', 'commit']),
+  /** Forge-built main commits (Issue 3bd4a8e9), one row per commit, written with the Forge pack
+   * that holds it: a Lane whose base is that main State builds its commit on this one. */
+  projectGitMainCommits: defineTable({
+    projectId: v.id('hostedProjects'),
+    state: v.string(),
+    commit: v.string(),
+    tree: v.string(),
+    sequence: v.number(),
+  }).index('by_project_and_state', ['projectId', 'state']),
   /** Worker byte-path use per UTC day: `scope` is a project id, or '*' for every project. */
   gitWorkerUsage: defineTable({
     scope: v.string(),

@@ -11,12 +11,16 @@ import { digest } from '../src/portable-hash';
 import { published } from '../src/hosted-github-mirror';
 import { gitHash } from '../src/hosted-github-git';
 import { laneCommitBytes, type PackObject } from '../src/git-lane-objects';
+import { invariant } from '../src/errors';
+import { PackTrees, commitTree, type TreeListing } from '../src/git-pack-trees';
 import {
   TreeWork,
   packListing,
   readR2,
+  scanPacks,
   stepIds,
   storePack,
+  treeBudget,
   type Alias,
   type Chunk,
   type IndexedPack,
@@ -33,12 +37,33 @@ export const listingThreshold = 32;
 type Plan = {
   status: 'build';
   lane: { head: string; baseHead: string; baseReceiptId: string };
-  parent: { commit: string; tree: string; legacy: boolean };
+  /** `tree` is null for the imported commit of an unmirrored project (found in its pack);
+   * `listing` is the newest Forge-built main commit's tree listing (Issue 3bd4a8e9). */
+  parent: { commit: string; tree: string | null; legacy: boolean; listing: Chunk | null };
   author: { name: string; email: string };
   aliases: Chunk | null;
   /** History packs (chunks and tree index), newest pack first. */
   packs?: IndexedPack[];
 };
+
+/** A commit's root tree from the history packs (newest first), stopping at the commit; GitHub
+ * packs lead with their tip commit, so this reads about one range of the import pack. */
+async function commitRoot(projectId: string, packs: IndexedPack[], commit: string) {
+  const scan = new PackTrees(treeBudget, { commit });
+  await scanPacks(
+    projectId,
+    packs.map(pack => pack.chunks),
+    scan,
+    () => !!scan.commit,
+  );
+  const root = scan.commit ? commitTree(scan.commit) : null;
+  invariant(
+    root,
+    'GIT_LANE_TREE',
+    `Forge could not find Git commit ${commit.slice(0, 12)} in stored history; no Lane ref was made.`,
+  );
+  return root;
+}
 
 export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>, laneId: string, plan: Plan) {
   const started = Date.now();
@@ -51,12 +76,22 @@ export async function buildLane(ctx: ActionCtx, projectId: Id<'hostedProjects'>,
   const [base, head] = await work.states([lane.baseHead, lane.head]);
   const baseFiles = base!.files.filter(published(parent.legacy ? 'legacy' : 'tracked'));
   const headFiles = head!.files.filter(published('tracked'));
+  const root = parent.tree ?? (await commitRoot(projectId, plan.packs ?? [], parent.commit));
+  const storedListing = parent.listing ? await readR2(projectId, parent.listing.sha256) : null;
+  const listing: TreeListing | null = storedListing
+    ? new Map(
+        Object.entries(JSON.parse(storedListing.toString('utf8')) as Record<string, [string, string]>).map(
+          ([path, [mode, sha]]) => [path, { mode, sha }],
+        ),
+      )
+    : null;
   let aliasesMissing = 0;
   const before = work.metric.readBlobs;
-  const baseStep = await work.base(baseFiles, parent.tree, {
+  const baseStep = await work.base(baseFiles, root, {
+    listing,
     threshold: listingThreshold,
     scan: async () => {
-      const found = await packListing(projectId, plan.packs ?? [], parent.tree);
+      const found = await packListing(projectId, plan.packs ?? [], root);
       work.metric.packScanned = found.scanned;
       work.metric.packIndexed = found.indexed;
       return found.listing;
