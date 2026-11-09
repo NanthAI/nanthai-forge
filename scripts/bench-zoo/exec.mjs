@@ -2,7 +2,9 @@
 // Child-process helper of the zoo run (Issue 85d26a8b): timed, bounded, last JSON line parsed.
 import { spawn } from 'node:child_process';
 
-const TIMEOUT_MS = 40 * 60_000;
+// A landing command waits while a measurement hold is on (a bench batch can hold for over an hour),
+// so the bound is generous; a stuck process is still ended.
+const TIMEOUT_MS = 120 * 60_000;
 
 /** Runs a command; resolves { code, stdout, stderr, seconds, json } (json = last JSON line). */
 export function exec(cmd, args, { cwd, timeoutMs = TIMEOUT_MS } = {}) {

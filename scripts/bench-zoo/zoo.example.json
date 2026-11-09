@@ -11,6 +11,9 @@
   {"id": "python", "upstream": "tree-sitter/py-tree-sitter", "fork": "NanthAI/bench-zoo-python", "ref": "master"},
   {"id": "rust", "upstream": "BurntSushi/ripgrep", "fork": "NanthAI/bench-zoo-rust", "ref": "master"},
   {"id": "jvm", "upstream": "square/kotlinpoet", "fork": "NanthAI/bench-zoo-jvm", "ref": "main"},
-  {"id": "mixed", "upstream": "pydantic/jiter", "fork": "NanthAI/bench-zoo-mixed", "ref": "main"}
+  {"id": "mixed", "upstream": "pydantic/jiter", "fork": "NanthAI/bench-zoo-mixed", "ref": "main"},
+  {"id": "dart", "upstream": "felangel/equatable", "fork": "NanthAI/bench-zoo-dart", "ref": "master",
+   "check": {"name": "verify", "executable": "bash", "args": [".forge-zoo/ci.sh"], "environmentLabel": "bench-zoo upstream CI",
+             "actionsToolchains": [{"tool": "dart", "version": "stable"}], "actionsCache": {"presets": ["pub"]}}}
  ]
 }

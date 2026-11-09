@@ -7,11 +7,14 @@ import {
   appendLine,
   checkFacts,
   cliHead,
+  controlCodeSource,
+  preflightFacts,
   githubEquivalent,
   landPending,
   pickProbeFiles,
   probeLine,
   resolveKeepBoth,
+  submodulePaths,
   summaryTable,
   tagLastLine,
 } from '../scripts/bench-zoo/lib.mjs';
@@ -172,4 +175,119 @@ test('an asynchronous SUBMITTED land (exit 0, inProgress) is followed by the wai
   assert.equal(landPending({ code: 0, json: { result: { phase: 'finish', inProgress: true } } }), true);
   assert.equal(landPending({ code: 0, json: { result: { status: 'terminal', successful: false } } }), false);
   assert.equal(landPending({ code: 1, json: null }), false);
+});
+
+test('wave-2 ecosystems: probe files and comment syntax (C#, Swift, Elixir, Ruby, PHP, Dart, Zig, C++)', () => {
+  const pick = paths => pickProbeFiles(paths.map(p => f(p)));
+  assert.deepEqual(pick(['src/G/Guard.cs', 'src/G/Extra/Ext.cs', 'test/G.UnitTests/GuardTests.cs']), {
+    ext: '.cs',
+    first: 'src/G/Guard.cs',
+    second: 'src/G/Extra/Ext.cs',
+  });
+  assert.deepEqual(
+    pick(['Sources/AP/Parsable.swift', 'Sources/Other/B.swift', 'Tests/APUnitTests/AUnitTests.swift']),
+    { ext: '.swift', first: 'Sources/AP/Parsable.swift', second: 'Sources/Other/B.swift' },
+  );
+  assert.equal(pick(['lib/plug/conn.ex', 'lib/plug.ex', 'test/plug_test.exs']).ext, '.ex');
+  assert.equal(pick(['lib/sinatra/base.rb', 'lib/sinatra.rb', 'spec/base_spec.rb']).first, 'lib/sinatra.rb');
+  assert.equal(pick(['src/Utils.php', 'tests/UtilsTest.php']).second, 'tests/UtilsTest.php');
+  assert.equal(
+    pick(['lib/src/equatable.dart', 'test/equatable_test.dart']).second,
+    'test/equatable_test.dart',
+  );
+  assert.equal(pick(['clap.zig', 'clap/args.zig', 'example/simple.zig']).second, 'clap/args.zig');
+  assert.equal(
+    pick(['include/fmt/core.h', 'include/fmt/format.h', 'src/format.cc', 'test/format-test.cc']).ext,
+    '.h',
+  );
+  for (const [file, mark] of [
+    ['a.cs', '//'],
+    ['a.swift', '//'],
+    ['a.dart', '//'],
+    ['a.php', '//'],
+    ['a.zig', '//'],
+    ['a.hpp', '//'],
+    ['a.ex', '#'],
+    ['a.exs', '#'],
+  ])
+    assert.equal(probeLine(file, 'x'), `${mark} forge-zoo probe x\n`);
+});
+
+test('preflightFacts reads the land receipt selection; controlCodeSource reads the control checkout', () => {
+  const receipt = {
+    result: {
+      preflight: { status: 'advised', selected: ['package:.:swift test'], tests: 1, estimateMinutes: 2 },
+    },
+  };
+  assert.deepEqual(preflightFacts(receipt), {
+    status: 'advised',
+    selected: ['package:.:swift test'],
+    tests: 1,
+    estimateMinutes: 2,
+    reason: null,
+  });
+  assert.equal(preflightFacts({ result: {} }), null);
+  const own =
+    '      - uses: actions/checkout@v4\n        with:\n          path: control\n          ref: ${{ github.sha }}\n          persist-credentials: false\n';
+  assert.deepEqual(controlCodeSource(own), {
+    repository: 'the runner repository itself',
+    ref: '${{ github.sha }}',
+    byDigest: false,
+  });
+  const sha = 'a'.repeat(40);
+  const pinned = `      - uses: actions/checkout@v4\n        with:\n          repository: NanthAI/nanthai-forge\n          path: control\n          ref: ${sha}\n`;
+  assert.deepEqual(controlCodeSource(pinned), {
+    repository: 'NanthAI/nanthai-forge',
+    ref: sha,
+    byDigest: true,
+  });
+  assert.equal(controlCodeSource('jobs: {}'), null);
+});
+
+test('a one-module library (one source file plus its tests) still gets a second probe file', () => {
+  const picked = pickProbeFiles([f('index.js'), f('test.js'), f('fixtures/fixture-cwd.js'), f('readme.md')]);
+  assert.deepEqual(picked, { ext: '.js', first: 'index.js', second: 'test.js' });
+  assert.equal(pickProbeFiles([f('a.js'), f('b.spec.js')]).second, 'b.spec.js');
+  assert.equal(pickProbeFiles([f('src/a.js'), f('src/b.js'), f('test.js')]).second, 'src/b.js');
+});
+
+test('preflightFacts reads the plan of a preflight action receipt', () => {
+  const receipt = {
+    result: {
+      plan: {
+        status: 'planned',
+        scope: 'scoped',
+        tests: ['test.js'],
+        estimateMinutes: 1,
+        reason: 'project test runner node: 1 changed test file(s)',
+      },
+    },
+  };
+  assert.deepEqual(preflightFacts(receipt), {
+    status: 'planned',
+    scope: 'scoped',
+    selected: ['test.js'],
+    tests: 1,
+    estimateMinutes: 1,
+    reason: 'project test runner node: 1 changed test file(s)',
+  });
+});
+
+test('submodule paths come from .gitmodules, so probes never land inside another repository', () => {
+  const text =
+    '[submodule "core"]\n\tpath = tree_sitter/core\n\turl = https://x\n[submodule "b"]\n  path=vendor/b/\n';
+  assert.deepEqual(submodulePaths(text), ['tree_sitter/core', 'vendor/b']);
+  assert.deepEqual(submodulePaths(''), []);
+});
+
+test('tagLastLine skips a last line too long to take a trailing comment inside a formatter limit', () => {
+  const long = `internal expect fun StringBuilder.appendCodePoint(codePoint: CodePoint): StringBuilder`;
+  assert.equal(
+    tagLastLine(`a\nfun short() {}\n${long}\n`, 'x.kt', 'a'),
+    `a\nfun short() {} // forge-zoo a\n${long}\n`,
+  );
+  // Two tags on the same text still hit the same line, so the conflict stays forced.
+  const text = `x = 1\n${long}\n`;
+  assert.equal(tagLastLine(text, 'x.py', 'a').split('\n')[0].endsWith('forge-zoo a'), true);
+  assert.equal(tagLastLine(long, 'x.kt', 'b'), `${long} // forge-zoo b`);
 });

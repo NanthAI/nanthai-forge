@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Cross-ecosystem zoo run (Issue 85d26a8b): for every repository in ZOO_ROOT/zoo.json, the same
 // generic scenario on Forge and on plain git + GitHub, with timings side by side.
-//   node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--reimport] [--no-github-run]
+//   node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--reimport] [--no-github-run] [--prepare-only]
 // Forge: GitHub import, clone, three Lanes (two agents on one file, one disjoint), save, check-only,
 // land, clean sync after an overtake, land again (check reuse expected), forced conflict, keep-both
 // resolution, land. Plain git: the same edits on clones of the public fork (scratch branch).
@@ -27,6 +27,8 @@ import {
   appendLine,
   checkFacts,
   cliHead,
+  controlCodeSource,
+  preflightFacts,
   tagLastLine,
   errorCode,
   findAll,
@@ -35,6 +37,7 @@ import {
   pickProbeFiles,
   probeLine,
   resolveKeepBoth,
+  submodulePaths,
 } from './lib.mjs';
 
 function listFiles(root) {
@@ -65,11 +68,20 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   const step = (name, side, value) => ((r.steps[name] ??= {})[side] = value);
   const refuse = (where, code, detail) =>
     r.refusals.push({ where, code, detail: detail?.slice?.(0, 300) ?? null });
-  const nf = async (root, verb, body, flags = []) => {
+  const nf = async (root, verb, body, flags = [], afterPreflight = false) => {
     // An agent answers the blocking overlap notice the two same-file Lanes raise by landing in order.
     if (verb === 'land') body = { operationId: randomUUID(), overlapAnswer: 'accept-order', ...body };
     let res = await io.cli(['agent', root, verb, ...flags, JSON.stringify(body)]);
     io.receipt(repo.id, { verb, flags, body, code: res.code, seconds: res.seconds, receipt: res.json });
+    // The named recovery of a PREFLIGHT_REQUIRED refusal (a change to test files must run them
+    // first): run the Lane's preflight once, bounded, then submit again. Both are recorded.
+    if (verb === 'land' && res.code && errorCode(res.json) === 'PREFLIGHT_REQUIRED' && !afterPreflight) {
+      refuse(`${verb} ${body.laneId?.slice(0, 8)}`, 'PREFLIGHT_REQUIRED', res.json?.error?.message);
+      const pf = await nf(root, 'preflight', { laneId: body.laneId, budgetSeconds: 120 });
+      r.notes.push(`preflight-required recovery on ${body.laneId?.slice(0, 8)}: preflight exit ${pf.code}`);
+      const { operationId: _previous, ...again } = body;
+      return nf(root, verb, again, flags, true);
+    }
     // IN PROGRESS (exit 3), or an asynchronous land that printed SUBMITTED and exited 0 with
     // `inProgress: true`: follow the landing with its blocking wait, bounded (8 x 540 s). Without
     // this the land timing is the submit time and a conflict never reaches the recovery step.
@@ -94,6 +106,10 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     }
     return res;
   };
+  // A repository may declare its own check (toolchain steps, cache presets) and runner; the rest
+  // of the scenario is identical for every repository.
+  const check = { ...cfg.check, ...repo.check };
+  const runnerCfg = { ...cfg.runner, ...repo.runner };
   const base = join(runDir, repo.id);
   mkdirSync(base, { recursive: true });
   const since = new Date().toISOString();
@@ -131,17 +147,24 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   step('clone', 'forge', { ok: fc.code === 0, seconds: fc.seconds });
   if (fc.code !== 0) return (refuse('clone', errorCode(fc.json) ?? `exit ${fc.code}`, fc.stderr), r);
   const gA = join(base, 'git-a');
-  const gc = await io.git(['clone', '--quiet', `https://github.com/${repo.fork}`, gA]);
+  // Submodules are materialized in the Forge clone, so the plain-git side checks them out too.
+  const gc = await io.git([
+    'clone',
+    '--quiet',
+    '--recurse-submodules',
+    `https://github.com/${repo.fork}`,
+    gA,
+  ]);
   step('clone', 'git', { ok: gc.code === 0, seconds: gc.seconds });
 
   // 3. Project setup: the repository's own CI command, trusted agent policy, the runner.
   const settings = (await nf(clone, 'check-settings', {})).json?.result ?? {};
-  if (!settings.definitions?.some(d => d.name === cfg.check.name)) {
+  if (!settings.definitions?.some(d => d.name === check.name)) {
     const c = await io.cli([
       'x',
       clone,
       'configure-check',
-      JSON.stringify({ operationId: randomUUID(), command: cfg.check }),
+      JSON.stringify({ operationId: randomUUID(), command: check }),
     ]);
     if (c.code) refuse('configure-check', errorCode(c.json) ?? `exit ${c.code}`, c.stderr);
   }
@@ -160,15 +183,35 @@ export async function runRepo(cfg, repo, state, runDir, io) {
       'x',
       clone,
       'configure-runner',
-      JSON.stringify({ operationId: randomUUID(), provider: 'github-actions', ...cfg.runner }),
+      JSON.stringify({ operationId: randomUUID(), provider: 'github-actions', ...runnerCfg }),
     ]);
     runner = c.code === 0;
     if (!runner)
       refuse('configure-runner', errorCode(c.json) ?? `exit ${c.code}`, c.json?.error?.message ?? c.stderr);
   }
+  // Runner grants (Issue 77fa4412): record that the runner was configured with a grant only (no
+  // operator binding is read here; the settings carry the grant) and what blocks landing, if anything.
+  const after = (await nf(clone, 'check-settings', {})).json?.result ?? {};
+  r.runnerSettings = {
+    configuredNow: !settings.runner && runner,
+    runnerGrant: after.runnerGrant ?? null,
+    agentLandsOnPass: after.agentLandsOnPass ?? null,
+    blockers: after.blockers ?? null,
+    declaredToolchains: check.actionsToolchains?.map(t => t.tool) ?? [],
+  };
+
+  // `--prepare-only`: stop once the project, check and runner are set up (a measurement hold
+  // delays landings; setup does not land).
+  if (cfg.prepareOnly) return (r.notes.push('prepare-only: stopped before the Lanes'), r);
 
   // 4. Probe files: generic choice from the tree (two directories, the main source extension).
-  const probe = pickProbeFiles(listFiles(clone));
+  let modules = [];
+  try {
+    modules = submodulePaths(readFileSync(join(clone, '.gitmodules'), 'utf8'));
+  } catch {}
+  const probe = pickProbeFiles(
+    listFiles(clone).filter(f => !modules.some(m => f.path === m || f.path.startsWith(`${m}/`))),
+  );
   r.probe = probe;
   if (!probe?.second) return (refuse('probe', 'ZOO_NO_PROBE_FILES', 'no two editable source files'), r);
 
@@ -194,6 +237,18 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     if (name === 'a') step('save', 'forge', { ok: res.code === 0, seconds: res.seconds });
   }
 
+  // Affected-test selection (the land receipt of an asynchronous land carries none): lane A's
+  // preflight, bounded; what it selected and why, never tuned.
+  {
+    const pf = await nf(lanes.a.path, 'preflight', { laneId: lanes.a.id, budgetSeconds: 90 });
+    r.preflight = {
+      code: pf.code,
+      seconds: pf.seconds,
+      error: errorCode(pf.json),
+      ...(preflightFacts(pf.json) ?? {}),
+    };
+  }
+
   // Plain git: the same three edits on clones of a scratch branch of the fork.
   const branch = `zoo/${basename(runDir)}-${repo.id}`;
   const g = (dir, ...args) => io.git(['-C', dir, ...args]);
@@ -202,7 +257,15 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     gC = join(base, 'git-c'),
     gD = join(base, 'git-d');
   for (const d of [gB, gC, gD])
-    await io.git(['clone', '--quiet', '--branch', branch, `https://github.com/${repo.fork}`, d]);
+    await io.git([
+      'clone',
+      '--quiet',
+      '--recurse-submodules',
+      '--branch',
+      branch,
+      `https://github.com/${repo.fork}`,
+      d,
+    ]);
   const commit = async (dir, tag) =>
     g(
       dir,
@@ -462,7 +525,7 @@ export function resolutionFolder(res, lanePath, file) {
 async function main(argv) {
   const root = argv[0];
   if (!root || root.startsWith('--')) {
-    console.error('usage: run.mjs ZOO_ROOT [--repos a,b] [--reimport] [--no-github-run]');
+    console.error('usage: run.mjs ZOO_ROOT [--repos a,b] [--reimport] [--no-github-run] [--prepare-only]');
     return 2;
   }
   const flag = f => argv.includes(f);
@@ -471,6 +534,7 @@ async function main(argv) {
     ...JSON.parse(readFileSync(join(root, 'zoo.json'), 'utf8')),
     reimport: flag('--reimport'),
     noGithubRun: flag('--no-github-run'),
+    prepareOnly: flag('--prepare-only'),
   };
   const statePath = join(root, 'state.json');
   const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { repos: {} };
@@ -498,7 +562,8 @@ async function main(argv) {
   );
   // The CLI follows main, so a run can straddle a release: name the CLI build before and after.
   const cliCommits = [...new Set([cliBefore, readCli()].filter(Boolean))];
-  const out = { stamp, cliCommits, deployment: cfg.deployment, results };
+  const controlCode = await io.controlCode(cfg.runner.repository).catch(error => ({ error: error.message }));
+  const out = { stamp, cliCommits, deployment: cfg.deployment, controlCode, results };
   writeFileSync(join(runDir, 'RESULT.json'), JSON.stringify(out, null, 1) + '\n');
   if (!flag('--keep-checkouts'))
     for (const repo of repos) rmSync(join(runDir, repo.id), { recursive: true, force: true });

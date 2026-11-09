@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import { exec } from './exec.mjs';
+import { controlCodeSource } from './lib.mjs';
 
 // The import client needs a built Forge checkout (cfg.forgeCheckout: dist/ and node_modules/),
 // so it is loaded from there; the GitHub and meter helpers use Node built-ins only.
@@ -32,6 +33,17 @@ export function makeIo({ cfg, root, runDir, state, statePath }) {
         join(runDir, `${id}.receipts.jsonl`),
         JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n',
       ),
+    /** Where the runner workflow gets Forge's control code: the runner repository's own checkout at
+     * its workflow sha, or a pinned digest (Issue 77fa4412). Reads the workflow text on GitHub. */
+    async controlCode(runnerRepo) {
+      const text = await gh([
+        'api',
+        `repos/${runnerRepo}/contents/.github/workflows/forge-check.yml`,
+        '-H',
+        'Accept: application/vnd.github.raw',
+      ]);
+      return controlCodeSource(text);
+    },
     saveState: () => writeFileSync(statePath, JSON.stringify(state, null, 1) + '\n'),
 
     /** GitHub import into a NEW project (projectGithubImport start + status), timed end to end. */
@@ -69,6 +81,13 @@ export function makeIo({ cfg, root, runDir, state, statePath }) {
         jobs: m.jobs,
         jobSeconds: m.jobSeconds,
         queueSeconds: m.queueSeconds,
+        // GitHub-side timing per run, to compare with Forge's own run start and end.
+        runTimes: runs.map(x => ({
+          title: x.name ?? x.display_title ?? null,
+          created: x.created_at ?? null,
+          updated: x.updated_at ?? null,
+          conclusion: x.conclusion ?? null,
+        })),
         otherProjectRuns,
       };
     },
