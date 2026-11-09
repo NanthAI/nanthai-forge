@@ -672,7 +672,7 @@ test('mirror, dispatch, cancellation and configure all refuse without a binding 
     ...f.ctx,
     runMutation: async (ref, input) => {
       const name = getFunctionName(ref);
-      if (name.endsWith(':reserve') || name.endsWith(':cancellation')) return run;
+      if (name.endsWith(':reserve') || name.endsWith(':cancellation')) return JSON.stringify(run);
       if (name.endsWith(':observe') || name.endsWith(':failed')) {
         observed.push(input);
         return null;

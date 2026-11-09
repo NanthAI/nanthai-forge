@@ -55,16 +55,17 @@ export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
 }
 export const session = internalMutation({
   args: { ...sessionArgs, timings: v.optional(v.boolean()) },
-  returns: v.any(),
+  // JSON text (Issue 0c457ae4): a finished run's reports are keyed by test file.
+  returns: v.string(),
   handler: async (ctx, input) => {
     const { run } = await actionsSession(ctx, input);
-    if (!input.timings) return { ...run, capabilities: [...hostedActionsCapabilities] };
+    if (!input.timings) return JSON.stringify({ ...run, capabilities: [...hostedActionsCapabilities] });
     const { history } = await hostedTimingHistory(ctx, input.projectId);
-    return {
+    return JSON.stringify({
       run,
       capabilities: [...hostedActionsCapabilities],
       timingHistory: JSON.stringify(history),
       sourcePack: await latestSourcePack(ctx, input.projectId),
-    };
+    });
   },
 });

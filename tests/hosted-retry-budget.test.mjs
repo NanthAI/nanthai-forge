@@ -67,13 +67,15 @@ async function fixture(t, shardCount) {
     run_attempt: '1',
     runner_environment: 'github-hosted',
   };
-  const send = result =>
-    s.transaction('retry-budget-result', results.result, {
-      projectId: s.projectId,
-      runId: run.id,
-      claims: JSON.stringify(claims),
-      result: JSON.stringify(result),
-    });
+  const send = async result =>
+    JSON.parse(
+      await s.transaction('retry-budget-result', results.result, {
+        projectId: s.projectId,
+        runId: run.id,
+        claims: JSON.stringify(claims),
+        result: JSON.stringify(result),
+      }),
+    );
   return { ...s, run, send };
 }
 const flaky = {

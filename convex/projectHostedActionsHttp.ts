@@ -15,6 +15,7 @@ import { hostedCheckTerminal } from '../src/hosted-check';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
+import { convexValueLimit } from '../src/convex-value-limit';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
 import type { SessionInput } from './projectHostedActionsSession';
@@ -87,7 +88,7 @@ export async function cleanPoolClaims(projectId: string, runId: string, now = Da
   clearTimeout(timer);
 }
 export const handle = httpAction(async (ctx, request) => {
-  let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' = 'authorization';
+  let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' | 'limit' = 'authorization';
   try {
     const site = process.env.CONVEX_SITE_URL;
     invariant(
@@ -135,23 +136,29 @@ export const handle = httpAction(async (ctx, request) => {
         digests: command.digests,
       });
     else if (command.kind === 'output')
-      value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:output'), {
-        ...input,
-        index: command.index,
-        log: canonicalPayload(command.log),
-      });
+      value = JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:output'), {
+          ...input,
+          index: command.index,
+          log: canonicalPayload(command.log),
+        }),
+      );
     else if (command.kind === 'session')
-      value = await ctx.runMutation(
-        makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
-        { ...input, ...(command.timings ? { timings: true } : {}) },
+      value = JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSession:session'), {
+          ...input,
+          ...(command.timings ? { timings: true } : {}),
+        }),
       );
     else if (command.kind === 'sourcePack')
       value = await sourcePackCommand(ctx, input, command.phase, command.object);
     else if (command.kind === 'submoduleAccess') {
       // Authorize the live run first; tokens are minted for its repository's installation only.
-      const run: HostedCheckRun = await ctx.runMutation(
-        makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
-        input,
+      const run: HostedCheckRun = JSON.parse(
+        await ctx.runMutation(
+          makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
+          input,
+        ),
       );
       invariant(
         run.configuration.provider === 'github-actions',
@@ -189,15 +196,17 @@ export const handle = httpAction(async (ctx, request) => {
         ),
       ]);
       reason = 'authorization';
-      value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsPlan:prepare'), {
-        ...input,
-        recipe: canonicalPayload(plan.recipe),
-        lockfile: plan.lockfile,
-        ...('storageId' in selection
-          ? { selectionStorage: selection.storageId }
-          : { selectionR2Key: selection.r2Key }),
-        ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
-      });
+      value = JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsPlan:prepare'), {
+          ...input,
+          recipe: canonicalPayload(plan.recipe),
+          lockfile: plan.lockfile,
+          ...('storageId' in selection
+            ? { selectionStorage: selection.storageId }
+            : { selectionR2Key: selection.r2Key }),
+          ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
+        }),
+      );
       // Shard pool: sign one claim per unit here (CPU only), so shards claim with no Convex call.
       if (plan.recipe.pool) {
         reason = 'storage';
@@ -218,10 +227,14 @@ export const handle = httpAction(async (ctx, request) => {
         'Log bytes differ from the result log.',
       );
       reason = 'authorization';
-      const { target, run } = (await ctx.runMutation(
-        makeFunctionReference<'mutation'>('projectHostedActionsResults:output'),
-        { ...input, index: command.result.index, log: canonicalPayload(log), withRun: true },
-      )) as { target: { url: string; headers: Record<string, string> }; run: HostedCheckRun };
+      const { target, run } = JSON.parse(
+        await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:output'), {
+          ...input,
+          index: command.result.index,
+          log: canonicalPayload(log),
+          withRun: true,
+        }),
+      ) as { target: { url: string; headers: Record<string, string> }; run: HostedCheckRun };
       reason = 'storage';
       await storeOutputObject(target, body);
       await verifyOutputObject(
@@ -233,9 +246,11 @@ export const handle = httpAction(async (ctx, request) => {
     } else {
       // Storage verification happens outside the result transaction. The transaction
       // repeats authority/fence checks before atomically committing output and evidence.
-      const run: HostedCheckRun = await ctx.runMutation(
-        makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
-        input,
+      const run: HostedCheckRun = JSON.parse(
+        await ctx.runMutation(
+          makeFunctionReference<'mutation'>('projectHostedActionsSession:session'),
+          input,
+        ),
       );
       if (command.result.log) {
         reason = 'storage';
@@ -259,24 +274,30 @@ export const handle = httpAction(async (ctx, request) => {
     }
     return Response.json(value, { headers });
   } catch (error) {
+    // A Convex value-shape limit fails the same way on every retry: refuse it, never 503.
+    const limit = convexValueLimit(error);
     // Codes and schema paths only: request bodies and messages may carry runner data.
     console.error(
       'Actions request refused',
       error instanceof z.ZodError
         ? `validation ${error.issues.map(issue => issue.path.join('.')).join(',')}`
-        : ((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown'),
+        : limit
+          ? 'CONVEX_VALUE_LIMIT'
+          : ((error as { code?: unknown })?.code ?? (error as Error)?.name ?? 'unknown'),
     );
-    if ((error as { data?: { code?: string } })?.data?.code === 'CHECK_CANCELLED') reason = 'cancelled';
+    if (limit) reason = 'limit';
+    else if ((error as { data?: { code?: string } })?.data?.code === 'CHECK_CANCELLED') reason = 'cancelled';
     else if (error instanceof z.ZodError) reason = 'validation';
     else if (String((error as { code?: unknown })?.code ?? '').startsWith('R2_')) reason = 'storage';
     const code =
       (error as { data?: { code?: string }; code?: string })?.data?.code ??
       (error as { code?: string })?.code;
     const unavailable =
-      reason === 'storage' ||
-      transientCodes.includes(code ?? '') ||
-      ['TimeoutError', 'AbortError', 'TypeError'].includes((error as Error)?.name) ||
-      (!code && (error as Error)?.name === 'Error' && reason !== 'validation');
+      !limit &&
+      (reason === 'storage' ||
+        transientCodes.includes(code ?? '') ||
+        ['TimeoutError', 'AbortError', 'TypeError'].includes((error as Error)?.name) ||
+        (!code && (error as Error)?.name === 'Error' && reason !== 'validation'));
     // A paused deployment names its end, so runners wait once instead of polling.
     const pause = unavailable ? activeStoragePause() : null;
     return Response.json(
@@ -302,10 +323,14 @@ async function settleResult(
   phase: (reason: 'authorization' | 'storage') => void,
 ) {
   // The terminal result also returns the final output target (Issue 75cb5074): no prepare call.
-  const { run: settled, final } = (await ctx.runMutation(
-    makeFunctionReference<'mutation'>('projectHostedActionsResults:result'),
-    { ...input, result: canonicalPayload(result), withFinal: true },
-  )) as { run: HostedCheckRun; final: FinalOutput | 'prepare' };
+  // JSON text (Issue 0c457ae4): the settled run's reports are keyed by test file.
+  const { run: settled, final } = JSON.parse(
+    await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:result'), {
+      ...input,
+      result: canonicalPayload(result),
+      withFinal: true,
+    }),
+  ) as { run: HostedCheckRun; final: FinalOutput | 'prepare' };
   if (!hostedCheckTerminal(settled)) return settled;
   // Runs beside the output manifest work; it never throws.
   const cleanup = settled.poolClaimed ? cleanPoolClaims(input.projectId, settled.id) : undefined;

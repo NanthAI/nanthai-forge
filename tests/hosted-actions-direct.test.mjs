@@ -127,7 +127,14 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
     s.selection({ expectedConfiguration: configuration.digest, expectedDefinition: definition.digest }),
   );
   const id = { projectId: s.projectId, runId: run.id };
-  const call = (module, method, args) => s.transaction(`direct-${method}`, module[method], args);
+  // These internal mutations return JSON text (Issue 0c457ae4); tests read the value.
+  const text = new Set([direct.reserve, plans.prepare, sessions.session, results.result, results.output]);
+  const call = async (module, method, args) => {
+    const value = await s.transaction(`direct-${method}`, module[method], args);
+    return text.has(module[method]) ? JSON.parse(value) : value;
+  };
+  // Exactly what the Convex function returns, for actions under test that parse it themselves.
+  const raw = (module, method, args) => s.transaction(`direct-${method}`, module[method], args);
   const reserve = () => call(direct, 'reserve', id);
   const bind = async () => {
     const reserved = await reserve();
@@ -164,7 +171,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null) {
       recipeStorage,
     });
   };
-  return { ...s, scheduled, cancelled, storage, run, id, input, call, reserve, bind, prepare };
+  return { ...s, scheduled, cancelled, storage, run, id, input, call, raw, reserve, bind, prepare };
 }
 test('App JWT uses RS256 for GitHub PKCS#1 and PKCS#8; installation is derived per call', async t => {
   for (const type of ['pkcs1', 'pkcs8']) {
@@ -260,7 +267,7 @@ test('concurrent dispatch reservation and lost reply send one GitHub dispatch wi
     dispatches++;
     throw new Error('Synthetic lost reply after GitHub accepted the dispatch.');
   });
-  const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
+  const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
   await Promise.all([direct.dispatch._handler(ctx, s.id), direct.dispatch._handler(ctx, s.id)]);
   await direct.dispatch._handler(ctx, s.id);
   assert.equal(dispatches, 1);
@@ -288,7 +295,7 @@ test('dispatch retains custom and array runner labels, and self-hosted OIDC comp
     expected = runsOn;
     const s = await fixture(t, 2, runsOn);
     bindRepository(t, s.id.projectId, 'synthetic/project');
-    const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
+    const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
     await direct.dispatch._handler(ctx, s.id);
     assert.equal((await s.status(s.run.id)).executionId, '123');
     const selfHosted = claims({ runner_environment: 'self-hosted' });
@@ -701,7 +708,7 @@ test('HTTP submodule access mints one read-only token per repository of the run 
   const ctx = {
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
-      return s.call(modules[name], method, input);
+      return s.raw(modules[name], method, input);
     },
   };
   const send = (repositories, authorization = `Bearer ${oidc()}`) =>
@@ -779,7 +786,7 @@ test('OIDC HTTP commits one bounded log with its shard result and reconciles a l
   const ctx = {
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
-      return s.call(modules[name], method, input);
+      return s.raw(modules[name], method, input);
     },
   };
   const send = () =>
@@ -851,7 +858,7 @@ test('an inline log is authorized, stored and verified inside the one result cal
     runMutation: (ref, input) => {
       mutations.push(getFunctionName(ref));
       const [name, method] = getFunctionName(ref).split(':');
-      return s.call(modules[name], method, input);
+      return s.raw(modules[name], method, input);
     },
   };
   const send = logBytes =>
@@ -974,7 +981,7 @@ test('workflow_run uses the existing HMAC webhook boundary', async t => {
   const signature = `sha256=${createHmac('sha256', 'synthetic-webhook-key').update(payload).digest('hex')}`;
   const send = signature =>
     route._handler(
-      { runMutation: (_ref, input) => s.call(webhooks, 'receive', input) },
+      { runMutation: (_ref, input) => s.raw(webhooks, 'receive', input) },
       new Request(`${audience}/github/webhook`, {
         method: 'POST',
         body: payload,
@@ -1024,7 +1031,7 @@ test('HTTP plan pairs use verified canonical R2 bytes and reuse both digests on 
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
       mutations.push(name);
-      return s.call(
+      return s.raw(
         { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
         method,
         input,
@@ -1114,7 +1121,7 @@ test('HTTP plan stores the selection and recipe objects concurrently with the sa
   const ctx = {
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
-      return s.call(
+      return s.raw(
         { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
         method,
         input,
@@ -1149,7 +1156,7 @@ test('legacy HTTP session shape remains a run with additive capabilities; unknow
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
       received.push(input);
-      return s.call(modules[name], method, input);
+      return s.raw(modules[name], method, input);
     },
   };
   const send = (command, identity = {}) =>
@@ -1411,7 +1418,7 @@ for (const responseStatus of [202, 409])
     assert.equal((await s.cancel(s.run.id)).status, 'cancelled');
     await s.cancel(s.run.id);
     assert.equal(s.scheduled.filter(task => task.name === 'projectHostedActionsWebhook:cancel').length, 1);
-    const ctx = { runMutation: (ref, args) => s.call(webhooks, getFunctionName(ref).split(':')[1], args) };
+    const ctx = { runMutation: (ref, args) => s.raw(webhooks, getFunctionName(ref).split(':')[1], args) };
     await Promise.all([webhooks.cancel._handler(ctx, s.id), webhooks.cancel._handler(ctx, s.id)]);
     await webhooks.cancel._handler(ctx, s.id);
     assert.equal(cancels, 1);
@@ -1446,7 +1453,7 @@ test('cancellation enforces current repository binding before token minting or c
     return Response.json({ id: 9 });
   });
   const ctx = {
-    runMutation: (ref, args) => s.call(webhooks, getFunctionName(ref).split(':')[1], args),
+    runMutation: (ref, args) => s.raw(webhooks, getFunctionName(ref).split(':')[1], args),
     runQuery: async ref => {
       assert.equal(getFunctionName(ref), 'githubBindingStore:page');
       return JSON.stringify({ page: [], isDone: true, continueCursor: '' });
@@ -1462,7 +1469,7 @@ test('cancelled HTTP calls return a distinct safe 403 that old runners already r
   await s.prepare();
   await s.cancel(s.run.id);
   t.mock.method(globalThis, 'fetch', async () => jwks());
-  const ctx = { runMutation: (_ref, args) => s.call(sessions, 'session', args) };
+  const ctx = { runMutation: (_ref, args) => s.raw(sessions, 'session', args) };
   const response = await handle._handler(
     ctx,
     new Request(`${audience}/checks/actions`, {
@@ -1540,7 +1547,7 @@ test('existing OIDC session issues preflight ticket in a header without changing
       runMutation: (ref, input) => {
         calls++;
         assert.equal(getFunctionName(ref), 'projectHostedActionsSession:session');
-        return s.call(sessions, 'session', input);
+        return s.raw(sessions, 'session', input);
       },
     },
     new Request(`${audience}/checks/actions`, {
@@ -1590,6 +1597,38 @@ test('transient OIDC key lookup and service failures return safe infrastructure 
   });
   assert.equal(response.status, 503);
   assert.doesNotMatch(await response.text(), /private-service-error/);
+});
+
+test('Issue 0c457ae4: a Convex value-limit refusal is a deterministic 403 limit, not a retryable 503', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  t.mock.method(globalThis, 'fetch', async () => jwks());
+  const send = message =>
+    handle._handler(
+      {
+        runMutation: () => {
+          throw new Error(message);
+        },
+      },
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...s.id, command: { kind: 'session' } }),
+      }),
+    );
+  for (const message of [
+    'Uncaught Error: return value invalid: Object has too many fields (1025 > maximum number 1024)',
+    'Array length is too long (8193 > maximum length 8192)',
+    'Value is too large (1.2 MiB > maximum size 1 MiB)',
+  ]) {
+    const response = await send(message);
+    assert.equal(response.status, 403, message);
+    const body = await response.json();
+    assert.equal(body.reason, 'limit');
+    assert.doesNotMatch(JSON.stringify(body), /1025|8193|MiB/);
+  }
+  // Anything else without a code stays an outage the runner may retry.
+  assert.equal((await send('Connection lost while action was in flight')).status, 503);
 });
 
 test('Issue 72d50375: a paused deployment answers 503 with Retry-After so the runner keeps its result', async t => {
@@ -1658,7 +1697,7 @@ function github(t, s, { dispatch, runs = [] }) {
     calls.list++;
     return Response.json({ workflow_runs: runs });
   });
-  const ctx = { runMutation: (ref, input) => s.call(direct, getFunctionName(ref).split(':')[1], input) };
+  const ctx = { runMutation: (ref, input) => s.raw(direct, getFunctionName(ref).split(':')[1], input) };
   return { calls, ctx };
 }
 const reconcileTasks = s => s.scheduled.filter(item => item.name === 'projectHostedActionsDirect:reconcile');
@@ -1811,7 +1850,7 @@ test('shard pool: the existing plan call signs one create-only claim per unit wi
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
       mutations.push(name);
-      return s.call(
+      return s.raw(
         { projectHostedActionsSession: sessions, projectHostedActionsPlan: plans }[name],
         method,
         input,
@@ -1973,7 +2012,7 @@ test('shard pool: the final result deletes its run claims and sweeps stale ones,
     runMutation: (ref, input) => {
       const [name, method] = getFunctionName(ref).split(':');
       mutations.push(`${name}:${method}`);
-      return s.call(modules[name], method, input);
+      return s.raw(modules[name], method, input);
     },
   };
   const result = {

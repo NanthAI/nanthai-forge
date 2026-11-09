@@ -491,8 +491,12 @@ Backend and runner updates can be deployed in any order.
 
 Command and result metadata strip unknown fields. The identity envelope, known
 field types, logs, object pins and recipes remain strict. Refusals include a fixed
-`reason` (`validation`, `authorization` or `storage`); the runner includes only
-these codes in its error, never arbitrary response text.
+`reason` (`validation`, `authorization`, `storage`, `cancelled` or `limit`); the
+runner includes only these codes in its error, never arbitrary response text.
+`limit` means the request broke a Convex value limit (for example an object of more
+than 1024 fields); it fails the same way on every retry, so Forge answers 403 and
+the runner stops at once with `CONVEX_VALUE_LIMIT`. Internal functions on this path
+return runs as JSON text, because a run holds one report per test file.
 
 The negotiated planning session includes the project's advisory timing history. Eight-way LPT partitioning models the two test workers on each
 runner; unknown files use the historical p75, or the existing sorted round-robin

@@ -256,7 +256,7 @@ async function server(t, check, gate) {
     f.patch('projectHostedCheckRuns', row._id, { gate, value: JSON.stringify({ ...queued, gate }) });
   }
   const id = { projectId: f.projectId, runId: queued.id };
-  const reserved = await f.call('reserve', direct.reserve, id);
+  const reserved = JSON.parse(await f.call('reserve', direct.reserve, id));
   await f.call('bind', direct.observe, {
     ...id,
     fence: reserved.fence,
@@ -303,14 +303,16 @@ async function server(t, check, gate) {
       const recipe = hostedActionsRecipeSchema.parse({ ...pins, pin: checkPin(pins) });
       storage.set('selection', savePin(selection));
       storage.set('recipe', savePin(recipe));
-      return f.call('commandPlan', plans.prepare, {
-        ...id,
-        claims: JSON.stringify(claims),
-        recipe: JSON.stringify(recipe),
-        lockfile: 'e'.repeat(64),
-        selectionStorage: 'selection',
-        recipeStorage: 'recipe',
-      });
+      return JSON.parse(
+        await f.call('commandPlan', plans.prepare, {
+          ...id,
+          claims: JSON.stringify(claims),
+          recipe: JSON.stringify(recipe),
+          lockfile: 'e'.repeat(64),
+          selectionStorage: 'selection',
+          recipeStorage: 'recipe',
+        }),
+      );
     },
   };
 }

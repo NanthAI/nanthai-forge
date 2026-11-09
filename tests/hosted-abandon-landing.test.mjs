@@ -54,7 +54,7 @@ async function directRun(f) {
   const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === run.id);
   f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify({ ...run, configuration }) });
   const input = { projectId: f.projectId, runId: run.id };
-  const reserved = await f.transaction('reserveCancelProvider', direct.reserve, input);
+  const reserved = JSON.parse(await f.transaction('reserveCancelProvider', direct.reserve, input));
   await f.transaction('bindCancelProvider', direct.observe, {
     ...input,
     fence: reserved.fence,

@@ -411,7 +411,7 @@ async function server(t, { check = ci(), main = 'green', paths = ['crates/a/src/
     f.selection({ expectedDefinition: definition.digest, expectedConfiguration: configuration.digest }),
   );
   const id = { projectId: f.projectId, runId: queued.id };
-  const reserved = await f.call('reserve', direct.reserve, id);
+  const reserved = JSON.parse(await f.call('reserve', direct.reserve, id));
   await f.call('bind', direct.observe, {
     ...id,
     fence: reserved.fence,
@@ -446,14 +446,16 @@ async function server(t, { check = ci(), main = 'green', paths = ['crates/a/src/
     const recipe = hostedActionsRecipeSchema.parse({ ...pins, pin: checkPin(pins) });
     storage.set('selection', savePin(selection));
     storage.set('recipe', savePin(recipe));
-    return f.call('graphPlan', plans.prepare, {
-      ...id,
-      claims: JSON.stringify(claims),
-      recipe: JSON.stringify(recipe),
-      lockfile: 'e'.repeat(64),
-      selectionStorage: 'selection',
-      recipeStorage: 'recipe',
-    });
+    return JSON.parse(
+      await f.call('graphPlan', plans.prepare, {
+        ...id,
+        claims: JSON.stringify(claims),
+        recipe: JSON.stringify(recipe),
+        lockfile: 'e'.repeat(64),
+        selectionStorage: 'selection',
+        recipeStorage: 'recipe',
+      }),
+    );
   };
   const planFor = changed => actionsGateSelection(queued, changed, repos.cargo, false);
   return { f, queued, prepare, planFor };

@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
+import { checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const artifactStorage = await import(moduleUrl('../convex/artifactStorage.ts'));
@@ -501,9 +501,10 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
       (fn, args) => {
         const [module, name] = getFunctionName(fn).split(':'),
           handler = modules[module][name];
+        const returned = value => (checkReturn(value, getFunctionName(fn)), value);
         return handler.isMutation
-          ? transaction(() => handler._handler(ctx, args))
-          : handler._handler(ctx, args);
+          ? transaction(async () => returned(await handler._handler(ctx, args)))
+          : Promise.resolve(handler._handler(ctx, args)).then(returned);
       };
   return {
     ctx,

@@ -96,26 +96,29 @@ export const receive = internalMutation({
 });
 export const cancellation = internalMutation({
   args: { projectId: v.id('hostedProjects'), runId: v.string() },
-  returns: v.any(),
+  // JSON text (Issue 0c457ae4): a cancelled run keeps its per-file reports.
+  returns: v.string(),
   handler: async (ctx, input) => {
     const { row, run } = await writableHostedCheck(ctx, input);
     if (!run.actions || !run.cancelRequested || !run.executionId || run.actions.cancelScheduled !== true)
-      return null;
+      return 'null';
     // Consume before IO. Replays/duplicate action deliveries never resend an
     // unknown outcome; true = scheduled, false = attempted, absent = unscheduled.
     run.actions.cancelScheduled = false;
     await writeHostedCheck(ctx, row._id, run);
-    return run;
+    return JSON.stringify(run);
   },
 });
 export const cancel = internalAction({
   args: { projectId: v.id('hostedProjects'), runId: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
-    const run = (await ctx.runMutation(
-      makeFunctionReference<'mutation'>('projectHostedActionsWebhook:cancellation'),
-      input,
-    )) as import('../src/hosted-check').HostedCheckRun | null;
+    const run = JSON.parse(
+      await ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectHostedActionsWebhook:cancellation'),
+        input,
+      ),
+    ) as import('../src/hosted-check').HostedCheckRun | null;
     if (!run || run.configuration.provider !== 'github-actions') return null;
     const token = await installationToken(
       ctx,

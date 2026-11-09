@@ -11,6 +11,24 @@ const fail = (kind, path) => {
   throw new Error(`${kind} at ${path}`);
 };
 
+// Convex rejects any value (argument, return value, stored document, scheduler argument) with an
+// object of more than 1024 fields or an array of more than 8192 elements (Issue 0c457ae4: a run's
+// per-test-file reports crossed a mutation return and stalled every check above 1024 test files).
+export const convexObjectFields = 1024,
+  convexArrayElements = 8192;
+export function checkConvexValue(value, path = 'value', kind = 'ConvexValueError') {
+  if (Array.isArray(value)) {
+    if (value.length > convexArrayElements)
+      fail(kind, `${path} (array has ${value.length} > ${convexArrayElements} elements)`);
+    for (let i = 0; i < value.length; i++) checkConvexValue(value[i], `${path}[${i}]`, kind);
+  } else if (object(value)) {
+    const keys = Object.keys(value).filter(key => value[key] !== undefined);
+    if (keys.length > convexObjectFields)
+      fail(kind, `${path} (object has ${keys.length} > ${convexObjectFields} fields)`);
+    for (const key of keys) checkConvexValue(value[key], `${path}.${key}`, kind);
+  }
+}
+
 // Compile each exported validator once, including its nested fields. Synthetic IDs
 // remain strings: this fake does not model Convex's opaque, table-encoded IDs.
 function compile(spec) {
@@ -99,7 +117,10 @@ export function checkArgs(fn, args, name) {
     functions.set(fn.exportArgs, check);
   }
   check(args === undefined ? {} : args, name, 'ArgumentValidationError');
+  checkConvexValue(args, name, 'ArgumentValidationError');
 }
+/** A function's return value as Convex would serialize it. */
+export const checkReturn = (value, name) => checkConvexValue(value, name, 'ReturnValueError');
 
 export function checkDocument(schema, table, document) {
   // Scheduler fixtures maintain their own synthetic system records; these are
@@ -112,6 +133,7 @@ export function checkDocument(schema, table, document) {
     tables.set(table, compile(schema.doc(table).json));
   }
   tables.get(table)(document, table, 'DocumentValidationError');
+  checkConvexValue(document, table, 'DocumentValidationError');
   return jsonToConvex(convexToJson(document));
 }
 

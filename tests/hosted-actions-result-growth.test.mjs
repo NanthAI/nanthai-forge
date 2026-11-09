@@ -118,7 +118,7 @@ async function landing(t, shards) {
   const configuration = await s.configure({ kind: 'runner', configuration: runner }, s.configuration.digest);
   const run = await s.enqueue(s.selection({ expectedConfiguration: configuration.digest }));
   const id = { projectId: s.projectId, runId: run.id };
-  const reserved = await s.transaction('reserve', direct.reserve, id);
+  const reserved = JSON.parse(await s.transaction('reserve', direct.reserve, id));
   await s.transaction('observe', direct.observe, {
     ...id,
     fence: reserved.fence,
@@ -569,4 +569,63 @@ test('unsealed output: the committed result stands and prepare refuses exactly a
   );
   assert.equal(l.stored().status, 'passed');
   assert(![...l.s.tables.projectHostedOutputHeads.values()][0].final);
+});
+
+test('Issue 0c457ae4: 5,000 test files complete through the hosted result path and every read', async t => {
+  // Convex rejects an object of more than 1024 fields in any return value, argument or document,
+  // which rolled the last shard back and stalled every check above 1024 test files. The fixture
+  // applies that limit to every function call; this run crosses it almost five times over.
+  const { read } = await import('./hosted-checks-fixture.mjs');
+  const { culpritFailures, probeVerdict } = await import('../dist/culprit-bisect.js');
+  const { summarizeCheckRun } = await import('../dist/hosted-check-summary.js');
+  const { checkFailureDetail } = await import('../dist/check-failure-detail.js');
+  const { checkConvexValue } = await import('./convex-args.mjs');
+  const many = Array.from({ length: 5000 }, (_, i) => `tests/limit-${String(i).padStart(4, '0')}.test.mjs`);
+  const failed = many[4321],
+    shards = 8,
+    per = Math.ceil(many.length / shards);
+  const l = await landing(t, shards);
+  const steps = Array.from({ length: shards }, (_, index) => ({
+    index,
+    exitCode: index === 5 ? 1 : 0,
+    contractReports: Object.fromEntries(
+      many
+        .slice(index * per, (index + 1) * per)
+        .map((file, i) => [
+          file,
+          file === failed ? failing(file, 'synthetic failure') : { durationMs: 1 + i, failed: false },
+        ]),
+    ),
+  }));
+  let body;
+  for (const step of steps) body = await l.post(step);
+  assert.equal(body.status, 'failed');
+  assert.equal(Object.keys(body.contractReports).length, many.length);
+  assert.equal(body.testFiles.counts.total, many.length);
+  const run = l.stored();
+  assert.equal(run.status, 'failed');
+  assert.equal(Object.keys(run.contractReports).length, many.length);
+  // A replayed shard result after the terminal returns the finished run again.
+  assert.equal((await l.post(steps[2])).status, 'failed');
+  // Reads: status, summary and the per-file consumers (failure detail, culprit bisect).
+  const status = JSON.parse(
+    await l.s.transaction('checkStatus', read.status, { projectId: l.id.projectId, runId: l.id.runId }),
+  );
+  assert.equal(Object.keys(status.contractReports).length, many.length);
+  const summary = JSON.parse(
+    await l.s.transaction('checkSummary', read.summary, { projectId: l.id.projectId, runId: l.id.runId }),
+  );
+  assert.equal(summary.status, 'failed');
+  assert.deepEqual(summarizeCheckRun(run).status, 'failed');
+  assert(checkFailureDetail(run).includes(failed));
+  assert.deepEqual(culpritFailures(run), [{ file: failed, excerpt: 'synthetic failure' }]);
+  assert.equal(probeVerdict(run, [failed]), 'fail');
+  // Timings were recorded from the finished run as one JSON text field.
+  const timings = [...l.s.tables.projectHostedTestTimings.values()];
+  assert.equal(timings.length, 1);
+  assert.equal(typeof timings[0].history, 'string');
+  for (const table of Object.keys(l.s.tables))
+    for (const row of l.s.tables[table].values()) checkConvexValue(row, table);
+  const runRow = [...l.s.tables.projectHostedCheckRuns.values()].find(row => row.runId === l.id.runId);
+  t.diagnostic(JSON.stringify({ files: many.length, shards, runRowKB: kb(Buffer.byteLength(runRow.value)) }));
 });

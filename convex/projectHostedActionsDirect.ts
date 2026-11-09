@@ -152,7 +152,12 @@ export async function reserveDirectActions(ctx: MutationCtx, input: CheckIdentit
   await writeHostedCheck(ctx, row._id, run);
   return run;
 }
-export const reserve = internalMutation({ args: identity, returns: v.any(), handler: reserveDirectActions });
+// JSON text (Issue 0c457ae4): a run value never crosses a function boundary as an object.
+export const reserve = internalMutation({
+  args: identity,
+  returns: v.string(),
+  handler: async (ctx, input) => JSON.stringify(await reserveDirectActions(ctx, input)),
+});
 export const observe = internalMutation({
   args: {
     ...identity,
@@ -246,9 +251,8 @@ export const dispatch = internalAction({
   args: identity,
   returns: v.null(),
   handler: async (ctx, input): Promise<null> => {
-    const run: HostedCheckRun | null = await ctx.runMutation(
-      makeFunctionReference<'mutation'>('projectHostedActionsDirect:reserve'),
-      input,
+    const run: HostedCheckRun | null = JSON.parse(
+      await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsDirect:reserve'), input),
     );
     if (!run) return null;
     invariant(run.configuration.provider === 'github-actions', 'RUNNER_UNAVAILABLE', 'Select Actions.');

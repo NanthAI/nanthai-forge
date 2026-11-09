@@ -27,7 +27,8 @@ export const prepare = internalMutation({
     recipeStorage: v.optional(v.id('_storage')),
     recipeR2Key: v.optional(v.string()),
   },
-  returns: v.any(),
+  // JSON text (Issue 0c457ae4): a replayed plan can return a finished run with per-file reports.
+  returns: v.string(),
   handler: async (ctx, input) => {
     const { row, run } = await actionsSession(ctx, input);
     const recipe = hostedActionsRecipeSchema.parse(JSON.parse(input.recipe)),
@@ -178,6 +179,6 @@ export const prepare = internalMutation({
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });
       await writeHostedCheck(ctx, row._id, run);
     }
-    return run;
+    return JSON.stringify(run);
   },
 });

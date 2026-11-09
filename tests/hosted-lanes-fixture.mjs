@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
-import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
+import { checkArgs, checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
 const {
@@ -276,6 +276,8 @@ export function lanesFixture() {
       try {
         if (decorate) await decorate(ctx, input, name);
         const result = await fn._handler(fn.isQuery ? ctx : finishReadWriter(ctx), input);
+        // Convex rejects an oversized return value, which rolls the mutation back.
+        if (fn.exportArgs) checkReturn(result, name);
         if (reads.every(unchanged => unchanged())) {
           for (const [table, id, row] of writes) {
             if (row === null) tables[table].delete(id);

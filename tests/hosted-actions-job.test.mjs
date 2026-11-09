@@ -1307,6 +1307,7 @@ test('runner errors print only allowlisted refusal reasons, including old and ma
     [JSON.stringify({ reason: 'authorization' }), '; reason: authorization'],
     [JSON.stringify({ reason: 'storage' }), '; reason: storage'],
     [JSON.stringify({ reason: 'cancelled' }), '; reason: cancelled'],
+    [JSON.stringify({ reason: 'limit' }), '; reason: limit'],
     [JSON.stringify({ reason: 'secret-response' }), ''],
     [JSON.stringify({ error: 'old refusal' }), ''],
     ['not JSON', ''],
@@ -1314,12 +1315,31 @@ test('runner errors print only allowlisted refusal reasons, including old and ma
   ]) {
     s.client.request = async () => new Response(body, { status: 403 });
     await assert.rejects(s.client.call({ kind: 'session' }), error => {
-      assert.equal(error.code, suffix === '; reason: cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE');
+      assert.equal(
+        error.code,
+        { '; reason: cancelled': 'CHECK_CANCELLED', '; reason: limit': 'CONVEX_VALUE_LIMIT' }[suffix] ??
+          'RUNNER_UNAVAILABLE',
+      );
       assert.equal(error.message, `Convex Actions request failed (403${suffix}).`);
       assert.doesNotMatch(error.stack, /secret-response/);
       return true;
     });
   }
+});
+
+test('Issue 0c457ae4: a result Forge refuses for a Convex value limit fails at once, never retried for the delivery window', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  let requests = 0;
+  s.client.request = async () => (requests++, Response.json({ reason: 'limit' }, { status: 403 }));
+  const started = Date.now();
+  await assert.rejects(s.client.call({ kind: 'result', result: { index: 0, exitCode: 0 } }), error => {
+    assert.equal(error.code, 'CONVEX_VALUE_LIMIT');
+    assert.equal(error.refusal, 'limit');
+    return true;
+  });
+  assert.equal(requests, 1);
+  assert(Date.now() - started < 5000);
 });
 
 for (const capabilities of [null, [], ['session.timingHistory']])

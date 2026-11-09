@@ -74,7 +74,11 @@ export class ActionsJobClient {
           const reason = actionsRefusalReasons.find(value => value === body?.reason);
           throw Object.assign(
             new ForgeError(
-              reason === 'cancelled' ? 'CHECK_CANCELLED' : 'RUNNER_UNAVAILABLE',
+              reason === 'cancelled'
+                ? 'CHECK_CANCELLED'
+                : reason === 'limit'
+                  ? 'CONVEX_VALUE_LIMIT'
+                  : 'RUNNER_UNAVAILABLE',
               `Convex Actions request failed (${response.status}${reason ? `; reason: ${reason}` : ''}).`,
             ),
             // Callers tell a request Forge refused as invalid (deterministic) from an unavailable runner.

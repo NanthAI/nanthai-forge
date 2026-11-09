@@ -37,7 +37,8 @@ export const output = internalMutation({
     log: v.string(),
     withRun: v.optional(v.boolean()),
   },
-  returns: v.any(),
+  // JSON text: a run can hold one report per test file, beyond Convex's 1024-field object limit.
+  returns: v.string(),
   handler: async (ctx, input) => {
     const selected = await actionsSession(ctx, input),
       { run } = selected,
@@ -53,19 +54,20 @@ export const output = internalMutation({
       digest: log.object.sha256,
       size: log.object.size,
     });
-    return input.withRun ? { target, run } : target;
+    return JSON.stringify(input.withRun ? { target, run } : target);
   },
 });
 export const result = internalMutation({
   // withFinal: a terminal result also returns the final output target, so the HTTP action
   // skips the separate prepare call (Issue 75cb5074). 'prepare' asks it to run prepare as before.
   args: { ...sessionArgs, result: v.string(), withFinal: v.optional(v.boolean()) },
-  returns: v.any(),
+  // JSON text (Issue 0c457ae4): the settled run's reports are keyed by test file.
+  returns: v.string(),
   handler: async (ctx, { withFinal, ...input }) => {
     const run = await settle(ctx, input);
-    if (!withFinal) return run;
+    if (!withFinal) return JSON.stringify(run);
     const final = hostedCheckTerminal(run) ? await finalOutputTarget(ctx, input, run) : null;
-    return { run, final: final === undefined ? 'prepare' : final };
+    return JSON.stringify({ run, final: final === undefined ? 'prepare' : final });
   },
 });
 /** A run as loadHostedCheck would parse it back from the value writeHostedCheck stores. */

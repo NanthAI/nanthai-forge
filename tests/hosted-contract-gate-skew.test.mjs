@@ -126,7 +126,7 @@ async function fixture(t, gate) {
     f.patch('projectHostedCheckRuns', row._id, { gate, value: JSON.stringify({ ...run, gate }) });
   }
   const id = { projectId: f.projectId, runId: run.id };
-  const reserved = await f.call('reserve', direct.reserve, id);
+  const reserved = JSON.parse(await f.call('reserve', direct.reserve, id));
   await f.call('bind', direct.observe, {
     ...id,
     fence: reserved.fence,
@@ -164,14 +164,16 @@ async function fixture(t, gate) {
       const recipe = hostedActionsRecipeSchema.parse({ ...pins, pin: checkPin(pins) });
       storage.set('selection', savePin(selection));
       storage.set('recipe', savePin(recipe));
-      return f.call('gatePlan', plans.prepare, {
-        ...id,
-        claims: JSON.stringify(claims),
-        recipe: JSON.stringify(recipe),
-        lockfile: 'e'.repeat(64),
-        selectionStorage: 'selection',
-        recipeStorage: 'recipe',
-      });
+      return JSON.parse(
+        await f.call('gatePlan', plans.prepare, {
+          ...id,
+          claims: JSON.stringify(claims),
+          recipe: JSON.stringify(recipe),
+          lockfile: 'e'.repeat(64),
+          selectionStorage: 'selection',
+          recipeStorage: 'recipe',
+        }),
+      );
     },
   };
 }
@@ -246,16 +248,18 @@ test('3k-file contract selection and complete metadata run stay below 60 functio
   };
   let terminal;
   for (let index = 0; index < run.plan.shardCount; index++)
-    terminal = await f.call('gateResult', callbacks.result, {
-      projectId: f.projectId,
-      runId: run.id,
-      claims: JSON.stringify(claims),
-      result: JSON.stringify({
-        index,
-        exitCode: 0,
-        ...(index === 0 ? { contractReports: { [leaf]: { durationMs: 12, failed: false } } } : {}),
+    terminal = JSON.parse(
+      await f.call('gateResult', callbacks.result, {
+        projectId: f.projectId,
+        runId: run.id,
+        claims: JSON.stringify(claims),
+        result: JSON.stringify({
+          index,
+          exitCode: 0,
+          ...(index === 0 ? { contractReports: { [leaf]: { durationMs: 12, failed: false } } } : {}),
+        }),
       }),
-    });
+    );
   assert.equal(terminal.status, 'passed');
   assert(f.traffic.acceptedCalls <= 60);
   // Existing direct-run accounting: HTTP + source transaction per window,

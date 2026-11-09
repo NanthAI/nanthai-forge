@@ -71,4 +71,11 @@ export function actionsCommandForCapabilities(
   }
   return result;
 }
-export const actionsRefusalReasons = ['validation', 'authorization', 'storage', 'cancelled'] as const;
+/** `limit`: the request broke a Convex value limit; it fails the same way on every retry. */
+export const actionsRefusalReasons = [
+  'validation',
+  'authorization',
+  'storage',
+  'cancelled',
+  'limit',
+] as const;
