@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from './main-module.mjs';
 import { watch, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import {
   FILESYSTEM_EVENT_DEADLINE_MS,
   FILESYSTEM_EVENT_CLOSE_DEADLINE_MS,
@@ -90,7 +90,7 @@ export function watchAttempt(
   });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMainModule(import.meta.url)) {
   console.log(
     JSON.stringify(
       await watchAttempt(process.argv[2], {

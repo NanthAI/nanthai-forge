@@ -212,6 +212,7 @@ export async function approveHeldLanding(
     actor: actor.id,
     operationId: attempt.operations.accept,
     action: 'accept',
+    actorKind: actor.kind,
   });
   return published;
 }

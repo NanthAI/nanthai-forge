@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { watch, mkdtempSync, realpathSync, writeFileSync, rmSync, type FSWatcher } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { rm } from 'node:fs/promises';
 
 export type Command = { id: number; type: string; path: string; recursive: boolean; probe: number };
@@ -177,7 +177,7 @@ export function startLocalWatcher(
   }
   return receive;
 }
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   if (process.argv[2]) {
     void import('./local-watcher-owner.js').then(({ startSharedWatcher }) =>
       startSharedWatcher(process.argv[2]!),

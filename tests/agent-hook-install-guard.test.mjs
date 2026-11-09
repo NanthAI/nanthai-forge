@@ -8,12 +8,15 @@ import {
   mkdirSync,
   writeFileSync,
   readFileSync,
+  readdirSync,
   rmSync,
   realpathSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isMainModule } from '../scripts/main-module.mjs';
 import { installEditHooks } from '../dist/agent-install-hooks.js';
 import { hookHealth, hookHealthText } from '../dist/agent-hook-health.js';
 import { selectCliBuild } from '../dist/cli-installation.js';
@@ -230,4 +233,51 @@ test('hosted status carries hook health in value and text', async t => {
   });
   assert.equal(status.value.hooks.status, 'attention');
   assert.match(status.text, /^Forge clone: current with main\.\nForge agent hooks need repair:/);
+});
+
+test('guard: every shipped entry script compares its real path, so a symlinked install still runs it', () => {
+  // Installed hooks and workers run through the auto-updated `current` symlink. Node names the main
+  // module by its real path, so `resolve(argv[1]) === fileURLToPath(import.meta.url)` was false there
+  // and the first-write and turn-end hooks exited 0 with no output (Issue 2a6bc0cb). Use
+  // scripts/main-module.mjs (isMainModule) or compare realpathSync(argv[1]).
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const listed = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).files.filter(
+    file => file.startsWith('scripts/') && file.endsWith('.mjs'),
+  );
+  const walk = directory =>
+    readdirSync(join(root, directory), { withFileTypes: true }).flatMap(entry =>
+      entry.isDirectory()
+        ? walk(join(directory, entry.name))
+        : entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')
+          ? [join(directory, entry.name)]
+          : [],
+    );
+  const offenders = [];
+  for (const file of [...walk('src'), ...listed]) {
+    if (file === 'scripts/main-module.mjs') continue;
+    readFileSync(join(root, file), 'utf8')
+      .split('\n')
+      .forEach((line, index) => {
+        if (
+          line.includes('process.argv[1]') &&
+          /import\.meta|fileURLToPath|modulePath/.test(line) &&
+          !line.includes('realpathSync')
+        )
+          offenders.push(`${file}:${index + 1}`);
+      });
+  }
+  assert.deepEqual(offenders, [], 'entry checks that ignore symlinked installs');
+});
+
+test('isMainModule matches a symlinked start and a query-tagged import of the same file', t => {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'forge-main-module-')));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const file = join(directory, 'entry.js');
+  writeFileSync(file, '');
+  symlinkSync(directory, join(directory, 'current'));
+  const url = pathToFileURL(file).href;
+  assert.equal(isMainModule(url, join(directory, 'current', 'entry.js')), true);
+  assert.equal(isMainModule(`${url}?shutdown-test`, file), true);
+  assert.equal(isMainModule(url, join(directory, 'other.js')), false);
+  assert.equal(isMainModule(url, undefined), false);
 });

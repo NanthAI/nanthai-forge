@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import {
   clearTurnBlocked,
   markTurnBlocked,
@@ -135,7 +134,7 @@ export async function runTurnEndHook(text: string) {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   let text = '';
   try {
     text = readFileSync(0, 'utf8');

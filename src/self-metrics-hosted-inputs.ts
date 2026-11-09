@@ -15,6 +15,7 @@ export type MetricAttempt = {
   runId: string | null;
   recheckReason?: string | null | undefined;
   scopedFallback?: string | null | undefined;
+  actorKind?: 'agent' | 'person' | null | undefined;
 };
 export type MetricLane = { id: string; version: number; intentId: string; revert: boolean };
 export type MetricSave = { id: string; laneId: string; head: string; at: string };

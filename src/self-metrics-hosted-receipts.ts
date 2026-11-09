@@ -21,8 +21,24 @@ export function hostedCallerReceipts(
         origin: 'command',
         action: row.action,
         operationId: row.operationId,
-        actor: { kind: 'person', name: row.actor },
+        // The server records agent or person from the signed-in identity; older rows know the account only.
+        actor: { kind: row.actorKind ?? 'account', name: row.actor },
         at: row.at,
+      });
+      continue;
+    }
+    if (row.kind === 'first-write') {
+      // Metric 5.4: the edit hook delivered overlap notices before this first write (hosted Lane).
+      (records.observations ??= []).push({
+        type: 'overlap-delivery',
+        id: `first-write:${row.writeId}`,
+        at: row.at,
+        laneId: row.laneId,
+        head: 'unsaved',
+        paths: row.paths,
+        noticeIds: [],
+        via: 'hook',
+        firstWriteId: row.writeId,
       });
       continue;
     }

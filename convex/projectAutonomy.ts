@@ -26,6 +26,7 @@ import { acceptancePolicyDigest } from '../src/policy-digest';
 import { landingQueue } from './projectHostedLandingEvents';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { callerActorKind } from './metricActorKind';
 import type { Doc, Id } from './_generated/dataModel';
 import type { ApprovalRow } from './projectHostedApprovalStore';
 import {
@@ -140,6 +141,7 @@ async function writePolicy(
     actor: input.actor,
     operationId: command.operationId,
     action: 'set-policy',
+    actorKind: await callerActorKind(ctx, input.actor),
   });
   return {
     operationId: command.operationId,

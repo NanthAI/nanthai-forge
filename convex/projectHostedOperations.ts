@@ -7,6 +7,7 @@ import { invariant } from '../src/errors';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { callerActorKind } from './metricActorKind';
 import type { MetricMutationAction } from '../src/self-metric-receipts';
 import {
   prepareHostedOperation,
@@ -68,18 +69,23 @@ export async function beginHostedOperation(
       await activeProject(ctx, input.projectId, input.actor);
     },
   );
-  if (!old)
+  if (!old) {
+    const metricAction =
+      input.metricAction ??
+      ((input.payload as { kind?: string }).kind === 'hosted-landing-cancel'
+        ? ('cancel' as const)
+        : undefined);
+    // The receipt is written when the operation completes, often by a job with no caller identity.
+    const metricActorKind = metricAction ? await callerActorKind(ctx, input.actor) : undefined;
     await ctx.db.insert('projectHostedOperations', {
       projectId: input.projectId,
       actor: input.actor,
       operationId: request.operationId,
-      ...(input.metricAction
-        ? { metricAction: input.metricAction }
-        : (input.payload as { kind?: string }).kind === 'hosted-landing-cancel'
-          ? { metricAction: 'cancel' as const }
-          : {}),
+      ...(metricAction ? { metricAction } : {}),
+      ...(metricActorKind ? { metricActorKind } : {}),
       value: canonicalPayload(prepared.operation),
     });
+  }
   return prepared;
 }
 export async function finishHostedOperation(
@@ -108,6 +114,7 @@ export async function finishHostedOperation(
         operationId: input.operationId,
         action: row.metricAction,
         at: operation.terminal.at,
+        ...(row.metricActorKind ? { actorKind: row.metricActorKind } : {}),
       });
   }
   return operation;

@@ -113,6 +113,8 @@ const rowSchemas = {
     runId: z.string().nullable(),
     recheckReason: z.string().min(1).max(64).nullable().optional(),
     scopedFallback: z.string().min(1).max(64).nullable().optional(),
+    /** Submitter as the server authenticated it; absent from older deployments. */
+    actorKind: z.enum(['agent', 'person']).nullable().optional(),
   }),
   lanes: z.object({ id: z.string(), version: z.number(), intentId: z.string(), revert: z.boolean() }),
   saves: z.object({ id: z.string(), laneId: z.string(), head: z.string(), at: stamp }),
@@ -228,6 +230,7 @@ export async function readHostedMetricPages(
     saves: MetricSave[] = [];
   const accepted = new Map<string, string>();
   const receiptRows: z.infer<typeof rowSchemas.receipts>[] = [];
+  const retries: (MetricRecords['receipts'][number] & { submissionId: string })[] = [];
   let receiptCoverage: Record<string, string | null> | undefined;
   try {
     const streams = runsOnly
@@ -325,14 +328,15 @@ export async function readHostedMetricPages(
           } else if (stream === 'requests') {
             const row = rowSchemas.requests.parse(rawRow);
             if (row.retry)
-              records.receipts.push({
+              retries.push({
                 schema: 1,
                 kind: 'mutation',
                 origin: 'command',
                 action: 'retry',
                 at: row.at,
                 operationId: row.retry.operationId,
-                actor: { kind: 'agent', name: row.retry.actor },
+                actor: { kind: 'account', name: row.retry.actor },
+                submissionId: row.id,
               });
             records.submissions.push({
               ...row,
@@ -363,7 +367,8 @@ export async function readHostedMetricPages(
                 kind: 'mutation',
                 origin: 'command',
                 ...row.mutation,
-                actor: { kind: 'person', name: row.mutation.actor },
+                // Legacy cancel rows record the account only, never agent or person.
+                actor: { kind: 'account', name: row.mutation.actor },
               });
           }
         }
@@ -398,6 +403,16 @@ export async function readHostedMetricPages(
   if (!flakesProjected) records.flakesUnprojected = true;
   if (reuseKeysProjected && cutover) records.coverage = { ...records.coverage, checkRequests: cutover };
   else records.gaps.push('Hosted reuse keys need the deployed projectSelfMetrics runs projection.');
+  // Who submitted each landing, as the server authenticated it: the first attempt names the submitter.
+  const submitter = new Map<string, 'agent' | 'person'>();
+  for (const attempt of [...attempts].sort((a, b) => a.at.localeCompare(b.at)))
+    if (attempt.actorKind && !submitter.has(attempt.submissionId))
+      submitter.set(attempt.submissionId, attempt.actorKind);
+  for (const { submissionId, ...retry } of retries)
+    records.receipts.push({
+      ...retry,
+      actor: { kind: submitter.get(submissionId) ?? 'account', name: retry.actor.name },
+    });
   if (!records.error && !summary && !runsOnly) {
     records.billHistoryFrom = contextFrom;
     await readHostedBills(query, period, records).catch(error => {
@@ -425,11 +440,22 @@ export async function readHostedMetricPages(
           action: 'resubmit',
           at: request.at,
           operationId: request.operationId ?? request.entryId,
-          actor: { kind: 'person', name: request.actor ?? 'unknown' },
+          actor: { kind: submitter.get(request.entryId) ?? 'account', name: request.actor ?? 'unknown' },
         });
       for (const id of intents) seenIntents.add(id);
     }
   }
+  const unattributed = records.receipts.filter(
+    r =>
+      r.kind === 'mutation' &&
+      r.actor.kind === 'account' &&
+      Date.parse(r.at) >= Date.parse(period.from) &&
+      Date.parse(r.at) < Date.parse(period.to),
+  ).length;
+  if (unattributed)
+    (records.mutationCoverageGaps ??= []).push(
+      `${unattributed} interventions have no recorded agent or person (written before attribution was recorded) and are shown as account:NAME.`,
+    );
   for (const submission of records.submissions) submission.landedAt = accepted.get(submission.entryId);
   return { records, cutover };
 }

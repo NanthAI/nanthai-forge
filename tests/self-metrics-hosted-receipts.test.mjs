@@ -50,9 +50,19 @@ test('caller receipts ride on a successful CLI mutation, bound to its project an
       noOwner: true,
       noOwnerCause: 'check worker at checking',
     };
+  const firstWrite = {
+    kind: 'first-write',
+    actor: null,
+    at: now(),
+    laneId: randomUUID(),
+    writeId: 'a'.repeat(64),
+    count: 2,
+    paths: ['src/shared.ts'],
+  };
   const carried = [
     mine,
     delivery,
+    firstWrite,
     outcome({ actor: 'stranger' }),
     outcome({ at: '2099-01-01T00:00:00.000Z' }),
     { kind: 'outcome', action: 'finish' },
@@ -67,7 +77,13 @@ test('caller receipts ride on a successful CLI mutation, bound to its project an
   const request = f.request();
   await enqueue(request, JSON.stringify(carried));
   const rows = receiptRows(f);
-  assert.deepEqual(rows.map(row => row.kind).sort(), ['delivery', 'outcome']);
+  assert.deepEqual(rows.map(row => row.kind).sort(), ['delivery', 'first-write', 'outcome']);
+  assert.deepEqual(JSON.parse(rows.find(row => row.kind === 'first-write').value), {
+    count: 2,
+    laneId: firstWrite.laneId,
+    paths: ['src/shared.ts'],
+    writeId: firstWrite.writeId,
+  });
   assert(rows.every(row => row.projectId === f.projectId && row.actor === 'owner'));
   assert.deepEqual(JSON.parse(rows.find(row => row.kind === 'outcome').value), {
     action: 'finish',
@@ -126,7 +142,37 @@ test('every owner intervention has its own timestamped receipt, including repeat
   );
   assert.equal(new Set(mutations.map(row => row.key)).size, 4);
   assert(mutations.every(row => row.actor === 'owner' && Number.isFinite(Date.parse(row.at))));
+  // Metric 5.5 attribution comes from the identity the server authenticated, never a default.
+  assert.deepEqual(
+    mutations.map(row => JSON.parse(row.value).actorKind),
+    ['person', 'person', 'person', 'person'],
+  );
   assert.equal(receiptRows(f).length, 4, 'no rows besides the receipts themselves');
+  // An agent on the owner's account (a device credential) is recorded as an agent.
+  f.tables.cliCredentials.set('synthetic-device', {
+    _id: 'synthetic-device',
+    credentialId: 'synthetic-device',
+    owner: 'owner',
+    scope: 'cli',
+    expiresAt: Date.now() + 60_000,
+    revoked: false,
+  });
+  await f.call(
+    'priorityChangeDevice',
+    priority.prioritize,
+    {
+      projectId: f.projectId,
+      submissionId: state.id,
+      operationId: randomUUID(),
+      priority: 'normal',
+      authorityEpoch: 1,
+      expectedVersion: 3,
+    },
+    { subject: 'owner', forgeCredential: 'synthetic-device' },
+  );
+  const device = receiptRows(f).filter(row => row.kind === 'mutation');
+  assert.equal(device.length, 5);
+  assert.equal(JSON.parse(device.at(-1).value).actorKind, 'agent');
 });
 
 test('caller receipts record what the caller received, with no-owner cause, and the outbox is idempotent', t => {
@@ -299,13 +345,19 @@ test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and 
     noOwner: false,
     noOwnerCause: null,
   });
-  for (const [action, minutes] of [
-    ['prioritize', 11],
-    ['prioritize', 12],
-    ['cancel', 13],
-    ['set-policy', 14],
+  for (const [action, minutes, actorKind] of [
+    ['prioritize', 11, 'person'],
+    ['prioritize', 12, 'agent'],
+    ['cancel', 13, 'agent'],
+    ['set-policy', 14, 'person'],
   ])
-    receipt('mutation', 'owner', at(minutes), { action, operationId: randomUUID() });
+    receipt('mutation', 'owner', at(minutes), { action, operationId: randomUUID(), actorKind });
+  receipt('first-write', 'owner', at(15), {
+    laneId: randomUUID(),
+    writeId: 'b'.repeat(64),
+    count: 1,
+    paths: ['src/shared.ts'],
+  });
   const window = { from: at(0), to: at(600) };
   const read = async () => metricsSurface((await readHostedMetricPages(f.query, window)).records, window);
   let totals = (await read()).totals;
@@ -326,6 +378,16 @@ test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and 
   assert.equal(totals['5.5'].partial, false, totals['5.5'].gaps.join('; '));
   assert.equal(totals['5.5'].interventions, 4);
   assert.equal(totals['5.5'].perLanding, 4);
+  assert.deepEqual(
+    totals['5.5'].byActor.map(row => [row.actor, row.count]),
+    [
+      ['agent:owner', 2],
+      ['person:owner', 2],
+    ],
+  );
+  // A hosted first write that delivered notices counts in 5.4.
+  assert.equal(totals['5.4'].firstWrites, 1);
+  assert.equal(totals['5.4'].firstWriteAlerts, 1);
   // A caller that never reported keeps both caller metrics partial; it is not a zero.
   request(randomUUID(), at(60), 'terminal-failed');
   totals = (await read()).totals;
@@ -337,6 +399,16 @@ test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and 
   const early = { from: at(-120), to: at(600) };
   const before = metricsSurface((await readHostedMetricPages(f.query, early)).records, early).totals;
   for (const metric of ['5.2', '5.3', '5.5']) assert.equal(before[metric].partial, true, metric);
+  // A receipt written before agent/person was recorded names only the account, never a person.
+  receipt('mutation', 'owner', at(16), { action: 'abandon', operationId: randomUUID() });
+  totals = (await read()).totals;
+  assert.equal(totals['5.5'].interventions, 5);
+  assert.deepEqual(
+    totals['5.5'].byActor.map(row => row.actor),
+    ['account:owner', 'agent:owner', 'person:owner'],
+  );
+  assert.equal(totals['5.5'].partial, true);
+  assert(totals['5.5'].gaps.some(gap => gap.startsWith('1 interventions have no recorded agent or person')));
   assert.equal(f.meter.writes, 0);
 });
 

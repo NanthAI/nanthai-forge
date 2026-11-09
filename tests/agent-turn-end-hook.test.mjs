@@ -10,6 +10,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -113,8 +114,13 @@ test('the installed hook process blocks once, then allows, with tiny JSON output
     XDG_STATE_HOME: process.env.XDG_STATE_HOME,
     XDG_CONFIG_HOME: join(s.directory, 'config'),
   };
+  // Installed hooks run through the auto-updated `current` symlink. Node names the main module by its
+  // real path, so an entry check on argv[1] alone made the hook a silent no-op for every agent.
+  const link = join(s.directory, 'current');
+  symlinkSync(fileURLToPath(new URL('..', import.meta.url)), link);
+  const installed = join(link, 'dist', 'agent-stop-hook.js');
   const stop = () =>
-    spawnSync(process.execPath, [hookRunner, '--forge-turn-end'], {
+    spawnSync(process.execPath, [installed, '--forge-turn-end'], {
       env,
       input: JSON.stringify({ session_id: s.id, hook_event_name: 'Stop', stop_hook_active: false }),
       encoding: 'utf8',

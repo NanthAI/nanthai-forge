@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { workerPath } from './worker-install.js';
 import { detachedWorker } from './detached-worker-shutdown.js';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -17,8 +18,7 @@ import { workProgress } from './work-progress.js';
 import { recoverOptimisticMain, recoveryResult, recoveryAllowed } from './optimistic-recovery.js';
 import { wakeGithubPush } from './github-auto-push.js';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { WorkStore } from './work-store.js';
 import { withQueueSlot } from './landing-queue.js';
 import { selectMainAudit } from './post-accept-selection.js';
@@ -214,7 +214,7 @@ export async function drainPostAccept(
     }),
   );
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   void detachedWorker(async signal => {
     const push = process.argv[3]
       ? (JSON.parse(process.argv[3]) as { channel: string; checkId: string })

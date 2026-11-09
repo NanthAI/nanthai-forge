@@ -11,10 +11,10 @@
 // Forge sets the variable only when the graph selected runnable packages; otherwise the script goes
 // on with its full steps. Commands run in order, without a shell, in the checkout, with the CI
 // script's own environment; every command runs, and the exit code is the first failure's.
+import { isMainModule } from './main-module.mjs';
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute, join } from 'node:path';
 
 /** Validated commands of a packages file, or an error message. */
 export function packageRunCommands(text) {
@@ -78,7 +78,7 @@ export function runPackageCommands(commands, root, { spawn = spawnSync, log = co
   return code;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const [packagesFile, root = process.cwd()] = process.argv.slice(2);
   const parsed = packagesFile
     ? packageRunCommands(readFileSync(packagesFile, 'utf8'))

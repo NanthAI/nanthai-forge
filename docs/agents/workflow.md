@@ -726,6 +726,16 @@ on this machine. Both switches apply; preferences use `~/.config/forge/edit-hook
 `PreToolUse` covers Claude `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and Codex
 `apply_patch`, including move destinations. Shell writes and clients without
 hooks remain outside coverage; clients may require their normal trust review.
+Hooks live in the user settings files, so an agent host must load them: a Claude
+Agent SDK host passes `settingSources` including `"user"` (Claude Code and Codex
+CLIs load them by default). Hook commands run through the `current` symlink; every
+Forge entry script compares real paths (`scripts/main-module.mjs`), and a build-failing
+guard keeps it that way.
+
+A hosted first write that returns overlap notices queues one `first-write` receipt in
+the local metric outbox (Lane, opaque write id, path, notice count); the next `start`
+or `land` carries it, so measurement adds no call. Metric 5.4 counts these as
+first-write deliveries.
 
 Before first save, each uncached hosted path/session makes exactly one bounded
 `projectHostedOverlaps:read({projectId,laneId,path,detail:true,items:5})` query
@@ -2008,6 +2018,11 @@ zeroing list price or execution minutes. A zero invoice has undefined percentage
 estimator error. Missing provider bills remain partial. Monthly shared charges
 and otherwise unjoined runs are allocated over ordinary landings; exact run/input
 or landing identities take precedence.
+
+Hosted intervention receipts (metric 5.5) record agent or person from the signed-in
+identity, as landing policy does: a device credential is an agent, a browser sign-in
+is the person. Older receipts, which named only the account, are shown as
+`account:NAME` with a gap, never as a person.
 
 Checkpoint overlap observations count shared changed paths against active,
 unlanded peers, including edits in different regions. Delivery records describe

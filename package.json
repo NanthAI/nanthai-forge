@@ -198,6 +198,8 @@
     "scripts/self-hosted-runner/start.mjs",
     "scripts/self-hosted-runner/Dockerfile",
     "scripts/child-env.d.mts",
+    "scripts/main-module.mjs",
+    "scripts/main-module.d.mts",
     "scripts/node-runtime.mjs",
     "scripts/check-quarantine.mjs",
     "scripts/check-documentation.mjs",

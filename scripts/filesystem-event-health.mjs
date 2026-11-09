@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from './main-module.mjs';
 import { execFile } from 'node:child_process';
 import { mkdtemp, rm, mkdir, lstat, stat as volumeStat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { childEnv } from './child-env.mjs';
 
@@ -137,7 +138,7 @@ export function filesystemEventRefusal(probe, platform = process.platform) {
   }`;
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMainModule(import.meta.url)) {
   let result;
   try {
     const root = process.argv[2] ?? process.cwd();

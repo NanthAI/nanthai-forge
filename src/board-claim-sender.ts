@@ -3,8 +3,8 @@
 // first-write hook while it holds the per-Lane lock; never on the hook's critical path. It waits a
 // short window so first writes that arrive together go up in one mutation, sends, and exits once
 // the spool stays empty. Advisory: any failure drops the claim (peers then just see less).
-import { fileURLToPath } from 'node:url';
-import { join, resolve } from 'node:path';
+import { isMainModule } from '../scripts/main-module.mjs';
+import { join } from 'node:path';
 import { utimesSync } from 'node:fs';
 import {
   acquireClaimLock,
@@ -100,7 +100,7 @@ export async function runClaimSender(
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const [root, laneId, project, url] = process.argv.slice(2);
   if (root && laneId && project && url)
     await runClaimSender({ root, laneId, project, url }).catch(() => undefined);

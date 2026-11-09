@@ -57,7 +57,7 @@ test('queued cancellation keeps original pins, settles both operations and repai
       kind: 'mutation',
       actor: 'owner',
       at: operation(f, operationId).terminal.at,
-      value: JSON.stringify({ action: 'cancel', operationId }),
+      value: JSON.stringify({ action: 'cancel', actorKind: 'person', operationId }),
     },
   ]);
   assert.deepEqual(await cancel(f, state.id, operationId), result);

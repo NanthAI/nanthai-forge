@@ -206,7 +206,8 @@ test('hosted immutable inputs classify first try, retry, fixer and main-race was
   ]);
   assert.equal(result.metric1.gaps.length, 1, 'one explicit bounded-context gap');
   assert.equal(result.metric5.interventions, 2);
-  assert.equal(result.metric5.byActor[0].actor, 'person:owner');
+  // The resubmit takes its kind from the signed-in identity on the attempt (an agent here), not a fixed person label.
+  assert.equal(result.metric5.byActor[0].actor, 'agent:owner');
   assert.equal(result.metric6.runnerMinutes, 22);
   assert.equal(waste.byCause.find(row => row.cause === 'main-race').runnerMinutes, 4);
   assert.equal(waste.byCause.find(row => row.cause === 'main-race').discardedPassedRunnerMinutes, 4);

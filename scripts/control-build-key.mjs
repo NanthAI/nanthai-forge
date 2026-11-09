@@ -2,10 +2,10 @@
 // Cache key for the trusted control build (`npm run build:core` output in dist/): a content hash of
 // exactly the files that build reads, so unrelated commits reuse one cached build. Any CI can call
 // it: `node scripts/control-build-key.mjs [ROOT]` prints one hex digest. Plain Node, no dependencies.
+import { isMainModule } from './main-module.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join, posix, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 // package.json "build:core": prepare-convex-api.mjs (writes only convex/_generated, outside dist),
 // tsc over tsconfig.json "include" (src/**/*.ts plus the scripts/*.d.mts typings src imports), then
@@ -90,5 +90,4 @@ export function controlBuildKey(root = '.', inputs = controlBuildInputs) {
   return hash.digest('hex');
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  console.log(controlBuildKey(process.argv[2] ?? '.'));
+if (isMainModule(import.meta.url)) console.log(controlBuildKey(process.argv[2] ?? '.'));

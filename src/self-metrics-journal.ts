@@ -15,7 +15,8 @@ import { READ_ONLY_ACTIONS } from './agent-read-actions.js';
 export type Requester = {
   action: string;
   operationId: string;
-  actor: WorkActor | { kind: 'system'; name: string };
+  /** `account`: a hosted receipt written before agent/person was recorded; only the account is known. */
+  actor: WorkActor | { kind: 'system'; name: string } | { kind: 'account'; name: string };
   origin: 'command' | 'system';
   savedHead?: { laneId: string; head: string };
 };

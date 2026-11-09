@@ -1,12 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runEditHook } from '../dist/agent-edit-hook.js';
 import { preEditHosted, hostedEditContext } from '../dist/agent-edit-hosted.js';
+import { metricOutboxDirectory } from '../dist/hosted-metric-outbox.js';
 import { hostedEditServer, hostedMarker, laneA, laneB } from './hosted-edit-fixture.mjs';
 
 test('one Lane-independent hook reads hosted saved peers before first save, caches by path/session, and fails open', async t => {
@@ -30,8 +39,29 @@ test('one Lane-independent hook reads hosted saved peers before first save, cach
     tool_name: 'Write',
     tool_input: { file_path: join(b, file) },
   });
+  const config = join(root, 'config'),
+    previousConfig = process.env.XDG_CONFIG_HOME;
+  process.env.XDG_CONFIG_HOME = config;
+  t.after(() => {
+    if (previousConfig === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previousConfig;
+  });
+  const outbox = metricOutboxDirectory({ url: server.url, projectId: 'synthetic-project' });
+  const firstWrites = () =>
+    (existsSync(outbox) ? readdirSync(outbox).filter(name => name.endsWith('.json')) : []).map(name =>
+      JSON.parse(readFileSync(join(outbox, name), 'utf8')),
+    );
   const hook = data => runEditHook('--auto', '', data);
   const notice = hook(input('shared.txt'));
+  // Metric 5.4: the delivered notice is queued for the next Lane mutation, with no call of its own.
+  const [receipt, ...others] = firstWrites();
+  assert.equal(others.length, 0);
+  assert.equal(receipt.kind, 'first-write');
+  assert.equal(receipt.laneId, laneB);
+  assert.deepEqual(receipt.paths, ['shared.txt']);
+  assert.match(receipt.writeId, /^[0-9a-f]{64}$/);
+  assert.equal(receipt.actor, null);
+  assert.ok(receipt.count >= 1);
   assert.equal(notice.hookSpecificOutput.permissionDecision, undefined);
   assert.match(notice.hookSpecificOutput.additionalContext, /overlap; coverage=hosted/);
   assert.match(notice.hookSpecificOutput.additionalContext, new RegExp(laneA));
@@ -43,6 +73,8 @@ test('one Lane-independent hook reads hosted saved peers before first save, cach
   assert.equal(Atomics.load(server.counts, 0), 2);
   const different = hook(input('different.txt'));
   assert.match(different.hookSpecificOutput.additionalContext, /allowed.*overlaps=0/);
+  // One receipt per first write that delivered notices: the cached repeat and the clear path add none.
+  assert.equal(firstWrites().length, 2);
   assert.equal(different.hookSpecificOutput.permissionDecision, undefined);
   // Same installed command resolves another Lane and patch move destinations from edited paths.
   const patch = hook({

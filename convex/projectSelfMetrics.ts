@@ -128,7 +128,7 @@ export const page = query({
             maximumRowsRead: 100,
             maximumBytesRead: 512 * 1024,
           });
-        // Collection starts are three point reads, on the first page only.
+        // Collection starts are one point read per receipt kind, on the first page only.
         const coverage: Record<string, string | null> = {};
         if (input.cursor === null)
           for (const [metric, kind] of Object.entries(metricReceiptCoverage))
@@ -321,6 +321,7 @@ export const page = query({
               runId: attempt.check?.runId ?? null,
               recheckReason: attempt.recheckReason ?? null,
               scopedFallback: attempt.scopedFallback ?? null,
+              actorKind: attempt.actor?.kind ?? null,
             };
           }
           return { id: row._id, ...('metricMutation' in row ? { mutation: row.metricMutation } : {}) };

@@ -14,7 +14,7 @@ import {
 type Row = {
   projectId: Id<'hostedProjects'>;
   key: string;
-  kind: 'outcome' | 'delivery' | 'mutation';
+  kind: 'outcome' | 'delivery' | 'mutation' | 'first-write';
   actor: string;
   at: string;
   value: string;
@@ -37,6 +37,8 @@ export async function recordMutationReceipt(
     operationId: string;
     action: MetricMutationAction;
     at?: string;
+    /** Agent or person as the server authenticated it (metric 5.5 attribution). */
+    actorKind?: 'agent' | 'person';
   },
 ) {
   const at = input.at ?? new Date().toISOString();
@@ -46,7 +48,11 @@ export async function recordMutationReceipt(
     kind: 'mutation',
     actor: input.actor,
     at,
-    value: canonicalPayload({ action: input.action, operationId: input.operationId }),
+    value: canonicalPayload({
+      action: input.action,
+      operationId: input.operationId,
+      ...(input.actorKind ? { actorKind: input.actorKind } : {}),
+    }),
   });
 }
 const DAY = 86_400_000;

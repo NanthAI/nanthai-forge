@@ -1,22 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { linkSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { homedir } from 'node:os';
+import { readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
 import { metricErrorCodes } from './self-metrics-journal.js';
-import {
-  CALLER_RECEIPT_BATCH,
-  callerReceiptKey,
-  callerReceiptSchema,
-  type CallerReceipt,
-} from './self-metric-receipts.js';
-import type { HostedAgentAddress } from './hosted-agent-contract.js';
-import { refuseRealUserState } from './test-isolation.js';
+import { CALLER_RECEIPT_BATCH, callerReceiptSchema, type CallerReceipt } from './self-metric-receipts.js';
+export { metricOutboxDirectory, writeCallerReceipts } from './hosted-metric-outbox-write.js';
 
-/** Pending receipts per deployment/project, shared by every CLI process of this user. */
-const OUTBOX_LIMIT = 1000;
 const lifecycle: Record<string, 'start' | 'checkpoint' | 'sync' | 'finish'> = {
   start: 'start',
   save: 'checkpoint',
@@ -30,10 +19,6 @@ const noOwnerCodes = new Set([
   'MAC_RUNNER_NO_OWNER',
   'MAC_RUNNER_LEASE_EXPIRED',
 ]);
-export function metricOutboxDirectory(address: HostedAgentAddress) {
-  const base = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return join(base, 'forge', 'metric-outbox', digest(`${address.url}\0${address.projectId}`).slice(0, 32));
-}
 type Landing = {
   id: string;
   stall?: { missingOwner?: string; step?: string };
@@ -120,34 +105,6 @@ export function callerReceipts(input: {
     const parsed = callerReceiptSchema.safeParse(receipt);
     return parsed.success ? [parsed.data] : [];
   });
-}
-/** One exclusive-create file per idempotency key: replays never duplicate. Never throws. */
-export function writeCallerReceipts(directory: string, receipts: CallerReceipt[]) {
-  if (!receipts.length) return;
-  try {
-    refuseRealUserState(directory, 'the metric outbox');
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-    if (readdirSync(directory).filter(name => name.endsWith('.json')).length >= OUTBOX_LIMIT) return;
-    for (const receipt of receipts) {
-      // Complete bytes, then an exclusive link: readers never see a partial receipt.
-      const temporary = join(directory, `${randomUUID()}.tmp`);
-      writeFileSync(temporary, JSON.stringify(receipt), { flag: 'wx', mode: 0o600 });
-      try {
-        linkSync(
-          temporary,
-          join(directory, `${digest(callerReceiptKey(receipt, receipt.actor ?? '')).slice(0, 40)}.json`),
-        );
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      } finally {
-        unlinkSync(temporary);
-      }
-    }
-  } catch {
-    process.emitWarning('Caller metric receipt could not be retained.', {
-      code: 'METRIC_RECEIPT_UNAVAILABLE',
-    });
-  }
 }
 /** Oldest pending receipts for this requester, bounded to one mutation's batch. */
 export function takeCallerReceipts(directory: string, actor: string) {

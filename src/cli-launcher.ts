@@ -285,7 +285,9 @@ async function launch() {
 if (
   basename(fileURLToPath(import.meta.url)) === 'launcher.mjs' &&
   process.argv[1] &&
-  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  // Node names the main module by its real path; a symlinked install must compare real paths.
+  existsSync(process.argv[1]) &&
+  realpathSync(resolve(process.argv[1])) === fileURLToPath(import.meta.url)
 ) {
   try {
     await launch();

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { workerPath } from './worker-install.js';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { processAlive, processIdentity } from './local-process.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ownerEnvNames } from './worker-environment.js';
@@ -137,7 +137,7 @@ export async function refreshAgentAdvisory(
   );
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   let pending: string | undefined;
   try {
     const { command, response, liveMcp } = JSON.parse(process.argv[3]!) as {

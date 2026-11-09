@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { randomUUID } from 'node:crypto';
 import { existsSync, writeFileSync, linkSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { nativeSelfMetricsReader } from './self-metrics-native.js';
 import {
   failMetricWeek,
@@ -45,7 +45,7 @@ export async function writeMetricWeek(owner: string, at: string, token: string, 
     releaseMetricWeek(directory, name, token);
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   const [owner, at, token] = process.argv.slice(2);
   if (!owner || !at || !token) process.exitCode = 1;
   else process.exitCode = (await writeMetricWeek(owner, at, token)) ? 0 : 1;

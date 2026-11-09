@@ -7,7 +7,12 @@ export const selfMetricReceiptTables = {
   projectSelfMetricReceipts: defineTable({
     projectId: v.id('hostedProjects'),
     key: v.string(),
-    kind: v.union(v.literal('outcome'), v.literal('delivery'), v.literal('mutation')),
+    kind: v.union(
+      v.literal('outcome'),
+      v.literal('delivery'),
+      v.literal('mutation'),
+      v.literal('first-write'),
+    ),
     actor: v.string(),
     at: v.string(),
     value: v.string(),

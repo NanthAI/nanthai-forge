@@ -11,6 +11,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
+import { callerActorKind } from './metricActorKind';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
 
@@ -84,6 +85,7 @@ export const prioritize = mutation({
         actor: actor.id,
         operationId: input.operationId,
         action: 'prioritize',
+        actorKind: await callerActorKind(ctx, actor.id),
       });
       return canonicalPayload(landingPriorityState({ ...row, ...patch }, state));
     } catch (error) {

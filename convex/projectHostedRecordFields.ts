@@ -81,6 +81,8 @@ export const hostedRecordTables = {
         v.literal('accept'),
       ),
     ),
+    /** Agent or person who started the counted command (metric 5.5), from the signed-in identity. */
+    metricActorKind: v.optional(v.union(v.literal('agent'), v.literal('person'))),
     // Legacy cancel receipts; new successful commands append projectSelfMetricReceipts.
     metricMutation: v.optional(
       v.object({ action: v.literal('cancel'), actor: v.string(), operationId: v.string(), at: v.string() }),

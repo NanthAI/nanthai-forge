@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { serverRecoveryAuthority } from './recovery-authority.js';
 import { readHostState } from './host-binding.js';
 import { workerPath } from './worker-install.js';
@@ -6,8 +7,7 @@ import { retryWorkEdit } from './work-edit.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WorkStore } from './work-store.js';
 import { withQueueSlot } from './landing-queue.js';
@@ -191,7 +191,7 @@ export async function drainGithubPush(
     }
   }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   drainGithubPush(new WorkStore(process.argv[2]!)).catch(() => {
     process.exitCode = 1;
   });

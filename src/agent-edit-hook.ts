@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isMainModule } from '../scripts/main-module.mjs';
 import { cliPackageRoot, retainCliRuntime } from './cli-installation.js';
 import { canonicalEditPath, editTarget } from './agent-edit-target.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData } from 'node:worker_threads';
 import { recordEditDelivery } from './agent-edit-metrics.js';
+import { metricOutboxDirectory, writeCallerReceipts } from './hosted-metric-outbox-write.js';
+import type { CallerReceipt } from './self-metric-receipts.js';
 import type { MetricObservation } from './self-metrics-observations.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { spawnSync } from 'node:child_process';
@@ -50,7 +53,7 @@ export function runEditHook(
     port1.close();
     void thread.terminate();
     if (message?.kind === 'forge-edit-hook-result') {
-      for (const delivery of message.deliveries ?? []) recordEditDelivery(delivery.directory, delivery.event);
+      recordHookOutput(message);
       return message.output;
     }
     return failOpen(owner, laneId, wait === 'timed-out' ? 'timeout' : 'unreachable');
@@ -67,8 +70,7 @@ export function runEditHook(
     try {
       const result = JSON.parse(child.stdout);
       if (result.kind === 'forge-edit-hook-result') {
-        for (const delivery of result.deliveries ?? [])
-          recordEditDelivery(delivery.directory, delivery.event);
+        recordHookOutput(result);
         return result.output;
       }
       return result;
@@ -110,6 +112,13 @@ const hookDeliveries: {
   directory: string;
   event: Extract<MetricObservation, { type: 'overlap-delivery' }>;
 }[] = [];
+/** Hosted first-write deliveries (metric 5.4), written by the supervisor after it answers and carried
+ * to the server by the next Lane mutation that sends caller receipts: no call of their own. */
+const hookReceipts: { directory: string; receipt: Extract<CallerReceipt, { kind: 'first-write' }> }[] = [];
+function recordHookOutput(message: { deliveries?: typeof hookDeliveries; receipts?: typeof hookReceipts }) {
+  for (const delivery of message.deliveries ?? []) recordEditDelivery(delivery.directory, delivery.event);
+  for (const item of message.receipts ?? []) writeCallerReceipts(item.directory, [item.receipt]);
+}
 async function worker(owner: string, laneId: string, input: Record<string, unknown>) {
   if (owner === '--auto') return autoWorker(input);
   owner = realpathSync(owner);
@@ -213,10 +222,24 @@ async function autoWorker(input: Record<string, unknown>) {
     seen.add(key);
     if (target.url) {
       if (input.hook_event_name === 'UserPromptSubmit') continue;
-      const result = await preEditHosted(
-        target,
-        String(input.session_id ?? input.tool_use_id ?? randomUUID()),
-      );
+      const session = String(input.session_id ?? input.tool_use_id ?? randomUUID());
+      const result = await preEditHosted(target, session);
+      if (result.status === 'overlap')
+        hookReceipts.push({
+          directory: metricOutboxDirectory({ url: target.url, projectId: target.project }),
+          receipt: {
+            kind: 'first-write',
+            actor: null,
+            at: new Date().toISOString(),
+            laneId: target.laneId,
+            // Opaque: one first write per session, Lane and path (the hook's own cache key).
+            writeId: createHash('sha256')
+              .update(JSON.stringify([target.url, target.project, target.laneId, session, target.path]))
+              .digest('hex'),
+            count: Math.max(1, Math.min(10_000, result.count ?? result.overlaps.length)),
+            paths: [target.path.slice(0, 1024)],
+          },
+        });
       const context = hostedEditContext(result);
       if (context) contexts.push(context);
     } else {
@@ -237,7 +260,12 @@ async function autoWorker(input: Record<string, unknown>) {
 if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
   try {
     const output = await worker(workerData.owner, workerData.laneId, workerData.input);
-    workerData.port.postMessage({ kind: 'forge-edit-hook-result', output, deliveries: hookDeliveries });
+    workerData.port.postMessage({
+      kind: 'forge-edit-hook-result',
+      output,
+      deliveries: hookDeliveries,
+      receipts: hookReceipts,
+    });
   } catch {
     workerData.port.postMessage({ failed: true });
   } finally {
@@ -245,7 +273,7 @@ if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
     Atomics.notify(workerData.signal, 0);
     workerData.port.close();
   }
-} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+} else if (isMainModule(import.meta.url)) {
   const child = process.argv[2] === '--worker';
   const owner = process.argv[child ? 3 : 2]!,
     laneId = process.argv[child ? 4 : 3]!;
@@ -254,7 +282,14 @@ if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
     const result = child ? await worker(owner, laneId, input) : runEditHook(owner, laneId, input);
     process.stdout.write(
       JSON.stringify(
-        child ? { kind: 'forge-edit-hook-result', output: result, deliveries: hookDeliveries } : result,
+        child
+          ? {
+              kind: 'forge-edit-hook-result',
+              output: result,
+              deliveries: hookDeliveries,
+              receipts: hookReceipts,
+            }
+          : result,
       ) + '\n',
     );
   } catch {

@@ -9,10 +9,10 @@
 //    writes before any Candidate code runs. Lane checks restore read-only; a miss installs cold.
 //  - Candidate installs are never cached: they read the main-seeded download cache and verify
 //    every package against their own lockfile integrity hashes.
+import { isMainModule } from './main-module.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export function controlDepsKey(root = '.', runtime = process) {
   const lock = readFileSync(join(resolve(root), 'package-lock.json'));
@@ -20,5 +20,4 @@ export function controlDepsKey(root = '.', runtime = process) {
   return `forge-control-deps-v2-${runtime.platform}-${runtime.arch}-node-${node}-${createHash('sha256').update(lock).digest('hex')}`;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url))
-  console.log(controlDepsKey(process.argv[2] ?? '.'));
+if (isMainModule(import.meta.url)) console.log(controlDepsKey(process.argv[2] ?? '.'));

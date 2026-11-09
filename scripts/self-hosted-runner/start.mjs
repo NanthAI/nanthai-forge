@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isMainModule } from '../main-module.mjs';
 import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -43,7 +42,7 @@ export async function startSelfHostedRunner(args, services = {}) {
   );
   await (services.worker ?? workerCli)([url, projectId, machineId]);
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMainModule(import.meta.url)) {
   try {
     await startSelfHostedRunner(process.argv.slice(2));
   } catch (error) {
