@@ -34,6 +34,13 @@ export function liveMemorySampler({ intervalMs = 2 } = {}) {
       collections++;
       baseline = live();
     },
+    /** Start a new measured window: collect, then count only growth above what is retained now. */
+    restart() {
+      if (!collect) return;
+      collect();
+      collections++;
+      baseline = peak = sampledPeak = live();
+    },
     report: () => ({
       peakLiveMiB: peak / 1048576,
       baselineLiveMiB: baseline === undefined ? undefined : baseline / 1048576,
