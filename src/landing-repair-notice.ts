@@ -9,9 +9,11 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import type { ConflictEvidence } from './agent-repair-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'native' | 'path' | 'readRecords' | 'root'>;
+
 /** Canonical retained diagnosis is the owner; inbox reads only project it. A lost
  * notification never loses evidence, and reading starts neither checks nor repair agents. */
-export function landingRepairNotices(store: WorkStore, laneId?: string): ConflictNotice[] {
+export function landingRepairNotices(store: StoreAccess, laneId?: string): ConflictNotice[] {
   if (!store.native) return [];
   const tx = store.readRecords();
   if (!tx) return [];

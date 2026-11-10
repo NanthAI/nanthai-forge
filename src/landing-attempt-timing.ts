@@ -3,6 +3,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type WorkLockSpan } from './work-lock.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<WorkStore, 'directory'>;
 export type AttemptTiming = {
   selectedAt: string;
   composeStartedAt?: string;
@@ -12,7 +14,7 @@ export type AttemptTiming = {
   commitObservedAt?: string;
   settledAt?: string;
 };
-export function readAttemptLocks(store: WorkStore, attemptId: string): WorkLockSpan[] {
+export function readAttemptLocks(store: StoreAccess, attemptId: string): WorkLockSpan[] {
   const path = join(store.directory, 'landing-attempt-locks', `${attemptId}.jsonl`);
   if (!existsSync(path)) return [];
   // A process may die mid-append; retain prior complete records.

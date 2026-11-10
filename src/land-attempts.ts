@@ -5,9 +5,11 @@ import { readLandCheckProgress } from './land-check-progress.js';
 import { finishChild } from './finish-child.js';
 import type { LandEntry } from './land-journal.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'readRecords' | 'select'>;
 /** Every batch/requeue and proper diagnosis prefix keeps its own boundaries.
  * Missing historical timestamps stay absent rather than borrowing another try. */
-export function readLandingAttempts(store: WorkStore, entryId: string, journal?: LandEntry) {
+export function readLandingAttempts(store: StoreAccess, entryId: string, journal?: LandEntry) {
   const tx = store.readRecords();
   const batches = tx
     ? tx.manifest.collections.landingBatches

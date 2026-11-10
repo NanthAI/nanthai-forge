@@ -10,6 +10,8 @@ import { backupRecordsOwner, verifiedRecordBackup } from './work-record-backup.j
 import { syncDirectory } from './native-durability.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'locked' | 'native' | 'revision' | 'root' | 'select'>;
+
 export const collectRecordsSchema = z.object({
   action: z.literal('collect-records'),
   operationId: z.uuid().optional(),
@@ -20,7 +22,11 @@ type Page = { id: string; bytes: number };
 /** Reads never take a lock or create a backup. Application serializes with Work
  * publication; every deletion is independently retryable and leaves all retained
  * roots intact. Active writers pin pages before staging and wait out collection. */
-export function collectRecords(store: WorkStore, input: unknown, hooks: { removed?(page: Page): void } = {}) {
+export function collectRecords(
+  store: StoreAccess,
+  input: unknown,
+  hooks: { removed?(page: Page): void } = {},
+) {
   const command = collectRecordsSchema.parse(input);
   const run = () => {
     const began = performance.now(),

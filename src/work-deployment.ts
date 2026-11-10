@@ -13,7 +13,35 @@ import type { WorkStore } from './work-store.js';
 import type { Deployment, DeploymentCommand, EnvironmentCommand, WorkData } from './work-types.js';
 import { forgeTempDir } from './forge-disk.js';
 
-export async function deploymentWork(store: WorkStore, command: DeploymentCommand, revision: number) {
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
+export async function deploymentWork(store: StoreAccess, command: DeploymentCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   const original = store.locked(() => {
     if (!store.native) executionGuard(store.root);
@@ -223,7 +251,7 @@ export async function deploymentWork(store: WorkStore, command: DeploymentComman
 export function previewEnvironments(data: WorkData) {
   return [...new Map(data.environmentMoves.map(move => [move.name, move])).values()];
 }
-export function selectPreviewEnvironment(store: WorkStore, command: EnvironmentCommand, revision: number) {
+export function selectPreviewEnvironment(store: StoreAccess, command: EnvironmentCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   return store.locked(() => {
     if (!store.native) executionGuard(store.root);

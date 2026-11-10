@@ -10,7 +10,9 @@ import { withGithubTransport } from './work-github.js';
 import type { WorkStore } from './work-store.js';
 import type { ContributionCommand, Lane } from './work-types.js';
 
-export async function importBundle(store: WorkStore, command: ContributionCommand, revision: number) {
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'native' | 'path' | 'root' | 'save'>;
+
+export async function importBundle(store: StoreAccess, command: ContributionCommand, revision: number) {
   invariant(
     Number.isSafeInteger(revision) && revision >= 0 && isAbsolute(command.path),
     'BAD_ARGUMENT',

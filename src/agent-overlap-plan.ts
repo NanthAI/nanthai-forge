@@ -6,6 +6,8 @@ import { overlapOrder, predictiveOverlaps, type PredictiveOverlap } from './agen
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'root'>;
+
 export type OverlapPlan = {
   order: string[];
   pairs: { lanes: [string, string]; overlaps: PredictiveOverlap[] }[];
@@ -13,7 +15,7 @@ export type OverlapPlan = {
   coverage: 'local' | 'local-incomplete';
 };
 /** Saved source only; shared by publication, landing and the pending-work view. */
-export function savedOverlapPlan(store: WorkStore, lanes: Lane[], focus?: string): OverlapPlan {
+export function savedOverlapPlan(store: StoreAccess, lanes: Lane[], focus?: string): OverlapPlan {
   const plan: OverlapPlan = { order: [], pairs: [], groups: [], coverage: 'local' };
   if (!lanes.length) return plan;
   const source = new PeersSource(store, lanes[0]!.base),

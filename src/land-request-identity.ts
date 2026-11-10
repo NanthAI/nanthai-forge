@@ -5,9 +5,11 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { LandEntry } from './land-journal.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 /** An alias retains its own request identity but observes the original controller.
  * Resolve atomic journal snapshots without joining any owner or driver lock. */
-export function resolveLandEntry(store: WorkStore, entry: LandEntry): LandEntry {
+export function resolveLandEntry(store: StoreAccess, entry: LandEntry): LandEntry {
   if (!entry.sourceOperationId) return entry;
   const state = JSON.parse(
     readFileSync(join(store.directory, 'agent-land', `${entry.sourceOperationId}.json`), 'utf8'),

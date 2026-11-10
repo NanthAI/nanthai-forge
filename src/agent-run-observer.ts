@@ -9,11 +9,39 @@ import { SelectedRunObserver } from './work-run-observation.js';
 import { recoverRuns } from './work-run.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const active = (run: CheckRun) =>
   run.status === 'queued' || run.status === 'preparing' || run.status === 'running';
 
 export async function waitForAgentRun(
-  store: WorkStore,
+  store: StoreAccess,
   operationId: string,
   waitMs?: number,
   progress = true,

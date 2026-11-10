@@ -10,6 +10,8 @@ import { durableReplace, syncDirectory, syncFile } from './native-durability.js'
 import { readWorkFile } from './work-records.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'native' | 'root'>;
+
 type Backup = {
   path: string;
   revision: number;
@@ -18,14 +20,14 @@ type Backup = {
   files: { path: string; sha256: string; symlink?: boolean }[];
 };
 const registryName = 'record-collection-backups.json';
-function backups(store: WorkStore): Backup[] {
+function backups(store: StoreAccess): Backup[] {
   const bytes = readSource(store.directory, registryName, Number.MAX_SAFE_INTEGER);
   return bytes ? JSON.parse(bytes.toString()) : [];
 }
 /** Called under the owner lock. Copy the full directory, including unreferenced
  * pages, workspace files, source objects and pending operations, before deletion.
  * No recovery receipt is published until every copied file is flushed. */
-export function backupRecordsOwner(store: WorkStore, revision: number): Backup {
+export function backupRecordsOwner(store: StoreAccess, revision: number): Backup {
   invariant(
     store.native,
     'UNSUPPORTED_NATIVE_WORK',
@@ -62,7 +64,7 @@ export function backupRecordsOwner(store: WorkStore, revision: number): Backup {
   durableReplace(join(store.directory, registryName), JSON.stringify([...backups(store), backup]));
   return backup;
 }
-export function verifiedRecordBackup(store: WorkStore, revision: number): Backup | undefined {
+export function verifiedRecordBackup(store: StoreAccess, revision: number): Backup | undefined {
   const pointer = digest(readWorkFile(store.directory)!);
   return backups(store)
     .reverse()

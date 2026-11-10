@@ -16,6 +16,34 @@ import { wakeLandingWorker } from './landing-worker-wake.js';
 import { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const active = (run: CheckRun) => ['queued', 'preparing', 'running'].includes(run.status);
 const requestSchema = z.object({
   schema: z.literal(1),
@@ -26,11 +54,11 @@ const requestSchema = z.object({
   environment: z.string(),
   runner: z.object({ pid: z.number(), startTime: z.string().optional(), host: z.string() }),
 });
-const requestPath = (store: WorkStore, id: string) =>
+const requestPath = (store: StoreAccess, id: string) =>
   join(store.directory, `check-${id}`, 'controller-request.json');
 const starting = new Set<string>();
 
-export function hasDetachedCheckRequest(store: WorkStore, run: CheckRun) {
+export function hasDetachedCheckRequest(store: StoreAccess, run: CheckRun) {
   try {
     const request = requestSchema.parse(JSON.parse(readFileSync(requestPath(store, run.id), 'utf8')));
     return (
@@ -47,7 +75,7 @@ export function hasDetachedCheckRequest(store: WorkStore, run: CheckRun) {
 
 /** The caller only publishes a durable wake. The detached process owns the run
  * lease and physical execution, independently of CLI/MCP disconnection. */
-export async function launchDetachedCheck(store: WorkStore, run: CheckRun): Promise<void> {
+export async function launchDetachedCheck(store: StoreAccess, run: CheckRun): Promise<void> {
   const key = `${store.root}:${run.id}`;
   if (starting.has(key)) return;
   const path = requestPath(store, run.id);
@@ -109,9 +137,9 @@ export async function launchDetachedCheck(store: WorkStore, run: CheckRun): Prom
 }
 
 export async function runCheckController(
-  store: WorkStore,
+  store: StoreAccess,
   id: string,
-  execute?: (store: WorkStore, run: CheckRun) => Promise<unknown>,
+  execute?: (store: StoreAccess, run: CheckRun) => Promise<unknown>,
 ) {
   return withQueueSlot(
     join(store.directory, 'check-controllers', id),

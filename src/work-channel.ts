@@ -31,9 +31,37 @@ import type {
   WorkData,
 } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const channelRef = (name: string) => `refs/forge/channels/${name}`;
 const receiptRef = (id: string) => `refs/forge/channel-moves/${id}`;
-function refHead(store: WorkStore, ref: string): string | null {
+function refHead(store: StoreAccess, ref: string): string | null {
   return (
     workGit(
       store.root,
@@ -43,7 +71,11 @@ function refHead(store: WorkStore, ref: string): string | null {
     ).trim() || null
   );
 }
-export function retainedAcceptance(store: WorkStore, data: WorkData, move: ChannelMove | undefined): boolean {
+export function retainedAcceptance(
+  store: StoreAccess,
+  data: WorkData,
+  move: ChannelMove | undefined,
+): boolean {
   if (move?.status !== 'accepted') return false;
   if (!store.native) return refHead(store, receiptRef(move.id)) === move.head;
   new NativeSource(store.root).state(move.head);
@@ -59,7 +91,7 @@ export function retainedAcceptance(store: WorkStore, data: WorkData, move: Chann
     data.views.some(view => view.id === move.viewId && view.status === 'clean' && view.head === move.head)
   );
 }
-export function channelStatus(store: WorkStore, data: WorkData) {
+export function channelStatus(store: StoreAccess, data: WorkData) {
   const prefix = 'refs/forge/channels/';
   const refs = workGit(store.root, ['for-each-ref', '--format=%(refname)', prefix])
     .trim()
@@ -99,7 +131,7 @@ export function channelStatus(store: WorkStore, data: WorkData) {
     }
   });
 }
-export function intentChannelBase(store: WorkStore, data: WorkData, pin: ChannelBase): string {
+export function intentChannelBase(store: StoreAccess, data: WorkData, pin: ChannelBase): string {
   const channel = channelStatus(store, data).find(item => item.name === pin.name);
   invariant(
     channel?.head === pin.head && channel.moveId === pin.acceptanceId,
@@ -115,7 +147,7 @@ export function intentChannelBase(store: WorkStore, data: WorkData, pin: Channel
   ]).trim();
 }
 function accept(
-  store: WorkStore,
+  store: StoreAccess,
   command: Extract<ChannelCommand, { action: 'accept-channel' }>,
   revision: number,
   githubReview?: InvariantAssessment['githubReview'],
@@ -281,7 +313,7 @@ function accept(
   launchPlaybooks(store, started);
   return started.length ? { ...result, revision: store.load().revision } : result;
 }
-export async function exportChannelBundle(store: WorkStore, id: string, includeChannelHistory = false) {
+export async function exportChannelBundle(store: StoreAccess, id: string, includeChannelHistory = false) {
   const data = store.load(),
     move = data.channelMoves.find(item => item.id === id);
   invariant(
@@ -334,7 +366,7 @@ export async function exportChannelBundle(store: WorkStore, id: string, includeC
   };
 }
 export async function channelWork(
-  store: WorkStore,
+  store: StoreAccess,
   command: ChannelCommand,
   revision: number,
   actor: AcceptanceActor = localPerson(),
@@ -366,7 +398,7 @@ export async function channelWork(
   return accept(store, command, revision, observation, actor, attribution);
 }
 
-export async function releaseWork(store: WorkStore, command: ReleaseCommand, revision: number) {
+export async function releaseWork(store: StoreAccess, command: ReleaseCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   if (command.action === 'export-release') {
     const data = store.load(),

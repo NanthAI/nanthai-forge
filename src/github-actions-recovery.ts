@@ -8,8 +8,10 @@ import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 /** Reopen unresolved dispatches or shard replacements; observe the original identity. */
-export function strandedActionsRun(store: WorkStore, run: CheckRun | undefined): boolean {
+export function strandedActionsRun(store: StoreAccess, run: CheckRun | undefined): boolean {
   if (run?.status !== 'interrupted' || run.backend?.actual !== 'github-actions' || run.cancelRequested)
     return false;
   try {
@@ -40,7 +42,7 @@ export function strandedActionsRun(store: WorkStore, run: CheckRun | undefined):
 }
 
 /** Under the owner lock, retain the old receipt before claiming the same run again. */
-export function retainInterruptedActionsReceipt(store: WorkStore, run: CheckRun) {
+export function retainInterruptedActionsReceipt(store: StoreAccess, run: CheckRun) {
   const path = join(store.directory, `check-${run.id}`, 'result.json');
   if (existsSync(path)) {
     renameSync(path, `${path}.interrupted-${randomUUID()}`);

@@ -14,6 +14,34 @@ import { bisectLandings, reverseLandings } from './optimistic-bisect.js';
 import type { WorkStore } from './work-store.js';
 import type { ChannelMove, CheckRun, WorkData, WorkView } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export const recoveryAllowed = (data: WorkData) =>
   !!data.autonomyPolicy && optimisticLanding(data.autonomyPolicy);
 export const recoveryResult = (data: WorkData, run: CheckRun) =>
@@ -21,7 +49,12 @@ export const recoveryResult = (data: WorkData, run: CheckRun) =>
 
 /** Reuse completed exact subset evidence, including after a worker restart.
  * Interrupted executions get distinct retained operation IDs. */
-export async function recoveryCheck(store: WorkStore, audit: CheckRun, view: WorkView, observe?: () => void) {
+export async function recoveryCheck(
+  store: StoreAccess,
+  audit: CheckRun,
+  view: WorkView,
+  observe?: () => void,
+) {
   await recoveryEdit(
     store,
     data => {
@@ -93,7 +126,7 @@ function recoveryView(
   };
 }
 async function settleRecovery(
-  store: WorkStore,
+  store: StoreAccess,
   audit: CheckRun,
   status: 'flaky' | 'fix-forward' | 'reverted',
   culprits: ChannelMove[] = [],
@@ -143,7 +176,7 @@ async function settleRecovery(
 }
 
 /** Run under the post-accept worker slot, never a Work/landing lock during checks. */
-export async function recoverOptimisticMain(store: WorkStore, audit: CheckRun, observe?: () => void) {
+export async function recoverOptimisticMain(store: StoreAccess, audit: CheckRun, observe?: () => void) {
   let data = await observeRecoveryRecords(store, audit.mainCheck!.channel);
   if (!store.native || !recoveryAllowed(data) || recoveryResult(data, audit)) return;
   const moves = data.channelMoves.filter(

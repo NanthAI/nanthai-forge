@@ -2,7 +2,9 @@
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
-export function updateRemoteRun(store: WorkStore, run: CheckRun) {
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'locked' | 'records'>;
+
+export function updateRemoteRun(store: StoreAccess, run: CheckRun) {
   store.locked(() => {
     const tx = store.records(),
       selected = tx.find('runs', run.id)!;

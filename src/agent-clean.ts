@@ -26,6 +26,34 @@ import { lanePinned } from './lane-registry.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, Lane } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export const CLEAN_KINDS = [
   'check-workspaces',
   'check-retention',
@@ -120,7 +148,7 @@ const measured = (path: string) => {
 };
 
 function checkWorkspaces(
-  store: WorkStore,
+  store: StoreAccess,
   items: Item[],
   skipped: Skipped[],
   automatic?: Automatic,
@@ -172,7 +200,7 @@ function checkWorkspaces(
 }
 
 function laneDirectories(
-  store: WorkStore,
+  store: StoreAccess,
   kinds: Kind[],
   items: Item[],
   skipped: Skipped[],
@@ -321,7 +349,7 @@ function laneDirectories(
 }
 
 type Automatic = { id: string; actor: string; laneIds?: string[]; runId?: string };
-function plan(store: WorkStore, kinds: Kind[], automatic?: Automatic, selected?: Set<string>) {
+function plan(store: StoreAccess, kinds: Kind[], automatic?: Automatic, selected?: Set<string>) {
   const items: Item[] = [],
     skipped: Skipped[] = [];
   const processes = workingProcesses();
@@ -333,7 +361,7 @@ function plan(store: WorkStore, kinds: Kind[], automatic?: Automatic, selected?:
   skipped.push(...retention.skipped);
   return { items, skipped };
 }
-const objectItems = (store: WorkStore) =>
+const objectItems = (store: StoreAccess) =>
   (
     nativeObjects(store, { action: 'inspect-native-objects' }).result.candidates as {
       id: string;
@@ -347,7 +375,7 @@ const objectItems = (store: WorkStore) =>
     reason: 'Digest object not reachable from retained State, Work records or history.',
   }));
 
-function remove(store: WorkStore, item: Item): string | undefined {
+function remove(store: StoreAccess, item: Item): string | undefined {
   if (item.kind === 'auto-snapshots') {
     try {
       return removeAutoSnapshot(store, item as SnapshotRetentionItem);
@@ -414,7 +442,7 @@ function cleanupResult(
   };
 }
 
-export function agentClean(store: WorkStore, command: CleanCommand, automatic?: Automatic) {
+export function agentClean(store: StoreAccess, command: CleanCommand, automatic?: Automatic) {
   invariant(store.native, 'UNSUPPORTED_NATIVE_WORK', 'clean supports a native Work owner.');
   if (automatic) {
     invariant(

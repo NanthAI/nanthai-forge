@@ -5,6 +5,34 @@ import { allRecords } from './agent-lifecycle.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, WorkView } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Reference discovery examines values, never executes source or provider code. */
 export function references(value: unknown, found: Set<string>) {
   if (typeof value === 'string') {
@@ -16,7 +44,7 @@ export function references(value: unknown, found: Set<string>) {
   else if (value && typeof value === 'object')
     for (const child of Object.values(value)) references(child, found);
 }
-export function retentionPins(store: WorkStore, runs: CheckRun[]) {
+export function retentionPins(store: StoreAccess, runs: CheckRun[]) {
   const refs = new Set<string>(),
     baselines = new Set<string>(),
     views = allRecords<WorkView>(store, 'views');

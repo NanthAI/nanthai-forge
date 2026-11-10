@@ -9,7 +9,12 @@ import { validateNativePr } from './native-pr-pins.js';
 import { ForgeError, invariant } from './errors.js';
 import { detailCommandSchema, type Lane, type WorkView } from './work-types.js';
 
-export function viewReview(store: WorkStore, view: WorkView, compact = false) {
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'native' | 'observing' | 'path' | 'revision' | 'root' | 'select'
+>;
+
+export function viewReview(store: StoreAccess, view: WorkView, compact = false) {
   if (compact) return { ...view, details: '', detailDeferred: true };
   const source = store.native ? new NativeSource(store.root) : null;
   const details =
@@ -21,7 +26,7 @@ export function viewReview(store: WorkStore, view: WorkView, compact = false) {
   return { ...view, details };
 }
 
-export function laneReview(store: WorkStore, lane: Lane, compact = false) {
+export function laneReview(store: StoreAccess, lane: Lane, compact = false) {
   const path = store.path(lane.id);
   if (store.native) {
     // Overview reports retained pins and directory availability. Current owner and
@@ -126,7 +131,7 @@ export function laneReview(store: WorkStore, lane: Lane, compact = false) {
   };
 }
 
-export function readWorkDetail(store: WorkStore, input: unknown) {
+export function readWorkDetail(store: StoreAccess, input: unknown) {
   const parsed = detailCommandSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Select a retained review and its original source pins.');
   return store.observing(() => {

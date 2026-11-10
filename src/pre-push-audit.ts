@@ -2,9 +2,11 @@
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load'>;
+
 /** Resolve the existing check for a full audit, without changing acceptance
  * metadata or introducing a passing-check publication policy. */
-export function requestPushAudit(store: WorkStore) {
+export function requestPushAudit(store: StoreAccess) {
   const data = store.load();
   const main = data.channelMoves.filter(move => move.channel === 'main' && move.status === 'accepted').at(-1);
   if (!main) return;

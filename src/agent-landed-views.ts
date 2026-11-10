@@ -3,7 +3,35 @@ import { allRecords } from './agent-lifecycle.js';
 import type { LandingEntry } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';
 
-export function noopLandingViews(store: WorkStore, channel: string) {
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
+export function noopLandingViews(store: StoreAccess, channel: string) {
   const records = store.readRecords();
   const entries = records
     ? records.manifest.collections.landingEntries

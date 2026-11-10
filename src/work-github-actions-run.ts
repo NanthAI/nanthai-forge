@@ -28,8 +28,26 @@ import { GitSyncError } from './github-sync-git.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'page'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+>;
+
 export async function launchGithubActionsRun(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   api: ActionsApi = actionsApi,
   exportSnapshot = exportActionsSnapshot,

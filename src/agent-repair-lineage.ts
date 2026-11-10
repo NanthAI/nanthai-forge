@@ -5,6 +5,34 @@ import type { WorkStore } from './work-store.js';
 import type { WorkRecord, WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane, WorkView } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Project existing guarded sync receipts. No file capture/write, rebase, check
  * reuse or model scheduling happens while observing repair/ownership context. */
 export function syncLineage(lane: Lane, head: string): SyncLineage[] {
@@ -76,13 +104,13 @@ type RepairInputs = {
   moves?: WorkRecord<'channelMoves'>[];
 };
 // Peer reports decorate every notice; read these collections once per content, not once per notice.
-const repairInputs = new WeakMap<WorkStore, RepairInputs>();
+const repairInputs = new WeakMap<StoreAccess, RepairInputs>();
 function readAll<K extends 'intents' | 'views' | 'channelMoves'>(tx: WorkRecordTransaction, collection: K) {
   return Array.from({ length: tx.manifest.collections[collection]?.count ?? 0 }, (_, index) =>
     tx.at(collection, index),
   );
 }
-function inputsFor(store: WorkStore, tx: WorkRecordTransaction): RepairInputs {
+function inputsFor(store: StoreAccess, tx: WorkRecordTransaction): RepairInputs {
   const { intents, views, channelMoves } = tx.manifest.collections;
   const key = JSON.stringify([intents, views, channelMoves]);
   let inputs = repairInputs.get(store);
@@ -90,7 +118,7 @@ function inputsFor(store: WorkStore, tx: WorkRecordTransaction): RepairInputs {
   return inputs;
 }
 
-export function decorateRepair(store: WorkStore, notice: ConflictNotice): ConflictNotice {
+export function decorateRepair(store: StoreAccess, notice: ConflictNotice): ConflictNotice {
   const tx = store.readRecords();
   if (!tx) return notice;
   const resolutions: RepairResolution[] = [];

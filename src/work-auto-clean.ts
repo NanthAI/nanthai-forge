@@ -3,10 +3,38 @@ import { createHash } from 'node:crypto';
 import { agentClean } from './agent-clean.js';
 import { readPolicy } from './work-autonomy.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 /** Stable per lifecycle event and terminal attempt; a resumed run can finish
  * again, while replay cannot clean a subsequently reopened Lane. */
 export function automaticCleanup(
-  store: WorkStore,
+  store: StoreAccess,
   event: string,
   actor: string,
   scope: { laneIds?: string[]; runId?: string } = {},

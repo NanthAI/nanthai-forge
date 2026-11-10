@@ -10,10 +10,15 @@ import { retryWorkPhase } from './work-retry.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'locked' | 'readRecords' | 'records' | 'revision' | 'root'
+>;
+
 /** The normal native composer and pin revalidation, with selected-record
  * publication. Queue admission must not hydrate every historical Lane first. */
 export async function composeLandingInputs(
-  store: WorkStore,
+  store: StoreAccess,
   input: unknown,
   options: { compact?: boolean; beforePublish?: () => void } = {},
 ) {

@@ -9,6 +9,8 @@ import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import type { NativeMergeConflict } from './native-merge.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'path' | 'readRecords'>;
+
 export type NoticeParticipant = {
   lane: string;
   workspace?: string;
@@ -52,7 +54,7 @@ export type ConflictNotice = {
   after?: string;
   detail?: string;
 };
-export function noticeParticipant(store: WorkStore, source: PeersSource, lane: Lane): NoticeParticipant {
+export function noticeParticipant(store: StoreAccess, source: PeersSource, lane: Lane): NoticeParticipant {
   const tx = store.readRecords(),
     intent =
       tx?.fields('intents', lane.intentId)?.record ??

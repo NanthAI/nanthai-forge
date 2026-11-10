@@ -13,6 +13,11 @@ import { assertMergeResolved, resolvedSyncCheckpoint } from './agent-sync.js';
 import type { WorkStore } from './work-store.js';
 import type { LocalWorkCommand, Lane } from './work-types.js';
 import { executionBase } from './work-intent-local.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'laneLocked' | 'locked' | 'native' | 'path' | 'readRecords' | 'records' | 'root'
+>;
 type NativeLaneCommand = Extract<
   LocalWorkCommand,
   { action: 'lane' | 'child-lane' | 'undo' | 'resume' | 'checkpoint' }
@@ -20,7 +25,7 @@ type NativeLaneCommand = Extract<
 export const scopedNativeLane = (command: LocalWorkCommand): command is NativeLaneCommand =>
   ['lane', 'child-lane', 'undo', 'resume', 'checkpoint'].includes(command.action);
 export function recordNativeLane(
-  store: WorkStore,
+  store: StoreAccess,
   command: LocalWorkCommand,
   revision: number,
   compact = false,
@@ -32,7 +37,7 @@ export function recordNativeLane(
   return laneId ? store.laneLocked(laneId, run, { operation: command.action }) : run();
 }
 function recordNativeLaneLocked(
-  store: WorkStore,
+  store: StoreAccess,
   command: LocalWorkCommand,
   revision: number,
   compact: boolean,

@@ -11,6 +11,34 @@ import { assertLaneStatusTransition } from './lane-state-transition.js';
 import { NativeSource } from './native-source.js';
 import { validateAnchorView, validateAnchorFile } from './work-source-anchor.js';
 import { headAt } from './work-git.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 type ScopedMetadataCommand = Extract<LocalWorkCommand, { action: 'note' | 'intent-status' | 'lane-status' }>;
 export const scopedMetadata = (
   command: LocalWorkCommand,
@@ -20,7 +48,7 @@ export const scopedMetadata = (
   ['note', 'intent-status', 'lane-status'].includes(command.action) ||
   (command.action === 'intent' && !command.baseChannel);
 export function recordMetadata(
-  store: WorkStore,
+  store: StoreAccess,
   command: LocalWorkCommand,
   revision: number,
   options: {

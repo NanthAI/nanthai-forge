@@ -12,8 +12,36 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export async function selectPostAccept(
-  store: WorkStore,
+  store: StoreAccess,
   push?: { channel: string; checkId: string },
   signal?: AbortSignal,
 ) {

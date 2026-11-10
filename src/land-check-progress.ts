@@ -10,6 +10,34 @@ import type { ActionsJournal } from './github-actions-export.js';
 import type { RemoteCheckPlan } from './remote-check-plan.js';
 import type { Counts } from './land-phases.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const markerCache = new Map<string, { stamp: string; files: Set<string>; markers: boolean }>();
 function fileMarkers(path: string) {
   const stat = statSync(path, { bigint: true });
@@ -116,7 +144,7 @@ export function readLandCheckProgress(directory: string, runId: string, includeF
 }
 
 /** Read the physical execution lease without queue admission, recovery or stale-ticket cleanup. */
-export function readLandCheckController(store: WorkStore, run: CheckRun) {
+export function readLandCheckController(store: StoreAccess, run: CheckRun) {
   if (!['queued', 'preparing', 'running'].includes(run.status)) return;
   const lease = `check-controllers/${run.id}`;
   let names: string[] = [];

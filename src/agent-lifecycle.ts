@@ -9,8 +9,36 @@ import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane, WorkData } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Every record of a collection, read page by page without locking. */
-export function allRecords<T>(store: WorkStore, collection: string): T[] {
+export function allRecords<T>(store: StoreAccess, collection: string): T[] {
   const result: T[] = [];
   for (let offset: number | null = 0; offset !== null;) {
     const page = store.page(collection, offset, 100) as { records: T[]; nextOffset: number | null };
@@ -21,14 +49,14 @@ export function allRecords<T>(store: WorkStore, collection: string): T[] {
 }
 type Head = { name: string; head: string };
 /** Accepted Channel heads, from data already loaded or (when omitted) read fresh. */
-export function channelHeads(store: WorkStore, data?: Pick<WorkData, 'channelMoves'>): Head[] {
+export function channelHeads(store: StoreAccess, data?: Pick<WorkData, 'channelMoves'>): Head[] {
   const channels = store.native
     ? nativeChannels((data ?? { channelMoves: allRecords(store, 'channelMoves') }) as WorkData)
     : channelStatus(store, store.load());
   return channels.flatMap(item => (item.head ? [{ name: item.name, head: item.head }] : []));
 }
 /** A Lane is merged when it has its own work and its head is contained in an accepted Channel head. */
-export function mergedChecker(store: WorkStore, heads: Head[]) {
+export function mergedChecker(store: StoreAccess, heads: Head[]) {
   const native = store.native ? new NativeSource(store.root).ancestry() : undefined;
   return (lane: Pick<Lane, 'head' | 'base'>): string | null => {
     if (lane.head === lane.base) return null;

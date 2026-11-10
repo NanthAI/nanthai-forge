@@ -6,9 +6,37 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { failedTestFiles } from './check-failure-files.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const CAP = 4096,
   MATCH = /✖|not ok|Error/;
-function tail(store: WorkStore, run: CheckRun, stream: 'stdout' | 'stderr'): string[] {
+function tail(store: StoreAccess, run: CheckRun, stream: 'stdout' | 'stderr'): string[] {
   try {
     const response = runWork(
       store,
@@ -21,7 +49,7 @@ function tail(store: WorkStore, run: CheckRun, stream: 'stdout' | 'stderr'): str
   }
 }
 /** Short, bounded explanation of a failed run: last stderr lines plus failure markers from either stream. */
-export function failureSummary(store: WorkStore, run: CheckRun): string {
+export function failureSummary(store: StoreAccess, run: CheckRun): string {
   const err = tail(store, run, 'stderr'),
     out = tail(store, run, 'stdout');
   const last = err.filter(line => line.trim()).slice(-40);

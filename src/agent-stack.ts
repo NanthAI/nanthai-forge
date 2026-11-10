@@ -6,18 +6,46 @@ import { noopLandingViews } from './agent-landed-views.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane, ChannelMove } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Status accepts stored Lanes and the public receipts used by project pages. */
 export type StackLane = Pick<Lane, 'stack'> & ({ id: string } | { laneId: string });
 const parentId = (stack: Lane['stack']) =>
   typeof stack?.laneId === 'string' && stack.laneId.length ? stack.laneId : undefined;
-const currentChannelHead = (store: WorkStore, channel: string) =>
+const currentChannelHead = (store: StoreAccess, channel: string) =>
   allRecords<ChannelMove>(store, 'channelMoves')
     .filter(move => move.channel === channel && move.status === 'accepted')
     .at(-1)?.head ?? null;
 
 /** A landing is established by a Candidate input and a receipt still on main,
  * never by coincidental source containment or the parent's lifecycle alone. */
-export function stackLanding(store: WorkStore, lane: Pick<Lane, 'stack'>, mainTarget?: string) {
+export function stackLanding(store: StoreAccess, lane: Pick<Lane, 'stack'>, mainTarget?: string) {
   const stack = lane.stack;
   if (!stack || stack.detached || !parentId(stack)) return undefined;
   const parent = store.select('lanes', stack.laneId);
@@ -62,7 +90,7 @@ export function stackLanding(store: WorkStore, lane: Pick<Lane, 'stack'>, mainTa
     );
   });
 }
-export function stackStatus(store: WorkStore, lane: StackLane) {
+export function stackStatus(store: StoreAccess, lane: StackLane) {
   const stack = lane.stack;
   if (!stack) return undefined;
   const parent = parentId(stack) ? store.select('lanes', stack.laneId) : undefined;
@@ -126,7 +154,7 @@ export function stackStatus(store: WorkStore, lane: StackLane) {
       : {}),
   };
 }
-export function stackSyncTarget(store: WorkStore, lane: Lane, ontoMain = false, mainTarget?: string) {
+export function stackSyncTarget(store: StoreAccess, lane: Lane, ontoMain = false, mainTarget?: string) {
   const stack = lane.stack;
   if (!stack || stack.detached) return undefined;
   const landing = stackLanding(store, lane);

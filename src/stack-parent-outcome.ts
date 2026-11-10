@@ -3,9 +3,37 @@ import { allRecords } from './agent-lifecycle.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import type { LandingEntry } from './landing-batch-types.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 /** Only a terminal submission of the saved parent pin changes the stack target.
  * A newer live retry keeps the dependency; lifecycle labels are not evidence. */
-export function stackParentFailed(store: WorkStore, lane: Pick<Lane, 'stack'>) {
+export function stackParentFailed(store: StoreAccess, lane: Pick<Lane, 'stack'>) {
   const stack = lane.stack;
   if (!stack?.laneId || stack.detached) return false;
   const tx = store.readRecords?.();

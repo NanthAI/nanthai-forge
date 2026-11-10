@@ -83,9 +83,37 @@ export const runInterruption = new AbortController();
 
 const active = (run: CheckRun) =>
   run.status === 'queued' || run.status === 'preparing' || run.status === 'running';
-const directory = (store: WorkStore, id: string) => join(store.directory, `check-${id}`);
+const directory = (store: StoreAccess, id: string) => join(store.directory, `check-${id}`);
 export { checkEnvironment } from './check-environment.js';
 import { checkProcessEnvironment, checkEnvironmentDescription } from './check-environment.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 function safeDirectory(path: string): boolean {
   return (
     existsSync(path) &&
@@ -94,13 +122,13 @@ function safeDirectory(path: string): boolean {
     realpathSync(path) === path
   );
 }
-export function runOutputDirectory(store: WorkStore, id: string) {
+export function runOutputDirectory(store: StoreAccess, id: string) {
   const path = directory(store, id);
   invariant(safeDirectory(path), 'NOT_FOUND', 'Run output directory is unavailable.');
   return path;
 }
 const adoptingRemoteRuns = new Set<string>();
-export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adopt = true): boolean {
+export function recoverRuns(store: StoreAccess, data: Pick<WorkData, 'runs'>, adopt = true): boolean {
   let changed = false;
   for (const run of data.runs.filter(active)) {
     const path = directory(store, run.id);
@@ -170,9 +198,9 @@ export function recoverRuns(store: WorkStore, data: Pick<WorkData, 'runs'>, adop
 /** Claim the current stored runner under the owner lock before starting an adopter.
  * Observation copies never acquire execution ownership or overwrite a live runner. */
 export async function adoptRemoteRun(
-  store: WorkStore,
+  store: StoreAccess,
   id: string,
-  start: (store: WorkStore, run: CheckRun) => Promise<unknown> = async (store, run) =>
+  start: (store: StoreAccess, run: CheckRun) => Promise<unknown> = async (store, run) =>
     launchDetachedCheck(store, run),
 ): Promise<void> {
   let claimed: CheckRun | undefined;
@@ -207,9 +235,9 @@ export async function adoptRemoteRun(
 
 /** A physical controller owns completion even when its submitting transport ends. */
 export async function executeOwnedRun(
-  store: WorkStore,
+  store: StoreAccess,
   claimed: CheckRun,
-  start: (store: WorkStore, run: CheckRun) => Promise<unknown> = launch,
+  start: (store: StoreAccess, run: CheckRun) => Promise<unknown> = launch,
   complete?: (error?: unknown) => void,
 ) {
   try {
@@ -264,7 +292,7 @@ export async function executeOwnedRun(
     wakeLandingWorker(store);
   }
 }
-function saveCompletion(store: WorkStore, id: string, complete?: (error?: unknown) => void) {
+function saveCompletion(store: StoreAccess, id: string, complete?: (error?: unknown) => void) {
   try {
     store.locked(() => {
       const tx = store.records(),
@@ -289,7 +317,11 @@ function saveCompletion(store: WorkStore, id: string, complete?: (error?: unknow
     // The durable receipt remains inspectable/reconcilable if metadata cannot be saved.
   }
 }
-async function launch(store: WorkStore, run: CheckRun, complete?: (error?: unknown) => void): Promise<void> {
+async function launch(
+  store: StoreAccess,
+  run: CheckRun,
+  complete?: (error?: unknown) => void,
+): Promise<void> {
   if (run.backend?.actual === 'github-actions') {
     await launchGithubActionsRun(store, run);
     saveCompletion(store, run.id, complete);
@@ -318,7 +350,7 @@ async function launch(store: WorkStore, run: CheckRun, complete?: (error?: unkno
   return launchLocal(store, run, complete);
 }
 async function launchLocal(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   complete?: (error?: unknown) => void,
 ): Promise<void> {
@@ -791,7 +823,7 @@ async function launchLocal(
   }
 }
 export function runWork(
-  store: WorkStore,
+  store: StoreAccess,
   command: Exclude<EvidenceCommand, { action: 'import-checks' | 'export-check' }>,
   revision: number,
   sequence?: { id: string; complete: (error?: unknown) => void },

@@ -6,12 +6,14 @@ import { detailWriter } from './work-detail-store.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'directory' | 'native' | 'pointer' | 'readRecords'>;
+
 type Progress = { collection: number; offset: number; id: string; fromSchema: number };
 const collections = ['runs', 'automaticActions'] as const;
 /** Each finite page publishes its cursor atomically with its converted records.
  * Lost replies replay the selected cursor; objects are immutable and deduplicated.
  * Historical pointers and receipts are never rewritten. Call under the Work lock. */
-export function migrateWorkDetails(store: WorkStore, pageSize = 128) {
+export function migrateWorkDetails(store: StoreAccess, pageSize = 128) {
   invariant(
     store.native,
     'UNSUPPORTED_NATIVE_WORK',

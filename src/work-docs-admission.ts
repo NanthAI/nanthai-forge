@@ -4,9 +4,11 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { isStandardForgeCheck } from './standard-check.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'root'>;
+
 /** Classify immutable bytes with the installed selector, never execute candidate code.
  * Missing selector/inputs conservatively retain ordinary machine admission. */
-export async function lightweightDocsRun(store: WorkStore, run: CheckRun): Promise<boolean> {
+export async function lightweightDocsRun(store: StoreAccess, run: CheckRun): Promise<boolean> {
   if (
     !store.native ||
     run.checkSelection?.scope === 'partial' ||

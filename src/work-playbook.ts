@@ -20,6 +20,34 @@ import type {
 } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 // ponytail: linear retained-run lookups per step; index IDs if measured history sizes warrant it.
 function terminal(data: WorkData, run: PlaybookRun): PlaybookRun['status'] | undefined {
   const steps = run.steps.map(s => data.runs.find(r => r.id === s.runId));
@@ -61,7 +89,7 @@ export function playbookApplicability(data: WorkData, run: PlaybookRun, environm
     reasons.push('Recorded runtime settings changed.');
   return { applicability: reasons.length ? ('historical' as const) : ('current' as const), reasons };
 }
-function interrupt(store: WorkStore, id: string, error: unknown) {
+function interrupt(store: StoreAccess, id: string, error: unknown) {
   try {
     store.locked(() => {
       const data = store.load(),
@@ -82,7 +110,7 @@ function interrupt(store: WorkStore, id: string, error: unknown) {
     // Ambiguous metadata is retained, never used to authorize a new launch.
   }
 }
-function advance(store: WorkStore, id: string) {
+function advance(store: StoreAccess, id: string) {
   try {
     const next = store.locked(() => {
       const data = store.load();
@@ -306,13 +334,13 @@ export function registerAutomations(
       return run.status === 'running' ? [run.id] : [];
     });
 }
-export function launchPlaybooks(store: WorkStore, ids: string[], error?: unknown) {
+export function launchPlaybooks(store: StoreAccess, ids: string[], error?: unknown) {
   for (const id of ids) {
     if (error) interrupt(store, id, error);
     else advance(store, id);
   }
 }
-export function playbookWork(store: WorkStore, command: PlaybookCommand, revision: number) {
+export function playbookWork(store: StoreAccess, command: PlaybookCommand, revision: number) {
   invariant(
     Number.isSafeInteger(revision) && revision >= 0,
     'BAD_ARGUMENT',

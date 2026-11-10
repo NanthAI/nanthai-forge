@@ -4,6 +4,8 @@ import { NativeSource, nativeOwner } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'readRecords' | 'root'>;
+
 type CheckpointInput = {
   laneId: string;
   expectedHead: string;
@@ -15,7 +17,7 @@ type CheckpointInput = {
  * publication remain under the existing owner lock. No metadata-only freshness
  * shortcut: capture reads every included file's actual bytes and current mode. */
 export function nativeCheckpointCandidate(
-  store: WorkStore,
+  store: StoreAccess,
   command: CheckpointInput,
   revision?: number,
   preparedSource?: NativeSource,

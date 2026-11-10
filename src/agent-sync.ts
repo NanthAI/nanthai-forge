@@ -32,6 +32,34 @@ import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export type SyncCommand = {
   ontoMain?: boolean;
   operationId: string;
@@ -94,7 +122,7 @@ export function resolvedSyncCheckpoint(source: NativeSource, lane: Lane, files: 
 /** Bring a Channel head into a native Lane, like `git pull`. Clean merges become a
  * two-parent Lane checkpoint; conflicts leave markers and a pending merge parent. */
 export function agentSync(
-  store: WorkStore,
+  store: StoreAccess,
   command: SyncCommand,
   options: { target?: string; identity?: unknown; automaticActor?: string; resolveDocs?: boolean } = {},
 ) {

@@ -23,6 +23,34 @@ import { terminalReceipt, remoteExecutionBlocker } from './clean-terminal-receip
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const LOG_TAIL_BYTES = 64 * 1024;
 export type RetentionItem = {
@@ -50,7 +78,7 @@ function size(path: string): number {
 }
 
 export function retentionPlan(
-  store: WorkStore,
+  store: StoreAccess,
   kinds: readonly string[],
   processes: ReturnType<typeof workingProcesses>,
   now = Date.now(),

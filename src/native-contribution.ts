@@ -15,6 +15,8 @@ import {
 } from './native-contribution-types.js';
 import { forgeTempDir } from './forge-disk.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'locked' | 'native' | 'path' | 'root' | 'save' | 'snapshotBytes'>;
+
 const request = (c: NativeContributionCommand) =>
   digest(
     JSON.stringify({
@@ -28,7 +30,7 @@ const request = (c: NativeContributionCommand) =>
     }),
   );
 
-export async function importNativeContribution(store: WorkStore, input: unknown, revision: number) {
+export async function importNativeContribution(store: StoreAccess, input: unknown, revision: number) {
   const parsed = nativeContributionCommandSchema.safeParse(input);
   invariant(
     parsed.success && Number.isSafeInteger(revision) && revision >= 0,
@@ -62,7 +64,7 @@ export async function importNativeContribution(store: WorkStore, input: unknown,
       // source/evidence closure. Its Work lives only in temporary storage.
       const owner = join(scratch, 'owner');
       await restoreNativeWork(directory, owner);
-      const incoming = new WorkStore(owner),
+      const incoming = WorkStore.open<'load'>(owner),
         original = incoming.load(),
         source = new NativeSource(owner),
         ancestry = source.ancestry();

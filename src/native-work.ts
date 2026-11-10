@@ -49,6 +49,34 @@ import { laneReview, viewReview } from './work-detail.js';
 
 import { createWork } from './work-create.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export const CHANNEL_DIVERGED =
   'The Candidate does not contain the current Channel head, so accepting it would drop accepted work. Sync the Lane with the Channel (or compose with it) and finish again.';
 /** True when this Channel already accepted `head`; re-accepting it is an explicit rollback. */
@@ -134,7 +162,7 @@ function nativeViewReview(source: NativeSource, view: WorkView, compact = false)
     ? { ...view, details: nativeDiff(source, source.state(view.base).files, source.state(view.head).files) }
     : view;
 }
-export function nativeStatus(store: WorkStore, data: WorkData, options: { compact?: boolean } = {}) {
+export function nativeStatus(store: StoreAccess, data: WorkData, options: { compact?: boolean } = {}) {
   const source = new NativeSource(store.root);
   invariant(data.nativeHead, 'INVALID_NATIVE_SOURCE', 'Native bootstrap State is unavailable.');
   source.state(data.nativeHead);
@@ -233,7 +261,7 @@ export function nativeStatus(store: WorkStore, data: WorkData, options: { compac
   };
 }
 export function nativeExecute(
-  store: WorkStore,
+  store: StoreAccess,
   input: unknown,
   revision: number,
   options: {
@@ -611,7 +639,7 @@ export function nativeExecute(
   };
 }
 
-function requireNativeAcceptance(store: WorkStore, epoch: number): void {
+function requireNativeAcceptance(store: StoreAccess, epoch: number): void {
   const state = readHostState(store),
     binding = state.binding;
   if (!binding) return;

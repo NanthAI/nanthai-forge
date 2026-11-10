@@ -9,11 +9,39 @@ import { workGithubApi, withGithubTransport } from './work-github.js';
 import type { WorkStore } from './work-store.js';
 import type { MirrorCommand } from './work-types.js';
 
-function workGitRef(store: WorkStore, branch: string) {
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
+function workGitRef(store: StoreAccess, branch: string) {
   workGit(store.root, ['check-ref-format', `refs/heads/${branch}`]);
 }
 
-export async function mirrorWork(store: WorkStore, command: MirrorCommand, revision: number) {
+export async function mirrorWork(store: StoreAccess, command: MirrorCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   const previous = store.locked(() => {
     executionGuard(store.root);

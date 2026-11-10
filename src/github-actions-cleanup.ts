@@ -10,10 +10,12 @@ import { receiptSchema } from './work-run-receipt.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'page' | 'select'>;
+
 const terminal = (status: string) => !['queued', 'preparing', 'running'].includes(status);
 /** A rotating, bounded local-history sweep. Unknown dispatches and live operations keep their refs. */
 export async function sweepActionsRefs(
-  store: WorkStore,
+  store: StoreAccess,
   repo: string,
   api: ActionsApi,
   progress: (message: string) => void,

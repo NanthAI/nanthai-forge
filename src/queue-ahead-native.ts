@@ -9,8 +9,36 @@ import { channelStatus } from './work-channel.js';
 import type { WorkStore } from './work-store.js';
 import type { LandingEntry } from './landing-batch-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Only active queue headers and selected Candidates; retained history is excluded. */
-function readNativeQueueAhead(store: WorkStore, entry: LandingEntry) {
+function readNativeQueueAhead(store: StoreAccess, entry: LandingEntry) {
   if (!['queued', 'checking'].includes(entry.status)) return undefined;
   const tx = store.readRecords();
   if (!tx) throw new Error('Selected queue-ahead records are unavailable.');
@@ -63,7 +91,7 @@ function readNativeQueueAhead(store: WorkStore, entry: LandingEntry) {
 }
 
 /** Advisory metadata/source availability never changes the canonical outcome. */
-export function nativeQueueAhead(store: WorkStore, entry: LandingEntry) {
+export function nativeQueueAhead(store: StoreAccess, entry: LandingEntry) {
   try {
     return readNativeQueueAhead(store, entry);
   } catch {

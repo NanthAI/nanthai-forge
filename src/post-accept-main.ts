@@ -27,10 +27,38 @@ import { foregroundQueued } from './check-queue.js';
 import { ForgeError } from './errors.js';
 import { failedMainCheck, fixMainIntentId } from './post-accept-fix-forward.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** The acceptance is the durable queue entry. Coalesced wakes invalidate an
  * in-flight snapshot so newly accepted requests receive another observation. */
-const waking = new WeakMap<WorkStore, { dirty: boolean }>();
-export function wakePostAccept(store: WorkStore) {
+const waking = new WeakMap<StoreAccess, { dirty: boolean }>();
+export function wakePostAccept(store: StoreAccess) {
   const pending = waking.get(store);
   if (pending) {
     pending.dirty = true;
@@ -53,7 +81,7 @@ export function wakePostAccept(store: WorkStore) {
     }
   })();
 }
-function publishAuditWake(store: WorkStore, data: import('./work-types.js').WorkData) {
+function publishAuditWake(store: StoreAccess, data: import('./work-types.js').WorkData) {
   const moves = data.channelMoves;
   if (
     readMainAuditState(store)?.status !== 'stalled' &&
@@ -87,7 +115,7 @@ function publishAuditWake(store: WorkStore, data: import('./work-types.js').Work
 }
 
 export async function drainPostAccept(
-  store: WorkStore,
+  store: StoreAccess,
   push?: { channel: string; checkId: string },
   options: {
     waitMs?: number;
@@ -223,7 +251,36 @@ if (isMainModule(import.meta.url)) {
     const waitMs = Number(
       process.env.FORGE_LANDING_LOCK_WAIT_MS ?? process.env.FORGE_WORK_LOCK_WAIT_MS ?? 600000,
     );
-    await drainPostAccept(new WorkStore(process.argv[2]!), push, { signal, waitMs });
+    await drainPostAccept(
+      WorkStore.open<
+        | 'commitRecords'
+        | 'directory'
+        | 'laneLocked'
+        | 'load'
+        | 'locked'
+        | 'lockedAsync'
+        | 'native'
+        | 'observing'
+        | 'page'
+        | 'path'
+        | 'pinnedBytes'
+        | 'pinnedData'
+        | 'pointer'
+        | 'prepareCommitRecords'
+        | 'prepareSave'
+        | 'preparing'
+        | 'publishSave'
+        | 'readRecords'
+        | 'records'
+        | 'revision'
+        | 'root'
+        | 'save'
+        | 'select'
+        | 'snapshotBytes'
+      >(process.argv[2]!),
+      push,
+      { signal, waitMs },
+    );
   }).then(
     () => process.exit(0),
     error => {

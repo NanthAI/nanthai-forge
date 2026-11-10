@@ -48,6 +48,34 @@ import {
 import { type WorkData } from './work-types.js';
 import { publishDirectory } from './native-durability.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const code = 'INVALID_WORK_BACKUP';
 const coverage =
   'Full original committed source/history, retained Git refs, Work records and listed private evidence files. Uncommitted/index changes, workspaces, ignored files, Git configuration/credentials, graphs and hosted identity/storage/grants are excluded. Logs and tracked history can contain private data. Restore never starts recorded commands; unfinished runs become interrupted. Hashes detect changed bytes, not authenticated authorship.';
@@ -75,7 +103,7 @@ function ownedFiles(data: WorkData) {
     ]),
   ];
 }
-function refsAt(store: WorkStore) {
+function refsAt(store: StoreAccess) {
   return workGit(store.root, ['for-each-ref', '--format=%(refname) %(objectname)'])
     .trim()
     .split('\n')
@@ -113,7 +141,7 @@ export async function copyPrivate(source: string, destination: string) {
   return copied;
 }
 
-export async function exportWork(store: WorkStore, revision: number, archive = false) {
+export async function exportWork(store: StoreAccess, revision: number, archive = false) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid Work revision.');
   const snapshot = store.locked(() => {
     const data = store.load(),
@@ -389,7 +417,32 @@ async function restoreDirectory(input: string, destination: string) {
       `--object-format=${manifest.format}`,
       '--initial-branch=forge-restored',
     ]);
-    const store = new WorkStore(scratch);
+    const store = WorkStore.open<
+      | 'commitRecords'
+      | 'directory'
+      | 'laneLocked'
+      | 'load'
+      | 'locked'
+      | 'lockedAsync'
+      | 'native'
+      | 'observing'
+      | 'page'
+      | 'path'
+      | 'pinnedBytes'
+      | 'pinnedData'
+      | 'pointer'
+      | 'prepareCommitRecords'
+      | 'prepareSave'
+      | 'preparing'
+      | 'publishSave'
+      | 'readRecords'
+      | 'records'
+      | 'revision'
+      | 'root'
+      | 'save'
+      | 'select'
+      | 'snapshotBytes'
+    >(scratch);
     for (const file of manifest.files) {
       invariant(
         allowed.has(file.path) && !names.has(file.path),

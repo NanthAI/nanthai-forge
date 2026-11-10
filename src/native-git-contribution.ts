@@ -14,6 +14,11 @@ import { startNativeContribution, registerNativeContribution } from './native-co
 import type { WorkStore } from './work-store.js';
 import { forgeTempDir } from './forge-disk.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'path' | 'root' | 'save' | 'snapshotBytes'
+>;
+
 const gitId = z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
   sha = z.string().regex(/^[0-9a-f]{64}$/);
 export const nativeGitContributionCommandSchema = z
@@ -45,7 +50,7 @@ export const nativeGitContributionRequest = (c: NativeGitContributionCommand) =>
 export const contributionRef = (operationId: string) => `refs/forge/contributions/${operationId}/head`;
 
 export async function importNativeGitContribution(
-  store: WorkStore,
+  store: StoreAccess,
   input: unknown,
   revision: number,
   observed: { wireRef?: 'refs/heads/contribution' } = {},

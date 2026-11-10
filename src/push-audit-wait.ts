@@ -7,11 +7,13 @@ import { ForgeError } from './errors.js';
 import { workProgress } from './work-progress.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'page' | 'readRecords' | 'root'>;
+
 /** The worker joins the existing audit queue and reconciles its retained run.
  * Keep its command pipes out of this CLI: timing out observation must neither
  * cancel the audit nor keep the caller alive until that command completes. */
 export async function waitPushAudit(
-  store: WorkStore,
+  store: StoreAccess,
   audit: { channel: string; checkId: string } | undefined,
   timeoutMs: number,
 ) {

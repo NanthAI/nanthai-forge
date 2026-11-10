@@ -7,9 +7,11 @@ import type { WorkCollection, WorkRecordTransaction } from './work-record-transa
 import { isUnifiedWork } from './work-unified-types.js';
 import { planningTarget, type UnifiedPlanningData } from './work-planning-unified.js';
 import { applyPlanningMetadata, exportPlanning, retainedPlanning } from './work-planning-state.js';
+
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'load' | 'locked' | 'native' | 'records' | 'root'>;
 export { currentPlanning } from './work-planning-state.js';
 
-export function planningWork(store: WorkStore, command: PlanningCommand, revision: number) {
+export function planningWork(store: StoreAccess, command: PlanningCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   return store.locked(() => {
     if (!store.native) executionGuard(store.root);
@@ -55,7 +57,7 @@ export function planningWork(store: WorkStore, command: PlanningCommand, revisio
 
 /** Schema 16: load only the addressed Intents, aliases, Initiatives and history head. */
 function unifiedPlanningWork(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   data: WorkData,
   command: PlanningWrite,

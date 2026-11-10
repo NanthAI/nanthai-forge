@@ -11,8 +11,36 @@ import type { LandingEntry } from './landing-batch-types.js';
 import type { ChannelMove, CheckRun, WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const HISTORY_LIMIT = 20;
-function records(store: WorkStore, channel: string, arrivedAt?: string) {
+function records(store: StoreAccess, channel: string, arrivedAt?: string) {
   const tx = store.readRecords();
   if (!tx) {
     const data = store.load();
@@ -30,7 +58,7 @@ function records(store: WorkStore, channel: string, arrivedAt?: string) {
   return { entries, moves: moves.reverse() };
 }
 function runRecords(
-  store: WorkStore,
+  store: StoreAccess,
   entry: LandingEntry | undefined,
   run: CheckRun | undefined,
   move: ChannelMove | undefined,
@@ -94,7 +122,7 @@ function runRecords(
 }
 /** Finite local-only projection. It never wakes a worker, fetches provider data or changes records. */
 function landingProgressSnapshot(
-  store: WorkStore,
+  store: StoreAccess,
   operationId: string,
   journal?: LandEntry,
   now = Date.now(),

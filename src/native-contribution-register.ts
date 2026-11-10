@@ -8,16 +8,18 @@ import type { WorkStore } from './work-store.js';
 import type { Lane, WorkData } from './work-types.js';
 import type { NativeContributionReceipt } from './native-contribution-types.js';
 
+type StoreAccess = Pick<WorkStore, 'locked' | 'path' | 'root' | 'save' | 'snapshotBytes'>;
+
 export type ContributionPins = Pick<
   NativeContributionReceipt,
   'id' | 'request' | 'intentId' | 'base' | 'provenance'
 >;
-export function contributionSnapshot(store: WorkStore) {
+export function contributionSnapshot(store: StoreAccess) {
   const bytes = store.snapshotBytes();
   invariant(bytes, 'INVALID_WORK_STORE', 'Original native Work metadata is unavailable.');
   return { data: parseWorkBytes(bytes), sha256: digest(bytes) };
 }
-export function retryNativeContribution(store: WorkStore, data: WorkData, pins: ContributionPins) {
+export function retryNativeContribution(store: StoreAccess, data: WorkData, pins: ContributionPins) {
   const old = data.nativeContributionReceipts?.find(item => item.id === pins.id);
   if (!old) return;
   invariant(
@@ -65,7 +67,7 @@ function select(data: WorkData, pins: ContributionPins, revision: number) {
     'This operation already belongs to another Lane.',
   );
 }
-export function startNativeContribution(store: WorkStore, pins: ContributionPins, revision: number) {
+export function startNativeContribution(store: StoreAccess, pins: ContributionPins, revision: number) {
   return store.locked(() => {
     const current = contributionSnapshot(store),
       original = retryNativeContribution(store, current.data, pins);
@@ -76,7 +78,7 @@ export function startNativeContribution(store: WorkStore, pins: ContributionPins
   });
 }
 export function registerNativeContribution(
-  store: WorkStore,
+  store: StoreAccess,
   initial: { sha256: string },
   revision: number,
   receipt: NativeContributionReceipt,

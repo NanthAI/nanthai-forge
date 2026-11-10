@@ -16,6 +16,8 @@ import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import { diskMode } from './source-links.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'native' | 'readRecords' | 'root'>;
+
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 const journalSchema = z.object({ head: hash, target: hash.optional(), revision: z.number() });
 const noticeSchema = z.object({
@@ -27,7 +29,7 @@ const noticeSchema = z.object({
 });
 const journalName = 'work/owner-root.json';
 const noticeName = 'work/owner-root-notice.json';
-export const ownerRootNotice = (store: WorkStore) => readSyncJournal(store.root, noticeName, noticeSchema);
+export const ownerRootNotice = (store: StoreAccess) => readSyncJournal(store.root, noticeName, noticeSchema);
 function stat(path: string) {
   try {
     return lstatSync(path);
@@ -107,7 +109,7 @@ function currentFiles(root: string, from: NativeFile[], to: NativeFile[]) {
 }
 /** Called under the owner-root lock, after durable Channel publication. A pending
  * target is completed before selecting a newer main; replay can never rewind it. */
-export function updateOwnerRoot(store: WorkStore, data: WorkData, explicit = false) {
+export function updateOwnerRoot(store: StoreAccess, data: WorkData, explicit = false) {
   invariant(
     store.native && data.nativeHead,
     'UNSUPPORTED_NATIVE_WORK',
@@ -173,7 +175,7 @@ export function updateOwnerRoot(store: WorkStore, data: WorkData, explicit = fal
 }
 /** Workspace refresh has its own lock; file I/O never owns the Work writer lock.
  * Select current main after admission so delayed acceptance replay cannot rewind it. */
-export function refreshAcceptedOwnerRoot(store: WorkStore, explicit = false) {
+export function refreshAcceptedOwnerRoot(store: StoreAccess, explicit = false) {
   const policy = effectivePolicy(store.readRecords()?.data() ?? store.load());
   if (!explicit && !policy.ownerRootUpdates) return undefined;
   return workLocked(
@@ -182,6 +184,6 @@ export function refreshAcceptedOwnerRoot(store: WorkStore, explicit = false) {
     { operation: 'owner root refresh' },
   );
 }
-export function refreshOwnerRoot(store: WorkStore) {
+export function refreshOwnerRoot(store: StoreAccess) {
   return refreshAcceptedOwnerRoot(store, true);
 }

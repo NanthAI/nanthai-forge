@@ -6,11 +6,13 @@ import { workLockWaitMs } from './work-lock.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<WorkStore, 'locked' | 'readRecords' | 'records'>;
+
 /** Prepare immutable record pages before admission. Retry metadata CAS conflicts
  * and transient admission contention without rerunning the caller's source
  * capture, merge or materialization. */
 export function preparedRecordCommit<T>(
-  store: WorkStore,
+  store: StoreAccess,
   operation: string,
   prepare: (tx: WorkRecordTransaction) => () => T,
 ): T {
