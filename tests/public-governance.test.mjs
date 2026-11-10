@@ -1101,3 +1101,51 @@ test('every set-policy field is classified for the owner gate, and an unlisted f
   assert.equal(ownerGated(base, { ...base, trust: { enabled: false, trustedAt: 3 } }), false);
   assert.equal(ownerGated(base, { ...base, trust: { enabled: true } }), true);
 });
+
+// Owner approval for gate-relaxing policy changes: one negative case per field. A change to any gated
+// field from an agent sign-in is held; an exempt field applies; a relax-only field is held only when
+// it lowers owner oversight.
+test('each policy field is held, exempt or relax-only for an agent edit, one case per field', async () => {
+  const { OWNER_GATE, ownerGated } = await import(moduleUrl('../src/policy-digest.ts'));
+  const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
+  // Trust is read only while enabled, so the base enables it and every trust field is live.
+  const base = { ...policyPreset('trusted'), trust: { enabled: true } };
+  const withField = (path, value) => {
+    const policy = JSON.parse(JSON.stringify(base));
+    const keys = path.split('.');
+    let node = policy;
+    for (const key of keys.slice(0, -1)) node = node[key] ??= {};
+    node[keys.at(-1)] = value;
+    return policy;
+  };
+  const lowered = {
+    'acceptance.landingMode': ['strict', 'fast'],
+    'agentDefaults.stallAlerts.enabled': [true, false],
+    'agentDefaults.stallAlerts.webhook': ['ntfy', 'off'],
+  };
+  // Fields the gate reads through the effective agent defaults take values of their own type.
+  const typed = {
+    'agentDefaults.preflight': ['require', 'off'],
+    'agentDefaults.preflightMaxMinutes': [10, 0],
+    'agentDefaults.urgentRoles': [['owner'], ['owner', 'agents']],
+    'agentDefaults.checkpointNudgeMinutes': [30, 0],
+    'agentDefaults.stallAlerts.notifyAfterMinutes': [15, 1440],
+    'agentDefaults.stallAlerts.repeatAfterMinutes': [30, 2880],
+    'agentDefaults.stallAlerts.email': [[], ['alerts@example.com']],
+  };
+  for (const [field, rule] of Object.entries(OWNER_GATE)) {
+    if (field === 'trust.enabled') {
+      assert.equal(ownerGated(base, withField(field, false)), true, field);
+      continue;
+    }
+    if (typeof rule === 'object' && 'relax' in rule) {
+      const [safe, relaxed] = lowered[field] ?? assert.fail(`${field}: add its lowering case here`);
+      assert.equal(ownerGated(withField(field, safe), withField(field, relaxed)), true, `${field} lowered`);
+      assert.equal(ownerGated(withField(field, relaxed), withField(field, safe)), false, `${field} raised`);
+      continue;
+    }
+    const [from, to] = typed[field] ?? [{ probe: 1 }, { probe: 2 }];
+    const changed = ownerGated(withField(field, from), withField(field, to));
+    assert.equal(changed, rule === 'gated', `${field} is ${rule === 'gated' ? 'held' : 'exempt'}`);
+  }
+});
