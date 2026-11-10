@@ -2,7 +2,7 @@
 import { customAction, customCtx, customMutation, customQuery } from 'convex-helpers/server/customFunctions';
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { recordCallerReceipts } from './projectSelfMetricReceiptStore';
 import {
   mutation as baseMutation,
@@ -117,6 +117,37 @@ export const finishQuery = people(
     customCtx(async (ctx: QueryCtx) => {
       await guard(ctx, 'cli');
       return { db: finishReadReader(ctx).db };
+    }),
+  ),
+);
+/** The overlap query needs the full current policy row in several authority checks. Reuse only
+ * canonical project reads inside this one query, including public mapping; clone each result so a
+ * caller's local object edits cannot alter later authority checks. No grants or cross-query cache. */
+export const projectQuery = people(
+  customQuery(
+    baseQuery,
+    customCtx(async (ctx: QueryCtx) => {
+      await guard(ctx, 'cli');
+      const projects = new Map<string, Promise<Doc<'hostedProjects'> | null>>();
+      return {
+        db: new Proxy(ctx.db, {
+          get(target, key) {
+            if (key === 'get')
+              return async (id: string) => {
+                const projectId = target.normalizeId('hostedProjects', id);
+                if (!projectId) return target.get(id as never);
+                let row = projects.get(projectId);
+                if (!row) {
+                  row = target.get(projectId);
+                  projects.set(projectId, row);
+                }
+                return structuredClone(await row);
+              };
+            const value = Reflect.get(target, key);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        }),
+      };
     }),
   ),
 );

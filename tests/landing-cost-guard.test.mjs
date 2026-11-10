@@ -468,3 +468,98 @@ test('save/preflight timing keeps landing cost guard bytes within one percent wi
     `duration bytes: read ${after.readBytes - before.readBytes}, write ${after.writeBytes - before.writeBytes}; baseline ${before.readBytes}/${before.writeBytes}`,
   );
 });
+
+test('overlap driver bytes include changed peers, presence, board and public identity mapping', async t => {
+  const f = await finishFixture(t);
+  const project = f.tables.hostedProjects.get(f.projectId);
+  f.patch('hostedProjects', f.projectId, {
+    agentGuidance: 'synthetic'.repeat(2000),
+    autonomyPolicy: {
+      ...project.autonomyPolicy,
+      agentDefaults: { ...project.autonomyPolicy.agentDefaults, dormantAfterDays: 0 },
+    },
+  });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  const member = f.insert('projectContributors', { projectId: f.projectId, contributor: 'viewer' });
+  const peer = await f.c.lane(f.lane.state.object);
+  f.insert('projectBoardInboxes', {
+    projectId: f.projectId,
+    key: `lane:${f.lane.laneId}`,
+    latestAt: 10,
+    count: 1,
+  });
+  f.insert('projectBoardMessages', {
+    projectId: f.projectId,
+    id: 'synthetic-driver-note',
+    author: 'owner',
+    fromLaneId: peer.laneId,
+    targetKey: `lane:${f.lane.laneId}`,
+    body: 'Synthetic peer note',
+    bytes: 19,
+    bodyHash: 'synthetic',
+    at: 10,
+    expiresAt: Date.now() + 86_400_000,
+  });
+  const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
+  const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
+  const changes = Array.from({ length: 50 }, (_, i) => ({
+    path: `src/synthetic-${i}.ts`,
+    before: { blob: 'a'.repeat(64), mode: 'file' },
+    after: { blob: 'b'.repeat(64), mode: 'file' },
+    evidence: { baseBlob: 'a'.repeat(64), ranges: [{ start: 0, end: 1 }], symbols: [] },
+  }));
+  await f.tx(
+    'seedOverlapDriver',
+    {
+      _handler: async ctx => {
+        for (const entry of [f.lane, peer]) {
+          const row = await records.readHostedRecord(ctx, {
+            projectId: f.projectId,
+            actor: 'owner',
+            kind: 'lane',
+            key: entry.laneId,
+          });
+          await tracking.trackHostedOverlapLane(ctx, f.projectId, JSON.parse(row.value), {
+            baseSequence: 0,
+            intent: 'Synthetic driver changes',
+            changes,
+          });
+        }
+      },
+    },
+    {},
+  );
+  const input = {
+    projectId: f.projectId,
+    laneId: f.lane.laneId,
+    path: 'src/synthetic-0.ts',
+    detail: true,
+    presence: {},
+    board: { after: 0 },
+  };
+  const from = f.counts.length;
+  const response = JSON.parse(await f.tx('driverOverlapRead', overlaps.read, input, 'viewer'));
+  assert.equal(f.counts.length - from, 1, 'one query including all public mapping');
+  assert.equal(response.peerEvidence.items.length, 1);
+  assert(response.presence);
+  assert(response.board);
+  const measured = f.counts.at(-1);
+  t.diagnostic(JSON.stringify({ overlapReadBytes: measured.readBytes, tables: measured.readBytesByTable }));
+  const budget = costs.find(c => c.metric === 'overlapReadBytes');
+  assert(budget, 'the full overlap query has a byte budget');
+  assert.notEqual(judgeCost(budget, measured.readBytes, costGuard).status, 'fail');
+  f.tables.projectContributors.delete(member);
+  await assert.rejects(
+    f.tx('driverOverlapRevoked', overlaps.read, input, 'viewer'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  f.insert('projectReaders', { projectId: f.projectId, reader: 'viewer' });
+  const reader = JSON.parse(await f.tx('driverOverlapReader', overlaps.read, input, 'viewer'));
+  assert.equal(reader.presence, undefined);
+  assert.equal(reader.board, undefined);
+  assert(
+    !JSON.stringify(reader).includes('synthetic-owner'),
+    'read-only access does not name another person',
+  );
+});

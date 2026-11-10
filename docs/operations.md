@@ -1199,7 +1199,9 @@ outside this subtotal). The finish steps retain exact publication evidence and s
 only for the same run that evidence already proved terminal. Reuse completion passes canonical
 rows already read in its transaction into installation and proof validation. Authority, current
 settings and policy still recheck; those rows never enter the action response. Its byte entry is
-amortized over the same two completed landings (one proof completion).
+amortized over the same two completed landings (one proof completion). The overlap entry covers
+two Lanes with 50 saved paths each, presence, a board note and peer identity mapping. It reuses
+canonical project reads only within that query; grants still check and each caller gets a clone.
 
 **Updating the ledger.** Fix the change, or edit the entry in the same Lane: the new `value`, a
 `source` naming the run and date, and a `reason` for the move. Run

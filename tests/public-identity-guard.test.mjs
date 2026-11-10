@@ -340,3 +340,31 @@ test('a landing acceptance stamp names the accepting person by handle only (fe5b
   assert.equal(landingAcceptedBySchema.parse({ ...rest, handle: actor }).actor, subject);
   assert.equal('handle' in landingAcceptedBySchema.parse({ ...rest, handle: actor }), false);
 });
+
+test('query-local project reads isolate object edits and recheck the next query snapshot', async () => {
+  const { v } = await import('convex/values');
+  const { projectQuery } = await import(moduleUrl('../convex/cliServer.ts'));
+  const { ownedProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
+  const owner = 'user_ownerAAAAAAAA';
+  const f = fixture({ viewer: owner });
+  const read = projectQuery({
+    args: { projectId: v.id('hostedProjects') },
+    returns: v.null(),
+    handler: async (ctx, { projectId }) => {
+      const project = await ownedProject(ctx, projectId, owner);
+      project.owner = 'intruder';
+      await assert.rejects(
+        ownedProject(ctx, projectId, 'intruder'),
+        error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+      );
+      assert.equal((await ownedProject(ctx, projectId, owner)).owner, owner);
+      return null;
+    },
+  });
+  assert.equal(await read._handler(f.ctx, { projectId: 'project-1' }), null);
+  f.ctx.db.get = async () => ({ _id: 'project-1', owner: 'intruder' });
+  await assert.rejects(
+    read._handler(f.ctx, { projectId: 'project-1' }),
+    error => (error.data?.code ?? error.code) === 'PROJECT_UNAVAILABLE',
+  );
+});

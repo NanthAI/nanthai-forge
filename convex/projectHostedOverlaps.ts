@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
-import { query } from './cliServer';
+import { projectQuery as query } from './cliServer';
 import { accessibleProject, activeProject } from './projectAuthority';
 import { readHostedPresence, dormantHostedPresence } from './projectHostedPresence';
 import { dormantCutoff, liveOpenOverlapLanes } from './projectHostedDormancy';

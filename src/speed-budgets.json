@@ -910,6 +910,18 @@
       "source": "Completed solo plus main-race control tails on merged main 5d97289f, 1,000 reports, ten shards and 19 KB project. Reuse completion 1,869,565 -> 963,183 B/call (one completion across two landings); finish 1,399,875 -> 1,256,506 B/landing; three drivers 2,761,733 -> 2,165,174 B/landing. Calls stay 13/3/1.",
       "issue": "3e3f9fe6",
       "reason": "Removes duplicate canonical run, compose, finish and landing reads within the transaction; fresh authority, settings, policy and exact proof checks remain. Already-loaded audit runs also serve publication and batch validation. No new records or RPCs."
+    },
+    {
+      "id": "landing-driver-overlap-read-bytes",
+      "area": "Overlap query with saved peers, presence, board and public mapping",
+      "measuredBy": "driver-fixture",
+      "metric": "overlapReadBytes",
+      "unit": "bytes",
+      "value": 88600,
+      "floor": 1024,
+      "source": "One contributor path/detail query on merged main7ef80300: two changed Lanes, 50 saved paths each, 19 KB project, peer identity, presence and a board note. 164,538 -> 88,502 B/query; one query unchanged. The project row was read five times and is now read once.",
+      "issue": "3e3f9fe6",
+      "reason": "Removes four duplicate full-project reads inside one query snapshot. Keeps full policy, current grant checks and public masking; returns independent object copies. No cross-query cache, writes, tables or extra calls."
     }
   ]
 }
