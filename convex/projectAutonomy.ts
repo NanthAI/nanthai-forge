@@ -77,9 +77,13 @@ const settingRuleValidator = v.union(
 const POLICY_KEY = settingKey('policy');
 /** Issue 470ef29b: an agent's edit needs the owner person when it changes what a landing may accept
  * (the acceptance digest: gate, mode, protected and owner-approval paths, auto actors, checks,
- * lifecycle, enforced trust) or where accepted source is mirrored. */
+ * lifecycle, enforced trust), where accepted source is mirrored, or switches fast landing on. The
+ * landing mode is outside the digest so pinned landings survive it; an agent may still go back to
+ * strict alone (fe7d67a8: an agent's set-policy turned fast on unheld). */
+const landingMode = (policy: AutonomyPolicy) => policy.acceptance.landingMode ?? 'strict';
 const gatesLandings = (previous: AutonomyPolicy, policy: AutonomyPolicy) =>
   acceptancePolicyDigest(previous) !== acceptancePolicyDigest(policy) ||
+  (landingMode(policy) !== 'strict' && landingMode(policy) !== landingMode(previous)) ||
   canonicalPayload(previous.githubMirror ?? null) !== canonicalPayload(policy.githubMirror ?? null);
 /** What a held edit is pinned to: the parts an agent may not change alone, so a later edit of agent
  * defaults or notifications does not void the owner's pending grant. */

@@ -275,7 +275,9 @@ red audit or when audits are often stalled or flaky.
 nforge x ROOT set-policy '{"acceptance":{"landingMode":"fast"}}'
 ```
 
-Switching the mode never invalidates a queued landing: it is read when a proof is decided.
+Switching the mode never invalidates a queued landing: it is read when a proof is decided. From an
+agent sign-in, switching fast on is held for the owner person, like any edit that changes what may
+land; switching back to strict applies at once.
 
 ## Three test tiers
 

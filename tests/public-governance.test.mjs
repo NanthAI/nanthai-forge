@@ -934,6 +934,13 @@ test('owner-device settings writes apply before the first landing and are held f
   )(f.rawChecks.selection);
   assert.equal((await f.accept(await prepared(f, ['src/app.ts']), 'contributor')).status, 'landed');
 
+  // fe7d67a8: switching fast landing on relaxes what lands on its own check, so an agent's switch is held
+  // although the landing mode is outside the pinned digest; going back to strict needs no one.
+  const fast = await settings.policy(DEVICE, policyCommand({ acceptance: { landingMode: 'fast' } }));
+  assert.equal(fast.rule, 'held');
+  assert.equal(fast.policy.acceptance.landingMode ?? 'strict', 'strict');
+  const strict = await settings.policy(DEVICE, policyCommand({ acceptance: { landingMode: 'strict' } }));
+  assert.equal(strict.rule, 'no-gate-change');
   // Policy: an edit that changes what landings may accept is held; nothing changes until a grant.
   const command = policyCommand({ acceptance: { protectedPaths: [] } });
   const held = await settings.policy(DEVICE, command);
