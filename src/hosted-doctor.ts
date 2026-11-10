@@ -7,7 +7,7 @@ import { ForgeError } from './errors.js';
 import { hookHealth } from './agent-hook-health.js';
 import { shellQuote } from './shell-quote.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
 

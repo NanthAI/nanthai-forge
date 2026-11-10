@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import type { ForgeError } from './errors.js';
 import type { HostedAgentAddress, HostedAgentAction } from './hosted-agent-contract.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';

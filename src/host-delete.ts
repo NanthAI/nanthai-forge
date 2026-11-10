@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { authFile, deploymentUrl, readAuth } from './auth-store.js';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { hostedAgentDirectory } from './hosted-agent-journal.js';
 import { workLocked } from './work-lock.js';
 import { coordinationClient, type CoordinationTransport } from './coordination-client.js';

@@ -12,7 +12,7 @@ import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
 import { selectHostedSource, selectHostedMain, hostedSourceShowSchema } from './mcp-hosted-source.js';
 import { summarizeAgainstMain } from './hosted-diff-summary.js';
-import { hostedWaitSchema } from './hosted-agent-observe.js';
+import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';
 import { memberDataNotice } from './member-data-notice.js';

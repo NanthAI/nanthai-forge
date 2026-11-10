@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 
 /** Agent-mode wait budget: under the 10-minute ceiling of common agent shells
  * (for example a 600 s tool timeout), so a wait returns IN_PROGRESS with its resume

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { createHash } from 'node:crypto';
 import { processAlive } from './local-process.js';
 import { LANDING_DROP_MS } from './landing-stall.js';
 import type { TurnWork } from './agent-turn-work.js';
@@ -40,4 +43,33 @@ export function turnEntryState(work: TurnWork, now: number): TurnEntryState {
 export function turnEntry(work: TurnWork, now: number) {
   const state = turnEntryState(work, now);
   return { state, ...entryStates[state] };
+}
+
+/** The client's own session id, as both its shell commands and its hooks see it. */
+export function turnSessionKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const value = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID;
+  return value && value.length <= 200 ? value : undefined;
+}
+export function turnLedgerDirectory() {
+  return join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'turns');
+}
+// The file name is a digest: session ids never appear on disk.
+export const turnLedgerFile = (session: string) =>
+  join(turnLedgerDirectory(), `${createHash('sha256').update(session).digest('hex').slice(0, 32)}.json`);
+/** True when the session's ledger records no work and no pending block (or no ledger exists): a
+ * plain parse with no schema, so the turn-end hook skips the record schemas on an idle stop. A
+ * file that is anything else, including unreadable, is not idle and goes to the full reader. */
+export function turnLedgerIdle(session: string) {
+  let text: string;
+  try {
+    text = readFileSync(turnLedgerFile(session), 'utf8');
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT';
+  }
+  try {
+    const ledger = JSON.parse(text) as { work?: unknown; blocked?: unknown };
+    return Array.isArray(ledger.work) && ledger.work.length === 0 && !ledger.blocked;
+  } catch {
+    return false;
+  }
 }

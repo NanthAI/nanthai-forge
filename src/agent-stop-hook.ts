@@ -1,15 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isMainModule } from '../scripts/main-module.mjs';
 import { existsSync, readFileSync } from 'node:fs';
-import {
-  clearTurnBlocked,
-  markTurnBlocked,
-  readTurnLedger,
-  settleTurnWork,
-  type TurnWork,
-} from './agent-turn-work.js';
+import type { TurnWork } from './agent-turn-work.js';
 import { WAKE_BUDGET_SECONDS } from './agent-wake.js';
 import {
+  turnLedgerIdle,
   turnEntryStale,
   turnObserverAlive,
   TURN_WORK_STALE_MS,
@@ -44,6 +39,10 @@ export async function turnEndDecision(
 ): Promise<{ decision?: 'block'; reason?: string }> {
   const session = typeof input.session_id === 'string' && input.session_id ? input.session_id : undefined;
   if (!session || (input.hook_event_name !== undefined && input.hook_event_name !== 'Stop')) return {};
+  // An idle stop (no ledger, or one with no work) is the common case: it never loads the record schemas.
+  if (turnLedgerIdle(session)) return {};
+  const { clearTurnBlocked, markTurnBlocked, readTurnLedger, settleTurnWork } =
+    await import('./agent-turn-work.js');
   const ledger = readTurnLedger(session);
   if (ledger.blocked) {
     // Second consecutive stop attempt: the agent chose to stop. Never block it.
@@ -102,7 +101,7 @@ async function withDeadline(probe: Promise<TurnWorkState>): Promise<TurnWorkStat
  * (nextVersion past the end returns no history events). */
 export async function hostedTurnWorkProbe(work: TurnWork): Promise<TurnWorkState> {
   if (!existsSync(work.root)) return 'unknown';
-  const { hostedAgentAddress } = await import('./hosted-agent-cli.js');
+  const { hostedAgentAddress } = await import('./hosted-agent-address.js');
   const address = hostedAgentAddress(work.root, {});
   if (!address) return 'unknown';
   const { ConvexExchange } = await import('./exchange-client.js');

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import { landingStateField, type LandingRecord } from './landing-state.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { operationWait } from './agent-operation-wait.js';
 import { landingHold } from './hosted-landing-hold.js';
 import { syncRequiredAdvice, syncRequiredContinuation } from './hosted-would-conflict.js';

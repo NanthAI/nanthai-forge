@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import { homedir } from 'node:os';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { backgroundWake } from './agent-wake.js';
+import { turnLedgerDirectory, turnLedgerFile, turnSessionKey } from './agent-turn-state.js';
 import { processStartTime } from './local-process.js';
+
+export { turnLedgerDirectory, turnSessionKey };
 
 /** Machine-local ledger of unfinished Forge work an agent session started: one small
  * file per client session, written only by Forge commands that session runs, read once
@@ -35,11 +37,6 @@ export type TurnWork = z.infer<typeof entrySchema>;
 export type TurnLedger = z.infer<typeof ledgerSchema>;
 const MAX_ENTRIES = 32;
 
-/** The client's own session id, as both its shell commands and its hooks see it. */
-export function turnSessionKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const value = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID;
-  return value && value.length <= 200 ? value : undefined;
-}
 /** The agent client for landing receipts (81d12a32): the harness, from the same variables that
  * identify its session, and the model when the launcher declared it in `FORGE_AGENT_MODEL` (no
  * harness exposes its model to shell commands). Undefined outside an agent session. */
@@ -50,19 +47,12 @@ export function agentClient(env: NodeJS.ProcessEnv = process.env): string | unde
   if (!tool && !model) return undefined;
   return `${tool ?? 'agent'}${model ? `:${model}` : ''}`;
 }
-export function turnLedgerDirectory() {
-  return join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'turns');
-}
 /** Test processes never touch the developer's real state unless they select one. */
 const disabled = () => Boolean(process.env.NODE_TEST_CONTEXT) && !process.env.XDG_STATE_HOME;
-// The file name is a digest: session ids never appear on disk.
-const file = (session: string) =>
-  join(turnLedgerDirectory(), `${createHash('sha256').update(session).digest('hex').slice(0, 32)}.json`);
-
 /** One local read. A missing or malformed file is an empty ledger. */
 export function readTurnLedger(session: string): TurnLedger {
   try {
-    const parsed = ledgerSchema.safeParse(JSON.parse(readFileSync(file(session), 'utf8')));
+    const parsed = ledgerSchema.safeParse(JSON.parse(readFileSync(turnLedgerFile(session), 'utf8')));
     if (parsed.success) return parsed.data;
   } catch {
     /* missing or unreadable: nothing recorded */
@@ -74,7 +64,7 @@ function write(session: string, ledger: TurnLedger) {
     temporary = join(directory, `.${randomUUID()}`);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   writeFileSync(temporary, JSON.stringify(ledger), { mode: 0o600 });
-  renameSync(temporary, file(session));
+  renameSync(temporary, turnLedgerFile(session));
 }
 function update(session: string | undefined, change: (ledger: TurnLedger) => TurnLedger | null) {
   if (!session || disabled()) return false;

@@ -89,7 +89,6 @@ import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { nativeOwner } from './native-source.js';
-import { WorkStore } from './work-store.js';
 import { makeFunctionReference } from 'convex/server';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
@@ -1266,7 +1265,13 @@ export class HostedAgentTransport {
       return response;
     } catch (error) {
       const owner = nativeOwner(existsSync(this.root) ? realpathSync(this.root) : this.root);
-      if (owner) rememberSourceAuthorityError(new WorkStore(owner), error, this.address.projectId);
+      // The native Work store is a large module graph; only a failing native-owned command loads it.
+      if (owner)
+        rememberSourceAuthorityError(
+          new (await import('./work-store.js')).WorkStore(owner),
+          error,
+          this.address.projectId,
+        );
       if (error instanceof z.ZodError)
         throw isHostedReplyError(error)
           ? protocolMismatchError(replyIssuePaths(error.issues))

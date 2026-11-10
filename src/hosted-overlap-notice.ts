@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { actorLabel } from './agent-slug.js';
 import { peerPhaseText, type PeerLanding } from './hosted-overlap-coordination.js';
 import { owningPackage } from './hosted-coordination-client.js';

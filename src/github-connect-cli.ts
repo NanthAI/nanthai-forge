@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedRunSubscription, type HostedRunSubscription } from './hosted-agent-observe.js';

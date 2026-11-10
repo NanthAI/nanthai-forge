@@ -10,7 +10,7 @@ import { reviewPaths } from './source-review-format.js';
 import { readLaneEntry } from './lane-registry.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { scanCheckout } from './hosted-agent-finish-identity.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 

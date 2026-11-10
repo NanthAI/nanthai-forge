@@ -52,7 +52,7 @@ import {
   writePreflightEvidence,
   type PreflightEvidence,
 } from './agent-preflight-evidence.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { noTestsCollected } from '../scripts/check-packages-run.mjs';
 import { declaredPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 import {

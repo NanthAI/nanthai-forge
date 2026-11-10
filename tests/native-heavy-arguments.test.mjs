@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
-import { shellQuote } from '../dist/agent-brief-render.js';
+import { shellQuote } from '../dist/shell-quote.js';
 import { nodeTestWithoutPaths } from '../dist/heavy-slots.js';
 import { withSourceRecovery } from '../dist/hosted-agent-source-recovery.js';
 import assert from 'node:assert/strict';

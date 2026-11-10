@@ -50,6 +50,12 @@ test('scripts reject unwrapped Convex clients, default fetch parameters and prim
     assert(networkBoundaryFindings('scripts/unsafe.mjs', source).length, source);
 });
 
+test("381c62df: only the shared transport may load undici lazily; any other file's dynamic primitive is refused", () => {
+  const lazy = "const { Agent } = await import('undici'); new Agent();";
+  assert.deepEqual(networkBoundaryFindings('src/exchange-convex-fetch.ts', lazy), []);
+  assert(networkBoundaryFindings('src/other.ts', lazy).length);
+});
+
 test('exemptions stay narrow: interceptors may replace the global but not call fetch bare', () => {
   const intercept = 'const original = globalThis.fetch; globalThis.fetch = async () => new Response("");';
   assert.deepEqual(networkBoundaryFindings('scripts/measure-host.mjs', intercept), []);

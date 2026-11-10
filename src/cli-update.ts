@@ -15,7 +15,7 @@ import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { durableReplace } from './native-durability.js';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { tryHeavySlot } from './heavy-slots.js';
 import { shareDependencies } from './shared-dependencies.js';
 import {
@@ -40,7 +40,7 @@ import type { HostedMain } from './hosted-main.js';
 import { clientCacheRoot } from './root-paths.js';
 import { processAlive } from './local-process.js';
 import { cliPackageRoot } from './cli-installation.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import {
   activeCliCanaryRefusal,
   cliCanaryPreSwitch,

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkTerminal } from './check-run-state.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { resultOf, landTerminal } from './hosted-land-summary.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { operationWait } from './agent-operation-wait.js';

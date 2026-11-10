@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { readHostState } from './host-binding.js';
 import { nativeOwner } from './native-source.js';
 import { sourceAuthority } from './hosted-source-authority.js';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { ConvexExchange } from './exchange-client.js';
 import { makeFunctionReference } from 'convex/server';
 import { nativeSelfMetricsReader } from './self-metrics-native.js';

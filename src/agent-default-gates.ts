@@ -7,7 +7,7 @@ import { digest } from './hash.js';
 import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { ForgeError } from './errors.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { preflightOutcome } from './agent-preflight-incomplete.js';
 import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
 import { answerId, hostedOverlapNotice } from './hosted-overlap-notice.js';

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { z } from 'zod';
 export const LANDING_STALL_MS = 15 * 60_000;
 /** Metric 5.3: a pending landing with no progress for this long is dropped unless it gets an outcome. */
 export const LANDING_DROP_MS = 60 * 60_000;
@@ -12,15 +11,14 @@ export const CHECK_PROGRESS_WAKE_MS = 60_000;
 export function progressWakeDue(ciProgressAt: string | undefined, now: number) {
   return !ciProgressAt || now - Date.parse(ciProgressAt) >= CHECK_PROGRESS_WAKE_MS;
 }
-export const landingStallSchema = z.object({
-  code: z.literal('LANDING_STALLED'),
-  step: z.string(),
-  missingOwner: z.string(),
-  lastProgressAt: z.string(),
-  alarmAt: z.string(),
-  message: z.string(),
-});
-export type LandingStall = z.infer<typeof landingStallSchema>;
+export type LandingStall = {
+  code: 'LANDING_STALLED';
+  step: string;
+  missingOwner: string;
+  lastProgressAt: string;
+  alarmAt: string;
+  message: string;
+};
 export function latestLandingProgress(times: (string | undefined)[]) {
   return times
     .filter((at): at is string => !!at && Number.isFinite(Date.parse(at)))

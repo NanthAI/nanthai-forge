@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
 import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
 
@@ -25,8 +27,55 @@ test('CLI cold start is judged on CPU time from `time -p`, and a run that fails 
   assert.equal(cpuMs('no timing here'), null);
   const failed = cliColdStartSamples(1, [process.execPath, '-e', 'process.exit(3)']);
   assert.equal(measurement('cliColdStartCpu', failed).status, 'failed');
-  assert.equal(measurement('cliColdStartCpu', [{ durationMs: 2500 }]).status, 'pass');
-  assert.equal(measurement('cliColdStartCpu', [{ durationMs: 2501 }]).status, 'fail');
+  const max = budgets.cliColdStartCpu;
+  assert.equal(measurement('cliColdStartCpu', [{ durationMs: max }]).status, 'pass');
+  assert.equal(measurement('cliColdStartCpu', [{ durationMs: max + 1 }]).status, 'fail');
+});
+
+/** Modules a process loads, via a preload that counts every module load until exit. */
+function loadedModules(args, input = '') {
+  const preload =
+    'data:text/javascript,' +
+    encodeURIComponent(
+      "import { registerHooks } from 'node:module';const seen=new Set();" +
+        'registerHooks({load(url,ctx,next){seen.add(url);return next(url,ctx);}});' +
+        "process.on('exit',()=>process.stderr.write('\\nMODULES '+JSON.stringify([...seen])));",
+    );
+  const state = mkdtempSync(join(tmpdir(), 'forge-cold-'));
+  const run = spawnSync(process.execPath, ['--import', preload, ...args], {
+    input,
+    encoding: 'utf8',
+    env: { ...process.env, XDG_STATE_HOME: state, XDG_CONFIG_HOME: state },
+  });
+  rmSync(state, { recursive: true, force: true });
+  const line = run.stderr.slice(run.stderr.lastIndexOf('\nMODULES ') + 9);
+  return { run, modules: JSON.parse(line) };
+}
+
+test('381c62df: --version, --help and an idle turn-end hook stay on a minimal import path', () => {
+  const heavy =
+    /\/node_modules\/|\/(agent-cli|agent-install-hooks|hosted-agent-transport|agent-turn-work)\.js$/;
+  const cases = [
+    ['--version', ['dist/cli-entry.js', '--version'], '', 45],
+    ['--help', ['dist/cli-entry.js', '--help'], '', 45],
+    [
+      'idle turn-end hook',
+      ['dist/agent-stop-hook.js', '--forge-turn-end'],
+      JSON.stringify({ session_id: 'cold-start', hook_event_name: 'Stop' }),
+      25,
+    ],
+  ];
+  for (const [name, args, input, ceiling] of cases) {
+    const { run, modules } = loadedModules(
+      args.map(a => (a.startsWith('dist/') ? fileURLToPath(new URL(`../${a}`, import.meta.url)) : a)),
+      input,
+    );
+    assert.equal(run.status, 0, `${name}: ${run.stderr}`);
+    const mine = modules.filter(url => url.startsWith('file:'));
+    const loaded = mine.filter(url => heavy.test(url));
+    assert.deepEqual(loaded, [], `${name} loaded the command graph`);
+    assert.ok(mine.length <= ceiling, `${name} loaded ${mine.length} modules (ceiling ${ceiling})`);
+  }
 });
 
 test('bundle accounting follows shared static imports once and excludes dynamic route chunks', () => {

@@ -2,7 +2,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { randomUUID } from 'node:crypto';
 import { hostedRootRequired } from './agent-root.js';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { registerHostedAgentWorkflow } from './mcp-hosted-agent.js';
 import { agentSessionKey } from './hosted-agent-journal.js';

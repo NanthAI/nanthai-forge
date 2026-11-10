@@ -7,8 +7,7 @@ import { join } from 'node:path';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 import { hostedAgentRoot, hostedAgentDirectory, retainedHostedOperation } from './hosted-agent-journal.js';
 import { durableReplace } from './native-durability.js';
-import { observeHostedRun, hostedWaitSchema } from './hosted-agent-observe.js';
-import { observeOperations } from './hosted-agent-wait-local.js';
+import { hostedWaitSchema } from './hosted-wait-schema.js';
 import { invariant } from './errors.js';
 import { recordLaneHold, withLaneCommand } from './lane-registry.js';
 import { markerIdentity } from './lane-prune.js';
@@ -24,8 +23,6 @@ import { HostedAgentTransport } from './hosted-agent-transport.js';
 import { waitHostedAgentSource } from './hosted-agent-source-wait.js';
 import { networkTimeout } from './network-fetch.js';
 import { canonicalOperationIds } from './operation-id-case.js';
-import { boardWaitOption, boardWakeEnvelope, observePeerLane } from './hosted-board-wait.js';
-import { approvalNext, observeApproval } from './hosted-agent-approval.js';
 export { hostedAgentAddress } from './hosted-agent-address.js';
 /** The CLI sends a hosted save under its wire name `checkpoint`; both mean save. */
 const hostedSaveAction = (action: string) => action === 'save' || action === 'checkpoint';
@@ -61,6 +58,15 @@ export async function hostedAgentCli(
     ),
   );
   if (action === 'wait') {
+    // The wait observers are large module graphs that only a wait uses.
+    const [{ observeHostedRun }, { observeOperations }, board$, { approvalNext, observeApproval }] =
+      await Promise.all([
+        import('./hosted-agent-observe.js'),
+        import('./hosted-agent-wait-local.js'),
+        import('./hosted-board-wait.js'),
+        import('./hosted-agent-approval.js'),
+      ]);
+    const { boardWaitOption, boardWakeEnvelope, observePeerLane } = board$;
     const selectedWait = hostedWaitSchema.parse(command);
     const alone = selectedWait.peer ?? selectedWait.approval;
     invariant(

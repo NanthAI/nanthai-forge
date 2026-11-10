@@ -9,7 +9,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Landing to main, p50 and p90 (submit to commit) | every landing | 16.1 / 36.9 min over 491 landings, 2026-11-03 to 11-09; budget 25 / 60 |
 | Hosted check, p50 and p90 (check reserved to ended) | every landing | 8.3 / 10.7 min over 45 sampled runs; budget 10 / 14 |
 | Check result to commit, p90 (`ciEndedAt` to `committedAt`) | every landing | 8.5 s live after fix caa934a7 (300 s before it); budget 30 s |
-| CLI cold start (CPU time of `--version`) | `perf-harness --cli-cold-start` | 1.67 s median; budget 2.5 s |
+| CLI cold start (CPU time of `--version`) | `perf-harness --cli-cold-start` | 90 ms median at load 35 (320 ms before 381c62df); budget 250 ms. `--version` and `--help` read no release and load 28 modules; the idle turn-end hook loads 16 |
 | Web first paint: Now, Work, Lane first diff | `perf-harness --live` | unrun without the QA bot and a dev origin; budgets 1.5 s, 1.5 s, 1 s |
 | Web eager JavaScript (gzip) | `perf-harness --bundle` | 246 KB; budget 270 KB |
 | Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |

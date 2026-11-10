@@ -108,7 +108,11 @@ export function networkBoundaryFindings(path, text) {
       (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
         node.expression.getText(source) === 'require') &&
       ts.isStringLiteral(node.arguments[0] ?? {}) &&
-      /^(node:)?https?$|^(undici|node-fetch|cross-fetch|axios|got|superagent)$/.test(node.arguments[0].text)
+      /^(node:)?https?$|^(undici|node-fetch|cross-fetch|axios|got|superagent)$/.test(
+        node.arguments[0].text,
+      ) &&
+      // The shared transport loads undici on its first long action, not at every CLI start (381c62df).
+      path !== 'src/exchange-convex-fetch.ts'
     )
       fail(node, 'Dynamic network primitives bypass the shared transport.');
     ts.forEachChild(node, visit);

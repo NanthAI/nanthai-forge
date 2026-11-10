@@ -4,7 +4,7 @@ import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
-import { landingStallSchema } from './landing-stall.js';
+import { landingStallSchema } from './landing-stall-schema.js';
 import { mainExpectationSchema } from './hosted-main.js';
 import { hostedCheckRequestSchema, checkNumber } from './hosted-check.js';
 import { autonomyPolicySchema } from './autonomy-policy.js';

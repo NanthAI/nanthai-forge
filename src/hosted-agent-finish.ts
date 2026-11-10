@@ -21,7 +21,7 @@ import {
 } from './hosted-agent-actions.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import {
   FINISH_REFUSALS,

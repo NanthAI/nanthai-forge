@@ -54,9 +54,13 @@ try {
   process.exitCode = 1;
 }
 if (runCommand) {
-  (await import('./cli-command-ready.js')).enableCliRuntimePreparation();
-  if (!(await import('./cli-version.js')).cliDeferredCommand(process.argv.slice(2)))
-    await (await import('./cli-command-ready.js')).prepareCliRuntime();
+  const { cliDeferredCommand, cliDiagnosticCommand } = await import('./cli-version.js');
+  // --version and --help only print: they never prepare the runtime (hooks, disk sweep).
+  if (!cliDiagnosticCommand(process.argv.slice(2))) {
+    (await import('./cli-command-ready.js')).enableCliRuntimePreparation();
+    if (!cliDeferredCommand(process.argv.slice(2)))
+      await (await import('./cli-command-ready.js')).prepareCliRuntime();
+  }
   // Hosted clone needs no native owner, graph compiler or local execution services.
   // Keep the established CLI as the entry for every other command and direct caller.
   if (!['clone', 'pull'].includes(process.argv[2]!)) await import('./cli.js');

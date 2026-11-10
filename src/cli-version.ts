@@ -10,16 +10,8 @@ import {
   cliSelectedBuild,
   retainCliRuntime,
 } from './cli-installation.js';
-import { cliCommandProject, cliLandingCommand, waitForCliMeasurement } from './cli-measurement-hold.js';
 import { CLI_RUNTIME_WAIT_MS, resolveCliPointer } from './cli-launcher.js';
 import { ForgeError } from './errors.js';
-import {
-  activeCliCanaryRefusal,
-  readCliCanaryRefusal,
-  canaryCloneHint,
-  cliCanaryNotice,
-  rememberCanaryClone,
-} from './cli-canary.js';
 
 /** Cache the promise, including failures, so concurrent callers never repeat discovery. */
 export function cliVersionCheck() {
@@ -96,6 +88,7 @@ export async function startBackgroundCliUpdate(
   const { cliUpdateRunning, cliBackgroundUpdateFailedRecently } = await import('./cli-update.js');
   if (cliUpdateRunning(installation)) return 'running';
   if (cliBackgroundUpdateFailedRecently(installation)) return 'failed';
+  const { canaryCloneHint, rememberCanaryClone } = await import('./cli-canary.js');
   rememberCanaryClone(installation, canaryCloneHint(args));
   const log = openSync(join(installation, 'update.log'), 'w', 0o600);
   try {
@@ -149,8 +142,14 @@ async function redispatch(
     child.once('exit', (status, signal) => done(status ?? (signal === 'SIGINT' ? 130 : 1)));
   });
 }
+/** Print-only commands: no freshness read, no hook install, no disk sweep, no command graph. */
+export function cliDiagnosticCommand(args: string[]) {
+  return !args.length || (args.length === 1 && ['--help', 'help', '--version'].includes(args[0]!));
+}
 export function cliLocalArgumentsFirst(args: string[]) {
-  return !args.length || ['--help', '-h', 'help'].includes(args[0]!) || cliDeferredCommand(args);
+  return (
+    cliDiagnosticCommand(args) || ['--help', '-h', 'help'].includes(args[0]!) || cliDeferredCommand(args)
+  );
 }
 export async function cliStartup(
   args = process.argv.slice(2),
@@ -194,6 +193,16 @@ export async function cliStartup(
     return false;
   }
   const installation = cliInstallation(root);
+  // The canary and measurement-hold modules load only for a command that checks freshness.
+  const {
+    activeCliCanaryRefusal,
+    readCliCanaryRefusal,
+    canaryCloneHint,
+    cliCanaryNotice,
+    rememberCanaryClone,
+  } = await import('./cli-canary.js');
+  const { cliCommandProject, cliLandingCommand, waitForCliMeasurement } =
+    await import('./cli-measurement-hold.js');
   // Source checkouts remain available for development and exact-Candidate tests.
   if (!installation && existsSync(join(root, 'src', 'cli-entry.ts'))) return true;
   if (!installation)

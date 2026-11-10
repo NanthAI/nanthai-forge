@@ -3,16 +3,21 @@ import { indexProgressReporter } from './work-index-client.js';
 import { exchangeFetch, type ExchangeRequestOptions } from './exchange-request.js';
 import { ForgeError } from './errors.js';
 import { LONG_ACTION_DEADLINE_MS, pendingProgressGuard, longConvexAction } from './long-action.js';
-import { Agent, type Dispatcher } from 'undici';
+import type { Dispatcher } from 'undici';
 
 // Node fetch otherwise inherits Undici's five-minute header deadline. Override
-// the dispatched request as well as our AbortController deadline.
-class LongActionAgent extends Agent {
-  override dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) {
-    return super.dispatch({ ...options, headersTimeout: LONG_ACTION_DEADLINE_MS }, handler);
-  }
-}
-const actionDispatcher = new LongActionAgent();
+// the dispatched request as well as our AbortController deadline. Undici is a large module
+// graph that only a long action needs, so it loads on the first one (not at every CLI start).
+let actionDispatcher: Promise<Dispatcher> | undefined;
+const longActionDispatcher = () =>
+  (actionDispatcher ??= import('undici').then(({ Agent }) => {
+    class LongActionAgent extends Agent {
+      override dispatch(options: Dispatcher.DispatchOptions, handler: Dispatcher.DispatchHandler) {
+        return super.dispatch({ ...options, headersTimeout: LONG_ACTION_DEADLINE_MS }, handler);
+      }
+    }
+    return new LongActionAgent();
+  }));
 
 // Reads, content-addressed commits, and pinned publication pages are replay-safe.
 const replaySafe = new Set([
@@ -71,7 +76,7 @@ export function exchangeConvexFetch(
         // Preserve caller/native redirect behavior; the shared deadline owns
         // the complete chain rather than silently adding a route restriction.
         ...(signal ? { signal } : {}),
-        ...(longAction ? { dispatcher: actionDispatcher } : {}),
+        ...(longAction ? { dispatcher: await longActionDispatcher() } : {}),
       };
       while (true) {
         if (continuable) request.body = JSON.stringify(payload);

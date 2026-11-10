@@ -65,9 +65,9 @@
       "measuredBy": "perf-harness",
       "metric": "cliColdStartCpu",
       "unit": "ms",
-      "max": 2500,
-      "source": "node dist/cli-entry.js --version, CPU time (user+sys) on 2026-11-09: 1.3 to 1.9 s over 9 runs (wall 2 to 5 s on a machine at load 31). Measured by `node scripts/perf-harness.mjs --cli-cold-start`.",
-      "reason": "CPU time, because wall time moves with machine load. Set above the worst CPU sample. A bare Node start is 0.06 s, so 1.3 s for --version is itself a finding: this budget stops it growing, not the goal."
+      "max": 250,
+      "source": "node dist/cli-entry.js --version, CPU time (user+sys), 15 runs on 2026-11-10 at machine load 35: median 90 ms, p90 100-110 ms, after Issue 381c62df (before, same load: 300-320 ms; 1.3 to 1.9 s on 2026-11-09 at load 31 with the release read and the command graph). Measured by `node scripts/perf-harness.mjs --cli-cold-start`.",
+      "reason": "CPU time, because wall time moves with machine load. About 2.5 times the loaded median, so a slower CI runner passes, while the command graph loading again (320 ms measured at the same load) fails. tests/perf-harness.test.mjs also counts the modules --version, --help and an idle turn-end hook load."
     },
     {
       "id": "snapshot-added-unchanged",

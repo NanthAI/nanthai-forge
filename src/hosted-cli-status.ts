@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { HostedAgentTransport } from './hosted-agent-transport.js';
-import { hostedAgentAddress } from './hosted-agent-cli.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
 import { hookHealth, hookHealthText } from './agent-hook-health.js';
 import { hostedMirrorStatusText, type HostedMirrorStatus } from './hosted-github-mirror-status.js';
 

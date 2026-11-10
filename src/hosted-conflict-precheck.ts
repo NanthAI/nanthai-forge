@@ -7,7 +7,7 @@ import { durableReplace } from './native-durability.js';
 import { safeRelative } from './safe-relative.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { ForgeError } from './errors.js';
 import { conflictFinishOptions, type ConflictFinishOptions } from './hosted-conflict-finish-options.js';
 

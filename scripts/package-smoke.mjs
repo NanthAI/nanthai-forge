@@ -235,7 +235,8 @@ try {
   const unconfiguredHelp = spawnSync(process.execPath, [cli, '--help'], { env, encoding: 'utf8' });
   assert.equal(unconfiguredHelp.status, 0, unconfiguredHelp.stderr);
   assert.match(unconfiguredHelp.stdout, /nforge host ROOT/);
-  const unconfigured = spawnSync(process.execPath, [cli, '--version'], { env, encoding: 'utf8' });
+  // Valid work needs a release source; --version only prints (381c62df), so probe with a real command.
+  const unconfigured = spawnSync(process.execPath, [cli, 'queue', 'list'], { env, encoding: 'utf8' });
   assert.equal(unconfigured.status, 1);
   assert.equal(JSON.parse(unconfigured.stderr).error.code, 'CLI_UPDATE_SOURCE_REQUIRED');
   const installation = join(directory, 'forge-cli');
@@ -265,6 +266,8 @@ try {
   assert.match(run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--help'], { env }), /nforge host ROOT/);
   assert.equal(Atomics.load(releaseCalls, 0), 0, 'Installed help must make zero release reads.');
   run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--version'], { env });
+  assert.equal(Atomics.load(releaseCalls, 0), 0, 'Installed --version only prints: zero release reads.');
+  run(join(prefix, 'node_modules', '.bin', 'nforge'), ['docs'], { env });
   assert.equal(Atomics.load(releaseCalls, 0), 1, 'Valid installed work retains one freshness read.');
   const beforeLauncher = Atomics.load(releaseCalls, 0);
   assert.match(
@@ -277,6 +280,12 @@ try {
     'Stable launcher help must make zero release reads.',
   );
   run(process.execPath, [join(installation, 'launcher.mjs'), '--version'], { env });
+  assert.equal(
+    Atomics.load(releaseCalls, 0) - beforeLauncher,
+    0,
+    'Stable launcher --version makes zero release reads.',
+  );
+  run(process.execPath, [join(installation, 'launcher.mjs'), 'docs'], { env });
   assert.equal(
     Atomics.load(releaseCalls, 0) - beforeLauncher,
     1,

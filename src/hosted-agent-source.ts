@@ -13,7 +13,7 @@ import { syncRequestSchema } from './hosted-sync.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { ForgeError, invariant } from './errors.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';

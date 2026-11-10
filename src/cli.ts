@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
-import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice.js';
-import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
+import type { ExactConflictNotice } from './hosted-conflict-notice.js';
+import type { overlapBannerOnce } from './hosted-overlap-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
@@ -354,7 +354,10 @@ if (syncPending) {
 }
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
-  const output = withCallerOverlaps(process.argv[3] ?? process.cwd(), await main(process.argv.slice(2)));
+  const output = await withCallerOverlaps(
+    process.argv[3] ?? process.cwd(),
+    await main(process.argv.slice(2)),
+  );
   if (syncPending) {
     invariant(
       output && typeof output === 'object' && 'pushed' in output,
@@ -367,7 +370,7 @@ try {
     syncPending = false;
   }
   if (Array.isArray(output)) {
-    const overlaps = callerOverlaps(process.argv[3] ?? process.cwd());
+    const overlaps = await callerOverlaps(process.argv[3] ?? process.cwd());
     if (overlaps) process.stderr.write(JSON.stringify({ unacknowledgedOverlaps: overlaps }) + '\n');
   }
   if (output !== undefined) {
@@ -390,10 +393,10 @@ try {
     const notice = (output as { overlapNotice?: Parameters<typeof overlapBannerOnce>[0] } | null)
       ?.overlapNotice;
     if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && notice)
-      process.stderr.write(overlapBannerOnce(notice));
+      process.stderr.write((await import('./hosted-overlap-notice.js')).overlapBannerOnce(notice));
     const exact = (output as { conflictNotice?: ExactConflictNotice } | null)?.conflictNotice;
     if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && exact)
-      process.stderr.write(exactConflictBannerOnce(exact));
+      process.stderr.write((await import('./hosted-conflict-notice.js')).exactConflictBannerOnce(exact));
     if (
       process.argv[2] === 'agent' &&
       (process.argv[4] === 'finish' || (process.argv[4] === 'land' && process.argv[5] === '--save'))
@@ -415,11 +418,13 @@ try {
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
   } else {
     process.stderr.write(
-      `${JSON.stringify(withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
+      `${JSON.stringify(await withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
     );
     // A gate refusal names the blocking notices it judged and their exact answer (c8b842a9).
     if (process.argv[2] === 'agent' || process.argv[2] === 'x')
-      process.stderr.write(refusalOverlapBanner(failure.recovery));
+      process.stderr.write(
+        (await import('./hosted-overlap-notice.js')).refusalOverlapBanner(failure.recovery),
+      );
   }
   process.exitCode = 1;
 }

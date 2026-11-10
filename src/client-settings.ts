@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { cpus, homedir, totalmem } from 'node:os';
+import { cpus, totalmem } from 'node:os';
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
+import { forgeConfigDirectory, clientSettingsFile } from './client-settings-path.js';
 
 /** Machine-local parallel-work defaults (docs/parallel-work-defaults.md). They live beside
  * the saved login in the Forge config directory; project policy stays on the server. */
@@ -36,12 +37,7 @@ export const clientSettingsSchema = z
 export type ClientSettings = z.infer<typeof clientSettingsSchema>;
 export const clientSettingKeys = Object.keys(clientSettingsSchema.shape) as (keyof ClientSettings)[];
 
-export function forgeConfigDirectory() {
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'forge');
-}
-export function clientSettingsFile() {
-  return process.env.FORGE_CLIENT_SETTINGS || join(forgeConfigDirectory(), 'client.json');
-}
+export { forgeConfigDirectory, clientSettingsFile };
 function stored(): Record<string, unknown> {
   let text: string;
   try {

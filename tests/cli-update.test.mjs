@@ -400,6 +400,8 @@ test('a current installed process reuses its freshness receipt with zero idle ca
   assert.equal(await cliStartup(['--help'], f.old, check), true);
   assert.equal(Atomics.load(calls, 0), 0);
   assert.equal(await cliStartup(['--version'], f.old, check), true);
+  // Print-only commands never read the release (e.g. 381c62df: --version cost a network read per call).
+  assert.equal(Atomics.load(calls, 0), 0);
   assert.equal(await cliStartup(['init-native', join(f.directory, 'unused')], f.old, check), true);
   assert.equal(await cliStartup(['init-native', join(f.directory, 'unused')], f.old, check), true);
   await new Promise(done => setImmediate(done));
@@ -697,7 +699,7 @@ test('stable launcher refuses a gate-less historical runtime instead of executin
   writeFileSync(join(f.old, 'dist', 'cli-entry.js'), 'process.stdout.write("OLD-CODE-RAN");');
   writeFileSync(join(f.installation, 'rollback.json'), JSON.stringify({ head: a }));
   writeFileSync(join(f.installation, '.freeze'), 'measurement');
-  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), '--version'], {
+  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), 'queue', 'list'], {
     env: launcherEnv(f),
     encoding: 'utf8',
   });
@@ -716,7 +718,7 @@ test('historical selection restores a complete main build before dispatch, with 
   rmSync(join(f.old, 'dist', 'cli-version.js'));
   writeFileSync(join(f.old, 'dist', 'cli-entry.js'), 'process.stdout.write("OLD-CODE-RAN");');
   writeFileSync(join(f.installation, 'rollback.json'), JSON.stringify({ head: a }));
-  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), '--version'], {
+  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), 'queue', 'list'], {
     env: launcherEnv(f),
     encoding: 'utf8',
   });
@@ -864,7 +866,7 @@ test('explicit rollback preserves the main controller even when the older target
   assert.equal(result.cliCommit, a);
   assert.equal(realpathSync(join(f.installation, 'manager')), main);
   assert.ok(existsSync(main));
-  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), '--version'], {
+  const reply = spawnSync(process.execPath, [join(f.installation, 'launcher.mjs'), 'queue', 'list'], {
     env: launcherEnv(f),
     encoding: 'utf8',
   });

@@ -3,7 +3,7 @@ import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
-import { shellQuote } from './agent-brief-render.js';
+import { shellQuote } from './shell-quote.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { writeRecoveryState } from './recovery-state.js';
 import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js';

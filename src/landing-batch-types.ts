@@ -2,7 +2,7 @@
 import { semanticConflictsSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
-import { landingStallSchema } from './landing-stall.js';
+import { landingStallSchema } from './landing-stall-schema.js';
 import { landingRuntimeSchema } from './landing-environment-schema.js';
 import { checkEnvironmentSchema } from './check-environment-schema.js';
 const id = z.uuid(),

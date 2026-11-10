@@ -17,8 +17,9 @@ verified main before dispatch; the controller and current then share one build a
 There is no second user-selectable CLI.
 
 Managed commands check configured Forge main before hooks or execution.
-Help, heavy status and local agent/heavy/pull/clone argument errors make zero
-network calls. Valid commands make one authorized metadata query, cached
+`--version`, help, heavy status and local agent/heavy/pull/clone argument errors make zero
+network calls. `--version` and help only print: they also install no hooks, sweep no
+disk and load no command module (Issue 381c62df). Valid commands make one authorized metadata query, cached
 for that process in addition to its action calls. There is no timer,
 periodic check or idle network activity.
 

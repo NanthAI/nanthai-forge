@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { spawn, spawnSync } from 'node:child_process';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { clientSettingsCli, heavySlots, readClientSettings } from '../dist/client-settings.js';
+import { editHooksEnabled } from '../dist/agent-hook-settings.js';
 import { listLanes, readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { housekeepingLines, laneHousekeeping } from '../dist/lane-prune.js';
 import { acquireHeavySlot, heavyCli, tryHeavySlot } from '../dist/heavy-slots.js';
@@ -93,6 +94,22 @@ test('client settings default on, persist per machine and explain their source',
   assert.equal(heavySlots('auto', 4 * 2 ** 30, 2), 1);
   assert.equal(heavySlots('auto', 64 * 2 ** 30, 8), 4);
   assert.equal(heavySlots(5), 5);
+});
+
+test('381c62df: the hooks read firstWriteHooks without the settings schema and agree with the full reader', t => {
+  const directory = isolated(t);
+  const home = join(directory, 'home');
+  assert.equal(editHooksEnabled(undefined, home), true, 'no settings file: default on');
+  clientSettingsCli(['firstWriteHooks', 'false']);
+  assert.equal(readClientSettings().firstWriteHooks, false);
+  assert.equal(editHooksEnabled(undefined, home), false);
+  clientSettingsCli(['firstWriteHooks', '--reset']);
+  assert.equal(editHooksEnabled(undefined, home), true);
+  for (const text of ['{"firstWriteHooks":"no"}', '[]', 'not json'])
+    for (const read of [() => editHooksEnabled(undefined, home), readClientSettings]) {
+      writeFileSync(process.env.FORGE_CLIENT_SETTINGS, text);
+      assert.throws(read, { code: 'CLIENT_SETTINGS_INVALID' }, text);
+    }
 });
 
 test('start lists idle open Lanes and prunes finished roots after one batched read per 100 Lanes', async t => {

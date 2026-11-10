@@ -32,7 +32,7 @@ export async function cliCommandProject(args: string[]): Promise<string | null> 
       parsed.url !== undefined || parsed.projectId !== undefined
         ? { url: parsed.url, projectId: parsed.projectId }
         : {};
-    const { hostedAgentAddress } = await import('./hosted-agent-cli.js');
+    const { hostedAgentAddress } = await import('./hosted-agent-address.js');
     return hostedAgentAddress(root, selected)?.projectId ?? null;
   } catch {
     return null;
