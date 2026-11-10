@@ -8,14 +8,12 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import type { HostedRecord } from '../src/hosted-records';
-import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
+import { type HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
-import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
-import { isScopedRecheck } from '../src/scoped-recheck-policy';
+import { metricRunRow } from '../src/self-metrics-run';
+import { metricRunsPage } from './projectMetricReadRuns';
 import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
-import { runFlakes } from '../src/self-metrics-flakes';
-import { contractGateFallback } from '../src/fallback-reasons';
 import { landingCosts } from '../src/hosted-landings-view';
 import { landingSpeedSample } from '../src/landing-speed-alerts';
 
@@ -96,6 +94,7 @@ export const page = query({
     to: v.string(),
     cursor: v.union(v.string(), v.null()),
     contextDays: v.optional(v.number()),
+    compactRuns: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -108,12 +107,20 @@ export const page = query({
         'BAD_ARGUMENT',
         'Use a finite metrics window [from,to).',
       );
-      // Whole days from 1 to 30; absent keeps the original 30-day horizon for older clients.
+      // Zero/fractional days are explicit; absent keeps the original horizon for older clients.
       const contextDays = Math.min(
         30,
-        Math.max(1, Math.floor(Number.isFinite(input.contextDays) ? input.contextDays! : 30)),
+        Math.max(0, Number.isFinite(input.contextDays) ? input.contextDays! : 30),
       );
       const context = from - contextDays * 86400000;
+      if (input.stream === 'runs' && input.compactRuns)
+        return canonicalPayload({
+          ...(await metricRunsPage(ctx, input.projectId, context, to, input.cursor)),
+          contextFrom: new Date(context).toISOString(),
+          runProjectionVersion: 1,
+          cutover: project.sourceCutover?.at ?? null,
+          authority: project.sourceAuthority ?? { mode: 'native-owner', epoch: 0 },
+        });
       if (input.stream === 'receipts') {
         const rows = await ctx.db
           .query('projectSelfMetricReceipts')
@@ -253,40 +260,7 @@ export const page = query({
               settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,
             };
           }
-          if (input.stream === 'runs') {
-            const run = JSON.parse(row.value) as HostedCheckRun;
-            return {
-              id: run.id,
-              at: run.at,
-              endedAt: run.endedAt,
-              status: run.status,
-              head: run.request.expectedHead,
-              started: !!run.executionId,
-              // Cost.seconds is observed execution time, never the billed dollar amount.
-              runnerMinutes:
-                run.cost.status === 'observed' && run.cost.seconds !== null ? run.cost.seconds / 60 : null,
-              inputPin: run.candidate?.inputs ?? null,
-              reuseKey: hostedRunReuseKey(run.plan),
-              // Explicit selection is evidence; a check name alone is not.
-              fullSuite:
-                (run.gate ?? run.request.gate)
-                  ? ['full', 'audit'].includes((run.gate ?? run.request.gate)!.mode) ||
-                    (run.gate ?? run.request.gate)!.effective === 'full'
-                  : null,
-              ...(isScopedRecheck(run.gate) ? { scopedRecheck: true } : {}),
-              // Files that failed once and passed on the single retry.
-              // Explicit null means projected and none; an older deploy omits the field.
-              flaky: runFlakes(run) ?? null,
-              // Fallback codes already on the run (7c2e69e1): the runner's selection and the contract gate.
-              selectionFallback: run.fallback ?? null,
-              gateFallback: contractGateFallback(run.gate) ?? null,
-              // Audit seconds are already on this run. Attribute once at its end, as the live stamp does.
-              auditRunnerSeconds:
-                run.gate?.mode === 'audit' && hostedCheckTerminal(run)
-                  ? (run.execution?.seconds ?? null)
-                  : null,
-            };
-          }
+          if (input.stream === 'runs') return metricRunRow(JSON.parse(row.value) as HostedCheckRun);
           if (input.stream === 'requests') {
             const request = JSON.parse(row.value) as HostedLandingState;
             return {
@@ -354,6 +328,7 @@ export const page = query({
       );
       return canonicalPayload({
         page: values,
+        runProjectionVersion: 1,
         ...(input.stream === 'acceptances' && input.cursor === null
           ? { audits: await mainAuditEvents(ctx, input.projectId, from, to) }
           : {}),

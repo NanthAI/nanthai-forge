@@ -120,6 +120,7 @@ test('old check and landing documents remain valid; additive metadata is validat
   const names = schema.tables.projectHostedCheckRuns.export().indexes.map(i => i.indexDescriptor);
   assert.deepEqual(names, [
     'by_project',
+    'by_project_and_metrics_projection',
     'by_run',
     'by_project_and_run',
     'by_project_and_candidate',

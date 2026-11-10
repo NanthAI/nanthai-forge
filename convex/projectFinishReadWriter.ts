@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './_generated/server';
+import { metricReadWriter } from './projectMetricReadWriter';
 import {
   finishReadFields,
   finishReadProjection,
@@ -18,6 +19,8 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
   let original: MutationCtx['db'] | undefined;
   const source = () => (original ??= ctx.db);
   const overrides = new Map<PropertyKey, unknown>();
+  let metrics: ReturnType<typeof metricReadWriter> | undefined;
+  const metric = () => (metrics ??= metricReadWriter(source()));
   let tail = Promise.resolve();
   const serial = <T>(work: () => Promise<T>) => {
     const next = tail.then(work);
@@ -54,6 +57,8 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
         const value = Reflect.get(db, key);
         return typeof value === 'function' ? value.bind(db) : value;
       }
+      if (key === 'query' && typeof db.query === 'function') return metric().query;
+      if (key === 'get' && typeof db.get === 'function') return metric().get;
       if (key === 'insert')
         return async (table: string, value: Record<string, unknown>) => {
           if (!(table in finishReadFields)) return db.insert(table as never, value as never);
@@ -68,13 +73,15 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
       if (key === 'patch' || key === 'replace' || key === 'delete')
         return async (id: string, value?: Record<string, unknown>) => {
           const kind = kindFor(id);
+          let selected = value;
           const mutate = async () => {
             if (key === 'delete') await db.delete(id as never);
-            else if (key === 'replace') await db.replace(id as never, value as never);
-            else await db.patch(id as never, value as never);
+            else if (key === 'replace') await db.replace(id as never, selected as never);
+            else await db.patch(id as never, selected as never);
           };
           if (!kind) return mutate();
           return serial(async () => {
+            if (kind === 'projectHostedCheckRuns') selected = await metric().write(id, key, value);
             await mutate();
             if (
               key === 'patch' &&

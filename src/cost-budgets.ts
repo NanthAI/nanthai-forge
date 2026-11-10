@@ -36,7 +36,7 @@ export const costBudgetSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9-]+$/),
     area: z.string().min(1),
-    /** landing-, snapshot-, planning- and trial-merge-fixture: judged on change by the landing check. capture: a
+    /** landing-, snapshot-, planning-, metrics- and trial-merge-fixture: judged on change by the landing check. capture: a
      * live number for reading, judged nowhere (no deterministic measure exists). */
     measuredBy: z.enum([
       'landing-fixture',
@@ -45,11 +45,12 @@ export const costBudgetSchema = z
       'planning-fixture',
       'trial-merge-fixture',
       'ci-result-fixture',
+      'metrics-fixture',
       'capture',
     ]),
     metric: z.string().min(1),
     unit: z.enum(['calls', 'reads', 'bytes', 'GB-s', 'ops', 'runs', 'uploads', 'min']),
-    /** Per accepted landing (snapshot-fixture: per changed snapshot; planning-fixture: per planning write or search; trial-merge-fixture: per save). */
+    /** Per accepted landing (snapshot-fixture: per changed snapshot; planning-fixture: per planning write or search; trial-merge-fixture: per save; metrics-fixture: per window read). */
     value: z.number().min(0),
     /** Absolute change a measurement may move before any rule applies, so tiny counts never flap. */
     floor: z.number().min(0),
@@ -83,7 +84,7 @@ export function judgeCost(budget: CostBudget, after: number | null, guard: CostG
   const base = { id: budget.id, metric: budget.metric, unit: budget.unit, issue: budget.issue };
   const before = budget.value;
   const head = (verb: string, change: string) =>
-    `Cost budget ${budget.id} ${verb}: ${round(before)} -> ${round(after!)} ${budget.unit} per landing (${change}). ` +
+    `Cost budget ${budget.id} ${verb}: ${round(before)} -> ${round(after!)} ${budget.unit} per ${budget.measuredBy === 'metrics-fixture' ? 'metrics read' : 'landing'} (${change}). ` +
     `Area: ${budget.area}. Decision it protects: Issue ${budget.issue}.`;
   if (after === null || !Number.isFinite(after))
     return {

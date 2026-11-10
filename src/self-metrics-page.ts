@@ -16,10 +16,10 @@ export const metricPagingFields = {
   /** `page.nextCursor` of the previous page of the same window. */
   cursor: z.string().min(1).max(200).optional(),
 };
-/** Hosted `metrics` only: days of history before `from` read as context (default 2, at most 30).
+/** Hosted `metrics` only: days of history before `from` read as context (default 2, zero/fractional through 30).
  * Kept apart from the paging fields so the MCP tool list stays inside its context budget. */
 export const metricContextField = {
-  contextDays: z.number().int().min(1).max(METRICS_CONTEXT_DAYS_MAX).optional(),
+  contextDays: z.number().min(0).max(METRICS_CONTEXT_DAYS_MAX).optional(),
 };
 const encode = (offset: number, period: MetricPeriod) =>
   btoa(JSON.stringify({ o: offset, f: period.from, t: period.to }));

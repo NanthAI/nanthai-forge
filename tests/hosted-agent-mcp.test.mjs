@@ -368,9 +368,9 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
     'runs',
     'operations',
     'attempts',
+    'receipts',
     'lanes',
     'saves',
-    'receipts',
   ]);
   assert.equal(objectCalls, 1);
   // One read-only exact-conflict lead-time summary (flip 4).

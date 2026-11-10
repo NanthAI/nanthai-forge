@@ -207,36 +207,64 @@ lag) by one shared offset, and `page.nextCursor` continues the same `from`/`to`.
 Counts and totals are whole on every page; the per-day sections keep their counts and
 report `rowsOmitted` instead of rows (a one-day window returns them). Paging bounds the
 reply, not the read: each page recomputes the report from the same hosted pages.
-The whole `metrics` action, capability discovery included, ends within 100 s (under an
-agent shell's two-minute limit). The window bounds the read, and so does the context horizon:
-besides the window, each of the eight streams reads `contextDays` of earlier history (default 2,
-`--context-days N` or `contextDays` up to 30) to classify landings by retries, fixers and Lane
-inputs. The streams are read side by side, so the wall time is that of the slowest stream (check
-runs, whose pages are byte-limited). Measured on the dogfood project (35 landings in the 5 h window):
-the page reads for a 5 h window with a one-day horizon were 78 calls and 24 s one after another;
-the whole action with `contextDays: 1` (streams side by side, bills, placement and input
-hydration included) took 24 s and returned exit 0, where the fixed 30-day horizon read about
-366 pages and timed out for a 2 h window. Landings whose Lane history is older than the horizon
-show path `unknown` rather than a wrong class, and the coverage
-gap names the horizon actually read. A deploy older than this change reads 30 days unless `contextDays` is 1;
-the coverage gap then says so. A window that still does not fit ends with `METRICS_TIMEOUT`, changes
-nothing and names a command for the later half of the window with a one-day horizon.
+The whole `metrics` action, capability discovery included, ends within 100 s. `from` and
+`to` bound the window. History-dependent streams also read `contextDays` before `from`
+(default 2, maximum 30); zero and fractional days are supported, for example `0.0625`
+for 90 minutes. Keep the context needed by the question: prior failed submissions, check
+reuse, Lane saves and billing history can affect the report. The coverage gap names the
+actual horizon and leaves missing evidence unknown. `--limit` pages the reply, not the read.
+A read that cannot finish returns `METRICS_TIMEOUT` with its existing narrower-window command.
 
-Read bound (Convex calls and documents per call). Every `projectSelfMetrics:page` call reads at
-most 100 rows and 512 KB (`maximumRowsRead` 100): the lanes and saves streams also get one body
-per row (at most 200 documents), the first acceptances page adds at most 100 main-audit events,
-and the first receipts page adds three point reads. A window reads about
-`ceil(rows / 100)` pages per stream over the window plus its `contextDays` horizon, eight streams
-side by side, then one bills page (`projectSelfMetricBills:page`), one placement query
-(`projectBytePlacement:convexWritten`), two start-up queries (channel, capabilities) and
-`projectObjectDownloads:signDownloads` calls that hydrate Lane inputs from R2 (at most 8 objects and
-1 MiB per call). Measured on the dogfood project during a 7-builder wave (default `contextDays` 2,
-installed CLI, dev): a 6 h window took 39.5 s with 132 page calls and 43 sign calls; a 24 h window
-took 47.5 s with 145 page calls and 49 sign calls, exit 0, a 342 KB reply. The context horizon,
-not the window, is most of the pages, so 24 h costs only about 10% more than 6 h. Writes are zero and
-an idle project makes no call. Any window that does not finish inside the 100 s deadline ends with
-the structured `METRICS_TIMEOUT` (nothing changed) whose next step is the printed command for the
-later half of the window with `contextDays: 1`; `--limit` pages the reply, not the read.
+Receipt counters need only in-window rows, plus the first receipt of each kind for collection
+coverage; their context is zero. Lane/save streams are read only when immutable input pins
+and their object reader are present. Other streams retain the requested context. Streams run
+side by side, with Lane/save history fetched after the input pins are known.
+
+Full metrics reads negotiate compact check-run rows. Those rows retain exactly the fields
+used by the report, including runner/audit seconds, flakes, reuse keys, gates, fallbacks and
+input pins. They share the existing `projectFinishReadRows` table under a separate metrics
+kind; the status-only finish observer stays independent. Existing check-run writes update
+them transactionally: the already-read canonical row supplies creation time, and its existing
+write carries the compact row identity/digest. There is no added lookup on that path, mutation,
+worker, idle call or source-tree read. Their index
+uses the canonical run's creation time, preserving the legacy range and order.
+
+Migration happens through ordinary writes. An inserted run stays on the canonical fallback
+until an ordinary update already knows its exact stored creation time; insertion adds no read.
+A full-value maintenance write that has not read its canonical row clears compact coverage
+in that same write, retaining the full fallback without adding a source read.
+A window with any unprojected run reads the
+complete canonical stream; its cursor pins that choice for the whole read, including when
+ordinary writes project rows between pages. Fully projected windows use compact rows. No
+preparation pass or backfill runs on read, and no legacy measurement is dropped. Older
+clients and deployments retain the canonical protocol. Summary reads still take their
+existing first page. When adding report fields, update the shared run projector and its
+projection protocol together so retained rows cannot silently omit new evidence.
+
+Each metric page is limited to 100 rows and 512 KiB. The canonical fallback's first page
+also checks one unprojected run. Lane/save rows can each join one body; the first acceptances
+page adds at most 100 main-audit events; the first receipts page adds three collection-start
+point reads. Bills and placement add one query each. Capability/channel discovery and
+immutable input hydration are separate; object signing batches at most 8 objects and 1 MiB.
+Writes on read and idle calls are zero.
+
+`tests/metrics-context.test.mjs` compares the complete report on canonical and compact reads
+and guards bytes/pages through `metrics-fixture` entries in the cost ledger. Its synthetic
+project retains nine days at 150 landings, 300 check runs of 90 KiB and 300 receipts per day,
+with one day of context. Counts below include metrics, bills and placement queries; they
+exclude discovery and object transfers (the fixture has no input pins). Bytes are serialized
+fixture documents read, **not provider-billed bytes**.
+
+| Window | Canonical bytes | Compact bytes | Canonical pages | Compact pages |
+| --- | ---: | ---: | ---: | ---: |
+| 90 min | 29,856,375 | 465,807 | 77 | 14 |
+| 1 day | 56,330,621 | 942,665 | 138 | 21 |
+| 7 days | 225,290,111 | 3,963,699 | 543 | 84 |
+
+These are deterministic regression measurements, not a live billing forecast. Historical
+windows can retain canonical costs until ordinary writes cover their runs. The prior live
+90-minute dogfood read measured 38,457,450 database bytes over 88 metric-page calls; no broad
+live before/after read or preparation pass is needed to run this guard.
 
 Waste counts a main race by what it cost. When the replacement attempt adopts the superseded
 attempt's passing run (a reuse, no new check run), that run is not a re-check run, the raced

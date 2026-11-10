@@ -157,6 +157,7 @@ const pageSchema = (stream: keyof typeof rowSchemas) =>
     coverage: z.record(z.string(), nullableStamp).optional(),
     audits: audits.optional(),
     contextFrom: stamp.optional(),
+    runProjectionVersion: z.literal(1).optional(),
   });
 type StreamPage = z.infer<ReturnType<typeof pageSchema>>;
 const metricPage = async (
@@ -165,13 +166,15 @@ const metricPage = async (
   period: MetricPeriod,
   contextDays: number,
   cursor: string | null,
+  compactRuns = false,
 ) => {
   const raw: unknown = await query('projectSelfMetrics:page', {
     stream,
     from: period.from,
     to: period.to,
     cursor,
-    contextDays,
+    contextDays: stream === 'receipts' ? 0 : contextDays,
+    ...(compactRuns && stream === 'runs' ? { compactRuns: true } : {}),
   });
   return pageSchema(stream).parse(typeof raw === 'string' ? JSON.parse(raw) : raw);
 };
@@ -185,10 +188,11 @@ async function readStream(
   contextDays: number,
   firstPageOnly: boolean,
   first?: StreamPage,
+  compactRuns = false,
 ) {
   const pages: StreamPage[] = [];
   const seen = new Set<string>();
-  let page = first ?? (await metricPage(query, stream, period, contextDays, null));
+  let page = first ?? (await metricPage(query, stream, period, contextDays, null, compactRuns));
   for (;;) {
     pages.push(page);
     if (page.isDone || firstPageOnly) return pages;
@@ -198,12 +202,12 @@ async function readStream(
       'Hosted metric cursor did not advance.',
     );
     seen.add(page.continueCursor);
-    page = await metricPage(query, stream, period, contextDays, page.continueCursor);
+    page = await metricPage(query, stream, period, contextDays, page.continueCursor, compactRuns);
   }
 }
 /** `runsOnly` reads the runs stream alone (about one call per 100 check runs), with one day of
  * context and no bills, placement or input hydration: enough for the flake list (Issue d710663d).
- * `contextDays` bounds the pre-window history every stream also reads (default 2 days; status
+ * `contextDays` bounds the pre-window history the classification streams read (default 2 days; status
  * summaries and `runsOnly` read 1): the window bounds the read, not a fixed 30-day horizon
  * (Issue e32cb0e7: 366 page calls and a 100 s timeout for a 2 h window). */
 export async function readHostedMetricPages(
@@ -215,7 +219,7 @@ export async function readHostedMetricPages(
 ) {
   const contextDays = Math.min(
     METRICS_CONTEXT_DAYS_MAX,
-    Math.max(1, Math.floor(requestedContextDays ?? (summary || runsOnly ? 1 : METRICS_CONTEXT_DAYS_DEFAULT))),
+    Math.max(0, requestedContextDays ?? (summary || runsOnly ? 1 : METRICS_CONTEXT_DAYS_DEFAULT)),
   );
   // The horizon the server reports; an older deploy that ignores the argument reads 30 days.
   let contextFrom = new Date(Date.parse(period.from) - contextDays * 86400000).toISOString();
@@ -245,29 +249,42 @@ export async function readHostedMetricPages(
   const retries: (MetricRecords['receipts'][number] & { submissionId: string })[] = [];
   let receiptCoverage: Record<string, string | null> | undefined;
   try {
-    const streams = runsOnly
+    const streams: (keyof typeof rowSchemas)[] = runsOnly
       ? (['runs'] as const)
       : summary
         ? (['acceptances', 'requests', 'runs', 'operations'] as const)
-        : ([
-            'acceptances',
-            'requests',
-            'runs',
-            'operations',
-            'attempts',
-            'lanes',
-            'saves',
-            'receipts',
-          ] as const);
+        : (['acceptances', 'requests', 'runs', 'operations', 'attempts', 'receipts'] as const);
     // One probe page first: a missing module, a refused caller or a bad window ends the read
     // after one call, not eight. The streams then run side by side (same calls, wall time of the
     // slowest stream) and are folded in the fixed order above, whatever order they arrive in.
-    const probe = await metricPage(query, streams[0], period, contextDays, null);
+    const probe = await metricPage(query, streams[0]!, period, contextDays, null);
     const fetched = await Promise.all(
       streams.map((stream, index) =>
-        readStream(query, stream, period, contextDays, summary, index === 0 ? probe : undefined),
+        readStream(
+          query,
+          stream,
+          period,
+          contextDays,
+          summary,
+          index === 0 ? probe : undefined,
+          !summary && !runsOnly && probe.runProjectionVersion === 1,
+        ),
       ),
     );
+    // Lane/save history is used only to resolve immutable input pins.
+    if (
+      !summary &&
+      !runsOnly &&
+      query.objects &&
+      fetched.some(pages => pages.some(page => page.page.some(row => 'inputPin' in row && row.inputPin)))
+    ) {
+      streams.push('lanes', 'saves');
+      fetched.push(
+        ...(await Promise.all(
+          (['lanes', 'saves'] as const).map(stream => readStream(query, stream, period, contextDays, false)),
+        )),
+      );
+    }
     for (const [index, stream] of streams.entries()) {
       for (const page of fetched[index]!) {
         if (page.contextFrom && page.contextFrom < contextFrom) contextFrom = page.contextFrom;

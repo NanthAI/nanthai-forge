@@ -742,6 +742,78 @@
       "reason": "Replaces unconditional full-row reads for truncated peers with a 512-character all-path filter. At the capture #4 mix (60,000 old peer bytes/save, 1.6 head moves/landing), 1,000 landings avoid 96 MB of peer rows before false positives and rollout. At a full 51-row presence window the added field costs at most about 27 KB/save, leaving about 53 MB net read savings/1,000 landings; shared peers, false positives, writes and other presence reads reduce the net. Calls unchanged; idle zero."
     },
     {
+      "id": "metrics-90m-bytes",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "90mBytes",
+      "unit": "bytes",
+      "value": 465807,
+      "floor": 128,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
+      "id": "metrics-90m-pages",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "90mPages",
+      "unit": "calls",
+      "value": 14,
+      "floor": 0,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
+      "id": "metrics-1d-bytes",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "1dBytes",
+      "unit": "bytes",
+      "value": 942665,
+      "floor": 128,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
+      "id": "metrics-1d-pages",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "1dPages",
+      "unit": "calls",
+      "value": 21,
+      "floor": 0,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
+      "id": "metrics-7d-bytes",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "7dBytes",
+      "unit": "bytes",
+      "value": 3963699,
+      "floor": 128,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
+      "id": "metrics-7d-pages",
+      "area": "Windowed metrics reads",
+      "measuredBy": "metrics-fixture",
+      "metric": "7dPages",
+      "unit": "calls",
+      "value": 84,
+      "floor": 0,
+      "source": "tests/metrics-context.test.mjs: synthetic 150 landings, 300 90-KiB check runs and 300 receipts per day, nine retained days; one-day context; serialized documents read and page calls, not provider billed bytes.",
+      "issue": "3e3f9fe6",
+      "reason": "Preserve every metric and its context while removing full check-contract reads and pre-window receipt reads; historical windows fall back until ordinary writes install all projections."
+    },
+    {
       "id": "landing-driver-advance-read-bytes",
       "area": "Landing driver advance at 1,000 test files / 10 shards",
       "measuredBy": "driver-fixture",

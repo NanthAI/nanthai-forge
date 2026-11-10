@@ -9,6 +9,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { metricRunRow } from '../dist/self-metrics-run.js';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { formatCostVerdicts, judgeCost, judgeCosts } from '../dist/cost-budgets.js';
 
@@ -124,6 +125,17 @@ async function drain(f, m) {
 const stamped = f =>
   [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value).counts ?? null);
 const runs = f => [...f.tables.projectHostedCheckRuns.values()].map(r => JSON.parse(r.value));
+function assertRunMetrics(f) {
+  for (const row of f.tables.projectHostedCheckRuns.values()) {
+    const projection = [...f.tables.projectFinishReadRows.values()].find(
+      p => p.kind === 'projectMetricCheckRuns' && p.sourceId === row._id,
+    );
+    assert(projection, 'every landed run has its metric row from the existing mutation');
+    assert.equal(row.metricsProjected, true);
+    assert.deepEqual(JSON.parse(projection.value), metricRunRow(JSON.parse(row.value)));
+  }
+}
+
 const landed = f =>
   [...f.tables.projectHostedLandingRequests.values()].filter(r => JSON.parse(r.value).phase === 'landed')
     .length;
@@ -148,6 +160,7 @@ async function solo(t, { moveMain = false, extraQuery = false } = {}) {
     await drain(f, m);
   }
   assert.equal(landed(f), 1);
+  assertRunMetrics(f);
   return { landings: 1, checkRuns: runs(f).length, stamped: stamped(f), ...(await m.stop()) };
 }
 /** Four queued landings composed and checked together under the default batching policy. */
@@ -183,6 +196,7 @@ async function batch(t, { extraQuery = false } = {}) {
     else if (!queued.length) break;
   }
   assert.equal(landed(f), 4);
+  assertRunMetrics(f);
   return { landings: 4, checkRuns: f.runs().length, stamped: stamped(f), ...(await m.stop()) };
 }
 
@@ -229,6 +243,10 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
   t.diagnostic(`scenarios ${JSON.stringify(baseline.scenarios)}`);
   t.diagnostic(`measured in ${Math.round(performance.now() - started)} ms`);
   assert.equal(baseline.landings, 6);
+  assert(
+    baseline.measured.mutations <= 27.5,
+    'metrics read projections must share existing landing mutations (90-minute read-cost incident)',
+  );
   assert(verdicts.length >= 10, 'every fixture quantity has a ledger entry');
   assert.deepEqual(
     verdicts.filter(v => v.status === 'fail').map(v => v.message),

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument } from './convex-args.mjs';
 const api = await import(moduleUrl('../convex/projectSelfMetrics.ts'));
+const { metricReadProjection } = await import(moduleUrl('../convex/projectMetricReadProjection.ts'));
 const bills = await import(moduleUrl('../convex/projectSelfMetricBills.ts'));
 const placement = await import(moduleUrl('../convex/projectBytePlacement.ts'));
 const handlers = {
@@ -20,7 +21,7 @@ export const empty = () => ({ moves: [], submissions: [], runs: [], receipts: []
 // scheduler or write capability exists in the query context. Count point misses too.
 export function fixture() {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(table => [table, []]));
-  const meter = { calls: 0, documents: 0, writes: 0, maxPage: 0 };
+  const meter = { calls: 0, documents: 0, writes: 0, maxPage: 0, bytes: 0 };
   // Convex rejects a second paginate() in one query function (dev failure 2026-11-07, metrics
   // HOSTED_REQUEST_FAILED); the fake does too, counting system and table pages per call.
   // Each call has its own counter: callers may read several streams at once.
@@ -54,6 +55,7 @@ export function fixture() {
   };
   const read = rows => {
     meter.documents += Math.max(1, rows.length);
+    meter.bytes += rows.reduce((n, row) => n + Buffer.byteLength(JSON.stringify(row)), 0);
     return structuredClone(rows);
   };
   const makeCtx = state => ({
@@ -116,7 +118,17 @@ export function fixture() {
             build(bounds);
             selected = tables[table]
               .filter(row => predicates.every(predicate => predicate(row)))
-              .sort((a, b) => a._creationTime - b._creationTime);
+              .sort((a, b) => {
+                for (const key of [...spec.fields, '_creationTime', '_id']) {
+                  const left = field(a, key),
+                    right = field(b, key);
+                  if (left === right) continue;
+                  if (left === undefined) return -1;
+                  if (right === undefined) return 1;
+                  return left < right ? -1 : 1;
+                }
+                return 0;
+              });
             return q;
           },
           order(direction) {
@@ -253,6 +265,18 @@ export function fixture() {
     project,
     meter,
     query,
+    projectRuns(predicate = () => true) {
+      for (const row of tables.projectHostedCheckRuns.filter(predicate)) {
+        const projection = metricReadProjection(row);
+        assert(projection, 'fixture run has the real metrics projection');
+        const old = tables.projectFinishReadRows.find(
+          p => p.kind === projection.kind && p.sourceId === row._id,
+        );
+        if (old) Object.assign(old, projection);
+        else put('projectFinishReadRows', projection, new Date(row._creationTime).toISOString());
+        row.metricsProjected = true;
+      }
+    },
     recordBill,
     put,
     landing,

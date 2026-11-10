@@ -231,6 +231,13 @@ test('hosted immutable inputs classify first try, retry, fixer and main-race was
   assert.equal(waste.byCause.find(row => row.cause === 'flake').attempts, 0);
   assert(e.objectCalls < 7, 'input pins deduplicate across moves/runs/attempts');
   assert.equal(f.meter.writes, 0);
+  f.projectRuns();
+  const projected = await readHostedMetricPages(f.query, period);
+  assert.deepEqual(
+    metricsSurface(projected.records, period),
+    metricsSurface(records, period),
+    'compact runs preserve retries, fixers, actors, main-race waste and all report fields',
+  );
 });
 
 test('batch landings classify by their member Lanes, never unknown because the stack has empty inputs', async () => {

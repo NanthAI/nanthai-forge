@@ -12,7 +12,7 @@ export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
     process.stdout.write(
-      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (1 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n',
+      'nforge metrics ROOT [--from DATE] [--to DATE] [--json | --text] [--report FILE.md] [--compare FROM..TO] [--limit N] [--cursor C] [--context-days N] [--flake-issues]\nnforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [...]\nUTC windows are [from,to). JSON is the default for agents/non-TTY output.\n--limit N pages the report row lists (N entries per list; follow page.nextCursor with --cursor C, same window); per-day rows are omitted when paging.\n--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flaky-file list, each with its Issue.\n',
     );
     return;
   }
@@ -62,9 +62,9 @@ export async function metricsCli(args: string[]) {
   const contextDays = options['--context-days'] === undefined ? undefined : Number(options['--context-days']);
   invariant(
     contextDays === undefined ||
-      (Number.isInteger(contextDays) && contextDays >= 1 && contextDays <= METRICS_CONTEXT_DAYS_MAX),
+      (Number.isFinite(contextDays) && contextDays >= 0 && contextDays <= METRICS_CONTEXT_DAYS_MAX),
     'BAD_ARGUMENT',
-    `--context-days must be a whole number from 1 to ${METRICS_CONTEXT_DAYS_MAX}.`,
+    `--context-days must be a finite number from 0 to ${METRICS_CONTEXT_DAYS_MAX}.`,
   );
   invariant(
     !options['--cursor'] || limit !== undefined,
@@ -74,7 +74,7 @@ export async function metricsCli(args: string[]) {
   invariant(
     !(options['--flake-issues'] && (limit !== undefined || options['--compare'])),
     'BAD_ARGUMENT',
-    '--context-days N (1 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
+    '--context-days N (0 to 30, default 2) sets the days of pre-window history read to classify landings; the window and this horizon bound the read.\n--flake-issues prints only the flake list; do not combine it with --limit or --compare.',
   );
   const result = metricsSurface(
     await readMetricRecords(

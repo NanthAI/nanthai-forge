@@ -66,7 +66,11 @@ test('weekly flaky list comes from the existing runs page: no extra call, failur
   });
   const before = f.meter.calls;
   const { records } = await readHostedMetricPages(f.query, period);
-  assert.equal(f.meter.calls - before, 10, 'same eight streams, bill page and placement page as before');
+  assert.equal(
+    f.meter.calls - before,
+    8,
+    'six required streams, bills and placement; no Lane/save reads without input pins',
+  );
   assert.equal(records.flakesUnprojected, undefined);
   const result = metricsSurface(records, period);
   const flakes = result.totals.flakes;

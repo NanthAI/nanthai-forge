@@ -6,6 +6,7 @@ export const finishReadTables = {
   projectFinishReadRows: defineTable({
     kind: v.string(),
     sourceId: v.string(),
+    sourceCreatedAt: v.optional(v.number()),
     value: v.string(),
     projectId: v.optional(v.id('hostedProjects')),
     submissionId: v.optional(v.string()),
@@ -22,5 +23,6 @@ export const finishReadTables = {
     .index('by_kind_and_project_and_attempt', ['kind', 'projectId', 'attemptId'])
     .index('by_kind_and_project_and_run', ['kind', 'projectId', 'runId'])
     .index('by_kind_and_project_and_channel', ['kind', 'projectId', 'channel'])
+    .index('by_kind_and_project_and_source_time', ['kind', 'projectId', 'sourceCreatedAt', 'sourceId'])
     .index('by_project', ['projectId']),
 };

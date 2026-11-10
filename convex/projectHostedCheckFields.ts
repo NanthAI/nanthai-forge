@@ -47,6 +47,8 @@ export const hostedCheckTables = {
     'version',
   ]),
   projectHostedCheckRuns: defineTable({
+    metricsProjected: v.optional(v.literal(true)),
+    metricProjection: v.optional(v.object({ rowId: v.id('projectFinishReadRows'), digest: v.string() })),
     projectId: v.id('hostedProjects'),
     runId: v.string(),
     candidateId: v.string(),
@@ -56,6 +58,7 @@ export const hostedCheckTables = {
     gate: v.optional(checkGate),
   })
     .index('by_project', ['projectId'])
+    .index('by_project_and_metrics_projection', ['projectId', 'metricsProjected'])
     .index('by_run', ['runId'])
     .index('by_project_and_run', ['projectId', 'runId'])
     .index('by_project_and_candidate', ['projectId', 'candidateId'])
