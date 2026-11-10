@@ -15,6 +15,13 @@ export const checkGate = v.object({
   reason: v.optional(v.string()),
   effective: v.optional(v.union(v.literal('contract'), v.literal('full'), v.literal('docs'))),
 });
+export const drillRecord = v.object({
+  startedAt: v.string(),
+  redAt: v.optional(v.string()),
+  recoveredAt: v.optional(v.string()),
+  endedAt: v.optional(v.string()),
+  outcome: v.optional(v.union(v.literal('recovered'), v.literal('late'), v.literal('flake'))),
+});
 export const mainAuditFields = {
   projectId: v.id('hostedProjects'),
   lastGreen: v.optional(v.object({ sequence: v.number(), head: v.string(), runId: v.string() })),
@@ -51,8 +58,24 @@ export const mainAuditFields = {
     v.object({
       audited: v.number(),
       unclear: v.number(),
-      drill: v.optional(v.object({ at: v.string(), sequence: v.number(), reverted: v.boolean() })),
+      drill: v.optional(
+        v.object({
+          at: v.string(),
+          sequence: v.number(),
+          reverted: v.boolean(),
+          started: v.optional(v.string()),
+          red: v.optional(v.string()),
+        }),
+      ),
       lost: v.optional(v.object({ at: v.string(), reason: v.literal('red') })),
+    }),
+  ),
+  /** An owner's red-audit drill in progress (fe7d67a8): started by the owner person, it claims the
+   * first red audit in its window. Cleared when that red ends or a later red finds it expired. */
+  drill: v.optional(
+    v.object({
+      startedAt: v.string(),
+      red: v.optional(v.object({ at: v.string(), runId: v.string(), sequence: v.number() })),
     }),
   ),
   /** Consecutive audit starts that could not run (53b07031); cleared once one does. */
@@ -76,5 +99,8 @@ export const hostedMainAuditTables = {
     runId: v.string(),
     sequence: v.number(),
     culprit: v.optional(v.string()),
+    /** On the red an owner's drill claimed, and on the verdict that ended it: its start, red,
+     * recovery and end times, and whether it counted (recovered in time) or was a real red. */
+    drill: v.optional(drillRecord),
   }).index('by_project_and_sequence', ['projectId', 'sequence']),
 };

@@ -17,7 +17,9 @@ import {
   auditStale,
   earnedAfterGreen,
   earnedAfterUnclear,
+  earnedFromHistory,
   fastEffective,
+  FAST_DRILL_MS,
   landingEarned,
   landingModeView,
 } from '../dist/landing-mode.js';
@@ -908,6 +910,80 @@ test('earned fast mode: 200 audited landings, a recovered red on record, under 5
   earned = earnedAfterGreen({ ...EARNED, audited: 770, unclear: 29 }, 1);
   assert.deepEqual([earned.audited, earned.unclear], [385, 14]);
   assert.equal(landingEarned(earned).earned, true);
+});
+
+// Lead decision on Issue fe7d67a8: an owner's red-audit drill that recovers is the recovered red and
+// keeps the audited count; a real red, or a drill that recovers late, restarts it.
+test('red-audit drill rule: a drill that recovers in time counts and keeps the count; a real red and a late drill reset', () => {
+  const counted = { audited: 295, unclear: 4 };
+  const redAt = '2026-11-10T09:00:00.000Z';
+  const later = minutes => new Date(Date.parse(redAt) + minutes * 60_000).toISOString();
+  const drill = { startedAt: '2026-11-10T08:50:00.000Z', redAt };
+  const inTime = earnedAfterGreen(counted, 3, { at: later(40), sequence: 9, reverted: true, drill });
+  assert.deepEqual(inTime, {
+    audited: 295,
+    unclear: 4,
+    drill: { at: later(40), sequence: 9, reverted: true, started: drill.startedAt, red: redAt },
+  });
+  assert.equal(landingEarned(inTime).earned, true, 'the drill completes the bar');
+  const late = earnedAfterGreen(counted, 3, {
+    at: later(FAST_DRILL_MS / 60_000 + 1),
+    sequence: 9,
+    reverted: true,
+    drill,
+  });
+  assert.deepEqual(
+    [late.audited, late.unclear, late.lost.reason, late.drill.started],
+    [0, 0, 'red', undefined],
+  );
+  const real = earnedAfterGreen(counted, 3, { at: later(40), sequence: 9, reverted: false });
+  assert.deepEqual([real.audited, real.lost.reason], [0, 'red']);
+});
+
+test('the owner recount replays history with the live rules: exact, own-check, stalled, flake, drill and real reds', () => {
+  const e = (kind, sequence, extra = {}) => ({
+    kind,
+    at: `2026-11-10T0${sequence % 10}:00:00.000Z`,
+    runId: `r${sequence}`,
+    sequence,
+    ...extra,
+  });
+  const drill = {
+    startedAt: '2026-11-10T00:00:00.000Z',
+    redAt: '2026-11-10T05:00:00.000Z',
+    recoveredAt: '2026-11-10T05:40:00.000Z',
+  };
+  const landings = [
+    { sequence: 1, kind: 'exact' },
+    { sequence: 2, kind: 'proof' },
+    { sequence: 3, kind: 'docs' },
+    { sequence: 4, kind: 'proof' }, // stalled, then its retry audits it
+    { sequence: 5, kind: 'proof' }, // a red the flake guard cleared
+    { sequence: 6, kind: 'proof' }, // the drill's red
+    { sequence: 7, kind: 'proof' }, // the drill's recovery adds nothing
+    { sequence: 8, kind: 'proof' }, // covered by a later exact full landing
+  ];
+  const events = [
+    e('green', 2),
+    e('stalled', 4),
+    e('green', 4),
+    e('red', 5),
+    e('flake', 5, { runId: 'r5' }),
+    e('red', 6, { drill }),
+    e('culprit', 6, { runId: 'r6' }),
+    e('green', 7, { drill: { ...drill, outcome: 'recovered' } }),
+  ];
+  assert.deepEqual(earnedFromHistory(landings, events), {
+    audited: 4,
+    unclear: 2,
+    drill: { at: drill.recoveredAt, sequence: 7, reverted: true, started: drill.startedAt, red: drill.redAt },
+  });
+  // The same red without the owner's drill is a real red: everything before it is lost.
+  const real = earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6), e('green', 7)]);
+  assert.deepEqual(
+    [real.audited, real.unclear, real.lost.reason, real.drill.at],
+    [2, 0, 'red', e('green', 7).at],
+  );
 });
 
 test('audit freshness bounds lag by count and by time, and a stalled audit closes fast mode', () => {

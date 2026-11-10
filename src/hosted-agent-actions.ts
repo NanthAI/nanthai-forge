@@ -475,6 +475,19 @@ export async function executeHostedAgent(
   }
   if (action === 'configure-runner') {
     const command = hostedAgentCommandSchemas['configure-runner'].parse(input);
+    if (command.mainAudit) {
+      invariant(
+        Object.keys(command).length === 1,
+        'BAD_ARGUMENT',
+        'Send mainAudit alone: {"mainAudit":{"drill":"start"}} or {"mainAudit":{"backfill":{"since":"ISO"}}}.',
+      );
+      const request = {
+        operationId,
+        authorityEpoch: session.capabilities.authority.epoch,
+        earn: command.mainAudit,
+      };
+      return session.mutation('projectHostedMainAudit:configure', { request: canonicalPayload(request) });
+    }
     const selected = await session.journal.retain('configure-runner-target', () =>
       configureRunnerRequest(session, command, operationId),
     );

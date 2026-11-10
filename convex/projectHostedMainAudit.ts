@@ -16,6 +16,7 @@ import {
 import { beginCheckOperation, checkCaller, checkSetting, loadHostedCheck } from './projectHostedCheckStore';
 import { heldSettingReply, saveCheckSetting } from './projectHostedCheckDefinitions';
 import { settingKey } from './projectSettingApprovals';
+import { earnMainAudit, isEarnRequest } from './projectHostedMainAuditEarn';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { recordLandingObservation } from './projectHostedLandingStore';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -85,6 +86,8 @@ export async function configureMainAudit(
   text: string,
   approved = false,
 ) {
+  // The same owner-only door starts a red-audit drill or recounts the earned counters (fe7d67a8).
+  if (isEarnRequest(text)) return earnMainAudit(ctx, projectId, text, approved);
   const input = { projectId };
   const request = configureSchema.parse(JSON.parse(text));
   const { actor } = await checkCaller(ctx, input.projectId);

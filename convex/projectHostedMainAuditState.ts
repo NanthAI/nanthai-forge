@@ -22,6 +22,8 @@ import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
 import {
+  drillClaims,
+  drillInTime,
   earnedAfterGreen,
   earnedAfterUnclear,
   fastEffective,
@@ -157,6 +159,7 @@ export async function auditEvent(
   head: string,
   runId: string,
   sequence: number,
+  drill?: DrillRecord,
 ) {
   await ctx.db.insert('projectHostedMainAuditEvents', {
     projectId: row.projectId,
@@ -165,7 +168,50 @@ export async function auditEvent(
     head,
     runId,
     sequence,
+    ...(drill ? { drill } : {}),
   });
+}
+type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;
+/** The owner's drill that claimed the current red, as the counter rule takes it (fe7d67a8). */
+const drillOf = (row: Doc<'projectHostedMainAudits'>) =>
+  row.red && row.drill?.red?.runId === row.red.runId
+    ? { startedAt: row.drill.startedAt, redAt: row.drill.red.at }
+    : undefined;
+/** Ends the drill that claimed the current red: its record goes on the red event (one indexed read)
+ * and is returned for the event that ended it. The caller clears `drill` in its own patch. */
+export async function closeDrill(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedMainAudits'>,
+  recoveredAt: string | null,
+): Promise<DrillRecord | undefined> {
+  const drill = drillOf(row);
+  if (!drill) return undefined;
+  const record: DrillRecord = {
+    ...drill,
+    ...(recoveredAt ? { recoveredAt } : {}),
+    endedAt: new Date().toISOString(),
+    outcome: !recoveredAt ? 'flake' : drillInTime(drill, recoveredAt) ? 'recovered' : 'late',
+  };
+  const claimed = row.drill!.red!;
+  const events = await ctx.db
+    .query('projectHostedMainAuditEvents')
+    .withIndex('by_project_and_sequence', q =>
+      q.eq('projectId', row.projectId).eq('sequence', claimed.sequence),
+    )
+    .take(20);
+  const red = events.find(event => event.kind === 'red' && event.runId === claimed.runId);
+  if (red) await ctx.db.patch(red._id, { drill: record });
+  return record;
+}
+/** The recovery fields of a verdict that ends a red episode, the drill it closes, and its event record. */
+async function recovery(ctx: MutationCtx, row: Doc<'projectHostedMainAudits'>, at: string, sequence: number) {
+  if (!row.red) return { recovered: undefined, patch: {}, record: undefined };
+  const drill = drillOf(row);
+  return {
+    recovered: { at, sequence, reverted: Boolean(row.red.culprit), ...(drill ? { drill } : {}) },
+    patch: row.drill ? { drill: undefined } : {},
+    record: await closeDrill(ctx, row, at),
+  };
 }
 /** Bounded fan-out; removing hold advances the indexed window without a collection scan. */
 export async function releaseMainHolds(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -238,7 +284,9 @@ export async function noteMainLanding(
   }
   if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run)) {
     if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
+    const ended = await recovery(ctx, row, receipt.at, receipt.snapshot.revision);
     await ctx.db.patch(row._id, {
+      ...ended.patch,
       lastGreen: { sequence: receipt.snapshot.revision, head: receipt.candidate.head, runId: run.id },
       unaudited: { count: 0, firstAt: null },
       red: undefined,
@@ -246,13 +294,7 @@ export async function noteMainLanding(
       wake: undefined,
       startFailure: undefined,
       // An exact full pass audits this landing and every unaudited one below it.
-      earned: earnedAfterGreen(
-        row.earned,
-        (row.unaudited?.count ?? 0) + 1,
-        row.red
-          ? { at: receipt.at, sequence: receipt.snapshot.revision, reverted: Boolean(row.red.culprit) }
-          : undefined,
-      ),
+      earned: earnedAfterGreen(row.earned, (row.unaudited?.count ?? 0) + 1, ended.recovered),
     });
     if (row.red) {
       await auditEvent(
@@ -263,6 +305,7 @@ export async function noteMainLanding(
         receipt.candidate.head,
         run.id,
         receipt.snapshot.revision,
+        ended.record,
       );
       await releaseMainHolds(ctx, projectId);
     }
@@ -342,19 +385,17 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
   if (run.status === 'passed' && fullAudit) {
     const count = Math.max(0, (row.unaudited?.count ?? 0) - meta.count);
     const firstAt = count ? row.unaudited!.firstAt : null;
+    const ended = await recovery(ctx, row, at, meta.sequence);
     await ctx.db.patch(row._id, {
+      ...ended.patch,
       lastGreen: { sequence: meta.sequence, head: run.request.expectedHead, runId: run.id },
       unaudited: { count, firstAt },
       red: undefined,
       debt: false,
       ...(count ? {} : { startFailure: undefined }),
-      earned: earnedAfterGreen(
-        row.earned,
-        meta.count,
-        row.red ? { at, sequence: meta.sequence, reverted: Boolean(row.red.culprit) } : undefined,
-      ),
+      earned: earnedAfterGreen(row.earned, meta.count, ended.recovered),
     });
-    await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence);
+    await auditEvent(ctx, row, 'green', at, run.request.expectedHead, run.id, meta.sequence, ended.record);
     await releaseMainHolds(ctx, projectId);
     if (count)
       await armAudit(
@@ -371,10 +412,27 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
         ? meta.firstAt
         : row.unaudited!.firstAt;
     await ctx.db.patch(row._id, { unaudited: { count: row.unaudited!.count, firstAt } });
+    // An armed owner drill claims the first red in its window; a later red finds it expired (fe7d67a8).
+    const claims = !row.red && drillClaims(row.drill, at);
     await ctx.db.patch(row._id, {
       red: { ...row.red, since: row.red?.since ?? at, head: run.request.expectedHead, runId: run.id },
+      ...(!row.red && row.drill && !row.drill.red
+        ? {
+            drill: claims ? { ...row.drill, red: { at, runId: run.id, sequence: meta.sequence } } : undefined,
+          }
+        : {}),
     });
-    if (!row.red) await auditEvent(ctx, row, 'red', at, run.request.expectedHead, run.id, meta.sequence);
+    if (!row.red)
+      await auditEvent(
+        ctx,
+        row,
+        'red',
+        at,
+        run.request.expectedHead,
+        run.id,
+        meta.sequence,
+        claims ? { startedAt: row.drill!.startedAt, redAt: at } : undefined,
+      );
     await ctx.scheduler.runAfter(
       0,
       makeFunctionReference<'mutation'>('projectHostedCulprit:startRedClassification'),
@@ -460,6 +518,8 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
     redMinutes: row?.red ? Math.max(0, Date.now() - Date.parse(row.red.since)) / 60_000 : 0,
     lastGreen: row?.lastGreen ?? null,
     unaudited: pending,
+    // An owner's red-audit drill in progress (fe7d67a8); its outcome lands on the audit events.
+    drill: row?.drill ? { startedAt: row.drill.startedAt, redAt: row.drill.red?.at ?? null } : null,
     // One derive of the landing mode for status, the CLI and the web (src/landing-mode.ts).
     landing: landingModeView(
       project ? effectivePolicy(project).acceptance.landingMode : undefined,

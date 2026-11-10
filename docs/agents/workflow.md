@@ -102,7 +102,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `metrics` | `from?, to?, limit?, cursor?, contextDays?, operationId?` |
 | `capabilities` | `operationId?` |
 | `x configure-check` | `name?, checkId?, command?, expected?, operationId?` |
-| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, publicLogs?, submodules?, isolation?, machineId?, labels?, repository?, configuration?, expected?, operationId?` |
+| `x configure-runner` | `provider?, runsOn?, concurrencyBudget?, publicLogs?, submodules?, isolation?, machineId?, labels?, repository?, configuration?, expected?, mainAudit?, operationId?` |
 | `check-settings` | `operationId?` |
 | `policy` | `operationId?` |
 | `approve-link` | `operationId?` |

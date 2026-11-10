@@ -383,6 +383,14 @@ export const hostedAgentCommandSchemas = {
         .optional(),
       configuration: hostedCheckRunnerSchema.optional(),
       expected: hash.nullable().optional(),
+      /** Owner-only, alone: start a red-audit drill or recount the fast-landing counters from audit
+       * history (Issue fe7d67a8). From an agent it opens an approval request for the owner person. */
+      mainAudit: z
+        .union([
+          z.object({ drill: z.literal('start') }).strict(),
+          z.object({ backfill: z.object({ since: z.iso.datetime() }).strict() }).strict(),
+        ])
+        .optional(),
     })
     .strict(),
   'check-settings': z.object({}).strict(),

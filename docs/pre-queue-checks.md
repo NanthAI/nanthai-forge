@@ -234,10 +234,32 @@ history is the evidence. Fast mode carries a landing only while all three hold:
    transaction that publishes it. A change that lands on main's own exact full check has no
    lag to bound.
 
+**Red-audit drill.** A project that has never had a red audit runs one drill. Only the owner
+person starts it; from an agent sign-in (the owner's own CLI included) the request opens an
+approval request and nothing starts until the owner grants it on the approve link:
+
+```sh
+nforge x ROOT configure-runner '{"mainAudit":{"drill":"start"}}'
+```
+
+The drill claims the first red main audit within 2 hours of its start; it cannot start while
+main is red, so no red can be marked as a drill after the fact. The red is a normal red: landings
+are held, the culprit is found and reverted or a fix is opened. If main recovers within 2 hours
+of the red, the drill is the recovered red on record and the audited count is kept (the
+landings of that red episode are not counted). A drill that recovers later is a real red. A red
+the flake guard clears ends the drill without counting. The audit history records the drill on
+the red event and on the verdict that ended it: start, red, recovery and end times, and the
+outcome (`recovered`, `late` or `flake`). `check-settings` `mainAudit.drill` shows one in
+progress.
+
 Otherwise the landing gets the second check, and a passed second check is itself a full audit
-of main. A red audit takes the earned state away: the count restarts from zero. Counters
+of main. A real red audit takes the earned state away: the count restarts from zero. Counters
 halve at 800 landings, so the share follows recent history. They live on the project's main
-audit row and are written only by transactions that already write it.
+audit row and are written only by transactions that already write it, and by the owner's
+recount: `configure-runner '{"mainAudit":{"backfill":{"since":"ISO_TIME"}}}'` (owner person, or
+granted the same way as a drill) replays the retained receipts and audit events since that time
+with the same rules and replaces the counters. It reads each receipt and event once, writes once,
+and a rerun gives the same counters.
 
 **Flake policy.** A failed audit re-runs its failing files once on the same head. A pass there
 vouches for the audit: it is recorded as a `flake`, main is not red and fast mode is not lost.

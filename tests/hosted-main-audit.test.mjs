@@ -238,6 +238,195 @@ test('15-minute stall status is read-only; provider completion clears it without
   assert.equal((await readStatus(f)).alarm, null);
 });
 
+// Lead decision on Issue fe7d67a8: the owner person starts a red-audit drill; its red, if it recovers in
+// time, is the recovered red on record and keeps the audited count. A real red or a late drill resets it.
+const device = { subject: 'owner', forgeCredential: 'synthetic-device' };
+const earn = (f, body, actor = 'owner') =>
+  f
+    .call(
+      'earn',
+      audit.configure,
+      {
+        projectId: f.projectId,
+        request: JSON.stringify({ operationId: randomUUID(), authorityEpoch: 1, earn: body }),
+      },
+      actor,
+    )
+    .then(JSON.parse);
+const auditEvents = f => [...f.tables.projectHostedMainAuditEvents.values()];
+async function counted(f) {
+  f.insert('cliCredentials', {
+    credentialId: device.forgeCredential,
+    owner: 'owner',
+    name: 'Synthetic device',
+    tokenHash: 'synthetic-hash',
+    issuedAt: Date.now(),
+    scope: 'cli',
+    expiresAt: Date.now() + 60 * 60_000,
+    revoked: false,
+  });
+  await f.land('full');
+  for (let i = 0; i < 12; i++) await f.land();
+  await f.tick(f.pending()[0]);
+  await f.terminal();
+  assert.deepEqual(f.row().earned, { audited: 13, unclear: 0 });
+}
+async function red(f) {
+  await f.land();
+  await f.start();
+  await f.terminal('failed');
+}
+
+test('an owner drill that recovers in time is the recovered red and keeps the count; a real red resets it (fe7d67a8)', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
+  const f = await auditFixture();
+  await counted(f);
+  // An agent sign-in (the owner's own CLI included) only asks; nothing starts until the owner person grants.
+  const held = await earn(f, { drill: 'start' }, device);
+  assert.equal(held.rule, 'held');
+  assert.equal(f.row().drill, undefined);
+  const request = [...f.tables.projectHostedApprovals.values()].find(
+    r => r.laneId === 'setting:main-audit:drill',
+  );
+  await assert.rejects(
+    f.call(
+      'grantAsAgent',
+      approvals.decide,
+      {
+        projectId: f.projectId,
+        operationId: randomUUID(),
+        laneId: request.laneId,
+        decision: 'grant',
+        head: request.head,
+      },
+      device,
+    ),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  await f.call('grant', approvals.decide, {
+    projectId: f.projectId,
+    operationId: randomUUID(),
+    laneId: request.laneId,
+    decision: 'grant',
+    head: request.head,
+  });
+  const startedAt = f.row().drill.startedAt;
+  assert.ok(startedAt);
+  await red(f);
+  assert.equal(f.row().drill.red.runId, f.row().red.runId, 'the armed drill claims the next red');
+  assert.equal((await readStatus(f)).landing.effective, 'strict', 'a drill red holds landings like any red');
+  const fix = await f.land('full');
+  const earned = f.row().earned;
+  assert.deepEqual([earned.audited, earned.unclear, earned.lost], [13, 0, undefined]);
+  assert.deepEqual(earned.drill, {
+    at: fix.receipt.at,
+    sequence: fix.receipt.snapshot.revision,
+    reverted: false,
+    started: startedAt,
+    red: auditEvents(f).find(e => e.kind === 'red').at,
+  });
+  assert.equal(f.row().drill, undefined);
+  // The audit history records it as a drill: start, red, recovery and end, on the red and on its recovery.
+  const [redEvent, greenEvent] = auditEvents(f).filter(e => e.drill);
+  assert.deepEqual([redEvent.kind, greenEvent.kind], ['red', 'green']);
+  assert.deepEqual(redEvent.drill, greenEvent.drill);
+  assert.deepEqual(Object.keys(redEvent.drill).sort(), [
+    'endedAt',
+    'outcome',
+    'recoveredAt',
+    'redAt',
+    'startedAt',
+  ]);
+  assert.equal(redEvent.drill.outcome, 'recovered');
+  assert.deepEqual((await readStatus(f)).landing.progress, {
+    audited: 13,
+    needed: 200,
+    unclearShare: 0,
+    drill: true,
+  });
+  // A real red, with no drill armed, still resets the count.
+  await red(f);
+  await f.land('full');
+  assert.deepEqual([f.row().earned.audited, f.row().earned.lost.reason], [0, 'red']);
+});
+
+test('a drill that recovers late is a real red; an agent cannot start a drill or mark a red as one (fe7d67a8)', async () => {
+  const f = await auditFixture();
+  await counted(f);
+  assert.equal(
+    (await earn(f, { drill: 'start' })).drill.started,
+    true,
+    'the owner person starts it directly',
+  );
+  await red(f);
+  const row = f.row();
+  const lateRed = new Date(Date.now() - 3 * 3600000).toISOString();
+  f.patch('projectHostedMainAudits', row._id, {
+    drill: { ...row.drill, red: { ...row.drill.red, at: lateRed } },
+  });
+  await f.land('full');
+  assert.deepEqual(
+    [f.row().earned.audited, f.row().earned.lost.reason],
+    [0, 'red'],
+    'late: the count restarts',
+  );
+  assert.equal(auditEvents(f).find(e => e.kind === 'red').drill.outcome, 'late');
+  // While main is red no drill can start, so a red can never be claimed after the fact.
+  await red(f);
+  await assert.rejects(earn(f, { drill: 'start' }), error => error.data?.code === 'MAIN_RED');
+  assert.equal((await earn(f, { drill: 'start' }, device)).rule, 'held');
+  assert.equal(f.row().drill, undefined);
+  await f.land('full');
+  // A drill whose window closed before the red does not claim it.
+  await earn(f, { drill: 'start' });
+  f.patch('projectHostedMainAudits', f.row()._id, {
+    drill: { startedAt: new Date(Date.now() - 3 * 3600000).toISOString() },
+  });
+  await red(f);
+  assert.equal(f.row().drill, undefined);
+  assert.equal(
+    auditEvents(f)
+      .filter(e => e.kind === 'red')
+      .at(-1).drill,
+    undefined,
+  );
+});
+
+test('the owner recount replaces the counters with the live rules and is held for an agent (fe7d67a8)', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { getFunctionName } = await import('convex/server');
+  const earnModule = await import(moduleUrl('../convex/projectHostedMainAuditEarn.ts'));
+  const f = await auditFixture();
+  // The fixture's creation times count from zero; a deployment's are epoch milliseconds.
+  const since = new Date(0).toISOString();
+  await counted(f);
+  await earn(f, { drill: 'start' });
+  await red(f);
+  await f.land('full');
+  const live = f.row().earned;
+  assert.equal((await earn(f, { backfill: { since } }, device)).rule, 'held');
+  f.patch('projectHostedMainAudits', f.row()._id, { earned: { audited: 0, unclear: 0 } });
+  const scheduled = await earn(f, { backfill: { since } });
+  assert.deepEqual(scheduled.backfill, { since, scheduled: true });
+  const ctx = {
+    runQuery: (ref, args) => f.call('recount', earnModule[getFunctionName(ref).split(':')[1]], args),
+  };
+  ctx.runMutation = ctx.runQuery;
+  for (let run = 0; run < 2; run++) {
+    await earnModule.backfill._handler(ctx, { projectId: f.projectId, since });
+    assert.deepEqual(f.row().earned, live, 'the recount equals the live counter, and again on a rerun');
+  }
+  // A recount that main moved past is not written.
+  const written = await f.call('stale', earnModule.write, {
+    projectId: f.projectId,
+    through: f.row().lastGreen.sequence - 1,
+    earned: JSON.stringify({ audited: 1, unclear: 0 }),
+  });
+  assert.equal(written, false);
+  assert.deepEqual(f.row().earned, live);
+});
+
 test('project cadence settings are owner-only, validated, operation-idempotent and CAS protected', async () => {
   const f = await auditFixture();
   const request = {

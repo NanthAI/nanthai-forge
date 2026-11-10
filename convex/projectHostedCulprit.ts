@@ -11,7 +11,7 @@ import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore'
 import { insertHostedCheckRun } from './projectHostedChecks';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { prepareHostedRevert } from './projectHostedRevert';
-import { armAudit, auditSettings } from './projectHostedMainAuditState';
+import { armAudit, auditSettings, closeDrill } from './projectHostedMainAuditState';
 import { auditMetadata, auditDebt, auditDue } from '../src/main-audit';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { autoRevertEnabled, autoRevertHold } from '../src/auto-revert-policy';
@@ -616,7 +616,10 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       const firstAt = count ? (auditRow.unaudited?.firstAt ?? null) : null;
       const settings = count ? await auditSettings(ctx, input.projectId) : undefined;
       if (!count && auditRow.wake) await ctx.scheduler.cancel(auditRow.wake.taskId);
+      // A drill whose red was a flake ends without counting (fe7d67a8).
+      const drill = await closeDrill(ctx, auditRow, null);
       await ctx.db.patch(auditRow._id, {
+        ...(drill ? { drill: undefined } : {}),
         red: undefined,
         lastGreen: { sequence: state.range.at(-1)!.sequence, head: run.request.expectedHead, runId: run.id },
         unaudited: { count, firstAt },
