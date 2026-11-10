@@ -4,19 +4,23 @@ import { homedir, cpus, totalmem, release } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir, writeFile, rename, stat } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { budgets, bundleSummary, landingTiming, measurement, runtimeBuildHash } from './perf/report.mjs';
 
 export const usage = `Usage: node scripts/perf-harness.mjs [--out private-artifacts/perf/result.json]
   [--bundle hosted-web-dist] [--build-hash SOURCE_OR_DEPLOYED_HASH] [--samples 3]
-  [--work-owner OWNER --landing-id ACCEPTANCE_ID]
+  [--work-owner OWNER --landing-id ACCEPTANCE_ID] [--cli-cold-start]
   [--live --base DEV_URL --project ID --lane RETAINED_LANE_ID]
   [--credentials ~/.config/forge-ui-bot/credentials.json] [--timeout 60000]
 
 Build core first. For bundle bytes, build with npm run build:hosted -- --manifest.
 --live opts into read-only authenticated browser navigation, never a hosted push.
 Enable QA readiness markers with VITE_FORGE_PERF=1 in the measured frontend.
-Without --live, browser numbers are unrun. The retired exchange push measurement
-is always unrun. Work timings read only existing records; this command never
+Without --live, browser numbers are unrun. --cli-cold-start runs the built CLI's
+--version (node dist/cli-entry.js) --samples times and judges its CPU time (user+sys,
+which a loaded machine barely moves) against the cliColdStartCpu budget; it needs
+/usr/bin/time and is unrun otherwise. Budgets live in src/speed-budgets.json.
+Work timings read only existing records; this command never
 starts a check, finish, landing or backfill.
 JSON contains machine/build identities, timestamps, each sample and median budget
 pass/fail. A failed or exceeded budget exits 1; unrun is never a pass.`;
@@ -27,6 +31,7 @@ export function options(args) {
     options: {
       help: { type: 'boolean' },
       live: { type: 'boolean', default: false },
+      'cli-cold-start': { type: 'boolean', default: false },
       base: { type: 'string' },
       project: { type: 'string' },
       lane: { type: 'string' },
@@ -52,6 +57,30 @@ export function options(args) {
   }
   if (values['landing-id'] && !values['work-owner']) throw new Error('PERF_OPTIONS');
   return values;
+}
+
+/** CPU milliseconds (user+sys) of `node dist/cli-entry.js --version`, one sample per run, from the
+ * `time -p` the platform ships. Wall time is recorded too but not judged: it moves with machine load. */
+export function cliColdStartSamples(
+  count,
+  command = ['/usr/bin/time', '-p', process.execPath, 'dist/cli-entry.js', '--version'],
+) {
+  const samples = [];
+  for (let n = 0; n < count; n++) {
+    const started = performance.now();
+    const child = spawnSync(command[0], command.slice(1), { encoding: 'utf8', timeout: 60_000 });
+    const wallMs = Math.round(performance.now() - started);
+    const cpu = cpuMs(child.stderr ?? '');
+    samples.push({ durationMs: child.status === 0 && cpu !== null ? cpu : NaN, wallMs });
+  }
+  return samples;
+}
+export function cpuMs(timeOutput) {
+  const user = /^user\s+([\d.]+)/m.exec(timeOutput)?.[1],
+    system = /^sys\s+([\d.]+)/m.exec(timeOutput)?.[1];
+  return user === undefined || system === undefined
+    ? null
+    : Math.round((Number(user) + Number(system)) * 1000);
 }
 
 export async function main(args) {
@@ -88,6 +117,12 @@ export async function main(args) {
   if (config.bundle) {
     try {
       record.bundle = await bundleSummary(resolve(config.bundle));
+      const max = budgets.eagerJsGzipBytes;
+      record.bundle.budget = {
+        metric: 'eagerJsGzipBytes',
+        max,
+        status: record.bundle.eagerJsGzipBytes <= max ? 'pass' : 'fail',
+      };
     } catch {
       record.bundle = {
         status: 'failed',
@@ -119,11 +154,13 @@ export async function main(args) {
       record.browser.status = 'failed';
     }
   }
-  record.measurements.oneFilePush = measurement(
-    'oneFilePush',
-    [],
-    'Exchange push was retired; hosted save and finish metrics cover the current path.',
-  );
+  record.measurements.cliColdStartCpu = config['cli-cold-start']
+    ? measurement('cliColdStartCpu', cliColdStartSamples(config.samples))
+    : measurement(
+        'cliColdStartCpu',
+        [],
+        'Pass --cli-cold-start to run the built CLI (needs npm run build:core).',
+      );
   record.landing = {
     status: 'unrun',
     reason: 'Supply --work-owner to read retained acceptance and check records.',
@@ -144,6 +181,7 @@ export async function main(args) {
   record.status =
     record.browser.status === 'failed' ||
     record.bundle?.status === 'failed' ||
+    record.bundle?.budget?.status === 'fail' ||
     record.landing.status === 'failed' ||
     Object.values(record.measurements).some(m => ['fail', 'failed'].includes(m.status))
       ? 'fail'

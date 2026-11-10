@@ -776,6 +776,7 @@ export class HostedAgentTransport {
             address: this.address,
             exchange: this.exchange,
             query: this.query.bind(this),
+            mutation: this.mutation.bind(this),
             serverFeatures: this.serverFeatures,
             retainOperation: (id: string) => {
               this.callerOperationId ??= id;
@@ -1098,6 +1099,7 @@ export class HostedAgentTransport {
                 address: this.address,
                 exchange: this.exchange,
                 query: this.query.bind(this),
+                mutation: this.mutation.bind(this),
                 serverFeatures: this.serverFeatures,
               },
               planningItemId,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { formatSpeedBudgets, speedBudgetTable, speedBudgetWarning } from './speed-budgets-report.js';
 import { metricNames, type MetricsSurface, type MetricTotals } from './self-metrics-surface.js';
 const number = (value: number | null | undefined) =>
   value == null ? 'unknown' : Number(value.toFixed(3)).toString();
@@ -63,6 +64,8 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     ...formatFallbacks(current),
     ...formatSecondChecks(current),
     `Finish-to-main (trusted actors): ${finishToMain(current)}. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
+    '',
+    ...speedBudgetTable(current.totals.speedBudgets.rows),
     '',
     ...formatFlakes(current).map(line => (line.startsWith('  ') ? `- ${line.trim()}` : line)),
     '',
@@ -156,6 +159,7 @@ export function formatMetrics(current: MetricsSurface) {
           `Waste ${row.cause}: ${number(row.elapsedMinutes)} elapsed / ${number(row.runnerMinutes)} runner min; discarded passed ${number(row.discardedPassedRunnerMinutes)} runner min`,
       ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
+    ...formatSpeedBudgets(current.totals.speedBudgets.rows),
     ...formatFallbacks(current),
     ...formatSecondChecks(current),
     ...formatFlakes(current),
@@ -175,6 +179,7 @@ export function metricsHeadline(t: MetricTotals) {
       billed: m.billedUsdPerLanding,
       list: m.listUsdPerLanding,
     })),
+    speedBudgetWarning: speedBudgetWarning(t.speedBudgets.rows),
     partial: Object.values(t).some(m => m.partial),
     gaps: [...new Set(Object.values(t).flatMap(m => m.gaps))],
     diskWarning: t.disk.warning,

@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
-import { options } from '../scripts/perf-harness.mjs';
+import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
@@ -17,7 +17,16 @@ test('budget medians include the boundary, and an empty or incomplete run never 
     assert.equal(row.status, 'failed');
     assert.equal(row.medianMs, null);
   }
-  assert.equal(measurement('oneFilePush', [{ durationMs: 3 }, { durationMs: 1 }]).medianMs, 2);
+  assert.equal(measurement('work', [{ durationMs: 3 }, { durationMs: 1 }]).medianMs, 2);
+});
+
+test('CLI cold start is judged on CPU time from `time -p`, and a run that fails or prints no time never passes', () => {
+  assert.equal(cpuMs('real 4.45\nuser 1.10\nsys 0.19\n'), 1290);
+  assert.equal(cpuMs('no timing here'), null);
+  const failed = cliColdStartSamples(1, [process.execPath, '-e', 'process.exit(3)']);
+  assert.equal(measurement('cliColdStartCpu', failed).status, 'failed');
+  assert.equal(measurement('cliColdStartCpu', [{ durationMs: 2500 }]).status, 'pass');
+  assert.equal(measurement('cliColdStartCpu', [{ durationMs: 2501 }]).status, 'fail');
 });
 
 test('bundle accounting follows shared static imports once and excludes dynamic route chunks', () => {
@@ -151,13 +160,13 @@ async function run(t, extra = []) {
   return { code, record: JSON.parse(json) };
 }
 
-test('one command records machine/build identity and explicitly unrun retired push and browser results', async t => {
+test('one command records machine/build identity and explicitly unrun opt-in CLI cold start and browser results', async t => {
   const { code, record } = await run(t);
-  const push = record.measurements.oneFilePush;
-  assert.deepEqual(push.samples, []);
-  assert.equal(push.status, 'unrun');
-  assert.equal(push.medianMs, null);
-  assert.match(push.reason, /Exchange push was retired/);
+  const cold = record.measurements.cliColdStartCpu;
+  assert.deepEqual(cold.samples, []);
+  assert.equal(cold.status, 'unrun');
+  assert.equal(cold.medianMs, null);
+  assert.match(cold.reason, /--cli-cold-start/);
   assert.equal(code, 0);
   assert.equal(record.status, 'partial');
   for (const name of ['now', 'work', 'laneFirstDiff'])

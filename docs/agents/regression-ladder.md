@@ -6,38 +6,32 @@ Each alert or failure names its next step.
 
 | Rung | What runs | When | Cost |
 | --- | --- | --- | --- |
-| 1. Per-landing self-metric alert | Each landing's own timing against the project's 7-day median | Inside the mutation that lands | No new Convex call; one indexed read and one write of a row under 16 KB per landing; idle 0 |
+| 1. Per-landing speed budgets | Each landing's own timing against the [speed budgets](speed-budgets.md) | Inside the mutation that lands | No new Convex call; one indexed read and one write of a row under 16 KB per landing; idle 0 |
 | 2. Path-triggered dry micro-bench | A fixed no-model scenario on the hot-file clusters | Planned, not built: a change to landing-loop paths | Estimate below |
 | 3. Incident replays | Normal-suite tests that replay each core-claim incident and B1.5d case study | Every check | Part of the suite; the registered replays take under 30 s together |
 | 4. Full bench | The B1.5d repeat (exit bench 8c9b84fc) | Phase gates only | Hours of agent time |
 
-## Rung 1: landing speed alert
+## Rung 1: landing speed budgets
 
 Source: `src/landing-speed-alerts.ts`, called from the landing's own accept mutation
-(`convex/projectLandingSpeed.ts`). It reads only stamps the landed state already carries.
+(`convex/projectLandingSpeed.ts`). It reads only stamps the landed state already carries. The numbers, their
+data and the break, recovery and Issue rules are in [speed budgets](speed-budgets.md).
 
-- **Metrics.** Time to main: submit to commit. Check minutes: the accepted attempt's check,
-  reserved to ended. A missing stamp (for example a reused check) leaves that metric unknown for
-  the landing.
-- **Baseline.** The median of the previous 7 full UTC days, today excluded, with at least 10
-  landings. A new or quiet project has no baseline and never alerts.
-- **Sustained jump.** The median of the last 3 landings, all today, is over the threshold, so
-  one slow landing never alerts.
-- **Threshold.** The larger of baseline x 1.5 and baseline + 5 min (time to main) or + 2 min
-  (check minutes).
-- **Delivery.** At most one alert per metric per UTC day, sent the moment the jump becomes
-  sustained, through the project's [`stallAlerts`](../parallel-work-defaults.md#stallalerts)
-  channels (email, ntfy and the other webhook presets). With `stallAlerts` off, samples are still
-  kept and nothing is sent.
-- **Next step, named in the alert.** Time to main: `nforge metrics ROOT --text` for waste by
-  cause and main-race re-checks, then the rung 2 micro-bench on the latest landing-loop change.
-  Check minutes: `nforge metrics ROOT --text` for check minutes and flaky files, then compare the
-  slowest test files with the previous week and the latest verify script or runner change.
+- **Metrics.** Time to main: submit to commit. Check minutes: the accepted attempt's check, reserved to
+  ended. Check-to-commit gap: check result to commit, in seconds (Issue 03a749a5). A missing stamp (for example a reused check) leaves that metric unknown for the landing.
+- **Budgets.** p50 and p90 of each metric over the last 20 landings that know it, against the numbers in
+  `src/speed-budgets.json`. Fewer than 20 landings: no verdict.
+- **Delivery.** One alert when a budget breaks and one when it recovers, through the project's
+  [`stallAlerts`](../parallel-work-defaults.md#stallalerts) channels (email, ntfy and the other webhook
+  presets), and one P0 Issue per budget (fixed id, reopened on a repeat break). With `stallAlerts` off,
+  samples and Issues are still kept.
+- **Next step, named in the alert.** Time to main: `nforge metrics ROOT --text` for waste by cause and
+  main-race re-checks, then the rung 2 micro-bench on the latest landing-loop change. Check minutes:
+  `nforge metrics ROOT --text` for check minutes and flaky files, then compare the slowest test files with the
+  previous week and the latest verify script or runner change.
 - **Not covered.** Convex calls and dollars per landing are not stamped on a landing, so rung 1
   cannot alert on them. They stay on metric 5.8 (billed dollars per landing) in
   `nforge metrics`, read when bills are recorded.
-
-Change a threshold in `LANDING_SPEED_BASELINE` and this section together.
 
 ## Rung 2: path-triggered dry micro-bench (planned)
 

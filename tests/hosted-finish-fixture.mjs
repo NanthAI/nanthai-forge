@@ -136,6 +136,7 @@ export async function finishFixture(
       ticks: 0,
       stepCalls: [],
       stallDeliveries: [],
+      speedIssueWrites: [],
       convexSourceCalls: [],
       convexStorageCalls: 0,
     };
@@ -363,6 +364,9 @@ export async function finishFixture(
       } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
         // Owner channels are faked: record what would be sent, never call a network.
         metrics.stallDeliveries.push(input);
+      } else if (task.name === 'projectLandingSpeedIssue:write') {
+        // The board write runs through the Work command path, faked here: record what would be written.
+        metrics.speedIssueWrites.push(input);
       } else if (task.name === 'projectHostedRevertNotice:accepted') {
         await tx('revertNotice', revertNoticeApi.accepted, input);
       } else if (task.name === 'projectHostedAcceptedByNote:accepted') {

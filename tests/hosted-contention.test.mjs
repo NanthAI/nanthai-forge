@@ -115,6 +115,86 @@ test('hosted note contention and reactive read-set measurement', async t => {
   );
 });
 
+// Flip 5 acceptance meter: Work query re-runs per planning write for one open tab (Issue 0695ab24). Three
+// tabs re-run three times this. Baseline today: every write re-runs 3 (the workspace query reads the
+// project head row on every write); the flip's target is 2 for an Issue write and at most 2 for a comment.
+test('flip 5 re-run meter: Work queries one tab re-runs per planning write', async t => {
+  const s = await setup(t);
+  const initial = await s.read(),
+    intentId = randomUUID();
+  await actions.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: intentId,
+    revision: initial.data.revision,
+    command: JSON.stringify({
+      action: 'intent',
+      outcome: 'Meter',
+      constraints: '',
+      base: initial.sourceHead,
+    }),
+  });
+  const issues = [];
+  for (let i = 0; i < 5; i++) {
+    const item = s.item({ title: `Issue ${i}` });
+    await s.send(item);
+    issues.push(item);
+  }
+  await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
+  const pages = ['intents', 'notes', 'planningItems', 'planningComments', 'lanes', 'views', 'runs'];
+  const names = ['state', 'workspace', ...pages, 'unrelated Issue detail'];
+  const subscriptions = [
+    () => work.state._handler(s.ctx, { projectId: s.projectId }),
+    () => index.workspace._handler(s.ctx, { projectId: s.projectId }),
+    ...pages.map(
+      collection => () =>
+        index.records._handler(s.ctx, {
+          projectId: s.projectId,
+          collection,
+          paginationOpts: { cursor: null, numItems: 100 },
+        }),
+    ),
+    () =>
+      index.detail._handler(s.ctx, {
+        projectId: s.projectId,
+        collection: 'planningItems',
+        id: issues[0].itemId,
+      }),
+  ];
+  const tracking = trackReadSets(s.ctx, s.tables);
+  const dependencies = [];
+  for (const subscribe of subscriptions) dependencies.push(await tracking.subscribe(subscribe));
+  const rerun = async write => {
+    tracking.reset();
+    await write();
+    return names.filter((_, i) => tracking.invalidated([dependencies[i]]) === 1);
+  };
+  const measured = {
+    'new Issue': await rerun(() => s.send(s.item({ title: 'New' }))),
+    'Issue status': await rerun(() =>
+      s.send({ ...issues[4], operationId: randomUUID(), expectedVersion: 1, status: 'closed' }),
+    ),
+    'Issue comment': await rerun(() =>
+      s.send({
+        action: 'comment-planning-item',
+        operationId: randomUUID(),
+        itemId: issues[4].itemId,
+        text: 'c',
+        authorLabel: 'Owner',
+      }),
+    ),
+    'Intent note': await rerun(() => s.send({ action: 'note', intentId, text: 'n', kind: 'comment' })),
+  };
+  assert.deepEqual(measured, {
+    'new Issue': ['workspace', 'intents', 'planningItems'],
+    'Issue status': ['workspace', 'intents', 'planningItems'],
+    'Issue comment': ['workspace', 'intents', 'planningComments'],
+    'Intent note': ['workspace', 'intents', 'notes'],
+  });
+  console.log(
+    JSON.stringify({ perTab: Object.fromEntries(Object.entries(measured).map(([k, v]) => [k, v.length])) }),
+  );
+});
+
 test('revision-free planning comments and contributor notes retain authorization and original receipts', async t => {
   const s = await setup(t);
   const issue = s.item();

@@ -1,17 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
-// Regression ladder rung 1 (45f49fb7): a sustained jump in a landing's own time to main or
-// check minutes over the 7-day median alerts the owner the same day, on data the landing
-// already wrote. Replays the B1.5d n3-r3 a1 slowdown (4432 s against a ~1500 s norm).
+// Speed budgets (b7851c44, regression ladder rung 1): a landing's own time to main and check minutes
+// are judged against src/speed-budgets.json over the last window of landings, on data the landing
+// already wrote. A break alerts once and opens one P0 Issue; a recovery closes the alert.
+// Replays the B1.5d n3-r3 a1 slowdown (4432 s against a ~1500 s norm).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { finishFixture } from './hosted-finish-fixture.mjs';
+import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { readFileSync } from 'node:fs';
 import {
-  LANDING_SPEED_BASELINE,
-  landingSpeedAlertMessage,
+  longestStage,
   landingSpeedSample,
   observeLandingSpeed,
+  speedBudgetIssue,
+  speedBudgetMessage,
+  speedBudgetsSchema,
+  windowValue,
 } from '../dist/landing-speed-alerts.js';
+import { speedBudgets as budgets } from '../dist/speed-budgets.js';
+import { formatSpeedBudgets, speedBudgetRows, speedBudgetWarning } from '../dist/speed-budgets-report.js';
 
 const synthetic = {
   FORGE_HOSTED_CHECK_KEY_ID: 'SYNTHETIC',
@@ -33,118 +41,143 @@ test.after(() => {
   }
 });
 
-const day = 86_400_000,
-  noon = Date.parse('2026-11-04T12:00:00.000Z'),
-  today = noon - (noon % day);
-/** Ten quiet days of 25-minute landings with 3-minute checks. */
-function baseline(days = 7, perDay = 3, toMain = 25, check = 3) {
-  const samples = [];
-  for (let d = days; d >= 1; d--)
-    for (let n = 0; n < perDay; n++) samples.push([today - d * day + n * 3_600_000, toMain, check]);
-  return { schema: 1, samples, alerted: {} };
+const speedApi = await import(moduleUrl('../convex/projectLandingSpeed.ts'));
+const minute = 60_000,
+  noon = Date.parse('2026-11-04T12:00:00.000Z');
+const byId = id => budgets.budgets.find(b => b.id === id);
+const WINDOW = budgets.window.landings;
+let n = 0;
+/** Replays landings one minute apart; returns the final state and every event raised, in order. */
+function landings(state, values, start = noon + n * minute) {
+  const events = [];
+  for (const [index, [toMain, check = 5, settle = 8.5]] of values.entries()) {
+    const out = observeLandingSpeed(
+      state,
+      {
+        at: start + index * minute,
+        id: `r${n++}`.padEnd(8, '0'),
+        toMain,
+        check,
+        settle,
+        stages: { queue: toMain - check - 1, check, settle: settle / 60 },
+      },
+      budgets,
+    );
+    state = out.state;
+    events.push(...out.events);
+  }
+  return { state, events };
 }
-const land = (state, at, toMain, check = 3) => observeLandingSpeed(state, { at, toMain, check });
+const normal = (count, toMain = 12, check = 6) => Array.from({ length: count }, () => [toMain, check]);
 
 test('incident replay n3-r3 a1: three slow landings in a day alert once on time to main, naming the next step', () => {
-  let state = baseline();
-  // n3-r3 a1: 4432 s (74 min) against the normal ~1500 s (25 min) pace.
-  const first = land(state, noon, 74);
-  assert.deepEqual(first.alerts, [], 'one slow landing is not sustained');
-  const second = land(first.state, noon + 60_000, 74);
-  assert.deepEqual(second.alerts, [], 'two of three is not yet a full sustained window');
-  const third = land(second.state, noon + 120_000, 74);
-  assert.equal(third.alerts.length, 1);
-  const [alert] = third.alerts;
-  assert.deepEqual(alert, {
-    metric: 'toMain',
-    baselineMinutes: 25,
-    baselineLandings: 21,
-    currentMinutes: 74,
-    thresholdMinutes: 37.5,
-  });
-  const message = landingSpeedAlertMessage(alert, 'forge');
-  assert.match(message.subject, /^\[Forge\] Landing time to main regressed: forge$/);
-  assert.match(message.text, /7-day median 25 min over 21 landings; alert threshold 37.5 min/);
+  let { state } = landings(null, normal(WINDOW));
+  // n3-r3 a1: 4432 s (74 min) against the normal ~1500 s (25 min) pace; here against a 12 min norm.
+  const first = landings(state, [[74]]);
+  const second = landings(first.state, [[74]]);
+  assert.deepEqual(
+    [...first.events, ...second.events],
+    [],
+    'one or two slow landings are outliers, not a window',
+  );
+  const third = landings(second.state, [[74]]);
+  assert.equal(third.events.length, 1);
+  const [event] = third.events;
+  assert.equal(event.kind, 'broken');
+  assert.equal(event.budget.id, 'land-to-main-p90');
+  assert.equal(event.value, 74);
+  assert.equal(event.landing, `r${n - 1}`.padEnd(8, '0'), 'names the landing that crossed it');
+  assert.match(event.stage, /^queue and compose \(\d+ min\)$/);
+  assert.deepEqual(Object.keys(third.state.broken), ['land-to-main-p90']);
+  const message = speedBudgetMessage(event, 'forge', budgets);
+  assert.match(message.subject, /^\[Forge\] Speed budget broken: landing to main p90: forge$/);
+  assert.match(message.text, /is 74 min; budget 60 min/);
+  assert.match(message.text, /Crossed by landing r\d+0* /);
   assert.match(message.text, /\nNext: run `nforge metrics ROOT --text`/);
-  // Same day: never again for this metric.
-  state = third.state;
-  for (let n = 0; n < 5; n++) {
-    const next = land(state, noon + (3 + n) * 60_000, 90);
-    assert.deepEqual(next.alerts, []);
-    state = next.state;
-  }
-  // Next day the jump still holds: one fresh alert.
-  let tomorrow = state;
-  const alerts = [];
-  for (let n = 0; n < 3; n++) {
-    const next = land(tomorrow, noon + day + n * 60_000, 90);
-    alerts.push(...next.alerts);
-    tomorrow = next.state;
-  }
+  // While it stays broken: no second alert, however many slow landings follow.
+  const more = landings(third.state, normal(5, 90));
+  assert.deepEqual(more.events, []);
+  // Recovery: one message when the window is back within the budget, then silence.
+  const recovered = landings(more.state, normal(WINDOW));
   assert.deepEqual(
-    alerts.map(a => a.metric),
-    ['toMain'],
+    recovered.events.map(e => [e.kind, e.budget.id]),
+    [['recovered', 'land-to-main-p90']],
+  );
+  assert.deepEqual(recovered.state.broken, {});
+  assert.deepEqual(landings(recovered.state, normal(3)).events, []);
+});
+
+test('a single outlier, normal noise and a project with fewer landings than the window never alert', () => {
+  let { state, events } = landings(null, [...normal(WINDOW - 1), [500, 6]]);
+  assert.deepEqual(events, [], 'one 500 min outlier among a full window stays under the p90 budget');
+  ({ state, events } = landings(state, normal(WINDOW, 24, 9.9)));
+  assert.deepEqual(events, [], 'just under the p50 budgets never breaks');
+  // A cold project: fewer landings than the window have no verdict, however slow.
+  const cold = landings(null, normal(WINDOW - 1, 500, 500));
+  assert.deepEqual(cold.events, []);
+  assert.equal(windowValue(cold.state.samples, 'toMain', 'p50', WINDOW), null);
+});
+
+test('time to main and check minutes break their own budgets; unknown stamps are skipped, not counted as zero', () => {
+  const slowMedian = Math.floor(WINDOW / 2) + 1;
+  let { state, events } = landings(null, normal(WINDOW - slowMedian));
+  const slow = landings(state, normal(slowMedian, 70, 15));
+  const ids = slow.events.map(e => e.budget.id).sort();
+  assert.deepEqual(ids, ['check-p50', 'check-p90', 'land-to-main-p50', 'land-to-main-p90']);
+  assert.deepEqual(events, []);
+  // Landings with no check stamp (a reused check) leave check unknown: they neither break nor mask it.
+  const gaps = observeLandingSpeed(
+    slow.state,
+    {
+      at: noon + 999 * minute,
+      id: 'gap00000',
+      toMain: 5,
+      check: null,
+      stages: { queue: 4, check: null, settle: 1 },
+    },
+    budgets,
+  );
+  assert.equal(gaps.state.samples.at(-1)[2], null);
+  assert.equal(windowValue(gaps.state.samples, 'check', 'p50', WINDOW), 15, 'window skips the unknown stamp');
+});
+
+test('incident replay 03a749a5: a check-result-to-commit gap of 300 s breaks the 30 s budget; the fixed 8.5 s never does', () => {
+  const fixed = landings(null, normal(WINDOW));
+  assert.deepEqual(fixed.events, [], 'the live 8.5 s gap is within budget');
+  assert.equal(windowValue(fixed.state.samples, 'settle', 'p90', WINDOW), 8.5);
+  // Before caa934a7 every landing waited about 300 s after its check: three of them break the p90.
+  const two = landings(fixed.state, [
+    [12, 6, 300],
+    [12, 6, 300],
+  ]);
+  assert.deepEqual(two.events, [], 'two stalled landings are outliers');
+  const three = landings(two.state, [[12, 6, 300]]);
+  assert.deepEqual(
+    three.events.map(e => [e.kind, e.budget.id, e.value, e.budget.unit]),
+    [['broken', 'check-to-commit-p90', 300, 's']],
+  );
+  assert.match(speedBudgetMessage(three.events[0], 'forge', budgets).text, /is 300 s; budget 30 s/);
+  assert.deepEqual(
+    landings(three.state, normal(WINDOW)).events.map(e => e.kind),
+    ['recovered'],
+  );
+  assert.equal(
+    windowValue([[1, 1, 1, 'old00000']], 'settle', 'p90', 1),
+    null,
+    'rows from before the stamp have no verdict',
   );
 });
 
-test('a single outlier, normal noise and a project with no baseline never alert', () => {
-  // One outlier among normal landings: the median of the last three stays normal.
-  let state = baseline();
-  for (const [n, minutes] of [26, 120, 24, 27].entries()) {
-    const next = land(state, noon + n * 60_000, minutes);
-    assert.deepEqual(next.alerts, [], `landing ${n}`);
-    state = next.state;
-  }
-  // Just under the threshold (25 * 1.5 = 37.5) does not alert.
-  state = baseline();
-  for (let n = 0; n < 3; n++) {
-    const next = land(state, noon + n * 60_000, 37.5);
-    assert.deepEqual(next.alerts, []);
-    state = next.state;
-  }
-  // Fewer than minBaselineSamples prior landings: no baseline, no alert.
-  state = baseline(3, 3);
-  assert(state.samples.length < LANDING_SPEED_BASELINE.minBaselineSamples);
-  for (let n = 0; n < 3; n++) {
-    const next = land(state, noon + n * 60_000, 500);
-    assert.deepEqual(next.alerts, []);
-    state = next.state;
-  }
-});
-
-test('check minutes alert on their own floor; samples older than 7 days and over the cap are dropped', () => {
-  // 3-minute checks: x1.5 is 4.5 min, so the +2 min floor (5 min) is the threshold.
-  let state = baseline(),
-    raised = [];
-  for (let n = 0; n < 3; n++) {
-    const next = land(state, noon + n * 60_000, 25, 5);
-    raised.push(...next.alerts);
-    state = next.state;
-  }
-  assert.deepEqual(raised, [], 'at the floor is not over it');
-  for (let n = 3; n < 6; n++) {
-    const next = land(state, noon + n * 60_000, 25, 9);
-    raised.push(...next.alerts);
-    state = next.state;
-  }
-  assert.deepEqual(
-    raised.map(a => [a.metric, a.thresholdMinutes, a.currentMinutes]),
-    [['check', 5, 9]],
-  );
-  const old = baseline(10, 3);
-  const trimmed = land(old, noon, 25).state;
-  assert(trimmed.samples.every(([at]) => at >= today - 7 * day));
-  const crowded = {
-    schema: 1,
-    samples: Array.from({ length: 450 }, (_, n) => [noon - n * 1000, 1, 1]),
-    alerted: {},
-  };
-  assert.equal(land(crowded, noon + 1, 1).state.samples.length, LANDING_SPEED_BASELINE.maxSamples);
-  assert(Buffer.byteLength(JSON.stringify(land(crowded, noon + 1, 1).state)) < 16_000, 'row stays small');
+test('the row stays small: samples are capped and each carries a short landing id', () => {
+  const { state } = landings(null, normal(200));
+  assert.equal(state.samples.length, 60);
+  assert(Buffer.byteLength(JSON.stringify(state)) < 4_000, 'row stays small');
 });
 
 test('samples come from the landed state only; missing stamps leave a metric unknown', () => {
   const state = {
+    id: '11111111-1111-4111-8111-111111111111',
+    acceptance: { receiptId: '22222222-2222-4222-8222-222222222222' },
     timing: {
       submittedAt: '2026-11-04T10:00:00.000Z',
       checkReservedAt: '2026-11-04T10:05:00.000Z',
@@ -154,11 +187,122 @@ test('samples come from the landed state only; missing stamps leave a metric unk
   };
   assert.deepEqual(landingSpeedSample(state), {
     at: Date.parse('2026-11-04T10:12:00.000Z'),
+    id: '22222222-2222-4222-8222-222222222222',
     toMain: 12,
     check: 3.5,
+    settle: 210,
+    stages: { queue: 5, check: 3.5, settle: 3.5 },
   });
-  assert.deepEqual(landingSpeedSample({ timing: { ...state.timing, ciEndedAt: undefined } }).check, null);
+  const noCheck = landingSpeedSample({ ...state, timing: { ...state.timing, ciEndedAt: undefined } });
+  assert.equal(noCheck.check, null);
+  assert.equal(longestStage(noCheck.stages), 'queue and compose (5 min)');
   assert.equal(landingSpeedSample({}), null);
+});
+
+test('one P0 Issue per budget: the same id on every break and recovery, reopened only on a break', () => {
+  const project = '33333333-3333-4333-8333-333333333333';
+  const broken = (landing, kind = 'broken') => ({
+    kind,
+    budget: byId('land-to-main-p90'),
+    value: 74,
+    landing,
+    since: '2026-11-04T12:00:00.000Z',
+    stage: 'check (9 min)',
+  });
+  const first = speedBudgetIssue(broken('aaaaaaaa'), project, budgets);
+  const again = speedBudgetIssue(broken('bbbbbbbb'), project, budgets);
+  const recovered = speedBudgetIssue(broken('aaaaaaaa', 'recovered'), project, budgets);
+  const other = speedBudgetIssue({ ...broken('aaaaaaaa'), budget: byId('check-p50') }, project, budgets);
+  assert.equal(again.itemId, first.itemId, 'a repeat break finds the same Issue, never a duplicate');
+  assert.equal(recovered.itemId, first.itemId);
+  assert.notEqual(other.itemId, first.itemId, 'each budget has its own Issue');
+  assert.notEqual(
+    speedBudgetIssue(broken('aaaaaaaa'), '44444444-4444-4444-8444-444444444444', budgets).itemId,
+    first.itemId,
+  );
+  assert.equal(
+    new Set([first.putOperationId, again.putOperationId, first.commentOperationId, recovered.putOperationId])
+      .size,
+    4,
+  );
+  assert.equal(
+    speedBudgetIssue(broken('aaaaaaaa'), project, budgets).putOperationId,
+    first.putOperationId,
+    'a retried write reconciles',
+  );
+  assert.deepEqual([first.reopen, recovered.reopen], [true, false]);
+  assert.match(first.title, /^P0 speed budget broken: landing to main p90/);
+  assert.match(first.body, /landing `aaaaaaaa`/);
+  assert.match(recovered.comment, /back within budget/);
+});
+
+test('the budget file: every budget names its source and reason, only unrecorded ones lack a number, idle calls are 0', () => {
+  const file = JSON.parse(readFileSync(new URL('../src/speed-budgets.json', import.meta.url), 'utf8'));
+  const parsed = speedBudgetsSchema.parse(file);
+  const ids = parsed.budgets.map(b => b.id);
+  assert.equal(new Set(ids).size, ids.length);
+  for (const b of parsed.budgets) {
+    assert.equal(
+      b.max === null,
+      b.measuredBy === 'unrecorded',
+      `${b.id}: a number unless nothing records the value`,
+    );
+    assert(b.source.length > 20 && b.reason.length > 20, `${b.id}: source and reason are stated`);
+  }
+  assert.equal(byId('idle-convex-calls').max, 0);
+  for (const id of [
+    'save',
+    'preflight',
+    'cli-cold-start',
+    'web-first-paint',
+    'check-p50',
+    'land-to-main-p50',
+    'land-to-main-p90',
+  ])
+    assert(byId(id), `${id} is budgeted`);
+  assert.throws(
+    () => speedBudgetsSchema.parse({ ...file, window: { landings: 1 } }),
+    'one outlier must not decide',
+  );
+});
+
+test('the metrics report shows each value against its budget: pass, fail, unrun when the data or the measurer is missing, guarded by the build', () => {
+  const period = { from: '2026-11-03T00:00:00.000Z', to: '2026-11-10T00:00:00.000Z' };
+  const at = index => new Date(Date.parse(period.from) + index * 3_600_000).toISOString();
+  const records = {
+    // 20 landings: 14 fast, 6 slow, so the median holds and the p90 (18th) is slow.
+    finishTimings: Array.from({ length: 20 }, (_, i) => ({
+      id: `m${i}`,
+      at: at(i),
+      trusted: true,
+      minutes: i < 14 ? 10 : 80,
+    })),
+    runs: Array.from({ length: 20 }, (_, i) => ({
+      id: `r${i}`,
+      at: at(i),
+      status: 'passed',
+      wallMinutes: 8,
+      inputs: [],
+    })),
+  };
+  const rows = speedBudgetRows(records, period, budgets);
+  const row = id => rows.find(r => r.id === id);
+  assert.deepEqual([row('land-to-main-p50').status, row('land-to-main-p50').value], ['pass', 10]);
+  assert.deepEqual([row('land-to-main-p90').status, row('land-to-main-p90').value], ['fail', 80]);
+  assert.deepEqual([row('check-p50').status, row('check-p90').status], ['pass', 'pass']);
+  assert.equal(row('cli-cold-start').status, 'unrun');
+  assert.equal(row('save').status, 'unrun');
+  assert.equal(row('idle-convex-calls').status, 'guarded');
+  assert.match(speedBudgetWarning(rows), /^speed budget broken: land-to-main-p90 80\/60 min$/);
+  assert.match(formatSpeedBudgets(rows).join('\n'), /fail\s+land-to-main-p90: 80 \/ 60 min/);
+  // Fewer landings than the window: unrun, never a pass.
+  const few = speedBudgetRows(
+    { finishTimings: records.finishTimings.slice(0, 5), runs: [] },
+    period,
+    budgets,
+  );
+  assert.equal(few.find(r => r.id === 'land-to-main-p50').status, 'unrun');
+  assert.equal(speedBudgetWarning(few), null);
 });
 
 /** Seeds today's slow landings and the baseline relative to the landing's own clock. */
@@ -172,12 +316,15 @@ async function seededLanding(t, stallAlerts) {
     },
   });
   // Committed stamps use the wall clock (new Date()), not the fixture's fake Date.now.
-  const wall = new Date().getTime(),
-    start = wall - (wall % day);
-  const seed = baseline();
-  seed.samples = seed.samples.map(([at, toMain, check]) => [at - today + start, toMain, check]);
-  // Two slow landings earlier today; whatever this landing takes, the median of three is slow.
-  seed.samples.push([wall - 2, 120, 3], [wall - 1, 120, 3]);
+  const wall = new Date().getTime();
+  // Three slow landings just before this one: whatever it takes, the p90 of the last 20 is over 60 min.
+  const seed = landings(null, normal(WINDOW - 4)).state;
+  seed.samples = seed.samples.map(([at, ...rest]) => [at - noon + wall - 3_600_000, ...rest]);
+  seed.samples.push(
+    [wall - 3, 120, 3, 'seed0001'],
+    [wall - 2, 120, 3, 'seed0002'],
+    [wall - 1, 120, 3, 'seed0003'],
+  );
   await f.tx('seedLandingSpeed', {
     _handler: ctx =>
       ctx.db.insert('projectLandingSpeed', { projectId: f.projectId, value: JSON.stringify(seed) }),
@@ -195,26 +342,72 @@ async function seededLanding(t, stallAlerts) {
   return { f, before };
 }
 
-test('a landing that makes the jump sustained alerts the owner through the stall-alert channel, with no new call', async t => {
+test('a landing that breaks a budget alerts once on the stall-alert channel and queues one Issue write, with no idle work', async t => {
   const { f, before } = await seededLanding(t, { enabled: true, webhook: 'ntfy' });
   // The fixture's fake clock also jumps past the stall-alert tiers; those have their own tests.
-  const deliveries = f.metrics.stallDeliveries.filter(d => /regressed/.test(d.subject));
+  const deliveries = f.metrics.stallDeliveries.filter(d => /Speed budget/.test(d.subject));
   assert.equal(deliveries.length, 1, 'one alert, on the existing delivery action');
-  assert.match(deliveries[0].subject, /^\[Forge\] Landing time to main regressed: /);
+  assert.match(deliveries[0].subject, /^\[Forge\] Speed budget broken: landing to main p90: /);
   assert.match(deliveries[0].text, /Next: /);
   assert.equal(JSON.parse(deliveries[0].settings).webhook, 'ntfy');
   const [row] = f.tables.projectLandingSpeed.values();
   const stored = JSON.parse(row.value);
-  assert.equal(stored.samples.length, 21 + 3);
-  assert.equal(stored.alerted.toMain, new Date().toISOString().slice(0, 10));
-  // Rung 1 runs inside the landing's own mutations: no Convex function of its own.
-  assert(!f.counts.slice(before).some(c => /landingSpeed/i.test(c.name)), 'no new Convex call');
+  assert.equal(stored.samples.length, WINDOW);
+  assert.deepEqual(Object.keys(stored.broken), ['land-to-main-p90']);
+  // The Issue write: one scheduled action as the project owner, carrying the fixed per-budget Issue id.
+  assert.equal(f.metrics.speedIssueWrites.length, 1);
+  const [write] = f.metrics.speedIssueWrites;
+  assert.equal(write.projectId, f.projectId);
+  assert.equal(typeof write.owner, 'string');
+  const issue = JSON.parse(write.issue);
+  assert.equal(issue.reopen, true);
+  assert.match(issue.title, /^P0 speed budget broken: landing to main p90/);
+  assert(!f.counts.slice(before).some(c => /landingSpeed/i.test(c.name)), 'no new Convex call on a landing');
   assert.equal(f.pending().length, 0, 'idle afterwards: nothing left scheduled');
 });
 
-test('alerts off: the sample is still kept, nothing is sent', async t => {
+test('alerts off: the sample is kept and the Issue is still written, nothing is sent to the owner channels', async t => {
   const { f } = await seededLanding(t, { enabled: false });
   assert.equal(f.metrics.stallDeliveries.length, 0, 'no delivery of any kind');
+  assert.equal(f.metrics.speedIssueWrites.length, 1, 'the board is the durable record');
   const [row] = f.tables.projectLandingSpeed.values();
-  assert.equal(JSON.parse(row.value).samples.length, 24);
+  assert.equal(JSON.parse(row.value).samples.length, WINDOW);
+});
+
+test('the operator drill breaks one budget through the real path, then recovers it, then restores the window', async t => {
+  const f = await finishFixture(t);
+  const policy = [...f.tables.hostedProjects.values()].find(row => row._id === f.projectId).autonomyPolicy;
+  f.patch('hostedProjects', f.projectId, {
+    autonomyPolicy: {
+      ...(policy ?? policyPreset('trusted')),
+      agentDefaults: { stallAlerts: { enabled: true, webhook: 'ntfy' } },
+    },
+  });
+  const run = async (mode, original) => {
+    let result;
+    await f.tx('drill', {
+      _handler: async ctx =>
+        (result = await speedApi.drill._handler(ctx, { projectId: f.projectId, mode, original })),
+    });
+    await f.drain();
+    return result;
+  };
+  const broke = JSON.parse(await run('break'));
+  assert.deepEqual(broke.events, ['broken land-to-main-p90 70'], 'only the p90 budget breaks, not the p50');
+  assert.equal(broke.original, null, 'a project with no row has nothing to restore');
+  assert.equal(f.metrics.stallDeliveries.filter(d => /Speed budget broken/.test(d.subject)).length, 1);
+  assert.deepEqual(
+    f.metrics.speedIssueWrites.map(w => JSON.parse(w.issue).reopen),
+    [true],
+  );
+  const recovered = JSON.parse(await run('recover'));
+  assert.deepEqual(recovered.events, ['recovered land-to-main-p90 10']);
+  assert.equal(f.metrics.stallDeliveries.filter(d => /Speed budget recovered/.test(d.subject)).length, 1);
+  assert.deepEqual(
+    f.metrics.speedIssueWrites.map(w => JSON.parse(w.issue).reopen),
+    [true, false],
+  );
+  assert.equal(new Set(f.metrics.speedIssueWrites.map(w => JSON.parse(w.issue).itemId)).size, 1, 'one Issue');
+  assert.equal(await run('restore'), 'restored');
+  assert.equal([...f.tables.projectLandingSpeed.values()].length, 0, 'the synthetic window is gone');
 });

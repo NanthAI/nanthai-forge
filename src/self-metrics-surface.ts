@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { speedBudgets } from './speed-budgets.js';
+import { speedBudgetRows } from './speed-budgets-report.js';
 import { calculateSelfMetrics } from './self-metrics.js';
 import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
@@ -59,6 +61,12 @@ export function metricTotals(
   });
   return {
     waste: wrap(calculateWaste(records, period), count(records.submissions)),
+    speedBudgets: {
+      rows: speedBudgetRows(records, period, speedBudgets),
+      sourceRecords: (records.finishTimings ?? []).length,
+      partial: false,
+      gaps: [] as string[],
+    },
     finishToMain: (() => {
       const rows = (records.finishTimings ?? []).filter(row => row.trusted && during(row.at, period));
       const minutes = rows.flatMap(row => (row.minutes === null ? [] : [row.minutes]));

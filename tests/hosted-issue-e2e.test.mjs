@@ -21,6 +21,7 @@ import { policyPreset } from '../dist/autonomy-policy.js';
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
+const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const startModule = await import(moduleUrl('../convex/projectHostedStart.ts'));
@@ -50,6 +51,7 @@ function port(s, f) {
       projectWorkIndex: index,
       projectWorkActions: actions,
       projectWorkActionsV8: actionsV8,
+      projectWorkCommand: commands,
       projectHostedPlanningSearch: search,
     }[module][fn];
     return handler._handler(s.ctx, args);
@@ -65,6 +67,10 @@ function port(s, f) {
       },
     },
     query: async (name, args) => {
+      const value = await invoke(name, { ...args, projectId: s.projectId });
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    },
+    mutation: async (name, args) => {
       const value = await invoke(name, { ...args, projectId: s.projectId });
       return typeof value === 'string' ? JSON.parse(value) : value;
     },

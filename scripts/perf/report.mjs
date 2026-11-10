@@ -1,10 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
-export const budgets = { now: 1500, work: 1500, laneFirstDiff: 1000, oneFilePush: 3000 };
+/** The one budget file (b7851c44): src/speed-budgets.json. The harness judges the entries it
+ * measures, by `metric` name; the landing path judges the rest (src/landing-speed-alerts.ts). */
+export const speedBudgets = JSON.parse(
+  readFileSync(new URL('../../src/speed-budgets.json', import.meta.url), 'utf8'),
+);
+export const budgets = Object.fromEntries(
+  speedBudgets.budgets.filter(b => b.measuredBy === 'perf-harness').map(b => [b.metric, b.max]),
+);
 
 export async function runtimeBuildHash(directory) {
   const hash = createHash('sha256');

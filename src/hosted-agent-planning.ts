@@ -14,7 +14,10 @@ import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
 
 /** Planning is the hosted Work journal's Issues and Initiatives. This file only drives the existing
  * indexed reads and the owner Work command `projectWorkActionsV8:command`; it adds no storage. */
-export type PlanningPort = Pick<HostedAgentSession, 'query' | 'address' | 'exchange' | 'root'> & {
+export type PlanningPort = Pick<
+  HostedAgentSession,
+  'query' | 'mutation' | 'address' | 'exchange' | 'root'
+> & {
   retainOperation?: (id: string) => void;
   /** Contract features the server advertised (a83b6fd5); unknown means none. */
   serverFeatures?: readonly string[];
@@ -191,6 +194,19 @@ async function writePlanning(
   hints?: { likelyDuplicates?: unknown },
   stored?: PlanningItem,
 ) {
+  // Comments are insert-only: they take the revision-free mutation the web uses (flip 5 S0), one call,
+  // and an unrelated Work write never refuses them. The operation id reconciles a retry.
+  if (request.action === 'comment-planning-item')
+    return (
+      await port
+        .mutation<{ revision: number }>('projectWorkCommand:command', {
+          operationId: request.operationId,
+          command: JSON.stringify(request),
+        })
+        .catch(error => {
+          throw hostedActionError(error, 'planning write');
+        })
+    ).revision;
   const command = await compatiblePut(port, request, journal, stored);
   for (let attempt = 0; ; attempt++) {
     const observe = async () => {

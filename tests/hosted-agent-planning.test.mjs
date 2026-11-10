@@ -24,6 +24,7 @@ import { ForgeError } from '../dist/errors.js';
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const actionsV8 = await import(moduleUrl('../convex/projectWorkActionsV8.ts'));
+const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const search = await import(moduleUrl('../convex/projectHostedPlanningSearch.ts'));
 const planningModule = await import(moduleUrl('../convex/projectHostedPlanning.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -53,6 +54,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       projectWorkIndex: index,
       projectWorkActions: actions,
       projectWorkActionsV8: actionsV8,
+      projectWorkCommand: commands,
       projectHostedPlanningSearch: search,
       projectHostedPlanning: planningModule,
     }[module][fn];
@@ -72,6 +74,10 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       },
     },
     query: async (name, args) => {
+      const value = await invoke(name, { ...args, projectId: s.projectId });
+      return typeof value === 'string' ? JSON.parse(value) : value;
+    },
+    mutation: async (name, args) => {
       const value = await invoke(name, { ...args, projectId: s.projectId });
       return typeof value === 'string' ? JSON.parse(value) : value;
     },
@@ -156,6 +162,28 @@ test('a server without the V8 command receives the same original operation on th
   await assert.rejects(put(p, { kind: 'issue', title: 'Refused', status: 'open' }));
   assert.equal(names.filter(name => name.includes(':command')).length >= 1, true);
   assert(!names.includes('projectWorkActions:command'));
+});
+
+// Flip 5 S0: 21 of 55 retried planning writes were comments refused by an unrelated write moving the
+// project revision. A comment now reads no revision: one mutation, and a replay keeps one comment.
+test('an agent comment is one revision-free mutation and its replay adds no second comment (flip 5 S0)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const issue = (await put(p, { kind: 'issue', title: 'Discussed' })).result;
+  p.calls.length = 0;
+  const operationId = randomUUID();
+  const first = await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'Why' }, operationId);
+  assert.deepEqual(p.calls, ['projectWorkCommand:command']);
+  // An unrelated write moves the project revision; the replay still reconciles to the original.
+  await put(p, { kind: 'issue', title: 'Unrelated' });
+  const again = await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'Why' }, operationId);
+  assert.deepEqual(again, first);
+  assert.equal(first.result.commentId, operationId);
+  const read = await list(p, { id: issue.itemId, reconcile: false });
+  assert.deepEqual(
+    read.comments.map(comment => comment.text),
+    ['Why'],
+  );
 });
 
 test('agents create an Initiative and Issue, comment, and read them filtered and paged', async t => {
