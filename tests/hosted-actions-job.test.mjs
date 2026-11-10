@@ -1534,8 +1534,8 @@ test('Actions State recipe closures remove tree lookups while preserving the ver
   assert.equal(measurements[0].calls, 5, 'legacy recipes retain the tree traversal');
   assert.equal(
     measurements[1].gets,
-    measurements[0].gets - 8,
-    'neither preparation nor the disk reader fetches recipe/tree metadata',
+    measurements[0].gets - 9,
+    'recipe/tree metadata is skipped and shared leaves download once',
   );
 });
 
@@ -3241,4 +3241,41 @@ test('result-write capabilities remain private when a run bundle is written, rep
       0o600,
       'restoring an artifact reestablishes the supervisor-only boundary before Candidate spawn',
     );
+});
+
+test('cost 298f9675: cold Actions closure leaves share one request wave before ordered verified reconstruction', async t => {
+  const s = fixture(t),
+    parts = Array.from({ length: 4 }, (_, i) => Buffer.alloc(128 * 1024, 65 + i)),
+    pins = parts.map(bytes => s.put(bytes)),
+    object = s.put(Buffer.concat([...parts, parts[0]]));
+  s.recipes.set(object.sha256, s.put('unused recipe'));
+  s.closures.set(
+    object.sha256,
+    [...pins, pins[0]].map(pin => ({
+      digest: pin.sha256,
+      size: pin.size,
+      url: `https://objects.invalid/${pin.sha256}`,
+    })),
+  );
+  await s.client.session();
+  let started = 0;
+  const request = s.client.request,
+    unique = new Set(pins.map(pin => `https://objects.invalid/${pin.sha256}`));
+  s.client.request = async (url, init) => {
+    if (unique.has(String(url))) {
+      started++;
+      await new Promise(resolve => setImmediate(resolve));
+      assert.equal(started, 4, 'independent cold leaves must start together, not after the prior GET');
+    }
+    return request(url, init);
+  };
+  const cache = join(s.directory, 'parallel-closure-cache');
+  mkdirSync(cache);
+  const { transport, prepareRecipes } = s.client.transport(cache),
+    { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  await prepareRecipes([object.sha256]);
+  await new SourceWorkerReader(cache, transport).resolve(object.sha256);
+  assert.equal(started, 4, 'duplicate leaves share their verified disk entry');
+  assert.deepEqual(readFileSync(join(cache, object.sha256)), Buffer.concat([...parts, parts[0]]));
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 1);
 });

@@ -491,7 +491,7 @@ test('trusted closure refuses unstaged, packed, wrong-size and oversized project
   assert(!rows(s).some(row => row.digest === pin.sha256));
 });
 
-async function trustedClosureFixture(t, count = 12) {
+async function trustedClosureFixture(t, count = 12, packed = false) {
   const { s, fake } = await setup(t),
     exchange = client(s);
   const parts = Array.from({ length: count }, (_, i) => {
@@ -499,7 +499,15 @@ async function trustedClosureFixture(t, count = 12) {
     bytes.writeUInt32LE(i);
     return bytes;
   });
-  for (const bytes of parts) await exchange.uploadBatch(content([bytes]));
+  if (packed)
+    await exchange.uploadLazyBatch(
+      [Buffer.from('pack-prefix'), ...parts, Buffer.from('pack-suffix')].map(bytes => ({
+        pin: { sha256: digest(bytes), size: bytes.length },
+        read: () => bytes,
+      })),
+      { batchSize: 100, pack: true },
+    );
+  else for (const bytes of parts) await exchange.uploadBatch(content([bytes]));
   const bytes = Buffer.concat(parts),
     pin = { sha256: digest(bytes), size: bytes.length },
     leaves = pins(parts);
@@ -525,66 +533,68 @@ async function trustedClosureFixture(t, count = 12) {
   await storeSourceOutputs(s.ctx, 'project', 'trusted-worker', [
     { ...pin, recipe: pins([recipe])[0], recipeClosure: leaves },
   ]);
+  assert(rows(s).find(row => row.digest === pin.sha256).recipe, 'fixture logical content uses its recipe');
   return { s, fake, pin, bytes, leaves, moduleUrl };
 }
 
-test('trusted closures read through CLI, browser, server and both checkout transports with flat-object call counts', async t => {
-  const { s, pin, bytes, moduleUrl } = await trustedClosureFixture(t);
-  const { getFunctionName } = await import('convex/server');
-  const exchange = client(s),
-    calls = [];
-  const original = exchange.client.mutation;
-  exchange.client.mutation = (ref, args) => {
-    calls.push(getFunctionName(ref));
-    return original(ref, args);
-  };
-  assert.deepEqual(await exchange.download(pin), bytes);
-  assert.deepEqual(
-    calls,
-    ['projectObjectDownloads:signDownloads'],
-    'CLI obtains the entire closure in the existing signing call',
-  );
-  const { ObjectDownloadReader } = await import('../dist/blob-download.js');
-  let described = 0;
-  const browser = new ObjectDownloadReader({
-    describe: (digests, signed) => {
-      described++;
-      return downloads.describe._handler(s.ctx, { projectId: 'project', digests, signed });
-    },
-    sign: () => assert.fail('closure incurred a second signing call'),
+for (const packed of [false, true])
+  test(`trusted ${packed ? 'packed' : 'raw'} closures read through CLI, browser, server and both checkout transports with flat-object call counts`, async t => {
+    const { s, pin, bytes, moduleUrl } = await trustedClosureFixture(t, 25, packed);
+    const { getFunctionName } = await import('convex/server');
+    const exchange = client(s),
+      calls = [];
+    const original = exchange.client.mutation;
+    exchange.client.mutation = (ref, args) => {
+      calls.push(getFunctionName(ref));
+      return original(ref, args);
+    };
+    assert.deepEqual(await exchange.download(pin), bytes);
+    assert.deepEqual(
+      calls,
+      ['projectObjectDownloads:signDownloads'],
+      'CLI obtains the entire closure in the existing signing call',
+    );
+    const { ObjectDownloadReader } = await import('../dist/blob-download.js');
+    let described = 0;
+    const browser = new ObjectDownloadReader({
+      describe: (digests, signed) => {
+        described++;
+        return downloads.describe._handler(s.ctx, { projectId: 'project', digests, signed });
+      },
+      sign: () => assert.fail('closure incurred a second signing call'),
+    });
+    assert.deepEqual(Buffer.from((await browser.read([pin]))[0]), bytes);
+    assert.equal(described, 2, 'browser retains the flat before/after access reads');
+    const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+    let resolved = 0;
+    const query = s.ctx.runQuery;
+    s.ctx.runQuery = (ref, args) => {
+      if (getFunctionName(ref) === 'projectObjects:resolve') resolved++;
+      return query(ref, args);
+    };
+    assert.deepEqual(await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [pin]), [bytes]);
+    assert.equal(resolved, 2, 'server retains the flat before/after access reads');
+    const directory = mkdtempSync(join(tmpdir(), 'forge-r2-closure-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    for (const [index, name] of ['HostedCheckoutDownloads', 'ConvexLaneTransport'].entries()) {
+      const module = await import(
+        name === 'HostedCheckoutDownloads'
+          ? '../dist/hosted-checkout-downloads.js'
+          : '../dist/hosted-lane-transport.js'
+      );
+      const checkout = new module[name](exchange),
+        path = join(directory, String(index));
+      calls.length = 0;
+      await checkout.objects([pin.sha256]);
+      await checkout.downloadFiles([{ pin, path }]);
+      assert.deepEqual(readFileSync(path), bytes);
+      assert.equal(
+        calls.length,
+        name === 'HostedCheckoutDownloads' ? 1 : 2,
+        'checkout uses the existing signed page and ordinary final authority read',
+      );
+    }
   });
-  assert.deepEqual(Buffer.from((await browser.read([pin]))[0]), bytes);
-  assert.equal(described, 2, 'browser retains the flat before/after access reads');
-  const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
-  let resolved = 0;
-  const query = s.ctx.runQuery;
-  s.ctx.runQuery = (ref, args) => {
-    if (getFunctionName(ref) === 'projectObjects:resolve') resolved++;
-    return query(ref, args);
-  };
-  assert.deepEqual(await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [pin]), [bytes]);
-  assert.equal(resolved, 2, 'server retains the flat before/after access reads');
-  const directory = mkdtempSync(join(tmpdir(), 'forge-r2-closure-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  for (const [index, name] of ['HostedCheckoutDownloads', 'ConvexLaneTransport'].entries()) {
-    const module = await import(
-      name === 'HostedCheckoutDownloads'
-        ? '../dist/hosted-checkout-downloads.js'
-        : '../dist/hosted-lane-transport.js'
-    );
-    const checkout = new module[name](exchange),
-      path = join(directory, String(index));
-    calls.length = 0;
-    await checkout.objects([pin.sha256]);
-    await checkout.downloadFiles([{ pin, path }]);
-    assert.deepEqual(readFileSync(path), bytes);
-    assert.equal(
-      calls.length,
-      name === 'HostedCheckoutDownloads' ? 1 : 2,
-      'checkout uses the existing signed page and ordinary final authority read',
-    );
-  }
-});
 
 test('trusted closure corruption, whole-digest disagreement and mid-read revocation never expose reconstructed bytes', async t => {
   const { s, fake, pin, leaves, moduleUrl } = await trustedClosureFixture(t, 3);
@@ -752,4 +762,146 @@ test('older signature endpoints are negotiated once and current authorization er
   };
   await assert.rejects(signDownloadObjects(denied, 'project', []), /AUTH_REVOKED/);
   assert.equal(refused, 1);
+});
+
+test('cost 298f9675: packed closures reject changed range replies and cross-project source pack bindings', async t => {
+  const { s, pin, bytes, moduleUrl } = await trustedClosureFixture(t, 3, true);
+  const row = rows(s).find(row => row.digest === pin.sha256);
+  assert(row.recipeClosure.every(leaf => leaf.pack));
+  const { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  const pack = row.recipeClosure[0].pack;
+  await assert.rejects(
+    storeSourceOutputs(s.ctx, 'other', 'bad', [
+      {
+        sha256: digest(bytes.subarray(0, 1)),
+        size: 1,
+        pack,
+        r2Key: `v1/p/other/o/${pack.digest}`,
+      },
+    ]),
+    code('SOURCE_HASH_MISMATCH'),
+  );
+  const read = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const reply = await read(url, init);
+    if (new Headers(init?.headers).has('range'))
+      return new Response(await reply.arrayBuffer(), {
+        status: 206,
+        headers: { 'content-range': `bytes 0-0/${pack.size}` },
+      });
+    return reply;
+  };
+  try {
+    await assert.rejects(client(s).download(pin), code('INVALID_WORK_BACKUP'));
+  } finally {
+    globalThis.fetch = read;
+  }
+});
+
+test('cost 298f9675: V8 saves publish and consume native State recipes inside their existing byte window', async t => {
+  const { s, fake } = await setup(t),
+    exchange = client(s),
+    { buildSavePages, saveBytes } = await import('../dist/hosted-save.js'),
+    { runSmallSourceSave } = await import('../dist/hosted-source-small-save.js'),
+    { moduleUrl } = await import('./convex-module.mjs'),
+    { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts')),
+    { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  const original = Buffer.from('original\n');
+  await exchange.uploadBatch(content([original]));
+  const files = Array.from({ length: 29000 }, (_, i) => ({
+    path: `src/${String(i).padStart(6, '0')}.txt`,
+    blob: digest(original),
+    mode: 'file',
+  }));
+  const initial = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents: [],
+      files,
+      message: 'base',
+      at: '2026-01-01T00:00:00Z',
+    }),
+  );
+  let baseline = pins([initial])[0];
+  const key = `v1/p/project/o/${baseline.sha256}`;
+  fake.objects.set(fake.key(key), initial);
+  s.tables.projectObjects.set('native-state', {
+    _id: 'native-state',
+    _creationTime: Date.now(),
+    projectId: 'project',
+    digest: baseline.sha256,
+    size: baseline.size,
+    nonce: 'synthetic',
+    removed: false,
+    location: 'r2',
+    r2Committed: true,
+    r2Key: key,
+  });
+  for (let n = 0; n < 2; n++) {
+    const before = files[n].blob,
+      changed = Buffer.from(`changed-${n}\n`),
+      next = pins([changed])[0];
+    const pages = buildSavePages([
+      {
+        path: files[n].path,
+        before: { blob: before, mode: 'file' },
+        after: { blob: next.sha256, mode: 'file', content: { object: next, recipe: null } },
+      },
+    ]);
+    const baselineRow = rows(s).find(row => row.digest === baseline.sha256),
+      recipe = baselineRow.recipe;
+    const plan = Buffer.from(
+      saveBytes({
+        schema: 1,
+        kind: 'forge-hosted-save-input',
+        baseline: { object: baseline, recipe: recipe ? { sha256: recipe.digest, size: recipe.size } : null },
+        pages: pages.root,
+        pageCount: pages.pages.length,
+        changeCount: 1,
+        message: 'save',
+        at: '2026-01-01T00:00:00Z',
+      }),
+    );
+    const upload = [changed, ...pages.pages.map(page => Buffer.from(saveBytes(page.value))), plan];
+    await exchange.uploadBatch(content(upload));
+    const selected = [baseline, ...pins(upload)],
+      described = await downloads.describe._handler(s.ctx, {
+        projectId: 'project',
+        digests: selected.map(pin => pin.sha256),
+        signed: true,
+      });
+    const locations = described.map((row, i) => ({
+      descriptor: {
+        object: selected[i],
+        recipe: row.location === 'recipe' ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
+      },
+      storageId: null,
+      url: row.location === 'r2' ? row.url : null,
+      ...(row.closure ? { closure: row.closure } : {}),
+    }));
+    const worker = convexSourceTransport(
+      { storage: {}, runMutation: () => assert.fail('V8 closure incurred another descriptor call') },
+      { projectId: 'project', jobId: 'synthetic-v8', step: 0 },
+      locations,
+    );
+    const offset = fake.requests.length;
+    const output = await runSmallSourceSave(pins([plan])[0], worker.io);
+    assert(output, 'projected baseline stays in V8');
+    await worker.settle();
+    await storeSourceOutputs(s.ctx, 'project', 'synthetic-v8', worker.outputs);
+    const result = JSON.parse(await client(s).download(output)),
+      bytes = await client(s).download(result.state),
+      state = JSON.parse(bytes);
+    files[n] = { ...files[n], blob: next.sha256 };
+    assert.deepEqual(state.files, files);
+    assert.deepEqual(state.parents, [baseline.sha256]);
+    assert.equal(digest(bytes), result.state.sha256);
+    const stored = rows(s).find(row => row.digest === result.state.sha256);
+    assert(stored.recipeClosure.some(leaf => leaf.pack));
+    const put = fake.requests.slice(offset).filter(request => request.method === 'PUT');
+    assert(put.length <= 6, 'changed chunk, header, suffix, recipe metadata and result only');
+    assert(worker.putMetrics.snapshot(output).state < 750000);
+    baseline = result.state;
+  }
 });

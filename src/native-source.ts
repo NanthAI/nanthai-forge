@@ -201,24 +201,26 @@ export class NativeSource {
     conversation?: Conversation,
   ): string {
     for (const parent of parents) this.state(parent);
-    const bytes = Buffer.from(
-      JSON.stringify(
-        stateSchema.parse({
-          schema: 1,
-          kind: 'forge-source-state',
-          parents,
-          files: [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
-          message,
-          at,
-          ...(git ? { git } : {}),
-          ...(conversation ? { conversation } : {}),
-        }),
-      ),
-    );
-    const id = this.put(bytes);
+    const state = stateSchema.parse({
+      schema: 1,
+      kind: 'forge-source-state',
+      parents,
+      files: [...files].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),
+      message,
+      at,
+      ...(git ? { git } : {}),
+      ...(conversation ? { conversation } : {}),
+    });
+    return this.storeState(state);
+  }
+  /** Disk stores retain their verified read-back. A memory source can keep the
+   * exact already validated value instead of parsing its serialization again. */
+  protected storeState(state: NativeState): string {
+    const id = this.put(Buffer.from(JSON.stringify(state)));
     this.state(id);
     return id;
   }
+
   capture(root: string, retain = false, base?: string): NativeFile[] {
     return this.captureReport(root, retain, base).files;
   }

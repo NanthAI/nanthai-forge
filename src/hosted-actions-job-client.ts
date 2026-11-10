@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { mapSourceOrdered } from './hosted-source-parallel.js';
 import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
@@ -383,6 +384,7 @@ export class ActionsJobClient {
       return stream.readable as unknown as AsyncIterable<Uint8Array>;
     };
     let leaves: SourceWorkerReader | undefined;
+    const leafReads = new Map<string, Promise<string>>();
     const transport: SourceWorkerTransport = {
       describeBatch: async digests => {
         await resolve(digests);
@@ -410,16 +412,33 @@ export class ActionsJobClient {
           });
           const reader = leaves,
             closure = row.closure;
-          // The existing disk reader verifies and deduplicates each leaf; the
-          // enclosing reader still verifies the reconstructed logical object.
-          return (async function* () {
-            for (const leaf of closure) {
-              const path = await reader.file({
-                object: { sha256: leaf.digest, size: leaf.size },
-                recipe: null,
-              });
-              yield* createReadStream(path);
+          const readLeaf = (leaf: SignedDownload) => {
+            let read = leafReads.get(leaf.digest);
+            if (!read) {
+              read = reader
+                .file({ object: { sha256: leaf.digest, size: leaf.size }, recipe: null })
+                .finally(() => leafReads.delete(leaf.digest));
+              leafReads.set(leaf.digest, read);
             }
+            return read;
+          };
+          const unique = [...new Map(closure.map(leaf => [leaf.digest, leaf])).values()];
+          // Use the existing disk cache and download-worker bound. Cold leaves
+          // share a byte-bounded request wave instead of one RTT per leaf.
+          for (let at = 0; at < unique.length;) {
+            let end = at,
+              bytes = 0;
+            while (
+              end < unique.length &&
+              end - at < 16 &&
+              (!bytes || bytes + unique[end]!.size <= 4 * 1024 * 1024)
+            )
+              bytes += unique[end++]!.size;
+            await mapSourceOrdered(unique.slice(at, end), readLeaf, 16);
+            at = end;
+          }
+          return (async function* () {
+            for (const leaf of closure) yield* createReadStream(await readLeaf(leaf));
           })();
         }
         return readRaw(pin, row);
@@ -491,6 +510,7 @@ export class ActionsJobClient {
       prepareRecipes,
       resetCache: () => {
         leaves = undefined;
+        leafReads.clear();
       },
     };
   }

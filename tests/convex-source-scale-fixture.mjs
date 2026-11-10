@@ -137,7 +137,17 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
   const json = (value, stateGeneration) => putSpec(Buffer.from(saveBytes(value)), undefined, stateGeneration);
   const bytes = async pin => {
     const spec = objects.get(pin.sha256);
-    return Buffer.isBuffer(spec) ? spec : generated(spec);
+    if (spec) return Buffer.isBuffer(spec) ? spec : generated(spec);
+    const root = [...f.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+    assert(root?.recipeClosure, 'fixture logical source has a verified closure');
+    return Buffer.concat(
+      await Promise.all(
+        root.recipeClosure.map(async leaf => {
+          const physical = await bytes({ sha256: leaf.pack?.digest ?? leaf.sha256 });
+          return leaf.pack ? physical.subarray(leaf.pack.offset, leaf.pack.offset + leaf.size) : physical;
+        }),
+      ),
+    );
   };
   async function enqueue(input) {
     const jobId = randomUUID(),
@@ -281,8 +291,24 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               readCounts.set(id, (readCounts.get(id) ?? 0) + 1);
               events.push({ fetch: id });
               readObjects++;
-              readBytes += Buffer.isBuffer(spec) ? spec.length : spec.size;
-              value = Buffer.isBuffer(spec) ? spec : spec.generate ? generated(spec) : { ...spec, delay };
+              const physical = Buffer.isBuffer(spec) ? spec : spec.generate ? generated(spec) : null;
+              if (a.range) {
+                assert(physical, 'range fixture needs exact bytes');
+                const match = /^bytes=(\d+)-(\d+)$/.exec(a.range);
+                assert(match);
+                const offset = Number(match[1]),
+                  end = Number(match[2]);
+                assert(end < physical.length && offset <= end);
+                readBytes += end - offset + 1;
+                value = {
+                  rangeBytes: physical.subarray(offset, end + 1),
+                  status: 206,
+                  headers: { 'content-range': `bytes ${offset}-${end}/${physical.length}` },
+                };
+              } else {
+                readBytes += Buffer.isBuffer(spec) ? spec.length : spec.size;
+                value = physical ?? { ...spec, delay };
+              }
             } else if (message.kind === 'get') {
               storageCalls++;
               value = blobs.get(a.id) ?? null;

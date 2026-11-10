@@ -49,7 +49,7 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs, settle, clock, smallOutput } = convexSourceTransport(
+        const { io, outputs, settle, clock, smallOutput, putMetrics } = convexSourceTransport(
             ctx,
             input,
             state.locations,
@@ -61,7 +61,7 @@ export const step = internalAction({
               preloaded: supplied ? state.preloaded : undefined,
             },
           ),
-          durable = sourceStorage(ctx, input.projectId, nativeDigest);
+          durable = sourceStorage(ctx, input.projectId, nativeDigest, putMetrics.observer('progress'));
         let cursor: SourceStepCursor = initialSourceStep(state.input),
           progress: SourceProgress | null = null;
         let result!: Awaited<ReturnType<typeof runSourceStep>>;
@@ -130,6 +130,7 @@ export const step = internalAction({
               objects: result!.metrics.objects,
               bytes: result!.metrics.bytes,
               outputs: outputCount,
+              putBytes: putMetrics.snapshot(result!.cursor.output),
               started,
             });
           if (fanout) {

@@ -15,6 +15,9 @@ import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-
  * upload consumes the stream completely and commits only the supplied exact pin. */
 export interface SourceWorkerTransport {
   /** Trusted, current descriptor metadata; never a field in client plans. */
+  /** Fixed source builders may register parents of their own already validated
+   * generated State. Publication still verifies the exact whole-object hash. */
+  rememberOutputState?(pin: WorkerPin, parents: readonly string[]): void;
   stateGeneration?(id: string): number | undefined;
   rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;

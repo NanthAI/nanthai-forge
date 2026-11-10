@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { digest } from '../dist/hash.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
@@ -494,14 +495,21 @@ for (const count of [12000, 29000])
         blob: original.sha256,
         mode: 'file',
       }));
-      let baseline = await s.json({
-        schema: 1,
-        kind: 'forge-source-state',
-        files,
-        parents: [],
-        message: 'base',
-        at,
-      });
+      let baseline = await s.putSpec(
+        Buffer.from(
+          JSON.stringify({
+            schema: 1,
+            kind: 'forge-source-state',
+            files,
+            parents: [],
+            message: 'base',
+            at,
+          }),
+        ),
+        undefined,
+        1,
+        { parents: [] },
+      );
       const samples = [];
       for (let landing = 0; landing < 10; landing++) {
         const changed = await s.putSpec(Buffer.from(`landing-${landing}\n`));
@@ -516,7 +524,15 @@ for (const count of [12000, 29000])
         const input = await s.json({
           schema: 1,
           kind: 'forge-hosted-save-input',
-          baseline: { object: baseline, recipe: null },
+          baseline: {
+            object: baseline,
+            recipe: (() => {
+              const recipe = [...s.tables.projectObjects.values()].find(
+                row => row.digest === baseline.sha256,
+              )?.recipe;
+              return recipe ? { sha256: recipe.digest, size: recipe.size } : null;
+            })(),
+          },
           pages: pages.root,
           pageCount: pages.pages.length,
           changeCount: 1,
@@ -533,6 +549,14 @@ for (const count of [12000, 29000])
         files[landing] = { ...files[landing], blob: changed.sha256 };
         assert.deepEqual(state.files, files);
         assert.deepEqual(state.parents, [baseline.sha256]);
+        assert.equal(digest(await s.bytes(result.state)), result.state.sha256);
+        const stored = [...s.tables.projectObjects.values()].find(row => row.digest === result.state.sha256);
+        assert.equal(stored.stateGeneration, landing + 2);
+        assert.deepEqual(stored.stateParents, [baseline.sha256]);
+        assert(
+          stored.recipeClosure?.some(leaf => leaf.pack),
+          'unchanged files reuse committed R2 ranges',
+        );
         baseline = result.state;
         samples.push({
           ...report,
@@ -548,15 +572,15 @@ for (const count of [12000, 29000])
         'sequential save Convex-call ratchet',
       );
       assert(
-        samples.every(sample => sample.egress <= 114 * count + 500),
+        samples.every(sample => sample.egress <= (count === 12000 ? 750000 : 750500)),
         'sequential save body-byte ratchet',
       );
       assert(
-        samples.every(sample => sample.workCpuMicros > 0 && sample.workCpuMicros <= 1600000),
+        samples.every(sample => sample.workCpuMicros > 0 && sample.workCpuMicros <= 1400000),
         'each sequential save stays within the source handler CPU-work budget',
       );
       assert(
-        samples.every(sample => sample.maxRssBytes <= 300 * 1024 * 1024),
+        samples.every(sample => sample.maxRssBytes <= (count === 12000 ? 185 : 256) * 1024 * 1024),
         'sequential save memory ratchet',
       );
       assert.equal(s.ready.length, 0, 'finished sequential saves create no idle work');
@@ -564,3 +588,107 @@ for (const count of [12000, 29000])
       s.restore();
     }
   });
+
+test('cost 298f9675: 29k-file compose and sync consume projected States with exact ancestry and bounded work', async t => {
+  const s = await scaleFixture();
+  try {
+    const blob = await s.putSpec(Buffer.from('base\n'));
+    const files = Array.from({ length: 29000 }, (_, i) => ({
+      path: `src/${String(i).padStart(6, '0')}.txt`,
+      blob: blob.sha256,
+      mode: 'file',
+    }));
+    const state = (files, parents, generation) =>
+      s.putSpec(
+        Buffer.from(
+          JSON.stringify({ schema: 1, kind: 'forge-source-state', parents, files, message: 'branch', at }),
+        ),
+        undefined,
+        generation,
+        { parents },
+      );
+    const ref = pin => {
+      const recipe = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256)?.recipe;
+      return { object: pin, recipe: recipe ? { sha256: recipe.digest, size: recipe.size } : null };
+    };
+    const base = await state(files, [], 1),
+      l = await s.putSpec(Buffer.from('left\n')),
+      r = await s.putSpec(Buffer.from('right\n'));
+    const expected = files.map((file, i) => (i === 0 ? { ...file, blob: l.sha256 } : file));
+    let left = await state(expected, [base.sha256], 2),
+      rightFiles = files.map((file, i) => (i === 1 ? { ...file, blob: r.sha256 } : file)),
+      right = await state(rightFiles, [base.sha256], 2);
+    expected[1] = rightFiles[1];
+    for (const kind of ['compose', 'sync']) {
+      const inputs = buildComposePages([
+          {
+            laneId: randomUUID(),
+            head: right.sha256,
+            version: 0,
+            sourceVersion: 0,
+            lifecycleVersion: 0,
+            state: ref(right),
+          },
+        ]),
+        dependencies = buildComposePages([]);
+      for (const page of [...inputs.pages, ...dependencies.pages]) await s.json(page.value);
+      const value =
+        kind === 'compose'
+          ? {
+              schema: 1,
+              kind: 'forge-hosted-compose-input',
+              base: { head: left.sha256, receiptId: 'main' },
+              main: ref(left),
+              inputs: inputs.manifest,
+              dependencies: dependencies.manifest,
+              algorithm: 'forge-native-compose-v1',
+              message: 'merge',
+              at,
+            }
+          : {
+              schema: 1,
+              kind: 'forge-hosted-sync-input',
+              algorithm: 'forge-native-sync-v1',
+              work: { mode: 'sync', left: ref(left), right: ref(right) },
+              message: 'merge',
+              at,
+            };
+      const input = await s.json(value),
+        offset = s.events.length,
+        id = await s.enqueue(input),
+        report = await s.drain(),
+        job = await s.job(id);
+      assert.equal(job.status, 'completed');
+      const result = JSON.parse(await s.bytes(job.output)),
+        pin = result.result.state,
+        bytes = await s.bytes(pin),
+        merged = JSON.parse(bytes),
+        stored = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256),
+        egress = s.events.slice(offset).reduce((n, event) => n + (event.put ?? 0), 0);
+      assert.equal(digest(bytes), pin.sha256);
+      assert.deepEqual(merged.files, expected);
+      assert.deepEqual(merged.parents, [left.sha256, right.sha256]);
+      assert.deepEqual(stored.stateParents, merged.parents);
+      assert.equal(stored.stateGeneration, kind === 'compose' ? 3 : 4);
+      assert(stored.recipeClosure?.some(leaf => leaf.pack));
+      t.diagnostic(JSON.stringify({ projectedMergeCost: { kind, egress, ...report } }));
+      assert(egress <= 751000, 'merge State uploads contain changed chunks and bounded metadata');
+      assert(
+        report.calls <= (kind === 'compose' ? 8 : 6),
+        'source metadata stays batched across bounded quanta',
+      );
+      assert(report.maxRssBytes <= 400 * 1024 * 1024);
+      if (kind === 'compose') {
+        left = pin;
+        const next = await s.putSpec(Buffer.from('next\n'));
+        rightFiles = rightFiles.map((file, i) => (i === 2 ? { ...file, blob: next.sha256 } : file));
+        right = await state(rightFiles, [right.sha256], 3);
+        expected[2] = rightFiles[2];
+        assert(ref(left).recipe, 'sync reads the recipe the compose worker actually published');
+      }
+    }
+    assert.equal(s.ready.length, 0);
+  } finally {
+    s.restore();
+  }
+});

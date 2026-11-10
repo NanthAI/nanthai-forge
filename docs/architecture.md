@@ -135,7 +135,7 @@ Freshness comes from rereading source, never from timestamps. Re-indexing captur
 **Object catalog and upload packs.** A GitHub archive import writes no row per object. Each bounded upload window concatenates source objects into one immutable, content-addressed R2 pack; singleton and empty objects can remain raw. One transient receipt retains logical digests, sizes and optional pack digest/offset/physical-size bindings. Publication writes a sorted `projectObjectCatalog` of 256 pins per row. Physical packs also retain protected source bindings, so a later identical artifact cannot cause their cleanup while accepted source uses them. `findObject` (`convex/projectObjectFind.ts`) is the only digest lookup: an object's own row first, then the covering catalog row. A request reads each catalog row at most once. A writer needing a row ID copies the complete binding with `objectRow`. Readers authorize the project or selected worker grant, sign the exact byte Range for packed objects, and verify offsets, size and logical SHA-256. Raw objects and existing recipes remain readable. The generation's `sourceBlobs` resolve from the catalog, so there are no per-blob records. `finish` scans no inventory: it schedules a purge that deletes transient inventory in pages bounded by bytes read (rows stream in key order; a page stops after 4 MiB or 1,000 rows), because a window row is about 135 KB and a row-count page overran Convex's 16 MiB read limit on a 62k-file repository. Once every file is stored, the portable State is pinned on the import job. A publication failure maps to `GITHUB_IMPORT_PUBLICATION_FAILED` (never `GITHUB_IMPORT_INTERRUPTED`), and a retry of the original operation rebuilds the path-to-blob rows from that stored State and publishes without any GitHub archive, tree or blob request. `tests/github-import-archive.test.mjs` imports a 28.9k-file tree and guards fewer than 1,000 document writes, no per-object/per-blob rows and at most 80 R2 PUTs. `tests/object-catalog.test.mjs` guards the digest lookup boundary; `tests/import-object-packs.test.mjs` covers byte ranges, retry/replay, current access and cleanup bindings. The import needs no Mac: publication selects hosted main and server authority ([birth](#hosted-source-authority-and-operation-contracts)). The earlier live t3code reading was 16 min 56 s, before the catalog and window packs; with them it takes 2 min 31 s and 2 min 37 s in two runs, until the project is agent-writable, within the five-minute target ([Phase 5](phase5-plan.md)).
 
 Trusted source-worker recipe outputs may additionally retain a bounded ordered
-projection of raw R2 leaf pins on their existing object row. Publication validates
+projection of raw R2 leaf pins and exact pack ranges on their existing object row. Publication validates
 those pins against committed project objects; client recipe completion never supplies
 the projection. Existing authorized download and job-descriptor reads sign the whole
 projection together without leaf lookups or new calls. Browser, exchange, Lane checkout and trusted source readers consume the leaf
@@ -145,6 +145,24 @@ caches. Physical leaf and whole-object hashes, pack ranges and ordinary final
 access fences remain checked. Small saves can consume a projected recipe baseline
 within their existing byte bound. Legacy recipes without the projection retain
 their original readers. State identity and recipe bytes are unchanged.
+
+Within the existing 1–4 MiB State window, fixed source writers select path-anchored
+file-list chunks (256 KiB to 1 MiB), isolating parents and the suffix. Verified raw
+State reads supply reusable ranges in their existing R2 body; projected baselines
+supply their already trusted leaf bindings. Only changed chunks and recipe metadata
+are uploaded. A cold legacy baseline or a layout with no net byte saving keeps the
+flat encoding. Physical bindings travel with the logical output in the existing
+commit, with one atomic cleanup fence, so no chunk staging RPC is added. The State
+pin, parent list and generation retain their original meaning. Larger States keep
+the existing flat path, including its unresolved large-manifest memory risk.
+
+The existing `forge-source-step` log line includes `putBytes`: State (including
+recipe metadata), continuation/progress, final result and other attempted bodies;
+`refused` is the subset answered 412 and `avoided` counts reused destination bytes.
+Failed attempts use the same marker with `outcome: "failed"`.
+These are action-local counters, not billed egress: headers, responses, RPC metadata,
+platform accounting and other functions are outside this body measurement. No
+metrics query, retained counter, timer or idle call is introduced.
 
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 

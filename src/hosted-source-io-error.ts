@@ -91,7 +91,7 @@ export function logSourceFailure(
     }),
   );
 }
-/** One bounded line per completed source step so the existing log-stream
+/** One bounded line per completed step or failed attempt so the existing log-stream
  * instrument can split source memory-time by job kind and phase without a
  * metrics read. Counts and identifiers only; never URLs, messages or bytes. */
 export function logSourceStep(
@@ -104,6 +104,15 @@ export function logSourceStep(
     objects: number;
     bytes: number;
     outputs: number;
+    outcome?: 'failed';
+    putBytes?: {
+      state: number;
+      progress: number;
+      result: number;
+      other: number;
+      refused: number;
+      avoided: number;
+    };
     started: number;
   },
 ) {
@@ -116,12 +125,23 @@ export function logSourceStep(
       job: identity.jobId,
       step: identity.step,
       runtime: fields.runtime,
+      ...(fields.outcome ? { outcome: fields.outcome } : {}),
       kind: name(fields.kind),
       from: name(fields.from),
       to: name(fields.to),
       objects: count(fields.objects),
       bytes: count(fields.bytes),
       outputs: count(fields.outputs),
+      ...(fields.putBytes
+        ? {
+            putBytes: Object.fromEntries(
+              (['state', 'progress', 'result', 'other', 'refused', 'avoided'] as const).map(key => [
+                key,
+                count(fields.putBytes![key]),
+              ]),
+            ),
+          }
+        : {}),
       elapsedMs: Math.min(600000, Math.max(0, Math.round(performance.now() - fields.started))),
     }),
   );

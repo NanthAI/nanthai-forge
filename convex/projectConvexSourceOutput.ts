@@ -2,6 +2,7 @@
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
+import { packHeaders, packRange, type ObjectPack } from '../src/object-pack-range';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
 import { validStateGeneration, validStateParents } from '../src/state/generation';
@@ -15,7 +16,9 @@ export type SourceOutput = {
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
-  recipeClosure?: { sha256: string; size: number }[];
+  recipeClosure?: { sha256: string; size: number; pack?: ObjectPack }[];
+  pack?: ObjectPack;
+  physical?: { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[];
 };
 export async function storeSourceOutputs(
   ctx: MutationCtx,
@@ -23,7 +26,12 @@ export async function storeSourceOutputs(
   executionId: string,
   objects: SourceOutput[],
 ) {
-  for (const pin of objects) {
+  // Physical leaves/metadata ride on their logical output in the existing commit.
+  // This avoids per-chunk staging calls; all protection changes are atomic here.
+  let fence: string | undefined;
+  const packs = new Map<string, Awaited<ReturnType<typeof findObject>>>();
+  const staged: SourceOutput[] = objects.flatMap(pin => [...(pin.physical ?? []), pin]);
+  for (const pin of staged) {
     invariant(
       [pin.storageId, pin.recipe, pin.r2Key].filter(Boolean).length === 1,
       'SOURCE_JOB_INVALID',
@@ -37,12 +45,36 @@ export async function storeSourceOutputs(
         'Worker storage pin changed.',
       );
     } else if (pin.r2Key) {
-      // Only the trusted action calls this after checksum-bound PUT and HEAD.
+      // The fixed action supplies checksum-confirmed bodies or hash-verified
+      // ranges in an existing committed project body.
       invariant(
-        pin.r2Key === r2Key(projectId, pin.sha256),
+        pin.r2Key === r2Key(projectId, pin.pack?.digest ?? pin.sha256),
         'SOURCE_HASH_MISMATCH',
         'Source output project binding changed.',
       );
+      if (pin.pack) {
+        packHeaders(packRange(pin), pin.size);
+        let pack = packs.get(pin.pack.digest);
+        if (!pack) {
+          pack = await findObject(ctx, projectId, pin.pack.digest);
+          packs.set(pin.pack.digest, pack);
+        }
+        invariant(
+          pack &&
+            !pack.removed &&
+            isR2Object(pack) &&
+            !pack.pack &&
+            pack.size === pin.pack.size &&
+            pack.r2Key === r2Key(projectId, pin.pack.digest),
+          'SOURCE_HASH_MISMATCH',
+          'Source pack is not committed in this project.',
+        );
+        if (!pack.sourceReferenced) {
+          await ctx.db.patch((await objectRow(ctx, pack))._id, { sourceReferenced: true });
+          fence = pack.digest;
+          packs.set(pack.digest, { ...pack, sourceReferenced: true });
+        }
+      }
     } else {
       const recipe = await findObject(ctx, projectId, pin.recipe!.sha256);
       invariant(
@@ -54,6 +86,7 @@ export async function storeSourceOutputs(
         'Worker recipe is not staged.',
       );
     }
+    let closure = pin.recipeClosure;
     if (pin.recipeClosure) {
       invariant(pin.recipe, 'SOURCE_JOB_INVALID', 'Only a recipe has a leaf closure.');
       validateRecipeClosure(pin, pin.recipeClosure);
@@ -68,16 +101,20 @@ export async function storeSourceOutputs(
             leaf &&
             !leaf.removed &&
             isR2Object(leaf) &&
-            !leaf.pack &&
             leaf.size === pin.recipeClosure![i]!.size &&
-            leaf.r2Key === r2Key(projectId, leaf.digest),
+            leaf.r2Key === r2Key(projectId, leaf.pack?.digest ?? leaf.digest),
         ),
         'SOURCE_HASH_MISMATCH',
         'Worker closure contains an unstaged leaf.',
       );
+      closure = leaves.map(leaf => ({
+        sha256: leaf!.digest,
+        size: leaf!.size,
+        ...(leaf!.pack ? { pack: leaf!.pack } : {}),
+      }));
     }
     const encoding = pin.r2Key
-      ? { location: 'r2' as const, r2Key: pin.r2Key, r2Committed: true, recipe: undefined }
+      ? { location: 'r2' as const, r2Key: pin.r2Key, r2Committed: true, recipe: undefined, pack: pin.pack }
       : pin.storageId
         ? { storageId: pin.storageId, recipe: undefined }
         : { storageId: undefined, recipe: { digest: pin.recipe!.sha256, size: pin.recipe!.size } };
@@ -109,7 +146,7 @@ export async function storeSourceOutputs(
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
     // Written once from the hash-verified manifest, like the generation; never cleared.
     const graph = {
-      ...(pin.recipeClosure === undefined ? {} : { recipeClosure: pin.recipeClosure }),
+      ...(closure === undefined ? {} : { recipeClosure: closure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
     };
@@ -143,7 +180,7 @@ export async function storeSourceOutputs(
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
-    if (!old?.sourceReferenced)
-      await ctx.db.insert('projectCheckLogSourcePins', { projectId: projectId, digest: pin.sha256 });
+    if (!old?.sourceReferenced) fence = pin.sha256;
   }
+  if (fence) await ctx.db.insert('projectCheckLogSourcePins', { projectId, digest: fence });
 }

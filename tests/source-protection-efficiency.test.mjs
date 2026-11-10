@@ -129,3 +129,14 @@ test('invalid source batches roll back every protection mark and cleanup fence',
   assert.equal(duplicate.length, 2);
   assert.equal(s.counts.at(-1).writes, 2, 'duplicate pins share the exact read and mark');
 });
+
+test('cost 298f9675: source-output physical batches share one atomic cleanup fence and retry without writes', async () => {
+  const { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  const s = fixture(),
+    outputs = s.pins.map(pin => ({ ...pin, r2Key: `v1/p/${s.projectId}/o/${pin.sha256}` }));
+  await s.call('worker-output-batch', ctx => storeSourceOutputs(ctx, s.projectId, 'synthetic', outputs));
+  assert.equal(s.tables.projectCheckLogSourcePins.size, 1);
+  assert([...s.tables.projectObjects.values()].filter(row => row.sourceReferenced).length === outputs.length);
+  await s.call('worker-output-replay', ctx => storeSourceOutputs(ctx, s.projectId, 'synthetic', outputs));
+  assert.equal(s.counts.at(-1).writes, 0);
+});

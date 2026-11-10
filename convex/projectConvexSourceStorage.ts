@@ -24,11 +24,14 @@ export function sourceStorage(
   ctx: ActionCtx,
   projectId: Id<'hostedProjects'>,
   hash: (bytes: Uint8Array) => string = digest,
+  observe?: (event: 'put' | 'refused', pin: { sha256: string; size: number }) => void,
 ) {
   return {
-    async store(bytes: Uint8Array): Promise<string> {
-      const pin = { sha256: hash(bytes), size: bytes.length };
-      const stored = await storeSourceBytes(ctx, projectId, bytes, pin);
+    // `verified` is supplied only by the fixed transport after its exact hash
+    // check (or its chunk builder); durable cursor callers still compute it here.
+    async store(bytes: Uint8Array, verified?: { sha256: string; size: number }): Promise<string> {
+      const pin = verified ?? { sha256: hash(bytes), size: bytes.length };
+      const stored = await storeSourceBytes(ctx, projectId, bytes, pin, false, undefined, observe);
       return 'r2Key' in stored ? `r2source:${pin.sha256}:${pin.size}` : stored.storageId;
     },
     async read(ref: string): Promise<Uint8Array> {

@@ -21,6 +21,7 @@ export async function storeSourceBytes(
   pin: { sha256: string; size: number },
   reuse = false,
   created?: (wrote: boolean) => void,
+  observe?: (event: 'put' | 'refused', pin: { sha256: string; size: number }) => void,
 ): Promise<{ storageId: Id<'_storage'> } | { r2Key: string }> {
   invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Source output size changed.');
   invariant(projectId, 'SOURCE_JOB_INVALID', 'R2 source needs its exact project binding.');
@@ -35,6 +36,7 @@ export async function storeSourceBytes(
   }
   const target = await presignPut(config, key, { digest: pin.sha256, size: pin.size });
   let response: Response;
+  observe?.('put', pin);
   try {
     response = await convexFetch(target.url, {
       method: 'PUT',
@@ -46,6 +48,7 @@ export async function storeSourceBytes(
   } catch (error) {
     throw new SourceIoError(error, 'source-put', pin.sha256);
   }
+  if (response.status === 412) observe?.('refused', pin);
   if (transientSourceStatus(response.status))
     throw new SourceIoError(null, 'source-put', pin.sha256, response.status);
   invariant(response.ok || response.status === 412, 'R2_UPLOAD_FAILED', 'Source upload failed.');
@@ -67,4 +70,29 @@ export async function storeSourceBytes(
   // true: this PUT wrote the object; false (412): it already existed and may belong to another writer.
   created?.(response.status !== 412);
   return { r2Key: key };
+}
+
+/** Action-local attempted bodies, not a billed-meter estimate. A refused body
+ * is already included in its category and counted separately as overlap. */
+export function sourcePutMetrics() {
+  type Kind = 'state' | 'progress' | 'other';
+  const entries: { kind: Kind; sha256: string; size: number }[] = [];
+  let refused = 0,
+    avoided = 0;
+  return {
+    observer: (kind: Kind) => (event: 'put' | 'refused', pin: { sha256: string; size: number }) => {
+      if (event === 'put') entries.push({ kind, ...pin });
+      else refused += pin.size;
+    },
+    avoid: (size: number) => {
+      avoided += size;
+    },
+    snapshot: (result?: { sha256: string } | null) => {
+      const totals = { state: 0, progress: 0, result: 0, other: 0, refused, avoided };
+      for (const entry of entries)
+        totals[entry.kind === 'other' && entry.sha256 === result?.sha256 ? 'result' : entry.kind] +=
+          entry.size;
+      return totals;
+    },
+  };
 }

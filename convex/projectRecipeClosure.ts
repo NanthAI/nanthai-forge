@@ -2,8 +2,9 @@
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { presignGet, r2Config, r2Key } from './r2';
+import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
 import type { SignedDownload } from '../src/blob-download-format';
-type Pin = { sha256: string; size: number };
+type Pin = { sha256: string; size: number; pack?: ObjectPack };
 /** A bounded projection from verified worker output, never accepted from client plans.
  * Larger/legacy recipes keep their existing tree reader; this is not a source limit. */
 export function validateRecipeClosure(object: { size: number }, leaves: Pin[]) {
@@ -40,10 +41,16 @@ export async function signRecipeClosure(row: {
     row.recipeClosure.map(leaf => {
       let value = signed.get(leaf.sha256);
       if (!value) {
-        value = presignGet(config, r2Key(row.projectId, leaf.sha256)).then(url => ({
+        const range = packRange(leaf);
+        value = presignGet(
+          config,
+          r2Key(row.projectId, leaf.pack?.digest ?? leaf.sha256),
+          packHeaders(range, leaf.size),
+        ).then(url => ({
           digest: leaf.sha256,
           size: leaf.size,
           url,
+          ...(range ? { range } : {}),
         }));
         signed.set(leaf.sha256, value);
       }

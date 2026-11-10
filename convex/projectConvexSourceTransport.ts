@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sourcePutMetrics } from './projectSourceBytes';
+import { sourceStateChunks } from './projectConvexSourceChunks';
 import { copyRecipeClosure } from '../src/object-pack-range';
 import type { SignedDownload } from '../src/blob-download-format';
 import { convexFetch, networkTimeout } from './networkFetch';
@@ -44,10 +46,12 @@ export function convexSourceTransport(
     overlapWrites = false,
     hash = digest,
     preloaded = [],
+    putMetrics = sourcePutMetrics(),
   }: {
     overlapWrites?: boolean;
     /** Node supplies native SHA-256; V8 retains portable hashing. */
     hash?: (bytes: Uint8Array) => string;
+    putMetrics?: ReturnType<typeof sourcePutMetrics>;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -67,11 +71,29 @@ export function convexSourceTransport(
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
   };
-  const durable = sourceStorage(ctx, projectId, hash);
+  const durable = sourceStorage(ctx, projectId, hash, putMetrics.observer('other'));
+  const stateStorage = sourceStorage(ctx, projectId, hash, putMetrics.observer('state'));
+  const chunks = sourceStateChunks(
+    projectId,
+    hash,
+    async (pin, bytes) => {
+      const ref = await clock.write(() => stateStorage.store(bytes, pin)),
+        r2 = sourceR2Pin(ref);
+      invariant(
+        r2 && r2.sha256 === pin.sha256 && r2.size === pin.size,
+        'SOURCE_HASH_MISMATCH',
+        'Source chunk storage changed.',
+      );
+      return { ...pin, r2Key: r2Key(projectId, pin.sha256) };
+    },
+    putMetrics.avoid,
+  );
   const generations = new Map<string, number>(),
-    parents = new Map<string, string[]>();
+    parents = new Map<string, string[]>(),
+    outputParents = new Map<string, readonly string[]>();
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
+      chunks.remember(row);
       locations.set(row.descriptor.object.sha256, row);
       if (validStateGeneration(row.stateGeneration))
         generations.set(row.descriptor.object.sha256, row.stateGeneration);
@@ -86,12 +108,12 @@ export function convexSourceTransport(
     if (bytes.length === value.size && hash(bytes) === value.sha256) held.set(value.sha256, bytes);
   }
   let heldBytes = [...held.values()].reduce((n, bytes) => n + bytes.length, 0);
-  const keep = (pin: WorkerPin, bytes: Uint8Array) => {
+  const keep = (pin: WorkerPin, bytes: Uint8Array, verified = false) => {
     if (
       !held.has(pin.sha256) &&
       heldBytes + bytes.length <= 2 * 1024 * 1024 &&
       bytes.length === pin.size &&
-      hash(bytes) === pin.sha256
+      (verified || hash(bytes) === pin.sha256)
     ) {
       held.set(pin.sha256, bytes);
       heldBytes += bytes.length;
@@ -132,8 +154,12 @@ export function convexSourceTransport(
     return rows.map(row => row.descriptor);
   };
   const io: StepTransport = {
+    rememberOutputState: (pin, parents) => {
+      if (validStateParents(parents)) outputParents.set(pin.sha256, [...parents]);
+    },
     recipeLeaves: id => locations.get(id)?.closure?.map(leaf => ({ sha256: leaf.digest, size: leaf.size })),
     rememberBytes: (pin, bytes) => {
+      chunks.rememberBytes(pin, bytes, locations.get(pin.sha256));
       // The reader has just verified this exact whole-object pin. Keep one private
       // copy for the existing small fallback hand-off, without hashing it again.
       if (!held.has(pin.sha256) && heldBytes + pin.size <= 2 * 1024 * 1024 && bytes.length === pin.size) {
@@ -368,21 +394,15 @@ export function convexSourceTransport(
     })();
   }
   async function prepareOutput(pin: WorkerPin, stream: AsyncIterable<Uint8Array>) {
-    const parts: Uint8Array[] = [];
+    const bytes = new Uint8Array(pin.size);
     let size = 0;
     for await (const part of stream) {
       size += part.length;
       invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source output exceeded exact pin.');
-      parts.push(new Uint8Array(part));
-    }
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const part of parts) {
-      bytes.set(part, offset);
-      offset += part.length;
+      bytes.set(part, size - part.length);
     }
     invariant(
-      bytes.length === pin.size && hash(bytes) === pin.sha256,
+      size === pin.size && hash(bytes) === pin.sha256,
       'SOURCE_HASH_MISMATCH',
       'Source output changed.',
     );
@@ -390,7 +410,12 @@ export function convexSourceTransport(
     // list can select a generation; plans, display hints and uploads cannot.
     let stateGeneration: number | undefined, stateParents: string[] | undefined;
     const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
-    if (prefix.includes('"kind":"forge-source-state"')) {
+    const ownParents = outputParents.get(pin.sha256);
+    if (ownParents) {
+      stateParents = [...ownParents];
+      stateGeneration = nextStateGeneration(stateParents, id => generations.get(id));
+      if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
+    } else if (prefix.includes('"kind":"forge-source-state"')) {
       try {
         const state = parseNativeState(bytes);
         stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
@@ -408,11 +433,49 @@ export function convexSourceTransport(
     }
     return {
       async store(): Promise<SourceOutput> {
-        const ref = await clock.write(() => durable.store(bytes)),
+        const projected = stateParents ? await chunks.output(pin, bytes) : null;
+        if (projected) {
+          // The closure is signed locally for later quanta only after each body
+          // was confirmed; the commit still validates all physical bindings.
+          const closure = await Promise.all(
+            projected
+              .physical!.filter(leaf => projected.recipeClosure!.some(pin => pin.sha256 === leaf.sha256))
+              .map(async leaf => ({
+                digest: leaf.sha256,
+                size: leaf.size,
+                url: await presignGet(
+                  r2Config(),
+                  leaf.r2Key,
+                  packHeaders(
+                    leaf.pack ? { offset: leaf.pack.offset, total: leaf.pack.size } : undefined,
+                    leaf.size,
+                  ),
+                ),
+                ...(leaf.pack ? { range: { offset: leaf.pack.offset, total: leaf.pack.size } } : {}),
+              })),
+          );
+          const byDigest = new Map(closure.map(leaf => [leaf.digest, leaf]));
+          remember([
+            {
+              descriptor: { object: pin, recipe: projected.recipe! },
+              storageId: null,
+              url: null,
+              closure: projected.recipeClosure!.map(leaf => byDigest.get(leaf.sha256)!),
+              ...(stateGeneration === undefined ? {} : { stateGeneration }),
+              stateParents,
+            },
+          ]);
+          return {
+            ...projected,
+            ...(stateGeneration === undefined ? {} : { stateGeneration }),
+            stateParents,
+          };
+        }
+        const ref = await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
           r2 = sourceR2Pin(ref);
         // This action just hash-verified and stored the bytes. Later quanta can read them
         // before the one final commit registers their rows; no descriptor RPC is needed.
-        keep(pin, bytes);
+        keep(pin, bytes, true);
         if (r2) generatedKeys.set(pin.sha256, r2Key(projectId, r2.sha256));
         remember([
           {
@@ -435,6 +498,7 @@ export function convexSourceTransport(
   return {
     io,
     outputs,
+    putMetrics,
     /** Wait for overlapped writes; `outputs` is complete only after this. */
     settle,
     locations,

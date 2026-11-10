@@ -54,3 +54,13 @@ Things we built, measured and removed. Each entry says what the numbers were, so
 **Why it failed.** The kill rule needed live memory and latency at 150k+ files within the action limit and no worse than flat, and nothing slower on the client. Chunks cut bytes but not memory, because identity is still the flat manifest, and they added sequential round trips on the server and many more on the client.
 
 **What would have to change.** Two things together. First, one call that signs all of a recipe's leaves (the leaf list on the object row, or a single describe of the whole tree), on the server and in the client reader, so depth costs nothing. Second, a 190k State that fits in an action, which is the memory problem of flat States, not of chunking. With both, the byte saving above is the prize. The faster chunker loop from this experiment (4 to 5 times faster, same boundaries) was kept.
+
+**Current bounded encoding.** Issue 298f9675 supplies a trusted ordered leaf/range
+projection in the existing authorized read for both reader families, and copies
+leaves directly into the final buffer. Fixed source writers use that path only
+inside the existing 1–4 MiB State window, with unchanged identity, path-stable
+file-list cuts and verified destination-range reuse. A representation that would
+increase uploaded bytes keeps the flat writer. Physical metadata is published in
+the existing output commit; legacy recipes retain their reader. This addresses
+sequential descriptor calls at this scale. It does not solve the 190k-file flat
+manifest memory failure or authorize a State identity change.

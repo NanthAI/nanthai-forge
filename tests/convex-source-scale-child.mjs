@@ -41,17 +41,18 @@ process.on('message', async message => {
         const metadata = await rpc('r2-head', { url: String(url) });
         return new Response(null, { status: metadata ? 200 : 404, headers: metadata ?? {} });
       }
-      const spec = await rpc('fetch', { url: String(url) });
+      const spec = await rpc('fetch', { url: String(url), range: new Headers(init.headers).get('range') });
       if (spec.delay) await new Promise(resolve => setTimeout(resolve, spec.delay));
       if (spec.path) return new Response(createReadStream(spec.path, { highWaterMark: 65536 }));
       return new Response(
         new ReadableStream({
           start(controller) {
-            const b = bytes(spec);
+            const b = spec.rangeBytes ?? bytes(spec);
             for (let i = 0; i < b.length; i += 65536) controller.enqueue(b.subarray(i, i + 65536));
             controller.close();
           },
         }),
+        { status: spec.status ?? 200, headers: spec.headers },
       );
     };
     const storage = {

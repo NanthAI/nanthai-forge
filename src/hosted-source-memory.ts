@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { LazyMergeSource, NeededObject } from './hosted-merge-reader.js';
-import { parseNativeState, type NativeState } from './state/format.js';
+import { parseNativeState, validateNativeStateFiles, type NativeState } from './state/format.js';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { readObjectRecipe, objectRecipeSchema } from './object-chunks.js';
 import { digest } from './hash.js';
@@ -15,6 +15,7 @@ import { mapSourceOrdered } from './hosted-source-parallel.js';
 export class MemoryMergeSource extends LazyMergeSource {
   readonly objects = new Map<string, Buffer>();
   private readonly parsed = new Map<string, NativeState>();
+  private readonly generatedBytes = new WeakMap<Buffer, string>();
   private cutList: string[] | undefined;
   private cutIds = new Set<string>();
   constructor(
@@ -33,7 +34,21 @@ export class MemoryMergeSource extends LazyMergeSource {
     const id = digest(bytes);
     this.objects.set(id, bytes);
     this.generated.add(id);
+    this.generatedBytes.set(bytes, id);
     return id;
+  }
+  protected override storeState(state: NativeState): string {
+    validateNativeStateFiles(state);
+    const id = this.put(Buffer.from(JSON.stringify(state)));
+    this.parsed.set(id, state);
+    this.parents[id] = state.parents;
+    this.states.add(id);
+    return id;
+  }
+  outputState(bytes: Buffer) {
+    const id = this.generatedBytes.get(bytes),
+      state = id ? this.parsed.get(id) : undefined;
+    return id && state ? { pin: { sha256: id, size: bytes.length }, parents: state.parents } : null;
   }
   override state(id: string): NativeState {
     // This is an explicit proven graph cut, not a claim about stored parents.
@@ -207,6 +222,10 @@ export class MemorySourceReader extends SourceWorkerReader {
     }
   }
   override async publishMany(bytes: Buffer[]): Promise<WorkerPin[]> {
+    for (const content of bytes) {
+      const own = this.source.outputState(content);
+      if (own) this.io.rememberOutputState?.(own.pin, own.parents);
+    }
     const pins = await super.publishMany(bytes);
     for (let i = 0; i < pins.length; i++) this.source.objects.set(pins[i]!.sha256, bytes[i]!);
     return pins;

@@ -256,3 +256,47 @@ test('a padded recipe root above the established 2 MiB metadata bound is rejecte
   assert.equal(reads, 0);
   assert.equal(reader.source.objects.size, 0);
 });
+
+test('cost 298f9675: the existing step marker separates attempted State, progress, result and refused bodies', async t => {
+  fakeSourceR2(t);
+  const { sourcePutMetrics } = await import(moduleUrl('../convex/projectSourceBytes.ts'));
+  const { logSourceStep } = await import('../dist/hosted-source-io-error.js');
+  const counts = sourcePutMetrics(),
+    ctx = { storage: forbiddenStorage };
+  const state = sourceStorage(ctx, 'project', digest, counts.observer('state')),
+    progress = sourceStorage(ctx, 'project', digest, counts.observer('progress')),
+    other = sourceStorage(ctx, 'project', digest, counts.observer('other'));
+  const result = Buffer.from('result');
+  await state.store(Buffer.from('state'));
+  await state.store(Buffer.from('state'));
+  await progress.store(Buffer.from('cursor'));
+  await other.store(result);
+  counts.avoid(123);
+  let logged;
+  t.mock.method(console, 'warn', value => {
+    logged = JSON.parse(value);
+  });
+  logSourceStep(
+    { jobId: 'synthetic', step: 1 },
+    {
+      runtime: 'node',
+      kind: 'save',
+      from: 'input',
+      to: 'done',
+      objects: 1,
+      bytes: 5,
+      outputs: 2,
+      started: performance.now(),
+      putBytes: counts.snapshot({ sha256: digest(result) }),
+    },
+  );
+  assert.equal(logged.event, 'forge-source-step');
+  assert.deepEqual(logged.putBytes, {
+    state: 10,
+    progress: 6,
+    result: 6,
+    other: 0,
+    refused: 5,
+    avoided: 123,
+  });
+});

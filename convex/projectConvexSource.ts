@@ -120,11 +120,24 @@ export async function runConvexSourceStep(
           objects: transport.reads.objects,
           bytes: transport.reads.bytes,
           outputs: outputCount,
+          putBytes: transport.putMetrics.snapshot(output),
           started,
         });
         return published;
       } catch (error) {
         if (delegated) throw error;
+        logSourceStep(input, {
+          runtime: 'v8',
+          kind: state.jobKind ?? null,
+          from: 'input',
+          to: null,
+          objects: transport.reads.objects,
+          bytes: transport.reads.bytes,
+          outputs: transport.outputs.length,
+          started,
+          outcome: 'failed',
+          putBytes: transport.putMetrics.snapshot(),
+        });
         const domain = sourceDomainError(error);
         if (!domain || domain.code === 'SOURCE_JOB_FENCED') throw error;
         logSourceFailure(error, input, 'small-save', started);

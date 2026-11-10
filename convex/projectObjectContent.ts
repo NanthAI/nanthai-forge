@@ -203,9 +203,11 @@ export async function objectContents(
       continue;
     }
     if (row.recipe && row.recipeClosure) {
+      const bindings = new Map(row.recipeClosure.map(leaf => [leaf.sha256, leaf]));
       const closure = row.recipeClosure.map(leaf => ({ digest: leaf.sha256, size: leaf.size, url: '' }));
       const value = await copyRecipeClosure(pin, closure, async (leaf, destination) => {
-        const physical = { sha256: leaf.digest, size: leaf.size };
+        const physical = { sha256: leaf.digest, size: leaf.size },
+          binding = bindings.get(leaf.digest)!;
         return raw(
           ctx,
           {
@@ -216,7 +218,8 @@ export async function objectContents(
             removed: false,
             location: 'r2',
             r2Committed: true,
-            r2Key: r2Key(row.projectId, leaf.digest),
+            r2Key: r2Key(row.projectId, binding.pack?.digest ?? leaf.digest),
+            ...(binding.pack ? { pack: binding.pack } : {}),
           },
           physical,
           destination,

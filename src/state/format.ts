@@ -91,6 +91,11 @@ export function parseNativeStateValue(value: unknown): NativeState {
     if (!(error instanceof z.ZodError)) throw error;
     throw new ForgeError('INVALID_NATIVE_SOURCE', 'Native source manifest encoding is invalid.');
   }
+  validateNativeStateFiles(state);
+  return state;
+}
+/** Semantic checks shared by decoded reads and already schema-checked writers. */
+export function validateNativeStateFiles(state: NativeState) {
   invariant(
     new Set(state.files.map(file => file.path)).size === state.files.length &&
       state.files.every(file => !reservedSegment.test(file.path)),
@@ -102,5 +107,107 @@ export function parseNativeStateValue(value: unknown): NativeState {
     'INVALID_NATIVE_SOURCE',
     'Source file and directory paths overlap.',
   );
-  return state;
+}
+
+/** Derived physical boundaries only: the original State bytes and identity never
+ * change. Header/parents and suffix are isolated; file-list anchors depend on
+ * path bytes, so an edited blob does not move the remaining boundaries. */
+export function stateByteChunks(bytes: Uint8Array, hash: (bytes: Uint8Array) => string) {
+  if (
+    bytes.length < 1024 * 1024 ||
+    bytes.length > 4 * 1024 * 1024 ||
+    !new TextDecoder().decode(bytes.subarray(0, 256)).includes('"kind":"forge-source-state"')
+  )
+    return null;
+  const key = new TextEncoder().encode('"files":[');
+  let first = -1;
+  for (let i = 0; i <= bytes.length - key.length; i++) {
+    if (bytes[i] === 34 && key.every((c, n) => bytes[i + n] === c)) {
+      first = i + key.length;
+      break;
+    }
+  }
+  if (first < 0) return null;
+  const ends = [first];
+  let at = first,
+    chunk = first,
+    last = first;
+  while (bytes[at] !== 93) {
+    // Other validated file values are hex digests and fixed mode tokens: none
+    // contains 'p'. Native indexOf skips them without per-entry regex/string
+    // allocations. A path literal is consumed completely, including escapes.
+    const pathAt = bytes.indexOf(112, at);
+    if (
+      bytes[at] !== 123 ||
+      pathAt < 0 ||
+      bytes[pathAt - 1] !== 34 ||
+      bytes[pathAt + 1] !== 97 ||
+      bytes[pathAt + 2] !== 116 ||
+      bytes[pathAt + 3] !== 104 ||
+      bytes[pathAt + 4] !== 34 ||
+      bytes[pathAt + 5] !== 58 ||
+      bytes[pathAt + 6] !== 34
+    )
+      return null;
+    let cursor = pathAt + 7,
+      anchor = 2166136261,
+      escaped = false,
+      closed = false;
+    while (cursor < bytes.length) {
+      const c = bytes[cursor++]!;
+      if (c === 34 && !escaped) {
+        closed = true;
+        break;
+      }
+      if (c < 128) {
+        anchor = Math.imul(anchor ^ c, 16777619) >>> 0;
+        if (escaped) escaped = false;
+        else if (c === 92) escaped = true;
+      } else {
+        const length = c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : 2;
+        if (c < 0xc2 || c > 0xf4) return null;
+        let code = c & (length === 4 ? 7 : length === 3 ? 15 : 31);
+        for (let n = 1; n < length; n++) {
+          const next = bytes[cursor++]!;
+          if (!(next >= 0x80 && next <= 0xbf)) return null;
+          code = (code << 6) | (next & 63);
+        }
+        if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) return null;
+        if (code > 0xffff) {
+          code -= 0x10000;
+          anchor = Math.imul(anchor ^ (0xd800 + (code >>> 10)), 16777619) >>> 0;
+          anchor = Math.imul(anchor ^ (0xdc00 + (code & 1023)), 16777619) >>> 0;
+        } else anchor = Math.imul(anchor ^ code, 16777619) >>> 0;
+        escaped = false;
+      }
+    }
+    if (!closed) return null;
+    const end = bytes.indexOf(125, cursor) + 1;
+    if (!end) return null;
+    if (end - chunk > 1024 * 1024 && last > chunk) {
+      ends.push(last);
+      chunk = last;
+    }
+    if (end - chunk > 1024 * 1024) return null;
+    if (end - chunk >= 256 * 1024 && ((anchor & 4095) === 0 || end - chunk >= 1024 * 1024 - 8192)) {
+      ends.push(end);
+      chunk = end;
+    }
+    last = end;
+    at = end;
+    if (bytes[at] === 44) at++;
+    else if (bytes[at] !== 93) return null;
+  }
+  if (at > chunk) ends.push(at);
+  ends.push(bytes.length);
+  let offset = 0;
+  const chunks = ends
+    .map(end => {
+      const content = bytes.subarray(offset, end),
+        value = { sha256: hash(content), size: content.length, offset };
+      offset = end;
+      return value;
+    })
+    .filter(pin => pin.size > 0);
+  return chunks.every(pin => pin.size <= 1024 * 1024) ? chunks : null;
 }
