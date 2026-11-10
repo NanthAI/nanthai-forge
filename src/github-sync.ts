@@ -44,7 +44,32 @@ export async function githubSync(
     sleep?: (ms: number) => Promise<void>;
   } = {},
 ) {
-  const store = new WorkStore(input);
+  const store = WorkStore.open<
+    | 'commitRecords'
+    | 'directory'
+    | 'laneLocked'
+    | 'load'
+    | 'locked'
+    | 'lockedAsync'
+    | 'native'
+    | 'observing'
+    | 'page'
+    | 'path'
+    | 'pinnedBytes'
+    | 'pinnedData'
+    | 'pointer'
+    | 'prepareCommitRecords'
+    | 'prepareSave'
+    | 'preparing'
+    | 'publishSave'
+    | 'readRecords'
+    | 'records'
+    | 'revision'
+    | 'root'
+    | 'save'
+    | 'select'
+    | 'snapshotBytes'
+  >(input);
   if (options.autoPush)
     invariant(
       !serverRecoveryAuthority(readHostState(store)),

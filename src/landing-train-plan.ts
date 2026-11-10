@@ -5,9 +5,11 @@ import { landingOverlap } from './landing-overlap.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'root'>;
+
 /** Read-only adapter shared by the durable selector and status events. Predictions
  * schedule immutable submitted heads; they never supply acceptance evidence. */
-export function planLandingTrain(store: WorkStore, data: WorkData, channel: string) {
+export function planLandingTrain(store: StoreAccess, data: WorkData, channel: string) {
   const queued = orderLandingEntries(
     (data.landingEntries ?? []).filter(entry => entry.channel === channel && entry.status === 'queued'),
   );

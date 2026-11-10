@@ -17,13 +17,41 @@ import type { ConflictNotice } from './agent-conflict-notice.js';
 import type { Lane } from './work-types.js';
 import type { BriefEvent } from './agent-brief-types.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 type Handover = NonNullable<Lane['handovers']>[number] & { laneId: string; intentId: string };
 
 /** Local advisory journal, separate from portable Work and disposable peers cache.
  * Immutable per-operation files and a separate lock avoid lost concurrent answers. */
 export class CoordinationJournal {
   private readonly directory: string;
-  constructor(private readonly store: WorkStore) {
+  constructor(private readonly store: StoreAccess) {
     this.directory = join(store.directory, 'coordination');
   }
   private prepare() {

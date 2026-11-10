@@ -30,6 +30,34 @@ import type { WorkService } from './work.js';
 import type { BatchPrefix, LandingBatch } from './landing-batch-types.js';
 import type { LandingDriver } from './landing-driver.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const same = isDeepStrictEqual;
 /** Run/View IDs, timestamps and controller CLI pins are orchestration, not execution inputs.
  * Adopt the original validated shard placement: timing history is scheduling advice.
@@ -48,7 +76,7 @@ function recipe(plan: RemoteCheckPlan) {
     groups: { tests: plan.groups.flat().sort() },
   };
 }
-function tree(store: WorkStore, head: string) {
+function tree(store: StoreAccess, head: string) {
   return new NativeSource(store.root).state(head).files;
 }
 

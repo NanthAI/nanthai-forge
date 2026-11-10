@@ -12,9 +12,11 @@ import {
   OWNER_DERIVED_MAX_BYTES,
   type OwnerDerivedBaseline,
 } from './owner-derived.js';
+
+type StoreAccess = Pick<WorkStore, 'directory' | 'root'>;
 /** Disposable, bounded delta cache. Dry runs may redirect it outside the owner. */
 export function ownerDerivedBytes(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   baseline?: OwnerDerivedBaseline,
   cacheDirectory = store.directory,

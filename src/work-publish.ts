@@ -7,6 +7,8 @@ import { prepareNativeProjection, validateNativeProjection, publicationHead } fr
 import { publishSchema, type Publication } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'native' | 'root' | 'save'>;
+
 const branch = (id: string) => `forge/publish/${id}`;
 type Pull = {
   number: number;
@@ -17,7 +19,7 @@ type Pull = {
   base: { ref: string; repo: { full_name: string } };
 };
 
-async function findPull(store: WorkStore, publication: Publication): Promise<Pull | undefined> {
+async function findPull(store: StoreAccess, publication: Publication): Promise<Pull | undefined> {
   const query = new URLSearchParams({
     state: 'all',
     head: `${publication.repository.split('/')[0]}:${branch(publication.id)}`,
@@ -57,7 +59,7 @@ function pullResult(publication: Publication, pull: Pull) {
     merged: Boolean(pull.merged_at),
   };
 }
-function saveResult(store: WorkStore, publication: Publication, patch: Partial<Publication>) {
+function saveResult(store: StoreAccess, publication: Publication, patch: Partial<Publication>) {
   return store.locked(() => {
     const data = store.load();
     const saved = data.publications.find(p => p.id === publication.id);
@@ -77,7 +79,7 @@ function saveResult(store: WorkStore, publication: Publication, patch: Partial<P
   });
 }
 
-export async function publishWork(store: WorkStore, input: unknown, expectedRevision: number) {
+export async function publishWork(store: StoreAccess, input: unknown, expectedRevision: number) {
   const parsed = publishSchema.safeParse(input);
   invariant(
     parsed.success,

@@ -9,7 +9,35 @@ import { runOutputDirectory } from './work-run.js';
 import type { WorkStore } from './work-store.js';
 import { inspectArtifacts } from './work-artifacts.js';
 
-export async function exportCheck(store: WorkStore, id: string, revision: number) {
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
+export async function exportCheck(store: StoreAccess, id: string, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   const run = store.load().runs.find(item => item.id === id);
   invariant(run, 'NOT_FOUND', 'Select an existing local check run.');

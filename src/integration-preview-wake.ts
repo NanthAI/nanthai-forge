@@ -3,10 +3,38 @@ import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Committed source/configuration changes are wake hints. Reads never launch
  * previews. Exact tuple deduplication ignores unrelated notes and repeated saves. */
 export function wakeIntegrationPreview(
-  store: WorkStore,
+  store: StoreAccess,
   before: WorkRecordTransaction | undefined,
   after: WorkRecordTransaction | undefined,
 ) {

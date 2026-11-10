@@ -22,11 +22,39 @@ import { invariant } from './errors.js';
 import { buildSeedPages, seedRequestSchema, type SeedEntry } from './hosted-seed-protocol.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const pin = (bytes: Buffer) => ({ sha256: digest(bytes), size: bytes.length });
 const journals = ['agent-finish', 'agent-land', 'coordination'];
 /** Recovery format 1 retains exact S03 commands, attempt IDs, waits and unknown
  * outcomes. These are historical recovery inputs, never permission to rerun. */
-function recoveryFiles(store: WorkStore) {
+function recoveryFiles(store: StoreAccess) {
   const files: { path: string; bytes: string }[] = [];
   const sources: [string, string][] = journals.map(folder => [folder, join(store.directory, folder)]);
   sources.push(['client-agent', join(clientCacheRoot(store.root), 'agent')]);
@@ -48,7 +76,7 @@ function recoveryFiles(store: WorkStore) {
   return { schema: 1, kind: 'forge-native-seed-recovery', files };
 }
 
-export async function prepareHostedSeed(store: WorkStore, revision: number, operationId: string) {
+export async function prepareHostedSeed(store: StoreAccess, revision: number, operationId: string) {
   z.uuid().parse(operationId);
   const directory = join(store.directory, `hosted-seed-${operationId}`);
   mkdirSync(directory, { recursive: true, mode: 0o700 });

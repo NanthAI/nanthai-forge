@@ -11,7 +11,12 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import { nativeChannels } from './native-work.js';
 
-export async function boundCutoverPins(store: WorkStore, supplied?: CoordinationTransport) {
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'revision'>;
+
+export async function boundCutoverPins(
+  store: Pick<WorkStore, 'directory'>,
+  supplied?: CoordinationTransport,
+) {
   const binding = requireHostedBinding(store);
   const client = supplied ?? coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN);
   return JSON.parse(
@@ -21,7 +26,7 @@ export async function boundCutoverPins(store: WorkStore, supplied?: Coordination
   );
 }
 
-function requireLocalReady(store: WorkStore, request: ReturnType<typeof cutoverRequestSchema.parse>) {
+function requireLocalReady(store: StoreAccess, request: ReturnType<typeof cutoverRequestSchema.parse>) {
   store.locked(() => {
     requireOwnerDrained(store);
     const data = store.load(),
@@ -41,7 +46,7 @@ function requireLocalReady(store: WorkStore, request: ReturnType<typeof cutoverR
 }
 
 export async function cutoverBoundProject(
-  store: WorkStore,
+  store: StoreAccess,
   input: unknown,
   dryRun: boolean,
   supplied?: CoordinationTransport,

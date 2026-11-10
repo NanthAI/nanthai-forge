@@ -18,6 +18,34 @@ import { PreviewChecks, type PreviewObservation, type PreviewCheck } from './int
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const inputSchema = z
   .object({
     action: z.literal('integrate').optional(),
@@ -58,7 +86,7 @@ export type PreviewResult = {
 
 /** Explicit local speculation: no Candidate, check run, Channel move or remote call.
  * The per-owner lock serializes previews without holding the Work mutation lock. */
-export function integrationPreview(store: WorkStore, input: unknown) {
+export function integrationPreview(store: StoreAccess, input: unknown) {
   const parsed = inputSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Select optional unique active checkpointed laneIds.');
   const command = parsed.data;
@@ -72,7 +100,7 @@ export function integrationPreview(store: WorkStore, input: unknown) {
 
 /** Internal landing path: saved request pins, never reselect mutable Lane heads. */
 export function previewPinned(
-  store: WorkStore,
+  store: StoreAccess,
   laneIds?: string[],
   pins?: { laneId: string; head: string }[],
   base?: string,

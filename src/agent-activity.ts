@@ -6,6 +6,11 @@ import { localActor } from './work-actor.js';
 import type { WorkStore } from './work-store.js';
 import type { AgentAction } from './agent-workflow-schema.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'locked' | 'observing' | 'page' | 'revision' | 'root' | 'select'
+>;
+
 function sessionId(binding: string, lane: string, actor: string) {
   const bytes = createHash('sha256')
     .update(JSON.stringify([binding, lane, actor]))
@@ -33,7 +38,7 @@ const actions = new Set([
 ]);
 /** Local presence only. Hosted lifecycle and coordination have their own authoritative APIs. */
 export function recordAgentActivity(
-  store: WorkStore,
+  store: StoreAccess,
   command: AgentAction | { action: 'activity'; laneId: string; actor?: string },
   result: unknown,
   waiting = false,

@@ -10,6 +10,34 @@ import { channelStatus } from './work-channel.js';
 import type { Lane, WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Frozen source closure for each root. Intent dependencies are exact pins;
  * ordering dependencies select saved inputs once, never during a check. */
 export function previewClosure(data: WorkData, roots: Lane[]) {
@@ -96,7 +124,7 @@ export function previewClosure(data: WorkData, roots: Lane[]) {
   return dependencies;
 }
 
-export function previewTuple(store: WorkStore, data: WorkData, lanes: Lane[], main: string) {
+export function previewTuple(store: StoreAccess, data: WorkData, lanes: Lane[], main: string) {
   const source = new PeersSource(store, ''),
     checks = previewChecks(source, main, data.checks),
     environment = checkEnvironment(),
@@ -115,7 +143,7 @@ export function previewTuple(store: WorkStore, data: WorkData, lanes: Lane[], ma
 
 /** Read-only applicability check shared by receipts and peer/status advice. */
 export function previewCurrent(
-  store: WorkStore,
+  store: StoreAccess,
   result: { main: string; inputs: { laneId: string; head: string }[]; key: string },
 ) {
   try {
@@ -139,7 +167,7 @@ export function previewCurrent(
 
 /** Notices retain history, while only the latest exact observation is inbox advice. */
 export function previewAdviceCurrent(
-  store: WorkStore,
+  store: StoreAccess,
   advice: { main: string; key: string; inputs?: { laneId: string; head: string }[] },
   noticeId: string,
 ) {

@@ -9,6 +9,8 @@ import { interactionRequestSchema } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 const fields = z.record(z.string(), z.unknown());
 const attemptSchema = z.object({
   number: z.number().int().nonnegative(),
@@ -59,7 +61,7 @@ export function finishAttempt(
 }
 
 /** Read retained driver context for an explicit Lane handover; never resumes a driver. */
-export function laneFinishes(store: WorkStore, laneId?: string, operationId?: string) {
+export function laneFinishes(store: StoreAccess, laneId?: string, operationId?: string) {
   const directory = join(store.directory, 'agent-finish');
   if (!existsSync(directory)) return [];
   return readdirSync(directory)

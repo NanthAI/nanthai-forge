@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workStoreAccessFindings } from './check-work-store-access.mjs';
 import { networkBoundaryFindings } from './check-network-boundaries.mjs';
 import { readdirSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, dirname, relative, extname, sep } from 'node:path';
@@ -56,6 +57,7 @@ for (const file of files) {
     const path = relative(root, file),
       source = readFileSync(file, 'utf8');
     errors.push(...networkBoundaryFindings(path, source));
+    errors.push(...workStoreAccessFindings(path.split(sep).join('/'), source));
     if (['.ts', '.tsx'].includes(extname(file))) errors.push(...idleQueryFindings(path, source));
     errors.push(...recoveryAdviceFindings(path, source));
     errors.push(...spdxFindings(path.split(sep).join('/'), source));

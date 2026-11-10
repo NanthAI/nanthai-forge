@@ -10,6 +10,34 @@ import type { ExchangeTransport, TransferReceipt } from './native-exchange.js';
 import type { hostProgress } from './host-progress.js';
 import { digest } from './hash.js';
 import { retainRecoveryCapture } from './recovery-capture.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 export { prepareHostedSeed } from './hosted-seed-capture.js';
 export interface SeedClient {
   mutation(ref: FunctionReference<'mutation'>, args: Record<string, unknown>): Promise<unknown>;
@@ -19,7 +47,7 @@ export interface SeedClient {
  * Every successful page advances a durable hosted cursor. Unknown outcomes use
  * the same operation/page and immutable local bytes on the next invocation. */
 export async function seedHostedProject(
-  store: WorkStore,
+  store: StoreAccess,
   input: { projectId: string; operationId: string; revision: number },
   client: SeedClient,
   exchange: ExchangeTransport,

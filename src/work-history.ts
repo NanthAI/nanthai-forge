@@ -6,6 +6,8 @@ import { workGit } from './work-git.js';
 import type { HistoryCommand } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'root'>;
+
 type AvailableCommit = {
   id: string;
   status: 'available';
@@ -103,7 +105,7 @@ function commit(root: string, id: string, rawExport: boolean): HistoryEntry {
   };
 }
 
-export function historyWork(store: WorkStore, command: HistoryCommand, revision: number) {
+export function historyWork(store: StoreAccess, command: HistoryCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   const data = store.load();
   const view = evidenceView(data, command.viewId, command.expectedHead);

@@ -19,6 +19,8 @@ import { durableReplace } from './native-durability.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { parseHostedResponse } from './hosted-response.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'revision'>;
+
 /** Only call with feedback from this binding's authenticated transport. Never rewind a pin. */
 export function rememberSourceAuthorityError(
   store: Pick<WorkStore, 'directory' | 'locked'>,
@@ -36,7 +38,7 @@ export function rememberSourceAuthorityError(
 
 /** Journal before IO; replay the same command after any unknown reply or local interruption. */
 export async function transitionBoundSourceAuthority(
-  store: WorkStore,
+  store: StoreAccess,
   input: {
     operationId: string;
     expected: z.infer<typeof sourceAuthoritySchema>;

@@ -25,7 +25,8 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   const json = args.includes('--json');
   const [root, ...flags] = args.filter(arg => arg !== '--json');
   invariant(root && !root.startsWith('-'), 'BAD_ARGUMENT', HOST_HELP);
-  if (flags.length === 1 && flags[0] === '--cutover-pins') return boundCutoverPins(new WorkStore(root));
+  if (flags.length === 1 && flags[0] === '--cutover-pins')
+    return boundCutoverPins(WorkStore.open<'directory'>(root));
   if (flags[0] === '--cutover-file') {
     invariant(
       flags[1] && flags.length === 3 && ['--dry-run', '--apply'].includes(flags[2]!),
@@ -33,13 +34,16 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       'Use --cutover-file REQUEST.json --dry-run or --apply.',
     );
     return cutoverBoundProject(
-      new WorkStore(root),
+      WorkStore.open<'directory' | 'load' | 'locked' | 'revision'>(root),
       JSON.parse(readFileSync(flags[1], 'utf8')),
       flags[2] === '--dry-run',
     );
   }
   if (flags.length === 2 && flags[0] === '--source-authority')
-    return transitionBoundSourceAuthority(new WorkStore(root), JSON.parse(flags[1]!));
+    return transitionBoundSourceAuthority(
+      WorkStore.open<'directory' | 'load' | 'locked' | 'revision'>(root),
+      JSON.parse(flags[1]!),
+    );
   if (flags.length === 1 && flags[0] === '--abort-seed') return abortPendingSeed(root);
   if (flags[0] === '--abandon-pending') {
     invariant(
@@ -47,7 +51,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       'BAD_ARGUMENT',
       'Use --abandon-pending OPERATION_UUID --confirm OPERATION_UUID.',
     );
-    return abandonPendingHost(new WorkStore(root), flags[1], flags[3]);
+    return abandonPendingHost(WorkStore.open<'directory' | 'locked'>(root), flags[1], flags[3]);
   }
   if (flags.includes('--delete-project')) {
     const result = await deleteHostedProject(root, {

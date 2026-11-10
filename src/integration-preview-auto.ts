@@ -14,9 +14,37 @@ import { withQueueSlot } from './landing-queue.js';
 import { integrationPreview, type PreviewResult } from './integration-preview.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 const scheduled = new Set<string>();
-const requestPath = (store: WorkStore) => join(store.directory, 'integration-preview-request.json');
-const statusPath = (store: WorkStore) => join(store.directory, 'integration-preview-status.json');
+const requestPath = (store: StoreAccess) => join(store.directory, 'integration-preview-request.json');
+const statusPath = (store: StoreAccess) => join(store.directory, 'integration-preview-status.json');
 type Request = { token: string; at: number };
 type Status = { token: string; result?: PreviewResult; error?: string };
 function read<T>(path: string): T | undefined {
@@ -33,7 +61,7 @@ function write(path: string, value: unknown) {
 }
 
 /** Only successful saved events wake a finite local worker; no idle subscription. */
-export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spawn = spawn) {
+export function scheduleIntegrationPreview(store: StoreAccess, launch: typeof spawn = spawn) {
   try {
     if (!readPolicy(store).integrationPreview?.auto) return;
     const queued = workLocked(join(store.directory, 'integration-preview-request.lock'), () => {
@@ -85,7 +113,7 @@ export function scheduleIntegrationPreview(store: WorkStore, launch: typeof spaw
 /** Serialized finite drain. Queued workers recheck the handled token, so bursts
  * across CLI processes coalesce too; the preview's own lock also covers manual runs. */
 export async function drainIntegrationPreviews(
-  store: WorkStore,
+  store: StoreAccess,
   run: () => PreviewResult | Promise<PreviewResult> = () => integrationPreview(store, {}).result,
   debounceMs = 200,
 ) {
@@ -128,7 +156,7 @@ export async function drainIntegrationPreviews(
 }
 
 /** One compact local observation; pinned result remains available through integrate. */
-export function integrationPreviewStatus(store: WorkStore): string | undefined {
+export function integrationPreviewStatus(store: StoreAccess): string | undefined {
   const request = read<Request>(requestPath(store)),
     status = read<Status>(statusPath(store));
   if (!request) return;

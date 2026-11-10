@@ -4,8 +4,10 @@ import { landingWait, checkingWait } from './landing-waiting.js';
 import type { WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'root'>;
+
 /** Node-only (reads the native store); kept apart from landing-waiting so the browser bundle can import the pure wait helpers. */
-export function recordLandingWaits(store: WorkStore, data: WorkData, channel: string) {
+export function recordLandingWaits(store: StoreAccess, data: WorkData, channel: string) {
   const train = planLandingTrain(store, data, channel);
   for (const entry of data.landingEntries ?? []) {
     if (entry.channel !== channel) continue;

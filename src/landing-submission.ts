@@ -11,8 +11,36 @@ import type { ChannelMove } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
 import { submissionOutcome, type Submission } from './landing-submission-state.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 export * from './landing-submission-state.js';
-export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
+export function queuedOutcome(store: StoreAccess, entry: LandingEntry) {
   const run = entry.runId ? store.select('runs', entry.runId) : undefined;
   const batch = entry.batchId ? store.select('landingBatches', entry.batchId) : undefined;
   const stall = entryStall(
@@ -50,7 +78,7 @@ export function queuedOutcome(store: WorkStore, entry: LandingEntry) {
 }
 /** An actual review acceptance settles a pending request; never infer acceptance from source bytes. */
 export function reviewedOutcome(
-  store: WorkStore,
+  store: StoreAccess,
   result: Record<string, unknown>,
   viewId: string | undefined,
   channel: string,
@@ -67,7 +95,7 @@ export function reviewedOutcome(
 }
 /** Identity is immutable per request + (Lane, Intent); attempts change only for a new landing try. */
 export function landingSubmission(
-  store: WorkStore,
+  store: StoreAccess,
   operationId: string,
   pin: { laneId: string; head: string },
   result: Record<string, unknown>,

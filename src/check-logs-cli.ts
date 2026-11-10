@@ -34,7 +34,7 @@ export async function checkLogsCli(args: string[]) {
     else invariant(false, 'BAD_ARGUMENT', help);
   }
   invariant(root && planPath, 'BAD_ARGUMENT', help);
-  const store = new WorkStore(resolve(root));
+  const store = WorkStore.open<'directory' | 'load' | 'locked' | 'revision' | 'root'>(resolve(root));
   const binding = hosted ? requireHostedBinding(store) : undefined;
   const client = binding ? coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN) : undefined;
   const run = async (operationId: string, apply = false, expectedPlan?: string) => {

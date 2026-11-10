@@ -4,10 +4,12 @@ import { PeersCache } from './agent-peers-cache.js';
 import { type PeersDigest } from './agent-peers.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'root' | 'select'>;
+
 type Indexed = { base: string; head: string; peers: PeersDigest };
 
 /** Detached analysis publishes an observation, never a delivery. */
-export function retainIndexedPeers(store: WorkStore, laneId: string, peers: PeersDigest) {
+export function retainIndexedPeers(store: StoreAccess, laneId: string, peers: PeersDigest) {
   const lane = store.select('lanes', laneId, 'id', true);
   if (lane) {
     const cache = new PeersCache(store.root);

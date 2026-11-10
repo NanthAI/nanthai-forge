@@ -3,8 +3,10 @@ import { savedOverlapPlan, highOverlap, orderOverlapGroups } from './agent-overl
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import type { LandingEntry } from './landing-batch-types.js';
+
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'root'>;
 /** Pinned queued heads, not a later edit of the Lane, determine scheduling. */
-export function landingOverlap(store: WorkStore, data: WorkData, entries: LandingEntry[]) {
+export function landingOverlap(store: StoreAccess, data: WorkData, entries: LandingEntry[]) {
   const pins = new Map(
     entries
       .flatMap(entry => data.views.find(view => view.id === entry.viewId)?.inputs ?? [])

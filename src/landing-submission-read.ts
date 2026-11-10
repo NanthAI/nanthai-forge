@@ -15,7 +15,35 @@ import type { LandEntry } from './land-journal.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { WorkStore } from './work-store.js';
 
-export function landSubmissions(store: WorkStore, retained: LandEntry, includePhases = true) {
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
+export function landSubmissions(store: StoreAccess, retained: LandEntry, includePhases = true) {
   const entry = resolveLandEntry(store, retained);
   const queued = store.select('landingEntries', entry.command.operationId);
   const result = queued
@@ -61,7 +89,7 @@ export function landSubmissions(store: WorkStore, retained: LandEntry, includePh
 }
 /** Read-only local driver adapters. Work remains the authority for queued outcomes. */
 export function readLaneSubmissions(
-  store: WorkStore,
+  store: StoreAccess,
   laneId?: string,
   operationId?: string,
   includePhases = true,
@@ -172,7 +200,7 @@ export function readLaneSubmissions(
 }
 
 export function finishSubmissions(
-  store: WorkStore,
+  store: StoreAccess,
   command: FinishAction,
   attempts: FinishAttempt[],
   result: Record<string, unknown>,

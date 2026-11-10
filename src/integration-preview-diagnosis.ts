@@ -7,13 +7,15 @@ import type { PeersSource } from './agent-peers-source.js';
 import type { PreviewResult } from './integration-preview.js';
 import type { PreviewObservation } from './integration-preview-checks.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'path' | 'readRecords'>;
+
 /** Only observed failures with passing same-plan controls establish interaction.
  * Deletion minimization is advisory, never a claim of global minimality. */
 export function diagnosePreview(
   result: PreviewResult,
   lanes: Lane[],
   evaluate: (lanes: Lane[]) => PreviewObservation,
-  store: WorkStore,
+  store: StoreAccess,
   source: PeersSource,
 ) {
   result.combined = evaluate(lanes);

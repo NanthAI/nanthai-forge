@@ -16,6 +16,22 @@ import { invariant } from './errors.js';
 import { contextualHunks } from './review-hunks.js';
 import { gitFileMode } from './file-mode.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'observing'
+  | 'path'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'select'
+>;
+
 export const agentReviewSchema = z
   .object({
     kind: z.enum(['lane', 'view']),
@@ -59,11 +75,11 @@ function status(before: File | null, after: File | null): Change['status'] {
 }
 
 /** Compact review is an observation, never evidence of acceptance or coverage. */
-export function readAgentReview(store: WorkStore, input: AgentReviewInput) {
+export function readAgentReview(store: StoreAccess, input: AgentReviewInput) {
   return readReview(store, agentReviewSchema.parse(input));
 }
 function readReview(
-  store: WorkStore,
+  store: StoreAccess,
   command: z.output<typeof agentReviewSchema> | z.output<typeof agentStateDiffSchema>,
 ) {
   const selection = 'kind' in command ? command : undefined,

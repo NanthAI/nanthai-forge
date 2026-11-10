@@ -97,6 +97,34 @@ export type PeersDigest = {
 };
 export { PEERS_MAX_BYTES, boundPeers } from './agent-peers-bound.js';
 import { boundPeers } from './agent-peers-bound.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 // Lifecycle receipts bound full live dependency reads and unrelated advice.
 // Saved path candidates are all analyzed; this is not an overlap/source limit.
 export const RECEIPT_PEER_LIMIT = 3;
@@ -107,7 +135,7 @@ const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  * Lifecycle calls bound expensive advice; explicit reads finish their selected work.
  * Unavailable or deferred analysis never claims clear. */
 export function agentPeers(
-  store: WorkStore,
+  store: StoreAccess,
   input: z.input<typeof peersInputSchema>,
   options: { receipt?: boolean } = {},
 ): PeersDigest {
@@ -125,7 +153,11 @@ export function agentPeers(
     return peers;
   });
 }
-function readPeers(store: WorkStore, input: z.input<typeof peersInputSchema>, receipt = false): PeersDigest {
+function readPeers(
+  store: StoreAccess,
+  input: z.input<typeof peersInputSchema>,
+  receipt = false,
+): PeersDigest {
   const command = peersInputSchema.parse(input);
   const result: PeersDigest = { v: 1, coverage: 'local', overlaps: [], landed: [], conflicts: [] };
   try {

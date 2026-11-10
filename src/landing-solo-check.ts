@@ -9,6 +9,34 @@ import type { WorkStore } from './work-store.js';
 import type { CheckEnvironment, CheckRun, WorkData } from './work-types.js';
 import type { LandingEntry } from './landing-batch-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 export function soloCheckEnvironment(environment: CheckEnvironment): CheckEnvironment {
   const { fingerprint: _, ...observed } = environment;
   void _;
@@ -19,7 +47,7 @@ export function soloCheckEnvironment(environment: CheckEnvironment): CheckEnviro
 /** Admission is separate from combined-Candidate acceptance. Evidence must be
  * a full solo gate on this main, with freshly observed Q3 execution inputs. */
 export function soloCheckAdmission(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   base: string,
   environment: CheckEnvironment,

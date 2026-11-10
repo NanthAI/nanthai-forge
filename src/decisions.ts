@@ -8,14 +8,19 @@ import { invariant } from './errors.js';
 import { localActor } from './work-actor.js';
 import type { WorkStore } from './work-store.js';
 
-export function decisionRecords(store: WorkStore): DecisionRecord[] {
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'load' | 'locked' | 'readRecords' | 'records' | 'select'
+>;
+
+export function decisionRecords(store: StoreAccess): DecisionRecord[] {
   const tx = store.readRecords();
   return tx
     ? Array.from({ length: tx.manifest.collections.decisions?.count ?? 0 }, (_, i) => tx.at('decisions', i))
     : (store.load().decisions ?? []);
 }
 export function recordDecision(
-  store: WorkStore,
+  store: StoreAccess,
   input: z.infer<typeof decideInputSchema>,
   context?: Conversation,
 ) {

@@ -3,9 +3,37 @@ import { readLaneSubmissions } from './landing-submission-read.js';
 import type { WorkStore } from './work-store.js';
 import type { PeersDigest } from './agent-peers.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Shared by live peers and cached receipt advice. Reads indexed Work and retained
  * landing journals only; no source capture, network request or writer admission. */
-export function withPeerLanding(store: WorkStore, digest: PeersDigest): PeersDigest {
+export function withPeerLanding(store: StoreAccess, digest: PeersDigest): PeersDigest {
   let submissions: ReturnType<typeof readLaneSubmissions> | undefined;
   const cache = new Map<string, unknown>();
   const describe = (id: string) => {

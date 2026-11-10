@@ -1278,7 +1278,7 @@ export class HostedAgentTransport {
       // The native Work store is a large module graph; only a failing native-owned command loads it.
       if (owner)
         rememberSourceAuthorityError(
-          new (await import('./work-store.js')).WorkStore(owner),
+          (await import('./work-store.js')).WorkStore.open<'directory' | 'locked'>(owner),
           error,
           this.address.projectId,
         );

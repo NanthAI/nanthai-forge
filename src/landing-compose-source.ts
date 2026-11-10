@@ -7,6 +7,34 @@ import type { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { ChannelMove, Lane, WorkView } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 /** Recover the stack pin of a queued saved head even after a later sync/undo. */
 export function savedStack(lane: Lane, head: string) {
   let stack = lane.stack;
@@ -22,7 +50,7 @@ export function savedStack(lane: Lane, head: string) {
 
 /** Retarget an immutable View, retaining its exact input pins and the live Lane. */
 export function composeLandingSource(
-  store: WorkStore,
+  store: StoreAccess,
   source: NativeSource,
   view: WorkView,
   main: string,

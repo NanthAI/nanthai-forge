@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { ForgeError } from './errors.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load'>;
+
 export type OwnerDrainBlocker = { kind: string; id: string; status: string };
 const failures = new Set([
   'failed',
@@ -24,7 +26,7 @@ export function terminalOwnerResult(result: Record<string, unknown> | undefined)
 }
 /** Called under the owner lock, after closing native admission. Journals without
  * a known outcome remain blockers, including drivers that never made a batch. */
-export function ownerDrainBlockers(store: WorkStore): OwnerDrainBlocker[] {
+export function ownerDrainBlockers(store: StoreAccess): OwnerDrainBlocker[] {
   const data = store.load(),
     blockers: OwnerDrainBlocker[] = [];
   const add = (kind: string, id: string, status: string) => blockers.push({ kind, id, status });
@@ -77,7 +79,7 @@ export function ownerDrainBlockers(store: WorkStore): OwnerDrainBlocker[] {
   }
   return blockers;
 }
-export function requireOwnerDrained(store: WorkStore) {
+export function requireOwnerDrained(store: StoreAccess) {
   const blockers = ownerDrainBlockers(store);
   if (blockers.length)
     throw new ForgeError(

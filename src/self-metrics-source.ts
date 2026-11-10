@@ -13,10 +13,12 @@ import type { WorkStore } from './work-store.js';
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 /** Inspect only retained addressing. Never construct a WorkStore or wake an owner. */
 export function metricAddress(root: string): { owner: string; address: HostedAgentAddress | null } {
   const owner = nativeOwner(realpathSync(root)) ?? realpathSync(root);
-  const binding = readHostState({ directory: join(owner, '.forge', 'work') } as WorkStore).binding;
+  const binding = readHostState({ directory: join(owner, '.forge', 'work') } as StoreAccess).binding;
   return {
     owner,
     address: binding

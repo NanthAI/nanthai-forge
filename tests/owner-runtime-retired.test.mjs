@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { workStoreAccessFindings } from '../scripts/check-work-store-access.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -78,4 +79,26 @@ test('retired runtime references cannot survive in code, docs or verification co
     scan(join(root, directory));
   for (const entry of readdirSync(root, { withFileTypes: true }))
     if (entry.isFile()) scanFile(join(root, entry.name));
+});
+
+// Full-store construction and parameter types must not leak back into retained callers.
+test('retained store callers declare capabilities, including lazy and aliased imports', () => {
+  const prefix = "import { WorkStore } from './work-store.js';\n";
+  for (const source of [
+    prefix + 'new WorkStore(root);',
+    prefix + 'function read(store: WorkStore) {}',
+    prefix + 'WorkStore.open(root);',
+    prefix + 'WorkStore.open<keyof WorkStore>(root);',
+    "import { WorkStore as Store } from './work-store.js'; new Store(root);",
+    "new (await import('./work-store.js')).WorkStore(root);",
+  ])
+    assert(workStoreAccessFindings('src/caller.ts', source).length, source);
+  assert.deepEqual(
+    workStoreAccessFindings(
+      'src/caller.ts',
+      prefix + "type Reader = Pick<WorkStore, 'root'>; WorkStore.open<'root' | 'load'>(root);",
+    ),
+    [],
+  );
+  assert.deepEqual(workStoreAccessFindings('src/work-store.ts', prefix + 'new WorkStore(root);'), []);
 });

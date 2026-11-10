@@ -16,6 +16,11 @@ import {
 } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'root' | 'save' | 'snapshotBytes'
+>;
+
 // Preserve all provider fields; deleted users and draft reviews can have missing context.
 const entry = z
   .object({
@@ -32,7 +37,7 @@ const entry = z
 const pageSchema = z.object({ record: discussionRecordSchema, items: z.array(entry) });
 export type DiscussionPage = z.infer<typeof pageSchema>;
 const filename = (id: string) => `discussion-${id}.json`;
-function read(store: WorkStore, id: string): DiscussionPage | null {
+function read(store: StoreAccess, id: string): DiscussionPage | null {
   const bytes = readSource(store.directory, filename(id), 8 * 1024 * 1024);
   if (!bytes) return null;
   let value: unknown;
@@ -62,7 +67,7 @@ function mapped(data: WorkData, target: DiscussionRecord['target']) {
   invariant(pr?.number, 'NOT_FOUND', 'Choose a published PR mapping.');
   return { repository: pr.repository, number: pr.number, head: pr.head };
 }
-export async function discussionWork(store: WorkStore, command: DiscussionCommand, revision: number) {
+export async function discussionWork(store: StoreAccess, command: DiscussionCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   if (command.action !== 'import-discussion')
     return store.locked(() => {

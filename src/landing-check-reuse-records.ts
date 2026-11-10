@@ -5,11 +5,39 @@ import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
+
 type Index = { pages: string; keys: Map<string, string | undefined>; positions: Map<string, number[]> };
-const indexes = new WeakMap<WorkStore, Index>();
+const indexes = new WeakMap<StoreAccess, Index>();
 /** Passed status and reuse keys locate candidates; fully validate only matches.
  * A changed active run cannot force rehydration of retained passed histories. */
-export async function passedReuseCandidates(store: WorkStore, key: string) {
+export async function passedReuseCandidates(store: StoreAccess, key: string) {
   const tx = store.readRecords();
   if (!tx) return store.load().runs.filter(run => run.status === 'passed' && run.reuseKey === key);
   try {

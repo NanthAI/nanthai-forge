@@ -4,9 +4,11 @@ import { PRESENCE, activityAt } from './presence.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'readRecords'>;
+
 /** Ownership is advisory; only an explicit take of another actor's Lane needs confirmation. */
 export function laneOwnership(
-  store: WorkStore,
+  store: StoreAccess,
   lane: Lane,
   now = Date.now(),
   presence = readHostState(store).presence,
@@ -36,7 +38,7 @@ export function laneOwnership(
 }
 
 export function stalledLane(
-  store: WorkStore,
+  store: StoreAccess,
   lane: Lane,
   ownership: ReturnType<typeof laneOwnership>,
   unlanded: boolean,

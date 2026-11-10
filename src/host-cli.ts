@@ -52,7 +52,32 @@ export async function hostProject(
     'BAD_ARGUMENT',
     'Use a non-empty hosted project name.',
   );
-  const store = new WorkStore(root),
+  const store = WorkStore.open<
+      | 'commitRecords'
+      | 'directory'
+      | 'laneLocked'
+      | 'load'
+      | 'locked'
+      | 'lockedAsync'
+      | 'native'
+      | 'observing'
+      | 'page'
+      | 'path'
+      | 'pinnedBytes'
+      | 'pinnedData'
+      | 'pointer'
+      | 'prepareCommitRecords'
+      | 'prepareSave'
+      | 'preparing'
+      | 'publishSave'
+      | 'readRecords'
+      | 'records'
+      | 'revision'
+      | 'root'
+      | 'save'
+      | 'select'
+      | 'snapshotBytes'
+    >(root),
     original = readHostState(store);
   const selected =
     options.deployment ??

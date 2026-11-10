@@ -6,6 +6,8 @@ import { workGit } from './work-git.js';
 import type { InteractionCommand, WorkView } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'native' | 'root'>;
+
 function changedPaths(root: string, view: WorkView, native = false) {
   try {
     if (native) {
@@ -79,7 +81,7 @@ function pathFact(bytes: Buffer) {
   return { display, displayEncoding, rawBase64: bytes.toString('base64') };
 }
 
-export function compareViews(store: WorkStore, command: InteractionCommand, revision: number) {
+export function compareViews(store: StoreAccess, command: InteractionCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   const data = store.load(),
     left = evidenceView(data, command.viewId, command.expectedHead),

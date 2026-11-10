@@ -5,9 +5,11 @@ import { join } from 'node:path';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<WorkStore, 'directory' | 'select'>;
 /** Run metadata goes through Work's selected-record accessor, never raw history fields. */
 export async function candidateContractReports(
-  store: WorkStore,
+  store: StoreAccess,
   runId: string,
   candidateId: string,
   head: string,
@@ -49,6 +51,6 @@ export async function candidateContractReports(
   return { timings: { ...timings, ...reader.timings }, reports: { ...reports, ...reader.reports } };
 }
 
-export async function candidateTimings(store: WorkStore, runId: string, candidateId: string, head: string) {
+export async function candidateTimings(store: StoreAccess, runId: string, candidateId: string, head: string) {
   return (await candidateContractReports(store, runId, candidateId, head)).timings;
 }

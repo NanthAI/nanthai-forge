@@ -2,7 +2,9 @@
 import { landingPositions } from './landing-records-index.js';
 import type { WorkStore } from './work-store.js';
 
-export function readSemanticConflicts(store: WorkStore, candidateId: string) {
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'readRecords'>;
+
+export function readSemanticConflicts(store: StoreAccess, candidateId: string) {
   const tx = store.readRecords();
   try {
     if (!tx)

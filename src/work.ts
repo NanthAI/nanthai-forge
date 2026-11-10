@@ -90,14 +90,67 @@ import { importBundle } from './work-contribution.js';
 import { deploymentWork, previewEnvironments, selectPreviewEnvironment } from './work-deployment.js';
 import { historicalWork } from './native-work-history.js';
 import { laneReview, viewReview, readWorkDetail } from './work-detail.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'observing'
+  | 'page'
+  | 'path'
+  | 'pinnedBytes'
+  | 'pinnedData'
+  | 'pointer'
+  | 'prepareCommitRecords'
+  | 'prepareSave'
+  | 'preparing'
+  | 'publishSave'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'save'
+  | 'select'
+  | 'snapshotBytes'
+>;
 export class WorkService {
-  readonly store: WorkStore;
+  readonly store: StoreAccess;
   constructor(
     root: string,
     readonly actor: AcceptanceActor = localPerson(),
     private readonly detachedChecks = false,
   ) {
-    this.store = new WorkStore(root);
+    this.store = WorkStore.open<
+      | 'commitRecords'
+      | 'directory'
+      | 'laneLocked'
+      | 'load'
+      | 'locked'
+      | 'lockedAsync'
+      | 'native'
+      | 'observing'
+      | 'page'
+      | 'path'
+      | 'pinnedBytes'
+      | 'pinnedData'
+      | 'pointer'
+      | 'prepareCommitRecords'
+      | 'prepareSave'
+      | 'preparing'
+      | 'publishSave'
+      | 'readRecords'
+      | 'records'
+      | 'revision'
+      | 'root'
+      | 'save'
+      | 'select'
+      | 'snapshotBytes'
+    >(root);
   }
   private lane(data: WorkData, id: string): Lane {
     const lane = data.lanes.find(l => l.id === id);

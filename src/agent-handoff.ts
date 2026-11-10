@@ -5,7 +5,12 @@ import { invariant } from './errors.js';
 import { latestHandoff } from './agent-handoff-types.js';
 import type { WorkStore } from './work-store.js';
 
-export function readHandoff(store: WorkStore, laneId: string) {
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'load' | 'locked' | 'observing' | 'readRecords' | 'records' | 'select'
+>;
+
+export function readHandoff(store: StoreAccess, laneId: string) {
   return store.observing(() => {
     const tx = store.readRecords(),
       data = tx ? undefined : store.load(),

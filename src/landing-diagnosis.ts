@@ -10,6 +10,11 @@ import type { CheckRun } from './work-types.js';
 import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'readRecords' | 'root' | 'save' | 'select'
+>;
+
 /** Recovery may reuse only the original exact composition/definition/runtime. */
 export function validatePrefixRun(
   work: WorkService,
@@ -54,7 +59,7 @@ export function validatePassingPrefix(work: WorkService, batch: LandingBatch, pr
 }
 
 /** Source verdicts are conditional on the recorded main; speculative observations stay provisional. */
-export function landingDiagnosis(store: WorkStore, entry: LandingEntry) {
+export function landingDiagnosis(store: StoreAccess, entry: LandingEntry) {
   return batchDiagnosis(entry.batchId ? store.select('landingBatches', entry.batchId) : undefined);
 }
 export type LandingDiagnosisReport = NonNullable<ReturnType<typeof landingDiagnosis>['diagnosis']>;

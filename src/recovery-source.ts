@@ -154,7 +154,7 @@ async function recoveryCoverage(
   workSha256: string,
   elapsedMs: number | null,
 ) {
-  const store = new WorkStore(target),
+  const store = WorkStore.open<'directory' | 'load' | 'root' | 'snapshotBytes'>(target),
     data = store.load();
   invariant(
     digest(store.snapshotBytes()) === workSha256,

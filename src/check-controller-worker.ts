@@ -7,7 +7,35 @@ import { WorkStore } from './work-store.js';
 const keepAlive = setInterval(() => undefined, 60_000);
 try {
   if (process.argv[2] && process.argv[3])
-    await runCheckController(new WorkStore(process.argv[2]), process.argv[3]);
+    await runCheckController(
+      WorkStore.open<
+        | 'commitRecords'
+        | 'directory'
+        | 'laneLocked'
+        | 'load'
+        | 'locked'
+        | 'lockedAsync'
+        | 'native'
+        | 'observing'
+        | 'page'
+        | 'path'
+        | 'pinnedBytes'
+        | 'pinnedData'
+        | 'pointer'
+        | 'prepareCommitRecords'
+        | 'prepareSave'
+        | 'preparing'
+        | 'publishSave'
+        | 'readRecords'
+        | 'records'
+        | 'revision'
+        | 'root'
+        | 'save'
+        | 'select'
+        | 'snapshotBytes'
+      >(process.argv[2]),
+      process.argv[3],
+    );
 } finally {
   clearInterval(keepAlive);
 }

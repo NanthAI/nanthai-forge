@@ -3,9 +3,11 @@ import { savedStack } from './landing-compose-source.js';
 import { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkView } from './work-types.js';
+
+type StoreAccess = Pick<WorkStore, 'load' | 'native' | 'root'>;
 /** Attribute only accepted deltas that touch the paths of the actual conflict. */
 export function landingConflictPeers(
-  store: WorkStore,
+  store: StoreAccess,
   main: string,
   inputs: WorkView['inputs'],
   paths: string[],
