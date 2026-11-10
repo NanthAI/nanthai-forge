@@ -121,12 +121,71 @@ also exposes unknown usage, unwatched deployments and gaps. Keys are acknowledge
 once per billing period after successful delivery/printing, surviving restarts;
 failed hooks retry. Plan alerts replace the old daily/function thresholds while
 preserving the complete function list and all usage measurements. With no `plan`,
-the original $1.50/day and $0.50/function alerts still apply. Nothing blocks usage. The meter has no accepted-landing denominator and
-no built-in Forge P0-writing integration. It therefore guards the operator's aggregate spend and coverage,
-not the literal dollar-per-landing drift contract. Forge's existing accept-write cost budgets
-separately alert and create P0 Issues for rolling-20 attempts, writes, composed R2 requests and
-runner minutes; see [cost budgets](../operations.md#cost-budgets). Issue `3e3f9fe6` retains the
-priced per-landing/P0 gap; a spend projection is not a substitute for its missing unit-cost evidence.
+the original $1.50/day and $0.50/function alerts still apply. Nothing blocks usage. Live dollar drift uses the same notifier, as described below.
+
+## Live dollars per 1,000 landings
+
+A self-hosted operator gets the denominator from **their own log stream**. New
+publication transactions emit exactly `FORGE_ACCEPTED_LANDINGS N`, with no user,
+project, receipt or source data. `publishAcceptance` emits 1; `publishLandingBatch`
+emits the number of newly published non-refs receipts, once for the transaction.
+Original-operation replay and `closes:false` (refs-only work) emit nothing. The
+marker sits after publication work, so a failing scheduler does not emit it.
+The meter accepts exactly one whole-message marker from a successful, uncached
+Mutation Completion; failed/OCC-aborted attempts do not supply a denominator.
+Transport replays are deduplicated by the existing execution identity journal.
+Counting `Acceptance:complete` executions would overcount paged completion and
+replays; counting publication executions would undercount batches. No existing
+function execution is a receipt counter.
+
+Every existing 30-second local tick calculates a rolling **24-hour** deployment-wide
+list-rate cost divided by marked receipts. It stays quiet below **20 receipts**
+and when any cost class is unknown. The window includes background work, saves,
+scratch projects and refs-only costs; it is a whole-deployment unit-cost signal,
+not causal landing attribution. It includes detected-gap counts and always labels
+silent-drop coverage partial. Old journals without markers do not invent receipts.
+A newly deployed marker needs a fresh observation window before a useful comparison.
+`--print` includes the same read-only `landingDrift` report.
+
+The baseline is computed from the existing ledger's core calls, read/written bytes,
+modeled action GB-seconds and R2 PUT egress, using the meter's operating list rates.
+At the present ledger this is **$0.522616/1,000 Convex-only**, versus **$0.540722**
+including R2 operations. Neither includes full serving overhead. A live value more
+than the ledger's `costGuard.failPct` (**15%**, currently $0.601008/1,000 Convex-only)
+above that partial model raises a `landing-drift` notification. Workload mix can
+legitimately exceed it: investigate the functions and coverage before changing
+code or updating the ledger with a reason. Allowances and fixed subscription fees
+are excluded from both sides; plan billing alerts continue separately.
+
+The existing private notifier receives `priority: "P0"`, `title`, `body` and an
+`issue` object with the same stable `key`. Configure that existing hook to upsert
+one P0 incident in the operator's tracker by `issue.key` as well as deliver the
+notification. Delivery remains opt-in; without a hook, the payload prints locally.
+An acknowledgment is retained privately in `landing-drift-alerts.json`, once per
+model/threshold fingerprint, so unchanged drift does not repeat on the next day
+or restart. Hook failures retry on the existing tick; a crash before acknowledgment
+still requires the hook's idempotent upsert. Updating the ledger model makes a new
+key. The script makes **no Forge P0 mutation**: an automatic Forge write would
+violate the zero-added-Convex-call budget. Operators choose their existing hook
+and tracker; no new worker, service, private notifier setting or account is installed.
+An operator's hook may optionally turn the payload into a Forge planning Issue,
+with one event-driven Issue upsert per breach. That call belongs to the hook;
+the meter stays independent of Forge sign-in and makes no Forge mutation.
+Stopping the meter undoes monitoring while preserving its journal.
+
+`tests/hosted-acceptance.test.mjs` proves new/replay/refs/rollback behavior;
+`tests/hosted-landing-batches.test.mjs` proves one four-receipt transaction emits 4.
+`tests/bench-t3code-meter.test.mjs` covers exact parsing, unknown usage, low counts,
+midnight/rolling expiry, deployment selection, and persistent P0 deduplication.
+
+Runtime delta at any project size: **0 calls, 0 reads/writes, 0 tables, 0 timers**;
+only the existing transaction's numeric log line is added. Local drift work scans
+the cached current and previous day, O(completions), with temporary arrays/objects
+O(completions); no new provider request or retained raw log line. At 200,000
+completions/day, a rolling day has about 200,000 numeric records, with at most two
+days retained in the existing cache. The existing 30-second timer is reused. One synthetic 200,000-record drift pass
+measured 115 ms, 19.3 MB transient heap growth and 163 MiB process peak RSS;
+this excludes journal replay and the separate CLI process, and is not a live ceiling.
 
 Projection scales each watched deployment's known rate across the **whole** period,
 including earlier unwatched time, and never below already captured usage. It is a

@@ -16,6 +16,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { daySummary, utcDay } from './convex-spend-model.mjs';
+import { driftSummary } from './convex-spend-drift.mjs';
 import { billingPeriod, billingSummary, periodRows } from './convex-spend-plan.mjs';
 
 /** Append-only numeric day journals are both the restart ledger and the report source. */
@@ -24,6 +25,10 @@ export class SpendJournal {
     this.directory = directory;
     this.days = new Map();
     this.billingDays = new Map();
+    const acknowledgments = join(directory, 'landing-drift-alerts.json');
+    this.driftAcknowledgments = existsSync(acknowledgments)
+      ? new Set(JSON.parse(readFileSync(acknowledgments, 'utf8')))
+      : new Set();
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   async load(day) {
@@ -80,6 +85,13 @@ export class SpendJournal {
     state.needsNewline = false;
     if (row.kind === 'execution') state.seen.add(row.id);
     state.rows.push(row);
+    if (row.kind === 'alert' && row.key.startsWith('landing-drift:')) {
+      this.driftAcknowledgments.add(row.key);
+      const path = join(this.directory, 'landing-drift-alerts.json'),
+        temporary = `${path}.${process.pid}.tmp`;
+      writeFileSync(temporary, JSON.stringify([...this.driftAcknowledgments]) + '\n', { mode: 0o600 });
+      renameSync(temporary, path);
+    }
     // Retain only active/replayed days; history stays on disk without a retention policy.
     for (const key of this.days.keys())
       if (key < utcDay(Date.now() - 86_400_000) && key !== day) this.days.delete(key);
@@ -158,6 +170,14 @@ export class SpendJournal {
       reports.push(report);
     }
     return billingSummary(plan, reports, now, deployments);
+  }
+  async drift(now = Date.now(), deployments = []) {
+    const today = utcDay(now),
+      yesterday = utcDay(now - 86_400_000);
+    const rows = [...(await this.load(yesterday)).rows, ...(await this.load(today)).rows];
+    const report = driftSummary(rows, now, undefined, deployments);
+    report.alerts.push(...this.driftAcknowledgments);
+    return report;
   }
   async report(day = utcDay(Date.now()), now = Date.now()) {
     return daySummary(day, (await this.load(day)).rows, now);

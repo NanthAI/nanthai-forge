@@ -84,6 +84,74 @@ plan-handshake egress. Its R2 requests must remain in the price even when Convex
 calls/compute fit the operator's allowance. Ledger sources name the guarded
 fixtures and their decisions; these are resource models, not billed savings.
 
+### Live whole-deployment upper bound and other providers
+
+The lead's dev meter window **2026-11-10 16:10–17:58 UTC**, after CI batching,
+contains **7 accepted landings**: 8,046 calls, 196.4 MB database I/O, 111.7 MB
+egress and 0.0921 GB-hours. At the same operating list rates as captures 1–4,
+that is **$0.0964 total / $13.77 per 1,000**, or **$12.41** after removing
+`projectWorkIndex:records` planning scans. This is **live whole-deployment,
+upper bound**, alongside the **modeled core $0.541/1,000** above. It includes
+zoo/scratch runs, the inbound sample and purge retries, builder planning reads,
+and **nine meter coverage-gap records**. Seven landings is a thin denominator;
+this is an overhead-inclusive allocation, not a proven mathematical upper bound
+when logs can be missing, a serving attribution, an invoice, or a comparable
+post-cut replacement for corrected capture #4's $5.96.
+
+One bounded `cf sql query` of `events.r2CombinedOperations` selected the dev
+bucket and the same window, grouped by status (six returned rows, weighted by
+`SUM(sampleInterval)`). It measured **7,421 sampled/weighted requests**, about
+**1,060.14 per landing**, including scratch/zoo traffic across the bucket.
+The provider reported 167 ms and 157,066,139 internally scanned bytes; the result
+contains aggregate numbers only, with no source-object download or Convex call.
+Its SQL dataset has no operation type. Therefore the split below is **measured
+total, modeled split**, using ledger Class A/B **3.17/10.67**, not billed classes.
+The code classifies PUT/multipart/LIST/copy as A and GET/HEAD as B; DELETE is free.
+See `tests/landing-cost-guard.test.mjs` request instrumentation and
+`convex/presign.ts`; live accept-write R2 stamps cover compose requests only and
+cannot replace whole-bucket operation measurement.
+
+| R2 request pricing scenario | A/B requests per 1,000 landings | List $/1,000 | After free allowance, modeled $/1,000 |
+| --- | ---: | ---: | ---: |
+| Measured total, ledger split (22.90% A / 77.10% B) | 242,822 / 817,321 | 1.38693 | 0 |
+| All Class B lower-price bound | 0 / 1,060,143 | 0.38165 | 0 |
+| All Class A upper-price bound | 1,060,143 / 0 | 4.77064 | 3.27064 |
+
+The after-allowance column assumes **3,000 landings/month**, this workload alone,
+and the full shared **1M Class A / 10M Class B monthly free allowance** available.
+For monthly totals A and B, expense is
+`4.5e-6 * max(0,A-1e6) + 0.36e-6 * max(0,B-1e7)`; divide by monthly landings/1,000.
+If the team has already consumed its allowance, use the list column as marginal
+expense. The all-B/all-A bounds conditionally price every measured request as
+billable; deletes and nonbillable errors can lower actual expense further, to
+zero. Status alone cannot identify them. The exact billed class split remains an
+owner dashboard reconciliation in R2 Metrics, as documented by
+[Cloudflare's metrics API](https://developers.cloudflare.com/r2/platform/metrics-analytics/).
+No token extraction, GraphQL fallback or new bucket scan was performed. Earlier
+R2 stored-byte evidence remains **10.99 GB**, **$0.165/month list**, or
+**$0.055/1,000 at 3,000 landings/month**; it is a prior storage gauge, not a new
+same-window measurement. Account storage allowance is shared separately.
+
+**Netlify: modeled $0/1,000 within the existing Free plan allowance**, not a
+measured invoice. The connected provider confirms the worker site's team is Free.
+The one requested same-window bandwidth read returned 1,381,414 bytes but clamped
+its metadata start to **16:59:06.303 UTC**, so it cannot price the agreed window.
+Edge bandwidth also lacks worker invocation GB-hours and billed units. The
+[legacy Free allowance](https://docs.netlify.com/manage/accounts-and-billing/billing/billing-for-legacy-plans/legacy-pricing-plans/)
+is 100 GB/month bandwidth, 300 build minutes and 125,000 serverless invocations
+per site/month. This allocation assumes usage fits those existing allowances;
+team usage elsewhere and invoice/plan changes need separate reconciliation.
+The partial traffic figure is not extrapolated into an exact serving bill.
+No additional Netlify usage read, new plan or paid service was introduced.
+
+At list prices, the same-window whole-deployment allocation is therefore
+**$15.16/1,000** (Convex $13.77 plus measured-total/modeled-split R2 $1.38693),
+before stored bytes, backups and any Netlify excess. With R2's assumed free
+allowances it stays **$13.77**. These figures share the seven-receipt and coverage
+limitations above; they do not sum with the overlapping fixture slices. Against
+the $2/1,000 target, Convex is 688.5%, the R2 modeled split is 69.35%, and the
+combined list allocation is 757.85%; Netlify within its allowance adds 0%.
+
 ### GitHub inbound share
 
 `github-inbound-fixture` in the same landing-cost guard measures a GitHub main

@@ -1261,15 +1261,16 @@ Billed dollars, Convex per-function costs and the R2 operations of saves and che
 live captures (`costGuard.reference` holds the latest per-family dollars, labelled as list-price
 estimates).
 
-The self-hosted operator's [spend meter](operations/convex-spend.md) complements these
-per-landing alerts: it prices deployment log usage and alerts once per period on projected
-allowance/overage and coverage gaps, with zero Convex function calls. It does not count accepted
-landings or itself create the speed path's P0 Issues. A busier workload can raise aggregate spend with
-unchanged unit cost, and a higher unit cost at lower volume can remain under the spend threshold.
-Consequently the meter does not complete the literal live-dollar-per-landing drift requirement
-on Issue `3e3f9fe6`. The product's rolling-20 count/R2/runner alerts remain active; a comparable
-priced window with an accepted-receipt denominator and a dollar-drift/P0 bridge is still open.
-No new service, scheduled workflow, access grant or idle call is implied by that gap.
+The self-hosted operator's [spend meter](operations/convex-spend.md#live-dollars-per-1000-landings)
+also prices a rolling 24-hour log window per newly published non-refs receipt,
+using the numeric publication marker from the operator's own stream. It stays quiet
+below twenty receipts and alerts above the ledger's 15% drift threshold. The existing
+private notifier receives a stable P0 incident/upsert payload; successful delivery
+is acknowledged once per model, across days and restarts. The hook owns tracker
+upsert, so the meter adds no Forge mutation or service. Deployment-wide costs include
+other activity; its partial core model and log gaps remain explicit. Plan allowance,
+overage and coverage alerts continue separately. See the [current provider allocation](operations/cost-to-serve.md#live-whole-deployment-upper-bound-and-other-providers)
+for measured totals, modeled splits and the remaining invoice reconciliation.
 
 ## Local cleanup
 

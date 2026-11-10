@@ -783,3 +783,114 @@ test('plan-aware stdin/print reports overage and list-rate columns without any p
   assert.equal(typeof printed.billing.top10[0].allocatedOverageUsd, 'number');
   assert.equal(printed.today.usage.calls, 1);
 });
+
+const { acceptedLandings } = await import('../scripts/convex-spend-model.mjs');
+const { driftModel, driftSummary, driftAlerts } = await import('../scripts/convex-spend-drift.mjs');
+test('landing denominator uses only one numeric marker on successful uncached mutation completions', () => {
+  const marker = { udfType: 'Mutation', logLines: [{ messages: ['FORGE_ACCEPTED_LANDINGS 4'] }] };
+  assert.equal(acceptedLandings(marker), 4);
+  for (const bad of [
+    { ...marker, error: 'failed' },
+    { ...marker, cachedResult: true },
+    { ...marker, udfType: 'action' },
+    { ...marker, logLines: ['prefix FORGE_ACCEPTED_LANDINGS 4'] },
+    { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 0'] },
+    { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 1 extra'] },
+    { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 1', 'FORGE_ACCEPTED_LANDINGS 1'] },
+    { ...marker, logLines: [] },
+  ])
+    assert.equal(acceptedLandings(bad), 0);
+});
+test('rolling dollar drift stays quiet below twenty receipts and shares durable notifier deduplication across midnight', async t => {
+  const journal = new SpendJournal(dailyDirectory(t));
+  const now = Date.parse('2026-01-03T00:10:00Z');
+  const model = driftModel();
+  const append = async (at, count, id) =>
+    journal.append(
+      spendEvent(
+        dailyEvent({
+          udfType: 'mutation',
+          timestamp: at / 1000,
+          executionId: id,
+          logLines: [`FORGE_ACCEPTED_LANDINGS ${count}`],
+          usageStats: { ...dailyEvent().usageStats, databaseIoReadBytes: 1e9 },
+        }),
+        'synthetic',
+      ),
+    );
+  await append(now - 20 * 60_000, 19, 'batch');
+  assert.equal((await journal.drift(now)).status, 'too-few-landings');
+  assert.deepEqual(driftAlerts(await journal.drift(now)), []);
+  await append(now - 60_000, 1, 'solo');
+  const report = await journal.drift(now);
+  assert.equal(report.landings, 20);
+  assert.equal(report.status, 'drift');
+  const [alert] = driftAlerts(report);
+  assert.equal(alert.priority, 'P0');
+  assert.equal(alert.issue.key, alert.key);
+  assert.equal(report.model.usdPer1000, model.usdPer1000);
+  assert.equal(report.model.thresholdPct, 15);
+  await journal.append({ kind: 'alert', key: alert.key, at: now });
+  assert.deepEqual(driftAlerts(await new SpendJournal(journal.directory).drift(now)), []);
+  assert.equal((await journal.drift(now + 86_400_000)).landings, 0);
+  await append(now + 2 * 86_400_000, 20, 'later');
+  assert.deepEqual(driftAlerts(await new SpendJournal(journal.directory).drift(now + 2 * 86_400_000)), []);
+  assert.equal((await journal.drift(now, ['other'])).landings, 0);
+});
+test('drift compares matching list-rate classes and preserves unknown usage and exact threshold', () => {
+  const now = Date.parse('2026-01-03T00:10:00Z'),
+    model = { id: 'test', usdPer1000: 1, thresholdPct: 15 };
+  const row = {
+    kind: 'execution',
+    at: now,
+    deployment: 'one',
+    acceptedLandings: 20,
+    usage: { calls: 0, io: 115000000, egress: 0, compute: 0, search: 0 },
+  };
+  assert.equal(driftSummary([row], now, model).status, 'within-model');
+  row.usage.io++;
+  assert.equal(driftSummary([row], now, model).status, 'drift');
+  row.usage.egress = null;
+  assert.equal(driftSummary([row], now, model).status, 'unknown-usage');
+  assert.deepEqual(driftAlerts(driftSummary([row], now, model)), []);
+});
+
+test('stdin meter delivers one P0 upsert payload through the existing notifier and preserves its acknowledgment', async t => {
+  const dir = dailyDirectory(t),
+    config = join(dir, 'config.json'),
+    output = join(dir, 'issues.jsonl');
+  writeFileSync(
+    config,
+    JSON.stringify({
+      stateDirectory: join(dir, 'state'),
+      deployments: ['synthetic'],
+      notifier: {
+        command: [
+          process.execPath,
+          '-e',
+          "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>{if(JSON.parse(s).kind==='landing-drift')require('fs').appendFileSync(process.argv[1],s)});",
+          output,
+        ],
+        topic: 'synthetic-topic',
+        target: 'synthetic-target',
+      },
+    }),
+  );
+  const log = dailyEvent({
+    timestamp: Date.now() / 1000,
+    udfType: 'Mutation',
+    logLines: ['FORGE_ACCEPTED_LANDINGS 20'],
+    usageStats: { ...dailyEvent().usageStats, databaseIoReadBytes: 1e9 },
+  });
+  for (let i = 0; i < 2; i++)
+    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--stdin', '--config', config], {
+      input: JSON.stringify(log) + '\n',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  const alerts = readFileSync(output, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].priority, 'P0');
+  assert.equal(alerts[0].issue.key, alerts[0].key);
+  assert.equal(alerts[0].landings, 20);
+  assert.match(alerts[0].body, /partial/);
+});

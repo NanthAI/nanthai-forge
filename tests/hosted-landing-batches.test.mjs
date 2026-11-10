@@ -16,6 +16,10 @@ test.after(() => {
 });
 
 test('incident replay: four finishes in one minute share one full check and one atomic main publication', async t => {
+  const spendLines = [];
+  t.mock.method(console, 'log', (...args) => {
+    if (String(args[0]).startsWith('FORGE_ACCEPTED_LANDINGS')) spendLines.push(args);
+  });
   const f = await batchesFixture(t);
   const arrivals = states(f).map(s => Date.parse(s.at));
   assert(Math.max(...arrivals) - Math.min(...arrivals) < 60_000);
@@ -50,6 +54,11 @@ test('incident replay: four finishes in one minute share one full check and one 
   for (const entry of f.entries) assert.equal((await f.enqueue(entry.request)).phase, 'landed');
   assert.equal(f.runs().length, 1, 'original-operation replay starts no checks');
   assert.equal(f.pending().length, 0);
+  assert.deepEqual(
+    spendLines,
+    [['FORGE_ACCEPTED_LANDINGS 4']],
+    'one numeric line for all four receipts, none on replay',
+  );
 });
 
 test('a failed batch checks both halves at once; a culprit retains its own named test', async t => {

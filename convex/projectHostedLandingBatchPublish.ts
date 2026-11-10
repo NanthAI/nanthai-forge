@@ -452,5 +452,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
   await noteMainLanding(ctx, { project, receipt: last, run });
   await enqueueGithubMirror(ctx, project, last);
   await alertSecretAllowAdded(ctx, project, last);
+  const newlyPublished = members.filter(member => member.state.request.closes !== false).length;
+  if (newlyPublished) console.log(`FORGE_ACCEPTED_LANDINGS ${newlyPublished}`);
   return { status: 'landed' as const, receipt: receipts.find(r => r.submissionId === state.id)! };
 }

@@ -14,6 +14,17 @@ export const utcDay = at => new Date(at).toISOString().slice(0, 10);
 const sum = (a, b) => (a === null || b === null ? null : a + b);
 const empty = () => ({ calls: 0, io: 0, search: 0, compute: 0, egress: 0 });
 
+// Match the entire console message, never a substring of repository/user output.
+export function acceptedLandings(log) {
+  if (log.error || log.cachedResult || !/^mutation$/i.test(log.udfType ?? '')) return 0;
+  const counts = (log.logLines ?? []).flatMap(line => {
+    const text = typeof line === 'string' ? line : (line.messages ?? []).join(' ');
+    const match = /^FORGE_ACCEPTED_LANDINGS ([1-9]\d*)$/.exec(text);
+    return match ? [Number(match[1])] : [];
+  });
+  return counts.length === 1 && Number.isSafeInteger(counts[0]) ? counts[0] : 0;
+}
+
 /** Never retain arguments, results, error text or console output. OCC attempts remain distinct. */
 export function spendEvent(log, deployment) {
   if (log.kind === 'Progress') return null;
@@ -55,6 +66,7 @@ export function spendEvent(log, deployment) {
     day,
     deployment,
     identifier: log.identifier,
+    acceptedLandings: acceptedLandings(log),
     usage: {
       calls: 1,
       io: sum(usage.databaseIoReadBytes, usage.databaseIoWriteBytes),

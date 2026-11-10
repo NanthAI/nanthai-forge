@@ -837,3 +837,25 @@ test('fixture landing shows late proof beside its unchanged immutable receipt an
   assert.equal([...f.tables.projectHostedAcceptances.values()][0].value, receiptBefore);
   assert.equal(result.status, 'landed');
 });
+
+test('numeric spend marker counts new receipts once; replay, refs-only and rollback emit nothing', async t => {
+  const lines = [];
+  t.mock.method(console, 'log', (...args) => {
+    if (String(args[0]).startsWith('FORGE_ACCEPTED_LANDINGS')) lines.push(args.join(' '));
+  });
+  const f = await acceptanceFixture();
+  const { state } = await f.ready();
+  const claim = await f.claimAcceptance(state);
+  f.schedulerFailure(true);
+  await assert.rejects(f.commit(claim), /synthetic scheduler unavailable/);
+  assert.deepEqual(lines, []);
+  f.schedulerFailure(false);
+  await f.commit(claim);
+  assert.deepEqual(lines, ['FORGE_ACCEPTED_LANDINGS 1']);
+  await f.accept(state);
+  assert.deepEqual(lines, ['FORGE_ACCEPTED_LANDINGS 1']);
+  const refs = await acceptanceFixture();
+  const prepared = await refs.ready(null, { closes: false });
+  await refs.accept(prepared.state);
+  assert.deepEqual(lines, ['FORGE_ACCEPTED_LANDINGS 1']);
+});

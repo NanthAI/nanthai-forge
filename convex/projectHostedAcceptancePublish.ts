@@ -446,5 +446,7 @@ export async function publishAcceptance(
       ...precompose,
       candidate: { id: receipt.candidate.id, actor: receipt.actor.id, digest: receipt.candidate.digest },
     });
+  // Numeric only: shared operator log streams must contain no receipt or user data.
+  if (state.request.closes !== false) console.log('FORGE_ACCEPTED_LANDINGS 1');
   return { status: 'landed' as const, receipt };
 }

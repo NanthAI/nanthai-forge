@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { childEnv } from './child-env.mjs';
 import { isMainModule } from './main-module.mjs';
 import { spendEvent, pendingAlerts, utcDay, spendRates } from './convex-spend-model.mjs';
+import { driftAlerts } from './convex-spend-drift.mjs';
 import { spendPlan, planAlerts } from './convex-spend-plan.mjs';
 import { SpendJournal, journalLock, privateConfig } from './convex-spend-journal.mjs';
 
@@ -53,6 +54,7 @@ export async function printSpend(journal, now = Date.now(), plan = null, deploym
     JSON.stringify(
       {
         ...(plan ? { billing: await journal.billing(plan, now, deployments) } : {}),
+        landingDrift: await journal.drift(now, deployments),
         rates: spendRates,
         units: { calls: 'calls', io: 'bytes', search: 'query-bytes', compute: 'GB-hours', egress: 'bytes' },
         today: days[0],
@@ -128,7 +130,12 @@ export async function runSpend(args = process.argv.slice(2)) {
     }
     const report = await journal.report(utcDay(at), at);
     if (plan) report.billing = await journal.billing(plan, at, deployments);
-    for (const alert of plan ? planAlerts(report.billing) : pendingAlerts(report)) {
+    report.landingDrift = await journal.drift(at, deployments);
+    const alerts = [
+      ...(plan ? planAlerts(report.billing) : pendingAlerts(report)),
+      ...driftAlerts(report.landingDrift),
+    ];
+    for (const alert of alerts) {
       console.log(JSON.stringify({ ...alert, coverage: alert.coverage ?? report.coverage }));
       try {
         await notifySpend(config.notifier, alert);

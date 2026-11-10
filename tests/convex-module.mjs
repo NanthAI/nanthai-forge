@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // Route these in-process server markers away from CLI/result JSON stdout too.
 const moduleConsoleLog = console.log;
 console.log = (...args) => {
-  if (args.length === 1 && typeof args[0] === 'string' && args[0].startsWith('FORGE_PROJECT_EXECUTION '))
+  if (args.length === 1 && typeof args[0] === 'string' && /^FORGE_[A-Z_]+ /.test(args[0]))
     process.stderr.write(args[0] + '\n');
   else moduleConsoleLog(...args);
 };
