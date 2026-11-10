@@ -9,6 +9,11 @@ import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
 import { listGithubTree } from '../dist/github-archive-source.js';
+import { ListingTable } from '../dist/github-listing-codec.js';
+import { CatalogTable } from '../dist/import-catalog-table.js';
+import { importStateFiles } from '../dist/import-state-scan.js';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
 import { getFunctionName } from 'convex/server';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -777,3 +782,131 @@ for (const damage of ['gone', 'altered'])
     assert.equal(counts.trees, 2, 'start listed, the run listed again');
     assert.equal(job.completed, repo.files);
   });
+
+test('Issue 96f164ce: the stored file table round-trips as columns; a lookup finds every listed path and nothing else', () => {
+  const files = [
+    { path: '.gitattributes', sha: hex(1), size: 3, mode: '100644' },
+    { path: 'a/b', sha: hex(2), size: 0, mode: '100755' },
+    { path: 'a/b.c', sha: hex(3), size: 70_000_000, mode: '100644' },
+    { path: 'link', sha: hex(4), size: 6, mode: '120000' },
+    { path: 'vendor/sub', sha: hex(5), size: 0, mode: '160000' },
+    { path: 'z/caf\u00e9/\u6587\u4ef6 "q".txt', sha: hex(6), size: 9, mode: '100644' },
+  ];
+  const table = ListingTable.from({ files, totalBytes: 70_000_018, submodules: 1 });
+  const back = ListingTable.decode(table.encode(hex(9)), hex(9));
+  assert.equal(back.length, files.length);
+  assert.deepEqual([back.totalBytes, back.submodules], [70_000_018, 1]);
+  files.forEach((file, index) => {
+    assert.deepEqual(back.entry(index), file);
+    assert.equal(back.index(file.path), index);
+  });
+  for (const absent of ['', 'a', 'a/b/', 'link2', 'zz']) assert.equal(back.index(absent), -1, absent);
+  assert.equal(ListingTable.decode(table.encode(hex(9)), hex(8)), null, 'another tree');
+  assert.equal(ListingTable.decode(table.encode(hex(9)).subarray(0, 80), hex(9)), null, 'truncated');
+  assert.equal(
+    ListingTable.decode(Buffer.from(JSON.stringify({ schema: 1, tree: hex(9), files })), hex(9)),
+    null,
+    'a schema-1 JSON table from an earlier deployment is listed again',
+  );
+  const sha256 = ListingTable.from({
+    files: [{ ...files[0], sha: 'b'.repeat(64) }],
+    totalBytes: 3,
+    submodules: 0,
+  });
+  assert.equal(ListingTable.decode(sha256.encode(hex(9)), hex(9)).sha(0), 'b'.repeat(64));
+  assert.equal(
+    ListingTable.from({ files: [files[1], files[0]], totalBytes: 3, submodules: 0 }),
+    null,
+    'unsorted',
+  );
+  assert.equal(
+    ListingTable.from({ files: [files[0], files[0]], totalBytes: 6, submodules: 0 }),
+    null,
+    'duplicate',
+  );
+});
+
+test('Issue 96f164ce: the stored-object table answers has/get/set/values like the Map it replaces, and sorts by digest', () => {
+  const sha = n => createHash('sha256').update(String(n)).digest('hex');
+  const table = new CatalogTable(),
+    map = new Map();
+  const put = entry => {
+    table.set(entry.digest, entry);
+    map.set(entry.digest, entry);
+  };
+  for (let i = 0; i < 5000; i++)
+    put({
+      digest: sha(i),
+      size: i,
+      ...(i % 7 === 0 ? { pack: { digest: sha(`pack-${i % 3}`), size: 1e9, offset: i * 10 } } : {}),
+      ...(i % 11 === 0 ? { recipe: { digest: sha(`recipe-${i}`), size: 99 } } : {}),
+      ...(i % 13 === 0 ? { stateGeneration: 2 } : {}),
+    });
+  put({ digest: sha(7), size: 70 }); // a digest stored again replaces its row, pack and all
+  assert.equal(table.size, map.size);
+  for (const [digest, entry] of map) assert.deepEqual(table.get(digest), entry);
+  for (const digest of [sha('absent'), 'A'.repeat(64), 'short', ''])
+    assert.deepEqual([table.has(digest), table.get(digest)], [false, undefined], digest);
+  assert.deepEqual([...table.values()], [...map.values()]);
+  assert.deepEqual(
+    [...table.sorted()].map(entry => entry.digest),
+    [...map.keys()].sort(),
+  );
+  assert.throws(() => table.set('x', { digest: 'x', size: 1 }), TypeError);
+});
+
+test('Issue 96f164ce: a publication retry reads the stored State one file at a time, escaped paths exact', () => {
+  const files = [
+    { path: 'plain.txt', blob: 'a'.repeat(64), mode: 'file' },
+    { path: 'quote " and \\ back\\slash', blob: 'b'.repeat(64), mode: 'executable' },
+    { path: 'caf\u00e9/\u6587\u4ef6\n\u0001', blob: 'c'.repeat(64), mode: 'symlink' },
+    { path: 'vendor/sub', blob: 'd'.repeat(64), mode: 'gitlink' },
+  ];
+  const state = files =>
+    Buffer.from(
+      `{"schema":1,"kind":"forge-source-state","parents":[],"files":[${files.map(file => JSON.stringify(file)).join(',')}],"message":"m","at":"t"}`,
+    );
+  assert.deepEqual([...importStateFiles(state(files))], files);
+  assert.deepEqual([...importStateFiles(state([]))], []);
+  const bytes = state(files).toString();
+  for (const damaged of [
+    bytes.replace('"mode":"file"', '"mode":"tree"'),
+    bytes.replace('a'.repeat(64), 'A'.repeat(64)),
+    bytes.replace('"schema":1', '"schema":2'),
+    bytes.slice(0, bytes.length / 2),
+  ])
+    assert.throws(() => [...importStateFiles(Buffer.from(damaged))], { code: 'INVALID_WORK_BACKUP' });
+});
+
+test('Issue 96f164ce: an archive step keeps file pins in columns, under 300 bytes of heap per file from listing to archive-complete (150,612 files peaked at 494 of 512 MB)', async t => {
+  setFlagsFromString('--expose-gc');
+  const gc = runInNewContext('gc');
+  // A small import first loads every module the step uses, so the large one measures per-file cost.
+  const repo = repository({ files: 200, directories: 20, submodules: 0 }),
+    counts = {};
+  await serve(t, repo, counts);
+  await importArchive(pagedFixture());
+  Object.assign(repo, repository({ files: 30_000, directories: 2_000, submodules: 0 }));
+  const s = pagedFixture(),
+    heap = {},
+    log = console.log;
+  t.after(() => {
+    console.log = log;
+  });
+  console.log = (...args) => {
+    const phase =
+      typeof args[0] === 'string' && args[0].match(/^FORGE_IMPORT_METRIC .*"phase":"([a-z-]+)"/)?.[1];
+    if (phase === 'listing' || phase === 'archive-complete' || phase === 'ready') {
+      gc();
+      heap[phase] = process.memoryUsage().heapUsed;
+    }
+    if (!phase) log(...args);
+  };
+  const job = await importArchive(s);
+  console.log = log;
+  assert.equal(job.completed, repo.files);
+  const perFile = Math.round((heap['archive-complete'] - heap.listing) / repo.files);
+  t.diagnostic(`${perFile} heap bytes per file between listing and archive-complete`);
+  // Before (a path Map of pin objects plus a Map of catalog entry objects): 500 bytes here.
+  assert.ok(perFile < 300, `${perFile} heap bytes per file between listing and archive-complete`);
+});

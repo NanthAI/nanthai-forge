@@ -8,14 +8,20 @@ import { deleteR2Object } from './r2Operations';
 import { exchangeFetch } from '../src/exchange-request';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
-import { decodeListing, encodeListing } from '../src/github-listing-codec';
+import { ListingTable } from '../src/github-listing-codec';
 import type { GithubListing } from '../src/github-archive-source';
 
 type Pin = { sha256: string; size: number };
+/** The columns of a validated, sorted GitHub listing. */
+export function listingTable(listing: GithubListing) {
+  const table = ListingTable.from(listing);
+  invariant(table, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.');
+  return table;
+}
 /** Writes the file table of a commit tree to the project's R2 prefix (create-only, checksummed;
  * the key names the digest, so an existing key holds these exact bytes). */
-export async function storeListing(projectId: Id<'hostedProjects'>, tree: string, listing: GithubListing) {
-  const bytes = encodeListing(tree, listing),
+export async function storeListing(projectId: Id<'hostedProjects'>, tree: string, listing: ListingTable) {
+  const bytes = listing.encode(tree),
     pin: Pin = { sha256: digest(bytes), size: bytes.length };
   const put = await presignPut(r2Config(), r2ImportListingKey(projectId, pin.sha256), {
     digest: pin.sha256,
@@ -42,7 +48,9 @@ async function readListing(projectId: Id<'hostedProjects'>, pin: Pin, tree: stri
     });
     if (!response.ok) return null;
     const bytes = Buffer.from(await response.arrayBuffer());
-    return bytes.length === pin.size && digest(bytes) === pin.sha256 ? decodeListing(bytes, tree) : null;
+    return bytes.length === pin.size && digest(bytes) === pin.sha256
+      ? ListingTable.decode(bytes, tree)
+      : null;
   } catch {
     return null;
   }
@@ -61,12 +69,13 @@ export async function jobListing(
   const stored = job.listing ? await readListing(job.projectId, job.listing, tree) : null;
   if (stored) {
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-stored', at: Date.now(), elapsedMillis: Date.now() - started, files: stored.files.length })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing-stored', at: Date.now(), elapsedMillis: Date.now() - started, files: stored.length })}`,
     );
     return { listing: stored, pin: job.listing };
   }
-  const listing = await list();
-  if (!listing) return { listing, pin: undefined };
+  const listed = await list();
+  if (!listed) return { listing: null, pin: undefined };
+  const listing = listingTable(listed);
   const pin = await storeListing(job.projectId, tree, listing);
   await ctx.runMutation(internal.projectGithubImportStore.pinListing, { ...input, listing: pin });
   return { listing, pin };

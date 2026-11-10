@@ -12,7 +12,7 @@ import { digest } from '../src/hash';
 import { mapExchange } from '../src/exchange-parallel';
 import { invariant } from '../src/errors';
 import { importPageBytes, importPageFiles } from '../src/github-import-pages';
-import type { ObjectPack } from '../src/object-pack-range';
+import type { CatalogEntry } from '../src/import-catalog-table';
 export type Completions = {
   id: Id<'projectObjects'>;
   storageId?: Id<'_storage'>;
@@ -25,17 +25,16 @@ export type Recipes = {
   recipeDigest: string;
   recipeSize: number;
 }[];
-export type CatalogEntry = {
-  digest: string;
-  size: number;
-  stateGeneration?: number;
-  recipe?: { digest: string; size: number };
-  pack?: ObjectPack;
-};
-/** Catalog mode (archive imports): stored objects are this map, not projectObjects
- * rows. Each window is one receipt; publication writes the sorted catalog. */
+export type { CatalogEntry };
+/** Catalog mode (archive imports): stored objects are this set (a CatalogTable in an
+ * import; a Map in a test), not projectObjects rows. Each window is one receipt;
+ * publication writes the sorted catalog. */
 export type ImportCatalog = {
-  stored: Map<string, CatalogEntry>;
+  stored: {
+    has(digest: string): boolean;
+    get(digest: string): CatalogEntry | undefined;
+    set(digest: string, entry: CatalogEntry): unknown;
+  };
   record: (objects: CatalogEntry[], state?: { sha256: string; size: number }) => Promise<void>;
 };
 /** Retains one bounded source window plus its pack copy and one stream chunk. */

@@ -15,7 +15,7 @@ import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
-import { storeListing } from './projectGithubImportListing';
+import { listingTable, storeListing } from './projectGithubImportListing';
 import { report } from './errors';
 import { githubImportError, githubRequests } from './projectGithubImportFields';
 
@@ -91,17 +91,18 @@ export const start = action({
       );
       // One recursive listing decides the transfer: a complete tree streams the
       // commit archive; a truncated one keeps directory-by-directory discovery.
-      const listing = await listGithubTree(
+      const listed = await listGithubTree(
         source.repository,
         source.pending[0]!.sha,
         token,
         meter.wrap(networkFetch),
       );
+      const listing = listed && listingTable(listed);
       const begun = await ctx.runMutation(internal.projectGithubImportStore.begin, {
         ...(listing
           ? {
               archive: {
-                total: listing.files.length,
+                total: listing.length,
                 totalBytes: listing.totalBytes,
                 submodules: listing.submodules,
               },

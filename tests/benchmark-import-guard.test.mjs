@@ -379,6 +379,47 @@ test('unknown deletion reply replays the same operation and revision, and blocke
   assert.equal(guard.monitor.quiet(), false);
 });
 
+test('teardown repeats a failed cancellation page with its cursor, and a restarted guard resumes from the journal (the bigtree teardown exited twice at cancelScheduled)', async () => {
+  const s = fixture(),
+    journal = {},
+    cursors = [];
+  s.tables.projectWorkGenerations.set('generation', { _id: 'generation', projectId: 'project' });
+  for (let i = 0; i < 35; i++)
+    await s.ctx.scheduler.runAfter(0, makeFunctionReference('projectWorkIndexStore:retire'), {
+      generationId: 'generation',
+    });
+  let failures = new Set([2, 5, 6, 7, 8]);
+  let calls = 0;
+  const admin = {
+    query: s.admin.query,
+    mutation: async (ref, args) => {
+      cursors.push(args.cursor);
+      if (failures.has(++calls)) throw Error('convex run projectBenchmark:cancelScheduled exited 1');
+      return s.admin.mutation(ref, args);
+    },
+  };
+  const options = { ...target, since: 0, admin, owner: s.owner, journal, pause: async () => {} };
+  // Page 2 fails once and is repeated as is; page 4 then fails four times in a row: this stop gives up.
+  await assert.rejects(importBenchmarkGuard(options).stop(), /exited 1/);
+  assert.deepEqual(cursors, [null, '10', '10', '20', '30', '30', '30', '30']);
+  assert.equal(journal.cancel.cursor, '30');
+  failures = new Set();
+  const guard = importBenchmarkGuard(options);
+  await guard.stop();
+  assert.equal(cursors[8], '30', 'the next guard resumes at the journaled cursor');
+  assert.equal(journal.cancel.done, true);
+  assert.equal(guard.receipts.canceled, 35 - 30, 'pages 1-3 were canceled by the first guard');
+  assert.equal(
+    s.scheduled.filter(
+      task => getFunctionName(task.fn).endsWith(':retire') && s.tasks.get(task.id).state.kind === 'pending',
+    ).length,
+    0,
+  );
+  const before = cursors.length;
+  await importBenchmarkGuard(options).stop();
+  assert.equal(cursors.length, before, 'a finished cancellation is not scanned again');
+});
+
 test('project attribution contains no source bytes and emits once per invocation/project', () => {
   const ctx = {},
     lines = [],

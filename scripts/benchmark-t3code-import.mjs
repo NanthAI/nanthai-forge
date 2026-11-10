@@ -8,7 +8,9 @@
 // Telemetry: `convex logs --jsonl` (user login, read-only, zero Convex functions) feeds
 // the guard; raw log lines are never written. Owner calls use the saved nforge CLI
 // credential in memory; internal guard calls use `convex run` (deployment login).
-// The import itself never deletes: deletion happens only on a guard breach.
+// The import itself never deletes: deletion happens on a guard breach, or after the run
+// when FORGE_IMPORT_TEARDOWN=1 (guard cancellation, owner delete, then a finite wait for
+// the purge; rerunning with the same DIR resumes a teardown that stopped part way).
 // GitHub REST rate limits stop the job with GITHUB_RATE_LIMIT; the driver resumes the
 // same operation after the limit window instead of starting a new import. Builds before
 // the blob-endpoint classification fix report a rate-limited blob as GITHUB_UNAVAILABLE;
@@ -128,6 +130,7 @@ const metricNumbers = [
   'putBytes',
   'uploadMillis',
   'peakBufferedBytes',
+  'rssBytes',
 ];
 
 const logs = spawn('npx', ['convex', 'logs', '--deployment', DEPLOYMENT, '--jsonl', '--success'], {
@@ -164,7 +167,9 @@ createInterface({ input: logs.stdout }).on('line', line => {
         data.projectId !== guard.monitor.target.projectId ||
         ![
           'upload',
+          'listing-stored',
           'listing',
+          'resume',
           'archive-open',
           'archive-complete',
           'metadata',
@@ -327,6 +332,17 @@ try {
 } catch (error) {
   outcome = `driver-error:${error.data?.code ?? error.message}`;
 }
+let teardown = null;
+if (process.env.FORGE_IMPORT_TEARDOWN === '1')
+  try {
+    await guard.stop();
+    const until = Date.now() + 15 * 60_000;
+    while (!(await guard.confirmDeleted()) && Date.now() < until) await wait(10_000);
+    teardown = guard.report().deleted ? 'deleted' : 'delete-pending';
+  } catch (error) {
+    teardown = `failed:${error.data?.code ?? error.message}`;
+  }
+if (teardown) log({ event: 'teardown', teardown });
 clearInterval(ticker);
 stopping = true;
 logs.kill();
@@ -335,6 +351,7 @@ const final = report({
   last,
   finishedAt: new Date(journal.finishedAt ?? Date.now()).toISOString(),
   quietProvenAt: outcome === 'ready' ? new Date().toISOString() : null,
+  teardown,
 });
 log({ event: 'done', outcome, executions: final.guard.total });
 console.log(

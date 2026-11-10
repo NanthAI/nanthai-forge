@@ -10,6 +10,7 @@ import { gitHash, gitTree, githubCommit } from '../dist/hosted-github-git.js';
 import { mirrorFixture } from './hosted-github-mirror-fixture.mjs';
 import { formatLfsPointer, isLfsPath, lfsRules, parseLfsPointer } from '../dist/github-lfs.js';
 import { digest } from '../dist/hash.js';
+import { GithubMirrorApiError } from '../dist/hosted-github-api.js';
 async function drain(f, initial) {
   let plan = initial ?? (await prepareMirror(f.seed, f.io));
   while (plan.phase !== 'done') {
@@ -153,6 +154,46 @@ test('a mirror turned on after landings catches GitHub main up from the import S
   assert(
     f.calls.every(c => c.method === 'GET' || !c.path.endsWith('/refs/heads/main') || c.body.force === false),
   );
+});
+test('Issue 5bc16ea7: an empty GitHub repository gets a one-file first commit through the Contents API, then Forge main on top of it, no force push', async () => {
+  const f = mirrorFixture({
+    verified: false,
+    empty: true,
+    after: { 'README.md': '# hi', 'src/run.sh': { mode: 'executable', text: 'echo' } },
+  });
+  const plan = await drain(f);
+  assert.equal(
+    plan.entry.tree,
+    f.expected(),
+    'GitHub holds exactly Forge main; the first-commit file is gone',
+  );
+  const first = f.commits.get(plan.entry.parent);
+  assert.equal(first.parent, null, 'the parent is the Contents API commit, the repository root');
+  assert.match(
+    plan.entry.message,
+    /^An accepted outcome\n\nForge mirror first publish: the GitHub repository was empty;/,
+  );
+  assert.equal(f.calls.filter(c => c.method === 'PUT').length, 1, 'one Contents API write');
+  assert(f.calls.every(c => !c.path.endsWith('/refs/heads/main') || c.body.force === false));
+  assert.equal(f.remote(), plan.entry.commit);
+});
+test('Issue 5bc16ea7: a lost first-commit reply is recognized by its tree on the retry, never written twice', async () => {
+  const f = mirrorFixture({ verified: false, empty: true, after: { a: '1' } });
+  f.lose('/repos/synthetic/mirror/contents/.forge/mirror-first-commit');
+  await assert.rejects(prepareMirror(f.seed, f.io), /lost reply/);
+  const plan = await drain(f);
+  assert.equal(plan.entry.tree, f.expected());
+  assert.equal(f.calls.filter(c => c.method === 'PUT').length, 1);
+});
+test('Issue 5bc16ea7: a repository with branches but no main is not empty: nothing is written', async () => {
+  const f = mirrorFixture({ verified: false, after: { a: '1' } });
+  const api = f.io.api;
+  f.io.api = async (path, method, body) => {
+    if (path.endsWith('/git/ref/heads/main')) throw new GithubMirrorApiError(404, 'GET ref', 0);
+    return api(path, method, body);
+  };
+  await assert.rejects(prepareMirror(f.seed, f.io), e => e.status === 404);
+  assert(f.calls.every(c => c.method === 'GET'));
 });
 test('GitHub main that moved on its own stops with a next step and pushes nothing', async () => {
   const f = mirrorFixture({

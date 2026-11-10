@@ -9,7 +9,9 @@ import { ImportBenchmarkMonitor } from './benchmark-import-monitor.mjs';
  * signed-in project owner. Credentials stay in those clients, never arguments.
  * Start the provider stream BEFORE starting the benchmark. Each event is the
  * Convex JSONL Completion/Progress object; tick() is a local clock, not a query.
- * On unknown IO replies, call stop() again: the same operation IDs are retained. */
+ * Deployment-admin calls (cancellation pages, status) are retried in place with the same
+ * arguments; the cancellation cursor is journaled, so a restarted guard resumes it. On other
+ * unknown IO replies, call stop() again: the same operation IDs are retained. */
 export function importBenchmarkGuard({
   projectId,
   name,
@@ -23,6 +25,9 @@ export function importBenchmarkGuard({
   stopWorkload = async () => {},
   deletionOperationId = journal.deleteRequest?.operationId ?? journal.deletionOperationId ?? randomUUID(),
   cancellationOperationId = journal.cancellationOperationId ?? randomUUID(),
+  pause = wait,
+  adminAttempts = 4,
+  retryMs = 2_000,
 }) {
   const monitor = new ImportBenchmarkMonitor({ projectId, name, creationOperationId, since, now });
   const target = () => {
@@ -31,7 +36,7 @@ export function importBenchmarkGuard({
   };
   const ref = makeFunctionReference;
   let stopping,
-    canceled = false,
+    canceled = journal.cancel?.done === true,
     deleted = false,
     deleteRequest = journal.deleteRequest,
     quietStarted = false;
@@ -44,10 +49,23 @@ export function importBenchmarkGuard({
     statusCalls: 0,
     deletionCalls: 0,
   };
-  const status = async () => {
-    receipts.statusCalls++;
-    return admin.query(ref('projectBenchmark:project'), target());
+  // A deployment-admin call that fails (a CLI exit, a lost reply) is repeated as is: both
+  // calls are idempotent, so a repeat never cancels or reads anything twice.
+  const retried = async call => {
+    for (let attempt = 1; ; attempt++)
+      try {
+        return await call();
+      } catch (error) {
+        if (attempt >= adminAttempts) throw error;
+        receipts.adminRetries = (receipts.adminRetries ?? 0) + 1;
+        await pause(retryMs * attempt);
+      }
   };
+  const status = () =>
+    retried(() => {
+      receipts.statusCalls++;
+      return admin.query(ref('projectBenchmark:project'), target());
+    });
   const cleanup = async () => {
     try {
       await stopWorkload();
@@ -62,21 +80,27 @@ export function importBenchmarkGuard({
     Object.assign(journal, { ...target(), since, cancellationOperationId, deletionOperationId });
     await saveJournal(journal);
     if (!canceled) {
-      let cursor = null;
+      let cursor = journal.cancel?.cursor ?? null;
       do {
-        receipts.cancellationCalls++;
-        const page = await admin.mutation(ref('projectBenchmark:cancelScheduled'), {
-          ...target(),
-          operationId: cancellationOperationId,
-          cursor,
+        const page = await retried(() => {
+          receipts.cancellationCalls++;
+          return admin.mutation(ref('projectBenchmark:cancelScheduled'), {
+            ...target(),
+            operationId: cancellationOperationId,
+            cursor,
+          });
         });
         receipts.canceled += page.canceled;
         receipts.scanned += page.scanned;
         if (page.isDone) break;
         if (page.cursor === cursor) throw Error('BENCHMARK_CANCEL_CURSOR');
         cursor = page.cursor;
+        journal.cancel = { cursor, done: false };
+        await saveJournal(journal);
       } while (true);
       canceled = true;
+      journal.cancel = { cursor, done: true };
+      await saveJournal(journal);
     }
     let current = await status();
     if (current.purgeBlocked) throw Error(current.purgeBlocked);

@@ -21,12 +21,8 @@ import {
   githubArchiveFiles,
   gitBlobId,
 } from '../src/github-archive-source';
-import {
-  archiveCursorSchema,
-  importPathKey,
-  importPageBytes,
-  lfsImportDefaultBytes,
-} from '../src/github-import-pages';
+import { archiveCursorSchema, importPageBytes, lfsImportDefaultBytes } from '../src/github-import-pages';
+import { ImportedPins } from '../src/github-listing-codec';
 import { ObjectRecipeBuilder, objectChunkBytes } from '../src/object-chunks';
 import { mapExchange } from '../src/exchange-parallel';
 import { digest } from '../src/hash';
@@ -36,7 +32,6 @@ import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
 import { resumePublication, storedObjects } from './projectGithubImportResume';
 import { dropListing, jobListing } from './projectGithubImportListing';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
-import type { GithubHostedFile } from '../src/hosted-github-bootstrap';
 
 /** A run stops streaming here and continues in a fresh action; the platform
  * action limit is 10 minutes and publication needs headroom. */
@@ -79,9 +74,8 @@ export async function runArchiveImport(
   );
   invariant(listing, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
   console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.files.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
   );
-  const listed = new Map(listing.files.map(file => [file.path, file]));
   // Progress is the stored objects themselves: one receipt per earlier window.
   const stored = await storedObjects(ctx, input);
   const saveWindow = async (objects: CatalogEntry[], state?: { sha256: string; size: number }) => {
@@ -96,20 +90,22 @@ export async function runArchiveImport(
   };
   const catalog = { stored, record: saveWindow };
   const upload = new ImportUpload(ctx, job.projectId, job.owner, archiveUploadConcurrency, catalog);
-  const imported = new Map<string, GithubHostedFile>();
+  // Pins by listing row: columns, not a path Map (memory per file bounds the import size).
+  const imported = new ImportedPins(listing.length);
   let bytes = 0;
-  const record = (entry: GithubSourceEntry, pin: { blob: string; size: number }) => {
-    imported.set(entry.path, {
-      path: entry.path,
-      blob: pin.blob,
-      size: pin.size,
-      mode: githubSourceMode(entry.mode),
-    });
+  const record = (
+    entry: GithubSourceEntry,
+    pin: { blob: string; size: number },
+    index = listing.index(entry.path),
+  ) => {
+    invariant(index >= 0, 'GITHUB_RESPONSE', 'GitHub returned a file outside the listed tree.');
+    if (imported.has(index)) return;
+    imported.set(index, pin.blob, pin.size);
     if (entry.mode !== '160000') bytes += pin.size;
   };
   const counters = () => ({
-    completed: imported.size,
-    total: listing.files.length,
+    completed: imported.count,
+    total: listing.length,
     bytes,
     // LFS objects replace their pointers' listed bytes once resolved.
     totalBytes: Math.max(listing.totalBytes, bytes),
@@ -125,6 +121,7 @@ export async function runArchiveImport(
   const streamLarge = async (
     entry: GithubSourceEntry,
     read: (consume: (part: Buffer) => Promise<void>) => Promise<void>,
+    index?: number,
   ) => {
     const git = createHash(entry.sha.length === 40 ? 'sha1' : 'sha256').update(`blob ${entry.size}\0`),
       logical = createHash('sha256'),
@@ -142,7 +139,7 @@ export async function runArchiveImport(
     if (size !== entry.size || git.digest('hex') !== entry.sha) return false;
     const pin = { blob: logical.digest('hex'), size };
     upload.recipe(pin, builder.finish({ sha256: pin.blob, size }).bytes);
-    record(entry, pin);
+    record(entry, pin, index);
     return true;
   };
   // Pointer-shaped files wait until every .gitattributes is known (filter=lfs).
@@ -153,7 +150,7 @@ export async function runArchiveImport(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-open', at: Date.now(), elapsedMillis: Date.now() - started })}`,
   );
   let seen = 0;
-  for await (const file of githubArchiveFiles(archive, listed, objectChunkBytes)) {
+  for await (const file of githubArchiveFiles(archive, listing, objectChunkBytes)) {
     // Stop before the next member, not after the last: a run that read the whole
     // archive at the budget still publishes instead of streaming it all again.
     if (seen++ && over()) {
@@ -163,15 +160,15 @@ export async function runArchiveImport(
     if (file.bytes) {
       if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha && !lfs.hold(file.entry, file.bytes)) {
         const pin = upload.put(file.bytes);
-        record(file.entry, { blob: pin.sha256, size: pin.size });
+        record(file.entry, { blob: pin.sha256, size: pin.size }, file.index);
       }
-    } else await streamLarge(file.entry, file.read!);
+    } else await streamLarge(file.entry, file.read!, file.index);
     await drain();
   }
   // Members the archive omitted or rewrote, and gitlink pointers, by Git object.
-  const missing = complete
-    ? listing.files.filter(file => !imported.has(file.path) && !lfs.isHeld(file.path))
-    : [];
+  const missing: GithubSourceEntry[] = [];
+  for (let index = 0; complete && index < listing.length; index++)
+    if (!imported.has(index) && !lfs.isHeld(listing.path(index))) missing.push(listing.entry(index));
   for (const entry of missing.filter(file => file.mode === '160000')) {
     const pointer = Buffer.from(entry.sha);
     upload.put(pointer);
@@ -222,7 +219,7 @@ export async function runArchiveImport(
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes, rssBytes: process.memoryUsage().rss })}`,
   );
-  if (imported.size < listing.files.length || !complete) {
+  if (imported.count < listing.length || !complete) {
     // Progress is the stored objects themselves; a continuation skips them.
     // A run that stored nothing new cannot converge within an action.
     invariant(
@@ -242,25 +239,21 @@ export async function runArchiveImport(
   }
   // Rows are produced page by page while publication reads them: 100,000 files
   // as materialized JSON rows held about 190 MB of a 512 MB action.
-  const row = (file: GithubSourceEntry) => {
-    const value = imported.get(file.path)!;
-    return {
-      key: importPathKey(file.path),
-      value: JSON.stringify({ path: value.path, blob: value.blob, size: value.size, mode: value.mode }),
-    };
-  };
   const rows: ImportRows = {
     imported: {
       *[Symbol.iterator]() {
-        for (const file of listing.files) yield row(file);
+        for (let index = 0; index < listing.length; index++)
+          yield JSON.stringify({
+            path: listing.path(index),
+            blob: imported.blob(index),
+            size: imported.size(index),
+            mode: githubSourceMode(listing.mode(index)),
+          });
       },
     },
     blobs: {
       *[Symbol.iterator]() {
-        const blobs = new Map<string, number>();
-        for (const value of imported.values()) blobs.set(value.blob, value.size);
-        for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
-          yield { key: sha256, value: JSON.stringify({ sha256, size }) };
+        for (const pin of imported.distinct()) yield JSON.stringify(pin);
       },
     },
   };

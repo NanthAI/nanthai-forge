@@ -4,7 +4,8 @@ import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { ImportUpload, type ImportCatalog } from './projectGithubImportUpload';
-import { catalogPages } from './projectObjectFind';
+import { sortedCatalogPages } from './projectObjectFind';
+import type { CatalogTable } from '../src/import-catalog-table';
 import { githubImportedWork, type GithubHostedFile } from '../src/hosted-github-bootstrap';
 import { materializeWork, type IndexEntry } from '../src/work-hosted-index';
 import { sourceTreeEntries } from '../src/source-tree-index';
@@ -20,9 +21,11 @@ import { importPageFiles } from '../src/github-import-pages';
 const stagedPageBytes = 2 * 1024 * 1024;
 /** ~35 KB rows: the web's 100-row record window stays a few MB at the archive limit. */
 const treePathsPerRow = 500;
-type ImportRow = { key: string; value: string };
-/** Re-iterable, so an archive import can produce rows lazily instead of holding every JSON string. */
-export type ImportRows = Record<'imported' | 'blobs', Iterable<ImportRow>>;
+/** Row values (JSON) in key order. Re-iterable, so an archive import produces them lazily
+ * instead of holding every JSON string; the keys only order the paged inventory. */
+export type ImportRows = Record<'imported' | 'blobs', Iterable<string>>;
+/** Archive publication sorts the catalog it stored in place, never copying it. */
+type PublishCatalog = ImportCatalog & { stored: CatalogTable };
 /** Metadata is traversed in bounded ordered pages. No whole repository array,
  * State string, manifest string or projection crosses an RPC boundary. Archive
  * imports pass their verified rows in key order instead of an inventory. */
@@ -30,7 +33,7 @@ export async function publishImport(
   ctx: ActionCtx,
   job: Doc<'projectGithubImports'>,
   memory?: ImportRows,
-  catalog?: ImportCatalog,
+  catalog?: PublishCatalog,
   meter = new ImportRequestMeter(job.githubRequests),
 ) {
   try {
@@ -54,7 +57,7 @@ async function publishRows(
   ctx: ActionCtx,
   job: Doc<'projectGithubImports'>,
   memory?: ImportRows,
-  catalog?: ImportCatalog,
+  catalog?: PublishCatalog,
   meter = new ImportRequestMeter(job.githubRequests),
 ) {
   const started = Date.now();
@@ -65,7 +68,7 @@ async function publishRows(
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
     if (memory) {
-      let page: ImportRow[] = [];
+      let page: string[] = [];
       for (const row of memory[part as keyof ImportRows]) {
         page.push(row);
         if (page.length < importPageFiles) continue;
@@ -84,7 +87,7 @@ async function publishRows(
       });
       if (!rows.length) return;
       after = rows.at(-1)!.key;
-      yield rows;
+      yield rows.map(row => row.value);
     }
   }
   const upload = new ImportUpload(ctx, job.projectId, job.owner, 8, catalog);
@@ -93,7 +96,7 @@ async function publishRows(
     let first = true;
     for await (const rows of pages('imported')) {
       const values = rows.map(row => {
-        const { path, blob, mode }: GithubHostedFile = JSON.parse(row.value);
+        const { path, blob, mode }: GithubHostedFile = JSON.parse(row);
         return JSON.stringify({ path, blob, mode });
       });
       yield Buffer.from((first ? '' : ',') + values.join(','));
@@ -134,7 +137,7 @@ async function publishRows(
       yield Buffer.from(
         rows
           .map(row => {
-            const pin = JSON.parse(row.value);
+            const pin = JSON.parse(row);
             return ',' + JSON.stringify({ path: `objects/${pin.sha256}`, ...pin });
           })
           .join(''),
@@ -147,18 +150,28 @@ async function publishRows(
   if (catalog) {
     // Every stored object (sources, chunks, recipes, State, manifest) becomes a
     // sorted catalog row of objectCatalogPage pins: O(pages) documents, no row per object.
-    const pages = catalogPages([...catalog.stored.values()]);
     for (const entry of catalog.stored.values())
       invariant(
         !entry.recipe || catalog.stored.has(entry.recipe.digest),
         'IMPORT_INCOMPLETE',
         'A recipe object is not stored.',
       );
-    for (let at = 0; at < pages.length; at += 32)
+    let pages = [];
+    for (const page of sortedCatalogPages(catalog.stored.sorted())) {
+      pages.push(page);
+      if (pages.length < 32) continue;
       await ctx.runMutation(internal.projectGithubImportCatalog.publish, {
         ...identity,
         step: job.step,
-        pages: pages.slice(at, at + 32),
+        pages,
+      });
+      pages = [];
+    }
+    if (pages.length)
+      await ctx.runMutation(internal.projectGithubImportCatalog.publish, {
+        ...identity,
+        step: job.step,
+        pages,
       });
   }
   metric('catalog');
@@ -216,7 +229,7 @@ async function publishRows(
   for await (const rows of pages('imported')) {
     const paths = sourceTreeEntries(
       head,
-      rows.map(row => JSON.parse(row.value)),
+      rows.map(row => JSON.parse(row)),
       treePathsPerRow,
     );
     await stage(
@@ -235,12 +248,12 @@ async function publishRows(
   if (!catalog)
     for await (const rows of pages('blobs')) {
       await stage(
-        rows.map(row => ({
+        rows.map(value => ({
           collection: 'sourceBlobs',
-          key: row.key,
+          key: JSON.parse(value).sha256,
           parent: '',
           position: position++,
-          value: row.value,
+          value,
         })),
       );
     }

@@ -9,6 +9,12 @@ import { publicationExclusion, sourceExclusion } from './files.js';
 import { ForgeError, invariant } from './errors.js';
 import { noteMessage } from './landing-message.js';
 import {
+  createFirstCommit,
+  firstCommitPath,
+  firstCommitTree,
+  githubMain,
+} from './hosted-github-mirror-first.js';
+import {
   formatLfsPointer,
   isGitattributesPath,
   isLfsPath,
@@ -194,14 +200,42 @@ export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<Mir
       ...lfsPlan(baseline, target),
     };
   }
-  const ref = await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
-  const remote = ref.object.sha;
+  // An empty repository first gets the one-file commit the Git Data API needs (see that module).
+  const main = await githubMain(seed.repository, io.api);
+  invariant(
+    main || !seed.binding,
+    'GITHUB_SYNC_CHANGED',
+    'GitHub main is gone although Forge retains a mirror mapping for it. No ref was changed; Forge never rewrites GitHub history.',
+  );
+  const remote = main ?? (await createFirstCommit(seed, io.api));
   const commit = await io.api<{ tree: { sha: string }; message: string }>(`${prefix}/commits/${remote}`);
   invariant(
     !seed.binding || seed.binding.commit === remote,
     'GITHUB_SYNC_CHANGED',
     'GitHub main moved away from the retained Forge mirror mapping. No ref was changed; Forge never rewrites GitHub history.',
   );
+  if (commit.tree.sha === firstCommitTree) {
+    // Forge's own first commit: nothing to verify against, publish all of Forge main on it.
+    const [target] = await io.states([seed.state]);
+    invariant(target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
+    const empty = { ...target, files: [] };
+    const plan = diffPlan(
+      {
+        ...seed,
+        message: noteMessage(
+          seed.message,
+          `Forge mirror first publish: the GitHub repository was empty; this commit brings it to State ${seed.state.slice(0, 12)}.`,
+        ),
+      },
+      remote,
+      firstCommitTree,
+      empty,
+      target,
+      false,
+    );
+    plan.changes.push({ path: firstCommitPath, mode: '100644', type: 'blob', sha: null });
+    return { ...plan, ...lfsPlan(empty, target) };
+  }
   // A retained Mac mapping is preferred. Otherwise a public Forge-State trailer names the
   // candidate baseline; failing that, GitHub main still at the import commit means the project
   // landed before the mirror was on and the import State is the baseline. The exact source tree

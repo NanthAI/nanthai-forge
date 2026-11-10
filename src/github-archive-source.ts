@@ -6,6 +6,7 @@ import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-projec
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
+import type { ListingTable } from './github-listing-codec.js';
 import { splitGithubTree, TreeSplitUnavailable, type GithubTreeEntry } from './github-tree-split.js';
 
 const gitId = (value: unknown): value is string =>
@@ -47,7 +48,7 @@ export async function listGithubTree(
       return null;
     }
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries: entries.length })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries: entries.length, rssBytes: process.memoryUsage().rss })}`,
     );
   }
   const paths = new Set<string>(),
@@ -152,19 +153,26 @@ export const gitBlobId = (sha: string, bytes: Buffer) =>
     .update(bytes)
     .digest('hex');
 
-export type ArchiveFile = { entry: GithubSourceEntry; bytes: Buffer | null; read: TarRead | null };
+export type ArchiveFile = {
+  entry: GithubSourceEntry;
+  /** The entry's row in the listing table. */
+  index: number;
+  bytes: Buffer | null;
+  read: TarRead | null;
+};
 type TarRead = (consume: (bytes: Buffer) => Promise<void>) => Promise<void>;
 
 /** Yields archive members that name a listed tree entry of the same kind and
  * size, exactly once. Small members carry their bytes; large ones stream. The
  * caller proves each member's Git object ID; anything the archive omits or
- * rewrites (export-ignore, export-subst, LFS smudging) is fetched by Git blob. */
+ * rewrites (export-ignore, export-subst, LFS smudging) is fetched by Git blob.
+ * Members seen are marked by row, so no path string outlives its member. */
 export async function* githubArchiveFiles(
   archive: AsyncIterable<Uint8Array>,
-  listed: Map<string, GithubSourceEntry>,
+  listed: ListingTable,
   smallBytes: number,
 ): AsyncGenerator<ArchiveFile> {
-  const seen = new Set<string>();
+  const seen = new Uint8Array(listed.length);
   let prefix: string | null = null;
   for await (const member of tarEntries(archive)) {
     const slash = member.path.indexOf('/');
@@ -173,21 +181,22 @@ export async function* githubArchiveFiles(
     prefix ??= root;
     invariant(root === prefix, 'GITHUB_RESPONSE', 'GitHub archive has more than one root.');
     const path = slash < 0 ? '' : member.path.slice(slash + 1).replace(/\/$/, '');
-    const entry = path ? listed.get(path) : undefined;
-    if (!entry || seen.has(path) || entry.mode === '160000') continue;
+    const index = path ? listed.index(path) : -1;
+    if (index < 0 || seen[index] || listed.mode(index) === '160000') continue;
+    const entry = listed.entry(index);
     if (member.type === 'symlink') {
       if (entry.mode !== '120000') continue;
-      seen.add(path);
-      yield { entry, bytes: Buffer.from(member.linkname), read: null };
+      seen[index] = 1;
+      yield { entry, index, bytes: Buffer.from(member.linkname), read: null };
     } else if (member.type === 'file' && entry.mode !== '120000' && member.size === entry.size) {
-      seen.add(path);
-      if (member.size > smallBytes) yield { entry, bytes: null, read: member.read };
+      seen[index] = 1;
+      if (member.size > smallBytes) yield { entry, index, bytes: null, read: member.read };
       else {
         const parts: Buffer[] = [];
         await member.read(async part => {
           parts.push(Buffer.from(part));
         });
-        yield { entry, bytes: Buffer.concat(parts), read: null };
+        yield { entry, index, bytes: Buffer.concat(parts), read: null };
       }
     }
   }

@@ -130,37 +130,47 @@ export async function objectRow(ctx: MutationCtx, object: ObjectView): Promise<D
   });
   return (await ctx.db.get(id))!;
 }
+type CatalogPageEntry = {
+  digest: string;
+  size: number;
+  stateGeneration?: number;
+  recipe?: { digest: string; size: number };
+  pack?: ObjectPack;
+};
 /** Sorted catalog rows for a set of stored objects; callers write them once. */
-export function catalogPages(
-  objects: {
-    digest: string;
-    size: number;
-    stateGeneration?: number;
-    recipe?: { digest: string; size: number };
-    pack?: ObjectPack;
-  }[],
-) {
-  const sorted = [...objects].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0));
-  const pages = [];
-  for (let start = 0; start < sorted.length; start += objectCatalogPage) {
-    const rows = sorted.slice(start, start + objectCatalogPage);
-    pages.push({
-      first: rows[0]!.digest,
-      last: rows.at(-1)!.digest,
-      digests: rows.map(row => row.digest).join(''),
-      sizes: rows.map(row => row.size),
-      ...(rows.some(row => row.stateGeneration !== undefined)
-        ? {
-            stateGenerations: rows.flatMap((row, index) =>
-              row.stateGeneration === undefined ? [] : [{ index, generation: row.stateGeneration }],
-            ),
-          }
-        : {}),
-      recipes: rows.flatMap((row, index) => (row.recipe ? [{ index, ...row.recipe }] : [])),
-      ...(rows.some(row => row.pack)
-        ? { packs: rows.flatMap((row, index) => (row.pack ? [{ index, ...row.pack }] : [])) }
-        : {}),
-    });
+export function catalogPages(objects: CatalogPageEntry[]) {
+  return [
+    ...sortedCatalogPages(
+      [...objects].sort((a, b) => (a.digest < b.digest ? -1 : a.digest > b.digest ? 1 : 0)),
+    ),
+  ];
+}
+/** The same rows for objects already in ascending digest order, made one page at a time
+ * so a caller never holds a second copy of the whole catalog. */
+export function* sortedCatalogPages(sorted: Iterable<CatalogPageEntry>) {
+  let rows: CatalogPageEntry[] = [];
+  const page = () => ({
+    first: rows[0]!.digest,
+    last: rows.at(-1)!.digest,
+    digests: rows.map(row => row.digest).join(''),
+    sizes: rows.map(row => row.size),
+    ...(rows.some(row => row.stateGeneration !== undefined)
+      ? {
+          stateGenerations: rows.flatMap((row, index) =>
+            row.stateGeneration === undefined ? [] : [{ index, generation: row.stateGeneration }],
+          ),
+        }
+      : {}),
+    recipes: rows.flatMap((row, index) => (row.recipe ? [{ index, ...row.recipe }] : [])),
+    ...(rows.some(row => row.pack)
+      ? { packs: rows.flatMap((row, index) => (row.pack ? [{ index, ...row.pack }] : [])) }
+      : {}),
+  });
+  for (const row of sorted) {
+    rows.push(row);
+    if (rows.length < objectCatalogPage) continue;
+    yield page();
+    rows = [];
   }
-  return pages;
+  if (rows.length) yield page();
 }

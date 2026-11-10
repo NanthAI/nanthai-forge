@@ -9,18 +9,20 @@ import { ForgeError, invariant } from '../src/errors';
 import { digest } from '../src/hash';
 import { objectRecipeSchema, readObjectRecipe, type ChunkPin } from '../src/object-chunks';
 import { packHeaders, packRange, verifyPackRange } from '../src/object-pack-range';
-import { importPathKey } from '../src/github-import-pages';
+import { CatalogTable } from '../src/import-catalog-table';
+import { ImportedPins } from '../src/github-listing-codec';
+import { importStateFiles } from '../src/import-state-scan';
 import type { ImportRequestMeter } from '../src/github-import-meter';
 import { windowEntries } from './projectGithubImportCatalog';
 import type { CatalogEntry } from './projectGithubImportUpload';
-import { publishImport } from './projectGithubImportPublish';
+import { publishImport, type ImportRows } from './projectGithubImportPublish';
 import { dropListing } from './projectGithubImportListing';
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 
 /** Progress of an archive import is the objects its windows stored: one receipt per window. */
 export async function storedObjects(ctx: ActionCtx, input: Identity) {
-  const stored = new Map<string, CatalogEntry>();
+  const stored = new CatalogTable();
   for (let after = ''; ;) {
     const rows = await ctx.runQuery(internal.projectGithubImportCatalog.stored, { ...input, after });
     if (!rows.length) break;
@@ -31,7 +33,7 @@ export async function storedObjects(ctx: ActionCtx, input: Identity) {
 }
 
 /** One stored object, read back from R2 (a raw object, or one range of its pack) and verified. */
-async function rawBytes(projectId: Id<'hostedProjects'>, stored: Map<string, CatalogEntry>, pin: ChunkPin) {
+async function rawBytes(projectId: Id<'hostedProjects'>, stored: CatalogTable, pin: ChunkPin) {
   const entry = stored.get(pin.sha256);
   invariant(
     entry && !entry.recipe && entry.size === pin.size,
@@ -56,16 +58,23 @@ async function rawBytes(projectId: Id<'hostedProjects'>, stored: Map<string, Cat
 }
 
 /** The import rows (path -> blob) that the stored State recorded, with sizes from the
- * stored objects. Same order and values the archive stream produced. */
+ * stored objects. Same order and values the archive stream produced. Rows are made from the
+ * State's bytes while publication reads them; only blob pins are kept by row. */
 export async function rowsFromState(
   job: Doc<'projectGithubImports'>,
-  stored: Map<string, CatalogEntry>,
+  stored: CatalogTable,
   pin: { sha256: string; size: number },
-): Promise<Record<'imported' | 'blobs', { key: string; value: string }[]>> {
+): Promise<ImportRows> {
   const entry = stored.get(pin.sha256);
   invariant(entry && entry.size === pin.size, 'INVALID_WORK_BACKUP', 'The stored State is missing.');
-  const parts: Buffer[] = [];
-  if (!entry.recipe) parts.push(await rawBytes(job.projectId, stored, pin));
+  const bytes = Buffer.alloc(pin.size);
+  let at = 0;
+  const append = (part: Buffer) => {
+    invariant(at + part.length <= pin.size, 'INVALID_WORK_BACKUP', 'The stored State differs.');
+    part.copy(bytes, at);
+    at += part.length;
+  };
+  if (!entry.recipe) append(await rawBytes(job.projectId, stored, pin));
   else {
     const recipe = objectRecipeSchema.parse(
       JSON.parse(
@@ -75,23 +84,35 @@ export async function rowsFromState(
       ),
     );
     for await (const part of readObjectRecipe(recipe, chunk => rawBytes(job.projectId, stored, chunk)))
-      parts.push(part);
+      append(part);
   }
-  const state: { files: { path: string; blob: string; mode: string }[] } = JSON.parse(
-    Buffer.concat(parts).toString(),
-  );
-  invariant(state.files.length === job.total, 'INVALID_WORK_BACKUP', 'The stored State lists other files.');
-  const rows = { imported: [], blobs: [] } as Record<'imported' | 'blobs', { key: string; value: string }[]>;
-  const blobs = new Map<string, number>();
-  for (const { path, blob, mode } of state.files) {
+  invariant(at === pin.size, 'INVALID_WORK_BACKUP', 'The stored State differs.');
+  const pins = new ImportedPins(job.total);
+  let files = 0;
+  for (const { blob } of importStateFiles(bytes)) {
     const size = stored.get(blob)?.size;
-    invariant(size !== undefined, 'INVALID_WORK_BACKUP', 'A stored source object is missing.');
-    rows.imported.push({ key: importPathKey(path), value: JSON.stringify({ path, blob, size, mode }) });
-    blobs.set(blob, size);
+    invariant(
+      size !== undefined && files < job.total,
+      'INVALID_WORK_BACKUP',
+      size === undefined ? 'A stored source object is missing.' : 'The stored State lists other files.',
+    );
+    pins.set(files++, blob, size);
   }
-  for (const [sha256, size] of [...blobs].sort(([a], [b]) => (a < b ? -1 : 1)))
-    rows.blobs.push({ key: sha256, value: JSON.stringify({ sha256, size }) });
-  return rows;
+  invariant(files === job.total, 'INVALID_WORK_BACKUP', 'The stored State lists other files.');
+  return {
+    imported: {
+      *[Symbol.iterator]() {
+        let index = 0;
+        for (const { path, blob, mode } of importStateFiles(bytes))
+          yield JSON.stringify({ path, blob, size: pins.size(index++), mode });
+      },
+    },
+    blobs: {
+      *[Symbol.iterator]() {
+        for (const pin of pins.distinct()) yield JSON.stringify(pin);
+      },
+    },
+  };
 }
 
 /** Publication retry of an archive import: every file is stored and the State is pinned
@@ -107,7 +128,7 @@ export async function resumePublication(
   const pin = job.stateObject;
   if (!pin || !job.totalKnown || job.completed !== job.total) return false;
   const stored = await storedObjects(ctx, input);
-  let rows: Awaited<ReturnType<typeof rowsFromState>>;
+  let rows: ImportRows;
   try {
     rows = await rowsFromState(job, stored, pin);
   } catch (error) {
@@ -117,7 +138,7 @@ export async function resumePublication(
     return false;
   }
   console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'resume', at: Date.now(), files: rows.imported.length })}`,
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'resume', at: Date.now(), files: job.total, rssBytes: process.memoryUsage().rss })}`,
   );
   const record = async (objects: CatalogEntry[], state?: { sha256: string; size: number }) => {
     await ctx.runMutation(internal.projectGithubImportStore.archiveProgress, {

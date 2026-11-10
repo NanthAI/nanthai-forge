@@ -49,7 +49,13 @@ export async function splitGithubTree(
         'GITHUB_RESPONSE',
         'GitHub returned another tree.',
       );
-      return reply;
+      // Only the listed fields stay: each reply entry also carries a ~95-character API URL.
+      return {
+        ...reply,
+        tree: reply.tree.map(({ path, mode, type, sha, size }) =>
+          size === undefined ? { path, mode, type, sha } : { path, mode, type, sha, size },
+        ),
+      };
     } finally {
       active--;
       waiting.shift()?.();

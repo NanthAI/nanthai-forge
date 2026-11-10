@@ -83,7 +83,8 @@ a single directory is itself above the reply limit or the split would need more 
 is published.
 
 The tree is listed once per import job. `start` stores the listing (path, Git object ID,
-size, mode per file; plus totals) as one scratch object under the project's R2 prefix and
+size, mode per file; plus totals) as one scratch object under the project's R2 prefix, in
+columns (one paths string with offsets, binary object IDs, sizes and mode codes), and
 pins it on the job; every archive step reads that object back, verifies its digest and
 tree id, and makes no tree request. A missing or altered object is listed again, never
 trusted. Publication deletes it; project deletion removes it with the rest of the prefix.
@@ -120,15 +121,18 @@ size and checksum. An interrupted action does not publish partial source. The
 worker's finite action scheduling boundaries do not exclude files. A continuation
 that cannot make progress reports a structured failure rather than looping.
 
-Memory grows with file count and is the next limit of this path. A Convex Node action
-has 512 MB. An archive step holds the listing, its path index, the path-to-blob map and
-the stored-object catalog, and publication adds its working set. Measured live on
-150,612 files (1.47 GB; two steps, `rssBytes` in the `FORGE_IMPORT_METRIC` records): a
-near-empty import action sits at about 190 to 200 MB; the second step read the stored
-listing at 292 MB, finished the archive at 448 MB, and publication peaked at 494 MB
-(projection). The ceiling is therefore about 150,000 files per import; a larger
-repository is expected to run out of action memory (`Node.js action execution ran out of
-memory`, no main published) until the per-file structures are made smaller.
+Memory per file bounds the import size: a Convex Node action has 512 MB, and a near-empty
+import action sits at about 190 to 200 MB. An archive step keeps its per-file state in
+columns rather than objects: the listing (about 150 bytes a file at real path lengths,
+looked up by binary search over its sorted paths), the verified pin of each listed row
+(a 32-byte blob digest and a size) and the stored-object catalog (binary digests, sizes and
+pack offsets in an open-addressing index, about 70 bytes an object). Publication sorts
+that catalog in place and writes it 32 pages at a time, and a publication retry reads the
+stored State one file at a time instead of parsing it whole. Before this, 150,612 files
+(1.47 GB; `rssBytes` in the `FORGE_IMPORT_METRIC` records) read the listing at 292 MB,
+finished the archive at 448 MB and peaked at 494 MB during publication. A larger repository
+than the ceiling runs out of action memory (`Node.js action execution ran out of memory`,
+no main published).
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
@@ -196,7 +200,11 @@ plus objects; see [automatic main mirror](../workflows.md#automatic-main-mirror)
 `scripts/benchmark-t3code-import.mjs` calls the same source-import start entry
 point as the app and observes its status action on a disposable project. It keeps retry pins in its
 journal and observes sanitized, project-attributed provider telemetry. Set
-`FORGE_IMPORT_STATUS_MS=10000` for ten-second finite benchmark observations.
+`FORGE_IMPORT_STATUS_MS=10000` for ten-second finite benchmark observations, and
+`FORGE_IMPORT_TEARDOWN=1` to cancel the project's scheduled work and delete the project
+after the run. The guard repeats a failed deployment-admin call (a cancellation page or a
+status read) with the same arguments and journals the cancellation cursor, so rerunning
+with the same directory resumes a teardown that stopped part way.
 Record the installed CLI `.commit`, repository commit, project ID and timestamps
 for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
 upload waits and attempts, metadata, catalog, projection and ready publication.
@@ -204,7 +212,9 @@ The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on 
 28.9k-file import and fixes its GitHub REST total at 8 requests (start: repository,
 commit, tree; run: repository, tarball, two fallback blobs; publication:
 repository); `tests/github-import-archive.test.mjs` also asserts that a two-step
-import with a split listing makes one listing's tree reads in total. The protocol-2 fixture in `tests/github-import-pages.test.mjs`
+import with a split listing makes one listing's tree reads in total, and that an archive
+step keeps under 300 bytes of heap per file between listing and archive-complete (about
+500 with the earlier per-file Maps). The protocol-2 fixture in `tests/github-import-pages.test.mjs`
 (28,905 files, 4,089 directories) records 33,061 REST requests, one per directory
 and blob, so that path relies on the App installation token; without one, a
 private repository on that path proceeds at about 10 percent of the importer's

@@ -17,6 +17,8 @@ export function mirrorFixture({
   between = null,
   /** GitHub main is the project's import commit: no Forge-State trailer, named by the seed. */
   imported = false,
+  /** The GitHub repository has no commit yet: its Git Data API answers 409 until one exists. */
+  empty = false,
 } = {}) {
   const objects = new Map(),
     states = new Map(),
@@ -75,7 +77,7 @@ export function mirrorFixture({
   };
   root.commit = githubCommit(root);
   commits.set(root.commit, root);
-  let remote = root.commit,
+  let remote = empty ? null : root.commit,
     lose;
   /** Branches other than main (Candidate branches), by name. */
   const branches = new Map();
@@ -97,7 +99,22 @@ export function mirrorFixture({
     calls.push({ path, method, body });
     const route = path.replace('/repos/synthetic/mirror/git/', '');
     let result;
-    if (route === 'ref/heads/main') result = { object: { sha: remote } };
+    if (remote === null && path.includes('/git/'))
+      throw new GithubMirrorApiError(409, `${method} git`, 0, undefined, 'Git Repository is empty.');
+    if (path === '/repos/synthetic/mirror/branches?per_page=1') result = remote === null ? [] : [{}];
+    else if (path.startsWith('/repos/synthetic/mirror/contents/') && method === 'PUT') {
+      assert.equal(remote, null, 'the Contents API only seeds an empty repository');
+      assert.equal(body.branch, 'main');
+      const file = { path: path.slice('/repos/synthetic/mirror/contents/'.length), mode: 'file' };
+      const bytes = Buffer.from(body.content, 'base64');
+      file.sha = gitHash('blob', bytes);
+      githubBlobs.set(file.sha, bytes);
+      const tree = gitTree([file]);
+      trees.set(tree, [file]);
+      remote = digest(body.message).slice(0, 40);
+      commits.set(remote, { tree, message: body.message, parent: null });
+      result = { commit: { sha: remote, tree: { sha: tree } } };
+    } else if (route === 'ref/heads/main') result = { object: { sha: remote } };
     else if (route.startsWith('ref/heads/')) {
       const sha = branches.get(route.slice(10));
       if (!sha) throw new GithubMirrorApiError(404, 'GET ref', 0);
