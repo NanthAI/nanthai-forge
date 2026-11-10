@@ -114,6 +114,12 @@ test('a folder without a hosted marker is refused with its absolute path and nfo
         error.message.includes(JSON.stringify(path)) &&
         error.message.includes(`nforge host ${JSON.stringify(path)}`),
     );
+  // coordination ROOT / mcp-coordination ROOT resolve the hosted address, never a local Work store.
+  const { coordinationTarget } = await import('../dist/coordination-cli.js');
+  assert.throws(
+    () => coordinationTarget(join(root, 'folder')),
+    error => error.code === 'FORGE_ROOT_UNAVAILABLE' && error.message.includes('nforge host'),
+  );
   assert.equal(fs.existsSync(join(root, '.git')), false);
   assert.equal(fs.existsSync(join(root, '.forge')), false);
 });
@@ -162,6 +168,11 @@ test('non-Git Forge clone roots address hosted planning with no local Git depend
   );
   const { hostedAgentAddress } = await import('../dist/hosted-agent-cli.js');
   assert.deepEqual(hostedAgentAddress(clone, {}), { url: 'https://fixture.invalid', projectId: 'project' });
+  const { coordinationTarget } = await import('../dist/coordination-cli.js');
+  assert.deepEqual(coordinationTarget(clone), {
+    deployment: 'https://fixture.invalid',
+    projectId: 'project',
+  });
   assert.equal(fs.existsSync(join(clone, '.git')), false);
   const { hostedAgentHelp } = await import('../dist/hosted-agent-help.js');
   assert(hostedAgentHelp('planning').includes('reconcile'));

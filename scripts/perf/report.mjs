@@ -10,9 +10,10 @@ import { gzipSync } from 'node:zlib';
 export const speedBudgets = JSON.parse(
   readFileSync(new URL('../../src/speed-budgets.json', import.meta.url), 'utf8'),
 );
-export const budgets = Object.fromEntries(
-  speedBudgets.budgets.filter(b => b.measuredBy === 'perf-harness').map(b => [b.metric, b.max]),
-);
+const harnessBudgets = speedBudgets.budgets.filter(b => b.measuredBy === 'perf-harness');
+export const budgets = Object.fromEntries(harnessBudgets.map(b => [b.metric, b.max]));
+/** A budget with `stat: "p90"` is judged on the 90th percentile of its samples, the rest on the median. */
+const p90Metrics = new Set(harnessBudgets.filter(b => b.stat === 'p90').map(b => b.metric));
 
 export async function runtimeBuildHash(directory) {
   const hash = createHash('sha256');
@@ -28,16 +29,21 @@ export function measurement(name, samples, reason) {
   const sorted = valid ? samples.map(s => s.durationMs).sort((a, b) => a - b) : [];
   const middle = Math.floor(sorted.length / 2);
   const medianMs = sorted.length ? (sorted[middle] + sorted[Math.floor((sorted.length - 1) / 2)]) / 2 : null;
+  const p90Ms = sorted.length
+    ? sorted[Math.min(sorted.length - 1, Math.ceil(0.9 * sorted.length) - 1)]
+    : null;
+  const judgedMs = p90Metrics.has(name) ? p90Ms : medianMs;
   return {
     budgetMs,
     status: !valid
       ? samples.length
         ? 'failed'
         : 'unrun'
-      : budgetMs === null || medianMs <= budgetMs
+      : budgetMs === null || judgedMs <= budgetMs
         ? 'pass'
         : 'fail',
     medianMs,
+    p90Ms,
     samples,
     ...(reason ? { reason } : {}),
   };

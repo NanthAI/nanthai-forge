@@ -8,7 +8,7 @@ import { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { exchangeConvexFetch } from '../dist/exchange-convex-fetch.js';
 import { refusedWait, retryExchange, retryableExchangeError } from '../dist/exchange-retry.js';
-import { hostedActionError } from '../dist/hosted-action-error.js';
+import { hostedActionError, mainDiscoveryError } from '../dist/hosted-action-error.js';
 import { landingRedriver } from '../dist/hosted-landing-redrive.js';
 import { ForgeError } from '../dist/errors.js';
 
@@ -200,4 +200,19 @@ test('the write transport resends only a refusal, and only for a short Retry-Aft
   assert.equal(refusedWait(refused(Date.now() + 20 * 60_000), 0), null, 'a long one is reported, not slept');
   assert.equal(refusedWait(refused(undefined, 'unknown'), 0), null, 'a 504 may have run: no blind resend');
   assert.equal(refusedWait(new ForgeError('EXCHANGE_REQUEST_TIMEOUT', 'deadline'), 0), null);
+});
+
+test('cloning a new empty project says it has no source yet, not INTERNAL_ERROR (friction from Issue 7ac4e32f)', () => {
+  const missing = new ConvexError({
+    code: 'PROJECT_WORK_MISSING',
+    message: 'Hosted source index is not ready.',
+  });
+  const error = mainDiscoveryError(missing);
+  assert(error instanceof ForgeError);
+  assert.equal(error.code, 'PROJECT_WORK_MISSING');
+  assert.match(error.message, /no source yet/);
+  assert.match(error.message, /nforge import/);
+  // Other structured refusals keep their own code and message.
+  const other = mainDiscoveryError(new ConvexError({ code: 'PROJECT_UNAVAILABLE', message: 'Sign in.' }));
+  assert.deepEqual([other.code, other.message], ['PROJECT_UNAVAILABLE', 'Sign in.']);
 });

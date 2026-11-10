@@ -9,7 +9,7 @@ import { budgets, bundleSummary, landingTiming, measurement, runtimeBuildHash } 
 
 export const usage = `Usage: node scripts/perf-harness.mjs [--out private-artifacts/perf/result.json]
   [--bundle hosted-web-dist] [--build-hash SOURCE_OR_DEPLOYED_HASH] [--samples 3]
-  [--work-owner OWNER --landing-id ACCEPTANCE_ID] [--cli-cold-start]
+  [--work-owner OWNER --landing-id ACCEPTANCE_ID] [--cli-cold-start] [--snapshot-lane LANE_CHECKOUT]
   [--live --base DEV_URL --project ID --lane RETAINED_LANE_ID]
   [--credentials ~/.config/forge-ui-bot/credentials.json] [--timeout 60000]
 
@@ -19,7 +19,10 @@ Enable QA readiness markers with VITE_FORGE_PERF=1 in the measured frontend.
 Without --live, browser numbers are unrun. --cli-cold-start runs the built CLI's
 --version (node dist/cli-entry.js) --samples times and judges its CPU time (user+sys,
 which a loaded machine barely moves) against the cliColdStartCpu budget; it needs
-/usr/bin/time and is unrun otherwise. Budgets live in src/speed-budgets.json.
+/usr/bin/time and is unrun otherwise. --snapshot-lane runs in a Lane checkout of a scratch project with
+policy autoSnapshot on (never a real project's Lane) and judges what a snapshot adds to a command
+against the snapshotAdded* budgets; it needs a network and is unrun otherwise. Budgets live in
+src/speed-budgets.json.
 Work timings read only existing records; this command never
 starts a check, finish, landing or backfill.
 JSON contains machine/build identities, timestamps, each sample and median budget
@@ -32,6 +35,7 @@ export function options(args) {
       help: { type: 'boolean' },
       live: { type: 'boolean', default: false },
       'cli-cold-start': { type: 'boolean', default: false },
+      'snapshot-lane': { type: 'string' },
       base: { type: 'string' },
       project: { type: 'string' },
       lane: { type: 'string' },
@@ -161,6 +165,23 @@ export async function main(args) {
         [],
         'Pass --cli-cold-start to run the built CLI (needs npm run build:core).',
       );
+  const snapshotReason = 'Pass --snapshot-lane LANE_CHECKOUT (a scratch project with autoSnapshot on).';
+  record.measurements.snapshotAddedUnchangedMs = measurement('snapshotAddedUnchangedMs', [], snapshotReason);
+  record.measurements.snapshotAddedChangedMs = measurement('snapshotAddedChangedMs', [], snapshotReason);
+  if (config['snapshot-lane']) {
+    try {
+      const { snapshotLatencySamples } = await import('./perf/snapshot-latency.mjs');
+      const observed = await snapshotLatencySamples(resolve(config['snapshot-lane']), config.samples);
+      record.measurements.snapshotAddedUnchangedMs = measurement(
+        'snapshotAddedUnchangedMs',
+        observed.unchanged,
+      );
+      record.measurements.snapshotAddedChangedMs = measurement('snapshotAddedChangedMs', observed.changed);
+    } catch {
+      for (const name of ['snapshotAddedUnchangedMs', 'snapshotAddedChangedMs'])
+        record.measurements[name] = measurement(name, [], 'Snapshot latency run failed; details redacted.');
+    }
+  }
   record.landing = {
     status: 'unrun',
     reason: 'Supply --work-owner to read retained acceptance and check records.',

@@ -136,6 +136,8 @@ import {
 } from './hosted-metric-outbox.js';
 import { isHostedReplyError, parseHostedResponse, replyIssuePaths } from './hosted-response.js';
 import { snapshotLaneCheckout, type SnapshotReceipt } from './hosted-lane-snapshot.js';
+import { rememberSnapshotsKept } from './lane-snapshot-hint.js';
+import { launchSnapshotWorker } from './hosted-snapshot-worker.js';
 import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
 import { openLaneRoot } from './hosted-lane-location.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
@@ -143,6 +145,9 @@ import { openLaneRoot } from './hosted-lane-location.js';
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 /** Actions that capture or rewrite the working files themselves take no snapshot first. */
 const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'resolve', 'sync', 'compose', 'snapshots']);
+/** Actions that may rewrite or remove working files: their snapshot is taken first, in this process.
+ * Every other command hands its snapshot to a short-lived detached process and never waits for it. */
+const snapshotFirst = new Set(['start', 'open', 'reopen', 'pull', 'abandon', 'revert', 'recover-apply']);
 const quietActions = new Set([
   'approve-link',
   'request-approval',
@@ -308,8 +313,17 @@ export class HostedAgentTransport {
   /** Fires once the local journal selects the operation id, before any network wait:
    * a backgrounded or killed client still leaves its id and resume command behind. */
   onOperation?: (action: string, operationId: string) => void;
-  /** The unsaved-work snapshot this command took (or why it skipped), for its receipt. */
-  snapshotReceipt?: SnapshotReceipt | undefined;
+  /** The unsaved-work snapshot this command took first (or why it skipped), for its receipt. */
+  private snapshotReceipt?: SnapshotReceipt | undefined;
+  /** The Lane checkout a command works in (or names), if it has one. */
+  private snapshotRoot(data: unknown) {
+    const laneId = (data as { laneId?: unknown } | undefined)?.laneId;
+    return readHostedLaneCheckout(this.root)
+      ? this.root
+      : typeof laneId === 'string'
+        ? openLaneRoot({ root: this.root, address: this.address }, laneId)
+        : null;
+  }
   /** Epoch ms deadline for actions that wait for their own outcome; default: the agent wait
    * budget from dispatch. `wait` sets its own so a resumed save never outlives that budget. */
   waitUntil?: number;
@@ -833,18 +847,17 @@ export class HostedAgentTransport {
         );
       }
       // Unsaved-work snapshot (7ac4e32f): only when the policy is on and files changed; never fails the command.
-      if (capabilities.laneSnapshots && !snapshotSkips.has(action)) {
-        const laneId = (command.data as { laneId?: unknown }).laneId;
-        const root = readHostedLaneCheckout(this.root)
-          ? this.root
-          : typeof laneId === 'string'
-            ? openLaneRoot({ root: this.root, address: this.address }, laneId)
-            : null;
-        if (root) {
-          const taken = await snapshotLaneCheckout(root, this.address.projectId, this.exchange.client);
-          this.snapshotReceipt = taken.status === 'unchanged' ? undefined : taken;
+      // A project without the policy costs one local file check here; the Lane marker is read only when it is on.
+      const keep = capabilities.laneSnapshots ? this.snapshotRoot(command.data) : null;
+      if (keep) {
+        rememberSnapshotsKept(keep, true);
+        if (!snapshotSkips.has(action)) {
+          if (snapshotFirst.has(action)) {
+            const taken = await snapshotLaneCheckout(keep, this.address.projectId, this.exchange.client);
+            this.snapshotReceipt = taken.status === 'unchanged' ? undefined : taken;
+          } else launchSnapshotWorker(keep, this.address);
         }
-      }
+      } else if (!capabilities.laneSnapshots) rememberSnapshotsKept(this.root, false);
       if (action === 'source-pack') {
         hostedAgentCommandSchemas['source-pack'].parse(command.data);
         const journal = new HostedAgentJournal(

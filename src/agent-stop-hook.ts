@@ -21,7 +21,7 @@ const PROBE_DEADLINE_MS = 2500;
 /** `unknown`: the probe could not confirm either way (no address, error, deadline). */
 export type TurnWorkState = 'running' | 'terminal' | 'unknown';
 export type TurnWorkProbe = (work: TurnWork) => Promise<TurnWorkState>;
-type StopInput = { session_id?: unknown; hook_event_name?: unknown };
+type StopInput = { session_id?: unknown; hook_event_name?: unknown; cwd?: unknown };
 
 export function turnEndMessage(work: Pick<TurnWork, 'id' | 'kind' | 'wake'>, watched = false) {
   const what = `Your ${work.kind === 'check' ? 'check run' : 'landing'} ${work.id.slice(0, 8)} is still running.`;
@@ -136,10 +136,33 @@ export async function runTurnEndHook(text: string) {
   try {
     const { editHooksEnabled } = await import('./agent-hook-settings.js');
     if (!editHooksEnabled()) return {};
-    return await turnEndDecision(JSON.parse(text) as StopInput);
+    return await turnEndWithSnapshot(JSON.parse(text) as StopInput);
   } catch {
     return {};
   }
+}
+/** The turn-end answer plus the turn-end snapshot (Issue 7ac4e32f). Only a stop that is allowed
+ * ends the turn, so the snapshot runs once per turn and never before a block. A snapshot failure
+ * never changes the answer. */
+export async function turnEndWithSnapshot(
+  input: StopInput,
+  snapshot: (input: StopInput) => Promise<unknown> = snapshotAtTurnEnd,
+) {
+  const decision = await turnEndDecision(input);
+  if (!decision.decision && (input.hook_event_name === undefined || input.hook_event_name === 'Stop'))
+    try {
+      await snapshot(input);
+    } catch {
+      /* Advisory: the next command snapshots again. */
+    }
+  return decision;
+}
+async function snapshotAtTurnEnd(input: StopInput) {
+  const { turnEndSnapshot } = await import('./agent-turn-snapshot.js');
+  await turnEndSnapshot(input, async ({ url, projectId }) => {
+    const { ConvexExchange } = await import('./exchange-client.js');
+    return new ConvexExchange(url, process.env.FORGE_AUTH_TOKEN, projectId, '', null).client;
+  });
 }
 
 if (isMainModule(import.meta.url)) {

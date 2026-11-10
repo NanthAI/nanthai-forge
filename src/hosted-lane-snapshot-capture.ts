@@ -1,7 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
-import { lstatSync, readFileSync, readlinkSync, realpathSync, type Stats } from 'node:fs';
+import {
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+  type Stats,
+} from 'node:fs';
 import { join } from 'node:path';
-import { clientCacheRoot } from './root-paths.js';
+import { snapshotDirectory } from './lane-snapshot-hint.js';
 import { scanSourcePaths } from './source-paths.js';
 import { notSavedCollector } from './save-not-saved.js';
 import { SourceFileReader } from './source-file-reader.js';
@@ -10,7 +19,6 @@ import { forgeCachePath } from './forge-cache-paths.js';
 import { diskMode } from './source-links.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { durableReplace } from './native-durability.js';
 import {
   indexedBlob,
   readCheckoutStatIndex,
@@ -23,8 +31,6 @@ import type { NativeFile } from './native-state-format.js';
 import { LANE_SNAPSHOT, snapshotTree } from './lane-snapshot-contract.js';
 import { scanSecretText, SECRET_SCAN_MAX_FILE_BYTES } from './secret-scan.js';
 
-/** Private snapshot state of one checkout, beside it in `<root>.forge-client/snapshots`. */
-export const snapshotDirectory = (root: string) => join(clientCacheRoot(root), 'snapshots');
 type Entry = ReturnType<typeof statEntry>;
 const statPath = (root: string) => join(snapshotDirectory(root), 'stat.json');
 /** Secret-scan verdicts by blob digest: true = holds a credential. Each changed blob is scanned once. */
@@ -45,14 +51,34 @@ function readStat(root: string): CheckoutStatIndex & { verdicts: Verdicts } {
     return { since: 0, entries: new Map(), verdicts: new Map() };
   }
 }
+/** Every observed file matches the index and no verdict is new: rewriting it would change nothing. */
+function sameObservations(
+  before: { entries: Map<string, Entry>; verdicts: Verdicts },
+  entries: Map<string, Entry>,
+  verdicts: Verdicts,
+) {
+  if (before.entries.size !== entries.size || before.verdicts.size !== verdicts.size) return false;
+  for (const [path, entry] of entries) {
+    const old = before.entries.get(path);
+    if (!old || entry.some((value, index) => value !== old[index])) return false;
+  }
+  for (const [blob, secret] of verdicts) if (before.verdicts.get(blob) !== secret) return false;
+  return true;
+}
+/** Speed only: a lost or torn write makes the next snapshot hash more, so it is replaced
+ * atomically without the flush a source record needs. */
 function writeStat(root: string, since: number, entries: Map<string, Entry>, verdicts: Verdicts) {
+  const path = statPath(root),
+    temporary = `${path}.${process.pid}.tmp`;
   try {
-    durableReplace(
-      statPath(root),
+    writeFileSync(
+      temporary,
       JSON.stringify({ since, entries: Object.fromEntries(entries), verdicts: Object.fromEntries(verdicts) }),
+      { mode: 0o600 },
     );
+    renameSync(temporary, path);
   } catch {
-    /* Speed only: the next snapshot hashes more. */
+    rmSync(temporary, { force: true });
   }
 }
 
@@ -98,6 +124,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
     observed = new Map<string, Entry>(),
     verdicts: Verdicts = new Map(),
     held: string[] = [];
+  let hashed = false;
   const baseline = new Map<string, NativeFile>(marker.state.files.map(file => [file.path, file])),
     notSaved = notSavedCollector(),
     capped: string[] = [];
@@ -126,6 +153,8 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
     }
     let read: Buffer | undefined;
     if (!blob) {
+      // A file read here is racy or new: only a rewritten index moves `since` past it.
+      hashed = true;
       read = readBytes(root, path, stat);
       blob = digest(read);
     }
@@ -170,7 +199,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
       const old = baseline.get(path)!;
       changes.push({ path, before: { blob: old.blob, mode: old.mode }, after: null });
     }
-  writeStat(root, since, observed, verdicts);
+  if (hashed || !sameObservations(own, observed, verdicts)) writeStat(root, since, observed, verdicts);
   const built = changes.length ? buildSavePages(changes) : { pages: [], root: null };
   const head = marker.selection.head;
   return {

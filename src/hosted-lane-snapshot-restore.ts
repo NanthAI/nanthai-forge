@@ -11,7 +11,8 @@ import {
 import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { captureSnapshot, snapshotDirectory } from './hosted-lane-snapshot-capture.js';
+import { captureSnapshot } from './hosted-lane-snapshot-capture.js';
+import { snapshotDirectory } from './lane-snapshot-hint.js';
 import {
   readSnapshotLedger,
   snapshotLaneCheckout,
@@ -191,7 +192,11 @@ export async function executeSnapshots(
     ...(command.redo ? { redo: command.redo } : {}),
     ...(command.restore !== undefined ? { restore: command.restore } : {}),
   });
-  invariant(seq !== null, 'NOT_FOUND', `Nothing to ${move}: the operation log has no such snapshot.`);
+  invariant(
+    seq !== null,
+    'NOT_FOUND',
+    `Nothing to ${move}: the operation log has no such snapshot. List it with nforge x ROOT snapshots '{}'.`,
+  );
   const target = log.entries.find(entry => entry.seq === seq && entry.kind === 'snapshot')!;
   const delta = await readDelta(client, projectId, laneId, target);
   invariant(

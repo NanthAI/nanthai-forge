@@ -14,6 +14,7 @@ import type { ConvexHttpClient } from 'convex/browser';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { networkFailure } from './network-fetch.js';
+import { mainDiscoveryError } from './hosted-action-error.js';
 import type { ContentPin, ExchangeTransport } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
 import { putPreparedObjects, uploadPhysicalObjects, type BuiltPack } from './exchange-upload.js';
@@ -572,20 +573,23 @@ async function discoveredMain(
   projectId: string,
   expected?: MainExpectation,
 ) {
-  const value = await client.query(query('projectHostedAgent:capabilities'), {
-    projectId,
-    clientVersion: CUTOVER_CLI_VERSION,
-  });
-  const discovery = typeof value === 'string' ? JSON.parse(value) : value;
-  const authority = sourceAuthoritySchema.parse(discovery.authority);
-  const server = authority.mode === 'server';
-  const selected = await client.query(
-    query(server ? 'projectHostedChannels:current' : 'projectMain:current'),
-    {
+  let discovery, authority, server, selected;
+  try {
+    const value = await client.query(query('projectHostedAgent:capabilities'), {
+      projectId,
+      clientVersion: CUTOVER_CLI_VERSION,
+    });
+    discovery = typeof value === 'string' ? JSON.parse(value) : value;
+    authority = sourceAuthoritySchema.parse(discovery.authority);
+    server = authority.mode === 'server';
+    selected = await client.query(query(server ? 'projectHostedChannels:current' : 'projectMain:current'), {
       projectId,
       ...(server ? {} : { maxSchema: 2, ...(expected ? { expected } : {}) }),
-    },
-  );
+    });
+  } catch (error) {
+    // Only the server's structured refusals are translated; everything else surfaces as before.
+    throw error instanceof ConvexError ? mainDiscoveryError(error) : error;
+  }
   const main = parseHostedResponse(
     hostedMainSchema,
     typeof selected === 'string' ? JSON.parse(selected) : selected,

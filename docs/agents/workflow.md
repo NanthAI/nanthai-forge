@@ -785,14 +785,14 @@ Use `nforge exchange --help` and [source exchange](../operations/source-exchange
 
 Hosted Lanes snapshot unsaved work behind policy `autoSnapshot` (Issue 7ac4e32f); it is off unless set.
 
-- **What triggers a snapshot:** each Forge command run in a Lane checkout first snapshots the checkout's working files, if they changed since the last snapshot.
-- **What it costs:** unchanged files cost no call. A changed snapshot costs `prepare`, `commit` and create-only R2 uploads of only the changed files. File bytes never go into Convex.
+- **What triggers a snapshot:** each Forge command run in a Lane checkout hands the working files to a short-lived detached process, which snapshots them if they changed since the last snapshot; the command never waits for it (about 3 ms added: a lock and burst check plus the spawn). Commands that may rewrite or remove files (`start`, `open`, `reopen`, `pull`, `abandon`, `revert`, `recover-apply`) snapshot first, in their own process, and report it as `snapshot` in their receipt. A burst of commands within 3 seconds snapshots once. Commands that capture the tree themselves (`save`, `finish`, `resolve`, `sync`, `compose`) and the planning, metrics and capability reads take none. A turn that ends in a Lane checkout also snapshots, once, through the Stop hook the CLI already installs (Claude Code and Codex): at most 3.5 seconds, no call when nothing changed, and a failure never blocks the stop. The turn-end snapshot and the per-command ones run only in a checkout that last saw its project keep snapshots.
+- **What it costs:** unchanged files cost no call. A changed snapshot costs `prepare`, `commit` and create-only R2 uploads of only the changed files; it is durable about one second after the command for one changed file and about two seconds for fifty. File bytes never go into Convex. Each command also costs the machine one short process (about 0.8 s of CPU, unchanged or changed), which the 3-second burst gap bounds. A killed worker leaves its retained request: the next command or turn end finishes or replaces it, and its lock is cleared as soon as its process is gone.
 - **What it is not:** a snapshot is not a save. The Lane head never moves. Nothing lands, runs checks or raises notices.
 - **What is left out:** the walk is the save's. Ignored files and credential names are left out and counted as `notSaved`. New files over 1 MiB are left out and named in `snapshot.notSaved.capped`. Changed files the landing secret scan flags are left out and named in `snapshot.notSaved.held`: a snapshot never lands, so nothing would scan it later. A restore leaves held files at their saved-head version.
 - **Browsing and moving:** `x snapshots {}` lists the Lane's operation log. With the Lane checkout as ROOT, `{"undo":N}`, `{"redo":N}` and `{"restore":SEQ|"latest"}` write a snapshot's files back. Each move first snapshots the current files, so the move can be undone. Nothing is deleted or saved.
 - **Recovering on a new machine:** run `start --open {laneId}`, then `{"restore":"latest"}`.
 - **Expiry and purge:** a Lane's snapshots expire 14 days after its latest one. `{"purge":true}` deletes them from storage for real; it needs the Lane author or the project owner.
-- **Not covered:** edits made after the last command.
+- **Not covered:** edits made after the last turn ended, when no hook ran (a client without the installed Stop hook) and no command followed.
 
 ### Abandon work without losing it
 

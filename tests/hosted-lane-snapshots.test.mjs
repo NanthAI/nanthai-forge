@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { getFunctionName } from 'convex/server';
@@ -11,6 +11,10 @@ import { lifecycleFixture, code } from './hosted-lane-lifecycle-fixture.mjs';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { snapshotLaneCheckout } from '../dist/hosted-lane-snapshot.js';
+import { launchSnapshotWorker, snapshotWorkerTestHooks } from '../dist/hosted-snapshot-worker.js';
+import { turnEndSnapshot } from '../dist/agent-turn-snapshot.js';
+import { rememberSnapshotsKept, snapshotsKept } from '../dist/lane-snapshot-hint.js';
+import { snapshotDirectory } from '../dist/lane-snapshot-hint.js';
 import { executeSnapshots } from '../dist/hosted-lane-snapshot-restore.js';
 import { LANE_SNAPSHOT, snapshotTarget } from '../dist/lane-snapshot-contract.js';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
@@ -172,7 +176,13 @@ test('undo and redo walk the operation log; nothing is deleted', async t => {
   const redo2 = await x.run({ redo: 1 });
   assert.equal(redo2.target, 3);
   assert.equal(text(x.root, 'a.txt'), 'v3 unsnapshotted');
-  await assert.rejects(x.run({ redo: 1 }), code('NOT_FOUND'));
+  // The message names the command that lists the log, so the CLI's generic "run from the Lane root"
+  // lookup hint (src/argument-errors.ts), which would mislead here, is not appended.
+  await assert.rejects(x.run({ redo: 1 }), error => {
+    code('NOT_FOUND')(error);
+    assert.match(error.message, /nforge x ROOT snapshots/);
+    return true;
+  });
   // Restoring to the head puts head bytes back from saved objects.
   writeFileSync(join(x.root, 'a.txt'), 'original');
   rmSync(join(x.root, 'b.txt'));
@@ -243,9 +253,12 @@ test('secrets and big new files are left out like a save', async t => {
 test('policy off, closed Lanes and other members are refused; nothing is stored', async t => {
   const off = await fixture(t, { policy: false });
   writeFileSync(join(off.root, 'a.txt'), 'edited');
+  // The checkout last saw snapshots on; the refusal makes it forget, so a turn end stops looking.
+  rememberSnapshotsKept(off.root, true);
   const refused = await off.snap();
   assert.equal(refused.status, 'skipped');
   assert.equal(refused.code, 'SNAPSHOTS_OFF');
+  assert.equal(snapshotsKept(off.root), false);
   assert.equal(off.rows().length, 0);
   assert.equal(off.stored().length, 0);
 
@@ -343,4 +356,82 @@ test('snapshotTarget follows the parent chain and redo walks back undos', () => 
   assert.equal(snapshotTarget(log, { restore: 3 }), 3);
   assert.equal(snapshotTarget(log, { restore: 5 }), null, 'only snapshots are targets');
   assert.throws(() => hostedAgentCommandSchemas.snapshots.parse({ undo: 1, redo: 1 }));
+});
+
+test('a lock left by a killed process is cleared at once, not after two minutes', async t => {
+  const x = await fixture(t);
+  writeFileSync(join(x.root, 'a.txt'), 'edit');
+  mkdirSync(snapshotDirectory(x.root), { recursive: true });
+  // A pid beyond the default range is never alive: the previous process died holding the lock.
+  writeFileSync(join(snapshotDirectory(x.root), 'lock'), String(2 ** 22 + 12345));
+  const first = await x.snap();
+  assert.equal(first.status, 'saved', 'a dead holder does not block the next command for two minutes');
+});
+
+test('a command hands its snapshot to one detached worker and never waits for it', async t => {
+  const x = await fixture(t);
+  rememberSnapshotsKept(x.root, true);
+  const launches = [];
+  const failing = [];
+  snapshotWorkerTestHooks.launch = (command, args, options) => {
+    if (failing.length) throw new Error('spawn failed');
+    launches.push({ command, args, options });
+    return { on() {}, unref() {} };
+  };
+  t.after(() => delete snapshotWorkerTestHooks.launch);
+  process.env.JJSNAP_UNRELATED_SECRET = 'must-not-reach-the-worker';
+  t.after(() => delete process.env.JJSNAP_UNRELATED_SECRET);
+  const address = { url: 'https://fixture.invalid', projectId: x.f.projectId };
+  assert.equal(launchSnapshotWorker(x.root, address), true);
+  assert.equal(launches.length, 1);
+  assert.equal(launches[0].options.detached, true, 'it outlives the command that started it');
+  assert.equal(launches[0].options.stdio, 'ignore', 'no pipe or handle can keep the CLI alive');
+  assert(!('JJSNAP_UNRELATED_SECRET' in launches[0].options.env), 'only an allowlisted environment');
+  assert.deepEqual(launches[0].args.slice(1), [x.root, address.url, address.projectId]);
+  // A burst of commands snapshots once.
+  assert.equal(launchSnapshotWorker(x.root, address), false);
+  const stamp = join(snapshotDirectory(x.root), 'worker');
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(stamp, old, old);
+  // A snapshot already running (live holder) is not doubled; a dead holder's lock is no obstacle.
+  writeFileSync(join(snapshotDirectory(x.root), 'lock'), String(process.pid));
+  assert.equal(launchSnapshotWorker(x.root, address), false);
+  writeFileSync(join(snapshotDirectory(x.root), 'lock'), String(2 ** 22 + 12345));
+  assert.equal(launchSnapshotWorker(x.root, address), true);
+  assert.equal(launches.length, 2);
+  // A launch that fails never reaches the command.
+  utimesSync(stamp, old, old);
+  failing.push(1);
+  assert.equal(launchSnapshotWorker(x.root, address), false);
+});
+
+test('the turn-end snapshot covers edits after the last command, once, with no call when nothing changed', async t => {
+  const x = await fixture(t);
+  const sub = join(x.root, 'src');
+  mkdirSync(sub);
+  let built = 0;
+  const factory = async target => {
+    built++;
+    assert.equal(target.projectId, x.f.projectId);
+    return x.client();
+  };
+  // A checkout whose project never kept snapshots: not even a walk.
+  writeFileSync(join(x.root, 'a.txt'), 'edited after the last command');
+  assert.equal(await turnEndSnapshot({ cwd: sub }, factory), null);
+  assert.equal(built, 0);
+  assert.equal(x.calls.length, 0);
+  rememberSnapshotsKept(x.root, true);
+  assert.equal(snapshotsKept(x.root), true);
+  // The agent's cwd is a subdirectory of the Lane: the Lane checkout is found from it.
+  const taken = await turnEndSnapshot({ cwd: sub }, factory);
+  assert.equal(taken?.status, 'saved');
+  assert.deepEqual(x.calls, ['projectLaneSnapshots:prepare', 'projectLaneSnapshots:commit']);
+  x.calls.length = 0;
+  assert.deepEqual(await turnEndSnapshot({ cwd: sub }, factory), { status: 'unchanged', calls: 0 });
+  assert.equal(x.calls.length, 0, 'a turn that changed nothing costs no call');
+  // Not inside any Lane checkout, or no cwd: nothing.
+  assert.equal(await turnEndSnapshot({ cwd: tmpdir() }, factory), null);
+  assert.equal(await turnEndSnapshot({}, factory), null);
+  rememberSnapshotsKept(x.root, false);
+  assert.equal(snapshotsKept(x.root), false);
 });

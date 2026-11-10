@@ -21,6 +21,7 @@ import {
   hostedTurnWorkProbe,
   turnEndDecision,
   turnEndMessage,
+  turnEndWithSnapshot,
 } from '../dist/agent-stop-hook.js';
 import {
   readTurnLedger,
@@ -578,4 +579,29 @@ test('SM-C M1: ledger entries have named states; a reused pid is not an observer
   assert.equal(ownsLiveLanding(s.root, s.id, now), false, 'a dead observer past the queue life is not live');
   recordTurnWork(landing(s.root, randomUUID(), deadPid, now - 60_000));
   assert.equal(ownsLiveLanding(s.root, s.id, now), true);
+});
+
+test('the turn-end snapshot runs once on an allowed stop, never before a block, and never changes the answer', async t => {
+  const { id, root } = session(t, 'claude');
+  const seen = [];
+  const snapshot = async input => seen.push(input.cwd);
+  const stop = { session_id: id, hook_event_name: 'Stop', cwd: root };
+  assert.deepEqual(await turnEndWithSnapshot(stop, snapshot), {});
+  assert.deepEqual(seen, [root], 'one snapshot for the turn that ends');
+  // A failing snapshot never blocks or alters the stop.
+  const failing = async () => {
+    throw new Error('network down');
+  };
+  assert.deepEqual(await turnEndWithSnapshot(stop, failing), {});
+  // Other hook events are not turn ends.
+  assert.deepEqual(await turnEndWithSnapshot({ ...stop, hook_event_name: 'UserPromptSubmit' }, snapshot), {});
+  assert.equal(seen.length, 1);
+  // Unfinished landing: the first stop is blocked, so the turn is not over and nothing is taken.
+  recordTurnWork(landing(root));
+  const blocked = await turnEndWithSnapshot(stop, snapshot);
+  assert.equal(blocked.decision, 'block');
+  assert.equal(seen.length, 1);
+  // The repeated stop is allowed and ends the turn: one snapshot.
+  assert.deepEqual(await turnEndWithSnapshot(stop, snapshot), {});
+  assert.equal(seen.length, 2);
 });

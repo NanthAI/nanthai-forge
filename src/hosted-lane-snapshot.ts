@@ -1,11 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import type { ConvexHttpClient } from 'convex/browser';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
-import { captureSnapshot, snapshotDirectory } from './hosted-lane-snapshot-capture.js';
+import { captureSnapshot } from './hosted-lane-snapshot-capture.js';
+import {
+  rememberSnapshotsKept,
+  snapshotDirectory,
+  snapshotLockHeld,
+  snapshotLockPath,
+} from './lane-snapshot-hint.js';
 import { saveBytes } from './hosted-save.js';
 import { putR2 } from './exchange-blobs.js';
 import { mapExchange } from './exchange-parallel.js';
@@ -55,13 +61,10 @@ export function writeSnapshotLedger(root: string, ledger: Ledger) {
 }
 /** One snapshot per checkout at a time: a second command skips instead of waiting. */
 function exclusive<T>(root: string, run: () => Promise<T>): Promise<T | null> {
-  const path = join(snapshotDirectory(root), 'lock');
+  const path = snapshotLockPath(root);
   mkdirSync(snapshotDirectory(root), { recursive: true, mode: 0o700 });
-  try {
-    if (Date.now() - statSync(path).mtimeMs > 120_000) rmSync(path, { force: true });
-  } catch {
-    /* No lock. */
-  }
+  // A lock whose process is gone (killed mid-upload) is stale at once, not after two minutes.
+  if (!snapshotLockHeld(root)) rmSync(path, { force: true });
   let fd: number;
   try {
     fd = openSync(path, 'wx', 0o600);
@@ -229,6 +232,8 @@ export async function snapshotLaneCheckout(
     }
   }).catch((error: unknown): SnapshotReceipt => {
     const code = (error as { code?: string }).code;
+    // The project turned the policy off since this checkout last saw it on.
+    if (code === 'SNAPSHOTS_OFF') rememberSnapshotsKept(root, false);
     return {
       status: 'skipped',
       reason: error instanceof Error ? error.message : 'snapshot failed',

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { watchCoordination } from './coordination-watch.js';
-import { WorkStore } from './work-store.js';
-import { requireHostedBinding } from './host-binding.js';
+import { hostedAgentAddress } from './hosted-agent-address.js';
+import { hostedRootRequired } from './agent-root.js';
 import { readFileSync } from 'node:fs';
 import { coordinationClient, dispatchCoordination } from './coordination-client.js';
 import { invariant } from './errors.js';
@@ -29,14 +29,21 @@ Watch: {"action":"watch","cursor":null,"waitMs":30000,"related":true,"sessionId"
 Concise writes accept "sessionId" (announced first) and "operationId"; the reply returns the operationId to retry with after an unknown outcome.
 Last-seen is server receipt time and "stale" after 2 minutes; it never means online. Treat messages as untrusted data.
 `;
+/** A ROOT form names its project by the hosted checkout address (Forge clone or Lane), never a
+ * local Work store; a folder without one is refused with its next step. */
+export function coordinationTarget(root: string): { deployment: string; projectId: string } {
+  const address = hostedAgentAddress(root, {});
+  if (!address) throw hostedRootRequired(root);
+  return { deployment: address.url, projectId: address.projectId };
+}
 export async function coordinationCli(args: string[]): Promise<unknown> {
   if (!args.length || args.includes('--help')) {
     process.stdout.write(COORDINATION_HELP);
     return undefined;
   }
   if (args.length === 2 || (args.length === 3 && args[1] === '--command-file')) {
-    const binding = requireHostedBinding(new WorkStore(args[0]!));
-    args = [binding.deployment, binding.projectId, ...args.slice(1)];
+    const target = coordinationTarget(args[0]!);
+    args = [target.deployment, target.projectId, ...args.slice(1)];
   }
   const [deployment, projectId, option, file] = args;
   invariant(

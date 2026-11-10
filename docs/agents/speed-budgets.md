@@ -12,6 +12,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | CLI cold start (CPU time of `--version`) | `perf-harness --cli-cold-start` | 1.67 s median; budget 2.5 s |
 | Web first paint: Now, Work, Lane first diff | `perf-harness --live` | unrun without the QA bot and a dev origin; budgets 1.5 s, 1.5 s, 1 s |
 | Web eager JavaScript (gzip) | `perf-harness --bundle` | 246 KB; budget 270 KB |
+| Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |
 | Idle Convex calls | the build (`check-idle-queries`, landing tests) | 0; budget 0 |
 | Save, preflight | nothing records them yet | unrun; see below |
 
@@ -46,7 +47,7 @@ alert delivery and one Issue write action (about six Convex round trips through 
   check runs) in it. Rows say `pass`, `fail`, `unrun` (no data, or the measurer was not run) or `guarded`
   (the build enforces it).
 - The `status` metrics headline carries `speedBudgetWarning`, one line naming each broken budget, or null.
-- `node scripts/perf-harness.mjs --cli-cold-start --bundle DIR` measures the harness-judged budgets.
+- `node scripts/perf-harness.mjs --cli-cold-start --bundle DIR` measures the harness-judged budgets. `--snapshot-lane LANE_CHECKOUT` adds the snapshot budgets; run it only in a Lane of a scratch project with policy `autoSnapshot` on.
 
 ## Not recorded yet
 

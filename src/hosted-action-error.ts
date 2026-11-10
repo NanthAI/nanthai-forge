@@ -30,3 +30,15 @@ export function hostedActionError(error: unknown, phase: string): ForgeError {
     `Hosted ${phase} failed${requestId ? ` (Convex request ID: ${requestId})` : ''}. Push again to resume the retained operation; if it persists, inspect the deployment's action logs${requestId ? ' for this request ID' : ''}.`,
   );
 }
+
+/** Reading a project's main (clone, pull): the server's structured refusal keeps its code instead of
+ * surfacing as INTERNAL_ERROR, and a project with no accepted main yet says so. */
+export function mainDiscoveryError(error: unknown): ForgeError {
+  const safe = hostedActionError(error, 'main discovery');
+  return safe.code === 'PROJECT_WORK_MISSING'
+    ? new ForgeError(
+        'PROJECT_WORK_MISSING',
+        'This project has no source yet (a new empty project has no accepted main), so there is nothing to clone. Host or import source into it first: nforge host ROOT, or nforge import OWNER/NAME.',
+      )
+    : safe;
+}

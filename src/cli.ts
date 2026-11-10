@@ -156,15 +156,11 @@ async function main(args: string[]): Promise<unknown> {
       'BAD_ARGUMENT',
       'Use mcp-coordination ROOT or DEPLOYMENT PROJECT_ID.',
     );
-    const binding =
-      args.length === 2
-        ? (await import('./host-binding.js')).requireHostedBinding(
-            new (await import('./work-store.js')).WorkStore(args[1]),
-          )
-        : null;
+    const target =
+      args.length === 2 ? (await import('./coordination-cli.js')).coordinationTarget(args[1]) : null;
     await (
       await import('./coordination-mcp.js')
-    ).startCoordinationMcp(binding?.deployment ?? args[1], binding?.projectId ?? args[2]!);
+    ).startCoordinationMcp(target?.deployment ?? args[1], target?.projectId ?? args[2]!);
     return undefined;
   }
   if (args[0] === 'exchange') return (await import('./exchange-cli.js')).exchangeCli(args.slice(1));
