@@ -417,8 +417,8 @@ run to its commit on main), workspace prep (Lane start, clone, hosted job overhe
 metered dev Convex cost.
 
 A named GitHub rate refusal during import setup retains its failed attempt and provider reset. The harness waits locally
-without Convex polling and resumes the same import operation and source. Reports show both successful-attempt import
-seconds and full wall time, including each setup void and wait; unrelated errors are not retried.
+without Convex polling and resumes the same import operation and source. The import timing column and regression guard use full wall time, including each setup void and wait.
+Raw results also retain successful-attempt seconds; unrelated errors are not retried.
 
 The saved baseline ([`baseline.json`](../../scripts/bench-zoo/baseline.json)) is the regression guard: `--baseline` exits 1
 when a path that passed there fails now, or a Forge operation takes more than 1.5 times its baseline plus 5 s. A failure of

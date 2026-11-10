@@ -138,7 +138,10 @@ export function pathVerdicts(r, entry = {}) {
 export function timings(r) {
   const out = {};
   for (const [op, sides] of Object.entries(r.steps ?? {})) {
-    const f = sides.forge?.seconds;
+    const f =
+      op === 'import' && Number.isFinite(sides.forge?.wallSeconds)
+        ? sides.forge.wallSeconds
+        : sides.forge?.seconds;
     const g = sides.git?.seconds;
     out[op] = {
       forge: Number.isFinite(f) ? f : null,
@@ -277,7 +280,7 @@ export function suiteMarkdown(rows, meta = {}) {
       '',
       '## Import setup voids',
       '',
-      'Import seconds above measure the successful attempt; provider waits and failed setup attempts remain below and in RESULT.json.',
+      'Import seconds above include provider waits and failed setup attempts; successful-attempt seconds remain in RESULT.json.',
       '',
       '| Repo | Refusal | Failed attempt s | Provider wait s | Full import wall s |',
       '| --- | --- | --- | --- | --- |',

@@ -819,6 +819,14 @@ test('zoo stored-job recovery resumes its pinned import and never creates a seco
     Object.assign(raw.steps.import.forge, result);
     const row = summarize(raw);
     assert.equal(row.importWallSeconds, 70);
+    assert.equal(row.seconds.import.forge, 70, 'provider waits remain in end-to-end import timing');
+    assert.equal(
+      compareToBaseline([row], baselineOf([summarize(passing())])).some(
+        r => r.kind === 'seconds' && r.op === 'import',
+      ),
+      true,
+      'the regression guard cannot hide a slow import behind a fast successful retry',
+    );
     assert.equal(row.importSetupVoids[0].waitSeconds, 70);
     assert.match(suiteMarkdown([row]), /GITHUB_RATE_LIMIT/);
   } finally {
