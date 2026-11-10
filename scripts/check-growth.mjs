@@ -6,6 +6,7 @@
 //
 //   node scripts/check-growth.mjs                      check; prints the counts
 //   node scripts/check-growth.mjs --print [--json]     print current / baseline / phase-start counts (phase close)
+//   node scripts/check-growth.mjs --print --mac [--json]  also list the Mac dependencies and what is already off the Mac
 //   node scripts/check-growth.mjs --update             lower the baseline to the current counts; a rise needs --reason
 //   node scripts/check-growth.mjs --update --reason "removes X / merges Y / nothing can go because Z"
 //   node scripts/check-growth.mjs --init               write the first baseline; refuses to overwrite one
@@ -22,6 +23,9 @@
 //   cliCommands    top-level commands dispatched in src/cli.ts (`args[0] === 'x'`, `command === 'x'`,
 //                  `['a','b'].includes(args[0])` and `case 'x':`)
 //   glossaryTerms  public glossary terms: the distinct bold terms in docs/concepts.md
+//   macDependencies  entries in tests/mac-dependencies.json `needsMac` (Issue 56cf99cc): what still needs the
+//                  owner's Mac to run. Each has an Issue that removes it or a `staysBecause` reason; `offMac` records
+//                  what already moved. Print the list with `--print --mac`.
 //   unreferencedExports  exported names (function, const, class, enum, type, interface) declared in src/,
 //                  web/src/, convex/ or netlify/ whose name appears nowhere else as a word in src, web/src,
 //                  convex, netlify, tests, scripts or evals (comments and strings count as a mention, and a
@@ -37,12 +41,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GROWTH_BASELINE = 'tests/growth-baseline.json';
+export const MAC_DEPENDENCIES = 'tests/mac-dependencies.json';
 export const KINDS = [
   'tables',
   'errorCodes',
   'agentActions',
   'cliCommands',
   'glossaryTerms',
+  'macDependencies',
   'unreferencedExports',
 ];
 const LABEL = {
@@ -51,6 +57,7 @@ const LABEL = {
   agentActions: 'agent actions',
   cliCommands: 'CLI commands',
   glossaryTerms: 'glossary terms',
+  macDependencies: 'Mac dependencies',
   unreferencedExports: 'unreferenced exports',
 };
 const MIN_REASON = 12;
@@ -175,6 +182,51 @@ function countUnreferencedExports(root) {
   return unreferencedExportNames(exporters, others).size;
 }
 
+export function readMacDependencies(root = '.') {
+  return JSON.parse(readFileSync(resolve(root, MAC_DEPENDENCIES), 'utf8'));
+}
+
+/** Problems with the Mac dependency list: every entry needs a removing Issue or a reason, ids are unique. */
+export function macDependencyFindings(list) {
+  if (list?.version !== 1 || !Array.isArray(list.needsMac) || !Array.isArray(list.offMac))
+    return [`${MAC_DEPENDENCIES} is not a version 1 Mac dependency list`];
+  const findings = [];
+  const seen = new Set();
+  const text = (value, min) => typeof value === 'string' && value.trim().length >= min;
+  for (const entry of [...list.needsMac, ...list.offMac]) {
+    const id = entry?.id;
+    if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id) || seen.has(id))
+      findings.push(
+        `${MAC_DEPENDENCIES}: entry id ${JSON.stringify(id)} is missing, not kebab-case or repeated`,
+      );
+    else seen.add(id);
+  }
+  for (const entry of list.needsMac) {
+    const hasIssue = typeof entry.issue === 'string' && /^[0-9a-f]{8}$/.test(entry.issue);
+    if (!text(entry.what, MIN_REASON) || (!hasIssue && !text(entry.staysBecause, MIN_REASON)))
+      findings.push(
+        `${MAC_DEPENDENCIES}: ${entry.id} needs what, and an 8-hex Issue that removes it or a staysBecause reason`,
+      );
+    if (entry.issue !== undefined && !hasIssue)
+      findings.push(`${MAC_DEPENDENCIES}: ${entry.id} issue must be an 8-character Forge Issue id`);
+  }
+  const needs = new Set(list.needsMac.map(entry => entry.id));
+  for (const entry of list.offMac)
+    if (needs.has(entry.id) || !text(entry.how, MIN_REASON))
+      findings.push(`${MAC_DEPENDENCIES}: offMac ${entry.id} needs how, and cannot also be in needsMac`);
+  return findings;
+}
+
+export function formatMacDependencies(list, current, baseline) {
+  const row = entry =>
+    `  ${entry.id.padEnd(22)} ${entry.issue ? `Issue ${entry.issue}` : 'stays'.padEnd(14)}  ${entry.what}`;
+  return [
+    `Mac dependencies: ${current.macDependencies} now, baseline ${baseline.counts.macDependencies}, start ${baseline.start.macDependencies}`,
+    ...list.needsMac.map(row),
+    `Already off the Mac (${list.offMac.length}): ${list.offMac.map(entry => entry.id).join(', ')}`,
+  ].join('\n');
+}
+
 /** Current counts from the repository at `root`. */
 export function currentCounts(root = '.') {
   const read = path => readFileSync(resolve(root, path), 'utf8');
@@ -186,6 +238,7 @@ export function currentCounts(root = '.') {
     agentActions: agentActionNames(read('src/agent-verbs.ts')).size,
     cliCommands: cliCommandNames(read('src/cli.ts')).size,
     glossaryTerms: glossaryTerms(read('docs/concepts.md')).size,
+    macDependencies: readMacDependencies(root).needsMac.length,
     unreferencedExports: countUnreferencedExports(root),
   };
 }
@@ -293,20 +346,26 @@ function main(argv) {
     return refused.length ? 1 : 0;
   }
   if (flag('--print')) {
+    const list = flag('--mac') ? readMacDependencies(root) : undefined;
     console.log(
       flag('--json')
-        ? JSON.stringify({ current, baseline: baseline.counts, start: baseline.start })
-        : formatCounts(current, baseline),
+        ? JSON.stringify({ current, baseline: baseline.counts, start: baseline.start, mac: list })
+        : [formatCounts(current, baseline), list && formatMacDependencies(list, current, baseline)]
+            .filter(Boolean)
+            .join('\n\n'),
     );
     return 0;
   }
   if (argv.some(arg => arg.startsWith('--') && arg !== '--json')) {
     console.error(
-      'Usage: node scripts/check-growth.mjs [--print [--json] | --update [--reason TEXT] | --init]',
+      'Usage: node scripts/check-growth.mjs [--print [--mac] [--json] | --update [--reason TEXT] | --init]',
     );
     return 1;
   }
-  const findings = growthFindings(current, baseline);
+  const findings = [
+    ...macDependencyFindings(readMacDependencies(root)),
+    ...growthFindings(current, baseline),
+  ];
   for (const finding of findings) console.error(finding);
   console.log(
     `Growth guard: ${KINDS.map(kind => `${kind} ${current[kind]}/${baseline.counts[kind]}`).join(', ')}`,

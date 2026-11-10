@@ -9,8 +9,10 @@ import {
   countTables,
   errorCodes,
   glossaryTerms,
+  formatMacDependencies,
   growthFindings,
   initialBaseline,
+  macDependencyFindings,
   unreferencedExportNames,
   updateBaseline,
 } from '../scripts/check-growth.mjs';
@@ -139,6 +141,7 @@ const start = {
   agentActions: 30,
   cliCommands: 40,
   glossaryTerms: 5,
+  macDependencies: 6,
   unreferencedExports: 7,
 };
 
@@ -199,4 +202,51 @@ test('a hand-raised baseline with no ledger entry fails', () => {
   const findings = growthFindings({ ...start, tables: 12 }, baseline);
   assert.equal(findings.length, 1);
   assert.match(findings[0], /above its start 10 plus recorded rises/);
+});
+
+// Mac dependency list (56cf99cc): a count that may only fall, and no entry without a way out.
+
+const macList = () => ({
+  version: 1,
+  needsMac: [
+    { id: 'lead-session', what: 'The lead agent session on the owner machine.', issue: 'd65c423c' },
+    {
+      id: 'mac-runner',
+      what: 'The optional machine check runner.',
+      staysBecause: 'a product feature that stays',
+    },
+  ],
+  offMac: [{ id: 'dogfood-checks', how: 'GitHub-hosted runners run the landing check.' }],
+});
+
+test('a Mac dependency needs an Issue that removes it or a staysBecause reason; ids are unique and not both on and off', () => {
+  assert.deepEqual(macDependencyFindings(macList()), []);
+  const bare = macList();
+  bare.needsMac[0] = { id: 'lead-session', what: 'The lead agent session on the owner machine.' };
+  assert.match(macDependencyFindings(bare).join('\n'), /lead-session needs what, and an 8-hex Issue/);
+  const longIssue = macList();
+  longIssue.needsMac[0].issue = 'd65c423c-84fb-4db5-b6af-106c4ed418b1';
+  assert.match(macDependencyFindings(longIssue).join('\n'), /8-character Forge Issue id/);
+  const repeated = macList();
+  repeated.offMac.push({ id: 'lead-session', how: 'claims it moved while still listed' });
+  assert.match(macDependencyFindings(repeated).join('\n'), /repeated|cannot also be in needsMac/);
+  assert.match(macDependencyFindings({ version: 2 }).join('\n'), /not a version 1/);
+});
+
+test('the Mac dependency count is a growth kind: adding an entry fails until a reason is recorded', () => {
+  const baseline = initialBaseline(start, '2026-11-10');
+  const grown = { ...start, macDependencies: start.macDependencies + 1 };
+  assert.match(growthFindings(grown, baseline).join('\n'), /Mac dependencies: 7 now, baseline 6/);
+  assert.deepEqual(growthFindings({ ...start, macDependencies: 5 }, baseline), [], 'removing one passes');
+  const { baseline: lowered } = updateBaseline({ ...start, macDependencies: 5 }, baseline, undefined, 'x');
+  assert.equal(lowered.counts.macDependencies, 5, '--update lowers it');
+});
+
+test('the phase-close print lists the Mac dependencies against the start', () => {
+  const baseline = initialBaseline({ ...start, macDependencies: 2 }, '2026-11-10');
+  const text = formatMacDependencies(macList(), { macDependencies: 2 }, baseline);
+  assert.match(text, /Mac dependencies: 2 now, baseline 2, start 2/);
+  assert.match(text, /lead-session\s+Issue d65c423c/);
+  assert.match(text, /mac-runner\s+stays/);
+  assert.match(text, /Already off the Mac \(1\): dogfood-checks/);
 });

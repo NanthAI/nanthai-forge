@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "note": "What still needs the owner's Mac to run (Issue 56cf99cc). The growth guard counts needsMac as 'Mac dependencies'; the baseline in growth-baseline.json only falls. Remove an entry (and move it to offMac with how) when it runs elsewhere. Each entry needs an Issue that removes it or a staysBecause reason. No private paths or machine names: this repo is public.",
+  "needsMac": [
+    {
+      "id": "lead-session",
+      "what": "The lead agent session: planning, briefs, review, landing watch and the phone pings it sends.",
+      "why": "It runs in an interactive agent client signed in with the owner's own agent accounts, on the owner's Mac; nothing else can start or answer it.",
+      "issue": "d65c423c"
+    },
+    {
+      "id": "builder-sessions",
+      "what": "Up to about a dozen builder agent sessions with their Lane folders, dependency installs, heavy-test slots, the shared CLI cache and the CLI auto-update.",
+      "why": "They are child processes of the lead's agent client and use its sign-ins; Lane folders and caches (about 5 GiB a week, ec90cba2 bounds them) use this machine's disk and CPU.",
+      "issue": "d65c423c"
+    },
+    {
+      "id": "exit-bench",
+      "what": "The exit bench harness and its agent arm (scripts/bench-*).",
+      "why": "It drives agents inside a macOS sandbox profile and samples this machine's load; its measurement hold also stops landings on the shared dev deployment (2e1f5fbd).",
+      "issue": "d65c423c"
+    },
+    {
+      "id": "operator-maintenance",
+      "what": "Owner-only maintenance: global write pause, R2 maintenance and purge scripts, legacy storage cleanup and backfills, Convex env changes, durability drills.",
+      "why": "The lead runs them with a private deployment env file kept on this machine; there is no approved hosted path for them yet.",
+      "issue": "86a276fa"
+    },
+    {
+      "id": "mac-check-runner",
+      "what": "The Mac check runner (`nforge worker`) that large-fixture and bench projects select as their check provider.",
+      "staysBecause": "An optional bring-your-own-machine runner stays as a product feature (0eead5d7 speeds it up). Dogfood checks run on GitHub-hosted runners, so only projects that opt in depend on it; it falls off this list when no Forge or dogfood path selects it."
+    }
+  ],
+  "offMac": [
+    {
+      "id": "landing-accept",
+      "how": "Hosted main updated by compare-and-swap is the only accept path since the 2026-10-28 cutover."
+    },
+    {
+      "id": "dogfood-checks",
+      "how": "Landing checks run on free GitHub-hosted ubuntu-latest runners (forge-check workflow); the Mac check worker was stopped on 2026-10-29."
+    },
+    {
+      "id": "github-mirror",
+      "how": "The hosted GitHub mirror pushes accepted main from the server; no local push."
+    },
+    {
+      "id": "dev-deploys",
+      "how": "Convex and web deploys to dev run from GitHub Actions on every deploy-relevant push to main."
+    },
+    {
+      "id": "release-signing",
+      "how": "The release-sign workflow signs CLI releases on a GitHub-hosted runner; the key exists only in its protected environment."
+    },
+    {
+      "id": "weekly-backup",
+      "how": "The hosted-backup workflow runs on a Monday 03:00 UTC schedule with environment-scoped secrets."
+    }
+  ]
+}
