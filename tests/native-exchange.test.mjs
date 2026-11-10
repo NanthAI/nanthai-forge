@@ -53,37 +53,6 @@ function fixture(t) {
   return { dir, root, w, act, intent, lane, objects, transport, uploads: () => uploads };
 }
 
-test('optional agent exchange tools disclose migration semantics and require account-token configuration', async t => {
-  const { registerExchangeTools } = await import('../dist/mcp-exchange.js'),
-    saved = process.env.FORGE_AUTH_TOKEN,
-    savedConfig = process.env.XDG_CONFIG_HOME,
-    config = mkdtempSync(join(tmpdir(), 'forge-exchange-auth-')),
-    tools = [];
-  t.after(() => rmSync(config, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  try {
-    delete process.env.FORGE_AUTH_TOKEN;
-    process.env.XDG_CONFIG_HOME = config;
-    registerExchangeTools({ registerTool: (...args) => tools.push(args) }, '/unused');
-    assert.equal(tools.length, 0);
-    process.env.FORGE_AUTH_TOKEN = 'test-only';
-    registerExchangeTools({ registerTool: (...args) => tools.push(args) }, '/unused');
-    assert.deepEqual(
-      tools.map(item => item[0]),
-      ['forge_exchange', 'forge_migrate_archive'],
-    );
-    assert.equal(tools[1][1].annotations.destructiveHint, true);
-    assert.match(tools[1][1].description, /compressed-container bytes/);
-    assert.equal(
-      tools[0][1].inputSchema.command.safeParse({ action: 'push', url: 'bad', projectId: 'x' }).success,
-      false,
-    );
-  } finally {
-    if (saved === undefined) delete process.env.FORGE_AUTH_TOKEN;
-    else process.env.FORGE_AUTH_TOKEN = saved;
-    if (savedConfig === undefined) delete process.env.XDG_CONFIG_HOME;
-    else process.env.XDG_CONFIG_HOME = savedConfig;
-  }
-});
 test('logical archive validation preserves original bytes and cleans scratch on failure without materializing Lanes', async t => {
   const { exportNativeWork } = await import('../dist/native-backup.js'),
     { withValidatedNativeArchive } = await import('../dist/native-archive-validation.js'),

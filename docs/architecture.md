@@ -446,7 +446,7 @@ A check is an executable, its arguments, an optional environment label and expli
 
 Playbooks run a sequence of checks. Automation rules start a Playbook on an event. Evidence is reused only under the explicit native disjoint fast-path policy; acceptance revalidates the exact check and manifest-path proof and schedules full main verification. Missing coverage is unknown. A passing check, a model critique and a human review are separate facts. Accepting a Channel is an explicit step against an observed previous head. An optional Invariant can require specific evidence first.
 
-A hosted project can still ask a connected local computer to run a check (`nforge local-checks`), though Forge's own project does not use this path. The request carries only pins and the check name. The local owner validates them and keeps results and compact evidence, with local log retention and upload governed by the explicit project setting. A queued, claimed or finished status is a report. It does not prove the machine is online.
+Hosted checks run on the project's configured runner (`configure-runner`); the local `nforge local-checks` computer path is retired.
 
 ## Making-of record
 

@@ -43,8 +43,6 @@ nforge exchange NEW_DIR pull --command-file forge-pull.json
 nforge exchange ROOT migrate-archive --command-file forge-migrate.json
 ```
 
-With account authentication configured, `nforge mcp ROOT --agent` also offers `forge_exchange` and `forge_migrate_archive` over the same retained paths.
-
 ## Long actions
 
 Index rebuilds yield after committed batches. Pending responses continue the original request with `continuation:true`; unchanged saved progress stops with `EXCHANGE_ACTION_STALLED`. Long transfer actions retain seven-minute header and total deadlines, including Node's HTTP dispatch deadline. Reads, archive migration, initialization and object-recipe completion retain their existing retry and validation behavior.

@@ -22,7 +22,6 @@ Merge the printed `mcpServers.forge` entry into your client's configuration. It 
 | --- | --- | --- |
 | `nforge mcp ROOT` | Eight read-only source tools (`forge_current`, `forge_context`, `forge_inspect`, `forge_references`, `forge_trace`, `forge_impact`, `forge_source`, `forge_reindex`) | Your OS account |
 | `nforge mcp ROOT --agent` (hosted checkout) | Hosted task/check/overview, saved-source reads (`forge_review` supports `show` only) and explicit `forge_wait`; no `forge_brief` or `forge_peers` | Your signed-in account |
-| `--agent` after `nforge login` or with `FORGE_AUTH_TOKEN` set | Also `forge_exchange` and `forge_migrate_archive` | Your signed-in account |
 | `nforge mcp-coordination URL PROJECT_ID` | Coordination tools below | Your account token |
 | `nforge mcp-agent URL` | Only the read tools a source grant allows | `FORGE_AGENT_TOKEN` |
 
@@ -142,7 +141,7 @@ The token goes in the environment only. The server advertises just the granted t
 
 ## Local compute for hosted checks
 
-`nforge local-checks ROOT URL PROJECT_ID --name "My computer"` connects outward and waits. Without `--name` the computer is listed as `runner-xxxx` (stable for that root and project), never its hostname. In the hosted Review page, pick a clean Candidate, a check and your computer. The request carries only pins, never a command or source. Ctrl+C disconnects without cancelling a running check. Reconnect to reconcile its result.
+`nforge local-checks` is retired and refuses with `BAD_ARGUMENT` and the replacement. Hosted checks run on the project's configured runner: set it with `nforge agent ROOT configure-runner` ([quickstart](quickstart.md), [GitHub Actions checks](operations/github-actions-checks.md)).
 
 ## Index-only use
 
