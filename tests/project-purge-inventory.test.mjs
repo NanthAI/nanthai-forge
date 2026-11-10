@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { jsonToConvex } from 'convex/values';
 import { moduleUrl } from './convex-module.mjs';
@@ -14,8 +14,122 @@ const rowsPage = await import(moduleUrl('../convex/projectPurgeRows.ts'));
 const retention = await import(moduleUrl('../convex/projectRetention.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
 const projectWork = await import(moduleUrl('../convex/projectWork.ts'));
+const storageInventory = await import(moduleUrl('../convex/projectStorageInventory.ts'));
+const storageOwnership = await import(moduleUrl('../convex/projectStorageOwnership.ts'));
 const { projectPurgeTables, projectPurgeSpecial, idPaths } = inventory;
 const day = 24 * 60 * 60 * 1000;
+
+test('orphan inventory covers every indexed root owner without treating nested generation references as ownership', () => {
+  const owners = storageOwnership.storageOwners();
+  assert.deepEqual(
+    new Set(owners.filter(owner => owner.field === 'projectId').map(owner => owner.table)),
+    new Set(Object.keys(projectPurgeTables)),
+  );
+  assert.deepEqual(
+    owners
+      .filter(owner => owner.parent === 'projectWorkGenerations')
+      .map(owner => [owner.table, owner.field])
+      .sort(),
+    [
+      ['projectReturnPages', 'partitionId'],
+      ['projectWorkRecords', 'generationId'],
+    ],
+  );
+  assert.throws(() => storageOwnership.storageOwner('projectGithubImports', 'workIndex.generationId'));
+});
+
+test('orphan owner enumeration jumps entire populated owner ranges and resumes without payload scans', async () => {
+  const s = state([]);
+  for (const owner of ['a', 'b', 'c', 'd', 'e']) {
+    if (owner !== 'c') s.tables.hostedProjects.set(owner, { _id: owner, _creationTime: 1 });
+    for (let i = 0; i < 1000; i++)
+      s.tables.projectWorkRecords.set(`${owner}-${i}`, {
+        _id: `${owner}-${i}`,
+        _creationTime: i,
+        projectId: owner,
+        generationId: 'generation',
+        collection: 'runs',
+        key: `${i}`,
+        parent: '',
+        position: i,
+        value: 'synthetic payload',
+      });
+  }
+  const query = s.ctx.db.query;
+  let seeks = 0;
+  s.ctx.db.query = table => {
+    const q = query(table);
+    const take = q.take;
+    q.take = n => {
+      assert.equal(n, 1);
+      seeks++;
+      return take(n);
+    };
+    return q;
+  };
+  const input = { table: 'projectWorkRecords', field: 'projectId', after: null };
+  const first = await storageInventory.ownerPage(s.ctx, input);
+  assert.deepEqual(
+    first.page.map(row => [row.ownerId, row.exists]),
+    [
+      ['a', true],
+      ['b', true],
+      ['c', false],
+      ['d', true],
+    ],
+  );
+  assert.equal(seeks, 4, 'one indexed row read per distinct owner despite 1,000 rows in each range');
+  assert.equal(first.isDone, false);
+  const last = await storageInventory.ownerPage(s.ctx, { ...input, after: first.after });
+  assert.deepEqual(
+    last.page.map(row => row.ownerId),
+    ['e'],
+  );
+  assert.equal(last.isDone, true);
+  assert.equal(s.scheduled.length, 0, 'inventory schedules no work');
+});
+
+test('orphan purge rechecks absent ownership and exact pins, preserves live rows and reconciles lost replies', async () => {
+  const s = state([]);
+  const row = {
+    _id: 'orphan',
+    _creationTime: 1,
+    projectId: 'missing',
+    generationId: 'gone',
+    collection: 'runs',
+    key: 'run',
+    parent: '',
+    position: 0,
+    value: '{}',
+  };
+  s.tables.projectWorkRecords.set(row._id, row);
+  s.tables.projectWorkRecords.set('foreign', { ...row, _id: 'foreign', projectId: 'live' });
+  s.tables.hostedProjects.set('live', { _id: 'live', _creationTime: 1 });
+  const input = {
+    table: 'projectWorkRecords',
+    field: 'projectId',
+    ownerId: 'missing',
+    operationId: randomUUID(),
+    part: 'one',
+    pins: [{ id: row._id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+  };
+  const apply = args => s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, args));
+  s.tables.hostedProjects.set('missing', { _id: 'missing', _creationTime: 1 });
+  await assert.rejects(apply(input), /absent owner/);
+  s.tables.hostedProjects.delete('missing');
+  await assert.rejects(
+    apply({ ...input, pins: [{ ...input.pins[0], sha256: 'a'.repeat(64) }] }),
+    /pinned row/,
+  );
+  const result = await apply(input);
+  assert.equal(result.deleted, 1);
+  assert.ok(result.bytes > 0);
+  assert.deepEqual(await apply(input), result, 'unknown outcome replays the committed page receipt');
+  await assert.rejects(apply({ ...input, ownerId: 'changed' }), /Replay the original/);
+  assert.equal(s.tables.projectWorkRecords.has('orphan'), false);
+  assert.equal(s.tables.projectWorkRecords.has('foreign'), true);
+  assert.equal(s.scheduled.length, 0, 'finished cleanup has zero idle work');
+});
 
 /** Every typed hosted-project reference anywhere in a document, and any `projectId` field. */
 function projectFields(table) {
