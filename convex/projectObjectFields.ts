@@ -50,6 +50,15 @@ export const objectDocument = v.object({
   ...objectFields,
 });
 export const objectTables = {
+  /** Original upload ids remain replayable after their descriptors move to catalog pages.
+   * Values are digest pins; migration keys retain only their bounded cursor/byte receipt. */
+  projectObjectReceipts: defineTable({
+    projectId: v.id('hostedProjects'),
+    key: v.string(),
+    value: v.string(),
+  })
+    .index('by_key', ['key'])
+    .index('by_project', ['projectId']),
   projectObjects: defineTable(objectFields)
     .index('by_project', ['projectId'])
     .index('by_project_and_digest', ['projectId', 'digest'])

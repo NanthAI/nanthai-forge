@@ -51,9 +51,12 @@ function entry(page: Page, digest: string): CatalogObject | null {
   }
   return null;
 }
-// Function contexts are request-local and catalog rows are immutable, so one
+// Function contexts are request-local. Catalog writers invalidate this cache, so one
 // request reads each catalog row at most once however many digests it resolves.
 const requests = new WeakMap<QueryCtx, Page[]>();
+export function clearObjectCatalogCache(ctx: QueryCtx) {
+  requests.delete(ctx);
+}
 async function page(ctx: QueryCtx, projectId: Id<'hostedProjects'>, digest: string) {
   let seen = requests.get(ctx);
   if (!seen) requests.set(ctx, (seen = []));

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "Issue 8c4f126b removes seven-index immutable object descriptors and redundant callback/task/report payloads; one two-index compact retry-pin table preserves original upload ids after catalog migration.",
+  "date": "2026-11-10"
+}

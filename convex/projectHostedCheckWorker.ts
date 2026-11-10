@@ -243,7 +243,7 @@ export const heartbeat = mutation({
         runId: run.id,
         eventId: value.eventId,
         digest: checkPin(value),
-        value: canonicalPayload(value),
+        value: canonicalPayload({ eventId: value.eventId, kind: 'heartbeat' }),
       });
       await watchMacLease(ctx, run);
       await writeHostedCheck(ctx, row._id, run);

@@ -134,7 +134,8 @@ export async function measureResolutionAncestry(count, shape, width = 2048) {
       shape,
       filesPerState: width,
       ...report,
-      stateTasks: tasks.filter(task => JSON.parse(task.input).kind === 'states').length,
+      stateTasks: tasks.filter(task => s.tables.projectSourceBatches.get(task.batchId)?.kind === 'states')
+        .length,
       stateFanoutBatches: batches.filter(batch => batch.kind === 'states').length,
       jobSeconds: report.actionMs / 1000,
       output: job.output,

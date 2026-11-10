@@ -915,6 +915,34 @@ test('batched reports: 20,000 files retain details in bounded records and keep p
   assert(Buffer.byteLength(row.value) < 12 * 1024, 'the run head stays small');
   for (const report of l.s.tables.projectHostedActionsResults.values())
     assert(Buffer.byteLength(JSON.stringify(report)) < 300 * 1024, 'each stored document stays bounded');
+  const retainedReports = [...l.s.tables.projectHostedActionsResults.values()].filter(
+    row => row.index <= -1000,
+  );
+  const compactReportBytes = retainedReports.reduce(
+    (sum, row) => sum + Buffer.byteLength(JSON.stringify(row)),
+    0,
+  );
+  const legacyReportBytes = retainedReports.reduce((sum, row) => {
+    const saved = JSON.parse(row.reports);
+    const reports =
+      saved.schema === 1
+        ? {
+            ...Object.fromEntries(
+              Object.entries(saved.durations).map(([file, durationMs]) => [
+                file,
+                { failed: false, durationMs },
+              ]),
+            ),
+            ...saved.reports,
+          }
+        : saved;
+    return sum + Buffer.byteLength(JSON.stringify({ ...row, reports: JSON.stringify(reports) }));
+  }, 0);
+  assert(
+    compactReportBytes < legacyReportBytes * 0.75,
+    'passing report metadata uses at most75%of the legacy bytes, with exact hydration',
+  );
+  t.diagnostic(JSON.stringify({ compactReportBytes, legacyReportBytes, reportRows: retainedReports.length }));
   const start = l.s.counts.length;
   await l.conclude();
   const webhook = l.s.counts.slice(start).find(m => m.name === 'webhook');

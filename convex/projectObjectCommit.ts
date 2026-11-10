@@ -8,6 +8,7 @@ import { r2Config, headObject, checksumOf, presignGet, type HeadResult } from '.
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { bindPackMembers } from './projectObjectPacks';
+import { findObject } from './projectObjectFind';
 import { readExactObject } from './projectR2ExactRead';
 import { uploadPackMismatch } from '../src/object-pack-upload';
 import { mapExchange } from '../src/exchange-parallel';
@@ -30,7 +31,21 @@ export const pendingRows = internalQuery({
       const rows = [];
       for (const id of ids) {
         const row = await ctx.db.get(id);
-        invariant(row, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
+        if (!row) {
+          const receipt = await ctx.db
+            .query('projectObjectReceipts')
+            .withIndex('by_key', q => q.eq('key', id))
+            .unique();
+          invariant(receipt, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
+          await activeProject(ctx, receipt.projectId, actor);
+          const stored = await findObject(ctx, receipt.projectId, receipt.value);
+          invariant(
+            stored && !stored.removed && (stored.recipe || stored.r2Committed),
+            'PROJECT_UNAVAILABLE',
+            'This original upload is unavailable.',
+          );
+          continue;
+        }
         await activeProject(ctx, row.projectId, actor);
         invariant(
           row.location === 'r2' && row.r2Key,

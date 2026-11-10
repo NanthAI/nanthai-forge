@@ -9,7 +9,6 @@ import {
   checkReportExcerptBytes,
   encodedBytes,
 } from '../dist/check-report-cap.js';
-import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { checkFileSummary, failedErrorBytes } from '../dist/check-file-summary.js';
 import { semanticReportsSchema } from '../dist/intent-semantic-conflict.js';
 import { hostedCheckRunSchema } from '../dist/hosted-check.js';
@@ -224,7 +223,7 @@ test('the retained callback receipt of a callback over 1 MiB stays under the rec
   assert.equal(s.tables.projectHostedCheckCallbacks.size, before + 1);
 });
 
-test('callback receipts keep small callbacks verbatim and fall back to a file count when names alone are too large', () => {
+test('callback receipts retain only event identity, independent of report payload size', () => {
   const base = {
     schema: 1,
     eventId: 'e',
@@ -234,15 +233,15 @@ test('callback receipts keep small callbacks verbatim and fall back to a file co
     ...base,
     result: { ...base.result, contractReports: failures(3, 'boom') },
   };
-  assert.equal(callbackReceipt(small), canonicalPayload(small));
+  assert.deepEqual(JSON.parse(callbackReceipt(small)), { eventId: 'e', kind: 'complete' });
   const names = Object.fromEntries(
     Array.from({ length: 4000 }, (_, i) => [`tests/${'n'.repeat(120)}-${i}.test.mjs`, { failed: true }]),
   );
   const huge = { ...base, result: { ...base.result, contractReports: names } };
   const receipt = JSON.parse(callbackReceipt(huge));
   assert(Buffer.byteLength(callbackReceipt(huge)) <= checkCallbackReceiptBytes);
-  assert.equal(receipt.result.contractReports, undefined);
-  assert.equal(receipt.result.contractReportsOmitted, 4000);
+  assert.deepEqual(receipt, { eventId: 'e', kind: 'complete' });
+  assert.equal(callbackReceipt(huge), callbackReceipt(small));
 });
 
 test('the first 32 failed files keep excerpts ahead of recovered flakes', () => {

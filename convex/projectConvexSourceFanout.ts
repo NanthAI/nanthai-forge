@@ -147,7 +147,10 @@ export const begin = sourceMutation({
     }
     if (!active) {
       await ctx.db.patch(batch._id, { status: 'fenced' });
-      await ctx.db.patch(task._id, { status: 'done', failure: 'SOURCE_JOB_FENCED' });
+      await ctx.db.patch(task._id, {
+        status: 'done',
+        failure: 'SOURCE_JOB_FENCED',
+      });
       await releaseSourceTask(ctx, task._id);
       await drainSourcePool(ctx, b => validSourceBatch(ctx, b));
       return null;
@@ -207,6 +210,7 @@ export const complete = sourceMutation({
     }
     await ctx.db.patch(task._id, {
       status: 'done',
+      ...(args.failure ? {} : { input: '' }),
       progress: null,
       output: args.output,
       failure: args.failure,

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { packShardReports, unpackShardReports } from '../src/check-report-cap';
 import { runFlakes } from '../src/self-metrics-flakes';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -40,7 +41,10 @@ export async function hydrateCheckReports(ctx: QueryCtx | MutationCtx, run: Host
     'Retained check reports are incomplete.',
   );
   run.contractReports = Object.fromEntries(
-    rows.flatMap(row => Object.entries(JSON.parse(row.reports!))),
+    rows.flatMap(row => {
+      const saved = JSON.parse(row.reports!);
+      return Object.entries(saved.schema === 1 ? unpackShardReports(saved) : saved);
+    }),
   ) as NonNullable<HostedCheckRun['contractReports']>;
   invariant(
     checkPin(run.contractReports) === meta.digest,
@@ -58,8 +62,8 @@ export async function storeCheckReports(ctx: MutationCtx, run: HostedCheckRun) {
     const digest = checkPin(run.contractReports);
     if (digest !== meta.digest) {
       invariant(!meta.parts, 'EVIDENCE_CHANGED', 'Final check reports are immutable.');
-      const parts: Record<string, unknown>[] = [];
-      let part: Record<string, unknown> = {},
+      const parts: NonNullable<HostedCheckRun['contractReports']>[] = [];
+      let part: NonNullable<HostedCheckRun['contractReports']> = {},
         bytes = 2;
       for (const [file, report] of Object.entries(run.contractReports)) {
         const size = new TextEncoder().encode(canonicalPayload({ [file]: report })).length;
@@ -78,7 +82,7 @@ export async function storeCheckReports(ctx: MutationCtx, run: HostedCheckRun) {
           runId: run.id,
           index: firstPart - index,
           digest,
-          reports: canonicalPayload(reports),
+          reports: canonicalPayload({ schema: 1, ...packShardReports(reports) }),
         });
       meta.parts = parts.length;
       meta.digest = digest;

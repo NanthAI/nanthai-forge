@@ -48,7 +48,7 @@ async function saveInput(s) {
   });
 }
 
-test('source save at dogfood scale stays inside its document read and write budget', async t => {
+test('source save stays inside dogfood IO budgets and successful children drop redundant input windows', async t => {
   const s = await scaleFixture();
   try {
     const input = await saveInput(s),
@@ -57,6 +57,30 @@ test('source save at dogfood scale stays inside its document read and write budg
       report = await s.drain();
     const completed = await s.job(id);
     assert.equal(completed.status, 'completed');
+    const terminalTasks = [...s.tables.projectSourceTasks.values()].filter(
+      task => task.status === 'done' && !task.failure,
+    );
+    assert(terminalTasks.length > 0);
+    for (const task of terminalTasks) {
+      assert.equal(
+        task.input,
+        '',
+        'a joined successful child retains output instead of its redundant input window',
+      );
+      assert(
+        Buffer.byteLength(JSON.stringify(task)) < 1200,
+        'terminal child descriptor stays below1200bytes',
+      );
+    }
+    t.diagnostic(
+      JSON.stringify({
+        terminalTasks: terminalTasks.length,
+        terminalTaskBytes: terminalTasks.reduce(
+          (sum, task) => sum + Buffer.byteLength(JSON.stringify(task)),
+          0,
+        ),
+      }),
+    );
     const result = JSON.parse(await s.bytes(completed.output));
     const stateRow = [...s.tables.projectObjects.values()].find(row => row.digest === result.state.sha256);
     assert.equal(stateRow.stateGeneration, 2, 'the existing output record authenticates the generation');

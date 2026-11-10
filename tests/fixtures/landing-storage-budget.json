@@ -69,7 +69,7 @@
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
       "projectHostedCheckRuns": 3698,
-      "projectHostedCheckCallbacks": 4332,
+      "projectHostedCheckCallbacks": 1038,
       "projectHostedCheckShards": 720,
       "projectHostedMainAudits": 0,
       "projectHostedMainAuditEvents": 0,
@@ -179,7 +179,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "projectObjectReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 7679,
@@ -360,7 +361,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "projectObjectReceipts": 0
     }
   },
   "dogfood": {
@@ -433,7 +435,7 @@
       "projectHostedCheckSettings": 0,
       "projectHostedCheckSettingVersions": 0,
       "projectHostedCheckRuns": 573484,
-      "projectHostedCheckCallbacks": 8676,
+      "projectHostedCheckCallbacks": 2088,
       "projectHostedCheckShards": 1448,
       "projectHostedMainAudits": 0,
       "projectHostedMainAuditEvents": 0,
@@ -543,7 +545,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "projectObjectReceipts": 0
     },
     "retained": {
       "projectFinishReadRows": 9665,
@@ -724,7 +727,8 @@
       "imports": 0,
       "importArtifacts": 0,
       "importReaders": 0,
-      "githubDeliveries": 0
+      "githubDeliveries": 0,
+      "projectObjectReceipts": 0
     }
   }
 }

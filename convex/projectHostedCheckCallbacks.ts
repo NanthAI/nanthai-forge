@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { reportsDetached } from './projectHostedCheckReports';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
 import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
@@ -209,18 +208,7 @@ export async function receiveHostedCheckCallback(
     runId: run.id,
     eventId: callback.eventId,
     digest,
-    value:
-      reportsDetached(run) && callback.result.kind === 'complete' && callback.result.contractReports
-        ? canonicalPayload({
-            ...callback,
-            result: {
-              ...Object.fromEntries(
-                Object.entries(callback.result).filter(([key]) => key !== 'contractReports'),
-              ),
-              contractReportsOmitted: Object.keys(callback.result.contractReports).length,
-            },
-          })
-        : callbackReceipt(callback),
+    value: callbackReceipt(callback),
   });
   await input.beforeWrite?.(run);
   if (!input.deferWrite) {

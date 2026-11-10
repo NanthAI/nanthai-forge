@@ -5,7 +5,12 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import type { HostedCheckRun } from '../src/hosted-check';
 import type { semanticReportsSchema } from '../src/intent-semantic-conflict';
-import { applyCheckRetryBudget, capCheckReports } from '../src/check-report-cap';
+import {
+  applyCheckRetryBudget,
+  capCheckReports,
+  packShardReports,
+  unpackShardReports,
+} from '../src/check-report-cap';
 import { mergeShardReports, settlePoolPending } from '../src/hosted-actions-pool';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
@@ -49,29 +54,8 @@ export function expandReports(state: { notable: Reports; plain: string[] }): Rep
   };
 }
 
-/** Issue 75cb5074: a shard row stores each passing file that has only a duration as
- * `{file: durationMs}`, so the final replay reads names and numbers instead of one JSON
- * object per file. Everything else stays verbatim; rows written in the old shape still parse. */
-type SavedShard = { reports: Reports; durations?: Record<string, number>; yielded: string[] };
-export function packShardReports(reports: Reports) {
-  const kept: Reports = {},
-    durations: Record<string, number> = {};
-  for (const [file, report] of Object.entries(reports))
-    if (
-      report.failed === false &&
-      typeof report.durationMs === 'number' &&
-      Object.keys(report).every(key => key === 'failed' || key === 'durationMs')
-    )
-      durations[file] = report.durationMs;
-    else kept[file] = report;
-  return { reports: kept, durations };
-}
-export function unpackShardReports(saved: SavedShard): Reports {
-  const reports: Reports = {};
-  for (const [file, durationMs] of Object.entries(saved.durations ?? {}))
-    reports[file] = { durationMs, failed: false };
-  return Object.assign(reports, saved.reports);
-}
+// Shared lossless report codec; exported here for existing shard readers.
+export { packShardReports, unpackShardReports } from '../src/check-report-cap';
 
 const rows = (ctx: MutationCtx, run: HostedCheckRun) =>
   ctx.db
@@ -98,7 +82,7 @@ async function replayShardReports(
     .sort((a, b) => a.sequence! - b.sequence!);
   let state = { reports: {} as Reports, pending: [] as string[] };
   for (const row of shards) {
-    const saved = JSON.parse(row.reports!) as SavedShard;
+    const saved = JSON.parse(row.reports!) as Parameters<typeof unpackShardReports>[0];
     state = foldShardStep(state, {
       reports: unpackShardReports(saved),
       yielded: saved.yielded,

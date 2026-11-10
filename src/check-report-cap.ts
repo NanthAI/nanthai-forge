@@ -67,23 +67,34 @@ export function applyCheckRetryBudget(input: Reports) {
   return reports;
 }
 
-/** The stored callback receipt is only a replay record (its digest, taken over the full callback, decides
- * retries), so it must stay far below the 1 MiB document limit however many test files a callback reports.
- * Small callbacks are kept verbatim; larger ones keep capped excerpts, then only the file count. */
-export const checkCallbackReceiptBytes = 256 * 1024;
+/** Callback rows only reconcile event identity: the row's digest covers the complete
+ * authenticated callback. Outcome, reports and provider pins live on the run/shard.
+ * Keep no second transport payload (including signed machine lease tokens). */
+export const checkCallbackReceiptBytes = 128;
 export function callbackReceipt(callback: HostedCheckCallback) {
-  const fits = (text: string) => encoder.encode(text).length <= checkCallbackReceiptBytes;
-  const full = canonicalPayload(callback);
-  const result = callback.result;
-  if (fits(full) || result.kind !== 'complete' || !result.contractReports) return full;
-  const capped = canonicalPayload({
-    ...callback,
-    result: { ...result, contractReports: capCheckReports(result.contractReports).reports },
-  });
-  if (fits(capped)) return capped;
-  const { contractReports, ...rest } = result;
-  return canonicalPayload({
-    ...callback,
-    result: { ...rest, contractReportsOmitted: Object.keys(contractReports).length },
-  });
+  return canonicalPayload({ eventId: callback.eventId, kind: callback.result.kind });
+}
+
+/** Issue 75cb5074: a shard row stores each passing file that has only a duration as
+ * `{file: durationMs}`, so the final replay reads names and numbers instead of one JSON
+ * object per file. Everything else stays verbatim; rows written in the old shape still parse. */
+type SavedShard = { reports: Reports; durations?: Record<string, number>; yielded: string[] };
+export function packShardReports(reports: Reports) {
+  const kept: Reports = {},
+    durations: Record<string, number> = {};
+  for (const [file, report] of Object.entries(reports))
+    if (
+      report.failed === false &&
+      typeof report.durationMs === 'number' &&
+      Object.keys(report).every(key => key === 'failed' || key === 'durationMs')
+    )
+      durations[file] = report.durationMs;
+    else kept[file] = report;
+  return { reports: kept, durations };
+}
+export function unpackShardReports(saved: SavedShard): Reports {
+  const reports: Reports = {};
+  for (const [file, durationMs] of Object.entries(saved.durations ?? {}))
+    reports[file] = { durationMs, failed: false };
+  return Object.assign(reports, saved.reports);
 }

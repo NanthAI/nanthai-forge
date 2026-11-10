@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { state, projectRow } from './hosted-fixture.mjs';
 const find = await import(moduleUrl('../convex/projectObjectFind.ts'));
 const store = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
 const catalog = await import(moduleUrl('../convex/projectGithubImportCatalog.ts'));
@@ -272,4 +272,221 @@ test('a large inventory (135 KB window rows, 40 MB) is purged in pages that each
   assert.equal(s.tables.projectGithubImportInventory.size, 0);
   assert.ok(Math.max(...pages) < 8 * 1024 * 1024, `a page read ${Math.max(...pages)} bytes`);
   assert.ok(pages.length >= 9, `${pages.length} pages: bounded by bytes, not one 500-row page of ~66 MB`);
+});
+
+test('catalog compaction preserves every reachable binding, original upload retry and State provenance without idle work', async t => {
+  const compact = await import(moduleUrl('../convex/projectObjectCatalogCompact.ts'));
+  const commit = await import(moduleUrl('../convex/projectObjectCommit.ts'));
+  const output = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  const f = state([], { keysetPaging: true }),
+    projectId = 'project';
+  f.tables.hostedProjects.set(projectId, projectRow({ _id: projectId }));
+  f.counts = [];
+  let meter;
+  for (const name of ['insert', 'patch', 'replace', 'delete']) {
+    const original = f.ctx.db[name];
+    f.ctx.db[name] = async (...args) => {
+      const result = await original(...args);
+      if (meter) {
+        meter.writes++;
+        if (name !== 'delete') {
+          const id = name === 'insert' ? result : args[0];
+          const row = await f.ctx.db.get(id);
+          meter.writeBytes += Buffer.byteLength(JSON.stringify(row));
+        }
+      }
+      return result;
+    };
+  }
+  f.run = async (name, action) => {
+    meter = { name, writes: 0, writeBytes: 0 };
+    try {
+      return await f.transaction(action);
+    } finally {
+      f.counts.push(meter);
+      meter = null;
+    }
+  };
+  f.call = (name, fn, args) => f.run(name, () => fn._handler(f.ctx, args));
+  const inputs = Array.from({ length: 600 }, (_, i) => ({
+    digest: hex(`compact-${i}`),
+    size: i + 1,
+    ...(i % 19 === 0
+      ? { recipe: { digest: hex('compact-1'), size: 2 } }
+      : i % 17 === 0
+        ? { pack: { digest: hex('compact-2'), size: 100000, offset: i } }
+        : {}),
+  }));
+  const imported = Array.from({ length: 300 }, (_, i) => ({ digest: hex(`imported-${i}`), size: i }));
+  for (const page of find.catalogPages(imported))
+    await f.ctx.db.insert('projectObjectCatalog', { projectId, ...page, origin: 'github-import:complete' });
+  const ids = [];
+  for (const pin of inputs)
+    ids.push(
+      await f.ctx.db.insert('projectObjects', {
+        projectId,
+        ...pin,
+        nonce: 'original-upload',
+        removed: false,
+        sourceReferenced: true,
+        location: 'r2',
+        r2Key: `v1/p/${projectId}/o/${pin.pack?.digest ?? pin.digest}`,
+        r2Committed: true,
+      }),
+    );
+  const stateDigest = hex('state-with-provenance');
+  const stateId = await f.ctx.db.insert('projectObjects', {
+    projectId,
+    digest: stateDigest,
+    size: 100,
+    nonce: 'state',
+    removed: false,
+    sourceReferenced: true,
+    stateGeneration: 2,
+    stateParents: [hex('parent')],
+    location: 'r2',
+    r2Committed: true,
+    r2Key: `v1/p/${projectId}/o/${stateDigest}`,
+  });
+  const preserved = JSON.stringify(f.tables.projectObjects.get(stateId));
+  const untouched = [];
+  for (const fields of [
+    { sourceReferenced: false },
+    { recipeClosure: [{ sha256: hex('closure-leaf'), size: 1 }] },
+    { r2Committed: false },
+    { r2SweepKey: 'cleanup-key' },
+    { stateParents: [] },
+    { packMembers: [{ digest: hex('member'), size: 1 }] },
+  ]) {
+    const digest = hex(JSON.stringify(fields));
+    const id = await f.ctx.db.insert('projectObjects', {
+      projectId,
+      digest,
+      size: 1,
+      nonce: 'retained',
+      removed: false,
+      sourceReferenced: true,
+      location: 'r2',
+      r2Committed: true,
+      r2Key: `v1/p/${projectId}/o/${digest}`,
+      ...fields,
+    });
+    untouched.push([id, JSON.stringify(f.tables.projectObjects.get(id))]);
+  }
+  const before = [...f.tables.projectObjects.values(), ...f.tables.projectObjectCatalog.values()].reduce(
+    (n, row) => n + Buffer.byteLength(JSON.stringify(row)),
+    0,
+  );
+  let after = null,
+    result,
+    steps = 0;
+  do {
+    const request = { projectId, actor: 'owner', operationId: 'compact-original', after };
+    const value = await f.call('compact', compact.step, request);
+    assert.equal(
+      await f.call('compact-replay', compact.step, request),
+      value,
+      'unknown outcome replays the same page receipt',
+    );
+    assert.equal(f.counts.at(-1).writes, 0, 'page replay writes nothing');
+    result = JSON.parse(value);
+    after = result.after;
+    assert(++steps < 20, 'bounded migration converges');
+  } while (!result.done);
+  assert.equal(result.moved, 600);
+  assert.equal(
+    JSON.stringify(f.tables.projectObjects.get(stateId)),
+    preserved,
+    'mutable State provenance stays byte-identical',
+  );
+  assert.equal(f.tables.projectObjects.size, 1 + untouched.length);
+  for (const [id, original] of untouched)
+    assert.equal(JSON.stringify(f.tables.projectObjects.get(id)), original);
+  // Sparse imported pages and later source writes can have interleaving digest ranges.
+  await f.run('new-source', () =>
+    output.storeSourceOutputs(f.ctx, projectId, 'source-execution', [
+      { sha256: hex('later-source'), size: 7, r2Key: `v1/p/${projectId}/o/${hex('later-source')}` },
+      {
+        sha256: hex('new-state'),
+        size: 9,
+        stateGeneration: 3,
+        stateParents: [stateDigest],
+        r2Key: `v1/p/${projectId}/o/${hex('new-state')}`,
+      },
+    ]),
+  );
+  assert.equal(
+    f.tables.projectObjects.size,
+    3 + untouched.length,
+    'new source output retains proportional writes without rewriting unrelated catalog pages',
+  );
+  const resolved = await f.run('reachable', () =>
+    find.findObjects({ ...f.ctx }, projectId, [
+      ...inputs.map(pin => pin.digest),
+      hex('later-source'),
+      hex('new-state'),
+    ]),
+  );
+  assert.deepEqual(
+    resolved.map(row => row?.size),
+    [...inputs.map(pin => pin.size), 7, 9],
+  );
+  const oldImport = await find.findObjects(
+    { ...f.ctx },
+    projectId,
+    imported.map(pin => pin.digest),
+  );
+  assert.deepEqual(
+    oldImport.map(row => row?.size),
+    imported.map(pin => pin.size),
+    'pre-existing imported bindings remain reachable',
+  );
+  assert.deepEqual(resolved[0].recipe, inputs[0].recipe);
+  assert.deepEqual(resolved[17].pack, inputs[17].pack);
+  const pages = [...f.tables.projectObjectCatalog.values()].sort((a, b) => (a.first < b.first ? -1 : 1));
+  for (let i = 1; i < pages.length; i++)
+    assert(pages[i - 1].last < pages[i].first, 'catalog ranges never overlap');
+  assert.deepEqual(
+    await f.call('old-upload-retry', commit.pendingRows, { actor: 'owner', ids: [ids[0], ids[599]] }),
+    [],
+  );
+  await assert.rejects(
+    f.call('unauthorized-old-upload', commit.pendingRows, { actor: 'stranger', ids: [ids[0]] }),
+  );
+  await assert.rejects(f.call('unknown-upload', commit.pendingRows, { actor: 'owner', ids: ['absent'] }));
+  let checked = 0,
+    cursor = null,
+    verification;
+  do {
+    verification = JSON.parse(await f.call('verify', compact.verify, { projectId, actor: 'owner', cursor }));
+    cursor = verification.cursor;
+    checked += verification.checked;
+  } while (!verification.done);
+  assert.equal(checked, inputs.length, 'the independent verifier checks every migrated digest');
+  const retained = ['projectObjects', 'projectObjectCatalog', 'projectObjectReceipts'].reduce(
+    (n, table) =>
+      n + [...f.tables[table].values()].reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0),
+    0,
+  );
+  assert(
+    retained < before * 0.78,
+    `${retained}/${before}: compact descriptors plus permanent retry receipts`,
+  );
+  for (const row of pages) assert(row.sizes.length <= 256);
+  const sourceWrite = f.counts.find(row => row.name === 'new-source');
+  assert(
+    sourceWrite.writeBytes < 2 * 1024,
+    'small worker publication does not rewrite unrelated catalog pages',
+  );
+  t.diagnostic(
+    JSON.stringify({
+      before,
+      retained,
+      moved: result.moved,
+      pages: pages.length,
+      steps,
+      migration: result,
+      sourceWriteBytes: sourceWrite.writeBytes,
+    }),
+  );
 });

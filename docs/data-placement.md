@@ -44,6 +44,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `legacyStorageCleanupPages` | Retry receipts for approved maintenance pages; no file bodies. | Maintenance pages |
 | `legacyStorageCleanupWindows` | One metadata fence per approved dev cleanup window; closing it invalidates older deletion transactions. No source or file bytes. | Approved maintenance windows |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |
+| `projectObjectReceipts` | Original upload-id to digest pins after immutable descriptors move into catalog pages; current project access still gates replay. Bounded migration cursor receipts use the same table. See [storage compaction](operations/storage-compaction.md). | Compacted descriptor count |
 | `projectObjectCatalog` | Sorted pins of a GitHub archive import, 256 per row (digest, size, recipe or packed byte range; physical packs retain protected source pins), instead of one `projectObjects` row per object; `findObject` reads it. | Repo size / 256 |
 | `projectGithubImports`, `projectGithubImportInventory` | GitHub import jobs and their paged inventory (keys and positions per page). Inventory rows are deleted once the import is published. | Repo size, during an import |
 | `projectSourcePacks` | Latest source pack per project (R2 key and pins). | Fixed |

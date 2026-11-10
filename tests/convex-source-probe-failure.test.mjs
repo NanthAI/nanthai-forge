@@ -135,7 +135,7 @@ for (const large of [false, true])
             else assert.deepEqual(output, healthy, 'dispensable failure preserves exact output bytes');
           }
           const stateTasks = [...s.tables.projectSourceTasks.values()].filter(
-            row => JSON.parse(row.input).kind === 'states',
+            row => s.tables.projectSourceBatches.get(row.batchId)?.kind === 'states',
           );
           assert.equal(stateTasks.length > 0, large, 'exercise the intended graph summary path');
           // The logical descriptor is present: the nested strict resolver must
@@ -286,7 +286,7 @@ for (const fanout of [false, true])
           assert.equal(s.metrics.filter(m => m.failed).length, 0, 'domain error is settled by the worker');
         }
         const tasks = [...s.tables.projectSourceTasks.values()].filter(
-          row => JSON.parse(row.input).kind === 'states',
+          row => s.tables.projectSourceBatches.get(row.batchId)?.kind === 'states',
         );
         assert.equal(tasks.length > 0, fanout, 'exercise actual child summaries');
         const idle = s.calls.length;

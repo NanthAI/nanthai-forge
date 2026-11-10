@@ -144,6 +144,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
     projectWorkRecords: new Map(),
     projectObjects: new Map(),
     projectObjectCatalog: new Map(),
+    projectObjectReceipts: new Map(),
     projectCheckLogSourcePins: new Map(),
     projectCheckLogRetentions: new Map(),
     projectCheckLogCleanups: new Map(),

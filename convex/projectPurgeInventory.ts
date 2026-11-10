@@ -97,6 +97,7 @@ export const projectPurgeTables = {
   projectHostedDisplayRecords: 'by_project',
   projectObjects: 'by_project',
   projectObjectCatalog: 'by_project',
+  projectObjectReceipts: 'by_project',
   projectGithubImportInventory: 'by_project',
   projectGithubImports: 'by_project',
   projectHistory: 'by_project',
