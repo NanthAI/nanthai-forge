@@ -399,3 +399,87 @@ test('after a failed step or child and an expired lease, one explicit trigger re
     }
   }
 });
+
+test('4k-file multi-quantum composition shares one Node action and resolves each object window once', async t => {
+  const s = await scaleFixture();
+  try {
+    const blob = await s.putSpec(Buffer.from('original\n'));
+    const files = Array.from({ length: 4000 }, (_, i) => ({
+      path: `src/${'nested/'.repeat(24)}${String(i).padStart(6, '0')}.txt`,
+      mode: 'file',
+      blob: blob.sha256,
+    }));
+    const state = (files, parents = []) =>
+      s.json({ schema: 1, kind: 'forge-source-state', parents, files, message: 'seed', at });
+    const base = await state(files);
+    const a = await s.putSpec(Buffer.from('left\n')),
+      b = await s.putSpec(Buffer.from('right\n'));
+    const leftFiles = files.map((f, i) => (i === 0 ? { ...f, blob: a.sha256 } : f)),
+      rightFiles = files.map((f, i) => (i === 1 ? { ...f, blob: b.sha256 } : f));
+    const left = await state(leftFiles, [base.sha256]),
+      right = await state(rightFiles, [base.sha256]);
+    const inputs = buildComposePages([
+        {
+          laneId: randomUUID(),
+          head: right.sha256,
+          version: 0,
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: { object: right, recipe: null },
+        },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...inputs.pages, ...dependencies.pages]) await s.json(page.value);
+    const input = await s.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: left.sha256, receiptId: 'main' },
+      main: { object: left, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    });
+    const beforeObjects = new Set(s.objects.keys()),
+      beforeCounts = s.counts.length;
+    const jobId = await s.enqueue(input),
+      report = await s.drain(),
+      job = await s.job(jobId);
+    assert.equal(job.status, 'completed');
+    const result = JSON.parse(await s.bytes(job.output)),
+      merged = JSON.parse(await s.bytes(result.result.state));
+    assert.deepEqual(
+      merged.files,
+      files.map((f, i) => (i === 0 ? leftFiles[i] : i === 1 ? rightFiles[i] : f)),
+    );
+    assert.deepEqual(merged.parents, [left.sha256, right.sha256]);
+    assert.deepEqual(result.result.paths, [files[1].path]);
+    const nodes = s.calls.filter(name => name === 'projectConvexSourceNode:step').length;
+    t.diagnostic(
+      JSON.stringify({
+        multiQuantum4k: report,
+        dbReadBytes: s.counts.slice(beforeCounts).reduce((n, c) => n + c.readBytes, 0),
+        dbWriteBytes: s.counts.slice(beforeCounts).reduce((n, c) => n + c.writeBytes, 0),
+        r2BytesPut: [...s.objects]
+          .filter(([id]) => !beforeObjects.has(id))
+          .reduce((n, [, bytes]) => n + (Buffer.isBuffer(bytes) ? bytes.length : bytes.size), 0),
+        nodes,
+        resolves: s.calls.filter(n => n === 'projectConvexSourceObjects:resolve').length,
+      }),
+    );
+    assert.equal(nodes, 1, 'the >2 MiB graph-to-compute boundary needs a fresh heap, not a fresh action');
+    const resolutions = s.events
+      .filter(e => e.call === 'projectConvexSourceObjects:resolve' && !e.args.ancestry && !e.args.probe)
+      .flatMap(e => e.args.digests);
+    assert.equal(
+      resolutions.length,
+      new Set(resolutions).size,
+      'no repeated descriptor resolution across quanta',
+    );
+    assert.equal(s.readCounts.get(left.sha256), 1, 'verified left manifest is reused across quanta');
+    assert.equal(s.readCounts.get(right.sha256), 1, 'verified right manifest is reused across quanta');
+  } finally {
+    s.restore();
+  }
+});

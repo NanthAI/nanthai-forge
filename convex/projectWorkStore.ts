@@ -5,6 +5,13 @@
 // S3 adds the dual write: with `workStore: 'dual'` each journal append also stores its records.
 // Intents are mutable records: the journal owns a copied Intent until a hosted Lane pins its execution
 // (a base with a receipt); from then on hosted paths own it and the copy, compare and dual write leave it.
+import {
+  compareFingerprints,
+  fingerprintSource,
+  fingerprintHead,
+  fingerprintCoverage,
+  workReadDigest,
+} from './projectWorkStoreDigests';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -28,6 +35,7 @@ import { sameValue, storeReadOf } from './projectWorkStoreReads';
 export const WORK_STORE_PAGE = 100;
 const SAMPLE = 20;
 const copySource = v.union(...workStoreSources.map(name => v.literal(name)));
+const digestSource = v.union(copySource, v.literal('planningItems'), v.literal('issueHeads'));
 /** S4 reader compares: each journal row against what the store reader returns for it. */
 const readCompares = {
   readItems: 'planningItems',
@@ -82,11 +90,11 @@ async function indexPage(
       numItems: Math.min(newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
       maximumBytesRead: 4 * 1024 * 1024,
     });
-  const rows: { key: string; value: unknown }[] = [];
+  const rows: { key: string; position: number; value: unknown }[] = [];
   for (const row of page.page) {
     const header = JSON.parse(row.value);
     if (!header.payloadKey) {
-      rows.push({ key: row.key, value: header });
+      rows.push({ key: row.key, position: row.position, value: header });
       continue;
     }
     const parts: { position: number; value: string }[] = [];
@@ -107,6 +115,7 @@ async function indexPage(
     }
     rows.push({
       key: row.key,
+      position: row.position,
       value: assembleIndexValue(collection, header, parts, {
         incomplete: () => {
           throw new ForgeError('INVALID_WORK_JOURNAL', 'Indexed record payload coverage is incomplete.');
@@ -177,6 +186,9 @@ async function insertVersion(
     bodyId,
     digest: ref.digest,
     bytes: ref.bytes,
+    ...(journalRow(record as unknown as { kind: string }) === undefined
+      ? {}
+      : { workReadDigest: workReadDigest(journalRow(record as unknown as { kind: string })) }),
   });
   const inline = inlineValue(encoded),
     pointer = { ...identity, ...indexed, recordId, ...(inline === undefined ? {} : { value: inline }) };
@@ -219,9 +231,14 @@ export async function storeProjection(
   projectId: Id<'hostedProjects'>,
   owner: string,
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
+  partition?: Id<'projectWorkGenerations'>,
 ) {
   for (const entry of entries) {
-    if (!(workStoreSources as readonly string[]).includes(entry.collection)) continue;
+    if (
+      !(workStoreSources as readonly string[]).includes(entry.collection) &&
+      entry.collection !== 'planningItems'
+    )
+      continue;
     const collection = entry.collection as WorkStoreSource,
       header = JSON.parse(entry.value);
     const value = header.payloadKey
@@ -235,10 +252,24 @@ export async function storeProjection(
       : header;
     try {
       if (collection === 'intents') await storeIntent(ctx, projectId, owner, value, true);
-      else await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)));
+      else if (entry.collection !== 'planningItems')
+        await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)));
     } catch {
-      // The journal append stands; the compare reports the row as unreadable.
-      continue;
+      // A failed dual write is observable by its independently updated source fingerprint below.
+    }
+    if (partition) {
+      const encoded = await fingerprintSource(
+        ctx,
+        projectId,
+        partition,
+        owner,
+        entry.collection,
+        entry.key,
+        entry.position,
+        value,
+      );
+      const head = encoded ? await recordHead(ctx, projectId, encoded.kind, encoded.id) : null;
+      if (head) await fingerprintHead(ctx, projectId, partition, head);
     }
   }
 }
@@ -256,7 +287,23 @@ export const setMode = mutation({
     try {
       const { project } = await ownerStore(ctx, input.projectId);
       const workStore = input.mode === 'journal' ? undefined : input.mode;
-      if (project.workStore !== workStore) await ctx.db.patch(project._id, { workStore });
+      if (project.workStore !== workStore) {
+        await ctx.db.patch(project._id, { workStore });
+        if (!project.workStore || !workStore) {
+          const selected = await selectedGeneration(ctx, project);
+          const partition = selected && recordPartition(selected);
+          if (partition) {
+            const coverage = await ctx.db
+              .query('projectWorkRecords')
+              .withIndex('by_generation_and_collection_and_key', q =>
+                q.eq('generationId', partition).eq('collection', '_workStoreDigestCoverage'),
+              )
+              .take(100);
+            for (const row of coverage)
+              await ctx.db.patch(row._id, { value: JSON.stringify({ invalidated: true }) });
+          }
+        }
+      }
       return JSON.stringify({ mode: input.mode, changed: project.workStore !== workStore });
     } catch (error) {
       return report(error);
@@ -268,11 +315,69 @@ export const setMode = mutation({
  * second full run copies nothing; one stored with different bytes is reported, never overwritten. A
  * journal-owned Intent is mutable: a changed one is stored as its next version. */
 export const copy = mutation({
-  args: { projectId: v.id('hostedProjects'), collection: copySource, cursor: v.union(v.string(), v.null()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    collection: digestSource,
+    cursor: v.union(v.string(), v.null()),
+    digestsOnly: v.optional(v.boolean()),
+    newest: v.optional(v.number()),
+    sampleSize: v.optional(v.number()),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const { project, partition } = await ownerStore(ctx, input.projectId);
+      if (input.digestsOnly) {
+        let rows: { key: string; position: number; value: unknown }[], cursor: string | null;
+        if (input.collection === 'issueHeads') {
+          const page = await ctx.db
+            .query('projectHostedRecordHeads')
+            .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
+            .order('desc')
+            .paginate({
+              cursor: input.cursor,
+              numItems: Math.min(input.newest ?? 100, 100),
+              maximumBytesRead: 4 * 1024 * 1024,
+            });
+          for (const head of page.page) await fingerprintHead(ctx, input.projectId, partition, head);
+          rows = page.page.map(head => ({ key: head.key, position: head._creationTime, value: null }));
+          cursor = page.isDone ? null : page.continueCursor;
+        } else {
+          const page = await indexPage(ctx, partition, input.collection, input.cursor, input.newest);
+          rows = page.rows;
+          cursor = page.cursor;
+          for (const row of rows) {
+            const encoded = await fingerprintSource(
+              ctx,
+              input.projectId,
+              partition,
+              project.owner,
+              input.collection,
+              row.key,
+              row.position,
+              row.value,
+            );
+            const head = encoded ? await recordHead(ctx, input.projectId, encoded.kind, encoded.id) : null;
+            if (head) await fingerprintHead(ctx, input.projectId, partition, head);
+          }
+        }
+        if (cursor === null || rows.length >= (input.newest ?? Infinity))
+          await fingerprintCoverage(
+            ctx,
+            input.projectId,
+            partition,
+            input.collection,
+            rows.length ? Math.min(...rows.map(row => row.position)) : 0,
+            cursor === null,
+            input.sampleSize ?? input.newest ?? rows.length,
+          );
+        return JSON.stringify({ checked: rows.length, copied: 0, fingerprinted: rows.length, cursor });
+      }
+      invariant(
+        input.collection !== 'planningItems' && input.collection !== 'issueHeads',
+        'BAD_ARGUMENT',
+        'These collections only seed digest metadata.',
+      );
       const page = await indexPage(ctx, partition, input.collection, input.cursor);
       let copied = 0,
         same = 0,
@@ -327,11 +432,50 @@ export const compare = query({
     collection: compareSource,
     cursor: v.union(v.string(), v.null()),
     newest: v.optional(v.number()),
+    digestOnly: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const { project, partition } = await ownerStore(ctx, input.projectId);
+      const digestPrefix = 'work-digest:';
+      const fullPrefix = 'work-full:';
+      const mode = input.cursor?.startsWith(digestPrefix)
+        ? 'digest'
+        : input.cursor?.startsWith(fullPrefix)
+          ? 'full'
+          : undefined;
+      if (mode)
+        input = {
+          ...input,
+          cursor: input.cursor!.slice(mode === 'digest' ? digestPrefix.length : fullPrefix.length),
+        };
+      if (
+        mode === 'digest' ||
+        (mode !== 'full' && project.workStore && (input.digestOnly ?? input.newest !== undefined))
+      ) {
+        const compared = await compareFingerprints(
+          ctx,
+          input.projectId,
+          partition,
+          input.collection,
+          input.cursor,
+          input.newest ?? 100,
+        );
+        invariant(
+          compared || mode !== 'digest',
+          'WORK_STALE',
+          'The Work store comparison coverage changed. Restart this bounded compare.',
+        );
+        if (compared)
+          return JSON.stringify({
+            ...compared,
+            method: 'digest',
+            cursor: compared.cursor ? digestPrefix + compared.cursor : null,
+          });
+      }
+      const full = (value: { cursor: string | null } & Record<string, unknown>) =>
+        JSON.stringify({ ...value, method: 'full', cursor: value.cursor ? fullPrefix + value.cursor : null });
       const collection = input.collection as CompareSource;
       let checked = 0,
         matched = 0,
@@ -356,7 +500,7 @@ export const compare = query({
           else if (version !== head.version) note(different, `${head.key}:${head.version}:${version}`);
           else matched++;
         }
-        return JSON.stringify({
+        return full({
           checked,
           matched,
           missing,
@@ -388,7 +532,7 @@ export const compare = query({
           else if (!sameValue(read, row.value)) note(different, row.key);
           else matched++;
         }
-        return JSON.stringify({ checked, matched, missing, different, invalid, cursor: page.cursor });
+        return full({ checked, matched, missing, different, invalid, cursor: page.cursor });
       }
       const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
       for (const row of page.rows) {
@@ -430,7 +574,7 @@ export const compare = query({
           note(different, `${record.kind}:${record.id}:${record.version}`);
         else matched++;
       }
-      return JSON.stringify({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
+      return full({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
     } catch (error) {
       return report(error);
     }

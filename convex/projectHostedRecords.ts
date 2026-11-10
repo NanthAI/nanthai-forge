@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
 import type { OverlapChange } from '../src/hosted-overlap';
 import type { MutationCtx, QueryCtx } from './_generated/server';
@@ -178,6 +179,8 @@ export async function writeHostedRecord(
   const pointer = { ...identity, ...indexed, recordId: id };
   if (head) await ctx.db.replace(head._id, pointer);
   else await ctx.db.insert('projectHostedRecordHeads', pointer);
+  if (record.kind === 'intent')
+    await fingerprintHostedIntent(ctx, project, ref, head?._creationTime ?? Date.now(), indexed.status);
   if (record.kind === 'lane') {
     await touchLifecycleIntent(ctx, input.projectId, record.intentId);
     await trackHostedOverlapLane(ctx, input.projectId, record, input.overlap);

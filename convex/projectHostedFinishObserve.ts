@@ -10,7 +10,7 @@ import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { landingAlias } from './projectHostedLandingIdentity';
 import { finishPendingForReader } from '../src/hosted-finish';
 import { ConvexError, v } from 'convex/values';
-import { query, type QueryCtx } from './cliServer';
+import { finishQuery as query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { finishRow } from './projectHostedFinishWake';

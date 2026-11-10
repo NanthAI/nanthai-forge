@@ -330,3 +330,30 @@ test('dogfood landing drivers retain exact acceptance with 1,000 reports and ten
   assert(budget, 'the dogfood per-function read budget is recorded');
   assert.notEqual(judgeCost(budget, measured.readBytes, costGuard).status, 'fail');
 });
+
+test('observer driver bytes include public identity mapping and recheck current membership', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  f.patch('hostedProjects', f.projectId, { agentGuidance: 'synthetic'.repeat(2000) });
+  f.insert('forgeAccounts', { owner: 'owner', handle: 'synthetic-owner' });
+  const member = f.insert('projectContributors', { projectId: f.projectId, contributor: 'viewer' });
+  const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
+  const input = { projectId: f.projectId, operationId: state.operationId, nextVersion: 0 };
+  const from = f.counts.length;
+  const response = JSON.parse(await f.tx('driverObservePage', observe.page, input, 'viewer'));
+  assert.equal(response.submission.actor, 'synthetic-owner');
+  const measured = f.counts.at(-1);
+  assert.equal(f.counts.length - from, 1, 'one query including public identity mapping');
+  t.diagnostic(JSON.stringify({ observerReadBytes: measured.readBytes, tables: measured.readBytesByTable }));
+  const budget = costs.find(c => c.metric === 'finishObserveReadBytes');
+  assert(budget, 'the public observer byte budget is recorded');
+  assert.notEqual(judgeCost(budget, measured.readBytes, costGuard).status, 'fail');
+  f.tables.projectContributors.delete(member);
+  await assert.rejects(
+    f.tx('driverObserveRevoked', observe.page, input, 'viewer'),
+    error => error.data?.code === 'PROJECT_UNAVAILABLE',
+  );
+  f.insert('projectReaders', { projectId: f.projectId, reader: 'viewer' });
+  const reader = JSON.parse(await f.tx('driverObserveReader', observe.page, input, 'viewer'));
+  assert.equal(reader.submission.actor, undefined, 'a read grant does not disclose another person');
+});

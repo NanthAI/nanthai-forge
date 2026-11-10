@@ -38,6 +38,8 @@ export const hostedRecordFields = {
   restoreBases: v.optional(v.string()),
   digest: v.string(),
   bytes: v.number(),
+  /** Canonical journal-row hash for digest-only Work migration comparisons. */
+  workReadDigest: v.optional(v.string()),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
 };
 export const hostedRecordTables = {

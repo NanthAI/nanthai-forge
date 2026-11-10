@@ -678,13 +678,77 @@ test('with the store reader on, planning lists, versions, comments and detail re
       name,
     );
   // A bounded sample (spend freeze 2026-11-10): newest rows only, at most `newest` per collection.
+  const headsBeforeDigests = [...s.tables.projectHostedRecordHeads.values()].map(head =>
+    structuredClone(head),
+  );
+  const baseline = await run({ action: 'copy-work-store', digestsOnly: true, newest: 200 });
+  assert.ok(Object.values(baseline.collections).every(total => total.copied === 0));
+  assert.deepEqual(
+    [...s.tables.projectHostedRecordHeads.values()],
+    headsBeforeDigests,
+    'digest baseline never refreshes or recopies old heads',
+  );
+  const originalGet = s.ctx.db.get;
+  s.ctx.db.get = id => {
+    assert.ok(!s.tables.projectHostedRecordBodies.has(id), 'equal hashes never fetch full bodies');
+    return originalGet(id);
+  };
   const sample = await run({ action: 'compare-work-store', newest: 1 });
+  s.ctx.db.get = originalGet;
   assert.equal(sample.newest, 1);
   for (const [name, total] of Object.entries(sample.collections)) {
     assert.ok(total.checked <= 1, name);
     assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
   }
   assert.equal(sample.collections.readComments.checked, 1);
+  const compareMeter = meterReads(s.ctx);
+  const oldClient = {
+    ...client,
+    query: (ref, args) => {
+      const full = { ...args };
+      full.digestOnly = false;
+      return handlers[getFunctionName(ref)]._handler(s.ctx, full);
+    },
+  };
+  const fullCompareCost = await compareMeter.cost(() =>
+    dispatchHostedWork(oldClient, s.projectId, { action: 'compare-work-store', newest: 200 }),
+  );
+  const digestCompareCost = await compareMeter.cost(() => run({ action: 'compare-work-store', newest: 200 }));
+  assert.ok(
+    digestCompareCost.bytes < fullCompareCost.bytes,
+    JSON.stringify({ fullCompareCost, digestCompareCost }),
+  );
+  const withoutMethod = totals =>
+    Object.fromEntries(
+      Object.entries(totals).map(([name, total]) => {
+        const copy = { ...total };
+        delete copy.method;
+        return [name, copy];
+      }),
+    );
+  assert.deepEqual(
+    withoutMethod((await run({ action: 'compare-work-store', newest: 200 })).collections),
+    withoutMethod(
+      (await dispatchHostedWork(oldClient, s.projectId, { action: 'compare-work-store', newest: 200 }))
+        .collections,
+    ),
+  );
+  compareMeter.restore();
+  console.log(JSON.stringify({ migrationCompare: { fullCompareCost, digestCompareCost } }));
+  const corrupt = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'comment');
+  const originalDigest = corrupt.digest;
+  corrupt.digest = '0'.repeat(64);
+  let fetchedBodies = 0;
+  s.ctx.db.get = id => {
+    if (s.tables.projectHostedRecordBodies.has(id)) fetchedBodies++;
+    return originalGet(id);
+  };
+  const mismatch = await run({ action: 'compare-work-store', newest: 200 });
+  assert.ok(mismatch.collections.planningComments.different + mismatch.collections.notes.different > 0);
+  assert.ok(fetchedBodies > 0, 'a digest mismatch fetches the retained body for diagnosis');
+  s.ctx.db.get = originalGet;
+  corrupt.digest = originalDigest;
+
   // Writes keep both stores current while the store serves reads.
   await s.send({
     action: 'comment-planning-item',
@@ -698,4 +762,104 @@ test('with the store reader on, planning lists, versions, comments and detail re
   assert.deepEqual(await texts(), expected);
   await run({ action: 'set-work-store', mode: 'dual' });
   assert.deepEqual(await texts(), expected, 'switching back reads the journal, which has every write');
+});
+
+test('bounded digest comparisons retain 200-record coverage and pin full fallback across page boundaries', async t => {
+  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const mutation = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const s = await setup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  s.tables.hostedProjects.get(s.projectId).workStore = 'records';
+  const issue = s.item({ title: 'Digest page boundaries' });
+  await s.send(issue);
+  for (let i = 0; i < 205; i++)
+    await mutation.command._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: randomUUID(),
+      command: JSON.stringify({
+        action: 'note',
+        intentId: issue.itemId,
+        kind: 'comment',
+        text: `${i}: ${'rationale '.repeat(350)}`,
+      }),
+    });
+  const handlers = { 'projectWorkStore:copy': store.copy, 'projectWorkStore:compare': store.compare };
+  const client = {
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    action: () => assert.fail('no action'),
+  };
+  const run = input => dispatchHostedWork(client, s.projectId, input);
+  const cold = await run({ action: 'compare-work-store', newest: 201 });
+  assert.ok(Object.values(cold.collections).every(total => total.method === 'full'));
+  assert.equal(cold.collections.notes.checked, 201);
+  const heads = structuredClone([...s.tables.projectHostedRecordHeads.values()]);
+  const seeded = await run({ action: 'copy-work-store', digestsOnly: true, newest: 200 });
+  assert.equal(seeded.collections.notes.fingerprinted, 200);
+  assert.deepEqual([...s.tables.projectHostedRecordHeads.values()], heads);
+  const meter = meterReads(s.ctx);
+  const digestCost = await meter.cost(() => run({ action: 'compare-work-store', newest: 200 }));
+  const warm = await run({ action: 'compare-work-store', newest: 200 });
+  assert.equal(warm.collections.notes.checked, 200);
+  assert.equal(warm.collections.readNotes.checked, 200);
+  assert.ok(
+    Object.values(warm.collections).every(
+      total =>
+        total.method === 'digest' && total.different === 0 && total.invalid === 0 && total.missing === 0,
+    ),
+  );
+  const beyond = await run({ action: 'compare-work-store', newest: 201 });
+  assert.equal(beyond.collections.notes.checked, 201);
+  assert.equal(beyond.collections.notes.method, 'full');
+  const legacyClient = {
+    ...client,
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, { ...args, digestOnly: false }),
+  };
+  const fullCost = await meter.cost(() =>
+    dispatchHostedWork(legacyClient, s.projectId, { action: 'compare-work-store', newest: 200 }),
+  );
+  assert.ok(digestCost.bytes < fullCost.bytes / 2, JSON.stringify({ digestCost, fullCost }));
+  meter.restore();
+  console.log(JSON.stringify({ migrationCompare200: { digestCost, fullCost } }));
+  const insert = s.ctx.db.insert;
+  let failed = false;
+  s.ctx.db.insert = (table, value) => {
+    if (table === 'projectHostedRecords' && !failed) {
+      failed = true;
+      throw Error('Synthetic dual-write failure');
+    }
+    return insert(table, value);
+  };
+  const operationId = randomUUID();
+  const accepted = await mutation.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId,
+    command: JSON.stringify({
+      action: 'note',
+      intentId: issue.itemId,
+      kind: 'comment',
+      text: 'Journal remains accepted after dual-store failure',
+    }),
+  });
+  s.ctx.db.insert = insert;
+  assert.equal(accepted.operationId, operationId);
+  const failedDual = await run({ action: 'compare-work-store', newest: 200 });
+  assert.equal(failedDual.collections.notes.method, 'digest');
+  assert.ok(failedDual.collections.notes.missing > 0, 'independent journal hash exposes a failed dual write');
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'journal' });
+  await mutation.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: randomUUID(),
+    command: JSON.stringify({
+      action: 'note',
+      intentId: issue.itemId,
+      kind: 'comment',
+      text: 'Journal-only interval',
+    }),
+  });
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records' });
+  const resumed = await run({ action: 'compare-work-store', newest: 200 });
+  assert.equal(resumed.collections.notes.method, 'full');
+  assert.ok(resumed.collections.notes.missing > 0, 'a mode gap cannot reuse stale hash coverage');
 });

@@ -10,6 +10,7 @@ const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'
 const sourceReader = await import(
   `data:text/javascript;base64,${Buffer.from(
     moduleSource('../convex/projectHostedFinishObserve.ts')
+      .replace('finishQuery as query', 'query')
       .replace('const ctx = finishReadReader(rawCtx);', 'const ctx = rawCtx;')
       .replace("finishReadReader(rawCtx, 'owner')", 'rawCtx'),
   ).toString('base64')}`

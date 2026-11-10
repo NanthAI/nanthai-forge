@@ -90,24 +90,30 @@ export const snapshotEntries = internalQuery({
     if (generation?._id !== input.generationId || project.work?.revision !== input.revision) return null;
     const page = await ctx.db
       .query('projectWorkRecords')
-      .withIndex('by_generation', q => q.eq('generationId', recordPartition(generation)))
+      // Fingerprints sort before public Work collection names. Skip their index range rather than
+      // reading and filtering them: adding compare metadata must not add source-return pages.
+      .withIndex('by_generation_and_collection_and_position', q =>
+        q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
+      )
       .paginate({
         cursor: input.cursor,
         numItems: input.returnBatch ? 1000 : 100,
         maximumBytesRead: input.returnBatch ? 2000000 : 500000,
       });
     return {
-      entries: page.page.map(row => ({
-        ...(row.activityAt === undefined ? {} : { activityAt: row.activityAt }),
-        collection: row.collection,
-        key: row.key,
-        parent: row.parent,
-        position: row.position,
-        value: row.value,
-        ...(row.planning ? { planning: row.planning } : {}),
-        ...(row.status === undefined ? {} : { status: row.status }),
-        ...(row.actor === undefined ? {} : { actor: row.actor }),
-      })),
+      entries: page.page
+        .filter(row => !row.collection.startsWith('_workStore'))
+        .map(row => ({
+          ...(row.activityAt === undefined ? {} : { activityAt: row.activityAt }),
+          collection: row.collection,
+          key: row.key,
+          parent: row.parent,
+          position: row.position,
+          value: row.value,
+          ...(row.planning ? { planning: row.planning } : {}),
+          ...(row.status === undefined ? {} : { status: row.status }),
+          ...(row.actor === undefined ? {} : { actor: row.actor }),
+        })),
       cursor: page.isDone ? null : page.continueCursor,
     };
   },

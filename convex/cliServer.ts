@@ -13,6 +13,7 @@ import {
   type ActionCtx,
 } from './server';
 import { report } from './errors';
+import { finishReadReader } from './projectFinishReadReader';
 import { invariant } from '../src/errors';
 import { actionPublicPeople, actionSubjectArgs, publicPeople, subjectArgs, type Shape } from './publicPeople';
 export * from './server';
@@ -106,6 +107,17 @@ export const query = people(
   customQuery(
     baseQuery,
     customCtx((ctx: QueryCtx) => guard(ctx, 'cli')),
+  ),
+);
+/** The finite finish observer uses the same exact read projections at its public identity
+ * boundary as inside its handler. Otherwise naming a peer rereads the whole project row. */
+export const finishQuery = people(
+  customQuery(
+    baseQuery,
+    customCtx(async (ctx: QueryCtx) => {
+      await guard(ctx, 'cli');
+      return { db: finishReadReader(ctx).db };
+    }),
   ),
 );
 export const mutation = people(

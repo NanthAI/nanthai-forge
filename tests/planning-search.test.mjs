@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { setup } from './hosted-planning-fixture.mjs';
+import { meterReads } from './hosted-read-set.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import { planningSearchEntry, planningSearchTerms, planningSummary } from '../dist/planning-search.js';
@@ -265,7 +266,7 @@ test('CLI/MCP share search schema and briefings require it; validation names id 
   }
 });
 
-test('source snapshot transport preserves indexed search fields', async t => {
+test('source snapshot transport preserves indexed search fields and skips compare metadata reads', async t => {
   const s = await setup(t);
   const item = await add(s, { title: 'Roundtrip search', body: 'Original searchable body' });
   const store = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
@@ -286,4 +287,29 @@ test('source snapshot transport preserves indexed search fields', async t => {
     snapshot.entries.find(entry => entry.collection === 'planningSearch').planning,
     expected.planning,
   );
+  const args = {
+    projectId: s.projectId,
+    owner: 'owner',
+    generationId: ws.generationId,
+    revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
+    cursor: null,
+  };
+  const meter = meterReads(s.ctx);
+  const before = await meter.cost(() => store.snapshotEntries._handler(s.ctx, args));
+  for (let i = 0; i < 500; i++)
+    s.tables.projectWorkRecords.set(`digest-${i}`, {
+      _id: `digest-${i}`,
+      _creationTime: i,
+      projectId: s.projectId,
+      generationId: ws.generationId,
+      collection: '_workStoreDigests:notes',
+      key: `note-${i}`,
+      parent: '',
+      position: i,
+      value: JSON.stringify({ digest: 'f'.repeat(64) }),
+    });
+  const after = await meter.cost(() => store.snapshotEntries._handler(s.ctx, args));
+  assert.deepEqual(after, before, 'compare metadata adds no source snapshot documents, bytes or pages');
+  assert.deepEqual(await store.snapshotEntries._handler(s.ctx, args), snapshot);
+  meter.restore();
 });

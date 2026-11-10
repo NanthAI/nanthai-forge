@@ -3,13 +3,16 @@ import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { finishReadFields, type FinishReadKind } from './projectFinishReadProjection';
 const readers = new WeakSet<object>();
+const sourcePorts = new WeakMap<object, QueryCtx['db']>();
 export const isFinishReadReader = (ctx: QueryCtx) => readers.has(ctx);
 const unpack = (row: Doc<'projectFinishReadRows'>) => ({ ...JSON.parse(row.value), _id: row.sourceId });
 /** Selected exact read paths only. Old untouched rows remain readable, with an
  * explicit source-row dependency until their next ordinary write installs the
  * projection. No reader backfill, polling, source scan or extra RPC. */
 export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pending'): QueryCtx {
-  const db = ctx.db;
+  // The public boundary and handler can select different projection modes. Always wrap
+  // the source port once, so a legacy/missing row never repeats the projection lookup.
+  const db = sourcePorts.get(ctx.db) ?? ctx.db;
   const reader = {
     ...ctx,
     db: new Proxy(db, {
@@ -64,5 +67,6 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
     }),
   };
   readers.add(reader);
+  sourcePorts.set(reader.db, db);
   return reader;
 }

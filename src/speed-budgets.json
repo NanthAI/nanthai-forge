@@ -495,11 +495,11 @@
       "measuredBy": "landing-fixture",
       "metric": "mutations",
       "unit": "calls",
-      "value": 27.5,
+      "value": 27.17,
       "floor": 0.5,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
-      "issue": "7ecc4884",
-      "reason": "Controller wakes, driver steps, check callbacks and acceptance. Slice 2 skipped controller wakes that cannot change eligibility; one batched CI result path per run (65534f20) is the next cut."
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "issue": "71dbe458",
+      "reason": "Controller wakes, driver steps, check callbacks and acceptance. Slice 2 skipped controller wakes that cannot change eligibility; one batched CI result path per run (65534f20) is the next cut. Source-step cut (71dbe458) ratchets 27.5 to 27.17; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
     },
     {
       "id": "landing-v8-actions",
@@ -519,11 +519,11 @@
       "measuredBy": "landing-fixture",
       "metric": "nodeActions",
       "unit": "calls",
-      "value": 0.67,
+      "value": 0.5,
       "floor": 0.1,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
-      "issue": "ac5200f5",
-      "reason": "Node source steps cost eight times a V8 step per second; capture #3 found them the top function after more steps per landing. Fewer source-job steps is the decision."
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "issue": "71dbe458",
+      "reason": "Node source steps cost eight times a V8 step per second; capture #3 found them the top function after more steps per landing. Fewer source-job steps is the decision. Source-step cut (71dbe458) ratchets 0.67 to 0.5; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
     },
     {
       "id": "landing-read-bytes",
@@ -531,11 +531,11 @@
       "measuredBy": "landing-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 806895,
+      "value": 801924,
       "floor": 2048,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
-      "issue": "75cb5074",
-      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision."
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "issue": "71dbe458",
+      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained."
     },
     {
       "id": "landing-write-bytes",
@@ -555,11 +555,11 @@
       "measuredBy": "landing-fixture",
       "metric": "actionGbSeconds",
       "unit": "GB-s",
-      "value": 3.26,
+      "value": 2.85,
       "floor": 0.05,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
-      "issue": "ac5200f5",
-      "reason": "Executions by runtime times memory times the nominal durations in costGuard.actionModel: deterministic, so it moves only with the action mix. Live GB-seconds come from the captures."
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "issue": "71dbe458",
+      "reason": "Executions by runtime times memory times the nominal durations in costGuard.actionModel: deterministic, so it moves only with the action mix. Live GB-seconds come from the captures. Source-step cut (71dbe458) ratchets 3.26 to 2.85; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
     },
     {
       "id": "landing-r2-class-a",
@@ -579,11 +579,11 @@
       "measuredBy": "landing-fixture",
       "metric": "r2ClassB",
       "unit": "ops",
-      "value": 11.67,
+      "value": 10.67,
       "floor": 0.25,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
-      "issue": "ac5200f5",
-      "reason": "Object reads per landing: no per-step object re-resolve was part of the fewer-steps decision."
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage.",
+      "issue": "71dbe458",
+      "reason": "Object reads per landing: no per-step object re-resolve was part of the fewer-steps decision. Source-step cut (71dbe458) ratchets 11.67 to 10.67; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic."
     },
     {
       "id": "landing-r2-bytes-put",
@@ -752,6 +752,18 @@
       "source": "Dogfood landing fixture: one solo passed landing, 1,000 synthetic retained reports and ten shards; 274 KB run value. Before 606,839 B, one duplicate 286,568 B row read removed.",
       "issue": "3e3f9fe6",
       "reason": "Reuses the canonical run already read in the same transaction; keeps current authority, configuration and exact evidence checks. No extra calls or tables."
+    },
+    {
+      "id": "landing-finish-observe-read-bytes",
+      "area": "Finish observer including peer identity mapping",
+      "measuredBy": "driver-fixture",
+      "metric": "finishObserveReadBytes",
+      "unit": "bytes",
+      "value": 6800,
+      "floor": 512,
+      "source": "One observer query by a contributor reading another actor, a synthetic 19 KB project row and the same landing fixture: 25,510 -> 6,787 B. Existing exact read projections, public mapping included.",
+      "issue": "3e3f9fe6",
+      "reason": "Keeps identity mapping on the existing exact read projection through the whole observer query. Removes a full project reread; current membership and reader masking still apply."
     }
   ]
 }

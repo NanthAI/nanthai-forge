@@ -9,7 +9,7 @@ import type { StepTransport } from '../src/hosted-source-step';
 import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/portable-hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
-import { r2Key } from './r2';
+import { r2Key, presignGet, r2Config } from './r2';
 import { r2Counts } from './presign';
 import { ForgeError, invariant } from '../src/errors';
 import { parseNativeState } from '../src/native-state-format';
@@ -73,11 +73,24 @@ export function convexSourceTransport(
     }
   };
   remember(initial);
-  const held = new Map<string, Uint8Array>();
+  const held = new Map<string, Uint8Array>(),
+    generatedKeys = new Map<string, string>();
   for (const value of preloaded) {
     const bytes = new TextEncoder().encode(value.text);
     if (bytes.length === value.size && digest(bytes) === value.sha256) held.set(value.sha256, bytes);
   }
+  let heldBytes = [...held.values()].reduce((n, bytes) => n + bytes.length, 0);
+  const keep = (pin: WorkerPin, bytes: Uint8Array) => {
+    if (
+      !held.has(pin.sha256) &&
+      heldBytes + bytes.length <= 2 * 1024 * 1024 &&
+      bytes.length === pin.size &&
+      digest(bytes) === pin.sha256
+    ) {
+      held.set(pin.sha256, bytes);
+      heldBytes += bytes.length;
+    }
+  };
   const resolve = async (
     ids: string[],
     ancestry = false,
@@ -187,7 +200,25 @@ export function convexSourceTransport(
           yield bytes;
         })();
       if (!locations.has(pin.sha256)) await resolve([pin.sha256]);
-      return clock.read(() => openRead(pin));
+      const stream = await clock.read(() => openRead(pin));
+      if (heldBytes + pin.size > 2 * 1024 * 1024) return stream;
+      return (async function* () {
+        const parts: Uint8Array[] = [];
+        let size = 0;
+        for await (const part of stream) {
+          size += part.length;
+          invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
+          parts.push(new Uint8Array(part));
+          yield part;
+        }
+        const bytes = new Uint8Array(size);
+        let offset = 0;
+        for (const part of parts) {
+          bytes.set(part, offset);
+          offset += part.length;
+        }
+        keep(pin, bytes);
+      })();
     },
     upload: async (pin, stream) => {
       const output = await prepareOutput(pin, stream);
@@ -216,6 +247,8 @@ export function convexSourceTransport(
   };
   async function openRead(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>> {
     const row = locations.get(pin.sha256)!;
+    if (!row.url && generatedKeys.has(pin.sha256))
+      row.url = await presignGet(r2Config(), generatedKeys.get(pin.sha256)!);
     invariant(
       row.descriptor.object.size === pin.size,
       'SOURCE_HASH_MISMATCH',
@@ -312,6 +345,19 @@ export function convexSourceTransport(
       async store(): Promise<SourceOutput> {
         const ref = await clock.write(() => durable.store(bytes)),
           r2 = sourceR2Pin(ref);
+        // This action just hash-verified and stored the bytes. Later quanta can read them
+        // before the one final commit registers their rows; no descriptor RPC is needed.
+        keep(pin, bytes);
+        if (r2) generatedKeys.set(pin.sha256, r2Key(projectId, r2.sha256));
+        remember([
+          {
+            descriptor: { object: pin, recipe: null },
+            ...(stateGeneration === undefined ? {} : { stateGeneration }),
+            ...(stateParents === undefined ? {} : { stateParents }),
+            storageId: r2 ? null : (ref as Id<'_storage'>),
+            url: null,
+          },
+        ]);
         return {
           ...pin,
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
@@ -329,6 +375,27 @@ export function convexSourceTransport(
     locations,
     reads,
     clock,
+    /** Verified small UTF-8 texts only; delegation stays below the Node argument bound. */
+    preloaded: () => {
+      let sent = 0;
+      return [...held].flatMap(([sha256, bytes]) => {
+        try {
+          const value = {
+            sha256,
+            size: bytes.length,
+            text: new TextDecoder('utf-8', { fatal: true }).decode(bytes),
+          };
+          // UTF-8 bytes can expand sixfold when JSON escapes controls. Bound the
+          // serialized hand-off too, leaving room for descriptors and the outer args.
+          const size = new TextEncoder().encode(JSON.stringify(value)).length;
+          if (sent + size > 2 * 1024 * 1024) return [];
+          sent += size;
+          return [value];
+        } catch {
+          return [];
+        }
+      });
+    },
     /** This step's own small output with exactly this pin, as text; otherwise null. */
     smallOutput: (pin: { sha256: string; size: number } | null) => {
       const text = pin ? small.get(pin.sha256) : undefined;

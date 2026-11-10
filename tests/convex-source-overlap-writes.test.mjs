@@ -79,3 +79,40 @@ test('a failed overlapped write fails the step at settle; the default transport 
   for (const item of items) await serial.io.upload(item.pin, item.stream);
   assert.equal(serial.outputs.length, 2, 'without overlap, outputs are complete after each upload');
 });
+
+test("consecutive quanta can describe and read this action's verified output without a resolver or another R2 read", async t => {
+  const r2 = fakeSourceR2(t);
+  const transport = convexSourceTransport(
+    { storage: forbiddenStorage, runMutation: () => assert.fail('no repeated resolver') },
+    identity,
+  );
+  const item = object('verified output');
+  await transport.io.upload(item.pin, item.stream);
+  assert.deepEqual(await transport.io.describeBatch([item.pin.sha256]), [{ object: item.pin, recipe: null }]);
+  const parts = [];
+  for await (const part of await transport.io.read(item.pin)) parts.push(part);
+  assert.equal(Buffer.concat(parts).toString(), 'verified output');
+  assert.equal(r2.requests.filter(method => method === 'GET').length, 0);
+  assert.equal(
+    transport.clock.value().r2b,
+    1,
+    'only the verification HEAD is signed; a cached output needs no GET signature',
+  );
+});
+
+test('V8 fallback hand-off bounds serialized text even when UTF-8 controls expand in JSON', () => {
+  const text = '\0'.repeat(400 * 1024),
+    bytes = Buffer.from(text),
+    small = Buffer.from('small plan');
+  const transport = convexSourceTransport({ storage: forbiddenStorage }, identity, [], undefined, {
+    preloaded: [
+      { sha256: digest(bytes), size: bytes.length, text },
+      { sha256: digest(small), size: small.length, text: small.toString() },
+    ],
+  });
+  assert.deepEqual(
+    transport.preloaded().map(value => value.text),
+    ['small plan'],
+  );
+  assert(Buffer.byteLength(JSON.stringify(transport.preloaded())) <= 2 * 1024 * 1024);
+});

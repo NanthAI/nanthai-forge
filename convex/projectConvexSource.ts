@@ -4,13 +4,14 @@ import { makeFunctionReference } from 'convex/server';
 import { internalAction, type ActionCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { convexSourceTransport } from './projectConvexSourceTransport';
+import { runSmallSourceCompose } from '../src/hosted-source-small-compose';
 import { runSmallSourceSave } from '../src/hosted-source-small-save';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
 export { dispatch } from './projectConvexSourceStore';
 export { convexSourceTransport } from './projectConvexSourceTransport';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
-/** Small saves avoid Node cold starts. Other work retains the same bounded,
+/** Small saves and metadata-only compositions avoid Node cold starts. Other work retains the bounded,
  * resumable Node implementation and the begin/commit authority fence. */
 export const step = internalAction({
   args: {
@@ -82,6 +83,8 @@ export async function runConvexSourceStep(
               ),
             options.verified,
           );
+        else if (state.jobKind === 'compose' && !state.cursor && !state.batchId)
+          output = await runSmallSourceCompose(state.input, transport.io);
         if (!output) {
           // Reuse the already-authorized begin and bounded descriptors on fallback.
           delegated = true;
@@ -91,7 +94,7 @@ export async function runConvexSourceStep(
             loaded: JSON.stringify({
               ...state,
               locations: [...transport.locations.values()],
-              ...(options.preloaded?.length ? { preloaded: options.preloaded } : {}),
+              preloaded: transport.preloaded(),
             }),
             delegatedAt: Date.now(),
           });

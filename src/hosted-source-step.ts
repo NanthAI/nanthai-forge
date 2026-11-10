@@ -403,7 +403,7 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   // Set after this action ran a small calculation set itself: the merge re-enters on the same,
   // already parsed States (no new reads) instead of yielding to a fresh action. A recursive merge
   // can re-enter once per round; each round holds at most 100 requests and 1 MiB of input, so this
-  // stays bounded although it bypasses the step's object/time budget.
+  // bypasses the step's object/byte budget, but never its 20 s time boundary.
   let recompute = false;
   // Blobs this action's inline calculations published. Their object rows exist only once the step
   // commits, so a later round that reads one (a virtual-base merge result used as the next base)
@@ -412,7 +412,10 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
   // Merge inputs inline rounds already read in this action (a text merge, then its conflict
   // markers, read the same blobs); bounded, so a later round reads none of them from R2 again.
   const inlineReads = { bytes: new Map<string, Buffer>(), held: 0 };
-  while (c.phase !== 'done' && (!full(m) || (recompute && !m.yielded))) {
+  while (
+    c.phase !== 'done' &&
+    (!full(m) || (recompute && !m.yielded && performance.now() - m.started < 20000))
+  ) {
     if (c.phase === 'input') {
       c.plan = parseSourcePlan(await readJson(io, c.input, m));
       const kind = (c.plan as { kind: string }).kind;

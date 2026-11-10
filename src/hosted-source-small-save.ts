@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { readSourceExact } from './hosted-source-exact.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { digest } from './portable-hash.js';
@@ -17,21 +18,6 @@ export const smallSaveStateBytes = 4 * 1024 * 1024;
 export const smallSavePageBytes = 128 * 1024;
 const smallSaveInputBytes = 128 * 1024;
 const windowBytes = 8 * 1024 * 1024;
-async function readExact(io: SourceWorkerTransport, pin: WorkerPin) {
-  const bytes = new Uint8Array(pin.size);
-  let offset = 0;
-  for await (const part of await io.read(pin)) {
-    invariant(offset + part.length <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
-    bytes.set(part, offset);
-    offset += part.length;
-  }
-  invariant(
-    offset === pin.size && digest(bytes) === pin.sha256,
-    'SOURCE_HASH_MISMATCH',
-    'Source bytes differ from their exact pin.',
-  );
-  return bytes;
-}
 /** The same native delta and State format, in one bounded V8 action. Null hands
  * the unchanged execution to the resumable worker, before any output is written. */
 export async function runSmallSourceSave(
@@ -51,12 +37,12 @@ export async function runSmallSourceSave(
     hints
       .filter(pin => pin.size <= smallSaveStateBytes)
       .map(pin => {
-        const read = readExact(io, pin);
+        const read = readSourceExact(io, pin);
         read.catch(() => {});
         return [pin.sha256, { pin, read }] as const;
       }),
   );
-  const inputBytes = await readExact(io, input);
+  const inputBytes = await readSourceExact(io, input);
   const plan = sourceValidation('SOURCE_JOB_INVALID', () =>
     saveInputSchema.parse(JSON.parse(new TextDecoder().decode(inputBytes))),
   );
@@ -74,8 +60,8 @@ export async function runSmallSourceSave(
   const pending = [plan.pages, plan.baseline.object].filter(pin => !started(pin));
   // Both pins are known and prepared together: one round trip, not two (none when hinted).
   if (pending.length) await io.prepareRead?.(pending);
-  const pageRead = started(plan.pages) ?? readExact(io, plan.pages),
-    baselineRead = started(plan.baseline.object) ?? readExact(io, plan.baseline.object);
+  const pageRead = started(plan.pages) ?? readSourceExact(io, plan.pages),
+    baselineRead = started(plan.baseline.object) ?? readSourceExact(io, plan.baseline.object);
   baselineRead.catch(() => {});
   const pageBytes = await pageRead;
   const page = sourceValidation(

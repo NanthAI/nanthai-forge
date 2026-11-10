@@ -252,15 +252,16 @@ test('a legacy right tip is probed once, without hints', async () => {
     const legacy = await row(s, h.main.sha256);
     await s.ctx.db.patch(legacy._id, { stateGeneration: undefined, stateParents: undefined });
     const before = new Set(h.old);
-    const input = await resolveInput(s, h, { saves: 130 });
+    const input = await resolveInput(s, h, { saves: 430 });
     const resolved = await run(s, input);
     assert.deepEqual(resolved.output, await reference(s, input), 'byte-exact resolve result');
     const probes = probesOf(resolved.events, h.main.sha256);
     const rounds = resolved.events.filter(
       e => e.call === 'projectConvexSourceObjects:resolve' && e.args.probe,
     ).length;
-    // A step reads at most 100 objects, so 130 unrecorded saves take more than one step; each step is
-    // a new action that would ask for the unknown right tip again.
+    // A quantum reads at most 100 objects, and one action batches at most four quanta.
+    // 430 unrecorded saves still force a durable action boundary, where losing the
+    // right-tip probe flag would ask for that unknown tip again.
     assert(resolved.steps > 1, `the walk takes several steps (${resolved.steps})`);
     assert(rounds > 1, `and several probe rounds (${rounds})`);
     assert.equal(probes.length, 1, 'the right tip is in one probe');

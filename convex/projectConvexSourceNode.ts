@@ -18,6 +18,7 @@ import {
   saveSourceProgress,
   type SourceProgress,
 } from '../src/hosted-source-step-progress';
+import { cachedReads } from '../src/hosted-source-read-cache';
 import { invariant } from '../src/errors';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { logSourceFailure, logSourceStep, withSourceFailureLog } from '../src/hosted-source-io-error';
@@ -61,8 +62,8 @@ export const step = internalAction({
           durable = sourceStorage(ctx, input.projectId);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
           progress: SourceProgress | null = null;
-        let result,
-          fanout: SourceFanout | null = null;
+        let result!: Awaited<ReturnType<typeof runSourceStep>>;
+        let fanout: SourceFanout | null = null;
         io.fanout = plan => {
           fanout = plan;
         };
@@ -86,7 +87,30 @@ export const step = internalAction({
             applySourceFanout(cursor, joined, results, ref => enqueueSourceObject(cursor, ref));
           }
           const from = cursor.phase;
-          result = await runSourceStep(cursor, io);
+          // Consecutive quanta share descriptors and verified bytes, then commit once. Each
+          // quantum still drops its parsed merge heap; fan-out remains a durable boundary.
+          const cached = cachedReads(io, { bytes: new Map(), held: 0 }, 8 * 1024 * 1024);
+          let objects = 0,
+            bytes = 0;
+          for (let quantum = 0; quantum < 4; quantum++) {
+            result = await runSourceStep(cursor, cached);
+            objects += result.metrics.objects;
+            bytes += result.metrics.bytes;
+            cursor = result.cursor;
+            await settle();
+            if (
+              cursor.phase === 'done' ||
+              fanout ||
+              quantum === 3 ||
+              performance.now() - started >= 20000 ||
+              bytes >= 8 * 1024 * 1024 ||
+              outputs.length >= 100
+            )
+              break;
+          }
+          result!.metrics.objects = objects;
+          result!.metrics.bytes = bytes;
+          result!.metrics.detail.phase = `${from}>${cursor.phase}`;
           // The cursor write overlaps the step's last output writes; both finish before staging.
           const [saved] = await Promise.all([
             result.cursor.phase === 'done'
@@ -126,6 +150,12 @@ export const step = internalAction({
             });
             logStep();
             return null;
+          }
+          while (outputs.length > 100) {
+            const objects = outputs.splice(0, 100);
+            await clock.call(() =>
+              ctx.runMutation(reference('projectConvexSourceStore:stage'), { ...input, objects }),
+            );
           }
           const resultText = smallOutput(result.cursor.output);
           const published: string | null = await ctx.runMutation(

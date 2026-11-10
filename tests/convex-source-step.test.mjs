@@ -11,6 +11,7 @@ import { saveBytes, buildSavePages } from '../dist/hosted-save.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { digest } from '../dist/hash.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
+import { runSmallSourceCompose } from '../dist/hosted-source-small-compose.js';
 import { changedPaths } from '../dist/hosted-compose-worker.js';
 const at = '2026-01-01T00:00:00.000Z';
 function fixture() {
@@ -902,4 +903,116 @@ test('forge.json merge lists compose without a conflict and keep both entries in
       '# Changelog\n\n## Next\n- main change\n\n## Next\n- lane change\n\n## 1.0\n- first\n',
     );
   }
+});
+
+test('V8 manifest-only composition is byte-identical to the fixed worker for fast-forwards, contained tips and sibling metadata merges on 4k files', async () => {
+  for (const kind of ['forward', 'contained', 'sibling', 'content', 'overlap', 'mode']) {
+    const x = fixture(),
+      blob = x.put('base'),
+      changed = x.put('changed'),
+      other = x.put('other');
+    const files = Array.from({ length: 4000 }, (_, i) => ({
+      path: `src/${String(i).padStart(6, '0')}.txt`,
+      mode: 'file',
+      blob: blob.sha256,
+    }));
+    const base = x.state(files);
+    const leftFiles = files.map((f, i) => (i === 0 ? { ...f, blob: changed.sha256 } : f));
+    const rightFiles = files.map((f, i) =>
+      i === (kind === 'content' || kind === 'mode' ? 0 : 1)
+        ? { ...f, ...(kind === 'mode' ? { mode: 'executable' } : { blob: other.sha256 }) }
+        : f,
+    );
+    if (kind === 'overlap') {
+      leftFiles.push({ path: 'new', mode: 'file', blob: blob.sha256 });
+      rightFiles.push({ path: 'new/child', mode: 'file', blob: blob.sha256 });
+    }
+    let left = x.state(leftFiles, [base.sha256]),
+      right = x.state(rightFiles, [base.sha256]);
+    if (kind === 'forward') right = x.state(rightFiles, [left.sha256]);
+    if (kind === 'contained') left = x.state(leftFiles, [right.sha256]);
+    const inputs = buildComposePages([
+        {
+          laneId: randomUUID(),
+          head: right.sha256,
+          version: 0,
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: { object: right, recipe: null },
+        },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+    const input = x.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: left.sha256, receiptId: 'main' },
+      main: { object: left, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    });
+    const before = x.uploads.length,
+      actual = await runSmallSourceCompose(input, x.io);
+    if (['content', 'overlap'].includes(kind)) {
+      assert.equal(actual, null, kind);
+      assert.equal(x.uploads.length, before, 'fallback writes no speculative result');
+    } else {
+      const expected = await buildHostedSourceState(input, x.io);
+      assert.deepEqual(actual, expected.output, kind);
+    }
+  }
+});
+
+test('inline merge recomputation retains completed calculations but yields at the time boundary', async t => {
+  const x = fixture(),
+    file = text => ({ path: 'a.txt', mode: 'file', blob: x.put(text).sha256 });
+  const base = x.state([file('a\nb\nc\n')]),
+    left = x.state([file('A\nb\nc\n')], [base.sha256]),
+    right = x.state([file('a\nb\nC\n')], [base.sha256]);
+  const inputs = buildComposePages([
+      {
+        laneId: randomUUID(),
+        head: right.sha256,
+        version: 0,
+        sourceVersion: 0,
+        lifecycleVersion: 0,
+        state: { object: right, recipe: null },
+      },
+    ]),
+    dependencies = buildComposePages([]);
+  for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+  const input = x.json({
+    schema: 1,
+    kind: 'forge-hosted-compose-input',
+    base: { head: left.sha256, receiptId: 'main' },
+    main: { object: left, recipe: null },
+    inputs: inputs.manifest,
+    dependencies: dependencies.manifest,
+    algorithm: 'forge-native-compose-v1',
+    message: 'merge',
+    at,
+  });
+  const expected = await buildHostedSourceState(input, x.io);
+  let now = 0;
+  t.mock.method(performance, 'now', () => now);
+  const result = await runSourceStep(initialSourceStep(input), {
+    ...x.io,
+    fanout: () => assert.fail('small text calculation stays inline'),
+    upload: async (...args) => {
+      await x.io.upload(...args);
+      now = 20001;
+    },
+  });
+  assert.equal(result.cursor.phase, 'compute', 'the inline re-entry must honor the same time boundary');
+  assert(Object.keys(result.cursor.calculations).length > 0, 'the completed calculation is retained');
+  t.mock.restoreAll();
+  let cursor = result.cursor;
+  for (let i = 0; cursor.phase !== 'done'; i++) {
+    assert(i < 5);
+    cursor = (await runSourceStep(cursor, x.io)).cursor;
+  }
+  assert.deepEqual(cursor.output, expected.output, 'yielding and resuming preserves exact output');
 });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { NativeFile, NativeSource } from './native-source.js';
+import { mergeFileMetadata } from './native-file-merge.js';
 import { NativeAncestry } from './native-ancestry.js';
 import { invariant } from './errors.js';
 import {
@@ -59,9 +60,8 @@ export function mergeNativeFiles(
     y: Variant,
     resolved: NativeMergeResolution[],
   ): Variant | null {
-    if (same(x, y)) return x;
-    if (same(x, original)) return y;
-    if (same(y, original)) return x;
+    const metadata = mergeFileMetadata(original, x, y);
+    if (metadata !== null) return metadata;
     if (!original || !x || !y) return null;
     if (x.mode !== y.mode && x.mode !== original.mode && y.mode !== original.mode) return null;
     const mode = x.mode === original.mode ? y.mode : x.mode;

@@ -349,7 +349,14 @@ export async function appendWork(
             generationId: recordPartition(generation),
           });
       }
-      if (project.workStore) await storeProjection(ctx, project._id, project.owner, input.projection.entries);
+      if (project.workStore)
+        await storeProjection(
+          ctx,
+          project._id,
+          project.owner,
+          input.projection.entries,
+          recordPartition(generation),
+        );
       const metadata = JSON.parse(input.projection.metadata);
       if (parsed.success && (parsed.data.action === 'intent' || parsed.data.action === 'intent-status')) {
         const active = await ctx.db

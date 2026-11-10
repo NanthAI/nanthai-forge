@@ -26,10 +26,18 @@ reconciles that execution. It cannot create another execution.
 `projectConvexSource:step` is a Convex-runtime action. A save with one delta
 page, a raw baseline up to 4 MiB and up to 8 MiB of raw changed objects finishes
 there, avoiding concurrent Node cold starts. Its input and delta page each fit
-128 KiB. These are runtime routing boundaries: other saves, compose, sync and
+128 KiB. A single-selection compose also finishes on V8 when its verified tip
+manifests prove containment, a direct fast-forward, or a shared immediate parent
+whose files merge from metadata alone. Each raw manifest is at most 768 KiB and
+a sibling merge reads at most 2 MiB of manifests. It uses the native metadata
+merge rules, State schema and result format; content merges, overlapping paths,
+recipes, batches and restore compositions fall back before writing any output.
+These are runtime routing boundaries: other saves, compose, sync and
 retained continuations use `projectConvexSourceNode:step`, the same resumable
 Node worker. The fallback reuses the begin result and prepared descriptors;
-it does not allocate another execution or repeat the begin mutation. Both
+it does not allocate another execution or repeat the begin mutation. Up to 2 MiB
+of hash-verified small UTF-8 reads travel with the fallback, so it reuses the
+bytes as well as the descriptors. Both
 paths retain exact hash verification, current authority checks, result formats
 and the existing atomic commit/publication. Source bytes still go only to R2.
 The State and its result manifest upload concurrently; publication waits for
@@ -40,9 +48,8 @@ The small-save source job uses six invocations: dispatch mutation, step action,
 begin mutation, two batched descriptor mutations and commit mutation. This was
 seven with the Node dispatch wrapper. Publication adds its existing action and
 two mutations. Large-job fallback adds one nested Node action, offset by removing
-the old dispatch action, so its function count does not increase. An ineligible
-save can reread its small input/page from R2; prepared metadata is reused and no
-additional descriptor RPC is needed. Input uploads and observer updates are
+the old dispatch action, so its function count does not increase. An ineligible save reuses its verified small input/page on the Node fallback;
+prepared metadata is reused and no additional descriptor RPC is needed. Input uploads and observer updates are
 separate from these worker counts.
 
 Convex documents 64 MiB for regular actions and 512 MiB for Node actions. Even
@@ -214,8 +221,26 @@ encoding choices, not file, project or history quotas. See
 [scheduled-function guarantees](https://docs.convex.dev/scheduling/scheduled-functions).
 
 With no job, this provider makes zero calls and schedules zero functions. Each
-serial step has one action, one begin mutation and one commit mutation, plus
-bounded metadata windows and storage accesses. Intermediate steps also read and
+serial action has one begin mutation and one commit mutation, plus bounded
+metadata windows and storage accesses. It runs at most four consecutive quanta,
+starting another only while elapsed time is below 20 seconds and cumulative
+read bytes are below 8 MiB. A quantum retains its existing 100-object/8 MiB/20 s
+bounds; the last quantum can cross the cumulative read boundary by one window.
+Fan-out always ends the action. Parsed merge heaps are fresh between quanta;
+verified raw reads share an 8 MiB cache and object descriptors resolve once per
+action. Worker outputs become readable from their verified immutable locations
+without another resolve or a premature publication. One final progress write
+and atomic commit replace intermediate cursor writes, begins and commits.
+An interrupted action replays its original durable cursor and immutable writes.
+A job requiring Q consecutive quanta takes at least ceil(Q/4) Node actions;
+byte/time/output and fan-out boundaries can require more. Small saves and
+eligible compositions take one V8 action and zero Node actions; sync,
+registration and other compositions retain the same bounded Node contract.
+Scheduled sync and registration jobs start on Node directly, removing a V8
+action that only delegated and waited; an inline submit retains its existing
+V8 fallback fence. Inline recomputation also honors the existing 20-second quantum boundary;
+completed calculations remain in the resumable cursor. No source job has a new
+size or time restriction. Intermediate steps also read and
 write one progress blob, reusing unchanged compressed metadata sections. Each
 child similarly has one action, one begin mutation and one completion mutation,
 plus its metadata windows and progress/output storage. Forking and joining each
@@ -230,6 +255,50 @@ scheduled cooldown loop after its queue drains, and a lone work item adds at
 least five orchestration invocations before Workflow start/resume costs. The
 application-owned pool preserves the zero-idle requirement and the small-save
 call budget. No Convex component configuration or component deployment is needed.
+
+## Source-step cost evidence
+
+The unchanged six-landing cost fixture (solo, main-race recompose and batch of
+four) uses four compose jobs. Manifest-only composition moves one of them from
+Node into the V8 action already running: Node executions fall from four to three,
+V8 executions remain 59, mutations fall 165 to 163, and total executions fall
+228 to 225. Its per-landing ledger ratchets Node 0.67 to 0.5, mutations 27.5 to
+27.17, modeled action GB-seconds 3.26 to 2.85, DB reads 806,895 to 801,924 bytes after remeasuring on merged main,
+and R2 Class B 11.67 to 10.67. Other fixture outputs, R2 writes and check runs
+stay the same. The fixture counts source functions by runtime; save, sync and registration
+are covered separately by the source-worker tests.
+
+At Starter marginal rates, the modeled Convex subtotal per 1,000 landings falls
+from $0.61550 to $0.57503: executions at $2.20/million, read+write bytes at
+$0.22/GB, modeled action duration at $0.33/GB-hour, plus 1,881 bytes/landing of
+R2-upload egress at $0.132/GB. Compute contributes $0.29925 to $0.26106 of that
+subtotal. This is a synthetic comparison, excluding client waits, mirror,
+provider CI activity and other unobserved egress; the final DB-read number
+also includes intervening accepted changes after sync; it is not a billed serving
+forecast. The nominal durations remain 2.6 seconds/V8 and 5 seconds/Node.
+
+A separate synthetic 4,000-file deep-tree composition crosses the existing
+2 MiB graph-to-compute heap boundary. Consecutive-quantum execution reduces two
+Node actions to one, 13 functions to eight, five descriptor resolves to four,
+and nine physical reads (5,644,218 bytes) to six (3,385,534 bytes). DB reads fall
+62,487 to 48,329 bytes, DB writes 25,622 to 21,012 bytes, and R2 upload bytes
+1,131,082 to 1,128,754 (the removed progress checkpoint). The manifests
+resolve once in that job; a longer job crossing an action boundary reauthorizes
+its required windows. Exploratory local samples measured 0.907–2.438 seconds before and
+0.703–1.236 seconds after, with peak RSS below 177 MiB and the existing 400 MiB
+target. Compilation and cache warmth vary; these samples establish resource
+bounds, not a latency percentile or a sustained speedup.
+The source-step tests compare exact output pins against the fixed native worker,
+including fast-forward, contained head, sibling metadata and mode/content cases;
+content or file/directory conflicts fall back without speculative writes.
+
+Source actions that stay on Node use Buffer/crypto-based streaming recipe
+verification, compressed progress, or the native whole-file merge and syntax
+parsers. Their R2 reads/writes still include network wait, now amortized across
+quanta. Moving only that I/O into a nested V8 action would add calls and move
+source bytes across an action boundary. No such split, new worker or store is
+introduced. Saves and eligible manifest-only compositions keep their R2 wait
+in the 64 MiB V8 runtime. Idle remains zero calls.
 
 ## Retired provider compatibility
 

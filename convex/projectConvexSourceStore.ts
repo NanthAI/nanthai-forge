@@ -111,7 +111,11 @@ export async function startConvexSource(
   });
   const scheduledId = await ctx.scheduler.runAfter(
     inline ? inlineFallbackMs : 0,
-    makeFunctionReference<'action'>('projectConvexSource:step'),
+    makeFunctionReference<'action'>(
+      inline || job.jobKind === 'save' || job.jobKind === 'compose'
+        ? 'projectConvexSource:step'
+        : 'projectConvexSourceNode:step',
+    ),
     { projectId: args.projectId, jobId: args.jobId, step: 0 },
   );
   await ctx.db.patch(rowId, { scheduledId, ...(inline ? { inlineFallback: true } : {}) });
@@ -177,7 +181,9 @@ export async function lookupConvexSource(
       const scheduledId = await ctx.scheduler.runAfter(
         Math.max(0, (update.retryAt ?? row.retryAt ?? 0) - Date.now()),
         makeFunctionReference<'action'>(
-          row.step === 0 ? 'projectConvexSource:step' : 'projectConvexSourceNode:step',
+          row.step === 0 && (row.inlineFallback || job.jobKind === 'save' || job.jobKind === 'compose')
+            ? 'projectConvexSource:step'
+            : 'projectConvexSourceNode:step',
         ),
         { projectId: args.projectId, jobId: args.jobId, step: row.step, generation },
       );

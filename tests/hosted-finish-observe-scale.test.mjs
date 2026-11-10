@@ -8,7 +8,7 @@ import { queueStatusPage, rankQueueStatus } from '../dist/hosted-queue-status.js
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const projections = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const source = await import(
-  `data:text/javascript;base64,${Buffer.from(moduleSource('../convex/projectHostedFinishObserve.ts').replace('const ctx = finishReadReader(rawCtx);', 'const ctx = rawCtx;').replace("finishReadReader(rawCtx, 'owner')", 'rawCtx')).toString('base64')}`
+  `data:text/javascript;base64,${Buffer.from(moduleSource('../convex/projectHostedFinishObserve.ts').replace('finishQuery as query', 'query').replace('const ctx = finishReadReader(rawCtx);', 'const ctx = rawCtx;').replace("finishReadReader(rawCtx, 'owner')", 'rawCtx')).toString('base64')}`
 );
 
 test('selected observer reads stay bounded with 10/575/1150 queued submissions and large controller metadata', async t => {
