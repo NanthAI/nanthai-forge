@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StoredWorkEvent } from './projectWorkEventStore';
 import { v } from 'convex/values';
 import { action } from './cliServer';
 import { internal } from './_generated/api';
-import type { Doc } from './_generated/dataModel';
 import { report } from './errors';
 import { hostedWorkEventDocument } from './schema';
 import { caller, runWorkCommand } from './projectWorkCommandRun';
@@ -20,7 +20,7 @@ export const command = action({
     command: v.string(),
   },
   returns: hostedWorkEventDocument,
-  handler: async (ctx, input): Promise<Doc<'projectWorkEvents'>> => {
+  handler: async (ctx, input): Promise<StoredWorkEvent> => {
     try {
       const owner = await caller(ctx);
       try {

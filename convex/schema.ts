@@ -290,7 +290,7 @@ export const hostedWorkEventFields = {
   baseBackupId: v.optional(v.id('projectBackups')),
 };
 export const hostedWorkEventDocument = v.object({
-  _id: v.id('projectWorkEvents'),
+  _id: v.union(v.id('projectWorkEvents'), v.id('projectHostedRecordBodies')),
   _creationTime: v.number(),
   ...hostedWorkEventFields,
 });
@@ -334,6 +334,13 @@ const projectFields = {
   /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
    * their Issue version, comment or note record in the same mutation; records = dual, and the planning
    * reads (Issues, versions, comments) and an Intent's notes and moves come from the store. */
+  workStoreWriters: v.optional(
+    v.array(
+      v.union(v.literal('note'), v.literal('intent'), v.literal('intent-status'), v.literal('planning')),
+    ),
+  ),
+  workStoreCutoverRevision: v.optional(v.number()),
+  workStoreEventWindows: v.optional(v.array(v.object({ revision: v.number(), storeFirst: v.boolean() }))),
   workStore: v.optional(v.union(v.literal('dual'), v.literal('records'))),
   needsFix: v.optional(v.record(v.string(), v.string())),
   checkLogSweep: v.optional(

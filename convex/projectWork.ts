@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findWorkEvent, type StoredWorkEvent } from './projectWorkEventStore';
+import { retainedEventPage } from './projectWorkEventPage';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
 import { indexActivity } from '../src/work-hosted-index';
 import type { MutationCtx } from './_generated/server';
@@ -107,12 +109,7 @@ export const find = internalQuery({
   handler: async (ctx, { projectId, owner, operationId }) => {
     try {
       await accessibleProject(ctx, projectId, owner);
-      const event = await ctx.db
-        .query('projectWorkEvents')
-        .withIndex('by_project_and_operation', q =>
-          q.eq('projectId', projectId).eq('operationId', operationId),
-        )
-        .unique();
+      const event = await findWorkEvent(ctx, projectId, operationId);
       invariant(
         !event || event.actor === owner,
         'WORK_OPERATION_CHANGED',
@@ -135,7 +132,9 @@ export const events = internalQuery({
   returns: paginationResultValidator(hostedWorkEventDocument),
   handler: async (ctx, { projectId, owner, initialRevision, revision, paginationOpts }) => {
     try {
-      await accessibleProject(ctx, projectId, owner);
+      const project = await accessibleProject(ctx, projectId, owner);
+      if (project.workStoreCutoverRevision !== undefined && revision > project.workStoreCutoverRevision)
+        return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
       return await ctx.db
         .query('projectWorkEvents')
         .withIndex('by_project_and_revision', q =>
@@ -227,6 +226,15 @@ export async function appendWork(
     if (channelCommand.success)
       requireSourceAuthority(project, { mode: 'native-owner', epoch: input.authorityEpoch ?? 0 });
     const parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
+    const frozen =
+      parsed.success &&
+      project.workStoreWriters?.some(
+        action =>
+          action === parsed.data.action ||
+          (action === 'planning' &&
+            ['put-planning-item', 'comment-planning-item'].includes(parsed.data.action)),
+      ) &&
+      (parsed.data.action !== 'note' || !parsed.data.anchor);
     if (
       parsed.success &&
       (parsed.data.action === 'put-planning-item' || parsed.data.action === 'comment-planning-item')
@@ -251,12 +259,7 @@ export async function appendWork(
       if (command.action !== 'intent')
         await intentAuthority(ctx, input.projectId, input.owner, command.intentId);
     }
-    const original = await ctx.db
-      .query('projectWorkEvents')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .unique();
+    const original = await findWorkEvent(ctx, input.projectId, input.operationId);
     if (original) {
       invariant(
         original.actor === input.owner &&
@@ -319,6 +322,21 @@ export async function appendWork(
       'WORK_STALE',
       'Hosted Work changed. Your request and existing work remain available.',
     );
+    const event = {
+      projectId: input.projectId,
+      operationId: input.operationId,
+      request: input.request,
+      previousRevision: input.previousRevision,
+      revision: input.previousRevision + 1,
+      command: input.command,
+      ...(input.projection?.acceptance?.automatic
+        ? { automatic: input.projection.acceptance.automatic }
+        : {}),
+      actor: input.owner,
+      at: input.projection?.at ?? new Date().toISOString(),
+      ...(JSON.parse(input.command).action === 'intent' ? { baseBackupId: project.work!.backupId } : {}),
+    };
+    let retained: StoredWorkEvent | null = null;
     if (input.projection) {
       const generation = await selectedGeneration(ctx, project);
       invariant(
@@ -349,13 +367,25 @@ export async function appendWork(
             generationId: recordPartition(generation),
           });
       }
-      if (project.workStore)
-        await storeProjection(
+      if (project.workStore || frozen)
+        retained = await storeProjection(
           ctx,
           project._id,
           project.owner,
           input.projection.entries,
           recordPartition(generation),
+          frozen
+            ? {
+                projectId: event.projectId,
+                operationId: event.operationId,
+                request: event.request,
+                revision: event.revision,
+                actor: event.actor,
+                at: event.at,
+                command: event.command,
+                ...(event.baseBackupId ? { baseBackupId: event.baseBackupId } : {}),
+              }
+            : undefined,
         );
       const metadata = JSON.parse(input.projection.metadata);
       if (parsed.success && (parsed.data.action === 'intent' || parsed.data.action === 'intent-status')) {
@@ -390,20 +420,12 @@ export async function appendWork(
         JSON.stringify(metadata),
       );
     }
-    const id = await ctx.db.insert('projectWorkEvents', {
-      projectId: input.projectId,
-      operationId: input.operationId,
-      request: input.request,
-      previousRevision: input.previousRevision,
-      revision: input.previousRevision + 1,
-      command: input.command,
-      ...(input.projection?.acceptance?.automatic
-        ? { automatic: input.projection.acceptance.automatic }
-        : {}),
-      actor: input.owner,
-      at: input.projection?.at ?? new Date().toISOString(),
-      ...(JSON.parse(input.command).action === 'intent' ? { baseBackupId: project.work!.backupId } : {}),
-    });
+    invariant(
+      !frozen || retained,
+      'SOURCE_UNAVAILABLE',
+      'Retain the primary Work version before acknowledging its command.',
+    );
+    const saved = retained ?? (await ctx.db.get(await ctx.db.insert('projectWorkEvents', event)))!;
     await emitChange(ctx, {
       projectId: input.projectId,
       actor: input.owner,
@@ -415,7 +437,7 @@ export async function appendWork(
       await setWorkHead(ctx, project._id, project.work!.backupId, input.previousRevision + 1);
       await ctx.db.patch(project._id, { work: { ...project.work!, generationId: undefined } });
     }
-    return (await ctx.db.get(id))!;
+    return saved;
   } catch (error) {
     return report(error);
   }

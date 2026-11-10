@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { StoredWorkEvent } from './projectWorkEventStore';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
-import type { Doc, Id } from './_generated/dataModel';
+import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { metadataCommandSchema } from '../src/work-types';
 import { metadataRequest } from '../src/work-metadata';
@@ -30,7 +31,7 @@ export async function runWorkCommand(
     command: Exclude<HostedEvent['command'], { action: 'source-return' }>,
     request: string,
   ) => Promise<Awaited<ReturnType<typeof indexedCommand>>>,
-): Promise<Doc<'projectWorkEvents'>> {
+): Promise<StoredWorkEvent> {
   let parsed;
   try {
     parsed = metadataCommandSchema.safeParse(JSON.parse(input.command));
@@ -55,7 +56,7 @@ export async function runWorkCommand(
     'BAD_ARGUMENT',
     'Use an original operation UUID and Work revision.',
   );
-  const original: Doc<'projectWorkEvents'> | null = await ctx.runQuery(internal.projectWork.find, {
+  const original: StoredWorkEvent | null = await ctx.runQuery(internal.projectWork.find, {
     projectId: input.projectId,
     owner,
     operationId: input.operationId,

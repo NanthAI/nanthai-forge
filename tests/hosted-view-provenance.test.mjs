@@ -6,6 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { setup } from './hosted-planning-fixture.mjs';
 import { prepareViewProvenance } from './view-provenance-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { meterReads } from './hosted-read-set.mjs';
 import { NativeSource } from '../dist/native-source.js';
 const reads = await import(moduleUrl('../convex/projectViewReads.ts'));
 const actions = await import(moduleUrl('../convex/projectViewActions.ts'));
@@ -69,6 +70,11 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
   await assert.rejects(query({ action: 'view', viewId: randomUUID() }), /View not found/);
   await assert.rejects(query({ action: 'view', viewId: p.view.id, generationId: 'different' }), /generation/);
 
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.workStore = 'records';
+  project.workStoreWriters = ['note'];
+  project.workStoreCutoverRevision = revision;
+  const journalSize = s.tables.projectWorkEvents.size;
   await s.send(
     {
       action: 'note',
@@ -78,6 +84,28 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
     },
     detail.revision,
   );
+  assert.equal(s.tables.projectWorkEvents.size, journalSize);
+  const frozenView = await parse(query({ action: 'view', viewId: p.view.id }));
+  assert.ok(
+    frozenView.files.items[0].why[0].notes.some(note => note.excerpt === 'New rationale after indexing'),
+  );
+  const meter = meterReads(s.ctx);
+  const canonicalViewCost = await meter.cost(() => query({ action: 'view', viewId: p.view.id }));
+  const savedEvents = [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
+  const { eventDocument } = await import(moduleUrl('../convex/projectWorkEventStore.ts'));
+  for (const row of savedEvents) {
+    s.tables.projectHostedRecordBodies.delete(row._id);
+    s.tables.projectWorkEvents.set(row._id, eventDocument(row));
+  }
+  const journalViewCost = await meter.cost(() => query({ action: 'view', viewId: p.view.id }));
+  meter.restore();
+  assert.deepEqual(canonicalViewCost, journalViewCost);
+  assert.deepEqual(await parse(query({ action: 'view', viewId: p.view.id })), frozenView);
+  for (const row of savedEvents) {
+    s.tables.projectWorkEvents.delete(row._id);
+    s.tables.projectHostedRecordBodies.set(row._id, row);
+  }
+  console.log(JSON.stringify({ frozenViewReads: { canonicalViewCost, journalViewCost } }));
   assert.equal(
     (await parse(query({ action: 'view', viewId: p.view.id }))).revision,
     revision + 1,

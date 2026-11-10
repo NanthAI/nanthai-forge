@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findWorkEvent } from './projectWorkEventStore';
 import { readHostedRecord, writeHostedRecord } from './projectHostedRecords';
 import { parseWork } from '../src/work-unified-types';
 import { commandPayloadRows, commandPlanningRows } from './projectWorkCommandRows';
@@ -63,12 +64,7 @@ export async function executeCommand(
     await intentAuthority(ctx, input.projectId, user.subject, command.intentId);
   }
   const request = metadataRequest(command);
-  const original = await ctx.db
-    .query('projectWorkEvents')
-    .withIndex('by_project_and_operation', q =>
-      q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-    )
-    .unique();
+  const original = await findWorkEvent(ctx, input.projectId, input.operationId);
   if (original) {
     invariant(
       original.actor === user.subject && original.request === request,

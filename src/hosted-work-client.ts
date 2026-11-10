@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { metadataCommandSchema } from './work-intent-types.js';
 import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
@@ -29,7 +30,14 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
       newest: z.number().int().min(1).max(1000).optional(),
     })
     .strict(),
-  z.object({ action: z.literal('set-work-store'), mode: z.enum(['journal', 'dual', 'records']) }).strict(),
+  z
+    .object({
+      action: z.literal('set-work-store'),
+      mode: z.enum(['journal', 'dual', 'records']),
+      writers: z.array(z.enum(['note', 'intent', 'intent-status', 'planning'])).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('command'), operationId: z.uuid(), command: metadataCommandSchema }).strict(),
   z
     .object({
       action: z.literal('records'),
@@ -231,7 +239,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store, compare-work-store or set-work-store.',
+    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store, compare-work-store, set-work-store or command.',
   );
   try {
     const request = parsed.data;
@@ -255,12 +263,32 @@ export async function dispatchHostedWork(
       return result;
     }
 
+    if (request.action === 'command') {
+      invariant(client.mutation, 'UNSUPPORTED', 'This transport needs hosted mutations for Work commands.');
+      if (request.command.action === 'note' && request.command.anchor) {
+        const revision = await client.query(makeFunctionReference('projectWorkIndex:revision'), {
+          projectId,
+        });
+        return await client.action(makeFunctionReference('projectWorkActions:command'), {
+          projectId,
+          operationId: request.operationId,
+          revision,
+          command: JSON.stringify(request.command),
+        });
+      }
+      return await client.mutation(makeFunctionReference('projectWorkCommand:command'), {
+        projectId,
+        operationId: request.operationId,
+        command: JSON.stringify(request.command),
+      });
+    }
     if (request.action === 'set-work-store') {
       invariant(client.mutation, 'UNSUPPORTED', 'This transport needs hosted mutations for set-work-store.');
       return JSON.parse(
         (await client.mutation(makeFunctionReference('projectWorkStore:setMode'), {
           projectId,
           mode: request.mode,
+          ...(request.writers !== undefined ? { writers: request.writers } : {}),
         })) as string,
       );
     }

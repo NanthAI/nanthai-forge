@@ -200,6 +200,13 @@ test('flip 5 re-run meter: Work queries one tab re-runs per planning write', asy
   // re-run (an Issue head, a comment head and an Intent version sit in separate kinds).
   s.tables.hostedProjects.get(s.projectId).workStore = 'records';
   assert.deepEqual(await meter({ expectedVersion: 2, status: 'open' }), expected);
+  s.tables.hostedProjects.get(s.projectId).workStoreWriters = ['note', 'intent', 'intent-status', 'planning'];
+  s.tables.hostedProjects.get(s.projectId).workStoreCutoverRevision = (await s.read()).data.revision;
+  assert.deepEqual(
+    await meter({ expectedVersion: 3, status: 'closed' }),
+    expected,
+    'freezing journal appends retains six reruns across three tabs',
+  );
   console.log(
     JSON.stringify({ perTab: Object.fromEntries(Object.entries(measured).map(([k, v]) => [k, v.length])) }),
   );

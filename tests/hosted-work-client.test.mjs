@@ -355,3 +355,76 @@ test('an explicit operator rebuild drives index continuations to completion and 
   assert.equal(events.at(-1).objectsDone, 100);
   assert.equal(events.at(-1).objectsTotal, 2495);
 });
+
+test('hosted Work writer transport keeps one call per metadata write and retains anchored-note validation', async t => {
+  const s = await setup(t);
+  const mutations = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const node = await import(moduleUrl('../convex/projectWorkActions.ts'));
+  let calls = 0;
+  const client = {
+    query: async (ref, args) => {
+      calls++;
+      return queries[getFunctionName(ref).split(':')[1]]._handler(s.ctx, args);
+    },
+    mutation: async (ref, args) => {
+      calls++;
+      assert.equal(getFunctionName(ref), 'projectWorkCommand:command');
+      return mutations.command._handler(s.ctx, args);
+    },
+    action: async (ref, args) => {
+      calls++;
+      assert.equal(getFunctionName(ref), 'projectWorkActions:command');
+      return node.command._handler(s.ctx, args);
+    },
+  };
+  const base = (await s.read()).sourceHead,
+    intentId = randomUUID(),
+    item = s.item();
+  for (const [command, operationId] of [
+    [{ action: 'intent', outcome: 'One-call writer', constraints: '', base }, intentId],
+    [{ action: 'note', intentId, text: 'Ordinary note', kind: 'comment' }, randomUUID()],
+    [{ action: 'intent-status', intentId, status: 'completed' }, randomUUID()],
+    [item, item.operationId],
+    [
+      {
+        action: 'comment-planning-item',
+        operationId: randomUUID(),
+        itemId: item.itemId,
+        text: 'One call',
+        authorLabel: 'Owner',
+      },
+    ],
+  ]) {
+    const before = calls;
+    await dispatchHostedWork(client, s.projectId, {
+      action: 'command',
+      operationId: operationId ?? command.operationId,
+      command,
+    });
+    assert.equal(calls - before, 1, command.action);
+  }
+  const before = calls;
+  await assert.rejects(
+    dispatchHostedWork(client, s.projectId, {
+      action: 'command',
+      operationId: randomUUID(),
+      command: {
+        action: 'note',
+        intentId,
+        text: 'Requires a real pinned View',
+        kind: 'comment',
+        anchor: {
+          viewId: randomUUID(),
+          base: 'a'.repeat(64),
+          head: 'b'.repeat(64),
+          file: 'a.ts',
+          side: 'after',
+          line: 1,
+          blob: 'c'.repeat(64),
+        },
+      },
+    }),
+  );
+  assert.equal(calls - before, 2, 'anchored note keeps the existing revision read plus validated action');
+  assert.equal((await s.read()).data.intents.find(i => i.id === intentId).notes.length, 1);
+});

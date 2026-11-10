@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import type { StoredWorkEvent } from './projectWorkEventStore';
 import { v } from 'convex/values';
 import { action, type ActionCtx } from './cliServer';
 import { internalAction } from './_generated/server';
@@ -67,7 +68,7 @@ const nodeCommand = (
 export const command = action({
   args: commandArgs,
   returns: hostedWorkEventDocument,
-  handler: async (ctx, input): Promise<Doc<'projectWorkEvents'>> => {
+  handler: async (ctx, input): Promise<StoredWorkEvent> => {
     try {
       return await nodeCommand(ctx, input, await caller(ctx));
     } catch (error) {
@@ -79,8 +80,7 @@ export const command = action({
 export const commandNode = internalAction({
   args: { ...commandArgs, owner: v.string() },
   returns: hostedWorkEventDocument,
-  handler: async (ctx, { owner, ...input }): Promise<Doc<'projectWorkEvents'>> =>
-    nodeCommand(ctx, input, owner),
+  handler: async (ctx, { owner, ...input }): Promise<StoredWorkEvent> => nodeCommand(ctx, input, owner),
 });
 export const exportJournal = action({
   args: { projectId: v.id('hostedProjects') },

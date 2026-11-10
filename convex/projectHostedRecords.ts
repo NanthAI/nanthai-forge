@@ -69,9 +69,18 @@ export async function recordVersion(
 
 /** Immutable header/body integrity, shared by authoritative reads and rebuilds. */
 export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'projectHostedRecords'>) {
+  if (row.inline !== undefined) {
+    invariant(
+      digest(row.inline) === row.digest && new TextEncoder().encode(row.inline).length === row.bytes,
+      'SOURCE_UNAVAILABLE',
+      'Exact canonical record bytes are unavailable.',
+    );
+    return row.inline;
+  }
   const body = await ctx.db.get(row.bodyId);
   invariant(
     body?.projectId === row.projectId &&
+      body.value !== undefined &&
       digest(body.value) === row.digest &&
       new TextEncoder().encode(body.value).length === row.bytes,
     'SOURCE_UNAVAILABLE',

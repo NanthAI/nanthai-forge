@@ -735,6 +735,27 @@ test('with the store reader on, planning lists, versions, comments and detail re
   );
   compareMeter.restore();
   console.log(JSON.stringify({ migrationCompare: { fullCompareCost, digestCompareCost } }));
+  const historical = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'issue');
+  const readerHash = historical.workReadDigest;
+  delete historical.workReadDigest;
+  const historicalCache = [...s.tables.projectWorkRecords.values()].find(
+    row =>
+      row.collection === '_workStoreDigests:planningVersions' &&
+      JSON.parse(row.value).ref.key === historical.key &&
+      JSON.parse(row.value).ref.version === historical.version,
+  );
+  const historicalValue = historicalCache.value;
+  const missingMetadata = JSON.parse(historicalValue);
+  delete missingMetadata.stored;
+  historicalCache.value = JSON.stringify(missingMetadata);
+  const oldVersion = (await run({ action: 'compare-work-store', newest: 200 })).collections.readVersions;
+  assert.deepEqual(
+    [oldVersion.different, oldVersion.invalid, oldVersion.missing],
+    [0, 0, 0],
+    'a historical version without derived hash metadata uses its verified full reader',
+  );
+  historical.workReadDigest = readerHash;
+  historicalCache.value = historicalValue;
   const corrupt = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'comment');
   const originalDigest = corrupt.digest;
   corrupt.digest = '0'.repeat(64);
@@ -743,11 +764,32 @@ test('with the store reader on, planning lists, versions, comments and detail re
     if (s.tables.projectHostedRecordBodies.has(id)) fetchedBodies++;
     return originalGet(id);
   };
+  const fullMismatch = await run({ action: 'compare-work-store' });
+  assert.ok(
+    fullMismatch.collections.planningComments.different + fullMismatch.collections.notes.different > 0,
+    'full verification catches out-of-band immutable header corruption',
+  );
+  fetchedBodies = 0;
+  const targetCaches = [...s.tables.projectWorkRecords.values()].filter(
+    row =>
+      (row.collection === '_workStoreHeads:comment' || row.collection.startsWith('_workStoreDigests:')) &&
+      JSON.parse(row.value).ref?.key === corrupt.key,
+  );
+  const cacheValues = targetCaches.map(row => row.value);
+  for (const row of targetCaches) {
+    const value = JSON.parse(row.value);
+    if (row.collection === '_workStoreHeads:comment') value.ref.digest = corrupt.digest;
+    else if (value.stored) value.stored.ref.digest = corrupt.digest;
+    row.value = JSON.stringify(value);
+  }
   const mismatch = await run({ action: 'compare-work-store', newest: 200 });
   assert.ok(mismatch.collections.planningComments.different + mismatch.collections.notes.different > 0);
   assert.ok(fetchedBodies > 0, 'a digest mismatch fetches the retained body for diagnosis');
   s.ctx.db.get = originalGet;
   corrupt.digest = originalDigest;
+  targetCaches.forEach((row, i) => {
+    row.value = cacheValues[i];
+  });
 
   // Writes keep both stores current while the store serves reads.
   await s.send({
@@ -862,4 +904,266 @@ test('bounded digest comparisons retain 200-record coverage and pin full fallbac
   const resumed = await run({ action: 'compare-work-store', newest: 200 });
   assert.equal(resumed.collections.notes.method, 'full');
   assert.ok(resumed.collections.notes.missing > 0, 'a mode gap cannot reuse stale hash coverage');
+});
+
+test('frozen Work writers retain replay, export, rebuild and note projections without journal appends', async t => {
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+  const { hostedBriefRecords } = await import(moduleUrl('../convex/projectBriefingContext.ts'));
+  const retained = await import(moduleUrl('../convex/projectWorkEventStore.ts'));
+  const { ensure } = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
+  const s = await setup(t);
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.sourceAuthority = { mode: 'server', epoch: 1 };
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: [] });
+  const base = (await s.read()).sourceHead;
+  const intentId = randomUUID();
+  const send = (command, operationId = command.operationId ?? randomUUID()) =>
+    commands.command._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId,
+      command: JSON.stringify(command),
+    });
+  const put = s.item();
+  await send(put);
+  await send({ action: 'intent', outcome: 'Retained replay', constraints: '', base }, intentId);
+  await send({ action: 'note', intentId, text: 'Before freeze', kind: 'comment' });
+  const frozen = ['note', 'intent', 'intent-status', 'planning'];
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: frozen });
+  for (const collection of [
+    'planningVersions',
+    'planningComments',
+    'notes',
+    'intents',
+    'lifecycle',
+    'planningItems',
+    'issueHeads',
+  ])
+    await store.copy._handler(s.ctx, {
+      projectId: s.projectId,
+      collection,
+      cursor: null,
+      newest: 200,
+      digestsOnly: true,
+    });
+  const journalSize = s.tables.projectWorkEvents.size;
+  const note = { action: 'note', intentId, text: 'After freeze', kind: 'decision' };
+  const noteId = randomUUID();
+  const receipt = await send(note, noteId);
+  assert.deepEqual(await send(note, noteId), receipt, 'unknown outcome replays its canonical receipt');
+  await assert.rejects(
+    send({ ...note, text: 'Changed retry' }, noteId),
+    e => e.data?.code === 'WORK_OPERATION_CHANGED',
+  );
+  await send({ action: 'intent', outcome: 'Frozen creation', constraints: '', base });
+  await send({ action: 'intent-status', intentId, status: 'completed' });
+  await send({ ...put, operationId: randomUUID(), expectedVersion: 1, title: 'Retained update' });
+  await send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: put.itemId,
+    text: 'Retained comment',
+    authorLabel: 'Owner',
+  });
+  assert.equal(s.tables.projectWorkEvents.size, journalSize);
+  const events = [...s.tables.projectHostedRecordBodies.values()].filter(row => row.operationId);
+  assert.equal(events.length, 5);
+  assert.ok(
+    events.every(row => !row.bodyId),
+    'one retained row per event, no second body or head',
+  );
+  const get = s.ctx.db.get;
+  s.ctx.db.get = id => {
+    assert.ok(
+      !s.tables.projectHostedRecords.get(id)?.inline,
+      'matching target hashes never read inline primary payloads',
+    );
+    return get(id);
+  };
+  const digestNotes = JSON.parse(
+    await store.compare._handler(s.ctx, {
+      projectId: s.projectId,
+      collection: 'readNotes',
+      cursor: null,
+      newest: 200,
+    }),
+  );
+  assert.equal(digestNotes.method, 'digest');
+  assert.deepEqual(
+    [digestNotes.different.count, digestNotes.missing.count, digestNotes.invalid.count],
+    [0, 0, 0],
+  );
+  s.ctx.db.get = get;
+  const expected = await s.read();
+  assert.equal(expected.data.intents.find(i => i.id === intentId).notes.length, 2);
+  assert.equal(expected.data.intents.find(i => i.id === intentId).status, 'completed');
+  const pages = async () => {
+    const result = [];
+    let cursor = null;
+    do {
+      const page = await work.events._handler(s.ctx, {
+        projectId: s.projectId,
+        owner: 'owner',
+        initialRevision: project.work.initialRevision,
+        revision: expected.data.revision,
+        paginationOpts: { cursor, numItems: 2 },
+      });
+      result.push(...page.page);
+      cursor = page.isDone ? null : page.continueCursor;
+    } while (cursor !== null);
+    return result;
+  };
+  const mixed = await pages();
+  assert.equal(mixed.length, expected.events.length);
+  const detail = async () =>
+    index.detail._handler(s.ctx, { projectId: s.projectId, collection: 'intents', id: intentId });
+  const beforeDetail = await detail();
+  const brief = () => hostedBriefRecords(s.ctx, project, { intentId });
+  const beforeBrief = await brief();
+  assert.equal(beforeBrief.records.intents[0].notes.length, 2);
+  const beforeExport = await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId });
+  // Compare identical retained commands through both physical layouts, with the same project flags.
+  const meter = meterReads(s.ctx);
+  const canonicalCost = await meter.cost(pages);
+  const canonicalBriefCost = await meter.cost(brief);
+  const canonicalDetailCost = await meter.cost(detail);
+  for (const event of events) {
+    const { _id, _creationTime, ...value } = retained.eventDocument(event);
+    s.tables.projectWorkEvents.set(_id, { ...value, _id, _creationTime });
+    s.tables.projectHostedRecordBodies.delete(_id);
+  }
+  const journalCost = await meter.cost(pages);
+  const journalBriefCost = await meter.cost(brief);
+  const journalDetailCost = await meter.cost(detail);
+  assert.deepEqual(canonicalBriefCost, journalBriefCost);
+  assert.deepEqual(canonicalDetailCost, journalDetailCost);
+  assert.deepEqual(await brief(), beforeBrief);
+  meter.restore();
+  assert.ok(
+    canonicalCost.documents <= journalCost.documents && canonicalCost.bytes <= journalCost.bytes,
+    JSON.stringify({ canonicalCost, journalCost }),
+  );
+  assert.deepEqual(await pages(), mixed);
+  assert.deepEqual((await s.read()).data, expected.data);
+  assert.deepEqual(await detail(), beforeDetail);
+  assert.equal(await actions.exportPlanning._handler(s.ctx, { projectId: s.projectId }), beforeExport);
+  for (const event of events) {
+    s.tables.projectWorkEvents.delete(event._id);
+    s.tables.projectHostedRecordBodies.set(event._id, event);
+  }
+  await ensure._handler(s.ctx, { projectId: s.projectId, rebuild: true });
+  assert.deepEqual((await s.read()).data, expected.data, 'index rebuild replays retained canonical events');
+  const rebuilt = await detail();
+  assert.equal(JSON.parse(rebuilt.value).noteCount, 2);
+  assert.equal(rebuilt.editable, beforeDetail.editable);
+  assert.equal(rebuilt.intentPin, beforeDetail.intentPin);
+  await send({ action: 'intent-status', intentId, status: 'completed' });
+  assert.equal(
+    s.tables.projectWorkEvents.size,
+    journalSize,
+    'a no-op status retains its primary Intent version too',
+  );
+  assert.equal((await s.read()).data.intents.find(i => i.id === intentId).status, 'completed');
+  // A damaged retained row never silently replays different source.
+  const damaged = events[0],
+    original = damaged.command;
+  damaged.command = JSON.stringify({ ...note, text: 'Damaged retained command' });
+  await assert.rejects(pages(), e => e.data?.code === 'SOURCE_UNAVAILABLE');
+  damaged.command = original;
+  console.log(
+    JSON.stringify({
+      frozenWorkReplay: {
+        canonicalCost,
+        journalCost,
+        canonicalBriefCost,
+        journalBriefCost,
+        canonicalDetailCost,
+        journalDetailCost,
+      },
+    }),
+  );
+});
+
+test('mixed retained history pages large planning commands once across planning freeze and rollback', async t => {
+  const s = await setup(t);
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.sourceAuthority = { mode: 'server', epoch: 1 };
+  const initial = await s.read(),
+    intentId = randomUUID();
+  const send = (command, operationId = command.operationId ?? randomUUID()) =>
+    commands.command._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId,
+      command: JSON.stringify(command),
+    });
+  await send(
+    { action: 'intent', outcome: 'Large history replay', constraints: '', base: initial.sourceHead },
+    intentId,
+  );
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: ['note'] });
+  const big = s.item({ body: 'Original large body\n'.repeat(18000) });
+  await send(big);
+  await send({ action: 'note', intentId, text: 'Mixed legacy planning', kind: 'comment' });
+  await send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: big.itemId,
+    text: 'Large legacy comment\n'.repeat(18000),
+    authorLabel: 'Owner',
+  });
+  await store.setMode._handler(s.ctx, {
+    projectId: s.projectId,
+    mode: 'records',
+    writers: ['note', 'planning'],
+  });
+  await send({ ...big, operationId: randomUUID(), expectedVersion: 1, title: 'Large retained update' });
+  await send({ action: 'intent-status', intentId, status: 'completed' });
+  await send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: big.itemId,
+    text: 'Large retained comment\n'.repeat(18000),
+    authorLabel: 'Owner',
+  });
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: ['note'] });
+  await send({ ...big, operationId: randomUUID(), expectedVersion: 2, title: 'Legacy after rollback' });
+  await send({ action: 'note', intentId, text: 'Retained after rollback', kind: 'comment' });
+  const expected = await s.read();
+  // Convex allows one .paginate() per query. Crossing epochs must use indexed streams,
+  // while the explicit byte budget still splits a page without reading any operation twice.
+  const query = s.ctx.db.query;
+  s.ctx.db.query = table => {
+    const result = query(table);
+    if (['projectWorkEvents', 'projectHostedRecordBodies'].includes(table))
+      result.paginate = () => assert.fail('mixed retained history cannot use Convex paginate across epochs');
+    return result;
+  };
+  const seen = new Set();
+  let cursor = null,
+    calls = 0;
+  do {
+    const page = await work.events._handler(s.ctx, {
+      projectId: s.projectId,
+      owner: 'owner',
+      initialRevision: project.work.initialRevision,
+      revision: expected.data.revision,
+      paginationOpts: { cursor, numItems: 100, maximumBytesRead: 500000 },
+    });
+    calls++;
+    for (const row of page.page) {
+      assert.ok(!seen.has(row.operationId));
+      seen.add(row.operationId);
+    }
+    cursor = page.isDone ? null : page.continueCursor;
+  } while (cursor !== null);
+  assert.deepEqual(
+    [...seen],
+    expected.events.map(event => event.id),
+  );
+  assert.ok(calls <= 5, 'byte windows and flag boundaries add no caller page calls');
+  assert.deepEqual((await s.read()).data, expected.data);
+  s.ctx.db.query = query;
 });

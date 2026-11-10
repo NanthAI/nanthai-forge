@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { findWorkEvent } from './projectWorkEventStore';
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
 import { githubMirrorStatus } from './projectGithubMirrorStatus';
@@ -217,12 +218,7 @@ export const detail = query({
       let editable = project.owner === user.subject,
         intentPin: string | null = null;
       if (input.collection === 'intents') {
-        const event = await ctx.db
-          .query('projectWorkEvents')
-          .withIndex('by_project_and_operation', q =>
-            q.eq('projectId', project._id).eq('operationId', input.id),
-          )
-          .unique();
+        const event = await findWorkEvent(ctx, project._id, input.id);
         const membership = await ctx.db
           .query('projectContributors')
           .withIndex('by_project_and_contributor', q =>

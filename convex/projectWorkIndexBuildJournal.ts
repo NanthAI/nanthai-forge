@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import type { StoredWorkEvent } from './projectWorkEventStore';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { internal } from './_generated/api';
@@ -22,8 +23,9 @@ export async function replayStep(
   project: Doc<'hostedProjects'>,
   c: Cursor,
 ): Promise<{ entries: IndexEntry[]; metadata?: string }> {
-  const page: { page: Doc<'projectWorkEvents'>[]; isDone: boolean; continueCursor: string } =
-    await ctx.runQuery(internal.projectWork.events, {
+  const page: { page: StoredWorkEvent[]; isDone: boolean; continueCursor: string } = await ctx.runQuery(
+    internal.projectWork.events,
+    {
       projectId: selected.projectId,
       owner: selected.owner,
       initialRevision: project.work!.initialRevision,
@@ -34,7 +36,8 @@ export async function replayStep(
         maximumBytesRead: 500000,
         maximumRowsRead: 50,
       },
-    });
+    },
+  );
   const events = page.page.map(row => journalEvent(project.key, backup.digest, row));
   type Key = { collection: string; key: string };
   const identity = (key: Key) => JSON.stringify([key.collection, key.key]);

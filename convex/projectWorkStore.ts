@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { eventDocument, type WorkProvenance, type StoredWorkEvent } from './projectWorkEventStore';
 // Flip 5 S1 and S2 (Issue 0695ab24): copy the journal index's Issues, comments and notes into the hosted
-// record store in pages, and compare the two read-only. Nothing here changes what Work reads or writes:
-// the owner runs these through `hosted-work` and the journal stays the authority until a later slice.
-// S3 adds the dual write: with `workStore: 'dual'` each journal append also stores its records.
+// record store in pages, compare them read-only and choose primary writers per command.
+// Reader and writer flags are independent; retained versions own provenance when a writer freezes its journal.
 // Intents are mutable records: the journal owns a copied Intent until a hosted Lane pins its execution
 // (a base with a receipt); from then on hosted paths own it and the copy, compare and dual write leave it.
 import {
@@ -12,6 +12,7 @@ import {
   fingerprintCoverage,
   workReadDigest,
 } from './projectWorkStoreDigests';
+import { workProject } from './projectWorkHead';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -138,13 +139,14 @@ export async function storeVersion(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   encoded: ReturnType<typeof hostedRecordValue>,
+  provenance?: WorkProvenance,
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const { record, ref } = encoded;
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
-    await insertVersion(ctx, projectId, encoded, head);
+    await insertVersion(ctx, projectId, encoded, head, provenance);
     return 'copied';
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
@@ -175,15 +177,20 @@ async function insertVersion(
   projectId: Id<'hostedProjects'>,
   encoded: ReturnType<typeof hostedRecordValue>,
   head: Awaited<ReturnType<typeof recordHead>>,
+  provenance?: WorkProvenance,
 ) {
   const { record, ref, value } = encoded;
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
-  const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId, value });
+  const bodyId = await ctx.db.insert(
+    'projectHostedRecordBodies',
+    provenance ? { ...provenance, value: '' } : { projectId, value },
+  );
   const recordId = await ctx.db.insert('projectHostedRecords', {
     ...identity,
     ...indexed,
     bodyId,
+    ...(provenance ? { inline: value } : {}),
     digest: ref.digest,
     bytes: ref.bytes,
     ...(journalRow(record as unknown as { kind: string }) === undefined
@@ -205,25 +212,31 @@ export async function storeIntent(
   owner: string,
   value: unknown,
   write: boolean,
+  provenance?: WorkProvenance,
 ): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
   const id = (value as { id: string }).id;
   const head = await recordHead(ctx, projectId, 'intent', id);
   if (head) {
     const row = await ctx.db.get(head.recordId);
     const stored = row ? JSON.parse(await hostedRecordBody(ctx, row)) : null;
-    if (!stored || stored.base?.receiptId) return 'hosted';
+    if (!stored || (stored.base?.receiptId && !provenance)) return 'hosted';
+    if (stored.base?.receiptId && provenance) {
+      const encoded = hostedRecordValue({ ...stored, version: head.version + 1, at: provenance.at });
+      await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance);
+      return 'copied';
+    }
     const same = hostedRecordValue(workStoreRecord('intents', value, { owner, version: head.version }));
-    if (same.ref.digest === row!.digest && same.ref.bytes === row!.bytes) return 'same';
+    if (same.ref.digest === row!.digest && same.ref.bytes === row!.bytes && !provenance) return 'same';
     if (!write) return 'different';
   } else if (!write) return 'missing';
   const encoded = hostedRecordValue(
     workStoreRecord('intents', value, { owner, version: head ? head.version + 1 : 0 }),
   );
-  await insertVersion(ctx as MutationCtx, projectId, encoded, head);
+  await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance);
   return 'copied';
 }
 
-/** S3 dual write: the Issue versions, comments, notes, Intents and lifecycle moves one journal append
+/** Store the Issue versions, comments, notes, Intents and lifecycle moves one Work command
  * projects, stored in the same mutation. Large values are joined from the payload parts of the same
  * projection. */
 export async function storeProjection(
@@ -232,7 +245,22 @@ export async function storeProjection(
   owner: string,
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
   partition?: Id<'projectWorkGenerations'>,
-) {
+  provenance?: WorkProvenance,
+): Promise<StoredWorkEvent | null> {
+  const command = provenance ? JSON.parse(provenance.command) : null;
+  const primary = !command
+    ? null
+    : command.action === 'note'
+      ? 'notes'
+      : command.action === 'intent'
+        ? 'intents'
+        : command.action === 'intent-status'
+          ? entries.some(e => e.collection === 'lifecycle')
+            ? 'lifecycle'
+            : 'intents'
+          : command.action === 'put-planning-item'
+            ? 'planningVersions'
+            : 'planningComments';
   for (const entry of entries) {
     if (
       !(workStoreSources as readonly string[]).includes(entry.collection) &&
@@ -250,11 +278,13 @@ export async function storeProjection(
             .sort((a, b) => a.position - b.position),
         )
       : header;
+    const audit = collection === primary ? provenance : undefined;
     try {
-      if (collection === 'intents') await storeIntent(ctx, projectId, owner, value, true);
+      if (collection === 'intents') await storeIntent(ctx, projectId, owner, value, true, audit);
       else if (entry.collection !== 'planningItems')
-        await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)));
-    } catch {
+        await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)), audit);
+    } catch (error) {
+      if (audit) throw error;
       // A failed dual write is observable by its independently updated source fingerprint below.
     }
     if (partition) {
@@ -272,6 +302,15 @@ export async function storeProjection(
       if (head) await fingerprintHead(ctx, projectId, partition, head);
     }
   }
+  if (!provenance) return null;
+  const body = await ctx.db
+    .query('projectHostedRecordBodies')
+    .withIndex('by_project_and_operation', q =>
+      q.eq('projectId', projectId).eq('operationId', provenance.operationId),
+    )
+    .unique();
+  invariant(body, 'SOURCE_UNAVAILABLE', 'The primary Work version must retain its operation provenance.');
+  return eventDocument(body);
 }
 
 /** Switch a project's Work store mode. Dual write starts only after a clean copy and compare; on the
@@ -281,6 +320,11 @@ export const setMode = mutation({
   args: {
     projectId: v.id('hostedProjects'),
     mode: v.union(v.literal('journal'), v.literal('dual'), v.literal('records')),
+    writers: v.optional(
+      v.array(
+        v.union(v.literal('note'), v.literal('intent'), v.literal('intent-status'), v.literal('planning')),
+      ),
+    ),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -304,7 +348,30 @@ export const setMode = mutation({
           }
         }
       }
-      return JSON.stringify({ mode: input.mode, changed: project.workStore !== workStore });
+      if (input.writers !== undefined) {
+        const current = await workProject(ctx, project);
+        const wasPlanning = project.workStoreWriters?.includes('planning') ?? false;
+        const isPlanning = input.writers.includes('planning');
+        await ctx.db.patch(project._id, {
+          ...(wasPlanning === isPlanning
+            ? {}
+            : {
+                workStoreEventWindows: [
+                  ...(project.workStoreEventWindows ?? []),
+                  { revision: current.work!.revision, storeFirst: isPlanning },
+                ],
+              }),
+          workStoreWriters: input.writers,
+          ...(input.writers.length && project.workStoreCutoverRevision === undefined
+            ? { workStoreCutoverRevision: current.work!.revision }
+            : {}),
+        });
+      }
+      return JSON.stringify({
+        mode: input.mode,
+        changed: project.workStore !== workStore,
+        ...(input.writers !== undefined ? { writers: input.writers } : {}),
+      });
     } catch (error) {
       return report(error);
     }

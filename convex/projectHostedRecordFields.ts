@@ -30,6 +30,7 @@ const indexed = {
 export const hostedRecordFields = {
   ...identity,
   ...indexed,
+  inline: v.optional(v.string()),
   bodyId: v.id('projectHostedRecordBodies'),
   /** Server-written Candidate creator, independent of its check requester. */
   creatorAccountId: v.optional(v.string()),
@@ -43,10 +44,20 @@ export const hostedRecordFields = {
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
 };
 export const hostedRecordTables = {
-  projectHostedRecordBodies: defineTable({ projectId: v.id('hostedProjects'), value: v.string() }).index(
-    'by_project',
-    ['projectId'],
-  ),
+  projectHostedRecordBodies: defineTable({
+    projectId: v.id('hostedProjects'),
+    value: v.string(),
+    operationId: v.optional(v.string()),
+    request: v.optional(v.string()),
+    revision: v.optional(v.number()),
+    actor: v.optional(v.string()),
+    at: v.optional(v.string()),
+    command: v.optional(v.string()),
+    baseBackupId: v.optional(v.id('projectBackups')),
+  })
+    .index('by_project', ['projectId'])
+    .index('by_project_and_revision', ['projectId', 'revision'])
+    .index('by_project_and_operation', ['projectId', 'operationId']),
   // Canonical immutable versions; the head is only a per-resource CAS pointer.
   projectHostedRecords: defineTable(hostedRecordFields)
     .index('by_project_and_kind', ['projectId', 'kind'])

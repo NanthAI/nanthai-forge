@@ -22,6 +22,7 @@ type Fingerprint = {
   readDigest?: string;
   hosted?: boolean;
   invalid?: boolean;
+  stored?: { ref: HostedRecordRef; readDigest?: string };
 };
 
 /** Updated in the same transaction as each journal projection, before a compare can observe it. */
@@ -50,9 +51,24 @@ export async function fingerprintSource(
       .filter(name => raw[name as keyof Identity] !== undefined)
       .map(name => [name, raw[name as keyof Identity]]),
   );
+  const actual = await recordVersion(ctx, projectId, encoded.ref.kind, encoded.ref.key, encoded.ref.version);
   await put(ctx, projectId, partition, sourceCollection(collection), key, position, {
     key,
     ref: encoded.ref,
+    ...(actual
+      ? {
+          stored: {
+            ref: {
+              kind: actual.kind,
+              key: actual.key,
+              version: actual.version,
+              digest: actual.digest,
+              bytes: actual.bytes,
+            },
+            ...(actual.workReadDigest === undefined ? {} : { readDigest: actual.workReadDigest }),
+          },
+        }
+      : {}),
     identity,
     ...(collection === 'intents' ? {} : { readDigest: workReadDigest(value) }),
   });
@@ -77,7 +93,13 @@ export async function fingerprintHead(
   }
   await put(ctx, projectId, partition, headsCollection(head.kind), head.key, head._creationTime, {
     key: head.key,
-    ref: { kind: row.kind, key: row.key, version: row.version, digest: row.digest, bytes: row.bytes },
+    ref: {
+      kind: row.kind,
+      key: row.key,
+      version: row.version,
+      digest: row.digest,
+      bytes: row.bytes,
+    },
     ...(readDigest === undefined ? {} : { readDigest }),
     ...(hosted ? { hosted: true } : {}),
   });
@@ -184,7 +206,13 @@ export async function compareFingerprints(
       pointer = {
         key: head.key,
         identity: expected.identity,
-        ref: { kind: row.kind, key: row.key, version: row.version, digest: row.digest, bytes: row.bytes },
+        ref: {
+          kind: row.kind,
+          key: row.key,
+          version: row.version,
+          digest: row.digest,
+          bytes: row.bytes,
+        },
         ...(head.kind === 'intent' && !head.status.startsWith('journal:') ? { hosted: true } : {}),
       };
     }
@@ -192,13 +220,12 @@ export async function compareFingerprints(
       hosted++;
       continue;
     }
-    const actual = await recordVersion(
-      ctx,
-      projectId,
-      ref.kind,
-      ref.key,
-      pointer?.ref.version ?? ref.version,
-    );
+    // These are independently recorded target hashes, captured only from a successful immutable
+    // version write. Source fingerprints remain independent, including failed dual writes.
+    const cached = pointer ? { ref: pointer.ref, readDigest: pointer.readDigest } : expected.stored;
+    const actual = cached
+      ? { ...cached.ref, workReadDigest: cached.readDigest }
+      : await recordVersion(ctx, projectId, ref.kind, ref.key, pointer?.ref.version ?? ref.version);
     if (!actual) {
       add(missing, expected.key);
       continue;
@@ -212,7 +239,6 @@ export async function compareFingerprints(
       matched++;
       continue;
     }
-    add(different, expected.key);
     // Only differences pay to open the source payload/reader and verify its retained body.
     const original = await indexed(
       ctx,
@@ -224,17 +250,24 @@ export async function compareFingerprints(
       try {
         const value = await storeReadOf(ctx, projectId, source as 'notes', expected.identity);
         if (value === null) add(missing, expected.key);
-        else if (sameValue(value, JSON.parse(original.value))) add(invalid, `${expected.key}:stale-digest`);
+        else if (sameValue(value, JSON.parse(original.value))) {
+          // Old immutable versions may predate reader-hash metadata. The verified full reader is
+          // authoritative; absent or stale derived metadata is not a source difference.
+          matched++;
+          continue;
+        }
       } catch {
         add(invalid, expected.key);
       }
     } else {
       try {
-        await hostedRecordBody(ctx, actual);
+        const row = await recordVersion(ctx, projectId, ref.kind, ref.key, actual.version);
+        if (row) await hostedRecordBody(ctx, row);
       } catch {
         add(invalid, expected.key);
       }
     }
+    add(different, expected.key);
   }
   if (page.isDone && checked < newest && !window.complete)
     add(invalid, `${source}:digest-baseline-too-small`);
