@@ -785,7 +785,11 @@ exchange objects), then every project-owned table in the
 1,000 rows or 4 MiB read and also removes the rows' exclusive Convex files and
 cancels their pending scheduled functions. Progress (operation id, rows, bytes,
 pages) is visible in Settings. A build test fails when a schema table with a
-`projectId` is missing from the inventory.
+`projectId` is missing from the inventory. Permanent purge deletes through the
+underlying writer: projection upkeep is unnecessary because the inventory removes
+all companions, and a resumed page may find a remembered companion already gone.
+It also removes the root project's legacy finish projection by source identity;
+progress and final tombstone writes do not recreate projections.
 
 Projects deleted before the retention window existed have no expiry. The lead arms
 them with the internal `projectRetention:armLegacyTrash` (one owner, 50 projects

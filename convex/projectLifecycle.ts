@@ -15,6 +15,7 @@ import { report } from './errors';
 import { projectExecution } from './projectExecution';
 import { startRetention, stopRetention, purgeSettleMs } from './projectRetention';
 import { purgeProjectRowsPage } from './projectPurgeRows';
+import { projectPurgeWriter } from './projectFinishReadWriter';
 
 const args = { projectId: v.id('hostedProjects'), operationId: v.string(), expectedRevision: v.number() };
 async function schedule(ctx: MutationCtx, project: Doc<'hostedProjects'>) {
@@ -326,6 +327,7 @@ export const purge = internalMutation({
     const project = await ctx.db.get(projectId);
     projectExecution(ctx, projectId, project?.name, project?.key);
     if (project?.removal !== 'deleting' || (project.r2Purge && !project.r2PrefixPurged)) return null;
+    ctx = projectPurgeWriter(ctx);
     // Access is already revoked. Signed uploads issued before deletion can still finish
     // until they expire; purging after that means no bytes or receipts can arrive later.
     const settleAt = (project.removedAt ?? 0) + purgeSettleMs;
@@ -406,6 +408,12 @@ export const purge = internalMutation({
       await scheduleR2Purge(ctx, project);
       return null;
     }
+    // Root projections predate projectId coverage; remove by their source identity too.
+    const rootRead = await ctx.db
+      .query('projectFinishReadRows')
+      .withIndex('by_kind_and_source', q => q.eq('kind', 'hostedProjects').eq('sourceId', projectId))
+      .unique();
+    if (rootRead) await ctx.db.delete(rootRead._id);
     // The owner/key tombstone prevents an old initial-upload retry from silently recreating this project.
     const finished = (await ctx.db.get(projectId))!;
     await ctx.db.patch(projectId, {

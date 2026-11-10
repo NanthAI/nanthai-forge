@@ -9,6 +9,7 @@ import { state } from './hosted-fixture.mjs';
 
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const inventory = await import(moduleUrl('../convex/projectPurgeInventory.ts'));
+const { finishReadFields } = await import(moduleUrl('../convex/projectFinishReadProjection.ts'));
 const rowsPage = await import(moduleUrl('../convex/projectPurgeRows.ts'));
 const retention = await import(moduleUrl('../convex/projectRetention.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
@@ -196,6 +197,10 @@ function fixture() {
   s.deletedRows = 0;
   const remove = s.ctx.db.delete;
   s.ctx.db.delete = async id => {
+    assert.ok(
+      Object.values(s.tables).some(table => table.has(id)),
+      `Delete on nonexistent document ID: ${id}`,
+    );
     s.deletedRows++;
     return remove(id);
   };
@@ -290,6 +295,88 @@ test('delete tombstones at once, revokes access, measures retained size and purg
   t.diagnostic(
     `purge: ${purge.calls} scheduled calls, ${receipt.pages} row pages, ${receipt.rows} rows, ${receipt.bytes} bytes, max ${purge.maxDeletes} deletes per call`,
   );
+});
+
+test('permanent purge removes every writer companion without double deletion or projection recreation, including resumed pages', async t => {
+  for (const resumed of [false, true]) {
+    await t.test(
+      resumed ? 'resume after the metric companion was purged' : 'all companions present',
+      async t => {
+        const s = fixture();
+        t.mock.method(Date, 'now', () => s.now.value);
+        const companions = s.tables.projectFinishReadRows;
+        const companion = (kind, source, projectId) => {
+          const id = `companion-${kind}-${source._id}`;
+          companions.set(id, {
+            _id: id,
+            _creationTime: 1,
+            kind,
+            sourceId: source._id,
+            ...(projectId ? { projectId } : {}),
+            value: '{}',
+          });
+          return id;
+        };
+        // Include every finish-writer selection, retained metric id and presence pointer.
+        // The inventory-only fixture used to omit these optional links and tolerate missing deletes.
+        for (const projectId of ['project', 'foreign']) {
+          for (const kind of Object.keys(finishReadFields)) {
+            const source = [...s.tables[kind].values()].find(row =>
+              kind === 'hostedProjects' ? row._id === projectId : row.projectId === projectId,
+            );
+            companion(kind, source, kind === 'hostedProjects' ? undefined : projectId);
+            if (kind === 'projectHostedFinishes') companion('projectHostedFinishOwners', source, projectId);
+            if (kind === 'projectHostedLandingRequests')
+              companion('projectHostedLandingPeers', source, projectId);
+            if (kind === 'projectHostedLandingQueues')
+              companion('projectHostedAheadQueues', source, projectId);
+            if (kind === 'projectHostedCheckRuns') {
+              const rowId = companion('projectMetricCheckRuns', source, projectId);
+              source.metricsProjected = true;
+              source.metricProjection = { rowId, digest: 'a'.repeat(64) };
+              if (resumed && projectId === 'project') companions.delete(rowId);
+            }
+          }
+          const overlap = [...s.tables.projectHostedOverlapLanes.values()].find(
+            row => row.projectId === projectId,
+          );
+          const presence = [...s.tables.projectHostedPresence.values()].find(
+            row => row.projectId === projectId,
+          );
+          overlap.presenceRow = { id: presence._id, at: 1 };
+        }
+        const foreign = structuredClone(
+          Object.fromEntries(
+            Object.entries(s.tables).map(([name, rows]) => [
+              name,
+              [...rows.values()].filter(
+                row =>
+                  row.projectId === 'foreign' ||
+                  (name === 'projectFinishReadRows' && row.sourceId === 'foreign'),
+              ),
+            ]),
+          ),
+        );
+        // Exercise the registered production mutation and its real finish/metric wrapper.
+        await lifecycle.permanentlyDelete._handler(s.ctx, { ...s.op(), confirm: 'synthetic-project' });
+        s.now.value += retention.purgeSettleMs;
+        const result = await s.run();
+        assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
+        assert.equal(count(s, 'project'), 0);
+        assert.ok(
+          ![...companions.values()].some(row => row.sourceId === 'project'),
+          'legacy root projection removed',
+        );
+        for (const [name, expected] of Object.entries(foreign))
+          for (const row of expected) assert.deepEqual(s.tables[name].get(row._id), row, name);
+        assert.ok(result.maxDeletes <= rowsPage.purgePageBudget.rows + 50);
+        assert.equal((await s.run()).calls, 0, 'completed purge adds no idle calls');
+        t.diagnostic(
+          `purge: ${result.calls} scheduled calls, ${s.tables.hostedProjects.get('project').purge.pages} row pages`,
+        );
+      },
+    );
+  }
 });
 
 test('restore within the window cancels the expiry and does not bring back grants', async t => {

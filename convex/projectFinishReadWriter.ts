@@ -13,7 +13,20 @@ import {
 /** Same-transaction read models, with no RPC, scheduling, fan-out or source bytes.
  * Steady-state patches read the narrow projection, not the large source row.
  * Only a legacy row's first relevant write needs its selected source document. */
-const wrapped = new WeakSet<object>();
+const wrapped = new WeakMap<object, () => MutationCtx['db']>();
+/** Only the validated permanent purge uses the original writer. Its inventory deletes
+ * every companion itself, including companions erased by an earlier purge page.
+ * Keeping ordinary projection upkeep here would double-delete or recreate them. */
+export function projectPurgeWriter(ctx: MutationCtx): MutationCtx {
+  const original = wrapped.get(ctx.db);
+  return original
+    ? new Proxy(ctx, {
+        get(target, key, receiver) {
+          return key === 'db' ? original() : Reflect.get(target, key, receiver);
+        },
+      })
+    : ctx;
+}
 export function finishReadWriter(ctx: MutationCtx): MutationCtx {
   // A retired/no-DB handler must still return before touching its context.
   let original: MutationCtx['db'] | undefined;
@@ -127,7 +140,10 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
       return true;
     },
   });
-  wrapped.add(writer);
+  wrapped.set(writer, () => {
+    const db = source();
+    return wrapped.get(db)?.() ?? db;
+  });
   return new Proxy(ctx, {
     get(target, key, receiver) {
       return key === 'db' ? writer : Reflect.get(target, key, receiver);
