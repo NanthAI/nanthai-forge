@@ -356,7 +356,7 @@ const projectFields = {
   ),
   sourceAuthority: v.optional(sourceAuthority),
   /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read; tolerated so
-   * a project row written before the rollback still validates. */
+   * a project row written before the rollback still validates. Remove with `stateTree` on objects. */
   stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),

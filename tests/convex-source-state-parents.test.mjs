@@ -130,7 +130,8 @@ test('recorded parents are written once, exact and immutable', async () => {
 });
 
 // Trees in packs were tried and dropped (docs/decisions.md, Issue 676efbc2). States and projects
-// written while the experiment ran may still carry its fields; nothing reads them.
+// written while the experiment ran may still carry its fields; the schema tolerates them and
+// nothing reads them.
 test('a State row and a project row that still carry a legacy tree pointer are read flat: same result, same calls, same rows', async () => {
   const sync = async legacy => {
     const s = await scaleFixture();

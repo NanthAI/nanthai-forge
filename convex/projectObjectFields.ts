@@ -13,7 +13,8 @@ export const objectFields = {
    * generation so ancestry walks read this row instead of the manifest. Absent on old rows. */
   stateParents: v.optional(v.array(v.string())),
   /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read. Kept
-   * as a tolerated field so rows written before the rollback still validate. */
+   * as a tolerated field so a row written before the rollback still validates; remove once no
+   * deployment holds one (the dev deployment's were stripped). */
   stateTree: v.optional(v.any()),
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
