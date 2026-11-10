@@ -327,13 +327,6 @@ test('table cutover rejects outstanding cursors with WORK_STALE and fresh pages 
   const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
   const project = s.tables.hostedProjects.get(s.projectId);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
-  // Recreate the pre-rollout physical layout, with exactly the same logical records.
-  delete generation.recordTables;
-  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
-    for (const [id, row] of s.tables[table]) {
-      s.tables.projectWorkRecords.set(id, row);
-      s.tables[table].delete(id);
-    }
   const before = await run(s, 'cutover');
   const first = await run(s, 'cutover', { limit: 1 });
   assert(first.nextCursor);
@@ -346,6 +339,13 @@ test('table cutover rejects outstanding cursors with WORK_STALE and fresh pages 
   };
   const listFirst = await index.records._handler(s.ctx, listInput);
   assert(!listFirst.isDone);
+  // Recreate the pre-rollout physical layout, with exactly the same logical records.
+  delete generation.recordTables;
+  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
+    for (const [id, row] of s.tables[table]) {
+      s.tables.projectWorkRecords.set(id, row);
+      s.tables[table].delete(id);
+    }
   let cursor = null;
   do {
     const result = JSON.parse(

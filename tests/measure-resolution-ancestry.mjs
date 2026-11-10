@@ -64,7 +64,7 @@ export async function measureResolutionAncestry(count, shape, width = 2048) {
       // all manifests in the coordinator or pass them to a worker at once.
       await s.putSpec({ path, size: bytes.length }, pin);
       parents.set(pin.sha256, edges);
-      await s.ctx.db.insert('projectWorkRecords', {
+      await s.ctx.db.insert('projectWorkDataRecords', {
         projectId: s.projectId,
         generationId,
         collection: 'sourceStateParents',

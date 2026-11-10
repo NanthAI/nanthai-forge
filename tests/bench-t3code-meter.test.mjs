@@ -789,12 +789,16 @@ const { driftModel, driftSummary, driftAlerts } = await import('../scripts/conve
 test('landing denominator uses only one numeric marker on successful uncached mutation completions', () => {
   const marker = { udfType: 'Mutation', logLines: [{ messages: ['FORGE_ACCEPTED_LANDINGS 4'] }] };
   assert.equal(acceptedLandings(marker), 4);
+  assert.equal(acceptedLandings({ ...marker, logLines: [{ messages: ["'FORGE_ACCEPTED_LANDINGS 4'"] }] }), 4);
   for (const bad of [
     { ...marker, error: 'failed' },
     { ...marker, cachedResult: true },
     { ...marker, udfType: 'action' },
     { ...marker, logLines: ['prefix FORGE_ACCEPTED_LANDINGS 4'] },
     { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 0'] },
+    { ...marker, logLines: ["'FORGE_ACCEPTED_LANDINGS 4"] },
+    { ...marker, logLines: ["FORGE_ACCEPTED_LANDINGS 4'"] },
+    { ...marker, logLines: ["'prefix FORGE_ACCEPTED_LANDINGS 4'"] },
     { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 1 extra'] },
     { ...marker, logLines: ['FORGE_ACCEPTED_LANDINGS 1', 'FORGE_ACCEPTED_LANDINGS 1'] },
     { ...marker, logLines: [] },

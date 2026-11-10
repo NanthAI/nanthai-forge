@@ -136,11 +136,10 @@ billed DB I/O. At 1,000 and 10,000 items the page budget is the same; total reta
 search text/index storage grows with item bytes. Convex also charges search query-GB
 against the entire search-index size, including retained generations and other
 projects; equality filters do not reduce that charge. See [Convex costs](https://docs.convex.dev/search/text-search#costs).
-`search_planning` sits on `projectPlanningRecords` for split generations. Its seven
+`search_planning` sits on `projectPlanningRecords`. Its seven
 ordinary planning indexes and full-text index cover planning rows and search fragments.
-Legacy generations retain their original table while the explicit bounded migration copies
-rows transactionally; list readers switch after the copy completes. The legacy indexes stay
-in the schema during that rollout. The historical dogfood reading was 7.47 MB billed per
+The core table has no planning/search indexes. Reads select their physical domain directly,
+without a layout query, mirror or legacy fallback. The historical dogfood reading was 7.47 MB billed per
 search before isolation; post-migration query-GB must be measured independently.
 For 1 KiB search documents, 50 returned rows are approximately 50 KiB plus fixed
 metadata at either scale; nominal indexed text is about 1 MiB/10 MiB respectively
@@ -193,7 +192,7 @@ not a growing Convex State or job record.
 
 ## Work projection index domains
 
-New generations split derived rows without changing logical collection names, record keys,
+Derived rows are split without changing logical collection names, record keys,
 positions or values. `projectPlanningRecords` holds `planning*` roots/versions/comments and
 `planningSearch:payload` search fragments. Other `:payload` chunks, `source*`, `viewFiles`
 and `_workStore*` comparison rows live in `projectWorkDataRecords`. Other collections stay
@@ -207,21 +206,22 @@ The index reader map (repository-relative paths):
 | --- | --- |
 | `by_generation_and_collection_and_activityAt` | `lanes`, `runs`; `convex/coordinationCounts.ts:95` |
 | `by_generation_and_actor` | Any collection with imported `actor` metadata; `convex/projectActorNames.ts:67`; retained on all three tables |
-| `by_generation_and_collection_and_key` | Every collection; `convex/projectWorkRecordTables.ts` selected lookup; planning id resolution in `convex/projectHostedPlanning.ts` |
-| `by_generation_and_collection_and_position` | Every collection, including source/payload/comparison pages; `convex/projectWorkIndex.ts`, `convex/projectWorkIndexBuildStore.ts`, `convex/projectWorkStoreDigests.ts` |
-| `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewFiles`, `laneViews`, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectViewReads.ts`, `convex/projectWorkIndex.ts` |
-| `by_generation_and_collection_and_status_and_position` | `intents`, `landingEntries`, `landingBatches`; `convex/projectWork.ts`, `convex/projectWorkIndexBuildStore.ts`, `convex/projectSourceAuthorityDrain.ts:24` |
+| `by_generation_and_collection_and_key` | Every collection; `convex/projectWorkRecordTables.ts:40` selected lookup; planning id resolution in `convex/projectHostedPlanning.ts` |
+| `by_generation_and_collection_and_position` | Every collection, including source/payload/comparison pages; `convex/projectWorkIndex.ts:170`, `convex/projectWorkIndexBuildStore.ts:50`, `convex/projectWorkStoreDigests.ts:161` |
+| `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewFiles`, `laneViews`, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectWorkIndex.ts:175` |
+| `by_generation_and_collection_and_status_and_position` | `intents`, `landingEntries`, `landingBatches`; `convex/projectWork.ts:395`, `convex/projectWorkIndexBuildStore.ts:202`, `convex/projectSourceAuthorityDrain.ts:24` |
 | `by_project` | Every collection; dynamic permanent purge, `convex/projectPurgeRows.ts:26` and `convex/projectPurgeInventory.ts` |
-| `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts` and explicit `convex/projectWorkRecordMigration.ts` |
-| Seven `by_planning_*` indexes | `planningSearch` roots only; all filter combinations in `convex/projectPlanningList.ts` |
-| `search_planning` | `planningSearch` roots/fragments only; `convex/projectHostedPlanningSearch.ts` |
+| `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts:344` and explicit `convex/projectWorkRecordMigration.ts:103` |
+| Seven `by_planning_*` indexes | `planningSearch` roots only; all filter combinations in `convex/projectPlanningList.ts:31`–75 |
+| `search_planning` | `planningSearch` roots/fragments only; `convex/projectHostedPlanningSearch.ts:90` |
 
 All three domains retain the common key/position/parent/project/generation indexes and
 actor visibility. Activity/status indexes belong only to the general Work domain.
 The data domain therefore has six custom B-tree indexes; the planning domain has thirteen
 plus search. Counting a document, two built-ins and one full-copy-equivalent search sensitivity
-gives 9 copies/data write and 17/planning write, against 19 before splitting. The general
-domain retains 19 during rollout; dropping legacy planning indexes later brings it to 11.
+gives 9 copies/data write, 17/planning write and 11/general Work write, against 19
+before splitting. The seven planning-filter indexes and full-text index no longer cover
+general Work rows.
 These are an index-count/storage sensitivity, not a claim that Convex copies an entire
 payload into every index.
 
@@ -233,22 +233,33 @@ sample model was 8.41 GB versus the owner's 10.84 GB dashboard. Neither model is
 reclaimed disk. `tests/work-index-cost.test.mjs` ratchets table index counts and a landing-shaped
 projection byte model; the landing storage guard separately tracks retained document bytes.
 
+The completed dev copy plus bounded aggregate audit reconstructs about 0.418 GB of retained
+logical documents: 39.5 MB general Work, 16.4 MB planning and 361.9 MB data. At the same
+copy-count sensitivity this is about 7.94 GB before and 3.97 GB after. These current native-byte
+measurements include writes absent from the frozen generation counts above. They remain a
+storage model; the dashboard figure measures provider storage. A further split of the small
+core activity/status groups saves at most about 0.08 GB; isolating planning history from its
+search roots saves about 0.11 GB. Neither warrants another live rewrite in this bounded slice.
+
 `projectWorkRecordMigration:run` explicitly drives at most 100 transactional pages per call;
 resume its phase/cursor and original operation id. Each copy page reads at most 100 rows with
 a 512 KB target (plus the provider's final-row overshoot) and upserts exact derived bytes.
-While copying, original and shadow writes commit together; point reads prefer the new row
-and fall back to the original. Lists keep their old range until the partition switches.
+The temporary dual-read/write rollout path is removed once every retained dev partition
+selects the split tables. Ordinary inserts
+route to one table, and reads use that domain with no layout lookup or extra RPC.
 At the one-time cutover, a fresh public generation preserves the record partition and Work
 revision. Outstanding list/search cursors receive `WORK_STALE` instructing callers to restart
 the list/search; fresh cursors retain their existing shape and pagination behaviour.
 Copy receipts in existing `projectReturnPages` retain old row ids and sizes, so cleanup deletes
-those exact duplicates without rereading all payloads. Every page has a durable operation
+those exact duplicates without an application-level second payload scan. The provider still
+bills the deleted document bytes as reads. Every page has a durable operation
 receipt, including replay after subsequent pages. The original canonical source, Work history,
 planning versions, landing receipts and audit remain untouched. Retirement and project purge
 cover all three tables. There is no scheduler, idle call or recurring migration scan.
 
-The deployment-wide mixed-sample envelope predicts roughly 1.3 GB for old-row reads,
+The deployment-wide mixed-sample envelope predicts roughly 1.4 GB for old-row reads,
 new-row writes, duplicate deletions and compact receipts, below the approved 1.5 GB migration
-budget. The earlier two-full-scan design would approach 1.7 GB; compact-id cleanup removes
-that second payload scan. Provider-billed I/O, concurrent mirror writes, write I/O per landing
-and the post-cleanup dashboard remain separate live measurements.
+budget, including measured fixed page overhead. The completed dev migration billed
+0.840 GB read and 0.530 GB write (1.369 GB total); the aggregate domain verification added
+0.056 GB reads, for 1.425 GB together. It found no moved collection left in the core table.
+Ordinary write I/O per landing and the post-cleanup dashboard are measured separately.

@@ -203,50 +203,6 @@ export const indexTables = {
       'status',
       'position',
     ])
-    .index('by_planning_initiativeId', ['generationId', 'collection', 'planning.initiativeId', 'position'])
-    .index('by_planning_kind', ['generationId', 'collection', 'planning.kind', 'position'])
-    .index('by_planning_status', ['generationId', 'collection', 'planning.status', 'position'])
-    .index('by_planning_initiativeId_and_kind', [
-      'generationId',
-      'collection',
-      'planning.initiativeId',
-      'planning.kind',
-      'position',
-    ])
-    .index('by_planning_initiativeId_and_status', [
-      'generationId',
-      'collection',
-      'planning.initiativeId',
-      'planning.status',
-      'position',
-    ])
-    .index('by_planning_kind_and_status', [
-      'generationId',
-      'collection',
-      'planning.kind',
-      'planning.status',
-      'position',
-    ])
-    .index('by_planning_initiativeId_and_kind_and_status', [
-      'generationId',
-      'collection',
-      'planning.initiativeId',
-      'planning.kind',
-      'planning.status',
-      'position',
-    ])
     .index('by_project', ['projectId'])
-    .index('by_generation', ['generationId'])
-    .searchIndex('search_planning', {
-      searchField: 'planning.text',
-      filterFields: [
-        'generationId',
-        'planning.kind',
-        'planning.status',
-        'planning.initiativeId',
-        'planning.open',
-        'planning.itemId',
-        'planning.payloadKey',
-      ],
-    }),
+    .index('by_generation', ['generationId']),
 };

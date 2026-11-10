@@ -745,14 +745,14 @@ test('owner decisions project additively into the shared workspace and exact col
   assert.equal(older.metadata.counts.decisions, 0);
 });
 
-test('Work table migration mirrors concurrent writes, replays lost pages and retains every logical record through cleanup', async () => {
+test('Work table migration replays lost pages and retains every logical record through cleanup', async () => {
   const { state } = await import('./hosted-fixture.mjs');
   const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
   const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
   const { workRecordLookup, workRecordTable } = await import(
     moduleUrl('../convex/projectWorkRecordTables.ts')
   );
-  const s = state([], { keysetPaging: true });
+  const s = state([], { keysetPaging: true, legacyWorkRecords: true });
   const generationId = await s.ctx.db.insert('projectWorkGenerations', {
     projectId: 'project',
     backupId: 'backup',
@@ -796,17 +796,17 @@ test('Work table migration mirrors concurrent writes, replays lost pages and ret
     JSON.stringify(first),
     'lost-reply replay does not repeat a copy',
   );
+  let cursor = first.nextCursor;
+  do {
+    const result = JSON.parse(await page(cursor));
+    cursor = result.nextCursor;
+  } while (cursor);
+  assert.equal(s.tables.projectWorkGenerations.get(generationId).recordTables, 'split');
   const writer = workRecordWriter(s.ctx);
-  assert.equal(await workRecordTable(writer, generationId, 'planningItems'), 'projectWorkRecords');
+  assert.equal(await workRecordTable(writer, generationId, 'planningItems'), 'projectPlanningRecords');
   const moved = await workRecordLookup(writer, generationId, 'planningItems', '1');
   assert(s.tables.projectPlanningRecords.has(moved._id), 'copying lookups prefer the new table');
   await writer.db.patch(moved._id, { value: '{"updated":true}' });
-  const legacy = [...s.tables.projectWorkRecords.values()].find(row => row.key === '1');
-  assert.equal(
-    legacy.value,
-    '{"updated":true}',
-    'a concurrent new-first write reaches the still-live legacy list',
-  );
   const inserted = await writer.db.insert('projectWorkRecords', {
     generationId,
     projectId: 'project',
@@ -816,14 +816,8 @@ test('Work table migration mirrors concurrent writes, replays lost pages and ret
     position: 205,
     value: '{}',
   });
-  assert(s.tables.projectWorkRecords.has(inserted));
+  assert(s.tables.projectPlanningRecords.has(inserted));
   assert([...s.tables.projectPlanningRecords.values()].some(row => row.key === 'new'));
-  let cursor = first.nextCursor;
-  do {
-    const result = JSON.parse(await page(cursor));
-    cursor = result.nextCursor;
-  } while (cursor);
-  assert.equal(s.tables.projectWorkGenerations.get(generationId).recordTables, 'split');
   const current = workRecordWriter(s.ctx);
   assert.equal(await workRecordTable(current, generationId, 'planningItems'), 'projectPlanningRecords');
   const after = await workRecordLookup(current, generationId, 'planningItems', '1');

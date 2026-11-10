@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { assertWorkRecordDomain } from './work-record-domain-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
@@ -20,7 +21,7 @@ const encoded = rows => JSON.stringify(rows);
 /** Snapshot transactions with indexed read-range OCC (including missing keys).
  * Concurrent commits retry only when a read document/range actually changed.
  * All counters describe matched provider ranges, never the fake's JS scans. */
-export function lanesFixture() {
+export function lanesFixture({ legacyWorkRecords = false } = {}) {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
   const counts = [];
   const scheduled = [];
@@ -28,6 +29,7 @@ export function lanesFixture() {
     decorate,
     lastReadSet;
   const insert = (table, value) => {
+    assertWorkRecordDomain(table, value, legacyWorkRecords);
     const _id = `${table}-${++serial}`;
     tables[table].set(_id, insertedDocument(schema, table, value, _id, serial));
     return _id;
@@ -145,6 +147,7 @@ export function lanesFixture() {
             meter.writes++;
           },
           insert: async (table, value) => {
+            assertWorkRecordDomain(table, value, legacyWorkRecords);
             const id = `${table}-${++serial}`;
             // Real creation times are wall-clock; retention checks (Issue b78ca196) compare them with Date.now().
             // Operation receipts (expiry at 90 days) get wall-clock times, or every receipt would look

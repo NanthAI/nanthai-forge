@@ -315,6 +315,7 @@ test('planning puts in the revision-free mutation: unrelated writes never refuse
 // The before fixture leaves an unrelated writer in migration, so the measured command already owns
 // primary provenance on both sides; the difference is its migration telemetry alone.
 test('primary Work writes retire migration I/O without changing item versions or tab reads', async t => {
+  const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
   const { meterWorkIO } = await import('./hosted-read-set.mjs');
   const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
   const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
@@ -361,7 +362,7 @@ test('primary Work writes retire migration I/O without changing item versions or
     }
     project.workStoreWriters = primary ? writers : writers.filter(writer => writer !== 'note');
     costs.hostedIntent = await io.cost(() =>
-      writeHostedRecord(s.ctx, {
+      writeHostedRecord(workRecordWriter(s.ctx), {
         projectId: s.projectId,
         actor: 'owner',
         authorityEpoch: 1,

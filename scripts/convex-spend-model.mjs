@@ -19,7 +19,9 @@ export function acceptedLandings(log) {
   if (log.error || log.cachedResult || !/^mutation$/i.test(log.udfType ?? '')) return 0;
   const counts = (log.logLines ?? []).flatMap(line => {
     const text = typeof line === 'string' ? line : (line.messages ?? []).join(' ');
-    const match = /^FORGE_ACCEPTED_LANDINGS ([1-9]\d*)$/.exec(text);
+    // Provider JSONL console arguments may carry one balanced single-quote pair.
+    const message = text.startsWith("'") && text.endsWith("'") ? text.slice(1, -1) : text;
+    const match = /^FORGE_ACCEPTED_LANDINGS ([1-9]\d*)$/.exec(message);
     return match ? [Number(match[1])] : [];
   });
   return counts.length === 1 && Number.isSafeInteger(counts[0]) ? counts[0] : 0;

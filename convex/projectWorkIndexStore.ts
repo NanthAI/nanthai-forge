@@ -1,11 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import {
-  rememberRecordTables,
-  workRecordLookup,
-  workRecordTable,
-  workRecordTables,
-  recordTablesLayout,
-} from './projectWorkRecordTables';
+import { workRecordLookup, workRecordTable, workRecordTables } from './projectWorkRecordTables';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { stream } from 'convex-helpers/server/stream';
 import schema from './schema';
@@ -29,7 +23,6 @@ export const recordPartition = (generation: Doc<'projectWorkGenerations'>) =>
 
 export async function selectedGeneration(ctx: QueryCtx | MutationCtx, project: Doc<'hostedProjects'>) {
   const generation = project.work?.generationId ? await ctx.db.get(project.work.generationId) : null;
-  if (generation) rememberRecordTables(ctx, generation);
   return generation?.format === HOSTED_WORK_INDEX_FORMAT &&
     generation.status === 'ready' &&
     generation.projectId === project._id &&
@@ -94,7 +87,6 @@ export const snapshotEntries = internalQuery({
     const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner)),
       generation = await selectedGeneration(ctx, project);
     if (generation?._id !== input.generationId || project.work?.revision !== input.revision) return null;
-    const split = (await recordTablesLayout(ctx, recordPartition(generation))) === 'split';
     const bounds = {
       cursor: input.cursor,
       numItems: input.returnBatch ? 1000 : 100,
@@ -102,56 +94,43 @@ export const snapshotEntries = internalQuery({
     };
     // A source-return page is a set of keyed entries, not an ordering contract. Drain physical
     // tables in sequence and fill the same RPC page: no empty boundary RPC or merge lookahead reads.
-    const selection =
-      split && input.cursor
-        ? (JSON.parse(input.cursor) as { table: number; cursor: string | null })
-        : { table: 0, cursor: input.cursor };
+    const selection = input.cursor
+      ? (JSON.parse(input.cursor) as { table: number; cursor: string | null })
+      : { table: 0, cursor: input.cursor };
     const page: { page: Doc<(typeof workRecordTables)[number]>[]; isDone: boolean; continueCursor: string } =
       {
         page: [],
         isDone: false,
         continueCursor: '',
       };
-    if (!split)
-      Object.assign(
-        page,
-        await ctx.db
-          .query('projectWorkRecords')
-          .withIndex('by_generation_and_collection_and_position', q =>
-            q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
-          )
-          .paginate(bounds),
-      );
-    else {
-      let bytes = 0;
-      while (
-        selection.table < workRecordTables.length &&
-        page.page.length < bounds.numItems &&
-        bytes < bounds.maximumBytesRead
-      ) {
-        const part = await stream(ctx.db, schema)
-          .query(workRecordTables[selection.table]!)
-          .withIndex('by_generation_and_collection_and_position', q =>
-            q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
-          )
-          .paginate({
-            ...bounds,
-            cursor: selection.cursor,
-            numItems: bounds.numItems - page.page.length,
-            maximumBytesRead: bounds.maximumBytesRead - bytes,
-          });
-        page.page.push(...part.page);
-        bytes += part.page.reduce((n, row) => n + getDocumentSize(row), 0);
-        if (!part.isDone) {
-          selection.cursor = part.continueCursor;
-          break;
-        }
-        selection.table++;
-        selection.cursor = null;
+    let bytes = 0;
+    while (
+      selection.table < workRecordTables.length &&
+      page.page.length < bounds.numItems &&
+      bytes < bounds.maximumBytesRead
+    ) {
+      const part = await stream(ctx.db, schema)
+        .query(workRecordTables[selection.table]!)
+        .withIndex('by_generation_and_collection_and_position', q =>
+          q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
+        )
+        .paginate({
+          ...bounds,
+          cursor: selection.cursor,
+          numItems: bounds.numItems - page.page.length,
+          maximumBytesRead: bounds.maximumBytesRead - bytes,
+        });
+      page.page.push(...part.page);
+      bytes += part.page.reduce((n, row) => n + getDocumentSize(row), 0);
+      if (!part.isDone) {
+        selection.cursor = part.continueCursor;
+        break;
       }
-      page.isDone = selection.table === workRecordTables.length;
-      page.continueCursor = JSON.stringify(selection);
+      selection.table++;
+      selection.cursor = null;
     }
+    page.isDone = selection.table === workRecordTables.length;
+    page.continueCursor = JSON.stringify(selection);
     return {
       entries: page.page
         .filter(row => !row.collection.startsWith('_workStore'))

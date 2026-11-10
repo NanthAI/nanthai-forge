@@ -281,7 +281,7 @@ test('legacy indexed payload redaction spans parts without rewriting records or 
       }),
     ),
   );
-  const before = structuredClone(f.tables.projectWorkRecords);
+  const before = structuredClone(f.tables.projectWorkDataRecords);
   const memo = new Map();
   const result = await Promise.all(
     [...before.values()].map(part => hostedRecordValue(f.ctx, 'g', part, memo)),
@@ -291,7 +291,7 @@ test('legacy indexed payload redaction spans parts without rewriting records or 
   assert.equal(portable.actor, 'person');
   assert.doesNotMatch(JSON.stringify(portable), /Users|synthetic|localhost/);
   assert.equal(portable.links.hosted, 'https://forge.example/p');
-  assert.deepEqual(f.tables.projectWorkRecords, before);
+  assert.deepEqual(f.tables.projectWorkDataRecords, before);
 });
 
 test('payloads stored in many parts assemble without a nested paginated query', async () => {

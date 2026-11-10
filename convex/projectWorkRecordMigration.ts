@@ -3,7 +3,7 @@ import { v, getDocumentSize } from 'convex/values';
 import { internalMutation, internalAction } from './server';
 import { internal } from './_generated/api';
 import { projectPurgeWriter } from './projectFinishReadWriter';
-import { rememberRecordTables, splitRecordTable } from './projectWorkRecordTables';
+import { splitRecordTable } from './projectWorkRecordTables';
 import { invariant } from '../src/errors';
 import { digest } from '../src/state/hash';
 import { projectExecution } from './projectExecution';
@@ -87,8 +87,11 @@ export const page = internalMutation({
       for (const batch of receipts.page) {
         readBytes += getDocumentSize(batch);
         const plan = JSON.parse(batch.body) as { legacyIds: typeof legacyIds; legacyBytes: number };
-        for (const id of plan.legacyIds)
-          await ctx.db.delete(id as import('./_generated/dataModel').Id<'projectWorkRecords'>);
+        await Promise.all(
+          plan.legacyIds.map(id =>
+            ctx.db.delete(id as import('./_generated/dataModel').Id<'projectWorkRecords'>),
+          ),
+        );
         rows += plan.legacyIds.length;
         deletedBytes += plan.legacyBytes;
       }
@@ -169,10 +172,6 @@ export const page = internalMutation({
         result,
         ...(!input.cleanup ? { legacyIds, legacyBytes } : {}),
       }),
-    });
-    rememberRecordTables(wrapped, {
-      ...generation,
-      recordTables: input.cleanup || isDone ? 'split' : 'copying',
     });
     return JSON.stringify(result);
   },

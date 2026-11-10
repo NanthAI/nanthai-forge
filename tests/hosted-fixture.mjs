@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { fixtureWorkRecordTable, assertWorkRecordDomain } from './work-record-domain-fixture.mjs';
 const checkLogModules = Object.fromEntries(
   await Promise.all(
     [
@@ -118,7 +119,7 @@ function indexFields(table, index) {
   return [...found.fields, '_creationTime', '_id'];
 }
 
-export function state(jobs = [job()], { keysetPaging = false } = {}) {
+export function state(jobs = [job()], { keysetPaging = false, legacyWorkRecords = false } = {}) {
   const tables = {
     forgeAccounts: new Map(),
     accountHandles: new Map(),
@@ -275,6 +276,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
         }),
       },
       insert: async (table, row) => {
+        assertWorkRecordDomain(table, row, legacyWorkRecords);
         const id = `row-${count++}`;
         tables[table].set(
           id,
@@ -636,23 +638,10 @@ export function workRecordRows(tables) {
   ]);
 }
 
-/** Fixture seeds select physical placement independently of the server writer. Legacy fixtures
- * remain legacy until they explicitly acquire the split-generation marker. */
+/** Logical fixture seeds use the current physical domains independently of the server writer.
+ * Migration fixtures seed legacy physical rows directly. */
 export function setWorkRecord(tables, id, row) {
-  const split = tables.projectWorkGenerations?.get(row.generationId)?.recordTables === 'split';
-  const collection = row.collection ?? '';
-  const target = !split
-    ? 'projectWorkRecords'
-    : collection.startsWith('planningSearch')
-      ? 'projectPlanningRecords'
-      : collection.endsWith(':payload') ||
-          collection.startsWith('source') ||
-          collection === 'viewFiles' ||
-          collection.startsWith('_workStore')
-        ? 'projectWorkDataRecords'
-        : collection.startsWith('planning')
-          ? 'projectPlanningRecords'
-          : 'projectWorkRecords';
+  const target = fixtureWorkRecordTable(row.collection ?? '');
   tables[target] ??= new Map();
   tables[target].set(id, row);
 }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { fixtureWorkRecordTable } from './work-record-domain-fixture.mjs';
 import { deleteWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -101,7 +102,7 @@ function project({ verify = true, compact = true, checkCommand = command } = {})
         name: check.name,
         definition: check.definition,
       }))
-        s.insert('projectWorkRecords', { projectId, generationId, ...entry });
+        s.insert(fixtureWorkRecordTable(entry.collection), { projectId, generationId, ...entry });
   }
   return { s, projectId, newer, older };
 }
@@ -128,7 +129,12 @@ test('fromWork imports the newest verify from hosted Work with bounded reads and
   assert(meter.documents <= 40 && meter.ranges <= 20, JSON.stringify(meter));
   assert(meter.writes <= 6, `writes ${meter.writes}`);
   assert(meter.readBytes < 32 * 1024, `read bytes ${meter.readBytes}`);
-  assert.equal(meter.touched.filter(table => table === 'projectWorkRecords').length, 3);
+  assert.equal(
+    meter.touched.filter(table =>
+      ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table),
+    ).length,
+    3,
+  );
   assert.equal(s.counts.length, 1, 'one Convex function call');
   t.diagnostic(
     JSON.stringify({
@@ -193,7 +199,12 @@ test('fromWork preserves all command fields across payload chunks and reused rec
   assert.deepEqual(result.value, newer);
   const meter = s.counts.at(-1);
   assert(meter.documents <= 20 && meter.ranges <= 20, JSON.stringify(meter));
-  assert.equal(meter.touched.filter(table => table === 'projectWorkRecords').length, 2);
+  assert.equal(
+    meter.touched.filter(table =>
+      ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table),
+    ).length,
+    2,
+  );
 });
 
 for (const damage of ['missing', 'changed'])
@@ -204,7 +215,7 @@ for (const damage of ['missing', 'changed'])
     );
     if (damage === 'missing') deleteWorkRecord(s.tables, part._id);
     else
-      s.patch('projectWorkRecords', part._id, {
+      s.patch(fixtureWorkRecordTable(part.collection), part._id, {
         value: part.value.replace('"executable":"node"', '"executable":"false"'),
       });
     await assert.rejects(

@@ -347,11 +347,7 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
   };
   assert.equal(copies('projectPlanningRecords'), 17);
   assert.equal(copies('projectWorkDataRecords'), 9);
-  assert.equal(
-    copies('projectWorkRecords'),
-    19,
-    'legacy planning indexes remain only until the bounded migration finishes',
-  );
+  assert.equal(copies('projectWorkRecords'), 11, 'planning and search indexes cover only their own records');
   const groups = {
     core: { table: 'projectWorkRecords', rows: [] },
     planning: { table: 'projectPlanningRecords', rows: [] },
@@ -400,8 +396,30 @@ test('indexed Work writes ratchet per-kind index copies and the projection bytes
       group.rows.reduce((n, row) => n + bytes(row) * copies(group.table), 0),
     ]),
   );
-  assert(model.core <= 4000, JSON.stringify(model));
-  assert(model.planning <= 20000, JSON.stringify(model));
-  assert(model.data <= 300000, JSON.stringify(model));
+  assert(model.core <= 1859, JSON.stringify(model));
+  assert(model.planning <= 11526, JSON.stringify(model));
+  assert(model.data <= 205542, JSON.stringify(model));
   assert(model.data < groups.data.rows.reduce((n, row) => n + bytes(row) * 19, 0) / 2);
+});
+
+test('Work fixture inserts reject physical domain mismatches and allow explicit legacy migration seeds', async () => {
+  const { state } = await import('./hosted-fixture.mjs');
+  const { lanesFixture } = await import('./hosted-lanes-fixture.mjs');
+  const row = {
+    projectId: 'project',
+    generationId: 'generation',
+    collection: 'checks:payload',
+    key: 'part',
+    parent: 'check',
+    position: 0,
+    value: '{}',
+  };
+  await assert.rejects(state([]).ctx.db.insert('projectWorkRecords', row), /physical domain/);
+  assert.throws(() => lanesFixture().insert('projectWorkRecords', row), /physical domain/);
+  const current = state([]);
+  await current.ctx.db.insert('projectWorkDataRecords', row);
+  assert.equal(current.tables.projectWorkDataRecords.size, 1);
+  const legacy = state([], { legacyWorkRecords: true });
+  await legacy.ctx.db.insert('projectWorkRecords', row);
+  assert.equal(legacy.tables.projectWorkRecords.size, 1);
 });

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { fixtureWorkRecordTable } from './work-record-domain-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -125,7 +126,7 @@ test('owner rows match hosted parent, merge ancestry, View provenance and tree c
   const { state } = await import('./hosted-fixture.mjs');
   const hosted = state([]);
   for (const row of rows)
-    await hosted.ctx.db.insert('projectWorkRecords', {
+    await hosted.ctx.db.insert(fixtureWorkRecordTable(row.collection), {
       ...row,
       projectId: 'project',
       generationId: 'generation',

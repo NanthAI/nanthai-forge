@@ -73,7 +73,9 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
     // Flip 5 (Issue 0695ab24): never the per-project Work head either, so a journal write does not
     // re-run the workspace in every tab; only a first-row probe of a collection the counts lack.
     assert(
-      ['projectWorkRecords', 'forgeAccounts'].includes(table),
+      ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords', 'forgeAccounts'].includes(
+        table,
+      ),
       'workspace never reads history, freshness, owner reports or the Work head',
     );
     return query(table);
@@ -93,7 +95,7 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
   // Three workspace gets; the caller's own handle needs one account lookup and no project get.
   assert.equal(reads, 3);
   assert.deepEqual(tables, [
-    'projectWorkRecords',
+    'projectWorkDataRecords',
     'projectWorkRecords',
     'projectWorkRecords',
     'forgeAccounts',

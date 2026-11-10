@@ -2,7 +2,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleSource, moduleUrl } from './convex-module.mjs';
-const { rememberRecordTables } = await import(moduleUrl('../convex/projectWorkRecordTables.ts'));
 const { sourceMembership } = await import(moduleUrl('../convex/projectSourceMembership.ts'));
 
 test('cockpit history batches preserve all dogfood rows and issue no disabled reads', async t => {
@@ -129,7 +128,6 @@ test('a 100-Lane cockpit page shares indexed ancestry reads at dogfood scale', a
     },
   };
   // Production callers seed the selected generation before reading its ancestry page.
-  rememberRecordTables(ctx, { _id: 'generation', recordTables: 'split' });
   const started = performance.now();
   const included = await Promise.all(
     Array.from({ length: 100 }, (_, i) => sourceMembership(ctx, 'generation', 'main', ancestors[2400 + i])),
