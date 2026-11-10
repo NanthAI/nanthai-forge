@@ -172,6 +172,30 @@
       "reason": "Measured size plus about 10%. Needs no browser, so it is the first-paint guard that always runs with --bundle."
     },
     {
+      "id": "landing-attempts-mean",
+      "area": "landing attempts: compose and check or reuse, per landing",
+      "measuredBy": "landing-record",
+      "metric": "attempts",
+      "stat": "mean",
+      "unit": "attempts",
+      "max": 4,
+      "source": "Dogfood main 2026-11-08 to 11-10, 285 accepted landings (landings read): distinct Candidates per landing (recomposeCount + 1) averaged 2.26, its rolling 20-landing mean ranged 1.2 to 3.55 (p90 2.9). Stamped from the accepted attempt from this change on.",
+      "reason": "Every attempt is a compose and a check or reuse, the biggest per-landing cost multiplier after batching. Set just above the worst 20-landing window seen, so only a recompose or re-check loop (incident 10d253c6) breaks it. Ratchet down once 20 stamped landings show the real spread.",
+      "issue": "51bbbd00"
+    },
+    {
+      "id": "landing-writes-mean",
+      "area": "landing-state writes: landing-path mutations, per landing",
+      "measuredBy": "landing-record",
+      "metric": "writes",
+      "stat": "mean",
+      "unit": "writes",
+      "max": 40,
+      "source": "Cost guard fixture 2026-11-10: 7 writes for a solo landing, 14 when main moves once during its check (7 more per recompose). At the live 2.26 attempts per landing that is about 16; nothing stamped this number live before this change.",
+      "reason": "An upper bound, not a measured spread: about twice the worst window the attempts data implies, so it breaks on a write loop, not on noise. Ratchet down once 20 stamped landings exist.",
+      "issue": "7ecc4884"
+    },
+    {
       "id": "idle-convex-calls",
       "area": "idle cost",
       "measuredBy": "build-guard",
@@ -200,6 +224,200 @@
       "max": null,
       "source": "Not recorded: the hosted preflight reply carries no duration and no landing stamp covers it.",
       "reason": "No number is invented. Shown as unrun until a recorded value exists; the follow-up is on Issue b7851c44."
+    }
+  ],
+  "costGuard": {
+    "failPct": 15,
+    "warnPct": 5,
+    "ratchetPct": 10,
+    "scenario": "Six landings: solo, main moved during the check (recompose and re-check), and a batch of four. The client wait and observer reads, CI minutes and the GitHub mirror are not in the fixture; the live captures cover them.",
+    "actionModel": {
+      "v8": {
+        "gb": 0.0625,
+        "seconds": 2.6
+      },
+      "node": {
+        "gb": 0.5,
+        "seconds": 5
+      },
+      "source": "Capture #2 on Issue 9db58ca6 (2026-11-06): V8 small saves median 2.6 s at 64 MiB (2.1 GB-s over 13), Node source steps median 4.1-5.9 s at 512 MiB; Convex bills action memory times duration."
+    },
+    "reference": [
+      {
+        "family": "all Convex, per 1,000 accepted landings (list price, not billed)",
+        "usdPer1000": 5.92,
+        "source": "Capture #3, Issue 9db58ca6, 2026-11-07, N=10 (11.85 per acceptance event). Capture #4 (Issue 3e3f9fe6 line 1) replaces this when it reports."
+      }
+    ]
+  },
+  "costs": [
+    {
+      "id": "landing-queries",
+      "area": "Convex queries on the landing path, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "queries",
+      "unit": "calls",
+      "value": 0,
+      "floor": 0.5,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "74969509",
+      "reason": "Queries the server runs for a landing without a client read. The client wait and the finish observer are live-only (about 31 executions per landing in capture #2); slice 1 cut their bytes. An extra read per landing fails here."
+    },
+    {
+      "id": "landing-mutations",
+      "area": "Convex mutations on the landing path, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "mutations",
+      "unit": "calls",
+      "value": 27.5,
+      "floor": 0.5,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "7ecc4884",
+      "reason": "Controller wakes, driver steps, check callbacks and acceptance. Slice 2 skipped controller wakes that cannot change eligibility; one batched CI result path per run (65534f20) is the next cut."
+    },
+    {
+      "id": "landing-v8-actions",
+      "area": "Convex V8 action executions (64 MiB), per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "v8Actions",
+      "unit": "calls",
+      "value": 9.83,
+      "floor": 0.25,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "ee7ad4d8",
+      "reason": "Landing and finish drivers plus V8 source steps. Slice 3 routed eligible source work here from 512 MiB Node."
+    },
+    {
+      "id": "landing-node-actions",
+      "area": "Convex Node action executions (512 MiB), per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "nodeActions",
+      "unit": "calls",
+      "value": 0.67,
+      "floor": 0.1,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "ac5200f5",
+      "reason": "Node source steps cost eight times a V8 step per second; capture #3 found them the top function after more steps per landing. Fewer source-job steps is the decision."
+    },
+    {
+      "id": "landing-read-bytes",
+      "area": "Convex database bytes read, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "readBytes",
+      "unit": "bytes",
+      "value": 806895,
+      "floor": 2048,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "75cb5074",
+      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision."
+    },
+    {
+      "id": "landing-write-bytes",
+      "area": "Convex database bytes written, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "writeBytes",
+      "unit": "bytes",
+      "value": 248852,
+      "floor": 2048,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "9db58ca6",
+      "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages)."
+    },
+    {
+      "id": "landing-action-gb-seconds",
+      "area": "Convex action compute, modeled GB-seconds per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "actionGbSeconds",
+      "unit": "GB-s",
+      "value": 3.26,
+      "floor": 0.05,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "ac5200f5",
+      "reason": "Executions by runtime times memory times the nominal durations in costGuard.actionModel: deterministic, so it moves only with the action mix. Live GB-seconds come from the captures."
+    },
+    {
+      "id": "landing-r2-class-a",
+      "area": "R2 class A operations (PUT), per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "r2ClassA",
+      "unit": "ops",
+      "value": 3.17,
+      "floor": 0.1,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "9db58ca6",
+      "reason": "Class A costs ten times class B. Source bytes go to R2 (data placement); a recompose uploads its result once."
+    },
+    {
+      "id": "landing-r2-class-b",
+      "area": "R2 class B operations (GET, HEAD), per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "r2ClassB",
+      "unit": "ops",
+      "value": 11.67,
+      "floor": 0.25,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "ac5200f5",
+      "reason": "Object reads per landing: no per-step object re-resolve was part of the fewer-steps decision."
+    },
+    {
+      "id": "landing-r2-bytes-put",
+      "area": "R2 bytes uploaded, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "r2BytesPut",
+      "unit": "bytes",
+      "value": 1881,
+      "floor": 1024,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "9db58ca6",
+      "reason": "Stored bytes are an always-on cost; a landing writes only new objects."
+    },
+    {
+      "id": "landing-check-runs",
+      "area": "Hosted check runs, per landing",
+      "measuredBy": "landing-fixture",
+      "metric": "checkRuns",
+      "unit": "runs",
+      "value": 0.83,
+      "floor": 0.05,
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "issue": "51bbbd00",
+      "reason": "The queue throughput decision: runs per accepted landing at most 1.2 in the synthetic queue harness; check minutes follow runs. Live: 1.48 distinct runs per landing over 285 landings, 2026-11-08 to 11-10."
+    },
+    {
+      "id": "snapshot-uploads",
+      "area": "unsaved-work snapshot: R2 uploads for one changed file",
+      "measuredBy": "snapshot-fixture",
+      "metric": "snapshotUploads",
+      "unit": "uploads",
+      "value": 2,
+      "floor": 0,
+      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: a changed snapshot uploads one page and the one changed file; unchanged files are never sent.",
+      "issue": "7ac4e32f",
+      "reason": "A snapshot runs per command with changes, so it is charged per edit, not per landing. Any extra upload per snapshot fails."
+    },
+    {
+      "id": "snapshot-calls",
+      "area": "unsaved-work snapshot: Convex calls for one changed file",
+      "measuredBy": "snapshot-fixture",
+      "metric": "snapshotCalls",
+      "unit": "calls",
+      "value": 2,
+      "floor": 0,
+      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: prepare and commit; an unchanged tree costs no call.",
+      "issue": "7ac4e32f",
+      "reason": "Two calls per changed snapshot (prepare, commit) and zero when nothing changed; any extra call fails."
+    },
+    {
+      "id": "check-minutes",
+      "area": "hosted check minutes, per landing",
+      "measuredBy": "capture",
+      "metric": "checkMinutes",
+      "unit": "min",
+      "value": 12.3,
+      "floor": 0,
+      "source": "Dogfood main 2026-11-08 to 11-10: 421 distinct check runs for 285 accepted landings (1.48 per landing, landings read) times the check p50 of 8.3 min (speed budget check-p50).",
+      "issue": "51bbbd00",
+      "reason": "GitHub Actions minutes are free on the public repository (list price about $0.008 a minute); judged live by check-p50/p90 and attempts, and on change by landing-check-runs."
     }
   ]
 }

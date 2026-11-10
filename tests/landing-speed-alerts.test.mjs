@@ -191,8 +191,18 @@ test('samples come from the landed state only; missing stamps leave a metric unk
     toMain: 12,
     check: 3.5,
     settle: 210,
+    attempts: null,
+    writes: null,
     stages: { queue: 5, check: 3.5, settle: 3.5 },
   });
+  // Cost counts: the accepted attempt's ordinal from the caller, the writes from the state's version.
+  assert.deepEqual(
+    [
+      landingSpeedSample({ ...state, version: 6 }, 2).attempts,
+      landingSpeedSample({ ...state, version: 6 }).writes,
+    ],
+    [2, 7],
+  );
   const noCheck = landingSpeedSample({ ...state, timing: { ...state.timing, ciEndedAt: undefined } });
   assert.equal(noCheck.check, null);
   assert.equal(longestStage(noCheck.stages), 'queue and compose (5 min)');
@@ -250,6 +260,16 @@ test('the budget file: every budget names its source and reason, only unrecorded
     assert(b.source.length > 20 && b.reason.length > 20, `${b.id}: source and reason are stated`);
   }
   assert.equal(byId('idle-convex-calls').max, 0);
+  // The cost ledger (Issue 3e3f9fe6): each per-landing quantity names its value, source and decision.
+  const costIds = parsed.costs.map(c => c.id);
+  assert.equal(new Set(costIds).size, costIds.length);
+  for (const unit of ['calls', 'bytes', 'GB-s', 'ops', 'runs', 'uploads', 'min'])
+    assert(
+      parsed.costs.some(c => c.unit === unit),
+      `a ${unit} cost is budgeted`,
+    );
+  for (const id of ['landing-attempts-mean', 'landing-writes-mean'])
+    assert(byId(id).issue, `${id} names its decision`);
   for (const id of [
     'save',
     'preflight',
@@ -305,6 +325,60 @@ test('the metrics report shows each value against its budget: pass, fail, unrun 
   assert.equal(speedBudgetWarning(few), null);
 });
 
+test('live cost drift: a recompose loop breaks the attempts mean once and recovers; rows from before the counts have no verdict', () => {
+  const cost = (attempts, writes = attempts * 7) =>
+    Array.from({ length: WINDOW }, (_, i) => ({ attempts, writes, i }));
+  let state = null;
+  const feed = rows => {
+    const events = [];
+    for (const row of rows) {
+      const out = observeLandingSpeed(
+        state,
+        {
+          at: noon + n * minute,
+          id: `c${n++}`.padEnd(8, '0'),
+          toMain: 12,
+          check: 6,
+          settle: 8.5,
+          attempts: row.attempts,
+          writes: row.writes,
+          stages: { queue: 5, check: 6, settle: 0.1 },
+        },
+        budgets,
+      );
+      state = out.state;
+      events.push(...out.events);
+    }
+    return events;
+  };
+  // Normal dogfood: about 2.3 attempts per landing (2026-11-08 to 11-10), no verdict change.
+  assert.deepEqual(feed(cost(2)), []);
+  assert.equal(windowValue(state.samples, 'attempts', 'mean', WINDOW), 2);
+  // One starved landing (incident 10d253c6: 10 land operations) is an outlier in the mean.
+  assert.deepEqual(feed([{ attempts: 10, writes: 70 }]), []);
+  // A loop on every landing breaks attempts and writes once each, then stays quiet.
+  const broke = feed(cost(6));
+  assert.deepEqual(broke.map(e => [e.kind, e.budget.id]).sort(), [
+    ['broken', 'landing-attempts-mean'],
+    ['broken', 'landing-writes-mean'],
+  ]);
+  const attempts = broke.find(e => e.budget.id === 'landing-attempts-mean');
+  const message = speedBudgetMessage(attempts, 'forge', budgets);
+  assert.match(
+    message.text,
+    /attempts per landing mean over the last 20 landings is \S+ attempts; budget 4 attempts/,
+  );
+  assert.match(message.text, /recomposeCount and checkRunIds/);
+  assert.match(speedBudgetIssue(attempts, 'p', budgets).body, /Decision it protects: Issue 51bbbd00/);
+  assert.deepEqual(feed(cost(6)), []);
+  assert.deepEqual(
+    feed(cost(2)).map(e => e.kind),
+    ['recovered', 'recovered'],
+  );
+  // A row from before the counts (five fields) parses and has no cost verdict.
+  assert.equal(windowValue([[1, 12, 6, 'old00000', 8.5]], 'attempts', 'mean', 1), null);
+});
+
 /** Seeds today's slow landings and the baseline relative to the landing's own clock. */
 async function seededLanding(t, stallAlerts) {
   const f = await finishFixture(t);
@@ -354,6 +428,9 @@ test('a landing that breaks a budget alerts once on the stall-alert channel and 
   const stored = JSON.parse(row.value);
   assert.equal(stored.samples.length, WINDOW);
   assert.deepEqual(Object.keys(stored.broken), ['land-to-main-p90']);
+  // Live cost counts ride in the same row write: one attempt, the landing state's seven writes.
+  // (Found by its receipt id: the fixture's clock can place it before the seeded samples.)
+  assert.deepEqual(stored.samples.find(sample => sample[3].length === 36).slice(5), [1, 7]);
   // The Issue write: one scheduled action as the project owner, carrying the fixed per-budget Issue id.
   assert.equal(f.metrics.speedIssueWrites.length, 1);
   const [write] = f.metrics.speedIssueWrites;

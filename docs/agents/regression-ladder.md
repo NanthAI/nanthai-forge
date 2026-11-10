@@ -29,9 +29,11 @@ data and the break, recovery and Issue rules are in [speed budgets](speed-budget
   main-race re-checks, then the rung 2 micro-bench on the latest landing-loop change. Check minutes:
   `nforge metrics ROOT --text` for check minutes and flaky files, then compare the slowest test files with the
   previous week and the latest verify script or runner change.
-- **Not covered.** Convex calls and dollars per landing are not stamped on a landing, so rung 1
-  cannot alert on them. They stay on metric 5.8 (billed dollars per landing) in
-  `nforge metrics`, read when bills are recorded.
+- **Cost drift.** Attempts and landing-state writes per landing are stamped in the same row and judged
+  as a 20-landing mean ([cost budgets](../operations.md#cost-budgets)). Dollars, R2 operations and
+  billed usage are not stamped on a landing; they stay with the live captures and metric 5.8.
+- **Cost on change.** The landing check judges a scripted landing mix against the per-landing cost
+  ledger (`tests/landing-cost-guard.test.mjs`): a rise over 15% fails before it lands.
 
 ## Rung 2: path-triggered dry micro-bench (planned)
 

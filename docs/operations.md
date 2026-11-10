@@ -1125,6 +1125,43 @@ Forge never ends it: the deadline re-arms at 2, 4, 8 and 16 hours and then stops
 Entries waiting for review or a dependency are not ended. Settled and idle queues
 schedule no recurring wake. See [agent workflow](agents/workflow.md) for the receipt fields.
 
+## Cost budgets
+
+The per-landing cost ledger is the `costs` list in
+[`src/speed-budgets.json`](../src/speed-budgets.json), next to the speed budgets. Each entry has its
+value per accepted landing, a `floor` (the change too small to judge), its `source` and the decision
+`issue` it protects. `costGuard` holds the thresholds, the scripted scenario, the action model and the
+latest live dollars per 1,000 landings by family (`reference`, for reading only).
+
+**Reading the numbers.** Values are per accepted landing of a fixed fixture mix: one solo
+`land --save`, one whose main moves during its check (recompose on a source job, second check) and a
+batch of four. They count queries, mutations, V8 and Node action executions, database bytes read and
+written, R2 class A (PUT) and class B (GET, HEAD) requests, R2 bytes put and check runs. Action
+GB-seconds are modeled: executions by runtime times memory times the nominal durations in
+`costGuard.actionModel`. Two snapshot entries count Convex calls and R2 uploads per changed
+snapshot. The fixture has no client waits, CI minutes or GitHub mirror; dollars come from the live
+captures (Issue 9db58ca6 and its successors), never from these counts.
+
+**What the guard checks.** `tests/landing-cost-guard.test.mjs` runs the mix in the landing check
+(about 2 to 8 s) and judges every entry; `tests/hosted-lane-snapshots.test.mjs` judges the snapshot
+entries. A rise of more than 15% (and more than the floor) fails, naming the quantity, the ledger and
+measured values, the decision Issue and the two ways out. A rise of 5 to 15% warns in the check log.
+A drop of 10% or more prints a notice to lower the value, so savings ratchet in.
+
+**Updating the ledger.** Fix the change, or edit the entry in the same Lane: the new `value`, a
+`source` naming the run and date, and a `reason` for the move. Run
+`node --import ./tests/check-runtime.mjs --test tests/landing-cost-guard.test.mjs` after
+`npm run build:core`; its diagnostics print every measured value and the per-scenario counts.
+
+**Live drift alert.** Each landing's accept mutation adds its attempts (the accepted attempt's
+ordinal plus one) and its landing-state writes (the state's version plus one) to the
+`projectLandingSpeed` row it already writes. The `landing-attempts-mean` and `landing-writes-mean`
+budgets in `budgets` are judged as the mean over the last 20 landings, exactly like the speed
+budgets: one alert and one P0 Issue per break, a recovery message, nothing while it stays broken
+([speed budgets](agents/speed-budgets.md)). Idle cost is zero; a landing adds no call and two small numbers to a row it already writes (about
+0.5 KB more at 60 samples). R2 operations and billed usage are not readable inside a landing write and stay with the live
+captures.
+
 ## Local cleanup
 
 `nforge agent ROOT clean` (MCP `forge_task` action `clean`) reclaims regenerable local disk. It is a dry run unless you send `{"apply":true}`; the dry run lists candidates grouped by kind with bytes and the reason each is safe, plus totals and every skipped item with its reason. Apply recomputes the set under the owner lock and re-validates each item (pass `items` ids from a dry run to limit it; anything that changed is skipped). `kinds` filters:

@@ -52,6 +52,8 @@ export function lanesFixture() {
       let paginations = 0;
       const meter = {
         name,
+        // Query or mutation, for per-kind call counts (the landing cost guard).
+        query: !!fn.isQuery,
         retries,
         ranges: 0,
         documents: 0,

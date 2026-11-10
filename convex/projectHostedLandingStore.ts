@@ -283,7 +283,7 @@ export async function writeLanding(
       runId: row.runId,
     });
   if (state.phase === 'landed' && previous.phase !== 'landed' && state.acceptance) {
-    await recordLandingSpeed(ctx, row.projectId, state);
+    await recordLandingSpeed(ctx, row.projectId, state, attempt.number + 1);
     const project = await ctx.db.get(row.projectId);
     if (project?.needsFix)
       await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:accepted'), {

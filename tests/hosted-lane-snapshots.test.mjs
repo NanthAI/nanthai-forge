@@ -32,6 +32,8 @@ import { executeSnapshots } from '../dist/hosted-lane-snapshot-restore.js';
 import { LANE_SNAPSHOT, snapshotTarget } from '../dist/lane-snapshot-contract.js';
 import { effectivePolicy } from '../dist/autonomy-policy.js';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
+import { speedBudgets } from '../dist/speed-budgets.js';
+import { judgeCosts } from '../dist/cost-budgets.js';
 
 const snapshots = await import(moduleUrl('../convex/projectLaneSnapshots.ts'));
 const dropApi = await import(moduleUrl('../convex/projectLaneSnapshotDrop.ts'));
@@ -148,10 +150,18 @@ test('unchanged files cost no call; a changed snapshot is two calls and only cha
   writeFileSync(join(x.root, 'a.txt'), 'edit one');
   const first = await x.snap();
   assert.equal(first.status, 'saved');
-  assert.equal(first.calls, 2);
   assert.deepEqual(x.calls, ['projectLaneSnapshots:prepare', 'projectLaneSnapshots:commit']);
-  // One page plus the one changed file; the unchanged head file is never sent.
-  assert.equal(first.uploads, 2);
+  // One page plus the one changed file; the unchanged head file is never sent. Judged against the
+  // cost ledger (src/speed-budgets.json, Issue 3e3f9fe6): an extra call or upload per snapshot fails.
+  const costs = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'snapshot-fixture', {
+    snapshotCalls: first.calls,
+    snapshotUploads: first.uploads,
+  });
+  assert.equal(costs.length, 2);
+  assert.deepEqual(
+    costs.filter(c => c.status !== 'pass').map(c => c.message),
+    [],
+  );
   assert.equal(x.stored().length, 2);
   x.calls.length = 0;
   assert.deepEqual(await x.snap(), { status: 'unchanged', calls: 0 });

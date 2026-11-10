@@ -13,7 +13,7 @@ export type SpeedBudgetRow = {
   id: string;
   area: string;
   measuredBy: SpeedBudget['measuredBy'];
-  stat: 'p50' | 'p90' | null;
+  stat: 'p50' | 'p90' | 'mean' | null;
   unit: SpeedBudget['unit'];
   max: number | null;
   value: number | null;
@@ -66,13 +66,14 @@ export function speedBudgetRows(
         status: b.measuredBy === 'build-guard' ? 'guarded' : 'unrun',
         note: WHERE[b.measuredBy as keyof typeof WHERE],
       };
-    // The check-to-commit gap is stamped on the landing only; the metrics rows do not carry it.
-    if (b.metric === 'settle')
+    // The check-to-commit gap and the cost counts are stamped on the landing only; the metrics rows
+    // do not carry them.
+    if (b.metric === 'settle' || b.metric === 'attempts' || b.metric === 'writes')
       return {
         ...base,
         value: null,
         status: 'unrun',
-        note: 'judged on every landing by its accept mutation; the metrics rows do not carry the gap',
+        note: 'judged on every landing by its accept mutation; the metrics rows do not carry it',
       };
     const rows = samples(b.metric as LandingMetric);
     const value = windowValue(rows, b.metric as LandingMetric, b.stat!, budgets.window.landings);

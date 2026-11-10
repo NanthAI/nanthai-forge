@@ -19,15 +19,17 @@ import {
 } from '../src/landing-speed-alerts';
 import { speedBudgets } from '../src/speed-budgets';
 
-/** Speed budgets, judged inside the mutation that lands: one indexed read and one write of a row of
- * about 3 KB; no new Convex call. Only a budget that breaks or recovers (rare, never while it stays
- * broken) reads the project and schedules the existing stall-alert delivery plus one Issue write. */
+/** Speed and cost budgets, judged inside the mutation that lands: one indexed read and one write of a
+ * row of about 3.5 KB; no new Convex call. `attempts` is the accepted attempt's ordinal plus one, from
+ * the attempt the caller already loaded. Only a budget that breaks or recovers (rare, never while it
+ * stays broken) reads the project and schedules the existing stall-alert delivery plus one Issue write. */
 export async function recordLandingSpeed(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   state: HostedLandingState,
+  attempts: number | null = null,
 ) {
-  const sample = landingSpeedSample(state);
+  const sample = landingSpeedSample(state, attempts);
   return sample ? applyLandingSample(ctx, projectId, sample) : [];
 }
 
@@ -108,6 +110,8 @@ export const drill = internalMutation({
           toMain,
           check: 1,
           settle: 1,
+          attempts: 1,
+          writes: 7,
           stages: { queue: toMain - 2, check: 1, settle: 1 },
         })),
       );

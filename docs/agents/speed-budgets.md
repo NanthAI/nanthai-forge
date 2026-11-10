@@ -15,11 +15,12 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Web eager JavaScript (gzip) | `perf-harness --bundle` | 246 KB; budget 270 KB |
 | Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |
 | Idle Convex calls | the build (`check-idle-queries`, landing tests) | 0; budget 0 |
+| Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts about 2.3 (distinct Candidates over 285 landings, 2026-11-08 to 11-10; worst 20-landing window 3.55); writes 7 solo, 14 after one recompose on the fixture; budget 4 / 40 |
 | Save, preflight | nothing records them yet | unrun; see below |
 
 ## How a budget breaks
 
-A landing-judged budget is the statistic over the **last 20 landings** that know the value, so one outlier
+A landing-judged budget is the statistic (p50, p90, or the mean for cost counts) over the **last 20 landings** that know the value, so one outlier
 never breaks it (the p90 of 20 is the second slowest). A project with fewer than 20 landings has no verdict.
 The accept mutation of each landing appends its own stamps (`timing`, already on the landed state) to the one
 `projectLandingSpeed` row, judges every budget, and compares with the row's `broken` map:
