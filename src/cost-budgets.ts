@@ -40,6 +40,7 @@ export const costBudgetSchema = z
      * live number for reading, judged nowhere (no deterministic measure exists). */
     measuredBy: z.enum([
       'landing-fixture',
+      'driver-fixture',
       'snapshot-fixture',
       'planning-fixture',
       'trial-merge-fixture',

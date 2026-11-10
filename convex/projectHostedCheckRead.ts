@@ -6,7 +6,7 @@ import type { Id } from './_generated/dataModel';
 import { accessibleProject } from './projectAuthority';
 import { requireMacMachine } from './projectHostedCheckMachines';
 import { effectivePolicy } from '../src/autonomy-policy';
-import { checkPin } from '../src/hosted-check';
+import { checkPin, type HostedCheckRun } from '../src/hosted-check';
 import { recordHead, hostedWriteProject } from './projectHostedRecords';
 import { checkSetting, loadHostedCheck, type CheckIdentity } from './projectHostedCheckStore';
 import { summarizeCheckRun } from '../src/hosted-check-summary';
@@ -120,9 +120,16 @@ export async function requireHostedCheckEvidence(
     environment: string;
     authorityEpoch: number;
   },
+  // A canonical run already loaded in this transaction; authority and current settings still recheck.
+  loadedRun?: HostedCheckRun,
 ) {
   const project = await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
-  const { run } = await loadHostedCheck(ctx, input);
+  const run = loadedRun ?? (await loadHostedCheck(ctx, input)).run;
+  invariant(
+    run.id === input.runId && run.projectId === input.projectId,
+    'EVIDENCE_CHANGED',
+    'Hosted run identity differs from its record.',
+  );
   await hostedWriteProject(ctx, input.projectId, run.actor, input.authorityEpoch);
   const check = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
   const runner = await checkSetting(ctx, input.projectId, 'runner', 'runner');

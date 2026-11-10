@@ -249,3 +249,46 @@ test('live R2 stamp: a recomposed landing carries the requests its compose signe
     'batch members have no compose of their own',
   );
 });
+
+// Dogfood-sized control path: 1,000 retained test reports, ten completed shards. The runner
+// callbacks finish before we enlarge the retained row, so this isolates the landing drivers.
+async function dogfoodDriverCosts(t) {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  const reports = Object.fromEntries(
+    Array.from({ length: 1000 }, (_, i) => [
+      `tests/hosted-${String(i).padStart(4, '0')}-${'synthetic-path-'.repeat(10)}.test.mjs`,
+      { durationMs: 1234.567, failed: false, attempts: [{ durationMs: 1234.567, failed: false }] },
+    ]),
+  );
+  let runBytes = 0;
+  for (const row of f.tables.projectHostedCheckRuns.values()) {
+    const run = JSON.parse(row.value);
+    run.contractReports = reports;
+    run.plan.shardCount = 10;
+    run.counts = { completed: 10, passed: 10, failed: 0 };
+    const value = JSON.stringify(run);
+    runBytes = Buffer.byteLength(value);
+    f.patch('projectHostedCheckRuns', row._id, { value });
+  }
+  const from = f.counts.length;
+  await f.drain();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const calls = f.counts.slice(from).filter(c => c.name === 'finishLandingAdvance');
+  const readBytes = calls.reduce((n, c) => n + c.readBytes, 0);
+  t.diagnostic(
+    JSON.stringify({ runBytes, calls: calls.length, readBytes, tables: calls.map(c => c.readBytesByTable) }),
+  );
+  return { runBytes, calls: calls.length, readBytes };
+}
+
+test('dogfood landing drivers retain exact acceptance with 1,000 reports and ten shards', async t => {
+  const measured = await dogfoodDriverCosts(t);
+  assert(measured.runBytes >= 250_000 && measured.runBytes < 350_000);
+  assert.equal(measured.calls, 1, 'one advance for the passed run, no added RPC');
+  const budget = costs.find(c => c.metric === 'landingAdvanceReadBytes');
+  assert(budget, 'the dogfood per-function read budget is recorded');
+  assert.notEqual(judgeCost(budget, measured.readBytes, costGuard).status, 'fail');
+});

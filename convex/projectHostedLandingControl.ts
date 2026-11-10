@@ -266,18 +266,22 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
               : `The original exact check settled as ${run.status}. ${await describeCheckFailure(ctx, claim.projectId, run)} ${CHECK_FAILED_NEXT}`,
         };
       } else {
-        await requireHostedCheckEvidence(ctx, {
-          projectId: claim.projectId,
-          runId: check.runId,
-          actor: attempt.actor.id,
-          candidateId: attempt.crossHeadProof?.checked.id ?? attempt.candidate.id,
-          head: attempt.crossHeadProof?.checked.head ?? attempt.candidate.head,
-          checkId: check.checkId,
-          definition: check.definition,
-          configuration: check.configuration,
-          environment: check.environment,
-          authorityEpoch: attempt.authorityEpoch,
-        });
+        await requireHostedCheckEvidence(
+          ctx,
+          {
+            projectId: claim.projectId,
+            runId: check.runId,
+            actor: attempt.actor.id,
+            candidateId: attempt.crossHeadProof?.checked.id ?? attempt.candidate.id,
+            head: attempt.crossHeadProof?.checked.head ?? attempt.candidate.head,
+            checkId: check.checkId,
+            definition: check.definition,
+            configuration: check.configuration,
+            environment: check.environment,
+            authorityEpoch: attempt.authorityEpoch,
+          },
+          run,
+        );
       }
     }
   } catch (cause) {

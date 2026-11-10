@@ -1159,6 +1159,11 @@ entries. A rise of more than 15% (and more than the floor) fails, naming the qua
 measured values, the decision Issue and the two ways out. A rise of 5 to 15% warns in the check log.
 A drop of 10% or more prints a notice to lower the value, so savings ratchet in.
 
+The same landing-cost guard also meters `driver-fixture` entries on a solo landing with 1,000
+retained test reports and ten completed shards (about a 274 KB check-run value). These per-function
+read-byte entries cover the driver path separately from the small six-landing mix; they are
+synthetic row-I/O observations, not measured bills or latency claims.
+
 **Updating the ledger.** Fix the change, or edit the entry in the same Lane: the new `value`, a
 `source` naming the run and date, and a `reason` for the move. Run
 `node --import ./tests/check-runtime.mjs --test tests/landing-cost-guard.test.mjs` after

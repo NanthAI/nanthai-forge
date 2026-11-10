@@ -656,6 +656,18 @@
       "source": "tests/hosted-trial-merge.test.mjs: a 40-path disjoint peer reads zero full overlap rows; legacy rows without the optional filter stay conservative, and an omitted shared path still gets the same trial merge. Synthetic DB bytes are metered, not billed usage.",
       "issue": "427a12b0",
       "reason": "Replaces unconditional full-row reads for truncated peers with a 512-character all-path filter. At the capture #4 mix (60,000 old peer bytes/save, 1.6 head moves/landing), 1,000 landings avoid 96 MB of peer rows before false positives and rollout. At a full 51-row presence window the added field costs at most about 27 KB/save, leaving about 53 MB net read savings/1,000 landings; shared peers, false positives, writes and other presence reads reduce the net. Calls unchanged; idle zero."
+    },
+    {
+      "id": "landing-driver-advance-read-bytes",
+      "area": "Landing driver advance at 1,000 test files / 10 shards",
+      "measuredBy": "driver-fixture",
+      "metric": "landingAdvanceReadBytes",
+      "unit": "bytes",
+      "value": 320300,
+      "floor": 1024,
+      "source": "Dogfood landing fixture: one solo passed landing, 1,000 synthetic retained reports and ten shards; 274 KB run value. Before 606,839 B, one duplicate 286,568 B row read removed.",
+      "issue": "3e3f9fe6",
+      "reason": "Reuses the canonical run already read in the same transaction; keeps current authority, configuration and exact evidence checks. No extra calls or tables."
     }
   ]
 }

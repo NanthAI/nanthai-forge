@@ -435,3 +435,39 @@ test('one failed shard reports all four failed files and keeps flaky files separ
   assert.equal(result.testFiles.flaky[0].report.attempts.length, 2);
   assert.deepEqual(result.contractReports, contractReports);
 });
+
+test('same-transaction run reuse still rejects mismatched identity, changed definition and revoked authority', async () => {
+  const s = await checksFixture();
+  const run = await s.pass(await s.activate((await s.enqueue(s.selection())).id));
+  const pins = {
+    projectId: s.projectId,
+    runId: run.id,
+    actor: 'owner',
+    candidateId: run.request.candidateId,
+    head: run.request.expectedHead,
+    checkId: run.check.id,
+    definition: run.check.definition,
+    configuration: run.request.expectedConfiguration,
+    environment: run.request.expectedEnvironment,
+    authorityEpoch: 1,
+  };
+  const store = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
+  const evidence = (change = {}) =>
+    s.run(
+      'loadedEvidence',
+      async ctx => {
+        const loaded = (await store.loadHostedCheck(ctx, pins)).run;
+        return read.requireHostedCheckEvidence(ctx, { ...pins, ...change }, loaded);
+      },
+      {},
+    );
+  assert.equal((await evidence()).id, run.id);
+  assert.equal(s.counts.at(-1).readDocumentsByTable.projectHostedCheckRuns, 1);
+  await assert.rejects(evidence({ runId: randomUUID() }), code('EVIDENCE_CHANGED'));
+  await assert.rejects(evidence({ authorityEpoch: 2 }), code('SOURCE_AUTHORITY_CHANGED'));
+  await s.configure(
+    { kind: 'definition', checkId: s.checkId, command: { ...command, args: ['changed.mjs'] } },
+    s.definition.digest,
+  );
+  await assert.rejects(evidence(), code('EVIDENCE_CHANGED'));
+});
