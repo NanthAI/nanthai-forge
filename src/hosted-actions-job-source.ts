@@ -38,7 +38,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       phases[phase] = (phases[phase] ?? 0) + performance.now() - start;
     }
   };
-  const connection = client.transport(),
+  const connection = client.transport(cache),
     { transport, resolve, resolveWindow, prepareRecipes } = connection;
   let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
   // A scoped recheck also needs the checked base inventory; a cohort recheck each member basis's
@@ -130,6 +130,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
       );
       // Discard every extracted cache byte. A failed pack must not supply W2 bytes.
       await rm(cache, { recursive: true, force: true });
+      connection.resetCache();
       await mkdir(cache, { recursive: true });
       reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
     } finally {
@@ -238,6 +239,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     reason = 'pack tree verification failed';
     selected = state.files;
     await rm(cache, { recursive: true, force: true });
+    connection.resetCache();
     await mkdir(cache, { recursive: true });
     reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
     await materialize();

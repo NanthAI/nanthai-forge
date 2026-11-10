@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, createPublicKey, verify, sign, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, createPublicKey, verify, sign, randomUUID, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
@@ -965,6 +965,199 @@ test('source metadata batches yield before read exhaustion and retain session an
     code('SOURCE_UNAVAILABLE'),
   );
   await assert.rejects(s.call(source, 'resolve', { ...input, digests: ['invalid'] }), code('BAD_ARGUMENT'));
+});
+
+test('Actions recipe closures use the parent binding without leaf metadata reads and retain current fencing', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  await s.call(sessions, 'session', s.input());
+  const a = s.put('left'),
+    b = s.put('right'),
+    object = s.put('leftrightleft');
+  const recipe = s.put('synthetic recipe pin');
+  const row = [...s.tables.projectObjects.values()].find(row => row.digest === object.sha256);
+  s.patch('projectObjects', row._id, {
+    location: undefined,
+    r2Key: undefined,
+    r2Committed: undefined,
+    recipe: { digest: recipe.sha256, size: recipe.size },
+    recipeClosure: [a, b, a],
+  });
+  const input = { ...s.input(), batch: true, digests: [object.sha256] };
+  const before = await s.call(source, 'resolve', input);
+  assert.equal(before[0].closure, undefined, 'old clients retain their recipe traversal');
+  const baseline = s.counts.length;
+  const [signed] = await s.call(source, 'resolve', { ...input, closures: true });
+  assert.deepEqual(signed.descriptor, { object, recipe });
+  assert.equal(signed.url, null);
+  assert.deepEqual(
+    signed.closure.map(({ digest, size }) => ({ sha256: digest, size })),
+    [a, b, a],
+  );
+  assert.equal(signed.closure[0].url, signed.closure[2].url, 'duplicate leaves share a grant');
+  assert(signed.closure.every(leaf => leaf.url.includes(`/${leaf.digest}?`)));
+  const meter = s.counts[baseline];
+  assert.equal(meter.readDocumentsByTable.projectObjects, 1, 'no per-leaf metadata reads');
+  assert.equal(meter.readBytes, s.counts[baseline - 1].readBytes, 'same parent and session DB bytes');
+  assert.equal(meter.writes, 0);
+  await assert.rejects(
+    s.call(source, 'resolve', { ...input, closures: true, fence: 99 }),
+    code('WORK_STALE'),
+  );
+  s.patch('projectObjects', row._id, { removed: true });
+  await assert.rejects(s.call(source, 'resolve', { ...input, closures: true }), code('SOURCE_UNAVAILABLE'));
+});
+
+test('Actions signed recipe leaves yield a bounded prefix before the response value budget is exhausted', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const leaf = s.put('a'),
+    object = s.put('a'.repeat(100)),
+    recipe = s.put('synthetic recipe');
+  const row = [...s.tables.projectObjects.values()].find(row => row.digest === object.sha256);
+  s.patch('projectObjects', row._id, {
+    recipe: { digest: recipe.sha256, size: recipe.size },
+    location: undefined,
+    r2Key: undefined,
+    r2Committed: undefined,
+    recipeClosure: Array.from({ length: 100 }, () => leaf),
+  });
+  const rows = await s.call(source, 'resolve', {
+    ...s.input(),
+    batch: true,
+    closures: true,
+    digests: Array.from({ length: 100 }, () => object.sha256),
+  });
+  assert(rows.length > 0 && rows.length < 100, 'a prefix continues the same object list');
+  assert(Buffer.byteLength(JSON.stringify(rows)) <= 4 * 1024 * 1024);
+  assert(rows.every(row => row.closure.length === 100));
+});
+
+test('CI raw descriptor DB byte ratchet at 6k and 29k includes State and current-session reads (298f9675)', async t => {
+  for (const files of [6000, 29000]) {
+    const s = await fixture(t);
+    await s.bind();
+    await s.call(sessions, 'session', s.input());
+    const pin = s.put('byte-accounting template');
+    const template = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+    // An indexed immutable source population: use exact full documents with O(1)
+    // point lookup rather than the transaction fixture's O(files²) JS scans.
+    // Session, State, schema and transaction metrics still use the normal fixture.
+    const objects = new Map(
+      Array.from({ length: files }, (_, index) => {
+        const digest = createHash('sha256').update(`synthetic source ${index}`).digest('hex');
+        return [
+          digest,
+          {
+            ...template,
+            _id: `projectObjects-${index + 1000}`,
+            _creationTime: index + 1000,
+            digest,
+            size: Buffer.byteLength(`synthetic source ${index}`),
+            r2Key: `synthetic/${digest}`,
+          },
+        ];
+      }),
+    );
+    let objectBytes = 0,
+      objectReads = 0;
+    s.decorateContext(ctx => {
+      const query = ctx.db.query.bind(ctx.db),
+        metrics = ctx.meta.getTransactionMetrics.bind(ctx.meta);
+      let localBytes = 0,
+        localReads = 0;
+      ctx.db.query = table => {
+        if (table !== 'projectObjects') return query(table);
+        return {
+          withIndex: (name, build) => {
+            const bounds = {},
+              q = { eq: (field, value) => ((bounds[field] = value), q) };
+            build(q);
+            const row = objects.get(bounds.digest);
+            if (!row) return query(table).withIndex(name, build);
+            assert.equal(name, 'by_project_and_digest');
+            assert.equal(bounds.projectId, s.projectId);
+            return {
+              unique: async () => {
+                const bytes = Buffer.byteLength(JSON.stringify(row));
+                objectBytes += bytes;
+                objectReads++;
+                localBytes += bytes;
+                localReads++;
+                return structuredClone(row);
+              },
+            };
+          },
+        };
+      };
+      ctx.meta.getTransactionMetrics = async () => {
+        const value = await metrics();
+        value.bytesRead.remaining -= localBytes;
+        value.databaseQueries.remaining -= localReads;
+        return value;
+      };
+    });
+    const heads = ['base', 'candidate'].map(
+      message =>
+        s.put(
+          JSON.stringify({
+            schema: 1,
+            kind: 'forge-source-state',
+            parents: [],
+            files: [],
+            at: '2026-01-01T00:00:00.000Z',
+            message,
+          }),
+        ).sha256,
+    );
+    const digests = [...objects.keys()].sort();
+    const measure = async closures => {
+      const baseline = s.counts.length,
+        bytes = objectBytes,
+        reads = objectReads;
+      await s.call(source, 'resolve', {
+        ...s.input(),
+        batch: true,
+        digests: heads,
+        ...(closures ? { closures: true } : {}),
+      });
+      let calls = 1;
+      for (let at = 0; at < digests.length;) {
+        const rows = await s.call(source, 'resolve', {
+          ...s.input(),
+          batch: true,
+          digests: digests.slice(at, at + 3200),
+          ...(closures ? { closures: true } : {}),
+        });
+        assert(rows.length > 0);
+        at += rows.length;
+        calls++;
+      }
+      const meters = s.counts.slice(baseline);
+      assert(meters.every(m => m.writes === 0));
+      const byTable = meters.reduce((out, m) => {
+        for (const [table, bytes] of Object.entries(m.readBytesByTable))
+          out[table] = (out[table] ?? 0) + bytes;
+        return out;
+      }, {});
+      byTable.projectObjects = (byTable.projectObjects ?? 0) + objectBytes - bytes;
+      return {
+        calls,
+        bytes: Object.values(byTable).reduce((a, b) => a + b, 0),
+        objectReads: objectReads - reads,
+        byTable,
+      };
+    };
+    const scheduled = s.scheduled.length,
+      before = await measure(false),
+      after = await measure(true);
+    assert.equal(after.calls, files === 6000 ? 3 : 11);
+    assert.equal(after.objectReads, files, 'one full metadata document per raw blob remains the byte floor');
+    assert.deepEqual(after, before, 'closure negotiation adds no raw-object DB reads');
+    assert(after.bytes <= (files === 6000 ? 2_120_000 : 10_300_000), `${files}: ${after.bytes} DB bytes`);
+    assert.equal(s.scheduled.length, scheduled, 'zero idle/background work');
+    t.diagnostic(JSON.stringify({ rawDescriptorBytes: { files, before, after } }));
+  }
 });
 
 test('bounded source windows at doubled dogfood scale stay O(pages); idle schedules zero', async t => {

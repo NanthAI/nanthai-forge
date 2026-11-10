@@ -61,7 +61,8 @@ function fixture(
   const directory = mkdtempSync(join(tmpdir(), 'forge-direct-job-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
   const objects = new Map(),
-    recipes = new Map();
+    recipes = new Map(),
+    closures = new Map();
   const put = text => {
     const bytes = Buffer.from(text),
       pin = { sha256: digest(bytes), size: bytes.length };
@@ -236,6 +237,7 @@ function fixture(
             recipe: recipes.get(sha256) ?? null,
           },
           url: recipes.has(sha256) ? null : `https://objects.invalid/${sha256}`,
+          ...(command.closures && closures.has(sha256) ? { closure: closures.get(sha256) } : {}),
         })),
       );
     }
@@ -272,6 +274,7 @@ function fixture(
     directory,
     objects,
     recipes,
+    closures,
     put,
     entry,
     state,
@@ -1478,6 +1481,150 @@ test('recipe-backed source batches metadata and leaf descriptors instead of call
   await reader.resolveMany(logical.map(pin => pin.sha256));
   assert.equal(s.calls.filter(call => call.kind === 'source').length, 4);
   assert.equal(readFileSync(join(cache, logical[99].sha256), 'utf8'), 'left-99right-99');
+});
+
+test('Actions State recipe closures remove tree lookups while preserving the verified Candidate and storage GETs', async t => {
+  const measurements = [];
+  for (const closure of [false, true]) {
+    const s = fixture(t);
+    for (const id of [s.run.request.expectedHead, s.run.candidate.base.head]) {
+      const bytes = s.objects.get(id),
+        at = Math.floor(bytes.length / 2);
+      const leaves = [s.put(bytes.subarray(0, at)), s.put(bytes.subarray(at))];
+      const tree = s.put(
+        JSON.stringify({
+          kind: 'forge-byte-tree',
+          schema: 1,
+          children: leaves.map(leaf => ({ ...leaf, height: 0, length: leaf.size })),
+        }),
+      );
+      s.recipes.set(
+        id,
+        s.put(
+          JSON.stringify({
+            kind: 'forge-object-recipe',
+            schema: 1,
+            object: { sha256: id, size: bytes.length },
+            tree: { ...tree, height: 1, length: bytes.length },
+          }),
+        ),
+      );
+      if (closure)
+        s.closures.set(
+          id,
+          leaves.map(leaf => ({
+            digest: leaf.sha256,
+            size: leaf.size,
+            url: `https://objects.invalid/${leaf.sha256}`,
+          })),
+        );
+    }
+    await s.client.session(true);
+    const directory = join(s.directory, 'closure-candidate'),
+      cache = join(s.directory, 'closure-cache');
+    mkdirSync(cache);
+    await materializeActionsSource(s.client, directory, cache);
+    assert.equal(readFileSync(join(directory, 'README.md'), 'utf8'), 'synthetic after');
+    measurements.push({
+      calls: s.calls.filter(call => call.kind === 'source').length,
+      gets: s.traffic.downloads,
+    });
+  }
+  assert.equal(measurements[1].calls, 2, 'States and files use their original two descriptor windows');
+  assert.equal(measurements[0].calls, 5, 'legacy recipes retain the tree traversal');
+  assert.equal(
+    measurements[1].gets,
+    measurements[0].gets - 8,
+    'neither preparation nor the disk reader fetches recipe/tree metadata',
+  );
+});
+
+for (const failure of ['leaf hash', 'whole hash', 'size', 'missing'])
+  test(`Actions recipe closure refuses ${failure} before publishing bytes`, async t => {
+    const s = fixture(t),
+      a = s.put('left'),
+      b = s.put('right'),
+      object = s.put('leftrightleft');
+    s.recipes.set(object.sha256, s.put('unused recipe'));
+    const leaves = [a, b, a].map(leaf => ({
+      digest: leaf.sha256,
+      size: leaf.size,
+      url: `https://objects.invalid/${leaf.sha256}`,
+    }));
+    if (failure === 'leaf hash') s.objects.set(a.sha256, Buffer.from('LEFT'));
+    if (failure === 'whole hash') leaves.reverse();
+    if (failure === 'size') leaves[0].size++;
+    if (failure === 'missing')
+      for (const leaf of leaves) if (leaf.digest === a.sha256) leaf.url = 'https://objects.invalid/missing';
+    s.closures.set(object.sha256, leaves);
+    await s.client.session();
+    const cache = join(s.directory, 'closure-failure-cache');
+    mkdirSync(cache);
+    const { transport, prepareRecipes } = s.client.transport(cache);
+    const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+    const reader = new SourceWorkerReader(cache, transport);
+    // Reversing [a,b,a] is identical: use a same-size wrong ordering for the full-object guard.
+    if (failure === 'whole hash') [leaves[0], leaves[1]] = [leaves[1], leaves[0]];
+    await assert.rejects(
+      async () => {
+        await prepareRecipes([object.sha256]);
+        await reader.resolve(object.sha256);
+      },
+      error => ['SOURCE_HASH_MISMATCH', 'SOURCE_UNAVAILABLE'].includes(error.code),
+    );
+    assert.equal(existsSync(join(cache, object.sha256)), false);
+  });
+
+test('Actions recipe closure downloads duplicate leaves once with bounded streamed chunks', async t => {
+  const s = fixture(t),
+    leaf = s.put(Buffer.alloc(128 * 1024, 'x'));
+  const object = s.put(Buffer.alloc(3 * leaf.size, 'x'));
+  s.recipes.set(object.sha256, s.put('unused recipe'));
+  s.closures.set(
+    object.sha256,
+    Array.from({ length: 3 }, () => ({
+      digest: leaf.sha256,
+      size: leaf.size,
+      url: `https://objects.invalid/${leaf.sha256}`,
+    })),
+  );
+  await s.client.session();
+  const cache = join(s.directory, 'closure-duplicate-cache');
+  mkdirSync(cache);
+  const connection = s.client.transport(cache),
+    { transport, prepareRecipes } = connection;
+  const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  const reader = new SourceWorkerReader(cache, transport);
+  await prepareRecipes([object.sha256]);
+  await reader.resolve(object.sha256);
+  assert.equal(s.traffic.downloads, 1);
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 1);
+  assert(reader.metrics.maxChunkBytes <= 64 * 1024);
+  assert.equal(readFileSync(join(cache, object.sha256)).length, object.size);
+  rmSync(cache, { recursive: true });
+  mkdirSync(cache);
+  connection.resetCache();
+  await new SourceWorkerReader(cache, transport).resolve(object.sha256);
+  assert.equal(s.traffic.downloads, 2, 'a discarded pack cache never leaves stale leaf-file entries');
+  assert.equal(s.calls.filter(call => call.kind === 'source').length, 1);
+});
+
+test('a one-leaf Actions recipe reads the signed raw representation even when logical and leaf hashes match', async t => {
+  const s = fixture(t),
+    object = s.put('one raw leaf');
+  s.recipes.set(object.sha256, s.put('unused recipe'));
+  s.closures.set(object.sha256, [
+    { digest: object.sha256, size: object.size, url: `https://objects.invalid/${object.sha256}` },
+  ]);
+  await s.client.session();
+  const cache = join(s.directory, 'one-leaf-cache');
+  mkdirSync(cache);
+  const { transport, prepareRecipes } = s.client.transport(cache);
+  const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
+  await prepareRecipes([object.sha256]);
+  await new SourceWorkerReader(cache, transport).resolve(object.sha256);
+  assert.equal(readFileSync(join(cache, object.sha256), 'utf8'), 'one raw leaf');
+  assert.equal(s.traffic.downloads, 1);
 });
 
 for (const flaky of [false, true])

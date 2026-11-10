@@ -24,6 +24,10 @@ import {
   actionsDeliveryPolicy,
 } from './hosted-actions-retry.js';
 import { parseTimingHistory, timingDurations } from '../scripts/test-shards.mjs';
+import { createReadStream } from 'node:fs';
+import { SourceWorkerReader } from './hosted-source-worker-reader.js';
+import type { SignedDownload } from './blob-download-format.js';
+import { actionsSourceClosureCapability } from './hosted-actions-capabilities.js';
 /** The Actions job tokens the supervisor's environment holds: OIDC requests and the cache/artifact service. */
 export const runnerTokenNames = ['ACTIONS_ID_TOKEN_REQUEST_TOKEN', 'ACTIONS_RUNTIME_TOKEN'] as const;
 export class ActionsJobClient {
@@ -245,7 +249,7 @@ export class ActionsJobClient {
   get sourceWindow() {
     return this.capabilities.includes(actionsSourceBatchCapability) ? directSourceBatch : directSourceWindow;
   }
-  transport() {
+  transport(cache?: string) {
     const rows = new Map<
       string,
       {
@@ -255,8 +259,10 @@ export class ActionsJobClient {
         };
         url: string | null;
         range?: PackRange;
+        closure?: SignedDownload[];
       }
     >();
+    const signedLeaves = new Map<string, NonNullable<ReturnType<typeof rows.get>>>();
     const pending = new Map<string, Promise<void>>();
     const resolve = async (digests: string[], oneWindow = false): Promise<number> => {
       const unique = [...new Set(digests)],
@@ -270,6 +276,9 @@ export class ActionsJobClient {
             kind: 'source',
             digests: page,
             ...(batch ? { batch: true } : {}),
+            ...(batch && cache && this.capabilities.includes(actionsSourceClosureCapability)
+              ? { closures: true }
+              : {}),
           })) as (typeof rows extends Map<string, infer T> ? T : never)[];
           invariant(
             found.length > 0 && (batch ? found.length <= page.length : found.length === page.length),
@@ -283,6 +292,38 @@ export class ActionsJobClient {
               'Source descriptor changed.',
             );
             rows.set(page[index]!, row);
+            if (row.closure && cache) {
+              invariant(
+                row.descriptor.recipe &&
+                  row.closure.length > 0 &&
+                  row.closure.length <= 100 &&
+                  row.closure.every(
+                    leaf =>
+                      /^[a-f0-9]{64}$/.test(leaf.digest) &&
+                      Number.isSafeInteger(leaf.size) &&
+                      leaf.size >= 0 &&
+                      leaf.size <= 1024 * 1024,
+                  ) &&
+                  row.closure.reduce((n, leaf) => n + leaf.size, 0) === row.descriptor.object.size,
+                'SOURCE_HASH_MISMATCH',
+                'Recipe closure differs from its logical content.',
+              );
+              for (const leaf of row.closure) {
+                const prior = rows.get(leaf.digest);
+                invariant(
+                  !prior || prior.descriptor.object.size === leaf.size,
+                  'SOURCE_HASH_MISMATCH',
+                  'Recipe leaf size changed.',
+                );
+                const signed = {
+                  descriptor: { object: { sha256: leaf.digest, size: leaf.size }, recipe: null },
+                  url: leaf.url,
+                  ...(leaf.range ? { range: leaf.range } : {}),
+                };
+                signedLeaves.set(leaf.digest, signed);
+                if (!prior) rows.set(leaf.digest, signed);
+              }
+            }
           });
           start += found.length;
           if (oneWindow) break;
@@ -301,49 +342,87 @@ export class ActionsJobClient {
       if (!oneWindow && missingAt >= 0) return resolve(unique);
       return missingAt < 0 ? unique.length : missingAt;
     };
+    const readRaw = async (
+      pin: { sha256: string; size: number },
+      row: NonNullable<ReturnType<typeof rows.get>>,
+    ): Promise<AsyncIterable<Uint8Array>> => {
+      invariant(
+        row.url && row.descriptor.object.size === pin.size,
+        'SOURCE_UNAVAILABLE',
+        'Exact raw source location is unavailable.',
+      );
+      const stream = new TransformStream<Uint8Array, Uint8Array>();
+      const writer = stream.writable.getWriter();
+      let offset = 0;
+      void retryActionsInfrastructure(async signal => {
+        if (offset === pin.size && offset > 0) return;
+        const range = offset
+          ? { offset: (row.range?.offset ?? 0) + offset, total: row.range?.total ?? pin.size }
+          : row.range;
+        const response = await actionsInfrastructureResponse(
+          await this.request(row.url!, {
+            headers: packHeaders(range, pin.size - offset),
+            signal,
+            redirect: 'error',
+          }),
+        );
+        invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Source download failed.');
+        verifyPackRange(response, range, pin.size - offset);
+        for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+          invariant(offset + chunk.length <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its pin.');
+          await writer.write(chunk);
+          offset += chunk.length;
+        }
+        invariant(offset === pin.size, 'SOURCE_HASH_MISMATCH', 'Source download is incomplete.');
+      })
+        .then(
+          () => writer.close(),
+          error => writer.abort(error),
+        )
+        .catch(() => {});
+      return stream.readable as unknown as AsyncIterable<Uint8Array>;
+    };
+    let leaves: SourceWorkerReader | undefined;
     const transport: SourceWorkerTransport = {
       describeBatch: async digests => {
         await resolve(digests);
-        return digests.map(id => rows.get(id)!.descriptor);
+        return digests.map(id => {
+          const row = rows.get(id)!;
+          return cache && row.closure ? { object: row.descriptor.object, recipe: null } : row.descriptor;
+        });
       },
       read: async pin => {
         await resolve([pin.sha256]);
         const row = rows.get(pin.sha256)!;
-        invariant(
-          row.url && row.descriptor.object.size === pin.size,
-          'SOURCE_UNAVAILABLE',
-          'Exact raw source location is unavailable.',
-        );
-        const stream = new TransformStream<Uint8Array, Uint8Array>();
-        const writer = stream.writable.getWriter();
-        let offset = 0;
-        void retryActionsInfrastructure(async signal => {
-          if (offset === pin.size && offset > 0) return;
-          const range = offset
-            ? { offset: (row.range?.offset ?? 0) + offset, total: row.range?.total ?? pin.size }
-            : row.range;
-          const response = await actionsInfrastructureResponse(
-            await this.request(row.url!, {
-              headers: packHeaders(range, pin.size - offset),
-              signal,
-              redirect: 'error',
-            }),
+        if (cache && row.closure) {
+          invariant(
+            row.descriptor.object.size === pin.size,
+            'SOURCE_HASH_MISMATCH',
+            'Recipe object size changed.',
           );
-          invariant(response.ok && response.body, 'SOURCE_UNAVAILABLE', 'Source download failed.');
-          verifyPackRange(response, range, pin.size - offset);
-          for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
-            invariant(offset + chunk.length <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its pin.');
-            await writer.write(chunk);
-            offset += chunk.length;
-          }
-          invariant(offset === pin.size, 'SOURCE_HASH_MISMATCH', 'Source download is incomplete.');
-        })
-          .then(
-            () => writer.close(),
-            error => writer.abort(error),
-          )
-          .catch(() => {});
-        return stream.readable as unknown as AsyncIterable<Uint8Array>;
+          leaves ??= new SourceWorkerReader(cache, {
+            read: async pin => {
+              const leaf = signedLeaves.get(pin.sha256);
+              invariant(leaf, 'SOURCE_UNAVAILABLE', 'Recipe leaf grant is unavailable.');
+              return readRaw(pin, leaf);
+            },
+            upload: transport.upload,
+          });
+          const reader = leaves,
+            closure = row.closure;
+          // The existing disk reader verifies and deduplicates each leaf; the
+          // enclosing reader still verifies the reconstructed logical object.
+          return (async function* () {
+            for (const leaf of closure) {
+              const path = await reader.file({
+                object: { sha256: leaf.digest, size: leaf.size },
+                recipe: null,
+              });
+              yield* createReadStream(path);
+            }
+          })();
+        }
+        return readRaw(pin, row);
       },
       upload: async () => {
         throw new Error('Source upload is not part of an Actions check.');
@@ -388,7 +467,9 @@ export class ActionsJobClient {
         });
       };
       const recipes = digests.flatMap(id =>
-        rows.get(id)!.descriptor.recipe ? [rows.get(id)!.descriptor.recipe!] : [],
+        rows.get(id)!.descriptor.recipe && !(cache && rows.get(id)!.closure)
+          ? [rows.get(id)!.descriptor.recipe!]
+          : [],
       );
       await resolve(recipes.map(pin => pin.sha256));
       const frontier = [] as { sha256: string; size: number; height: number }[];
@@ -408,6 +489,9 @@ export class ActionsJobClient {
       resolve,
       resolveWindow: (digests: string[]) => resolve(digests, true),
       prepareRecipes,
+      resetCache: () => {
+        leaves = undefined;
+      },
     };
   }
 }

@@ -9,9 +9,15 @@ import { directSourceWindow, directSourceBatch } from '../src/hosted-actions-dir
 import { invariant } from '../src/errors';
 import { findObjects } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
+import { signRecipeClosure } from './projectRecipeClosure';
 /** One bounded descriptor+GET window. Bytes go storage→runner, never via Convex. */
 export const resolve = internalMutation({
-  args: { ...sessionArgs, digests: v.array(v.string()), batch: v.optional(v.literal(true)) },
+  args: {
+    ...sessionArgs,
+    digests: v.array(v.string()),
+    batch: v.optional(v.literal(true)),
+    closures: v.optional(v.literal(true)),
+  },
   returns: v.any(),
   handler: async (ctx, input) => {
     await actionsSession(ctx, input, false);
@@ -23,6 +29,7 @@ export const resolve = internalMutation({
     );
     const result = [];
     let sourceBytes = 0;
+    let replyBytes = 2;
     invariant(
       input.digests.every(digest => /^[a-f0-9]{64}$/.test(digest)),
       'BAD_ARGUMENT',
@@ -54,14 +61,24 @@ export const resolve = internalMutation({
               ? await blobStore(ctx).getUrl(row.storageId)
               : null;
         invariant(url || row.recipe, 'SOURCE_UNAVAILABLE', 'Source storage binding is unavailable.');
-        result.push({
+        const value = {
           descriptor: {
             object: { sha256: row.digest, size: row.size },
             recipe: row.recipe ? { sha256: row.recipe.digest, size: row.recipe.size } : null,
           },
           url,
           ...(row.pack ? { range: packRange(row)! } : {}),
-        });
+          ...(input.batch && input.closures && row.recipe && row.recipeClosure
+            ? { closure: await signRecipeClosure(row) }
+            : {}),
+        };
+        // Signed leaves can outweigh their parent descriptor. Keep the existing
+        // prefix protocol below the Convex value limit without capping the tree.
+        const bytes = new TextEncoder().encode(JSON.stringify(value)).length + 1;
+        if (input.batch && result.length && replyBytes + bytes > 4 * 1024 * 1024)
+          return JSON.stringify(result);
+        result.push(value);
+        replyBytes += bytes;
       }
     }
     return input.batch ? JSON.stringify(result) : result;

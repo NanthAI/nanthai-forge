@@ -102,6 +102,7 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       kind: z.literal('source'),
       digests: z.array(checkHash).min(1).max(directSourceBatch),
       batch: z.literal(true).optional(),
+      closures: z.literal(true).optional(),
     })
     .strip()
     .refine(command => command.batch || command.digests.length <= directSourceWindow),

@@ -61,6 +61,13 @@ commands have no selection.
 
 ### What Actions evidence attests
 
+Source descriptor windows negotiate server-verified recipe leaf closures. The
+same current-access call signs those leaves without reading their metadata rows.
+The job's disk reader verifies each unique leaf and streams it into a separately
+hash-verified logical object. Signed replies continue through the existing bounded
+prefix protocol; older servers and recipes retain their tree traversal. Raw file
+descriptors still read their object rows or catalog pages from Convex.
+
 A hosted check job runs the Candidate's own code (its tests and scripts) on the same runner as
 Forge's supervisor. So Forge takes the verdict, the outputs later steps read and every cache entry
 only from places that code cannot write (Issue 432164bf). For every CI adapter:
