@@ -55,7 +55,7 @@ export async function maintenanceCli(args: string[]) {
   );
   const binding =
     positional.length === 1
-      ? requireHostedBinding(new WorkStore(positional[0]!))
+      ? requireHostedBinding(WorkStore.open<'directory'>(positional[0]!))
       : { deployment: positional[0]!, projectId: positional[1]! };
   const { deployment, projectId } = binding,
     client = coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN);

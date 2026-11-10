@@ -20,7 +20,11 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { parseHostedResponse } from './hosted-response.js';
 
 /** Only call with feedback from this binding's authenticated transport. Never rewind a pin. */
-export function rememberSourceAuthorityError(store: WorkStore, error: unknown, projectId: string): void {
+export function rememberSourceAuthorityError(
+  store: Pick<WorkStore, 'directory' | 'locked'>,
+  error: unknown,
+  projectId: string,
+): void {
   const failure = hostedActionError(error, 'source authority');
   if (!(failure instanceof SourceAuthorityStaleError)) return;
   updateHostState(store, state => {

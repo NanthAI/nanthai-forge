@@ -41,7 +41,11 @@ function run(file: string, args: string[], cwd: string, input?: unknown): Promis
     child.stdin?.end(input === undefined ? undefined : JSON.stringify(input));
   });
 }
-export async function workGithubApi<T>(store: WorkStore, path: string, input?: unknown): Promise<T> {
+export async function workGithubApi<T>(
+  store: Pick<WorkStore, 'directory'>,
+  path: string,
+  input?: unknown,
+): Promise<T> {
   const result = await run(
     'gh',
     [
@@ -69,7 +73,7 @@ export async function workGithubApi<T>(store: WorkStore, path: string, input?: u
 // A disposable bare transport reads no target checkout configuration, hooks or filters.
 // It owns no work journal; retained objects and refs belong to the existing Git/WorkStore.
 export async function withGithubTransport<T>(
-  store: WorkStore,
+  store: Pick<WorkStore, 'root' | 'native' | 'directory'>,
   use: (
     path: string,
     git: (args: string[]) => Promise<string>,

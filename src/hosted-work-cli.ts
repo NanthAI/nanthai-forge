@@ -29,9 +29,9 @@ export async function hostedWorkCli(args: string[]) {
     process.stdout.write(HOSTED_WORK_HELP);
     return undefined;
   }
-  let store: WorkStore | undefined;
+  let store: Pick<WorkStore, 'directory' | 'locked'> | undefined;
   if (args.length === 2 || (args.length === 3 && args[1] === '--command-file')) {
-    store = new WorkStore(args[0]!);
+    store = WorkStore.open<'directory' | 'locked'>(args[0]!);
     const binding = requireHostedBinding(store);
     args = [binding.deployment, binding.projectId, ...args.slice(1)];
   }

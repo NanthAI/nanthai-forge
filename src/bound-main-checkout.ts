@@ -8,7 +8,7 @@ import { ConvexExchange } from './exchange-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 export async function boundMainCheckout(root: string, target?: string) {
-  const store = new WorkStore(root),
+  const store = WorkStore.open<'root' | 'directory' | 'locked'>(root),
     binding = requireHostedBinding(store);
   try {
     const client = new ConvexExchange(

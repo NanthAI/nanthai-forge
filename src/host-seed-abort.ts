@@ -17,7 +17,7 @@ export interface SeedAbortClient {
  * pending hosting seed (Issue 68361cd5, SM-E). The pending operation stays: `nforge host ROOT
  * --resume` then seeds the project again from page 0, and `--abandon-pending` retires it. */
 export async function abortPendingSeed(root: string, client?: SeedAbortClient) {
-  const pending = readHostState(new WorkStore(root, { readOnly: true })).hosting;
+  const pending = readHostState(WorkStore.open<'directory'>(root, { readOnly: true })).hosting;
   invariant(
     pending?.projectId,
     'HOST_NOT_PENDING',

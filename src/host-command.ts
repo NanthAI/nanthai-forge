@@ -63,7 +63,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
   if (flags.includes('--status') || (json && flags.length === 0)) {
     invariant(flags.length === 0 || flags.length === 1, 'BAD_ARGUMENT', HOST_HELP);
-    const store = new WorkStore(root, { readOnly: true });
+    const store = WorkStore.open<'directory'>(root, { readOnly: true });
     const state = readHostState(store);
     return {
       recovery: await readRecoveryInventory(root),
@@ -122,7 +122,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
   }
   if (!flags.includes('--resume'))
     invariant(
-      !readHostState(new WorkStore(root, { readOnly: true })).hosting,
+      !readHostState(WorkStore.open<'directory'>(root, { readOnly: true })).hosting,
       'HOST_RESUME_REQUIRED',
       'Hosting is pending. Read host ROOT --status, or use host ROOT --resume to continue it.',
     );
@@ -130,14 +130,14 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
     // A detached worker can fail before transport starts (for example expired
     // login). Preserve a safe code for --status, never the provider's text.
     if (backfill)
-      updateHostState(new WorkStore(root), state => {
+      updateHostState(WorkStore.open<'directory' | 'locked'>(root), state => {
         if (state.hosting)
           state.hosting.errorCode = error instanceof ForgeError ? error.code : 'HOST_INTERRUPTED';
       });
     throw error;
   });
   if ('historyBackfilling' in result && result.historyBackfilling) {
-    const store = new WorkStore(root);
+    const store = WorkStore.open<'page' | 'readRecords' | 'load'>(root);
     // FORGE_AUTH_TOKEN authenticates this worker's hosted source/metadata requests.
     const child = spawn(
       process.execPath,
@@ -153,7 +153,7 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       },
     );
     child.once('error', () =>
-      updateHostState(new WorkStore(root), state => {
+      updateHostState(WorkStore.open<'directory' | 'locked'>(root), state => {
         if (state.hosting?.operationId === result.operationId)
           state.hosting.errorCode = 'HOST_WORKER_START_FAILED';
       }),

@@ -52,7 +52,7 @@ export async function foldHostedRecovery(
     'SOURCE_UNAVAILABLE',
     'Read the hosted recovery tables before publication.',
   );
-  const store = cacheOnly ? undefined : new WorkStore(target),
+  const store = cacheOnly ? undefined : WorkStore.open<'load' | 'save'>(target),
     source = new NativeSource(target);
   const path = join(directory, 'hosted-fold.json');
   const identity = digest(canonicalPayload({ ...selected, completeHistory: null }));

@@ -58,7 +58,7 @@ type Local = {
   locked<T>(run: () => T): T;
   retire(projectId: string, deployment: string, operationId: string): boolean;
 };
-function storeLocal(store: WorkStore): Local {
+function storeLocal(store: Pick<WorkStore, 'directory' | 'locked'>): Local {
   const initial = readHostState(store);
   return {
     directory: store.directory,
@@ -87,7 +87,7 @@ function deleteLocal(root: string, options: DeleteProjectOptions): Local {
   );
   if (hosted) return journalLocal(hostedAgentDirectory(root), hostedAgentAddress(root, {})?.url);
   try {
-    return storeLocal(new WorkStore(root));
+    return storeLocal(WorkStore.open<'directory' | 'locked'>(root));
   } catch (error) {
     // A plain directory is an address: --deployment names the deployment, the project id the project.
     if (!(error instanceof ForgeError && ['GIT_FAILED', 'NOT_REPOSITORY_ROOT'].includes(error.code)))

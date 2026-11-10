@@ -20,7 +20,7 @@ import { autoExchangeStateSchema } from './auto-exchange-state.js';
 import { exchangeObservationSchema } from './exchange-observation.js';
 
 import { workLocked } from './work-lock.js';
-import { WorkStore } from './work-store.js';
+import type { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
 import { agentSyncSchema, compactAgentSync } from './agent-sync-state.js';
 import { reportedTokensSchema } from './making-of.js';
@@ -166,7 +166,7 @@ const schema = z.object({
 });
 export type HostState = z.infer<typeof schema>;
 export type HostedBinding = z.infer<typeof binding>;
-export function readHostState(store: WorkStore): HostState {
+export function readHostState(store: Pick<WorkStore, 'directory'>): HostState {
   const path = join(store.directory, 'hosted-binding.json');
   const state = existsSync(path)
     ? schema.parse(JSON.parse(readFileSync(path, 'utf8')))
@@ -180,7 +180,7 @@ export function readHostState(store: WorkStore): HostState {
  * Lifecycle queueing can skip the owner lock; other callers retain their existing guard.
  * The queue sidecar is authoritative once present, including during legacy migration. */
 export function updateHostState<T>(
-  store: WorkStore,
+  store: Pick<WorkStore, 'directory' | 'locked'>,
   update: (state: HostState) => T,
   options: { ownerLock?: boolean } = {},
 ): T {
@@ -208,7 +208,7 @@ export function updateHostState<T>(
 
   return result;
 }
-function writeChanged(store: WorkStore, name: string, value: unknown) {
+function writeChanged(store: Pick<WorkStore, 'directory'>, name: string, value: unknown) {
   const path = join(store.directory, name),
     bytes = JSON.stringify(value) + '\n';
   if (existsSync(path) && readFileSync(path, 'utf8') === bytes) return;
@@ -224,7 +224,7 @@ function writeChanged(store: WorkStore, name: string, value: unknown) {
   syncDirectory(store.directory);
 }
 
-export function requireHostedBinding(store: WorkStore): HostedBinding {
+export function requireHostedBinding(store: Pick<WorkStore, 'directory'>): HostedBinding {
   const state = readHostState(store);
   if (state.binding) return state.binding;
   invariant(
@@ -253,7 +253,11 @@ export function retirePendingHost(
   delete state.hosting;
   return receipt;
 }
-export function abandonPendingHost(store: WorkStore, operationId: string, confirm: string) {
+export function abandonPendingHost(
+  store: Pick<WorkStore, 'directory' | 'locked'>,
+  operationId: string,
+  confirm: string,
+) {
   invariant(
     operationId === confirm,
     'HOST_ABANDON_CONFIRM_MISMATCH',

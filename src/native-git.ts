@@ -116,7 +116,7 @@ export async function importNativeGit(input: string, commit: string, target: str
     'BAD_ARGUMENT',
     'Select an exact original Git commit ID. Run git rev-parse HEAD in the Git repository and pass that full ID.',
   );
-  const store = new WorkStore(input),
+  const store = WorkStore.open<'root' | 'native' | 'directory'>(input),
     { destination, scratch } = fresh(target);
   try {
     invariant(!store.native, 'BAD_ARGUMENT', 'Select an existing Git-backed repository.');
@@ -163,7 +163,7 @@ export async function importNativeGit(input: string, commit: string, target: str
     );
     renameSync(join(owner, '.forge'), join(workspace, '.forge'));
     nativeMarker(workspace);
-    new WorkStore(workspace).save(createWork(head));
+    WorkStore.open<'save'>(workspace).save(createWork(head));
     publish(workspace, destination);
     return {
       root: destination,
@@ -184,7 +184,7 @@ export async function importNativeGit(input: string, commit: string, target: str
 }
 export async function exportNativeGit(input: string, head: string, target: string, reuse?: string) {
   invariant(/^[0-9a-f]{64}$/.test(head), 'BAD_ARGUMENT', 'Select an exact retained native State.');
-  const store = new WorkStore(input);
+  const store = WorkStore.open<'root' | 'native'>(input);
   invariant(store.native, 'BAD_ARGUMENT', 'Select a native Forge owner or Lane.');
   const source = new NativeSource(store.root),
     states = [...source.ancestors(head)],
@@ -364,7 +364,11 @@ export async function prepareNativeProjection(store: WorkStore, head: string) {
     rmSync(scratch, { recursive: true, force: true });
   }
 }
-export function validateNativeProjection(store: WorkStore, head: string, projection: GitProjection) {
+export function validateNativeProjection(
+  store: Pick<WorkStore, 'root'>,
+  head: string,
+  projection: GitProjection,
+) {
   const source = new NativeSource(store.root);
   source.state(head);
   const bytes = source.object(projection.mapping);

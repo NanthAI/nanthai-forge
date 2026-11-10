@@ -51,7 +51,7 @@ export function validateNativeContributions(source: NativeSource, data: WorkData
         'INVALID_NATIVE_GIT',
         'Git contribution provenance differs from its original native source pins.',
       );
-      validateNativeProjection(new WorkStore(source.owner), item.base, item.projection);
+      validateNativeProjection(WorkStore.open<'root'>(source.owner), item.base, item.projection);
       source.object(item.bundleSha256);
       invariant(
         source.object(item.inputSha256).length === item.size,

@@ -39,6 +39,14 @@ export { preserveFields } from './work-normalization.js';
 import { createWork } from './work-create.js';
 
 export class WorkStore {
+  /** Select the caller's public capabilities without another store, proxy or I/O path. */
+  static open<K extends keyof WorkStore = never>(
+    root: string,
+    options: { readOnly?: boolean } = {},
+  ): Pick<WorkStore, K> {
+    return new WorkStore(root, options);
+  }
+
   private writerDepth = 0;
   private readonly afterWriter: (() => void)[] = [];
   private afterPublication(run: () => void) {

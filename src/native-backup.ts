@@ -396,7 +396,7 @@ async function restoreDirectory(
         run.details += ' Native snapshot restored without restarting commands.';
       }
     if (interrupted) data.revision++;
-    if (interrupted) new WorkStore(materialized).save(data);
+    if (interrupted) WorkStore.open<'save'>(materialized).save(data);
     beforePublish?.(materialized);
     publishDirectory(materialized, destination);
     return {

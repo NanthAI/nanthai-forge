@@ -43,7 +43,7 @@ export async function restoreRecoverySource(
   const marker = 'recovery-source.json',
     identity = digest(JSON.stringify(request));
   if (existsSync(target)) {
-    const path = join(new WorkStore(target).directory, marker);
+    const path = join(WorkStore.open<'directory'>(target).directory, marker);
     invariant(
       existsSync(path),
       'RESTORE_TARGET_EXISTS',
@@ -62,7 +62,7 @@ export async function restoreRecoverySource(
     );
     if (selected.hostedMain) {
       await foldHostedRecovery(directory, target, selected, transport);
-      retained.workSha256 = digest(new WorkStore(target).snapshotBytes());
+      retained.workSha256 = digest(WorkStore.open<'snapshotBytes'>(target).snapshotBytes());
       writeRecoveryState(path, retained);
     }
     return recoveryCoverage(
@@ -92,12 +92,12 @@ export async function restoreRecoverySource(
   let manifest: ReturnType<typeof nativeManifestSchema.parse> | undefined;
   const started = performance.now();
   const beforePublish = (root: string) =>
-    writeRecoveryState(join(new WorkStore(root).directory, marker), {
+    writeRecoveryState(join(WorkStore.open<'directory'>(root).directory, marker), {
       identity,
       selected,
       manifest,
       journalSha256: digest(journalBytes),
-      workSha256: digest(new WorkStore(root).snapshotBytes()),
+      workSha256: digest(WorkStore.open<'snapshotBytes'>(root).snapshotBytes()),
     });
   if (request.archivePath || selected.transport === 'archive') {
     const archivePath = request.archivePath ?? join(directory, 'source.tar.gz');
@@ -141,7 +141,7 @@ export async function restoreRecoverySource(
     manifest,
     digest(journalBytes),
     selected,
-    digest(new WorkStore(target).snapshotBytes()),
+    digest(WorkStore.open<'snapshotBytes'>(target).snapshotBytes()),
     Math.round(performance.now() - started),
   );
 }

@@ -499,7 +499,7 @@ async function restoreDirectory(input: string, destination: string) {
   };
 }
 function materializeRestoredLanes(target: string) {
-  const restored = new WorkStore(target);
+  const restored = WorkStore.open<'load' | 'path'>(target);
   executionGuard(target);
   for (const lane of restored.load().lanes) {
     const branch = branchFor(lane.id);

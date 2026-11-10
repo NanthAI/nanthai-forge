@@ -78,7 +78,7 @@ export function initNative(input: string) {
     : undefined;
   invariant(!owner || owner === root, 'NATIVE_TARGET_EXISTS', 'Choose a native owner, not a Lane.');
   if (owner && existsSync(resolve(root, '.forge/work/work.json'))) {
-    const data = new WorkStore(root).load();
+    const data = WorkStore.open<'load'>(root).load();
     invariant(data.nativeHead, 'INVALID_NATIVE_SOURCE', 'Native bootstrap State is unavailable.');
     return {
       root,
@@ -99,7 +99,7 @@ export function initNative(input: string) {
   }
   const files = source.state(head).files;
   if (!owner) nativeMarker(root);
-  const store = new WorkStore(root);
+  const store = WorkStore.open<'directory' | 'locked' | 'save'>(root);
   store.locked(() => {
     invariant(
       !existsSync(resolve(store.directory, 'work.json')),

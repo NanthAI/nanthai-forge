@@ -105,7 +105,7 @@ export async function pullNativeExchange(
       } else grouped.set(file.sha256, [file]);
     }
     const pending = [...grouped.values()],
-      cache = options.cacheRoot ? new WorkStore(options.cacheRoot) : undefined;
+      cache = options.cacheRoot ? WorkStore.open<'directory'>(options.cacheRoot) : undefined;
     const batches: (typeof pending)[] = [];
     while (pending.length) {
       const batch = [pending.shift()!];

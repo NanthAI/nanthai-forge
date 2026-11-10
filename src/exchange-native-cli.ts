@@ -42,7 +42,7 @@ export async function nativeExchangeCommand(root: string, action: string, input:
       'projectId' in input &&
       typeof input.projectId === 'string'
     )
-      rememberSourceAuthorityError(new WorkStore(owner), error, input.projectId);
+      rememberSourceAuthorityError(WorkStore.open<'directory' | 'locked'>(owner), error, input.projectId);
     throw hostedActionError(error, `exchange ${action}`);
   }
 }
