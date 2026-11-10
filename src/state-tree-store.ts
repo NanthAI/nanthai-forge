@@ -48,10 +48,11 @@ const fail: (condition: unknown) => asserts condition = condition =>
 
 /** One operation's view of the tree store: verified reads with a cache, and the one segment it
  * writes. A folder is checked against the node id its parent (or the State pointer) names, so a
- * ranged read is as safe as a whole one. */
+ * ranged read is as safe as a whole one, and a walk trusts no byte it did not check. */
 export class TreeSession {
   private readonly whole = new Map<string, Promise<{ bytes: Uint8Array; header: SegmentHeader }>>();
   private readonly headers = new Map<string, Promise<SegmentHeader>>();
+  /** Decoded folders by node id; `oid` is empty when the Git id was not computed. */
   private readonly nodes = new Map<string, { entries: readonly TreeEntry[]; oid: string }>();
   /** Where an already stored (or pending) record lives, by node or chunk id. */
   private readonly places = new Map<string, Locator>();
@@ -59,17 +60,25 @@ export class TreeSession {
   private readonly table = new Map<string, { index: number; size: number }>();
   private offset = 0;
   private sealed = false;
+  private readonly wholeBytes: number;
+  private readonly strict: boolean;
+  /** Every folder read is checked against the node id its parent (or the pointer) names. `strict`
+   * also checks each whole segment against its digest and each folder against the Git tree id
+   * its parent names: the checks that gate recording a pointer. */
   constructor(
     private readonly store: SegmentStore,
-    private readonly wholeBytes = WHOLE_SEGMENT_BYTES,
-  ) {}
+    options: { wholeBytes?: number; strict?: boolean } = {},
+  ) {
+    this.wholeBytes = options.wholeBytes ?? WHOLE_SEGMENT_BYTES;
+    this.strict = options.strict ?? false;
+  }
 
   private segment(segment: string, size: number) {
     let loaded = this.whole.get(segment);
     if (!loaded) {
       loaded = this.store.get(segment).then(bytes => {
         invariant(
-          bytes.length === size && digest(bytes) === segment,
+          bytes.length === size && (!this.strict || digest(bytes) === segment),
           'SOURCE_HASH_MISMATCH',
           'A stored object differs from its pin.',
         );
@@ -156,7 +165,7 @@ export class TreeSession {
   async load(ref: { id: string; oid?: string; at: Locator }): Promise<readonly TreeEntry[]> {
     const known = this.nodes.get(ref.id);
     if (known) {
-      fail(!ref.oid || ref.oid === known.oid);
+      fail(!this.strict || !ref.oid || !known.oid || ref.oid === known.oid);
       return known.entries;
     }
     fail(!pending(ref.at));
@@ -181,8 +190,8 @@ export class TreeSession {
       });
       tree = concatBytes(...trees);
     }
-    const oid = gitId('tree', tree);
-    fail(!ref.oid || ref.oid === oid);
+    const oid = this.strict ? gitId('tree', tree) : '';
+    fail(!oid || !ref.oid || ref.oid === oid);
     this.places.set(ref.id, ref.at);
     this.nodes.set(ref.id, { entries, oid });
     return entries;

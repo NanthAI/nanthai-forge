@@ -151,7 +151,11 @@ function editsBetween(before, after) {
   for (const path of was.keys()) if (!now.has(path)) edits.push([path, null]);
   return edits;
 }
-const cold = async (store, pointer) => (await readStateTree(new TreeSession(store), pointer)).manifest;
+const cold = async (store, pointer) =>
+  (await readStateTree(new TreeSession(store, { strict: true }), pointer)).manifest;
+const recordOf = bytes => stateTreeRecord(bytes).record;
+/** What the save path holds for its base: the pointer, the State id and the parsed flat list. */
+const baseOf = ({ pointer, manifest }) => ({ pointer, state: digest(manifest), files: filesOf(manifest) });
 const treeSample = {
   'README.md': 'hello\n',
   'a.b': 'dot',
@@ -215,9 +219,8 @@ test('tree form: a save rewrites only folders on changed paths and equals a full
   for (const [index, files] of steps.entries()) {
     const next = manifest(files, `save ${index}`, [digest(previous.manifest)]),
       edits = editsBetween(previous.manifest, next),
-      saved = await saveStateTree(store, previous.pointer, next, edits);
-    assert.equal(saved.exact, true);
-    await verifyStateTreeSave(store, previous, { pointer: saved.pointer, manifest: next });
+      saved = await saveStateTree(store, previous.pointer, recordOf(next), edits);
+    await verifyStateTreeSave(store, baseOf(previous), { pointer: saved.pointer, manifest: next });
     assert.deepEqual(Buffer.from(await cold(store, saved.pointer)), next);
     const full = await convertStateTree(segmentStore(), next, fileOf);
     assert.equal(saved.pointer.root, full.pointer.root, `step ${index}: same root as a full conversion`);
@@ -226,7 +229,9 @@ test('tree form: a save rewrites only folders on changed paths and equals a full
   }
   // A file and a folder at one path is refused, as the flat writer refuses it.
   await assert.rejects(
-    saveStateTree(store, base.pointer, first, [['a/b/c', fileOf({ blob: put('x'), mode: 'file' })]]),
+    saveStateTree(store, base.pointer, recordOf(first), [
+      ['a/b/c', fileOf({ blob: put('x'), mode: 'file' })],
+    ]),
     { code: 'INVALID_NATIVE_SOURCE' },
   );
 });
@@ -319,15 +324,28 @@ test('tree form: stored bytes that differ from their identity never yield a Stat
     const other = segmentStore();
     other.objects.set(pin.segment, copy);
     // Small segments are read whole and fail on their digest; ranged reads fail on the node id.
-    await assert.rejects(readStateTree(new TreeSession(other), pin), error =>
+    await assert.rejects(readStateTree(new TreeSession(other, { strict: true }), pin), error =>
       ['SOURCE_HASH_MISMATCH', 'GIT_OBJECT_INVALID', 'SOURCE_DIGEST_MISMATCH'].includes(error.code),
     );
-    await assert.rejects(readStateTree(new TreeSession(other, 0), pin), error =>
+    await assert.rejects(readStateTree(new TreeSession(other, { wholeBytes: 0, strict: true }), pin), error =>
       ['SOURCE_HASH_MISMATCH', 'GIT_OBJECT_INVALID', 'SOURCE_DIGEST_MISMATCH'].includes(error.code),
     );
   };
   for (const at of [0, 40, 200, original.length - 60, original.length - 9, original.length - 2])
     await tampered(copy => (copy[at] ^= 1));
+  // An ordinary walk skips the whole-segment digest, and still refuses a changed folder record.
+  for (const at of [0, 40, 200])
+    for (const wholeBytes of [undefined, 0]) {
+      const other = segmentStore(),
+        copy = Buffer.from(original);
+      copy[at] ^= 1;
+      other.objects.set(pointer.segment, copy);
+      const session = new TreeSession(other, { wholeBytes });
+      await assert.rejects(
+        session.open(pointer).then(({ root }) => treeFiles(session, root)),
+        error => ['SOURCE_HASH_MISMATCH', 'GIT_OBJECT_INVALID'].includes(error.code),
+      );
+    }
   // A valid segment under a pointer that names another root.
   await tampered(() => {}, { ...pointer, root: digest('other root') });
   // A store that does not return what was put: no pointer is produced.
@@ -349,11 +367,42 @@ test('tree form: stored bytes that differ from their identity never yield a Stat
   });
   // A save whose stored tree disagrees with its flat manifest fails verification.
   const next = manifest({ ...treeSample, extra: 'x' }, 'next', [digest(bytes)]),
-    wrong = await saveStateTree(store, pointer, next, [['other', fileOf({ blob: put('y'), mode: 'file' })]]);
+    wrong = await saveStateTree(store, pointer, recordOf(next), [
+      ['other', fileOf({ blob: put('y'), mode: 'file' })],
+    ]);
   await assert.rejects(
-    verifyStateTreeSave(store, { pointer, manifest: bytes }, { pointer: wrong.pointer, manifest: next }),
+    verifyStateTreeSave(store, baseOf({ pointer, manifest: bytes }), {
+      pointer: wrong.pointer,
+      manifest: next,
+    }),
     { code: 'SOURCE_DIGEST_MISMATCH' },
   );
+});
+
+test('tree form: a wide folder whose names hit no chunk cut is still read, edited and identified', async () => {
+  // The cut rule of wideChunks (FNV-1a of the name, modulo 32), to pick names that never cut.
+  const cuts = name => {
+    let hash = 0x811c9dc5;
+    for (const byte of Buffer.from(name)) hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+    return hash % 32 === 0;
+  };
+  const names = Array.from({ length: 400 }, (_, i) => `n${i}.ts`)
+    .filter(name => !cuts(name))
+    .slice(0, 70);
+  assert.equal(names.length, 70, 'more than the 64 entries a plain folder holds');
+  const store = segmentStore(),
+    files = Object.fromEntries(names.map(name => [`wide/${name}`, name])),
+    first = manifest(files),
+    base = await convertStateTree(store, first, fileOf);
+  assert.equal(base.exact, true);
+  const next = manifest({ ...files, [`wide/${names[3]}`]: 'edited' }, 'edit', [digest(first)]),
+    saved = await saveStateTree(store, base.pointer, recordOf(next), editsBetween(first, next));
+  await verifyStateTreeSave(store, baseOf({ pointer: base.pointer, manifest: first }), {
+    pointer: saved.pointer,
+    manifest: next,
+  });
+  assert.deepEqual(Buffer.from(await cold(store, saved.pointer)), next);
+  assert.equal((await convertStateTree(segmentStore(), next, fileOf)).pointer.root, saved.pointer.root);
 });
 
 /** A synthetic repository: `count` files, 9 per folder, 3 levels deep (about one folder per 8 files). */
@@ -393,14 +442,15 @@ test('tree form budget at 29k files: a save writes kilobytes and a merge reads o
   const edit = (list, index, textOf) =>
     list.map((file, i) => (i === index ? { ...file, blob: put(textOf) } : file));
   // Two Lanes save one file each from the same base.
-  const sides = [];
+  const sides = [],
+    baseFlat = baseOf({ pointer: base.pointer, manifest: first });
   for (const [index, name] of [
     [1234, 'left'],
     [20_001, 'right'],
   ]) {
     const next = stateBytes(edit(files, index, name), name, [digest(first)]),
       before = { puts: store.puts, putBytes: store.putBytes, gets: store.gets, getBytes: store.getBytes },
-      saved = await saveStateTree(store, base.pointer, next, [
+      saved = await saveStateTree(store, base.pointer, recordOf(next), [
         [files[index].path, fileOf({ blob: put(name), mode: 'file' })],
       ]);
     const wrote = store.putBytes - before.putBytes,
@@ -415,11 +465,7 @@ test('tree form budget at 29k files: a save writes kilobytes and a merge reads o
     // Header, four folders on the path (ranged, in the import segment) and the read-back.
     assert.ok(gets <= 8 && read < 256 * 1024, `a save read ${read} bytes in ${gets} GETs`);
     const verify = { gets: store.gets, getBytes: store.getBytes };
-    await verifyStateTreeSave(
-      store,
-      { pointer: base.pointer, manifest: first },
-      { pointer: saved.pointer, manifest: next },
-    );
+    await verifyStateTreeSave(store, baseFlat, { pointer: saved.pointer, manifest: next });
     assert.ok(
       store.gets - verify.gets <= 8 && store.getBytes - verify.getBytes < 256 * 1024,
       'verification costs what changed',
@@ -462,8 +508,13 @@ test('tree form: an edit in a wide folder rewrites one chunk, and scattered chun
     list.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const next = stateBytes(list, `save ${save}`, [digest(previous.manifest)]),
       before = store.putBytes,
-      saved = await saveStateTree(store, previous.pointer, next, editsBetween(previous.manifest, next));
-    await verifyStateTreeSave(store, previous, { pointer: saved.pointer, manifest: next });
+      saved = await saveStateTree(
+        store,
+        previous.pointer,
+        recordOf(next),
+        editsBetween(previous.manifest, next),
+      );
+    await verifyStateTreeSave(store, baseOf(previous), { pointer: saved.pointer, manifest: next });
     worst = Math.max(worst, store.putBytes - before);
     total += store.putBytes - before;
     previous = { pointer: saved.pointer, manifest: next };

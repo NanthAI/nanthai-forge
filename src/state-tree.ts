@@ -209,14 +209,18 @@ export async function mergeTrees(
   return { root: (await walk(base, left, right, '')) ?? session.write([]), contested };
 }
 
-/** Split exact manifest bytes into the State record and its files. */
+/** The record of a State from its decoded manifest value (keys in manifest order) and identity. */
+export function stateTreeRecordOf(value: Record<string, unknown>, state: string): StateTreeRecord {
+  const keys = Object.keys(value),
+    fields: Record<string, unknown> = {};
+  for (const key of keys) if (key !== 'files') fields[key] = value[key];
+  return { state, fields, filesAt: keys.indexOf('files') };
+}
+/** Split exact manifest bytes into the State record and its validated files. */
 export function stateTreeRecord(manifest: Uint8Array): { record: StateTreeRecord; files: NativeFile[] } {
   const parsed = parseNativeState(manifest),
-    original = JSON.parse(new TextDecoder().decode(manifest)) as Record<string, unknown>,
-    keys = Object.keys(original),
-    fields: Record<string, unknown> = {};
-  for (const key of keys) if (key !== 'files') fields[key] = original[key];
-  return { record: { state: digest(manifest), fields, filesAt: keys.indexOf('files') }, files: parsed.files };
+    original = JSON.parse(new TextDecoder().decode(manifest)) as Record<string, unknown>;
+  return { record: stateTreeRecordOf(original, digest(manifest)), files: parsed.files };
 }
 /** The manifest bytes a record and a file list stand for, in the native writer's order (UTF-16
  * code units of the whole path). */

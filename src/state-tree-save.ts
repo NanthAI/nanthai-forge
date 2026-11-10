@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
+import { digest } from './portable-hash.js';
 import type { NativeFile } from './native-state-format.js';
 import type { TreeFile } from './state-tree-format.js';
+import type { StateTreeRecord } from './state-tree-segment.js';
 import { TreeSession, type SegmentStore, type StateTreePointer } from './state-tree-store.js';
 import {
   applyTreeEdits,
@@ -22,8 +24,9 @@ const mismatch = (condition: unknown) =>
   invariant(condition, 'SOURCE_DIGEST_MISMATCH', 'The stored tree does not reproduce its State.');
 
 /** First conversion of a State: writes every folder once (the only write that costs the whole
- * list), then rebuilds the manifest from the stored segment with a cold reader and compares it
- * byte for byte. `fileOf` supplies each file's Git id (from its bytes, or a trusted alias). */
+ * list), then rebuilds the manifest from the stored segment with a cold, strict reader and
+ * compares it byte for byte. `fileOf` supplies each file's Git id (from its bytes, or a trusted
+ * alias). */
 export async function convertStateTree(
   store: SegmentStore,
   manifest: Uint8Array,
@@ -33,45 +36,43 @@ export async function convertStateTree(
   if (!reproducesManifest(record, files, manifest)) return { exact: false, reason: 'NON_CANONICAL_MANIFEST' };
   const session = new TreeSession(store),
     entries = await Promise.all(files.map(async file => [file.path, await fileOf(file)] as const)),
-    written = await session.finish(record, await applyTreeEdits(session, undefined, entries));
-  mismatch(equal((await readStateTree(new TreeSession(store), written.pointer)).manifest, manifest));
+    written = await session.finish(record, await applyTreeEdits(session, undefined, entries)),
+    stored = await readStateTree(new TreeSession(store, { strict: true }), written.pointer);
+  mismatch(equal(stored.manifest, manifest));
   return { exact: true, pointer: written.pointer, bytes: written.bytes, records: written.records };
 }
 
-/** A save as edits on a base that already has a verified pointer: rewrites only the folders on
- * the changed paths. `verifyStateTreeSave` must pass before the pointer is recorded. */
+/** A save as edits on a base that already has a proven pointer: reads and rewrites only the
+ * folders on the changed paths. `record` is the new State's record (`stateTreeRecordOf`).
+ * `verifyStateTreeSave` must pass before the pointer is recorded. */
 export async function saveStateTree(
   store: SegmentStore,
   base: StateTreePointer,
-  manifest: Uint8Array,
+  record: StateTreeRecord,
   changes: Iterable<readonly [string, TreeFile | null]>,
-): Promise<StateTreeWrite> {
-  const { record, files } = stateTreeRecord(manifest);
-  if (!reproducesManifest(record, files, manifest)) return { exact: false, reason: 'NON_CANONICAL_MANIFEST' };
+) {
   const session = new TreeSession(store),
     written = await session.finish(
       record,
       await applyTreeEdits(session, (await session.open(base)).root, changes),
     );
-  return { exact: true, pointer: written.pointer, bytes: written.bytes, records: written.records };
+  return { pointer: written.pointer, bytes: written.bytes, records: written.records };
 }
 
-/** Prove a save's tree form against its flat manifest at the cost of what changed. A cold reader
- * finds the files that differ between the stored base tree and the stored new tree; those
+/** Prove a save's tree form against its flat manifest, reading only what changed. A cold, strict
+ * reader finds the files that differ between the stored base tree and the stored new tree; those
  * differences applied to the base's flat list must give the new manifest byte for byte. The base
- * pointer was proven the same way (or by a full conversion), so unchanged folders are covered. */
+ * pointer was proven the same way (or by a full conversion), so unchanged folders are covered.
+ * The comparison itself is O(files) in memory, as long as the flat manifest exists to compare. */
 export async function verifyStateTreeSave(
   store: SegmentStore,
-  base: { pointer: StateTreePointer; manifest: Uint8Array },
+  base: { pointer: StateTreePointer; state: string; files: readonly NativeFile[] },
   next: { pointer: StateTreePointer; manifest: Uint8Array },
 ): Promise<void> {
-  const session = new TreeSession(store),
+  const session = new TreeSession(store, { strict: true }),
     [from, to] = await Promise.all([session.open(base.pointer), session.open(next.pointer)]),
-    was = stateTreeRecord(base.manifest),
-    files = new Map(was.files.map(file => [file.path, file]));
-  mismatch(
-    from.record.state === was.record.state && to.record.state === stateTreeRecord(next.manifest).record.state,
-  );
+    files = new Map(base.files.map(file => [file.path, file]));
+  mismatch(from.record.state === base.state && to.record.state === digest(next.manifest));
   for (const change of await treeChanges(session, from.root, to.root)) {
     const old = files.get(change.path);
     mismatch(change.before ? old?.blob === change.before.blob && old.mode === change.before.mode : !old);

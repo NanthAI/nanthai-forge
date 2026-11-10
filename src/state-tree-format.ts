@@ -25,10 +25,11 @@ export type TreeEntry = {
 export type TreeRef = { id: string; oid: string; at: Locator };
 export type TreeFile = { mode: NativeFile['mode']; blob: string; oid: string };
 
-/** Folders above this many entries are stored as chunks, so an edit rewrites one chunk. */
-export const WIDE_TREE_ENTRIES = 512;
+/** Folders above this many entries are stored as chunks, so an edit rewrites one chunk. At about
+ * 85 bytes an entry, a 64-entry folder costs what a chunk plus its chunk list costs. */
+export const WIDE_TREE_ENTRIES = 64;
 /** A chunk ends after an entry whose name hash is 0 modulo this: about this many entries each. */
-export const WIDE_CHUNK_MODULUS = 64;
+export const WIDE_CHUNK_MODULUS = 32;
 /** The segment a builder is still writing; it has no digest yet. */
 export const PENDING_SEGMENT = '';
 
@@ -186,7 +187,8 @@ export function decodeRecord(bytes: Uint8Array, segmentAt: SegmentAt): DecodedRe
     return { segment, size, offset, length };
   };
   if (kind === 2) {
-    fail(count > 1);
+    // A wide folder whose names hit no cut is one chunk; it is still stored as a chunk list.
+    fail(count >= 1);
     const ids = cursor.take(32 * count),
       chunks = Array.from({ length: count }, (_, i) => ({
         id: bytesToHex(ids.subarray(32 * i, 32 * i + 32)),
