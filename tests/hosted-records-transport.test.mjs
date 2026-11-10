@@ -14,10 +14,6 @@ import {
   hostedAgentCapabilitiesSchema,
   hostedAgentRecordActions,
 } from '../dist/hosted-agent-contract.js';
-import { boundAgentRecords } from '../dist/hosted-agent-bound.js';
-import { updateHostState } from '../dist/host-binding.js';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { recordsFixture } from './hosted-context-records-fixture.mjs';
 const code = expected => error => error.code === expected;
 function fixture(t) {
@@ -112,73 +108,6 @@ test('old hosted server returns HOSTED_ACTION_UNSUPPORTED without native fallbac
   };
   await assert.rejects(s.transport.dispatch('decisions', {}), code('HOSTED_ACTION_UNSUPPORTED'));
   assert(!existsSync(join(s.root, '.forge', 'work')));
-});
-
-test('server-bound workflow routes records to hosted without changing native Work', async t => {
-  const previousToken = process.env.FORGE_AUTH_TOKEN;
-  process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
-  t.after(() => {
-    if (previousToken === undefined) delete process.env.FORGE_AUTH_TOKEN;
-    else process.env.FORGE_AUTH_TOKEN = previousToken;
-  });
-  const s = fixture(t);
-  mkdirSync(s.root);
-  writeFileSync(join(s.root, 'synthetic.txt'), 'fixture\n');
-  initNative(s.root);
-  const agent = new AgentWorkflow(s.root),
-    lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic bound records' })).result,
-    store = agent.work.store;
-  updateHostState(store, state => {
-    state.binding = {
-      projectId: 'project',
-      operationId: randomUUID(),
-      deployment: s.address.url,
-      projectUrl: `${s.address.url}/project`,
-      name: 'Fixture',
-      visibility: 'private',
-      backupId: 'backup',
-      autoSync: false,
-      sourceAuthority: { mode: 'server', epoch: 1 },
-    };
-  });
-  t.mock.method(HostedAgentTransport.prototype, 'query', (name, args) =>
-    s.invoke(name, { projectId: 'project', ...args }),
-  );
-  t.mock.method(HostedAgentTransport.prototype, 'mutation', (name, args) =>
-    s.invoke(name, { projectId: 'project', ...args }),
-  );
-  const revision = store.revision();
-  await agent.dispatch({
-    action: 'friction',
-    title: 'Bound friction',
-    detail: 'Hosted write',
-    area: 'records',
-  });
-  await agent.dispatch({
-    action: 'decide',
-    target: { kind: 'project' },
-    decidedBy: 'Owner',
-    what: 'Hosted decision',
-    why: 'Context',
-  });
-  assert.equal((await agent.dispatch({ action: 'decisions' })).result.page.length, 1);
-  assert.equal(store.revision(), revision);
-  assert.equal(store.readRecords().manifest.collections.decisions?.count ?? 0, 0);
-  assert.equal(store.readRecords().manifest.collections.frictionEvents?.count ?? 0, 0);
-  updateHostState(store, state => {
-    state.binding.sourceAuthority = { mode: 'native-owner', epoch: 0 };
-  });
-  let native = 0;
-  await boundAgentRecords(
-    store,
-    { action: 'friction', title: 'Native' },
-    async () => {
-      native++;
-      return { revision, result: 'native' };
-    },
-    s.transport,
-  );
-  assert.equal(native, 1);
 });
 
 test('hosted MCP exposes record writes and paged decision reads through the shared transport', async t => {

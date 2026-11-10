@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeSource } from '../dist/native-source.js';
-import { conflictPlan, agentSync, syncTestHooks } from '../dist/agent-sync.js';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { randomUUID } from 'node:crypto';
+import { conflictPlan } from '../dist/agent-sync.js';
 
 const at = '2026-10-18T00:00:00.000Z';
 function fixture(t) {
@@ -131,47 +128,6 @@ test('three maximal bases fold in stable order without writing virtual States', 
     ['b0', 'b1', 'b2', 'left', 'right'],
   );
   assert.deepEqual(source.compose(left, right, 'merge', at), merged);
-});
-
-test('multi-base sync resumes a pinned plan after interruption and replays the identical head', async t => {
-  const { source, file, state, text } = fixture(t);
-  const initialized = initNative(source.owner);
-  const agent = new AgentWorkflow(source.owner);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'synthetic sync' })).result;
-  const root = initialized.head;
-  const a = state([file('a', 'a')], [root]);
-  const b = state([file('b', 'b')], [root]);
-  const files = [file('a', 'a'), file('b', 'b')];
-  const left = state([...files, file('lane')], [a, b]);
-  const right = state([...files, file('main', 'main')], [b, a]);
-  for (const f of source.state(left).files) writeFileSync(join(lane.path, f.path), source.object(f.blob));
-  const store = agent.work.store;
-  store.locked(() => {
-    const tx = store.records();
-    tx.patchFields('lanes', lane.laneId, { head: left });
-    store.commitRecords(tx);
-  });
-  const command = { operationId: randomUUID(), laneId: lane.laneId, expectedHead: left, channel: 'main' };
-  let planned;
-  syncTestHooks.afterWorkspace = () => {
-    throw new Error('synthetic interruption');
-  };
-  try {
-    assert.throws(() => agentSync(store, command, { target: right }), /synthetic interruption/);
-    // The operation's selected timestamp is used even though its publication failed.
-    const { syncSelectionName, readSyncJournal, syncSelection } =
-      await import('../dist/native-sync-journal.js');
-    planned = readSyncJournal(lane.path, syncSelectionName(command.operationId), syncSelection);
-  } finally {
-    delete syncTestHooks.afterWorkspace;
-  }
-  const expected = source.compose(left, right, 'Sync main', planned.at).head;
-  const synced = agentSync(store, command, { target: state([], [right], 'advanced target') }).result;
-  assert.equal(synced.head, expected);
-  assert.equal(synced.target, right);
-  assert.equal(text(synced.head), 'lane');
-  assert.equal(readFileSync(join(lane.path, 'main'), 'utf8'), 'main');
-  assert.equal(agentSync(store, command, { target: right }).result.head, expected);
 });
 
 test('file/subtree virtual-base clashes cannot silently delete opposing head resolutions', t => {

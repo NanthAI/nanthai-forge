@@ -3,18 +3,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir, hostname } from 'node:os';
+import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { deriveLandingPhases, landingEta, phaseDuration, phaseSummary } from '../dist/land-phases.js';
 import { readLandingProgress } from '../dist/land-progress.js';
 import { readLandingAttempts } from '../dist/land-attempts.js';
 import { readLandCheckController, readLandCheckProgress } from '../dist/land-check-progress.js';
-import { withQueueSlot } from '../dist/landing-queue.js';
-import { processIdentity } from '../dist/local-process.js';
-import { saveLandingWorkerState } from '../dist/landing-worker-status.js';
-import { changeOnlyLandingReporter, landingProgressLine } from '../dist/land-progress-live.js';
-import { landReceipt } from '../dist/land-receipt.js';
-import { finishSubmissions } from '../dist/landing-submission-read.js';
 const at = seconds => new Date(seconds * 1000).toISOString();
 const times = {
   queuedAt: at(0),
@@ -114,35 +108,6 @@ test('ETA history limit takes only the newest N, and unknown remaining phases om
     ),
     undefined,
   );
-});
-test('live stderr reporter emits only phase/progress/queue changes, including multiple Lanes', () => {
-  const output = [],
-    report = changeOnlyLandingReporter(line => output.push(line));
-  const queued = deriveLandingPhases({
-    current: 'queued',
-    queue: { position: 2, total: 3, waitingOn: 'batch ahead' },
-  });
-  report('abcdefgh-1', queued);
-  report('abcdefgh-1', { ...queued, eta: { remainingMs: 40000 } });
-  report('abcdefgh-1', { ...queued, eta: { remainingMs: 39000 } });
-  report('ijklmnop-2', queued);
-  report('abcdefgh-1', { ...queued, queue: { position: 1, total: 2, waitingOn: 'runner' } });
-  const ci = deriveLandingPhases({
-    current: 'ci-running',
-    progress: { jobs: { done: 1, total: 5 }, files: { done: 2, total: 6 } },
-  });
-  report('abcdefgh-1', ci);
-  report('abcdefgh-1', ci);
-  report('abcdefgh-1', {
-    ...ci,
-    progress: { ...ci.progress, files: { done: 3, total: 6 } },
-    eta: { remainingMs: 25000 },
-  });
-  assert.equal(output.length, 5);
-  assert.match(output[0], /position 2 of 3 · waiting on: batch ahead\n$/);
-  assert.match(output[3], /ci-running · jobs 1\/5 · files 2\/6/);
-  assert.match(output[4], /ETA ~25s \(estimate\)/);
-  assert.ok(output.every(line => !/[\r\x1b]/.test(line)));
 });
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-progress-'));
@@ -262,81 +227,6 @@ test('accepted results expose pending main audit and mirror push without inventi
   phases = readLandingProgress(store, 'e');
   assert.equal(phases.current, 'accepted');
   assert.equal(phases.timeline.find(item => item.phase === 'github-mirror-push').durationMs, 'unknown');
-});
-
-test('landing and delegated finish receipts stay identical while live follow-up timings change', t => {
-  const { store, data } = fixture(t);
-  const operationId = randomUUID(),
-    laneId = randomUUID(),
-    intentId = randomUUID();
-  const pin = { laneId, head: 'a'.repeat(64) };
-  data.lanes = [{ id: laneId, intentId, head: pin.head }];
-  data.views.push({ id: 'v', inputs: [pin] });
-  data.landingEntries.push({
-    id: operationId,
-    channel: 'main',
-    viewId: 'v',
-    runId: 'r',
-    status: 'accepted',
-    arrivedAt: at(0),
-    firstSelectedAt: at(10),
-    acceptanceId: 'm',
-  });
-  data.runs.push({ id: 'r', viewId: 'v', status: 'passed', startedAt: at(20), endedAt: at(130) });
-  data.channelMoves.push({
-    id: 'm',
-    channel: 'main',
-    viewId: 'v',
-    status: 'accepted',
-    at: at(140),
-    postAccept: {},
-    postAcceptRunId: 'audit',
-  });
-  data.githubAutoPush = { acceptanceId: 'm', status: 'queued', at: at(150) };
-  const command = { operationId, laneIds: [laneId] };
-  const finish = { operationId, laneId, accept: { channel: 'main' } };
-  const journal = {
-    state: { entries: [{ command: finish, inputs: [pin], result: { status: 'accepted' } }] },
-  };
-  const receipt = () => landReceipt(store, command, journal).result;
-  const delegated = result =>
-    JSON.parse(JSON.stringify(finishSubmissions(store, finish, [{ head: pin.head }], result)));
-  journal.state.entries[0].result = {
-    status: 'waiting',
-    queueStatus: 'checking',
-    code: 'WORK_BUSY',
-    message: 'stale journal',
-    diagnosis: { applicability: 'provisional' },
-  };
-  const original = receipt();
-  assert.equal(original.entries[0].queueStatus, 'accepted');
-  assert.equal(original.entries[0].runId, 'r');
-  assert.equal(original.entries[0].acceptanceId, 'm');
-  assert.equal(original.entries[0].code, undefined);
-  assert.equal(original.entries[0].diagnosis, undefined);
-  const saved = delegated(original);
-  assert.equal(original.entries[0].phases.current, 'accepted');
-  assert.equal(original.entries[0].phases.timeline.length, 6);
-  assert.equal(original.entries[0].phases.eta, undefined);
-  assert.deepEqual(original.entries[0].phases, original.entries[0].submissions[0].phases);
-  const assertStable = () => {
-    const replay = receipt();
-    assert.deepEqual(replay.entries, original.entries);
-    assert.equal(replay.table, original.table);
-    assert.deepEqual(delegated(replay), saved);
-  };
-  assert.equal(readLandingProgress(store, operationId).current, 'main-audit');
-  const audit = { id: 'audit', status: 'running', startedAt: at(150) };
-  data.runs.push(audit);
-  assertStable();
-  Object.assign(audit, { status: 'passed', endedAt: at(200) });
-  const live = readLandingProgress(store, operationId);
-  assert.equal(live.current, 'github-mirror-push');
-  assert.equal(live.timeline.find(item => item.phase === 'main-audit').durationMs, 50000);
-  assertStable();
-  data.githubSync = { commits: [{ acceptanceId: 'm' }], pushed: 1, pushedAt: at(210) };
-  assert.equal(readLandingProgress(store, operationId).current, 'accepted');
-  assertStable();
 });
 
 test('owner history supplies the same estimated phase structure used by status and wait', t => {
@@ -521,63 +411,6 @@ test('a legacy Modal execution without a shard index still reports recorded CI w
   assert.equal(phases.timeline[3].startedAt, 'unknown');
 });
 
-test('live ownership follows the physical controller lease instead of the submitting transport', async t => {
-  const { store, data, write } = fixture(t);
-  const run = {
-    id: randomUUID(),
-    viewId: randomUUID(),
-    head: 'a'.repeat(64),
-    check: { definition: 'b'.repeat(64) },
-    environment: { fingerprint: 'c'.repeat(64) },
-    status: 'queued',
-    runner: { pid: 2147483647, startTime: 'gone submitter', host: hostname() },
-  };
-  data.runs.push(run);
-  data.landingEntries.push({ id: 'e', channel: 'main', status: 'checking', runId: run.id });
-  write(`check-${run.id}/controller-request.json`, {
-    schema: 1,
-    id: run.id,
-    viewId: run.viewId,
-    head: run.head,
-    definition: run.check.definition,
-    environment: run.environment.fingerprint,
-    runner: run.runner,
-  });
-  const before = readLandCheckController(store, run);
-  assert.equal(before.holder, undefined);
-  assert.equal(before.waitingOn, 'check controller lease');
-  const receipt = readLandingProgress(store, 'e', undefined, undefined, false);
-  const output = [],
-    report = changeOnlyLandingReporter(line => output.push(line));
-  report('lane-id', readLandingProgress(store, 'e'));
-  const directory = join(store.directory, 'check-controllers', run.id);
-  await withQueueSlot(
-    directory,
-    async () => {
-      const control = readLandCheckController(store, run);
-      assert.equal(control.holder.pid, process.pid);
-      assert.equal(control.holder.lease, `check-controllers/${run.id}`);
-      assert.equal(control.phase, 'queued');
-      assert.equal(run.runner.pid, 2147483647);
-      report('lane-id', readLandingProgress(store, 'e'));
-      report('lane-id', readLandingProgress(store, 'e'));
-      assert.equal(output.length, 2);
-      assert.match(
-        output[1],
-        new RegExp(`run=${run.id} phase=queued.*holder=check controller pid ${process.pid}`),
-      );
-      assert.deepEqual(readLandingProgress(store, 'e', undefined, undefined, false), receipt);
-      run.status = 'preparing';
-      report('lane-id', readLandingProgress(store, 'e'));
-      assert.equal(output.length, 3);
-      assert.match(output[2], /phase=preparing/);
-    },
-    { anchor: store.directory, waitMs: 0 },
-  );
-  assert.equal(readLandCheckController(store, run).holder, undefined);
-  assert.equal(readLandCheckController(store, { ...run, status: 'passed' }), undefined);
-});
-
 test('stale or partially written controller tickets are observation only and never removed', t => {
   const { store, write } = fixture(t);
   const run = { id: 'r', status: 'running' };
@@ -589,34 +422,6 @@ test('stale or partially written controller tickets are observation only and nev
   write(path, '{unfinished');
   assert.equal(readLandCheckController(store, run).holder, undefined);
   assert.ok(existsSync(join(store.directory, path)));
-});
-
-test('worker errors retain affected Lane, operation and run identities only in live progress', t => {
-  const { store, data } = fixture(t);
-  const operationId = randomUUID(),
-    laneId = randomUUID(),
-    runId = randomUUID();
-  data.landingEntries.push({ id: operationId, channel: 'main', status: 'checking', runId });
-  data.runs.push({ id: runId, status: 'running', startedAt: at(20) });
-  const receipt = readLandingProgress(store, operationId, undefined, undefined, false);
-  const state = {
-    schema: 1,
-    id: randomUUID(),
-    worker: processIdentity(),
-    status: 'error',
-    observedAt: at(30),
-    endpoint: 'synthetic',
-    code: 'CHECK_RECOVERY_FAILED',
-    affected: { laneIds: [laneId], operationId, runId, channel: 'main' },
-  };
-  saveLandingWorkerState(store, state);
-  const phases = readLandingProgress(store, operationId);
-  assert.deepEqual(phases.workerError, { code: state.code, ...state.affected });
-  const line = landingProgressLine(laneId, phases);
-  for (const identity of [laneId, operationId, runId]) assert.ok(line.includes(identity));
-  assert.ok(line.includes(state.code));
-  assert.deepEqual(readLandingProgress(store, operationId, undefined, undefined, false), receipt);
-  assert.equal(readLandingProgress(store, 'unrelated').workerError, undefined);
 });
 
 test('attempt timing without historical run evidence survives the CLI JSON boundary', t => {

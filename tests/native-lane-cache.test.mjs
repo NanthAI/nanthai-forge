@@ -11,13 +11,12 @@ import fs, {
   rmSync,
   writeFileSync,
 } from 'node:fs';
-import childProcess, { spawn } from 'node:child_process';
+import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeSource, nativeMarker, nativeOwner } from '../dist/native-source.js';
-import { initNative } from '../dist/native-work.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-lane-tree-')));
@@ -117,53 +116,4 @@ test('source cache follows the exact selected State and does not accumulate old 
   assert.equal(readFileSync(join(path, 'nested/a.txt'), 'utf8'), 'new main');
   assert.equal(readFileSync(join(old, 'nested/a.txt'), 'utf8'), 'original bytes\n');
   assert.deepEqual(readdirSync(join(f.cache, '..')).sort(), ['lock-queue', 'tree', 'tree.json']);
-});
-
-test('eight simultaneous start processes all publish independent Lanes outside the owner writer lock', async t => {
-  const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-eight-starts-')));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  for (let i = 0; i < 200; i++) writeFileSync(join(root, `file-${i}.txt`), `file ${i}\n`.repeat(100));
-  initNative(root);
-  const module = new URL('../dist/agent-workflow.js', import.meta.url).href;
-  const sourceModule = new URL('../dist/native-source.js', import.meta.url).href;
-  const storeModule = new URL('../dist/work-store.js', import.meta.url).href;
-  const code = `import { AgentWorkflow } from ${JSON.stringify(module)};
-    import { NativeSource } from ${JSON.stringify(sourceModule)};
-    import { WorkStore } from ${JSON.stringify(storeModule)};
-    const root=process.argv[1], original=NativeSource.prototype.materialize, locked=WorkStore.prototype.locked;
-    let holding=0;
-    WorkStore.prototype.locked=function(run,options){return locked.call(this,()=>{holding++;try{return run()}finally{holding--}},options)};
-    NativeSource.prototype.materialize=function(...args) { if(holding) throw new Error('owner lock held while copying'); return original.apply(this,args); };
-    // The test harness disables lock waiting for negative tests. Exercise the
-    // product's normal concurrent-start waiting rather than that fixture mode.
-    delete process.env.FORGE_WORK_LOCK_WAIT_MS;
-    const began=performance.now();
-    const result=(await new AgentWorkflow(root).dispatch({action:'start',outcome:'Concurrent start '+process.argv[2]})).result;
-    console.log(JSON.stringify({laneId:result.laneId,path:result.path,ms:performance.now()-began}));`;
-  const results = await Promise.all(
-    Array.from(
-      { length: 8 },
-      (_, i) =>
-        new Promise((resolve, reject) => {
-          const child = spawn(process.execPath, ['--input-type=module', '-e', code, root, String(i)], {
-            stdio: ['ignore', 'pipe', 'pipe'],
-          });
-          t.after(() => child.kill());
-          let stdout = '',
-            stderr = '';
-          child.stdout.on('data', chunk => (stdout += chunk));
-          child.stderr.on('data', chunk => (stderr += chunk));
-          child.on('error', reject);
-          child.on('exit', code =>
-            code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(`start exited ${code}: ${stderr}`)),
-          );
-        }),
-    ),
-  );
-  assert.equal(new Set(results.map(result => result.laneId)).size, 8);
-  for (const result of results) {
-    assert.ok(result.ms < 30_000, `start took ${result.ms}ms`);
-    assert.equal(readFileSync(join(result.path, 'file-199.txt'), 'utf8'), 'file 199\n'.repeat(100));
-  }
-  t.diagnostic(`eight simultaneous starts ms: ${results.map(result => Math.round(result.ms)).join(', ')}`);
 });

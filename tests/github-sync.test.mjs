@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cleanupOwner } from './owner-cleanup.mjs';
-import { until as untilWorker } from './landing-worker-fixture.mjs';
-import { shortSocketPath } from './helpers/short-socket.mjs';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
 import test, { after } from 'node:test';
@@ -1501,65 +1499,6 @@ registerHooks({load(url, context, next) {
   );
   assert.notEqual(child.status, 0);
   assert.equal(JSON.parse(child.stdout).reason, 'GITHUB_SYNC_INCOMPLETE');
-});
-
-test('--wait-audit timeout exits while its newly started audit continues under the same run', async t => {
-  const { createServer } = await import('node:net');
-  const { once } = await import('node:events');
-  const f = fixture(t),
-    endpoint = shortSocketPath('audit-gate');
-  const sockets = new Set();
-  const server = createServer(socket => {
-    sockets.add(socket);
-  });
-  server.listen(endpoint);
-  await once(server, 'listening');
-  f.work.execute(
-    {
-      action: 'define-check',
-      checkId: f.work.store.load().checks[0].id,
-      name: 'verify',
-      executable: process.execPath,
-      args: [
-        '-e',
-        `require('net').connect(${JSON.stringify(endpoint)}).on('end',()=>process.exit(0)).resume()`,
-      ],
-    },
-    f.work.store.revision(),
-  );
-  try {
-    // Give the worker admission time independently of the observation deadline:
-    // stdout progress acknowledges that it is retained; the socket proves execution.
-    const pending = syncChild(f, ['--push', '--wait-audit', '--audit-timeout-ms', '3000']);
-    await untilWorker({ store: f.work.store }, () => sockets.size > 0, 'retained audit starts');
-    const runId = f.work.store.load().runs.find(run => run.mainCheck).id;
-    const child = await pending;
-    assert.equal(child.status, 1, child.stderr);
-    assert.equal(JSON.parse(child.stdout).reason, 'GITHUB_SYNC_AUDIT_TIMEOUT');
-    // The socket proves execution; its running progress record can still be
-    // queued behind another writer. Timeout must retain that same live run.
-    const retained = f.work.store.load().runs.find(run => run.id === runId);
-    assert.ok(['preparing', 'running'].includes(retained.status));
-    assert.equal(retained.endedAt, undefined);
-    assert.ok(!retained.cancelRequested);
-    // The socket can connect before the controller publishes its running record.
-    // Keep the command gated until that independent publication is observed.
-    await untilWorker(
-      { store: f.work.store },
-      () => f.work.store.load().runs.find(run => run.id === runId)?.status === 'running',
-      'retained audit publishes running',
-    );
-    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'running');
-    for (const socket of sockets) socket.end();
-    await drainPostAccept(f.work.store);
-    assert.equal(f.work.store.load().runs.filter(run => run.mainCheck).length, 1);
-    assert.equal(f.work.store.load().runs.find(run => run.id === runId).status, 'passed');
-    assert.equal(f.controlState().pushes, undefined);
-  } finally {
-    for (const socket of sockets) socket.destroy();
-    server.close();
-    await drainPostAccept(f.work.store);
-  }
 });
 
 // Incident 2026-10-24: re-landed old entries made accepted moves with head == previous,

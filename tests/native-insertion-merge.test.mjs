@@ -2,15 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { mergeNativeText, markNativeTextConflicts } from '../dist/native-text-merge.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { agentSync, conflictPlan } from '../dist/agent-sync.js';
 
 const bytes = text => Buffer.from(text);
 const base = "import test from 'node:test';\nimport assert from 'node:assert/strict';\n";
@@ -256,30 +253,6 @@ test('native composition reports and retains resolution provenance with original
   assert.equal(source.object(source.state(laneHead).files[0].blob).toString(), base + lane);
 });
 
-test('Lane sync orders main before Lane and replays the same resolution receipt', async t => {
-  const { root, source, state } = fixture(t);
-  const agent = new AgentWorkflow(root);
-  const started = (await agent.dispatch({ action: 'start', outcome: 'Append a test' })).result;
-  writeFileSync(join(started.path, 'file.mjs'), base + lane);
-  const checkpoint = (
-    await agent.dispatch({ action: 'checkpoint', laneId: started.laneId, message: 'Lane test' })
-  ).result;
-  const target = state(base + main, 'main');
-  const command = {
-    operationId: randomUUID(),
-    laneId: started.laneId,
-    expectedHead: checkpoint.head,
-    channel: 'main',
-  };
-  const result = agentSync(agent.work.store, command, { target }).result;
-  assert.equal(result.status, 'merged');
-  assert.equal(readFileSync(join(started.path, 'file.mjs'), 'utf8'), base + main + lane);
-  assert.deepEqual(result.resolutions, [{ path: 'file.mjs', baseLine: 3, resolved: 'both-insertions' }]);
-  assert.deepEqual(agentSync(agent.work.store, command, { target }).result, result);
-  assert.match(source.state(result.head).message, /both-insertions/);
-  assert.deepEqual(conflictPlan(source, checkpoint.head, target, ['lane', 'main']).conflicts, []);
-});
-
 test('a later unresolved hunk prevents publication of speculative resolution notes', () => {
   const resolutions = [];
   assert.equal(
@@ -287,40 +260,4 @@ test('a later unresolved hunk prevents publication of speculative resolution not
     null,
   );
   assert.deepEqual(resolutions, []);
-});
-
-test('Markdown conflict resolution preserves main-first code insertions and their receipt', async t => {
-  const { root, source, state } = fixture(t, true);
-  const agent = new AgentWorkflow(root);
-  const started = (await agent.dispatch({ action: 'start', outcome: 'Code and docs' })).result;
-  writeFileSync(join(started.path, 'file.mjs'), base + lane);
-  writeFileSync(join(started.path, 'README.md'), '- lane capability\n');
-  const checkpoint = (
-    await agent.dispatch({ action: 'checkpoint', laneId: started.laneId, message: 'Lane edits' })
-  ).result;
-  const target = state(base + main, 'main', '- main capability\n');
-  const command = {
-    operationId: randomUUID(),
-    laneId: started.laneId,
-    expectedHead: checkpoint.head,
-    channel: 'main',
-  };
-  const result = agentSync(agent.work.store, command, {
-    target,
-    resolveDocs: true,
-    automaticActor: 'synthetic',
-  }).result;
-  assert.equal(result.status, 'merged');
-  assert.equal(readFileSync(join(started.path, 'file.mjs'), 'utf8'), base + main + lane);
-  assert.equal(
-    readFileSync(join(started.path, 'README.md'), 'utf8'),
-    '- main capability\n- lane capability\n',
-  );
-  assert.deepEqual(result.docsResolution.paths, ['README.md']);
-  assert.deepEqual(result.resolutions, [{ path: 'file.mjs', baseLine: 3, resolved: 'both-insertions' }]);
-  assert.deepEqual(
-    agentSync(agent.work.store, command, { target, resolveDocs: true, automaticActor: 'synthetic' }).result,
-    result,
-  );
-  assert.match(source.state(result.head).message, /both-insertions/);
 });

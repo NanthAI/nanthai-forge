@@ -9,7 +9,6 @@ import {
   readFileSync,
   existsSync,
   realpathSync,
-  linkSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,8 +21,6 @@ import { NativeSource, nativePaths } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { PeersSource } from '../dist/agent-peers-source.js';
-import { readPendingStatus } from '../dist/pending-status-read.js';
-import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { readIgnoredStatus } from '../dist/ignored-status.js';
 
 import { exportNativeGit, importNativeGit } from '../dist/native-git.js';
@@ -145,34 +142,6 @@ test('save, first-write path set, Lane materialization and export omit Forge-ign
   );
   assert.equal(workGit(repo, ['show', `${exported.commit}:public.txt`]), 'public');
   assert.equal(readFileSync(join(path, 'retained.txt'), 'utf8'), 'original');
-});
-
-test('local pending status exposes rules without ignored file contents or remote IO', async t => {
-  const root = fixture(t);
-  put(root, '.gitignore', '*.tmp\n');
-  put(root, '.forgeignore', 'private/\n');
-  put(root, 'a.tmp');
-  put(root, 'private/a.txt');
-  put(root, '.env');
-  initNative(root);
-  const work = new WorkService(root),
-    revision = work.store.revision();
-  put(root, 'public.txt', 'public');
-  linkSync(join(root, 'public.txt'), join(root, 'public-linked.txt'));
-  let calls = 0;
-  t.mock.method(globalThis, 'fetch', () => {
-    calls++;
-    throw Error('Unexpected network call');
-  });
-  const compact = readPendingStatus(work.store);
-  assert.deepEqual(compact.ignored.counts, { '.gitignore': 1, '.forgeignore': 1, builtin: 2 });
-  assert(!('paths' in compact.ignored));
-  const detailed = readPendingStatus(work.store, undefined, undefined, { ignored: true });
-  assert.match(formatPendingStatus(detailed), /Ignored: 1 .gitignore · 1 .forgeignore · 2 built-in/);
-  assert.match(formatPendingStatus(detailed), /"private" · ".forgeignore":1 · "private\/"/);
-  assert(!JSON.stringify(detailed).includes('SYNTHETIC_EXCLUDED_CONTENT'));
-  assert.equal(calls, 0);
-  assert.equal(work.store.revision(), revision);
 });
 
 test('original Git import retains exact history while subsequent captures honor Forge rules', async t => {

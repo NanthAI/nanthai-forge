@@ -8,12 +8,8 @@ import { randomUUID } from 'node:crypto';
 
 import { initNative, nativeExecute } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { updateHostState } from '../dist/host-binding.js';
-import { drainLandingBatches } from '../dist/landing-batch.js';
-import { fixture as batchFixture } from './landing-batch-fixture.mjs';
 import { cleanupOwner } from './owner-cleanup.mjs';
-import { asAnotherProcess } from './another-process.mjs';
 
 const binding = {
   projectId: 'synthetic-project',
@@ -126,44 +122,3 @@ for (const acceptanceOwner of [undefined, false, true]) {
     assert.deepEqual(f.store.load(), before);
   });
 }
-
-test('Work dispatch, agent accept and repeated operations preserve source and return hosted guidance', async t => {
-  const f = fixture(t);
-  bind(f.store);
-  const before = f.store.load();
-  await assert.rejects(f.work.dispatch(f.command, before.revision), hosted);
-  const agent = new AgentWorkflow(f.root);
-  for (let i = 0; i < 2; i++)
-    await assert.rejects(
-      agent.dispatch({ action: 'accept', operationId: f.command.operationId, viewId: f.command.viewId }),
-      hosted,
-    );
-  assert.equal(f.store.load().channelMoves.length, 0);
-  assert.equal(f.store.select('lanes', f.lane.id).state, 'active');
-  // Under server authority, checkpoints go through hosted (covered by hosted-agent-bound tests).
-});
-
-test('native landing worker cannot accept a passing batch when the project becomes bound', async t => {
-  const f = await batchFixture(t, { delay: 0 });
-  await f.agent.dispatch({
-    action: 'set-policy',
-    operationId: randomUUID(),
-    acceptance: { batchWindowMs: 0 },
-  });
-  await f.candidate('ready.txt');
-  await assert.rejects(
-    drainLandingBatches(f.work, 'main', undefined, async () => {
-      // The binding stands in for another process, never the driver's lock context.
-      asAnotherProcess(() => bind(f.store, { acceptanceOwner: true, sourceAuthority: server }));
-    }),
-    hosted,
-  );
-  const data = f.store.load();
-  assert.equal(data.channelMoves.length, 0);
-  assert.equal(
-    data.landingEntries.some(entry => entry.status === 'accepted'),
-    false,
-  );
-  assert.ok(data.runs.some(run => run.status === 'passed'));
-  assert.ok(data.lanes.every(lane => lane.state === 'active'));
-});

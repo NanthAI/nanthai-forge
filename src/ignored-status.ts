@@ -30,13 +30,3 @@ export function readIgnoredStatus(root: string, detail = false, retained: string
   });
   return { counts, scope: 'local-paths-pruned-directories', ...(detail ? { paths } : {}) };
 }
-export function formatIgnoredStatus(value: IgnoredStatus) {
-  const c = value.counts;
-  return [
-    `Ignored: ${c['.gitignore']} .gitignore · ${c['.forgeignore']} .forgeignore · ${c.builtin} built-in`,
-    ...(value.paths ?? []).map(
-      item =>
-        `  ${JSON.stringify(item.path)} · ${item.file ? `${JSON.stringify(item.file)}:${item.line}` : 'built-in'} · ${JSON.stringify(item.rule)}`,
-    ),
-  ];
-}

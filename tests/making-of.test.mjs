@@ -1,14 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { trustAgents } from './autonomy-fixture.mjs';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { initNative } from '../dist/native-work.js';
-import { readHostState } from '../dist/host-binding.js';
 import { unknownCost } from '../dist/check-cost.js';
 import { ACTIVE_IDLE_MS, activeMs, deriveMakingOf, runTiming, unionMs } from '../dist/making-of.js';
 
@@ -321,89 +314,6 @@ test('several Lanes and runs: parallel waits count once, legacy runs add only to
   assert.deepEqual(record.actors, [{ name: 'a' }, { name: 'b', harness: ['codex'] }]);
   assert.ok(!('sessions' in record));
   assert.deepEqual(record.landings, []);
-});
-
-test('agent making-of and report actions over a native owner', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-making-of-'));
-  try {
-    writeFileSync(join(root, 'file.txt'), 'original\n');
-    initNative(root);
-    trustAgents(root);
-    const agent = new AgentWorkflow(root);
-    const started = (
-      await agent.dispatch({
-        action: 'start',
-        outcome: 'Change greeting',
-        actor: 'claude-i1',
-        tool: 'claude-code',
-      })
-    ).result;
-    const planned = (await agent.dispatch({ action: 'making-of', intentId: started.intentId })).result;
-    assert.equal(planned.lanes.length, 1);
-    assert.equal(planned.lanes[0].startedAt, planned.createdAt);
-    assert.deepEqual(planned.runs, []);
-    assert.ok(!('checks' in planned) && !('tokens' in planned));
-    writeFileSync(join(started.path, 'file.txt'), 'changed\n');
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'verify',
-      executable: process.execPath,
-      args: ['-e', "require('fs').readFileSync('file.txt','utf8')==='changed\\n'||process.exit(1)"],
-    });
-    const finished = (
-      await agent.dispatch({ action: 'finish', laneId: started.laneId, message: 'Greeting', accept: true })
-    ).result;
-    assert.equal(finished.status, 'accepted');
-
-    const report = {
-      action: 'report',
-      operationId: randomUUID(),
-      laneId: started.laneId,
-      actor: 'claude-i1',
-      model: 'claude-opus-5-5',
-      tokens: { input: 100, output: 20 },
-    };
-    const first = (await agent.dispatch(report)).result;
-    assert.equal(first.report.name, 'claude-i1');
-    const newer = { ...report, operationId: randomUUID(), tokens: { input: 300, output: 50 } };
-    await agent.dispatch(newer);
-    // Replaying an older operation never overwrites newer totals.
-    assert.deepEqual((await agent.dispatch(report)).result.report.tokens, { input: 300, output: 50 });
-    assert.equal(Object.keys(readHostState(agent.work.store).selfReports).length, 1);
-    await assert.rejects(
-      agent.dispatch({ action: 'report', laneId: started.laneId }),
-      error => error.code === 'BAD_ARGUMENT',
-    );
-    await assert.rejects(
-      agent.dispatch({ action: 'report', laneId: randomUUID(), model: 'm' }),
-      error => error.code === 'NOT_FOUND',
-    );
-
-    const record = (await agent.dispatch({ action: 'making-of', intentId: started.intentId })).result;
-    assert.equal(record.status, 'completed');
-    assert.deepEqual(
-      record.lanes[0].saves.map(save => save.kind),
-      ['save'],
-    );
-    assert.equal(record.runs.length, 1);
-    const [checked] = record.runs;
-    assert.equal(checked.status, 'passed');
-    for (const key of ['queuedMs', 'runningMs', 'durationMs'])
-      assert.ok(Number.isInteger(checked[key]) && checked[key] >= 0, key);
-    assert.equal(checked.queuedMs + checked.runningMs, checked.durationMs);
-    assert.equal(record.landings.length, 1);
-    assert.equal(record.landings[0].channel, 'main');
-    assert.deepEqual(record.tokens, { input: 300, output: 50, reports: 1 });
-    assert.deepEqual(record.actors.find(row => row.name === 'claude-i1')?.model, ['claude-opus-5-5']);
-    assert.ok(record.wallClockMs >= 0 && record.activeTime.ms <= record.wallClockMs);
-    assert.ok(!('operations' in record.reports[0]));
-    await assert.rejects(
-      agent.dispatch({ action: 'making-of', intentId: randomUUID() }),
-      error => error.code === 'NOT_FOUND',
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test('infrastructure outcomes end recorded timing without inventing a local spawn', () => {

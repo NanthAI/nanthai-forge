@@ -12,7 +12,6 @@ import { defaultR2Config, defaultR2Objects, interceptDefaultR2 } from './default
 import { moduleUrl } from './convex-module.mjs';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 const index = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const { log } = await import(moduleUrl('../convex/projectViewActions.ts'));
 const code = expected => error => (error.data?.code ?? error.code) === expected;
@@ -23,8 +22,8 @@ test('hosted log pages read only retained run bytes and recheck current read aut
   mkdirSync(root);
   writeFileSync(join(root, 'a.ts'), 'export const a = 1;\n');
   initNative(root);
-  const agent = new AgentWorkflow(root),
-    work = new WorkService(root);
+  const work = new WorkService(root),
+    act = command => work.execute(command, work.store.revision()).result;
   // Explicit project opt-in: this fixture exercises portable local-log recovery.
   const logPolicyData = work.store.load();
   logPolicyData.autonomyPolicy = {
@@ -32,31 +31,28 @@ test('hosted log pages read only retained run bytes and recheck current read aut
     checkLogs: { uploadLocal: true, retentionDays: 90 },
   };
   work.store.save(logPolicyData);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic log' })).result;
-  const view = (
-    await agent.dispatch({
-      action: 'compose',
-      operationId: randomUUID(),
-      intentId: lane.intentId,
-      inputs: [{ laneId: lane.laneId, head: lane.head }],
-    })
-  ).result;
-  const check = (
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'Synthetic failure',
-      executable: process.execPath,
-      args: ['-e', "process.stdout.write('x'.repeat(20000)+'\\n✖ retained failure\\n');process.exit(1)"],
-    })
-  ).result;
+  const intent = act({ action: 'intent', outcome: 'Synthetic log' }),
+    lane = act({ action: 'lane', intentId: intent.id, name: 'Log' });
+  const view = act({
+    action: 'compose',
+    operationId: randomUUID(),
+    intentId: intent.id,
+    inputs: [{ laneId: lane.id, head: lane.head }],
+  });
+  const check = act({
+    action: 'define-check',
+    name: 'Synthetic failure',
+    executable: process.execPath,
+    args: ['-e', "process.stdout.write('x'.repeat(20000)+'\\n✖ retained failure\\n');process.exit(1)"],
+  });
   const runId = randomUUID();
   await work.dispatch(
     {
       action: 'run-check',
       operationId: runId,
-      viewId: view.viewId,
+      viewId: view.id,
       expectedHead: view.head,
-      checkId: check.checkId,
+      checkId: check.id,
       expectedDefinition: check.definition,
       expectedEnvironment: work.status().environment.fingerprint,
     },

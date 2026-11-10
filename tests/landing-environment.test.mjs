@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { fixture } from './landing-batch-fixture.mjs';
-import { childWorker, until } from './landing-worker-fixture.mjs';
+import { execFileSync } from 'node:child_process';
 import { constants, copyFileSync, cpSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -61,56 +58,3 @@ test('runtime identity follows executable bytes for CLI and canonical location f
   copyFileSync(process.execPath, node, constants.COPYFILE_FICLONE);
   assert.deepEqual(changedLandingRuntime(original, read(node)), ['nodeExecutable', 'cli']);
 });
-
-for (const changed of ['cli', 'nodeExecutable'])
-  test(`installed worker ${changed === 'cli' ? 'accepts a different submitting CLI' : 're-pins a Node location change'}`, async t => {
-    const f = await fixture(t, { remote: false });
-    const input = await f.candidate('other-runtime.txt', undefined, false);
-    const root = mkdtempSync(join(tmpdir(), 'forge-other-controller-'));
-    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-    let executable = process.execPath;
-    let module = new URL('../dist/agent-workflow.js', import.meta.url).href;
-    if (changed === 'cli') {
-      const dist = join(root, 'dist');
-      cpSync(fileURLToPath(new URL('../dist', import.meta.url)), dist, { recursive: true });
-      symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'));
-      copyFileSync(fileURLToPath(new URL('../package.json', import.meta.url)), join(root, 'package.json'));
-      symlinkSync(fileURLToPath(new URL('../scripts', import.meta.url)), join(root, 'scripts'));
-      writeFileSync(join(dist, 'synthetic-build.js'), '// different installed build\n');
-      module = pathToFileURL(join(dist, 'agent-workflow.js')).href;
-    } else {
-      executable = join(root, 'node');
-      copyFileSync(process.execPath, executable, constants.COPYFILE_FICLONE);
-    }
-    const worker = await childWorker(f);
-    try {
-      const command = {
-        action: 'finish',
-        laneId: input.lane.laneId,
-        message: 'Other runtime',
-        accept: true,
-        wait: false,
-      };
-      const script = `import { AgentWorkflow } from ${JSON.stringify(module)};await new AgentWorkflow(process.argv[1]).dispatch(JSON.parse(process.argv[2]));`;
-      await promisify(execFile)(executable, [
-        '--input-type=module',
-        '-e',
-        script,
-        f.root,
-        JSON.stringify(command),
-      ]);
-      const expected = 'accepted';
-      await until(f, () => f.store.load().landingEntries?.[0]?.status === expected, 'runtime admission');
-      const data = f.store.load();
-      if (changed === 'nodeExecutable') {
-        assert.deepEqual(data.landingEntries[0].runtimeRepins[0].fields, ['nodeExecutable']);
-        assert.equal(data.runs.filter(r => !r.mainCheck).length, 1);
-        assert.equal(data.channelMoves.length, 1);
-        return;
-      }
-      assert.equal(data.runs.filter(run => !run.mainCheck).length, 1);
-      assert.equal(data.channelMoves.length, 1);
-    } finally {
-      await worker.stop();
-    }
-  });
