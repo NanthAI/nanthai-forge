@@ -57,3 +57,31 @@ Provider usage must be reconciled separately before claiming a cost saving.
 original-id retries, access failures, cursor replay, non-overlapping page ranges,
 retained-byte reduction and proportional new source writes. Report and callback
 byte ratchets live in the existing report-cap and Actions-result growth tests.
+
+## Cold CI descriptor reads
+
+The CI source resolver reads sorted digest windows and reuses each covering
+catalog page within its transaction. The raw-row fallback still reads one full
+object document per blob. The existing B2 guard in
+`tests/hosted-actions-direct.test.mjs` retains its 2,120,000 / 10,300,000-byte
+raw ceilings at 6k / 29k files, and also runs the same cold lookup against
+catalog pages. Catalog ceilings are 450,000 / 2,120,000 bytes, including State
+and current-session reads. Source calls remain three / eleven; the checks
+retain exact object hashes and sizes, current authority, no writes and no idle
+scheduling. This measures fixture document bytes, not provider index I/O.
+
+The catalog measurement reads 437,952 bytes instead of 2,110,450 at 6k,
+and 2,105,060 instead of 10,226,466 at 29k (about 79% less). Migration-origin
+metadata has its real operation-id width in the ratchet. The raw reference keeps
+B2's shorter synthetic R2 keys, so its comparison does not inflate the baseline.
+Catalogs derive the canonical project R2 keys; source bytes and content-id
+verification are unchanged. Imported and migrated bindings benefit; new raw rows
+retain their current cost until compacted. New small worker outputs do not
+rewrite unrelated catalog pages.
+
+A State-bound descriptor manifest in R2 could remove the remaining bulk catalog
+read. It must bind to the accepted State id, retain per-object content-id checks,
+and reuse the trusted baseline and changed pins without adding a whole Convex
+descriptor scan for each State. Its writer, R2 operations, storage and warm-job
+costs need a separate comparison. This manifest is a placement-review option;
+the current implementation does not introduce one.
