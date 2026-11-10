@@ -145,6 +145,7 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   ack: server,
   preflight: read,
   'source-pack': read,
+  snapshots: read,
   cancel: server,
   revert: server,
   abandon: { kind: 'checked', superseded: supersededLifecycle('abandon') },

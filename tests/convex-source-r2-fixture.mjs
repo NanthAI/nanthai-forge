@@ -44,6 +44,23 @@ export function fakeSourceR2(t) {
           : {}),
       });
     }
+    if (method === 'DELETE') {
+      objects.delete(url.pathname);
+      return new Response(null, { status: 204 });
+    }
+    if (method === 'GET' && url.searchParams.get('list-type') === '2') {
+      const bucket = url.pathname.replace(/\/$/, ''),
+        prefix = url.searchParams.get('prefix') ?? '';
+      const listed = [...objects.entries()]
+        .map(([path, value]) => [path.slice(bucket.length + 1), value])
+        .filter(([key]) => key.startsWith(prefix))
+        .sort(([a], [b]) => (a < b ? -1 : 1));
+      const page = listed.slice(0, 100),
+        more = listed.length > page.length;
+      return new Response(
+        `<ListBucketResult>${page.map(([key, value]) => `<Contents><Key>${encodeURIComponent(key)}</Key><Size>${value.length}</Size></Contents>`).join('')}<IsTruncated>${more}</IsTruncated>${more ? '<NextContinuationToken>next</NextContinuationToken>' : ''}</ListBucketResult>`,
+      );
+    }
     const bytes = objects.get(url.pathname);
     if (!bytes) return new Response(null, { status: 404 });
     if (method === 'HEAD')

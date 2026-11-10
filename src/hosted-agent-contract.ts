@@ -10,6 +10,7 @@ import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
+import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
 import { safeRelative } from './safe-relative.js';
 import { planningCommentCommandSchema, planningPutSchema } from './work-planning-types.js';
 import { invariant } from './errors.js';
@@ -76,7 +77,14 @@ export const hostedAgentReviewActions = ['approve-link', 'request-approval'] as 
  * clients parse the capability list strictly); the server feature `landing-withdraw` gates it. */
 export const hostedAgentLandingActions = ['withdraw'] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
-export const hostedAgentClientActions = ['ack', 'preflight', 'source-pack', 'recover-apply', 'pull'] as const;
+export const hostedAgentClientActions = [
+  'ack',
+  'preflight',
+  'source-pack',
+  'recover-apply',
+  'pull',
+  'snapshots',
+] as const;
 export { hostedAgentAddressSchema, type HostedAgentAddress } from './hosted-address.js';
 export const hostedAgentCapabilitiesSchema = z
   .object({
@@ -107,6 +115,8 @@ export const hostedAgentCapabilitiesSchema = z
     checkCallbackConfigured: z.boolean(),
     nativeOwnerRequired: z.literal(false),
     observation: z.literal('finite'),
+    /** Feature lane-snapshots: true while project policy autoSnapshot is on (Issue 7ac4e32f). */
+    laneSnapshots: z.boolean().optional(),
     /** Split save (save-settle-background, fea47345 C): the outcome of the save the client named in
      * `settling`, read in this same call (`terminal` null while it is still settling). */
     settledSave: z.object({ operationId: z.string(), terminal: z.unknown().nullable() }).strict().optional(),
@@ -263,6 +273,8 @@ export const hostedAgentCommandSchemas = {
     .strict(),
   /** Client-composed operator repair: pack the current hosted main and publish it to R2. */
   'source-pack': z.object({}).strict(),
+  /** Unsaved-work snapshots (7ac4e32f): the Lane's operation log, undo/redo/restore, owner purge. */
+  snapshots: snapshotsCommandSchema,
   cancel: z.object({ submissionId: uuid }).strict(),
   /** land --withdraw: cancel this Lane's live landing; the Lane, saves and check evidence stay. */
   withdraw: z

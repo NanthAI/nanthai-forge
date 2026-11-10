@@ -342,6 +342,9 @@
           "type": "string",
           "const": "finite"
         },
+        "laneSnapshots": {
+          "type": "boolean"
+        },
         "settledSave": {
           "type": "object",
           "properties": {

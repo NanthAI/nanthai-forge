@@ -94,6 +94,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `ack` | `laneId?, choice?, text?, operationId?` |
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, operationId?` |
 | `x source-pack` | `operationId?` |
+| `x snapshots` | `laneId?, undo?, redo?, restore?, purge?, operationId?` |
 | `x cancel` | `submissionId, operationId?` |
 | `land --withdraw` | `laneId?, submissionId?, reason?, operationId?` |
 | `x revert` | `message?, target, operationId?` |
@@ -960,6 +961,17 @@ Hosted UI metadata uses `projectViewReads.read({projectId,generationId?,action:"
 On native owners the presence observer snapshots each open Lane about 5 seconds after its files stop changing (at most every 30 seconds, and within a minute of continuous editing). An auto-snapshot is a content-addressed State whose parent is the Lane head. It is not a save: it adds no checkpoint, moves no head, syncs nothing and is never pushed. Each open Lane keeps its latest auto-snapshot regardless of age. Completed or abandoned Lanes retain that protection for seven days after the later of the snapshot and latest closure; reopening restores protection immediately. After the window, `clean` removes the pointer/cache and native object collection can reclaim only objects unreachable from all other retained source and history. Saved checkpoints remain retained. Capture rereads only files whose metadata changed; a Lane that is busy (sync, merge, checkpoint) or has a pending merge is skipped. A Lane that matches its head has no auto-snapshot.
 
 After an agent dies, `status {"laneId":…}` returns `lane.autoSnapshot` (`state`, `at`, `changedPathCount`, up to 20 `paths`, `notice`); owner `status {"detail":true}` lists them as `unsavedEdits`, and `start` with the same `actor` warns about that actor's Lanes. The edits normally remain in the Lane folder, so `checkpoint` saves them. If the folder is gone, read them with `diff {"from":HEAD,"to":STATE}` and `show {"state":STATE,"path":…}`. Disable with `nforge set-policy ROOT '{"operationId":"UUID","autoSnapshot":false}'`.
+
+**Hosted Lanes** (Issue 7ac4e32f): this runs behind policy `autoSnapshot` and is off unless set.
+
+- **What triggers a snapshot:** each Forge command run in a Lane checkout first snapshots the checkout's working files, if they changed since the last snapshot.
+- **What it costs:** unchanged files cost no call. A changed snapshot costs `prepare`, `commit` and create-only R2 uploads of only the changed files. File bytes never go into Convex.
+- **What it is not:** a snapshot is not a save. The Lane head never moves. Nothing lands, runs checks or raises notices.
+- **What is left out:** the walk is the save's. Ignored files, credential names and secret content are left out and counted as `notSaved`. New files over 1 MiB are left out and named in `snapshot.notSaved.capped`.
+- **Browsing and moving:** `x snapshots {}` lists the Lane's operation log. With the Lane checkout as ROOT, `{"undo":N}`, `{"redo":N}` and `{"restore":SEQ|"latest"}` write a snapshot's files back. Each move first snapshots the current files, so the move can be undone. Nothing is deleted or saved.
+- **Recovering on a new machine:** run `start --open {laneId}`, then `{"restore":"latest"}`.
+- **Expiry and purge:** a Lane's snapshots expire 14 days after its latest one. `{"purge":true}` deletes them from storage for real; it needs the Lane author or the project owner.
+- **Not covered:** edits made after the last command.
 
 ### Abandon work without losing it
 

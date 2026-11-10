@@ -133,9 +133,14 @@ import {
   writeCallerReceipts,
 } from './hosted-metric-outbox.js';
 import { isHostedReplyError, parseHostedResponse, replyIssuePaths } from './hosted-response.js';
+import { snapshotLaneCheckout, type SnapshotReceipt } from './hosted-lane-snapshot.js';
+import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
+import { openLaneRoot } from './hosted-lane-location.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
+/** Actions that capture or rewrite the working files themselves take no snapshot first. */
+const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'resolve', 'sync', 'compose', 'snapshots']);
 const quietActions = new Set([
   'approve-link',
   'request-approval',
@@ -221,6 +226,8 @@ export type HostedAgentResponse = {
   stack?: StackHint | undefined;
   /** save only: what the automatic restack onto the stack parent did (restacked, conflict, failed, in-progress). */
   restack?: Record<string, unknown>;
+  /** The unsaved-work snapshot this command took first, or why it could not (Issue 7ac4e32f). */
+  snapshot?: SnapshotReceipt;
   /** This agent session's public identity, `handle/slug` (start, save and land receipts). */
   as?: string;
   /** start only: your idle open Lanes and finished Lane roots pruned on this machine. */
@@ -297,6 +304,8 @@ export class HostedAgentTransport {
   /** Fires once the local journal selects the operation id, before any network wait:
    * a backgrounded or killed client still leaves its id and resume command behind. */
   onOperation?: (action: string, operationId: string) => void;
+  /** The unsaved-work snapshot this command took (or why it skipped), for its receipt. */
+  snapshotReceipt?: SnapshotReceipt | undefined;
   /** Epoch ms deadline for actions that wait for their own outcome; default: the agent wait
    * budget from dispatch. `wait` sets its own so a resumed save never outlives that budget. */
   waitUntil?: number;
@@ -387,13 +396,16 @@ export class HostedAgentTransport {
       { id: typeof input.operationId === 'string' ? input.operationId : null },
       () => this.dispatchScoped(requestedAction, input, signal),
     );
+    const snapshot = this.snapshotReceipt;
+    this.snapshotReceipt = undefined;
+    const withSnapshot = snapshot ? { ...response, snapshot } : response;
     // A stacked Lane's save restacks onto its parent's newer saved work when that applies cleanly.
     // Keyed on the normalized response action: the CLI sends a save under its wire name `checkpoint`.
-    return response.action === 'save'
-      ? restackAfterSave(response, this.checkoutLaneId(), (action, data) =>
+    return withSnapshot.action === 'save'
+      ? restackAfterSave(withSnapshot, this.checkoutLaneId(), (action, data) =>
           this.dispatch(action, data, signal),
         )
-      : response;
+      : withSnapshot;
   }
   /** The Lane this checkout holds, if any. */
   checkoutLaneId() {
@@ -799,6 +811,35 @@ export class HostedAgentTransport {
         });
       }
       this.defaults = capabilities.agentDefaults;
+      if (action === 'snapshots') {
+        invariant(
+          this.serverFeatures.includes('lane-snapshots'),
+          'HOSTED_ACTION_UNSUPPORTED',
+          'This Forge server does not keep Lane snapshots yet.',
+        );
+        const selected = hostedAgentCommandSchemas.snapshots.parse(command.data);
+        const root = selected.laneId
+          ? (openLaneRoot({ root: this.root, address: this.address }, selected.laneId) ?? this.root)
+          : this.root;
+        return this.response(
+          action,
+          null,
+          await executeSnapshots(root, this.address.projectId, this.exchange.client, selected),
+        );
+      }
+      // Unsaved-work snapshot (7ac4e32f): only when the policy is on and files changed; never fails the command.
+      if (capabilities.laneSnapshots && !snapshotSkips.has(action)) {
+        const laneId = (command.data as { laneId?: unknown }).laneId;
+        const root = readHostedLaneCheckout(this.root)
+          ? this.root
+          : typeof laneId === 'string'
+            ? openLaneRoot({ root: this.root, address: this.address }, laneId)
+            : null;
+        if (root) {
+          const taken = await snapshotLaneCheckout(root, this.address.projectId, this.exchange.client);
+          this.snapshotReceipt = taken.status === 'unchanged' ? undefined : taken;
+        }
+      }
       if (action === 'source-pack') {
         hostedAgentCommandSchemas['source-pack'].parse(command.data);
         const journal = new HostedAgentJournal(

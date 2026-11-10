@@ -11,12 +11,34 @@
     "unreferencedExports": 22
   },
   "counts": {
-    "tables": 179,
-    "errorCodes": 500,
-    "agentActions": 88,
+    "tables": 180,
+    "errorCodes": 501,
+    "agentActions": 89,
     "cliCommands": 53,
     "glossaryTerms": 27,
     "unreferencedExports": 19
   },
-  "reasons": []
+  "reasons": [
+    {
+      "kind": "tables",
+      "from": 179,
+      "to": 180,
+      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
+      "at": "2026-11-09"
+    },
+    {
+      "kind": "errorCodes",
+      "from": 500,
+      "to": 501,
+      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
+      "at": "2026-11-09"
+    },
+    {
+      "kind": "agentActions",
+      "from": 88,
+      "to": 89,
+      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
+      "at": "2026-11-09"
+    }
+  ]
 }

@@ -96,6 +96,10 @@ export const capabilities = query({
         hostedAgentCapabilitiesSchema.parse({
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(features ? { features: advertisedFeatures(features) } : {}),
+          // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.
+          ...(features?.includes('lane-snapshots')
+            ? { laneSnapshots: effectivePolicy(project).autoSnapshot === true }
+            : {}),
           ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
           ...(presenceVersion === 1 ? { presenceVersion: 1 } : {}),
           ...(boardVersion === 1 ? { boardVersion: 1 } : {}),

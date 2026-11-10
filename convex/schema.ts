@@ -2,6 +2,7 @@
 import { finishReadTables } from './projectFinishReadFields';
 import { hostedOverlapTables } from './projectHostedOverlapFields';
 import { boardTables } from './projectBoardFields';
+import { laneSnapshotTables } from './projectLaneSnapshotFields';
 import { abuseLimitTables } from './abuseLimitFields';
 import { hostedFrictionTables } from './projectHostedFrictionFields';
 import { selfMetricBillTables } from './projectSelfMetricBillFields';
@@ -768,6 +769,7 @@ export default defineSchema({
   ...selfMetricReceiptTables,
   ...hostedOverlapTables,
   ...boardTables,
+  ...laneSnapshotTables,
   ...abuseLimitTables,
   ...hostedDecisionTables,
   ...hostedTrustTables,

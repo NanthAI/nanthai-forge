@@ -102,6 +102,10 @@ export const hostedContractFeatures = [
    * head; a project with preflight require refuses a new agent landing without it. Without the
    * feature the CLI sends nothing (an older server judges nothing). */
   'land-gates',
+  /** Unsaved-work snapshots (Issue 7ac4e32f): projectLaneSnapshots:* exist and capabilities carry
+   * `laneSnapshots` (policy autoSnapshot). Without it the CLI takes no snapshot and refuses
+   * `x snapshots`. */
+  'lane-snapshots',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

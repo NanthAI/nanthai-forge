@@ -263,6 +263,7 @@ const examples: Record<string, unknown> = {
   ack: { laneId: 'LANE_ID', choice: 'accept-order' },
   preflight: { laneId: 'LANE_ID', run: false },
   'source-pack': {},
+  snapshots: { undo: 1 },
   cancel: { operationId: 'ORIGINAL_UUID' },
   accept: { viewId: 'CANDIDATE_ID' },
   complete: { laneId: 'LANE_ID' },
@@ -405,6 +406,9 @@ function actionHelp(action: string): string {
   if (action === 'source-pack')
     result +=
       'Hosted operator repair: x ROOT source-pack {} packs the current hosted main from this machine (objects come from the pack, the machine cache or object downloads) and publishes it to R2, so checks and Lane opens read one pack instead of every object. status current means the latest pack is already main; seed, cutover or import of a large repo should be followed by this.\n';
+  if (action === 'snapshots')
+    result +=
+      "Hosted: x ROOT snapshots {laneId?} lists the Lane's unsaved-work snapshots (newest first). With policy autoSnapshot on, each Forge command run in a Lane checkout first snapshots its working files when they changed: a hidden save in R2 that never moves the Lane head, lands, or runs checks or notices; ignored, credential and new files over 1 MiB are left out like a save leaves them out. {undo:N} / {redo:N} / {restore:SEQ|\"latest\"} write a snapshot's files back over the checkout (run with the Lane checkout as ROOT; on a new machine open it with start --open first); the current files are snapshotted first, so every move is undoable and nothing is deleted or saved. {purge:true} (Lane author or project owner) deletes every snapshot of the Lane from storage for real. Snapshots expire 14 days after a Lane's latest one. Edits made after the last command are not covered.\n";
   if (action === 'tests')
     result +=
       'Read the scoped landing test selection for the Lane saved head versus current main. Returns scope, reason, tests, command and source pins; command is null when no test files are selected. Run it in the Lane after building. Checkpoint edits and ask again after sync or main changes. Includes contractProposal with per-file historical estimates (unknown timings are null), current contract and version. candidateId selects exact composed source; runId reads its complete measured timing reports. Read-only; no check is started.\n';

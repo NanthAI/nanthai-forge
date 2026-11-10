@@ -102,6 +102,7 @@ const rows = [
   ['configure-runner', 'x configure-runner'],
   ['prioritize', 'x prioritize'],
   ['source-pack', 'x source-pack'],
+  ['snapshots', 'x snapshots'],
   ['check-settings', null],
   ['capabilities', null],
   ['integrate', 'save --preview', 'integrate', 'integrate'],
