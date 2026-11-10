@@ -371,6 +371,17 @@ test('restore drill compares one project row by row and names changed, missing a
             r2Key: `v1/p/${id}/o/${'c'.repeat(64)}`,
           },
         ];
+        // An upload that was prepared and never committed (an abandoned save): the app serves no
+        // bytes for it, so the drill must not ask the restored app for it (drill run 2026-11-10).
+        tables.projectObjects.push({
+          _id: 'pending',
+          projectId: id,
+          digest: 'a'.repeat(64),
+          size: 9,
+          removed: false,
+          location: 'r2',
+          r2Key: `v1/p/${id}/o/${'c'.repeat(64)}`,
+        });
         tables.otherProject = [{ _id: 'other', projectId: 'z'.repeat(32), text: 'SYNTHETIC_OTHER_PROJECT' }];
         return tables;
       };

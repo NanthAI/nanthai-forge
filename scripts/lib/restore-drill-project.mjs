@@ -28,7 +28,10 @@ export async function readProjectSnapshot(path, projectId, { whole = true } = {}
     if (event.table === 'hostedProjects' && row._id === projectId) project = row;
     for (const [key] of text.matchAll(keyPattern)) r2Keys.add(key);
     if (row.projectId !== projectId) continue;
-    if (event.table === 'projectObjects' && !row.removed) objects.set(row.digest, row.size);
+    // An R2 upload that was prepared but never committed is not a stored object: the app serves
+    // no bytes for it, so the drill does not ask the restored app for it either.
+    const pending = row.location === 'r2' && !row.r2Committed && !row.storageId && !row.recipe;
+    if (event.table === 'projectObjects' && !row.removed && !pending) objects.set(row.digest, row.size);
     if (event.table === 'projectObjectCatalog')
       for (let at = 0; at < row.digests.length; at += 64)
         objects.set(row.digests.slice(at, at + 64), row.sizes[at / 64]);

@@ -239,7 +239,8 @@ export async function drill(command, env = process.env) {
       report.app.main.equal &&
       report.app.sizeMismatch.length === 0;
   } catch (error) {
-    report.failed = { step, code: error?.code ?? 'DRILL_FAILED' };
+    // A refusal by the restored app arrives as a ConvexError: its code is in `data`.
+    report.failed = { step, code: error?.code ?? error?.data?.code ?? 'DRILL_FAILED' };
   } finally {
     step = 'teardown';
     if (backend && backend.exitCode === null) {
