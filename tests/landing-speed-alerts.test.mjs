@@ -491,11 +491,16 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
       rows = out.state;
       return out.events;
     };
-    for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed([6, 20, 400_000, 3260, 280, 1120]), []);
+    // The ledger is ratcheted from real data; the fixture must exercise below/above today's limits.
+    const classA = Math.floor(byId('landing-r2-class-a-mean').max),
+      classB = Math.floor(byId('landing-r2-class-b-mean').max / 2),
+      bytesPut = Math.floor(byId('landing-r2-bytes-put-mean').max / 2),
+      excessiveB = Math.ceil(byId('landing-r2-class-b-mean').max + 1);
+    for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed([classA, classB, bytesPut, 3260, 280, 1120]), []);
     assert.equal(windowValue(rows.samples, 'runnerAccepted', 'mean', WINDOW), 54.3);
     assert.equal(windowValue(rows.samples, 'runnerDiscarded', 'mean', WINDOW), 4.7);
     assert.equal(windowValue(rows.samples, 'runnerAudit', 'mean', WINDOW), 18.7);
-    assert.equal(windowValue(rows.samples, 'r2ClassB', 'mean', WINDOW), 20);
+    assert.equal(windowValue(rows.samples, 'r2ClassB', 'mean', WINDOW), classB);
     assert.equal(
       windowValue([[1, 12, 6, 'old00000', 8.5, 1, 7]], 'r2ClassA', 'mean', 1),
       null,
@@ -504,7 +509,7 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
     // A compose that re-reads every object (class B) and a test set that doubles each break their own
     // budget once, naming the next step, and stay quiet after.
     const broke = [];
-    for (let i = 0; i < WINDOW; i++) broke.push(...feed([6, 80, 400_000, 7000, 280, 1120]));
+    for (let i = 0; i < WINDOW; i++) broke.push(...feed([classA, excessiveB, bytesPut, 7000, 280, 1120]));
     assert.deepEqual(broke.map(e => [e.kind, e.budget.id]).sort(), [
       ['broken', 'landing-r2-class-b-mean'],
       ['broken', 'landing-runner-accepted-mean'],
@@ -512,11 +517,16 @@ test('live cost counts: R2 requests and runner minutes are stamped on the landin
     const r2 = broke.find(e => e.budget.id === 'landing-r2-class-b-mean');
     assert.match(
       speedBudgetMessage(r2, 'forge', budgets).text,
-      /R2 class B requests per landing mean over the last 20 landings is \S+ ops; budget 36 ops/,
+      /R2 class B requests per landing mean over the last 20 landings is \S+ ops; budget \S+ ops/,
+    );
+    assert(
+      speedBudgetMessage(r2, 'forge', budgets).text.includes(
+        `budget ${byId('landing-r2-class-b-mean').max} ops`,
+      ),
     );
     assert.match(speedBudgetMessage(r2, 'forge', budgets).text, /forge-source-step/);
     assert.match(speedBudgetIssue(r2, 'p', budgets).body, /Decision it protects: Issue ac5200f5/);
-    assert.deepEqual(feed([6, 80, 400_000, 7000, 280, 1120]), []);
+    assert.deepEqual(feed([classA, excessiveB, bytesPut, 7000, 280, 1120]), []);
   });
 });
 

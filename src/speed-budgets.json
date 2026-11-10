@@ -232,9 +232,9 @@
       "metric": "r2ClassA",
       "stat": "mean",
       "unit": "ops",
-      "max": 10,
-      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
-      "reason": "An upper bound, not a measured spread: it breaks on a per-object write loop in a compose, not on noise. Class A costs ten times class B ($4.50 per million). Counts are the composes only; check shards (one log PUT each) and saves are not in it.",
+      "max": 6.2,
+      "source": "One bounded dogfood landings read after dev deploy ae4816f5 (2026-11-10 12:57Z): 29 accepted landings (27 carry R2 stamps) since 09:26:46Z, 560,232 DB bytes, 45,583 reply bytes, no continuation. Last 20 stamped landings committed 10:52:24Z to 12:56:27Z. Observed rolling-20 mean: 4.1 ops per landing, from the costs already on each landing row.",
+      "reason": "About 1.5 times the observed rolling-20 mean, rounded up to the report precision (or 10 KB for bytes): about 50% headroom for normal workload variation. Replaces the fixture seed with live compose counts; missing stamps remain unknown. Ratchet from the same bounded read when the source path changes (Issue 3e3f9fe6).",
       "issue": "9db58ca6"
     },
     {
@@ -244,9 +244,9 @@
       "metric": "r2ClassB",
       "stat": "mean",
       "unit": "ops",
-      "max": 36,
-      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
-      "reason": "An upper bound, not a measured spread: it breaks on a per-object read loop in a compose (the object re-resolve per step the fewer-steps decision removed), not on noise.",
+      "max": 0.9,
+      "source": "One bounded dogfood landings read after dev deploy ae4816f5 (2026-11-10 12:57Z): 29 accepted landings (27 carry R2 stamps) since 09:26:46Z, 560,232 DB bytes, 45,583 reply bytes, no continuation. Last 20 stamped landings committed 10:52:24Z to 12:56:27Z. Observed rolling-20 mean: 0.55 ops per landing, from the costs already on each landing row.",
+      "reason": "About 1.5 times the observed rolling-20 mean, rounded up to the report precision (or 10 KB for bytes): about 50% headroom for normal workload variation. Replaces the fixture seed with live compose counts; missing stamps remain unknown. Ratchet from the same bounded read when the source path changes (Issue 3e3f9fe6).",
       "issue": "ac5200f5"
     },
     {
@@ -256,9 +256,9 @@
       "metric": "r2BytesPut",
       "stat": "mean",
       "unit": "bytes",
-      "max": 3000000,
-      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
-      "reason": "An upper bound, not a measured spread: stored bytes are an always-on cost, and a landing should write only new objects. A compose that re-uploads unchanged trees breaks it.",
+      "max": 1350000,
+      "source": "One bounded dogfood landings read after dev deploy ae4816f5 (2026-11-10 12:57Z): 29 accepted landings (27 carry R2 stamps) since 09:26:46Z, 560,232 DB bytes, 45,583 reply bytes, no continuation. Last 20 stamped landings committed 10:52:24Z to 12:56:27Z. Observed rolling-20 mean: 895242.9 bytes per landing, from the costs already on each landing row.",
+      "reason": "About 1.5 times the observed rolling-20 mean, rounded up to the report precision (or 10 KB for bytes): about 50% headroom for normal workload variation. Replaces the fixture seed with live compose counts; missing stamps remain unknown. Ratchet from the same bounded read when the source path changes (Issue 3e3f9fe6).",
       "issue": "9db58ca6"
     },
     {
