@@ -97,9 +97,11 @@ export const prepare = mutation({
       invariant(intent, 'NOT_FOUND', 'Hosted Intent not found on this project.');
       const peers = await mainSemanticMembers(ctx, auth, request.expectedMain.receiptId);
       const ownIntent = hostedRecordSchema.options[0].parse(JSON.parse(intent.value));
-      const afterSequence = peers.length
-        ? await semanticBaseSequence(ctx, input.projectId, ownIntent.base.receiptId)
-        : 0;
+      // A Lane start pins its Intent's receipt; an unpinned base counts every peer (the cautious side).
+      const afterSequence =
+        peers.length && ownIntent.base?.receiptId
+          ? await semanticBaseSequence(ctx, input.projectId, ownIntent.base.receiptId)
+          : 0;
       const state: ComposeState = {
         ...(peers.length
           ? { semanticPlan: { primaryIntentId: request.intentId, afterSequence, members: peers } }

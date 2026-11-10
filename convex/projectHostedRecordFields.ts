@@ -9,6 +9,7 @@ export const hostedKind = v.union(
   v.literal('job'),
   v.literal('issue'),
   v.literal('comment'),
+  v.literal('lifecycle'),
 );
 export const hostedRef = v.object({
   kind: hostedKind,

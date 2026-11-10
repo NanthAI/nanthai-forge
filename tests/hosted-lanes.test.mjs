@@ -684,3 +684,58 @@ test('planned start gives the Intent the Issue id, adds sibling Lanes, continues
   // Another account cannot attach Lanes to someone else's Intent by naming its Issue id.
   await assert.rejects(s.begin(s.input({ ...planned, intentId: first.intentId }), 'stranger'));
 });
+
+// Flip 5 (Issue 0695ab24): an Intent copied from the Work journal is owned by the journal until a Lane
+// starts on it. That start pins it exactly as the old start created it: same id, active, the Lane's base
+// and receipt, open to any project member. Until then Issue states never report its planning status.
+test('a planned start pins an Intent copied from the journal: same id, active, receipt base; Issue states ignore it until then', async () => {
+  const s = await setup(),
+    issue = randomUUID(),
+    planned = { kind: 'planned', intentId: issue, outcome: 'Planned Issue', constraints: '' };
+  s.insert('projectContributors', { projectId: s.projectId, contributor: 'member' });
+  // A closed Issue's journal Intent is completed, with no base and its creator the owner.
+  await s.call('copy', {
+    _handler: ctx =>
+      records.writeHostedRecord(ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: null,
+        record: {
+          kind: 'intent',
+          id: issue,
+          version: 0,
+          at: '2026-11-10T00:00:00.000Z',
+          outcome: 'Planned Issue',
+          constraints: '',
+          creatorAccountId: 'owner',
+          assigneeAccountIds: [],
+          status: 'completed',
+          journal: { createdAt: '2026-11-10T00:00:00.000Z', title: 'Planned Issue' },
+        },
+      }),
+  });
+  const states = () =>
+    s
+      .invoke('states', planning.intentStates, { projectId: s.projectId, ids: [issue] })
+      .then(value => JSON.parse(value));
+  assert.deepEqual(await states(), {}, 'a planning status is not an execution state');
+  const started = await s.begin(s.input(planned), 'member');
+  assert.equal(started.intentId, issue, 'no successor: the journal status is planning history');
+  const intent = JSON.parse(
+    await s.invoke('intent', reads.intent, { projectId: s.projectId, intentId: issue }),
+  );
+  assert.deepEqual(
+    [intent.version, intent.status, intent.base, intent.creatorAccountId, intent.assigneeAccountIds],
+    [1, 'active', { head, receiptId: 'main-0' }, 'owner', ['member']],
+  );
+  assert.equal(intent.journal.title, 'Planned Issue', 'journal attributes are kept');
+  assert.deepEqual(await states(), { [issue]: 'active' });
+  // A pinned Intent is pinned once: a sibling start writes no further version.
+  await s.begin(s.input(planned), 'member');
+  assert.equal(
+    [...s.tables.projectHostedRecords.values()].filter(row => row.kind === 'intent' && row.key === issue)
+      .length,
+    2,
+  );
+});

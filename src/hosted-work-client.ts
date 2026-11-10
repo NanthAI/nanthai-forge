@@ -3,6 +3,7 @@ import { rebuildWorkIndex } from './work-index-client.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { SourceAuthorityStaleError } from './hosted-source-authority.js';
 import { assembleIndexValue } from './work-index-value.js';
+import { workStoreSources } from './work-store-records.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { ConvexError } from 'convex/values';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
@@ -137,7 +138,7 @@ type StorePage = {
   invalid: StoreBucket;
   cursor: string | null;
 };
-/** Flip 5 S1/S2: the owner copies the journal's Issues, comments and notes into the Work store, or compares
+/** Flip 5 S1/S2: the owner copies the journal's Issues, comments, notes, Intents and lifecycle into the Work store, or compares
  * the two, one page per call (copy: one mutation, compare: one query) until every collection is done.
  * A copy is idempotent by digest, so an interrupted run is simply run again. */
 async function workStorePass(
@@ -152,9 +153,7 @@ async function workStorePass(
     'UNSUPPORTED',
     'This transport needs hosted mutations for copy-work-store.',
   );
-  const collections = copy
-    ? ['planningVersions', 'planningComments', 'notes']
-    : ['planningVersions', 'planningComments', 'notes', 'planningItems', 'issueHeads'];
+  const collections = copy ? [...workStoreSources] : [...workStoreSources, 'planningItems', 'issueHeads'];
   const totals: Record<string, Record<string, number | string[]>> = {};
   for (const collection of collections) {
     const total: Record<string, number | string[]> = {};

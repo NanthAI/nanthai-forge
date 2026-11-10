@@ -24,13 +24,17 @@ export const intentStates = query({
         let head = await recordHead(ctx, projectId, 'intent', id);
         // A finished Intent whose Issue continued (e4a71127) reports the latest Intent's state.
         let at = id;
-        for (let hop = 0; head && intentFinished(head.status) && hop < maxIntentChain; hop++) {
+        for (
+          let hop = 0;
+          head && intentFinished(head.status.replace(/^journal:/, '')) && hop < maxIntentChain;
+          hop++
+        ) {
           const next = await recordHead(ctx, projectId, 'intent', successorIntentId(at));
           if (!next) break;
           head = next;
           at = successorIntentId(at);
         }
-        if (head) states[id] = head.status;
+        if (head && !head.status.startsWith('journal:')) states[id] = head.status;
       }
       return canonicalPayload(states);
     } catch (error) {

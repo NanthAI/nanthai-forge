@@ -217,7 +217,7 @@ export async function prepareFinishCompose(ctx: MutationCtx, input: LandingIdent
     const own = ownRow ? hostedRecordSchema.options[0].parse(JSON.parse(ownRow.value)) : null;
     semanticPlan.afterSequence =
       originalCandidate?.semanticPlan?.afterSequence ??
-      (own ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
+      (own?.base?.receiptId ? await semanticBaseSequence(ctx, input.projectId, own.base.receiptId) : 0);
   }
   const project = await hostedWriteProject(ctx, input.projectId, state.actor, request.authorityEpoch);
   const stateValue: ComposeState = {

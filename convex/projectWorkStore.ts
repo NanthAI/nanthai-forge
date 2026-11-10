@@ -3,6 +3,8 @@
 // record store in pages, and compare the two read-only. Nothing here changes what Work reads or writes:
 // the owner runs these through `hosted-work` and the journal stays the authority until a later slice.
 // S3 adds the dual write: with `workStore: 'dual'` each journal append also stores its records.
+// Intents are mutable records: the journal owns a copied Intent until a hosted Lane pins its execution
+// (a base with a receipt); from then on hosted paths own it and the copy, compare and dual write leave it.
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -11,7 +13,7 @@ import { report } from './errors';
 import { accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { selectedGeneration, recordPartition, record as indexRecord } from './projectWorkIndexStore';
-import { recordHead, recordVersion } from './projectHostedRecords';
+import { recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { assembleIndexValue } from '../src/work-index-value';
 import { workStoreRecord, workStoreSources, type WorkStoreSource } from '../src/work-store-records';
@@ -101,10 +103,21 @@ const note = (bucket: { count: number; keys: string[] }, key: string) => {
 export async function storeVersion(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  { record, ref, value }: ReturnType<typeof hostedRecordValue>,
+  encoded: ReturnType<typeof hostedRecordValue>,
 ): Promise<'copied' | 'same' | 'different'> {
+  const { record, ref } = encoded;
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
   if (old) return old.digest === ref.digest && old.bytes === ref.bytes ? 'same' : 'different';
+  await insertVersion(ctx, projectId, encoded, await recordHead(ctx, projectId, record.kind, record.id));
+  return 'copied';
+}
+
+async function insertVersion(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  { record, ref, value }: ReturnType<typeof hostedRecordValue>,
+  head: Awaited<ReturnType<typeof recordHead>>,
+) {
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId, value });
@@ -115,18 +128,45 @@ export async function storeVersion(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!head) await ctx.db.insert('projectHostedRecordHeads', { ...identity, ...indexed, recordId });
   else if (head.version < record.version)
     await ctx.db.replace(head._id, { ...identity, ...indexed, recordId });
+}
+
+/** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.
+ * `same`: the head already holds these bytes. With `write`, a missing Intent is stored at version 0 and a
+ * changed one as the next version; without it a change is only reported (`different`). */
+export async function storeIntent(
+  ctx: QueryCtx | MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  owner: string,
+  value: unknown,
+  write: boolean,
+): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
+  const id = (value as { id: string }).id;
+  const head = await recordHead(ctx, projectId, 'intent', id);
+  if (head) {
+    const row = await ctx.db.get(head.recordId);
+    const stored = row ? JSON.parse(await hostedRecordBody(ctx, row)) : null;
+    if (!stored || stored.base?.receiptId) return 'hosted';
+    const same = hostedRecordValue(workStoreRecord('intents', value, { owner, version: head.version }));
+    if (same.ref.digest === row!.digest && same.ref.bytes === row!.bytes) return 'same';
+    if (!write) return 'different';
+  } else if (!write) return 'missing';
+  const encoded = hostedRecordValue(
+    workStoreRecord('intents', value, { owner, version: head ? head.version + 1 : 0 }),
+  );
+  await insertVersion(ctx as MutationCtx, projectId, encoded, head);
   return 'copied';
 }
 
-/** S3 dual write: the Issue versions, comments and notes one journal append projects, stored in the
- * same mutation. Large values are joined from the payload parts of the same projection. */
+/** S3 dual write: the Issue versions, comments, notes, Intents and lifecycle moves one journal append
+ * projects, stored in the same mutation. Large values are joined from the payload parts of the same
+ * projection. */
 export async function storeProjection(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
+  owner: string,
   entries: { collection: string; key: string; parent: string; position: number; value: string }[],
 ) {
   for (const entry of entries) {
@@ -142,14 +182,13 @@ export async function storeProjection(
             .sort((a, b) => a.position - b.position),
         )
       : header;
-    let encoded;
     try {
-      encoded = hostedRecordValue(workStoreRecord(collection, value));
+      if (collection === 'intents') await storeIntent(ctx, projectId, owner, value, true);
+      else await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)));
     } catch {
       // The journal append stands; the compare reports the row as unreadable.
       continue;
     }
-    await storeVersion(ctx, projectId, encoded);
   }
 }
 
@@ -171,19 +210,35 @@ export const setMode = mutation({
 });
 
 /** S1: copy one page. A version already stored with the same digest is left alone, so a retry or a
- * second full run copies nothing; one stored with different bytes is reported, never overwritten. */
+ * second full run copies nothing; one stored with different bytes is reported, never overwritten. A
+ * journal-owned Intent is mutable: a changed one is stored as its next version. */
 export const copy = mutation({
   args: { projectId: v.id('hostedProjects'), collection: copySource, cursor: v.union(v.string(), v.null()) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { partition } = await ownerStore(ctx, input.projectId);
+      const { project, partition } = await ownerStore(ctx, input.projectId);
       const page = await indexPage(ctx, partition, input.collection, input.cursor);
       let copied = 0,
-        same = 0;
+        same = 0,
+        hosted = 0;
       const different = tally(),
         invalid = tally();
       for (const row of page.rows) {
+        if (input.collection === 'intents') {
+          let stored;
+          try {
+            // A journal-owned Intent the journal has changed since is stored as its next version.
+            stored = await storeIntent(ctx, input.projectId, project.owner, row.value, true);
+          } catch {
+            note(invalid, row.key);
+            continue;
+          }
+          if (stored === 'copied') copied++;
+          else if (stored === 'same') same++;
+          else hosted++;
+          continue;
+        }
         let encoded;
         try {
           encoded = hostedRecordValue(workStoreRecord(input.collection, row.value));
@@ -196,7 +251,7 @@ export const copy = mutation({
         else if (stored === 'same') same++;
         else note(different, `${encoded.record.kind}:${encoded.record.id}:${encoded.record.version}`);
       }
-      return JSON.stringify({ copied, same, different, invalid, cursor: page.cursor });
+      return JSON.stringify({ copied, same, hosted, different, invalid, cursor: page.cursor });
     } catch (error) {
       return report(error);
     }
@@ -204,7 +259,7 @@ export const copy = mutation({
 });
 
 /** S2: compare one page read-only. Journal pages check each row has its record version with the same
- * digest; `planningItems` checks each Issue head is at the journal's latest version; `issueHeads`
+ * digest (an Intent: its head holds the journal's current Intent, or a Lane pinned it: `hosted`); `planningItems` checks each Issue head is at the journal's latest version; `issueHeads`
  * pages the store and checks each head has its journal Issue (nothing extra). */
 export const compare = query({
   args: {
@@ -215,10 +270,11 @@ export const compare = query({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { partition } = await ownerStore(ctx, input.projectId);
+      const { project, partition } = await ownerStore(ctx, input.projectId);
       const collection = input.collection as CompareSource;
       let checked = 0,
-        matched = 0;
+        matched = 0,
+        hosted = 0;
       const missing = tally(),
         different = tally(),
         invalid = tally();
@@ -249,6 +305,19 @@ export const compare = query({
       const page = await indexPage(ctx, partition, collection, input.cursor);
       for (const row of page.rows) {
         checked++;
+        if (collection === 'intents') {
+          let stored;
+          try {
+            stored = await storeIntent(ctx, input.projectId, project.owner, row.value, false);
+          } catch {
+            note(invalid, row.key);
+            continue;
+          }
+          if (stored === 'same') matched++;
+          else if (stored === 'hosted') hosted++;
+          else note(stored === 'missing' ? missing : different, row.key);
+          continue;
+        }
         let encoded;
         try {
           encoded = hostedRecordValue(
@@ -273,7 +342,7 @@ export const compare = query({
           note(different, `${record.kind}:${record.id}:${record.version}`);
         else matched++;
       }
-      return JSON.stringify({ checked, matched, missing, different, invalid, cursor: page.cursor });
+      return JSON.stringify({ checked, matched, hosted, missing, different, invalid, cursor: page.cursor });
     } catch (error) {
       return report(error);
     }

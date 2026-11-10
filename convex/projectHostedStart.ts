@@ -99,6 +99,8 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
   // Intent finished (e4a71127). Absent for a new outcome.
   let targetIntentId = payload.intent.kind === 'new' ? undefined : payload.intent.intentId;
   let successor = false;
+  // An Intent copied from the Work journal that no Lane has pinned yet (flip 5): this start pins it.
+  let unpinned: ReturnType<typeof hostedIntentSchema.parse> | undefined;
   if (payload.intent.kind === 'existing' || payload.intent.kind === 'planned') {
     const row = await readHostedRecord(ctx, {
       projectId,
@@ -114,7 +116,9 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     );
     if (row) {
       let intent = hostedIntentSchema.parse(JSON.parse(row.value));
-      if (payload.intent.kind === 'planned') {
+      // A journal-owned status is planning history, not execution: the first Lane pins it as active.
+      if (!intent.base?.receiptId) unpinned = intent;
+      else if (payload.intent.kind === 'planned') {
         // A finished Intent never restarts: the Issue continues on the next Intent in its chain, joined
         // when it exists, created by this start when it does not.
         for (let hop = 0; intentFinished(intent.status); hop++) {
@@ -137,8 +141,10 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
       if (successor) plannedExists = false;
       else overlapIntent = intent.outcome;
       if (!intentFinished(intent.status)) recovery = intent.needsFix;
+      // A planned start on an unpinned Intent is the start that used to create it: any project member.
       invariant(
-        project.owner === actor ||
+        (unpinned && payload.intent.kind === 'planned') ||
+          project.owner === actor ||
           intent.creatorAccountId === actor ||
           intent.assigneeAccountIds.includes(actor),
         'PROJECT_UNAVAILABLE',
@@ -228,6 +234,25 @@ async function execute(ctx: MutationCtx, input: Input, action: 'start' | 'intent
     intentId = first.ids.intent!,
     laneId = first.ids.lane!;
   const base = { head: main.head, receiptId: main.receipt.id };
+  // From the pin on, hosted paths own the Intent's status; the journal copy leaves it (projectWorkStore).
+  const pin = action === 'start' ? unpinned : undefined;
+  if (pin)
+    await writeHostedRecord(ctx, {
+      projectId,
+      actor,
+      authorityEpoch: expected.authorityEpoch,
+      expectedVersion: pin.version,
+      record: {
+        ...pin,
+        version: pin.version + 1,
+        at: first.at,
+        base,
+        status: 'active',
+        ...(pin.creatorAccountId === actor || pin.assigneeAccountIds.includes(actor)
+          ? {}
+          : { assigneeAccountIds: [...pin.assigneeAccountIds, actor] }),
+      },
+    });
   if (payload.intent.kind === 'new' || (payload.intent.kind === 'planned' && !plannedExists))
     await writeHostedRecord(ctx, {
       projectId,

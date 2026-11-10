@@ -28,8 +28,15 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       constraints: z.string().max(4000),
       creatorAccountId: z.string().min(1),
       assigneeAccountIds: z.array(z.string().min(1)),
-      base: main,
-      status: z.enum(['active', 'ready', 'completed', 'abandoned']),
+      /** A receipt means a hosted Lane pinned this Intent's execution; hosted paths then own its status.
+       * An Intent copied from the Work journal has no receipt (web Intents), or no base before any Lane. */
+      base: z
+        .object({ head: hash, receiptId: z.string().min(1).optional() })
+        .strict()
+        .optional(),
+      status: z.enum(['proposed', 'active', 'ready', 'completed', 'abandoned']),
+      /** The journal Intent's other attributes, kept verbatim (flip 5); notes and lifecycle are records. */
+      journal: z.looseObject({}).optional(),
     })
     .strict(),
   z
@@ -161,12 +168,24 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
         .optional(),
     })
     .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      version: z.literal(0),
+      at: z.string().min(1),
+      kind: z.literal('lifecycle'),
+      /** The Intent whose status moved; position is the move's order within it. */
+      parent: z.uuid(),
+      position: version,
+      entry: z.looseObject({ from: z.string(), to: z.string(), at: z.string() }),
+    })
+    .strict(),
 ]);
 export type HostedRecord = z.infer<typeof hostedRecordSchema>;
 export type HostedRecordKind = HostedRecord['kind'];
 export const hostedRecordRefSchema = z
   .object({
-    kind: z.enum(['intent', 'lane', 'save', 'candidate', 'job', 'issue', 'comment']),
+    kind: z.enum(['intent', 'lane', 'save', 'candidate', 'job', 'issue', 'comment', 'lifecycle']),
     key: z.uuid(),
     version,
     digest: hash,
@@ -177,7 +196,12 @@ export type HostedRecordRef = z.infer<typeof hostedRecordRefSchema>;
 export function hostedRecordIndex(record: HostedRecord) {
   switch (record.kind) {
     case 'intent':
-      return { parent: record.creatorAccountId, status: record.status };
+      // A journal-owned Intent (no Lane pinned it) keeps its status apart, so head-only readers of hosted
+      // execution state (Issue states, completion) never take a planning status for one.
+      return {
+        parent: record.creatorAccountId,
+        status: record.base?.receiptId ? record.status : `journal:${record.status}`,
+      };
     case 'lane':
       return { parent: record.intentId, status: record.state, ...(record.pinned ? { pinned: true } : {}) };
     case 'save':
@@ -190,6 +214,8 @@ export function hostedRecordIndex(record: HostedRecord) {
       return { parent: record.item.initiativeId ?? '', status: record.item.status };
     case 'comment':
       return { parent: record.parent, status: record.note?.kind ?? 'comment' };
+    case 'lifecycle':
+      return { parent: record.parent, status: record.entry.to };
   }
 }
 /** Validate and encode once when both the body and its immutable reference are needed. */

@@ -396,3 +396,106 @@ test('with dual write on, each planning write stores its Issue version, comment 
     error => error.code === 'PROJECT_UNAVAILABLE',
   );
 });
+
+// Flip 5 (Issue 0695ab24): web Intents and the Intent each Issue is join the hosted `intent` kind, and
+// their status moves become `lifecycle` records, with nothing lost; once a Lane pins an Intent, the
+// journal copy never overwrites it.
+test('journal Intents and lifecycle copy into the record store, the dual write keeps them current, and a pinned Intent is left alone', async t => {
+  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const s = await setup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  const handlers = {
+    'projectWorkStore:copy': store.copy,
+    'projectWorkStore:compare': store.compare,
+    'projectWorkStore:setMode': store.setMode,
+  };
+  const client = {
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    action: () => assert.fail('no action'),
+  };
+  const run = input => dispatchHostedWork(client, s.projectId, input).then(result => result.collections);
+  const clean = totals => {
+    for (const [name, total] of Object.entries(totals))
+      assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
+  };
+  const initial = await s.read(),
+    intentId = randomUUID();
+  await actions.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: intentId,
+    revision: initial.data.revision,
+    command: JSON.stringify({
+      action: 'intent',
+      outcome: 'Web',
+      constraints: 'Keep',
+      base: initial.sourceHead,
+    }),
+  });
+  const issue = s.item({ title: 'Planned' });
+  await s.send(issue);
+  // Closing the Issue moves its Intent's status: one lifecycle entry in the journal.
+  await s.send({ ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
+  const before = await run({ action: 'compare-work-store' });
+  assert.deepEqual([before.intents.missing, before.lifecycle.missing], [2, 1]);
+  const copied = await run({ action: 'copy-work-store' });
+  assert.deepEqual([copied.intents.copied, copied.lifecycle.copied], [2, 1]);
+  clean(await run({ action: 'compare-work-store' }));
+  const head = id =>
+    [...s.tables.projectHostedRecordHeads.values()].find(r => r.kind === 'intent' && r.key === id);
+  const body = id =>
+    JSON.parse(
+      s.tables.projectHostedRecordBodies.get(s.tables.projectHostedRecords.get(head(id).recordId).bodyId)
+        .value,
+    );
+  const web = body(intentId);
+  assert.deepEqual(
+    [web.outcome, web.constraints, web.base, web.creatorAccountId, web.status, head(intentId).status],
+    ['Web', 'Keep', { head: initial.sourceHead }, 'owner', 'active', 'journal:active'],
+    'a web Intent keeps its base, with no landing receipt',
+  );
+  assert(
+    !('notes' in web) && !('lifecycle' in web.journal) && web.journal.createdAt,
+    'notes and lifecycle are records',
+  );
+  assert.deepEqual([body(issue.itemId).status, 'base' in body(issue.itemId)], ['completed', false]);
+  assert.equal((await run({ action: 'copy-work-store' })).intents.same, 2, 'a second copy stores nothing');
+  // Dual write: a status move is the Intent's next version plus one lifecycle record; a note changes
+  // neither the Intent nor its version.
+  await run({ action: 'set-work-store', mode: 'dual' });
+  await s.send({ action: 'note', intentId, text: 'Context', kind: 'comment' });
+  assert.equal(head(intentId).version, 0);
+  await s.send({ action: 'intent-status', intentId, status: 'completed' });
+  assert.deepEqual([head(intentId).version, head(intentId).status], [1, 'journal:completed']);
+  const moves = [...s.tables.projectHostedRecordHeads.values()].filter(r => r.kind === 'lifecycle');
+  assert.deepEqual(
+    moves.map(r => [r.parent, r.status]).sort(),
+    [
+      [intentId, 'completed'],
+      [issue.itemId, 'completed'],
+    ].sort(),
+  );
+  clean(await run({ action: 'compare-work-store' }));
+  // A Lane pinned the Intent (a base with a receipt): hosted paths own it from here.
+  const pinned = {
+    ...body(intentId),
+    version: 2,
+    base: { head: initial.sourceHead, receiptId: 'main-1' },
+    status: 'active',
+  };
+  await records.writeHostedRecord(s.ctx, {
+    projectId: s.projectId,
+    actor: 'owner',
+    authorityEpoch: 1,
+    expectedVersion: 1,
+    record: pinned,
+  });
+  await s.send({ action: 'intent-status', intentId, status: 'abandoned' });
+  assert.deepEqual([head(intentId).version, body(intentId).status], [2, 'active'], 'never overwritten');
+  const after = await run({ action: 'compare-work-store' });
+  clean(after);
+  assert.equal(after.intents.hosted, 1);
+  assert.equal((await run({ action: 'copy-work-store' })).intents.hosted, 1);
+});
