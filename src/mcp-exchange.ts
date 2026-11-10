@@ -2,12 +2,8 @@
 import { hasSavedAuth } from './auth-store.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import {
-  exchangeCommand,
-  exchangeMigrateSchema,
-  exchangePullSchema,
-  mainPullSchema,
-} from './exchange-cli.js';
+import { exchangeCommand, mainPullSchema } from './exchange-cli.js';
+import { exchangeMigrateSchema, exchangePullSchema } from './exchange-native-cli.js';
 import { ForgeError } from './errors.js';
 export function registerExchangeTools(server: McpServer, root: string) {
   if (!process.env.FORGE_AUTH_TOKEN && !hasSavedAuth()) return;

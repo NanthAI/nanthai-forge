@@ -5,18 +5,11 @@ import { ConvexLaneTransport } from './hosted-lane-transport.js';
 
 import { checkoutHostedMain } from './hosted-main-checkout.js';
 import { mainExpectationSchema } from './hosted-main.js';
-import { rememberSourceAuthorityError } from './source-authority-client.js';
-import { nativeOwner } from './native-source.js';
 import { hostedActionError } from './hosted-action-error.js';
 
-import { receiveProposal } from './exchange-proposal.js';
-
 import { readFileSync } from 'node:fs';
-import { migrateNativeArchive } from './native-exchange-migrate.js';
 import { z } from 'zod';
 import { ConvexExchange } from './exchange-client.js';
-import { pullNativeExchange } from './native-exchange.js';
-import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { CUTOVER_UPGRADE } from './cutover-version.js';
 import { boundMainCheckout } from './bound-main-checkout.js';
@@ -28,24 +21,14 @@ export const mainPullSchema = z
     expected: mainExpectationSchema.optional(),
   })
   .strict();
-const shared = { url: z.url(), projectId: z.string().min(1) };
-export const exchangeMigrateSchema = z
-  .object({
-    ...shared,
-    backupId: z.string(),
-    operationId: z.uuid(),
-    archivePath: z.string(),
-    originalDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  })
-  .strict();
-export const exchangePullSchema = z
-  .object({
-    ...shared,
-    backupId: z.string().min(1),
-    cacheRoot: z.string().optional(),
-    journalPath: z.string().optional(),
-  })
-  .strict();
+/** Native-owner exchange (restore, legacy pull, proposals, archive migration) lives apart
+ * from the hosted checkout half so it can retire without touching hosted open/pull. */
+const NATIVE_EXCHANGE_ACTIONS: ReadonlySet<string> = new Set([
+  'restore',
+  'receive-proposal',
+  'pull-proposal',
+  'migrate-archive',
+]);
 export const EXCHANGE_HELP = `nforge exchange ROOT pull [--target NEW_DIRECTORY]
 Bound owners use stored deployment/project IDs.
 Bound pull checks out selected hosted main into a client directory (or --target).
@@ -102,18 +85,11 @@ export async function exchangeCli(args: string[]) {
 }
 export async function exchangeCommand(root: string, action: string, input: unknown) {
   if (action === 'push') throw new ForgeError('CLI_UPGRADE_REQUIRED', CUTOVER_UPGRADE);
+  if (NATIVE_EXCHANGE_ACTIONS.has(action) || (action === 'pull' && !mainPullSchema.safeParse(input).success))
+    return (await import('./exchange-native-cli.js')).nativeExchangeCommand(root, action, input);
   try {
     return await executeExchangeCommand(root, action, input);
   } catch (error) {
-    const owner = nativeOwner(root);
-    if (
-      owner &&
-      input &&
-      typeof input === 'object' &&
-      'projectId' in input &&
-      typeof input.projectId === 'string'
-    )
-      rememberSourceAuthorityError(new WorkStore(owner), error, input.projectId);
     throw hostedActionError(error, `exchange ${action}`);
   }
 }
@@ -140,45 +116,5 @@ async function executeExchangeCommand(root: string, action: string, input: unkno
     );
     return checkoutHostedMain(root, request, transport);
   }
-  if (action === 'receive-proposal') return receiveProposal(root, input);
-  if (action === 'pull-proposal') {
-    const request = z
-      .object({ ...shared, proposalId: z.string().min(1), cacheRoot: z.string().optional() })
-      .strict()
-      .parse(input);
-    const transport = new ConvexExchange(
-      request.url,
-      process.env.FORGE_AUTH_TOKEN,
-      request.projectId,
-      '',
-      null,
-      false,
-      request.proposalId,
-    );
-    return pullNativeExchange(request.proposalId, root, transport, {
-      ...(request.cacheRoot ? { cacheRoot: request.cacheRoot } : {}),
-      exportOnly: true,
-    });
-  }
-  if (action === 'migrate-archive') {
-    const request = exchangeMigrateSchema.parse(input),
-      transport = new ConvexExchange(
-        request.url,
-        process.env.FORGE_AUTH_TOKEN,
-        request.projectId,
-        request.operationId,
-        null,
-      );
-    return migrateNativeArchive(
-      request.archivePath,
-      request.originalDigest,
-      transport,
-      request.backupId,
-      request.operationId,
-    );
-  }
-
-  const request = exchangePullSchema.parse(input),
-    transport = new ConvexExchange(request.url, process.env.FORGE_AUTH_TOKEN, request.projectId, '', null);
-  return pullNativeExchange(request.backupId, root, transport, request);
+  invariant(false, 'BAD_ARGUMENT', EXCHANGE_HELP);
 }
