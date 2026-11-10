@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readLandingJournals, observeLandingJournals } from './landing-journal-reads.js';
+import { observeLandingJournals } from './landing-journal-reads.js';
 import { landingPins, landingPinsSchema } from './landing-environment.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { mkdirBelow } from './mkdir-below.js';
@@ -151,9 +151,6 @@ export function waitingFinishes(store: WorkStore) {
 const parseFinish = (text: string) => schema.parse(JSON.parse(text));
 const unfinishedFinish = (state: ReturnType<typeof parseFinish>) =>
   !state.result && state.command && (state.command.accept || state.submitted) ? state.command : undefined;
-export function unfinishedFinishes(store: WorkStore) {
-  return readLandingJournals(store, 'agent-finish', parseFinish, unfinishedFinish);
-}
 export function observeUnfinishedFinishes(store: WorkStore) {
   return observeLandingJournals(store, 'agent-finish', parseFinish, unfinishedFinish);
 }

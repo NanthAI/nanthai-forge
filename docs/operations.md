@@ -1069,7 +1069,6 @@ with `npm ci --ignore-scripts`, then `npm run build:core`):
 
 ```sh
 node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
-  tests/landing-lifecycle.test.mjs \
   tests/hosted-machine-lifecycle.test.mjs \
   tests/landing-check-recovery.test.mjs \
   tests/hosted-mac-runner.test.mjs
