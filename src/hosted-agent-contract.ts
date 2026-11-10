@@ -429,9 +429,13 @@ export const hostedAgentCommandSchemas = {
       cursor: z.string().nullable().default(null),
       /** Close or abandon Issues whose Intent finished; reports what it changed. */
       reconcile: z.boolean().default(true),
+      /** Also suggest which open Issues can run in parallel and which should stack, from the files
+       * each names (src/work-schedule.ts). Advice only; reads up to 5 pages to cover the backlog. */
+      schedule: z.boolean().optional(),
     })
     .strict()
-    .refine(input => !(input.id && input.search), 'Use id or search, not both.'),
+    .refine(input => !(input.id && input.search), 'Use id or search, not both.')
+    .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema
     .omit({ action: true, operationId: true, itemId: true })
     .extend({ itemId: planningRef.optional() })

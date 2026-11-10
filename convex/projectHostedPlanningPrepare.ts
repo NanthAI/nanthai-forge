@@ -5,6 +5,7 @@ import { internalMutation } from './server';
 import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { planningSearchEntries, planningSearchRowBytes, planningSummary } from '../src/planning-search';
+import { namedPathsField } from '../src/work-schedule';
 import { assembleIndexValue } from '../src/work-index-value';
 import type { PlanningItem } from '../src/work-planning-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
@@ -152,6 +153,7 @@ export const page = internalMutation({
             ...header,
             bodyLength: summary.bodyLength,
             hasDoneWhen: summary.hasDoneWhen,
+            ...namedPathsField(`${item.title}\n${item.body}`),
           }),
         });
       }

@@ -115,7 +115,7 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `approve-link` | `operationId?` |
 | `request-approval` | `laneId?, reason?, withdraw?, operationId?` |
 | `x set-policy` | `governanceVersion?, expectedPolicy?, preset?, acceptance?, checks?, integrationPreview?, ownerRootUpdates?, autoSnapshot?, checkLogs?, laneUpdates?, lifecycle?, notify?, githubMirror?, trust?, agentDefaults?, autoExchange?, operationId?` |
-| `planning` | `id?, search?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, operationId?` |
+| `planning` | `id?, search?, kind?, status?, initiativeId?, limit?, cursor?, reconcile?, schedule?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
 | `lanes` | `cursor?, limit?, view?` |
@@ -416,6 +416,8 @@ nforge agent ROOT put-planning-item '{"kind":"issue","title":"Fix X","body":"Why
 nforge agent ROOT comment-planning-item '{"itemId":"ITEM_ID","text":"Decision: use A, because B"}'
 nforge agent ROOT start '{"planningItemId":"ISSUE_ID"}'                  # your own Lane on the Issue; Issue becomes in-progress; openLanes lists others
 ```
+
+**Suggested schedule.** `planning {"kind":"issue","schedule":true}` adds `schedule`: which open and in-progress Issues can run in parallel and which should stack, with the reason. It groups Issues by the repository files their title and body name (`src/work-schedule.ts`); a stack lists started Issues first, then the oldest, and names the shared files. Markdown docs never make Issues stack, since landing merges them. An Issue that names no file is `unknown`, not independent: a missing name proves nothing. It reads up to five pages (`coverage` says whether that reached the end) and no item details: a long body's named files are kept on its index header when it is written. It is advice for the lead or agent choosing the next work; nothing is started, ordered or blocked. The web planning board shows the same suggestion as a `Stack n/m` chip on the Issues that should stack, with the order and reason on hover.
 
 Search before filing: `planning {"search":"words","status":"all"}` pages indexed title/body matches with status/kind/initiative filters. Filing returns advisory `likelyDuplicates`. See [planning search](../data-placement.md#planning-search) for filters, preparation and costs.
 

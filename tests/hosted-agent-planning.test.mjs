@@ -20,6 +20,7 @@ import { hostedContractFeatures } from '../dist/hosted-contract-features.js';
 import { z } from 'zod';
 import { ConvexError } from 'convex/values';
 import { ForgeError } from '../dist/errors.js';
+import { namedPaths, suggestSchedule } from '../dist/work-schedule.js';
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
@@ -240,6 +241,68 @@ test('agents create an Initiative and Issue, comment, and read them filtered and
   // The Planning view reads the same records.
   const work = (await s.read()).data;
   assert.equal(work.planningItems.filter(item => item.kind === 'issue').length, 3);
+});
+
+// Issue aa9fb5b1 part 3: a suggested schedule from the files each Issue names. Advice only.
+test('the files an Issue names group open Issues into stacks and parallel work, with reasons', () => {
+  assert.deepEqual(
+    namedPaths(
+      'Fix src/a.ts:12-30 and `convex/b.ts`; see https://example.com/c/d.ts, docs/x.md, `forge.json`, Node.js and ./src/a.ts again.',
+    ),
+    ['src/a.ts', 'convex/b.ts', 'docs/x.md', 'forge.json'],
+  );
+  const issue = (id, status, at, ...paths) => ({ id, title: id, status, at, paths });
+  const schedule = suggestSchedule(
+    [
+      issue('old', 'open', '2026-01-01', 'src/a.ts'),
+      issue('busy', 'in-progress', '2026-01-03', 'src/a.ts', 'docs/status.md'),
+      issue('docs', 'open', '2026-01-02', 'docs/status.md'),
+      issue('alone', 'open', '2026-01-02', 'src/c.ts'),
+      issue('vague', 'open', '2026-01-02'),
+      issue('done', 'closed', '2026-01-02', 'src/a.ts'),
+    ],
+    path => path.endsWith('.md'),
+  );
+  // The started Issue goes first; a shared Markdown doc never stacks; closed Issues are left out.
+  assert.deepEqual(schedule.stacks, [
+    {
+      order: ['busy', 'old'],
+      files: ['src/a.ts'],
+      more: 0,
+      reason:
+        "Both name src/a.ts; run them one after another so the later one starts from the earlier one's landing.",
+    },
+  ]);
+  assert.deepEqual(schedule.parallel.sort(), ['alone']);
+  assert.deepEqual(
+    schedule.unknown.sort(),
+    ['docs', 'vague'],
+    'naming no comparable file is unknown, not independent',
+  );
+});
+
+test('planning {schedule:true} suggests stacks from the stored Issues within the bounded page reads', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const first = (
+    await put(p, { kind: 'issue', title: 'Speed up compose', body: 'Touch src/hosted-compose-worker.ts.' })
+  ).result;
+  const second = (await put(p, { kind: 'issue', title: 'Fix src/hosted-compose-worker.ts paging' })).result;
+  const third = (await put(p, { kind: 'issue', title: 'Web copy', body: 'web/src/Home.tsx only' })).result;
+  p.calls.length = 0;
+  const read = await list(p, { kind: 'issue', schedule: true, reconcile: false });
+  assert.equal(read.schedule.coverage, 'complete');
+  assert.deepEqual(
+    read.schedule.stacks.map(stack => stack.order),
+    [[first.itemId, second.itemId]],
+  );
+  assert.deepEqual(read.schedule.parallel, [third.itemId]);
+  assert.match(read.schedule.rule, /Advice/);
+  assert(p.calls.length <= 3, `bounded reads, no per-Issue detail read: ${p.calls}`);
+  await assert.rejects(
+    async () => run(p, 'planning', { search: 'compose', schedule: true }),
+    /Use schedule with a list read/,
+  );
 });
 
 test('every planning read marks member-written text as data, once per read and in a few characters (S-17)', async t => {

@@ -11,6 +11,8 @@ import { ForgeError, invariant } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
+import { issuePaths, SCHEDULE_RULE, suggestSchedule } from './work-schedule.js';
+import { markdownDoc } from './docs-resolution.js';
 
 /** Planning is the hosted Work journal's Issues and Initiatives. This file only drives the existing
  * indexed reads and the owner Work command `projectWorkActionsV8:command`; it adds no storage. */
@@ -557,19 +559,23 @@ async function readPlanning(
   let scanned = 0;
   let done = false;
   let matches: PlanningItem[] = [];
-  for (let pages = 0; pages < maxPages && !done && !matches.length; pages++) {
+  // A schedule covers every open Issue it can reach in the bounded pages, not just the first match.
+  for (let pages = 0; pages < maxPages && !done && (input.schedule || !matches.length); pages++) {
     const result = await page(port, ws, 'planningItems', cursor, input.limit);
     scanned += result.page.length;
     done = result.isDone;
     cursor = result.continueCursor;
-    matches = result.page
-      .map(parseRow)
-      .filter(
-        item =>
-          (!input.kind || item.kind === input.kind) &&
-          (!input.status || input.status === 'all' || item.status === input.status) &&
-          (!input.initiativeId || item.initiativeId === input.initiativeId),
-      );
+    matches = [
+      ...(input.schedule ? matches : []),
+      ...result.page
+        .map(parseRow)
+        .filter(
+          item =>
+            (!input.kind || item.kind === input.kind) &&
+            (!input.status || input.status === 'all' || item.status === input.status) &&
+            (!input.initiativeId || item.initiativeId === input.initiativeId),
+        ),
+    ];
   }
   const issues = matches.filter(item => item.kind === 'issue' && open.includes(item.status));
   const states = await intentStates(
@@ -592,6 +598,26 @@ async function readPlanning(
       ),
     ),
     scanned,
+    ...(input.schedule
+      ? {
+          schedule: {
+            ...suggestSchedule(
+              matches
+                .filter(item => item.kind === 'issue')
+                .map(item => ({
+                  id: item.id,
+                  title: item.title,
+                  status: (closed.get(item.id) as string | undefined) ?? item.status,
+                  at: item.at,
+                  paths: issuePaths(item),
+                })),
+              markdownDoc,
+            ),
+            coverage: done ? 'complete' : 'partial',
+            rule: SCHEDULE_RULE,
+          },
+        }
+      : {}),
     nextCursor: done ? null : encode(ws, cursor!),
     ...(sync?.changed.length || sync?.failed || sync?.held?.length ? { reconciled: sync } : {}),
   };

@@ -5,7 +5,9 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 const { WorkPlanning } = await import(moduleUrl('../web/src/WorkPlanning.tsx'));
-const { planningGroups, planningRowMatches } = await import(moduleUrl('../web/src/planning-rows.ts'));
+const { planningGroups, planningRowMatches, scheduleHints } = await import(
+  moduleUrl('../web/src/planning-rows.ts')
+);
 const { planningDestination } = await import(moduleUrl('../web/src/shell/route.ts'));
 const at = new Date(Date.now() - 3 * 86400000).toISOString();
 const item = (id, kind, extra = {}) => ({
@@ -110,4 +112,18 @@ test('read-only Planning keeps rows and routes without exposing write or export 
   const html = render({ intents, lanes }, true);
   assert.match(html, /fx-wr-title/);
   assert.doesNotMatch(html, /New Initiative|New Intent|More planning actions/);
+});
+
+// Issue aa9fb5b1 part 3: the board marks only Issues that should stack; order and reason are on hover.
+test('the planning board shows a stack chip on Issues that name the same file, none on the rest', () => {
+  const item = (id, title, at, body = '') => ({ id, kind: 'issue', title, body, status: 'open', at });
+  const hints = scheduleHints([
+    item('a', 'First', '2026-01-01', 'Edit src/x.ts'),
+    item('b', 'Second', '2026-01-02', 'Also src/x.ts'),
+    item('c', 'Alone', '2026-01-02', 'web/src/Home.tsx'),
+    { id: 'i', kind: 'initiative', title: 'Phase', body: 'src/x.ts', status: 'open', at: '2026-01-01' },
+  ]);
+  assert.deepEqual([...hints.keys()], ['a', 'b']);
+  assert.equal(hints.get('a').label, 'Stack 1/2');
+  assert.match(hints.get('b').title, /^Suggested after: First\nBoth name src\/x\.ts/);
 });

@@ -15,6 +15,7 @@ import { archiveSource, archiveChannels, type sourceManifestSchema } from './wor
 import { currentPlanning } from './work-planning-state.js';
 import { hostedChannels } from './work-metadata.js';
 import type { z } from 'zod';
+import { namedPathsField } from './work-schedule.js';
 export type IndexEntry = {
   planning?: {
     itemId?: string;
@@ -190,6 +191,8 @@ export function indexedRecord(
           ? {
               bodyLength: String(object.body ?? '').length,
               hasDoneWhen: /done\s+when\s*:/i.test(String(object.body ?? '')),
+              // The files a long body names, kept for the suggested schedule (src/work-schedule.ts).
+              ...namedPathsField(`${String(object.title ?? '')}\n${String(object.body ?? '')}`),
             }
           : {}),
         id: key,

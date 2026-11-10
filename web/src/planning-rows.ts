@@ -5,6 +5,8 @@ import { intentProgress } from '../../src/work-intent-progress';
 import type { PlanningItem } from '../../src/work-planning-types';
 import type { IntentFilter } from './intents/model';
 import { age, type Tone } from './ui/status';
+import { issuePaths, SCHEDULE_RULE, suggestSchedule } from '../../src/work-schedule';
+import { markdownDoc } from '../../src/docs-resolution';
 
 export type PlanningLane = {
   intentId: string;
@@ -295,4 +297,34 @@ export function initiativeTimeline(
     }
   }
   return events.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+/** Suggested-schedule chips for the board (Issue aa9fb5b1, part 3): only Issues that should stack get
+ * one, keyed by Issue id; the reason and order are on hover. Computed from the headers already loaded. */
+export function scheduleHints(items: readonly PlanningItem[]) {
+  const issues = items.filter(item => item.kind === 'issue');
+  const titles = new Map(issues.map(item => [item.id, item.title]));
+  const schedule = suggestSchedule(
+    issues.map(item => ({
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      at: item.at,
+      paths: issuePaths(item as PlanningItem & { paths?: unknown }),
+    })),
+    markdownDoc,
+  );
+  const hints = new Map<string, { label: string; title: string }>();
+  for (const stack of schedule.stacks)
+    stack.order.forEach((id, i) =>
+      hints.set(id, {
+        label: `Stack ${i + 1}/${stack.order.length}`,
+        title: [
+          i ? `Suggested after: ${titles.get(stack.order[i - 1]!)}` : 'Suggested first in this stack',
+          stack.reason,
+          SCHEDULE_RULE,
+        ].join('\n'),
+      }),
+    );
+  return hints;
 }

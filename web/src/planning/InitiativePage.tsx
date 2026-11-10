@@ -23,10 +23,22 @@ import { WorkRow } from '../ui/WorkRow';
 import { age } from '../ui/status';
 import './initiative.css';
 
-export function PlanningRowFact({ row }: { row: PlanningRow }) {
+export function PlanningRowFact({
+  row,
+  hint,
+}: {
+  row: PlanningRow;
+  /** Suggested-schedule chip (planning-rows scheduleHints); the reason is on hover. */
+  hint?: { label: string; title: string } | undefined;
+}) {
   return (
     <>
       <span>{row.fact}</span>
+      {hint && (
+        <span className="fx-wr-auto" title={hint.title}>
+          {hint.label}
+        </span>
+      )}
       {row.actor && (
         <span className="fx-wr-who">
           <Avatar name={row.actor.name} kind={row.actor.kind === 'agent' ? 'agent' : 'human'} size="sm" />

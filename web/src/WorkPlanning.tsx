@@ -11,6 +11,7 @@ import { age } from './ui/status';
 import { Glyph } from './ui/Glyph';
 import {
   planningGroups,
+  scheduleHints,
   initiativeProgress,
   initiativeRows,
   planningRowMatches,
@@ -205,6 +206,7 @@ export function WorkPlanning({
     [error, setError] = useState('');
   const items = [...new Map(data.planningItems.map(item => [item.id, item])).values()];
   const groups = planningGroups(items, data.intents, data.lanes ?? []);
+  const hints = scheduleHints(items);
   const needle = search.trim().toLowerCase();
   const scopedGroups = groups
     .filter(group => !initiative || group.id === initiative)
@@ -466,7 +468,7 @@ export function WorkPlanning({
       href={row.intentId ? intentHref(row.intentId) : itemHref(items.find(item => item.id === row.itemId)!)}
       tone={row.tone}
       label={row.label}
-      fact={<PlanningRowFact row={row} />}
+      fact={<PlanningRowFact row={row} hint={hints.get(row.itemId ?? row.intentId ?? '')} />}
       age={row.at ? <time title={row.at}>{age(row.at, Date.now())}</time> : undefined}
       done={planningRowMatches(row, 'done')}
     />
