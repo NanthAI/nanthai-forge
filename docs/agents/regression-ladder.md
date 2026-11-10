@@ -74,6 +74,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `10d253c6` | Core claim: a 130-path Lane on hot files starved in a composition-conflict loop (10 land operations, about 2.5 h; 2026-11-10) |
 
 | `27865bc4` | Red main: a new failing test has no predecessor report; later failed audits must retain one recovery and complete its automatic reverse |
+| `438e9ace` | Red main: two landings pass alone but fail together; a later failed audit retains one checked pair recovery, with widening bounded at four |
 
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.

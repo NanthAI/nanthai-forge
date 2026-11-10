@@ -968,10 +968,31 @@ preserve later accepted work, and check and accept the fix normally. Worker
 restarts and repeated observations reuse that Intent, even if it was closed.
 Creating the handoff never changes source or rewinds main. The native post-accept worker
 never reverts a landing. On a hosted project the main-audit recovery may land a reverse of a
-single proven culprit through the normal queue and checks, unless `acceptance.autoRevert` is
+single proven culprit, or a bounded interacting set when none is proven, through the normal queue and checks, unless `acceptance.autoRevert` is
 `false` or the culprit or reverse touches protected paths (then it waits for a person; see
 [hosted acceptance gate](../workflows.md#hosted-acceptance-gate)). Abandon the Intent to close
 the handoff; reopen it to resume.
+
+Hosted recovery keeps one operation for the red episode (`red.since`); later failed audits
+append evidence without restarting it. When the failure reproduces but no single landing
+is proven (including a passing first check on the change's own source), recovery selects
+the two most recent landings whose changed paths or declared contract tests overlap a failing test or its retained
+error paths. The landing that added a new failing test also counts as overlap. One match
+is paired with the newest other landing; no matches selects the two newest. Exact
+reverse Lanes retain the authors' work. Their combined Candidate must pass the full check
+before anything is accepted. A failed re-check adds the newest unselected landing, one
+at a time up to four; then recovery stops, keeps main held and records the failed checks
+and an owner handoff. A source conflict or unavailable check also keeps accepted bytes.
+
+Green landings and idle make no additional calls. Red selection uses the existing bounded
+range (at most 100 receipts) and indexed Candidate metadata in the recovery transaction;
+source attribution reuses verified manifests in windows of 100. Pair recovery adds two
+ordinary reverse source jobs, one composition and one full check. Widening reuses prepared
+reverse Lanes and adds at most two more transitions, two compositions and two full checks
+(a prior attempted single reverse can add one of each). Runner minutes depend on the
+configured full check: three pair/widen checks cost at most three such runs; the replay
+models successful pair recovery in eight minutes. No live timing or billed-usage drill
+is claimed by this replay.
 
 Fast-path does not grant acceptance authority. Under supervised settings an agent
 still returns a checked Candidate for person review. Under trusted settings an agent

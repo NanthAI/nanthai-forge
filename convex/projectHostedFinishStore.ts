@@ -100,12 +100,17 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     'Finish selection differs from its original Candidate.',
   );
   if (state.request.revertOf) {
+    // Only the server's episode recovery can compose several retained reverse Lanes.
+    // User-requested compensation still selects its one canonical reverse Lane.
     invariant(
-      state.request.finish.composeOperationId && source.inputs.count === 1 && source.dependencies.count === 0,
+      state.request.finish.composeOperationId &&
+        source.dependencies.count === 0 &&
+        (source.inputs.count === 1 ||
+          (recoveryRunId && source.inputs.count >= 2 && source.inputs.count <= 4)),
       'WORK_OPERATION_CHANGED',
-      'A revert landing selects its one canonical reverse Lane.',
+      'A revert landing selects its canonical reverse Lanes.',
     );
-    const [selected] = await ctx.db
+    const selected = await ctx.db
       .query('projectHostedComposeSelections')
       .withIndex('by_project_and_actor_and_operation_and_kind_and_key', q =>
         q
@@ -114,20 +119,26 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
           .eq('operationId', state.request.finish!.composeOperationId!)
           .eq('kind', 'inputs'),
       )
-      .take(1);
-    const lane = selected
-      ? await readHostedRecord(ctx, {
+      .take(source.inputs.count + 1);
+    const lanes = await Promise.all(
+      selected.map(entry =>
+        readHostedRecord(ctx, {
           projectId: input.projectId,
           actor: state.actor,
           kind: 'lane',
-          key: selected.key,
-        })
-      : null;
-    const record = lane ? hostedRecordSchema.options[1].parse(JSON.parse(lane.value)) : null;
+          key: entry.key,
+        }),
+      ),
+    );
+    const records = lanes.map(row =>
+      row ? hostedRecordSchema.options[1].parse(JSON.parse(row.value)) : null,
+    );
     invariant(
-      record?.revert?.receiptId === state.request.revertOf,
+      selected.length === source.inputs.count &&
+        records.every(r => r?.revert) &&
+        records.some(r => r?.revert?.receiptId === state.request.revertOf),
       'WORK_OPERATION_CHANGED',
-      'Reverse Candidate must name the actual original receipt.',
+      'Reverse Candidate must name the actual original receipts.',
     );
   }
   // Legacy CLIs serialized this default even when no message was supplied.

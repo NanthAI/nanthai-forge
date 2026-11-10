@@ -34,7 +34,9 @@ import {
 } from '../src/hosted-check';
 import { canonicalPayload, hostedPayloadHash, hostedOperationSchema } from '../src/hosted-source-operation';
 import { culpritId, culpritFailures, probeVerdict, bisectStep, type NeedsFix } from '../src/culprit-bisect';
-import { buildComposePages } from '../src/hosted-compose';
+import { buildComposePages, type composeLaneSchema } from '../src/hosted-compose';
+import type { z } from 'zod';
+import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { savePin } from '../src/hosted-save';
 import { hostedLandingRequestSchema } from '../src/hosted-landing';
 import { presignPut, r2Config, r2Key } from './r2';
@@ -51,6 +53,7 @@ type Recovery = {
   evidence?: NeedsFix['failed'];
   missing?: string[];
   addition?: number;
+  pairUnclear?: boolean;
   range: { sequence: number; receipt: HostedAcceptance }[];
   failed: NeedsFix['failed'];
   low: number;
@@ -62,6 +65,12 @@ type Recovery = {
   reason: string;
   undo?: string;
   target?: HostedAcceptance;
+  /** Newest first; a bounded hypothesis, never reported as a proven single culprit. */
+  targets?: HostedAcceptance[];
+  reverseLanes?: z.infer<typeof composeLaneSchema>[];
+  reverseReceipts?: string[];
+  reverseRunId?: string;
+  reverseSubmissionId?: string;
   intentId?: string;
   /** A prepared reverse Candidate that was not landed because it waits for a person. */
   held?: { candidateId: string; reason: string };
@@ -95,7 +104,8 @@ async function retain(ctx: MutationCtx, row: Doc<'projectHostedOperations'>, sta
           result: {
             auditRunId: state.audit.id,
             reason: state.reason,
-            culprit: state.target?.id ?? null,
+            culprit: state.targets ? null : (state.target?.id ?? null),
+            ...(state.targets ? { revertedReceipts: state.targets.map(r => r.id) } : {}),
             failed: state.failed,
             evidence: state.evidence ?? state.failed,
             ...(state.addition ? { addedBy: state.range[state.addition - 1]!.receipt.id } : {}),
@@ -225,7 +235,7 @@ function report(
     previousHead: target.previous.head,
     sequence: state.range.at(-1)?.sequence ?? target.snapshot.revision,
     failed: state.failed,
-    summary: `${mode === 'reverted' ? 'Reverted' : 'Fix needed for'} receipt ${target.id}: ${
+    summary: `${state.targets ? `Recovery set [${state.targets.map(r => r.id).join(', ')}]. ` : ''}${mode === 'reverted' ? 'Reverted' : 'Fix needed for'} receipt ${target.id}: ${
       state.failed
         .slice(0, 3)
         .map(f => f.file)
@@ -313,7 +323,7 @@ async function fixForward(
   await notice(ctx, project, intentId, n);
   if (target) {
     // Several candidates remain candidates; do not falsely name one as the culprit.
-    for (const item of state.target ? [state.target] : []) {
+    for (const item of state.targets ?? (state.target ? [state.target] : [])) {
       const original = await candidateIntent(ctx, project, item);
       if (original)
         await notice(ctx, project, original, {
@@ -440,14 +450,30 @@ export async function onCulpritRunTerminal(ctx: MutationCtx, run: HostedCheckRun
             state.stage = 'done';
             state.reason = 'The red audit was superseded; no automatic reverse was landed.';
             await retain(ctx, row, state);
-          } else
-            await fixForward(
-              ctx,
-              project,
-              row,
-              state,
-              'The full-gated reverse did not pass; accepted source was not changed.',
-            );
+          } else if (!state.reverseRunId || state.reverseRunId === run.id) {
+            if (run.status === 'failed' && state.range.length >= 2) {
+              if (state.reverseSubmissionId)
+                await cancelHostedLanding(ctx, {
+                  projectId: project._id,
+                  actor: project.owner,
+                  reason:
+                    'The recovery re-check failed; widen the same red episode without publishing this reverse.',
+                  request: {
+                    operationId: culpritId({ cancelReverse: run.id }),
+                    authorityEpoch: project.sourceAuthority!.epoch,
+                    submissionId: state.reverseSubmissionId,
+                  },
+                });
+              await widenRevert(ctx, project, row, state);
+            } else
+              await fixForward(
+                ctx,
+                project,
+                row,
+                state,
+                'The full-gated reverse did not pass; accepted source was not changed.',
+              );
+          }
         }
       }
     }
@@ -648,6 +674,8 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     run,
     state.failed.map(f => f.file),
   );
+  if (verdict === 'unclear' && !pending.flake && state.range.length >= 2)
+    return widenRevert(ctx, project, row!, state);
   if (verdict === 'unclear')
     return fixForward(ctx, project, row!, state, 'Probe evidence is mixed, missing, static, or unavailable.');
   if (
@@ -733,6 +761,7 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       state.fail = { head: run.request.expectedHead, runId: run.id };
     }
   } else state.fail = { head: run.request.expectedHead, runId: run.id };
+  if (state.pairUnclear) return widenRevert(ctx, project, row!, state);
   if (state.addition) state.high = state.addition;
   const next = state.addition ? null : bisectStep(state.low, state.high);
   if (next !== null) {
@@ -747,14 +776,43 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       state.pass.head !== boundary.previous.head ||
       state.fail.head !== boundary.candidate.head)
   )
-    return fixForward(
-      ctx,
-      project,
-      row!,
-      state,
-      'Probe evidence does not establish distinct passing and failing adjacent source States.',
-    );
+    return state.range.length >= 2
+      ? widenRevert(ctx, project, row!, state)
+      : fixForward(
+          ctx,
+          project,
+          row!,
+          state,
+          'Probe evidence does not establish distinct passing and failing adjacent source States.',
+        );
   state.target = state.range[state.high - 1]!.receipt;
+  // A passing run of this change on its own source disproves single-landing blame.
+  // Only exact retained receipt evidence with the same check pins can establish it.
+  const checkedId = state.target.check?.runId;
+  if (checkedId && state.range.length >= 2) {
+    const ownRow = await ctx.db
+      .query('projectHostedCheckRuns')
+      .withIndex('by_project_and_run', q => q.eq('projectId', project._id).eq('runId', checkedId))
+      .unique();
+    const own = ownRow ? hostedCheckRunSchema.parse(JSON.parse(ownRow.value)) : null;
+    if (
+      own &&
+      own.check.definition === state.audit.check.definition &&
+      own.request.expectedConfiguration === state.audit.request.expectedConfiguration &&
+      own.request.expectedEnvironment === state.audit.request.expectedEnvironment &&
+      own.terminalDigest === state.target.check!.terminalDigest &&
+      own.request.expectedHead ===
+        (state.target.crossHeadProof?.checked.head ?? state.target.candidate.head) &&
+      own.request.candidateId === (state.target.crossHeadProof?.checked.id ?? state.target.candidate.id) &&
+      own.request.expectedHead !== state.fail.head &&
+      probeVerdict(
+        own,
+        state.failed.map(f => f.file),
+      ) === 'pass'
+    )
+      return widenRevert(ctx, project, row!, state);
+  }
+
   const auditRow = await ctx.db
     .query('projectHostedMainAudits')
     .withIndex('by_project', q => q.eq('projectId', input.projectId))
@@ -778,15 +836,72 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     : 'A single failing boundary was proven; reverse only this accepted change.';
   await prepareSystemRevert(ctx, project, row!, state);
 }
+/** Red-only metadata selection. No new call on acceptance or while idle. */
+async function widenRevert(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  row: Doc<'projectHostedOperations'>,
+  state: Recovery,
+) {
+  if (!autoRevertEnabled(effectivePolicy(project)))
+    return fixForward(ctx, project, row, state, 'Automatic revert is off; nothing was reverted.');
+  const recent = state.range.map(r => r.receipt).reverse();
+  if (!state.targets) {
+    const candidates = await Promise.all(recent.map(r => candidateRecord(ctx, project, r)));
+    const matching = recent.filter(
+      (r, i) =>
+        (state.addition && state.range[state.addition - 1]!.receipt.id === r.id) ||
+        candidates[i]?.governance?.paths.some(path =>
+          state.failed.some(f => f.file === path || f.excerpt?.includes(path)),
+        ) ||
+        candidates[i]?.semanticPlan?.members.some(member =>
+          member.tests.some(test => state.failed.some(f => f.file === test.path)),
+        ),
+    );
+    const ids = new Set([...matching, ...recent].slice(0, 2).map(r => r.id));
+    // De-duplicate before filling the second slot when exactly one path overlaps.
+    for (const r of recent) {
+      if (ids.size >= 2) break;
+      ids.add(r.id);
+    }
+    state.targets = recent.filter(r => ids.has(r.id));
+  } else {
+    const next = recent.find(r => !state.targets!.some(selected => selected.id === r.id));
+    if (state.targets.length >= 4 || !next)
+      return fixForward(
+        ctx,
+        project,
+        row,
+        state,
+        `Recovery stopped after reverting ${state.targets.length} landings in the re-check. Main is still held; no reverse was accepted. Inspect the failed full checks; the owner must resolve this red episode.`,
+      );
+    state.targets.push(next);
+    state.targets.sort((a, b) => recent.indexOf(a) - recent.indexOf(b));
+  }
+  const audit = await ctx.db
+    .query('projectHostedMainAudits')
+    .withIndex('by_project', q => q.eq('projectId', project._id))
+    .unique();
+  if (audit?.red?.culprit) await ctx.db.patch(audit._id, { red: { ...audit.red, culprit: undefined } });
+  state.target = state.targets[0];
+  state.reason = `No single culprit is proven. Re-check the reverse of ${state.targets.length} interacting landings before accepting it.`;
+  // Reuse already prepared reverses; widening reads only the newly selected transition.
+  delete state.reverseRunId;
+  delete state.reverseSubmissionId;
+  if (state.targets.some(r => !state.reverseReceipts?.includes(r.id)))
+    await prepareSystemRevert(ctx, project, row, state);
+  else await prepareSystemCompose(ctx, project, row, state);
+}
 async function prepareSystemRevert(
   ctx: MutationCtx,
   project: Doc<'hostedProjects'>,
   row: Doc<'projectHostedOperations'>,
   state: Recovery,
 ) {
-  const target = state.target!;
-  const operationId = culpritId({ revert: state.audit.id });
-  const intentId = culpritId({ revertIntent: state.audit.id });
+  const target = state.targets?.find(r => !state.reverseReceipts?.includes(r.id)) ?? state.target!;
+  const attempt = state.targets ? { target: target.id } : {};
+  const operationId = culpritId({ revert: state.audit.id, ...attempt });
+  const intentId = culpritId({ revertIntent: state.audit.id, ...attempt });
   const request = {
     kind: 'revert' as const,
     operationId,
@@ -876,19 +991,33 @@ async function prepareSystemCompose(
   const lane = hostedRecordSchema.options[1].parse(JSON.parse(laneRow!.value));
   if (lane.resolution?.status === 'pending')
     return fixForward(ctx, project, row, state, 'The reverse change requires conflict resolution.');
+  const selected = {
+    laneId: lane.id,
+    head: lane.head,
+    version: lane.version,
+    sourceVersion: lane.sourceVersion,
+    lifecycleVersion: lane.lifecycleVersion,
+    state: await saveObject(ctx, project._id, { sha256: lane.head }),
+  };
+  state.reverseLanes ??= [];
+  state.reverseReceipts ??= [];
+  const receiptId = sync.state.work.mode === 'revert' ? sync.state.work.receiptId : state.target!.id;
+  if (!state.reverseReceipts.includes(receiptId)) {
+    state.reverseLanes.push(selected);
+    state.reverseReceipts.push(receiptId);
+  }
+  if (state.targets?.some(r => !state.reverseReceipts!.includes(r.id)))
+    return prepareSystemRevert(ctx, project, row, state);
+  const entries = state.targets
+    ? state.targets.map(r => state.reverseLanes![state.reverseReceipts!.indexOf(r.id)]!)
+    : [selected];
   const main = await hostedStartMain(ctx, project._id);
-  const inputs = buildComposePages([
-    {
-      laneId: lane.id,
-      head: lane.head,
-      version: lane.version,
-      sourceVersion: lane.sourceVersion,
-      lifecycleVersion: lane.lifecycleVersion,
-      state: await saveObject(ctx, project._id, { sha256: lane.head }),
-    },
-  ]);
+  const inputs = buildComposePages(entries);
   const dependencies = buildComposePages([]);
-  const operationId = culpritId({ composeRevert: state.audit.id });
+  const operationId = culpritId({
+    composeRevert: state.audit.id,
+    ...(state.targets ? { receipts: state.targets.map(r => r.id) } : {}),
+  });
   const request = {
     operationId,
     intentId: state.intentId!,
@@ -907,7 +1036,7 @@ async function prepareSystemCompose(
     request,
     ownerInputs: true,
     main: await saveObject(ctx, project._id, { sha256: main.head }),
-    inputs: { next: null, pages: 1, count: 1 },
+    inputs: { next: null, pages: inputs.manifest.pages, count: inputs.manifest.count },
     dependencies: { next: null, pages: 1, count: 0 },
     candidateId: operation.firstAttempt.ids.candidate!,
     jobOperationId: operation.firstAttempt.ids.jobOperation!,
@@ -921,13 +1050,14 @@ async function prepareSystemCompose(
     culpritRunId: recoveryKey(state),
     value: canonicalPayload(compose),
   });
-  await ctx.db.insert('projectHostedComposeSelections', {
-    projectId: project._id,
-    actor: project.owner,
-    operationId,
-    kind: 'inputs',
-    key: lane.id,
-  });
+  for (const entry of entries)
+    await ctx.db.insert('projectHostedComposeSelections', {
+      projectId: project._id,
+      actor: project.owner,
+      operationId,
+      kind: 'inputs',
+      key: entry.laneId,
+    });
   state.composeOperationId = operationId;
   state.stage = 'compose';
   state.uploads = [...inputs.pages, ...dependencies.pages].map(p => ({
@@ -978,7 +1108,9 @@ async function finishSystemRevert(
   const held = autoRevertHold({
     project,
     policy,
-    culpritPaths: (await candidateRecord(ctx, project, state.target!))?.governance?.paths ?? null,
+    culpritPaths: (
+      await Promise.all((state.targets ?? [state.target!]).map(r => candidateRecord(ctx, project, r)))
+    ).flatMap(c => c?.governance?.paths ?? []),
     reversePaths: candidate.governance?.paths ?? null,
     checks: [state.audit.check, ...(project.checkEntries ?? [])],
   });
@@ -987,14 +1119,19 @@ async function finishSystemRevert(
     // on the culprit's Intent. No check is spent and nothing is enqueued.
     state.held = { candidateId: candidate.id, reason: held };
     state.reason = `The reverse was prepared as Candidate ${candidate.id} but not landed: ${held}. A person reviews and accepts it; it needs its full check first. Nothing in main changed.`;
-    const original = await candidateIntent(ctx, project, state.target!);
-    if (original) await notice(ctx, project, original, report(state, state.target!, 'needs-fix'));
+    for (const target of state.targets ?? [state.target!]) {
+      const original = await candidateIntent(ctx, project, target);
+      if (original) await notice(ctx, project, original, report(state, target, 'needs-fix'));
+    }
     state.stage = 'done';
     await retain(ctx, row, state);
     return;
   }
   const gate = { mode: 'full' as const, reason: `culprit-revert:${recoveryKey(state)}` };
-  const operationId = culpritId({ fullRevertCheck: state.audit.id });
+  const operationId = culpritId({
+    fullRevertCheck: state.audit.id,
+    ...(state.targets ? { receipts: state.targets.map(r => r.id) } : {}),
+  });
   const request = {
     ...state.audit.request,
     operationId,
@@ -1054,9 +1191,15 @@ async function finishSystemRevert(
         cost: { status: 'unknown' },
       }),
     );
-  const landingOperationId = culpritId({ landRevert: state.audit.id });
+  const landingOperationId = culpritId({
+    landRevert: state.audit.id,
+    ...(state.targets ? { receipts: state.targets.map(r => r.id) } : {}),
+  });
   const original = await candidateIntent(ctx, project, state.target!);
-  await enqueueHostedLanding(
+  const originals = state.targets
+    ? await Promise.all(state.targets.map(r => candidateIntent(ctx, project, r)))
+    : [];
+  const landing = await enqueueHostedLanding(
     ctx,
     { projectId: project._id },
     hostedLandingRequestSchema.parse({
@@ -1068,13 +1211,23 @@ async function finishSystemRevert(
       expectedHead: candidate.result.head,
       agent: true,
       revertOf: state.target!.id,
-      message: revertMessage(report(state, state.target!, 'needs-fix').summary, original),
+      message: state.targets
+        ? revertMessage(
+            `Revert receipts ${state.targets.map(r => r.id).join(', ')}. Re-land each kept Lane after fixing: ${originals
+              .filter(Boolean)
+              .map(intentId => `nforge agent ROOT start '{"intentId":"${intentId}"}'`)
+              .join('; ')}.`,
+            null,
+          )
+        : revertMessage(report(state, state.target!, 'needs-fix').summary, original),
       check: { kind: 'run', runId: id },
       finish: { composeOperationId: state.composeOperationId, after: null },
     }),
     { id: project.owner, kind: 'agent' },
   );
   state.stage = 'landing';
+  state.reverseRunId = id;
+  state.reverseSubmissionId = landing.id;
   state.landingOperationId = landingOperationId;
   await retain(ctx, row, state);
 }
@@ -1179,6 +1332,19 @@ export const sourceEvidence = internalMutation({
     if (presence && presence.length === state.range.length + 1 && !presence[0]!.length) {
       const indices = state.missing.map(file => presence.findIndex(files => files.includes(file)));
       if (indices[0]! > 0 && indices.every(index => index === indices[0])) addition = indices[0];
+    }
+    if (
+      !addition &&
+      !input.error &&
+      presence?.length === state.range.length + 1 &&
+      !presence[0]!.length &&
+      state.range.length >= 2
+    ) {
+      state.pairUnclear = true;
+      delete state.missing;
+      await probe(ctx, project, state, state.range.length, true);
+      await retain(ctx, row, state);
+      return null;
     }
     if (!addition) {
       await fixForward(
@@ -1347,6 +1513,28 @@ export const drive = internalAction({
     return null;
   },
 });
+async function revertedNotices(
+  ctx: MutationCtx,
+  project: Doc<'hostedProjects'>,
+  state: Recovery,
+  receipt: HostedAcceptance,
+) {
+  for (const target of state.targets ?? [state.target!]) {
+    const original = await candidateIntent(ctx, project, target);
+    if (original)
+      await notice(ctx, project, original, {
+        ...report(state, target, 'reverted', receipt.id),
+        sequence: receipt.snapshot.revision,
+      });
+  }
+  for (const target of state.targets?.slice(1) ?? [])
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedRevertNotice:accepted'), {
+      projectId: project._id,
+      receiptId: receipt.id,
+      revertOf: target.id,
+      actor: project.owner,
+    });
+}
 /** Called from the existing receipt-completion transaction, never a status read. */
 export async function onRecoveryAccepted(ctx: MutationCtx, receipt: HostedAcceptance) {
   const projectId = receipt.projectId as Id<'hostedProjects'>;
@@ -1384,38 +1572,37 @@ export async function onRecoveryAccepted(ctx: MutationCtx, receipt: HostedAccept
   if (!row?.recovery) return;
   const state: Recovery = JSON.parse(row.recovery);
   if (state.stage === 'done' && state.intentId === intentId && state.target && intent.needsFix) {
-    const original = await candidateIntent(ctx, project, state.target);
-    if (original) {
-      const originalRow = await readHostedRecord(ctx, {
-        projectId,
-        actor: project.owner,
-        kind: 'intent',
-        key: original,
-      });
-      const record = originalRow ? hostedRecordSchema.options[0].parse(JSON.parse(originalRow.value)) : null;
-      if (record?.needsFix?.auditRunId === state.audit.id) {
-        const { needsFix: resolvedNotice, ...rest } = record;
-        void resolvedNotice;
-        await clearNeedsFix(ctx, projectId, original);
-        await writeHostedRecord(ctx, {
+    for (const target of state.targets ?? [state.target]) {
+      const original = await candidateIntent(ctx, project, target);
+      if (original) {
+        const originalRow = await readHostedRecord(ctx, {
           projectId,
           actor: project.owner,
-          authorityEpoch: receipt.authorityEpoch,
-          expectedVersion: record.version,
-          record: { ...rest, version: record.version + 1 },
+          kind: 'intent',
+          key: original,
         });
+        const record = originalRow
+          ? hostedRecordSchema.options[0].parse(JSON.parse(originalRow.value))
+          : null;
+        if (record?.needsFix?.auditRunId === state.audit.id) {
+          const { needsFix: resolvedNotice, ...rest } = record;
+          void resolvedNotice;
+          await clearNeedsFix(ctx, projectId, original);
+          await writeHostedRecord(ctx, {
+            projectId,
+            actor: project.owner,
+            authorityEpoch: receipt.authorityEpoch,
+            expectedVersion: record.version,
+            record: { ...rest, version: record.version + 1 },
+          });
+        }
       }
     }
     return;
   }
   if (state.stage === 'done' && state.held && state.intentId === intentId && state.target) {
     // A person accepted the held reverse: the culprit's notice now says it was reverted.
-    const original = await candidateIntent(ctx, project, state.target);
-    if (original)
-      await notice(ctx, project, original, {
-        ...report(state, state.target, 'reverted', receipt.id),
-        sequence: receipt.snapshot.revision,
-      });
+    await revertedNotices(ctx, project, state, receipt);
     state.undo = `nforge agent ROOT revert '${JSON.stringify({ target: { kind: 'receipt', receiptId: receipt.id } })}'`;
     state.reason = `Reverted by a person after review: Candidate ${state.held.candidateId} landed as receipt ${receipt.id}. Undo: ${state.undo}`;
     delete state.held;
@@ -1423,12 +1610,7 @@ export async function onRecoveryAccepted(ctx: MutationCtx, receipt: HostedAccept
     return;
   }
   if (state.stage !== 'landing' || state.intentId !== intentId || !state.target) return;
-  const original = await candidateIntent(ctx, project, state.target);
-  if (original)
-    await notice(ctx, project, original, {
-      ...report(state, state.target, 'reverted', receipt.id),
-      sequence: receipt.snapshot.revision,
-    });
+  await revertedNotices(ctx, project, state, receipt);
   state.undo = `nforge agent ROOT revert '${JSON.stringify({ target: { kind: 'receipt', receiptId: receipt.id } })}'`;
   state.reason = report(state, state.target, 'reverted', receipt.id).summary + ` Undo: ${state.undo}`;
   state.stage = 'done';

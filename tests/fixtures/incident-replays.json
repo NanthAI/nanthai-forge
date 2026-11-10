@@ -151,6 +151,12 @@
       "what": "A newly added failing test had no culprit; later failed audits restarted recovery in the same red episode and main needed a manual fix.",
       "file": "tests/hosted-culprit.test.mjs",
       "test": "incident 27865bc4: a new failing test and later failed audits recover in one automatic reverse"
+    },
+    {
+      "incident": "438e9ace",
+      "what": "Two first-check landings pass alone but fail together; recovery must revert the pair within one red episode without a manual fix.",
+      "file": "tests/hosted-culprit.test.mjs",
+      "test": "incident 438e9ace: two passing landings fail together and a later failed audit preserves one automatic pair recovery"
     }
   ]
 }

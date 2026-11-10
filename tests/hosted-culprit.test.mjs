@@ -62,7 +62,7 @@ function seedRecord(f, record) {
   });
   f.insert('projectHostedRecordHeads', { ...indexed, recordId });
 }
-async function fixture(k = 5, { noop = false, addedAt = null } = {}) {
+async function fixture(k = 5, { noop = false, addedAt = null, pairFlag = false } = {}) {
   const f = await checksFixture();
   const original = await f.enqueue(f.selection());
   f.scheduled = [];
@@ -93,6 +93,9 @@ async function fixture(k = 5, { noop = false, addedAt = null } = {}) {
           ...tree,
           files: [
             ...tree.files,
+            ...(pairFlag && i >= 1
+              ? [{ path: 'tests/pair-flag.txt', blob: f.put('flag').sha256, mode: 'file' }]
+              : []),
             ...(addedAt !== null && i >= addedAt
               ? [
                   {
@@ -983,11 +986,72 @@ for (const [firstCheck, conflict, held] of [
 test('incident 27865bc4: a new failing test and later failed audits recover in one automatic reverse', t =>
   replaySystemReverse(t, { drill: true }));
 
-async function replaySystemReverse(t, { firstCheck = false, conflict = false, held, drill = false } = {}) {
+test('incident 438e9ace: two passing landings fail together and a later failed audit preserves one automatic pair recovery', t =>
+  replaySystemReverse(t, { drill: true, pair: true }));
+
+async function replaySystemReverse(
+  t,
+  { firstCheck = false, conflict = false, held, drill = false, pair = false } = {},
+) {
   if (drill) t.mock.timers.enable({ apis: ['Date'], now: Date.parse(at) });
   const replayStarted = performance.now();
   const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
-  const f = await fixture(1, { addedAt: drill ? 1 : null });
+  const f = await fixture(pair ? 2 : 1, { addedAt: drill ? (pair ? 2 : 1) : null, pairFlag: pair });
+  if (pair) {
+    // B adds a flag; A introduces a new test on a source without B. Each passes alone.
+    // Their accepted combination is red, so a passing A run cannot prove A alone broke main.
+    const files = head => JSON.parse(f.objectBytes.get(head)).files;
+    const base = JSON.parse(f.objectBytes.get(f.heads[0]));
+    const flag = { path: 'tests/pair-flag.txt', blob: f.put('flag').sha256, mode: 'file' };
+    const a = f.put(
+      JSON.stringify({
+        ...base,
+        files: files(f.heads[2]).filter(f => f.path !== flag.path),
+        message: 'A alone',
+      }),
+    ).sha256;
+    const passes = paths =>
+      !(paths.some(f => f.path === flag.path) && paths.some(f => f.path === 'tests/red.test.mjs'));
+    assert(passes(files(f.heads[1])), 'B passes alone');
+    assert(passes(files(a)), 'A passes alone');
+    assert(!passes(files(f.heads[2])), 'A+B fail together');
+    const own = hostedCheckRunSchema.parse({
+      ...f.audit,
+      id: randomUUID(),
+      request: { ...f.audit.request, expectedHead: a },
+      status: 'passed',
+      contractReports: { 'tests/red.test.mjs': { failed: false } },
+    });
+    f.insert('projectHostedCheckRuns', {
+      projectId: f.projectId,
+      runId: own.id,
+      candidateId: own.request.candidateId,
+      status: own.status,
+      gate: own.gate,
+      value: JSON.stringify(own),
+    });
+    firstCheckCulprit(f);
+    const receiptRow = [...f.tables.projectHostedAcceptances.values()].find(r => r.sequence === 575);
+    const receipt = JSON.parse(receiptRow.value);
+    receipt.crossHeadProof = {
+      ...receipt.crossHeadProof,
+      checked: { id: own.request.candidateId, head: a, digest: hash },
+      runId: own.id,
+      terminalDigest: own.terminalDigest,
+    };
+    receipt.check = {
+      runId: own.id,
+      checkId: own.check.id,
+      definition: own.check.definition,
+      configuration: own.request.expectedConfiguration,
+      environment: own.request.expectedEnvironment,
+      terminalDigest: own.terminalDigest,
+      planDigest: hash,
+      executionId: 'own-run',
+    };
+    f.patch('projectHostedAcceptances', receiptRow._id, { value: JSON.stringify(receipt) });
+    f.receipts[574] = receipt;
+  }
   const culpritReceipt = firstCheck ? firstCheckCulprit(f) : f.receipts[574];
   const receiptsBefore = [...f.tables.projectHostedAcceptances.values()].map(r => r.value);
   const mainBefore = [...f.tables.projectHostedChannels.values()][0].selection;
@@ -1001,24 +1065,6 @@ async function replaySystemReverse(t, { firstCheck = false, conflict = false, he
   await f.complete(f.probes()[0], true);
   let row = f.recovery(),
     recovery = JSON.parse(row.recovery);
-  const syncRow = [...f.tables.projectHostedSyncs.values()][0],
-    sync = JSON.parse(syncRow.value);
-  const reverseLane = {
-    kind: 'lane',
-    id: sync.resolutionLaneId,
-    version: 0,
-    sourceVersion: 0,
-    lifecycleVersion: 0,
-    at,
-    intentId: sync.intentId,
-    actor: 'owner',
-    base: sync.base,
-    head: f.heads[0],
-    state: 'active',
-    authorityEpoch: 1,
-    revert: { receiptId: recovery.target.id, previous: f.heads[0], accepted: f.heads[1] },
-  };
-  seedRecord(f, reverseLane);
   const completeOperation = async (id, result) => {
     const opRow = [...f.tables.projectHostedOperations.values()].find(r => r.operationId === id),
       op = JSON.parse(opRow.value);
@@ -1036,13 +1082,39 @@ async function replaySystemReverse(t, { firstCheck = false, conflict = false, he
       {},
     );
   };
-  // Model terminal source publications; the separate worker test verifies source bytes.
-  await completeOperation(sync.request.operationId, { lane: { laneId: reverseLane.id }, status: 'merged' });
-  f.patch('projectHostedSyncs', syncRow._id, { value: JSON.stringify({ ...sync, status: 'completed' }) });
-  delete recovery.uploads;
-  f.patch('projectHostedOperations', row._id, { recovery: JSON.stringify(recovery) });
-  await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
-  recovery = JSON.parse(f.recovery().recovery);
+  // Model terminal source publications; the byte-level pair test below uses the real worker.
+  for (let step = 0; recovery.stage === 'sync' && step < 4; step++) {
+    const syncRow = [...f.tables.projectHostedSyncs.values()].find(
+        r => r.operationId === recovery.syncOperationId,
+      ),
+      sync = JSON.parse(syncRow.value);
+    const reverseLane = {
+      kind: 'lane',
+      id: sync.resolutionLaneId,
+      version: 0,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      at,
+      intentId: sync.intentId,
+      actor: 'owner',
+      base: sync.base,
+      head: f.heads[0],
+      state: 'active',
+      authorityEpoch: 1,
+      revert: {
+        receiptId: sync.work.receiptId,
+        previous: sync.work.previous.object.sha256,
+        accepted: sync.work.accepted.object.sha256,
+      },
+    };
+    seedRecord(f, reverseLane);
+    await completeOperation(sync.request.operationId, { lane: { laneId: reverseLane.id }, status: 'merged' });
+    f.patch('projectHostedSyncs', syncRow._id, { value: JSON.stringify({ ...sync, status: 'completed' }) });
+    delete recovery.uploads;
+    f.patch('projectHostedOperations', row._id, { recovery: JSON.stringify(recovery) });
+    await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
+    recovery = JSON.parse(f.recovery().recovery);
+  }
   assert.equal(recovery.stage, 'compose');
   const transfer = JSON.parse(
     await f.transaction('transfer', culprit.transfer, { projectId: f.projectId, runId: f.recoveryId() }),
@@ -1122,6 +1194,15 @@ async function replaySystemReverse(t, { firstCheck = false, conflict = false, he
         acceptance: { mode: 'auto-on-pass', gate: 'contract', protectedPaths: ['src/file-1.ts'] },
       },
     });
+  if (pair) {
+    // A client-created composition cannot use the server-only multi-reverse path.
+    f.patch('projectHostedComposes', composeRow._id, { culpritRunId: undefined });
+    await assert.rejects(
+      f.transaction('manualPairReverse', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() }),
+      e => e.code === 'WORK_OPERATION_CHANGED',
+    );
+    f.patch('projectHostedComposes', composeRow._id, { culpritRunId: f.recoveryId() });
+  }
   await f.transaction('advanceFull', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
   if (held) {
     // Never auto-landed: no check, no landing, main and receipts untouched; the prepared
@@ -1205,10 +1286,12 @@ async function replaySystemReverse(t, { firstCheck = false, conflict = false, he
   // bring the culprit back (owner 2026-11-06: no lost code).
   const reverse = JSON.parse([...f.tables.projectHostedLandingRequests.values()][0].value);
   assert.equal(reverse.request.revertOf, culpritReceipt.id);
-  assert.equal(reverse.request.expectedMain.head, f.heads[1], 'composed on current main');
+  assert.equal(reverse.request.expectedMain.head, f.heads[pair ? 2 : 1], 'composed on current main');
   assert.match(
     reverse.request.message,
-    new RegExp(`Re-land after fixing: nforge agent ROOT start '\\{"intentId":"${f.intents[574].id}"\\}'`),
+    new RegExp(
+      `${pair ? '' : 'Re-land after fixing: '}nforge agent ROOT start '\\{"intentId":"${f.intents[574].id}"\\}'`,
+    ),
   );
   assert.match(reverse.request.message, /Undo: revert this receipt\.$/);
   assert.deepEqual(
@@ -1306,10 +1389,26 @@ async function replaySystemReverse(t, { firstCheck = false, conflict = false, he
     const recovered = JSON.parse(f.recovery().recovery);
     assert.equal(recovered.stage, 'done');
     assert.equal((await f.readIntent(f.intents[574].id)).needsFix.state, 'reverted');
-    assert.equal(recovered.addition, 1);
+    assert.equal(recovered.addition, pair ? 2 : 1);
+    if (pair) {
+      assert.deepEqual(
+        recovered.targets.map(r => r.id),
+        f.receipts
+          .slice(-2)
+          .reverse()
+          .map(r => r.id),
+      );
+      assert.equal((await f.readIntent(f.intents[573].id)).needsFix.state, 'reverted');
+      assert.equal(recovered.reverseLanes.length, 2);
+      assert.equal(
+        JSON.parse(f.tables.projectHostedOperations.get(f.recovery()._id).value).terminal.outcome.result
+          .culprit,
+        null,
+      );
+    }
     const replayMinutes = (Date.parse(recoveredAt) - Date.parse(recovered.episode)) / 60000;
     assert(replayMinutes <= 15, 'drill recovery fits the simulated 15 minute budget');
-    assert.equal(f.tables.projectHostedSyncs.size, 1);
+    assert.equal(f.tables.projectHostedSyncs.size, pair ? 2 : 1);
     assert.equal(JSON.parse([...f.tables.projectHostedChannels.values()][0].selection).head, f.heads[0]);
     t.diagnostic(
       JSON.stringify({
@@ -1740,6 +1839,248 @@ test('flake recovery releases held requests through the audit reducer and clears
   assert.equal(updated.error, null);
   assert.equal(updated.version, 1);
   assert.deepEqual(updated.observation, landingObservation('queued'));
+});
+
+test('inconclusive single attribution selects the most recent overlapping pair, or the two newest without overlap', async t => {
+  for (const [count, overlaps] of [
+    [5, [1, 3]],
+    [5, [2]],
+    [5, []],
+    [100, []],
+  ]) {
+    const f = await fixture(count);
+    for (const index of overlaps) {
+      const receipt = f.receipts[574 - count + index];
+      const header = [...f.tables.projectHostedRecords.values()].find(r => r.key === receipt.candidate.id);
+      const body = f.tables.projectHostedRecordBodies.get(header.bodyId);
+      const candidate = JSON.parse(body.value);
+      const next = hostedRecordValue({
+        ...candidate,
+        governance: { version: 1, paths: ['tests/red.test.mjs'], ownerInputs: true },
+      });
+      f.patch('projectHostedRecordBodies', body._id, { value: next.value });
+      f.patch('projectHostedRecords', header._id, { digest: next.ref.digest, bytes: next.ref.bytes });
+    }
+    await f.runCulprit();
+    await f.complete(f.probes()[0], true);
+    const probe = f.probes().find(r => r.status === 'queued');
+    const run = { ...probe, status: 'failed', endedAt: at, terminalDigest: hash, contractReports: {} };
+    const row = [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === run.id);
+    f.patch('projectHostedCheckRuns', row._id, { status: run.status, value: JSON.stringify(run) });
+    const before = f.counts.length;
+    await f.transaction('inconclusiveProbe', culprit.terminal, { projectId: f.projectId, runId: run.id });
+    const state = JSON.parse(f.recovery().recovery);
+    const indices = overlaps.length === 2 ? [3, 1] : overlaps.length ? [5, 2] : [count, count - 1];
+    assert.deepEqual(
+      state.targets.map(r => r.id),
+      indices.map(i => f.receipts[574 - count + i].id),
+    );
+    assert.equal(state.stage, 'sync');
+    if (count === 100) {
+      const calls = f.counts.slice(before);
+      assert.equal(calls.length, 1, 'selection stays in its one red-only transaction');
+      assert(calls[0].documents < 600 && calls[0].readBytes < 4 * 1024 * 1024, JSON.stringify(calls[0]));
+      t.diagnostic(
+        JSON.stringify({
+          pairSelectionReceipts: count,
+          calls: calls.length,
+          documents: calls[0].documents,
+          dbReadBytes: calls[0].readBytes,
+        }),
+      );
+    }
+    assert(
+      !f.tables.projectHostedMainAudits.get(f.auditRow).red.culprit,
+      'a hypothesis never blames one author',
+    );
+  }
+});
+
+async function prepareRecoveryCheck(f) {
+  const operations = await import(moduleUrl('../convex/projectHostedOperations.ts'));
+  const finishOperation = async (id, result) => {
+    const op = JSON.parse(
+      [...f.tables.projectHostedOperations.values()].find(r => r.operationId === id).value,
+    );
+    await f.transaction(
+      'sourceResult',
+      {
+        _handler: ctx =>
+          operations.finishHostedOperation(ctx, {
+            projectId: f.projectId,
+            actor: 'owner',
+            operationId: id,
+            receipt: { attemptId: op.firstAttempt.id, at, outcome: { status: 'completed', result } },
+          }),
+      },
+      {},
+    );
+  };
+  for (let step = 0; step < 5; step++) {
+    const state = JSON.parse(f.recovery().recovery);
+    if (state.stage !== 'sync') break;
+    const syncRow = [...f.tables.projectHostedSyncs.values()].find(
+      r => r.operationId === state.syncOperationId,
+    );
+    const sync = JSON.parse(syncRow.value);
+    const lane = {
+      kind: 'lane',
+      id: sync.resolutionLaneId,
+      version: 0,
+      sourceVersion: 0,
+      lifecycleVersion: 0,
+      at,
+      intentId: sync.intentId,
+      actor: 'owner',
+      base: sync.base,
+      head: f.heads[0],
+      state: 'active',
+      authorityEpoch: 1,
+      revert: {
+        receiptId: sync.work.receiptId,
+        previous: sync.work.previous.object.sha256,
+        accepted: sync.work.accepted.object.sha256,
+      },
+    };
+    seedRecord(f, lane);
+    await finishOperation(sync.request.operationId, { lane: { laneId: lane.id } });
+    delete state.uploads;
+    f.patch('projectHostedOperations', f.recovery()._id, { recovery: JSON.stringify(state) });
+    await f.transaction('advance', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
+  }
+  const state = JSON.parse(f.recovery().recovery);
+  assert.equal(state.stage, 'compose');
+  const uploads = state.uploads;
+  for (const u of uploads) f.put(u.value);
+  const composeRow = [...f.tables.projectHostedComposes.values()].find(
+    r => r.operationId === state.composeOperationId,
+  );
+  const compose = JSON.parse(composeRow.value);
+  const candidate = {
+    kind: 'candidate',
+    id: compose.candidateId,
+    version: 0,
+    at,
+    intentId: compose.request.intentId,
+    base: compose.request.expectedMain,
+    inputs: compose.request.inputs.root,
+    dependencies: compose.request.dependencies.root,
+    algorithm: 'native@fixture',
+    governance: { version: 1, paths: ['src/file-1.ts'], ownerInputs: true },
+    result: { status: 'clean', head: f.heads[0] },
+  };
+  seedRecord(f, candidate);
+  if (![...f.tables.projectHostedStates.values()].some(r => r.head === f.heads[0]))
+    f.insert('projectHostedStates', {
+      projectId: f.projectId,
+      head: f.heads[0],
+      size: f.objectBytes.get(f.heads[0]).length,
+      input: hash,
+      jobId: randomUUID(),
+      output: hash,
+    });
+  await finishOperation(compose.request.operationId, candidate);
+  f.patch('projectHostedComposes', composeRow._id, {
+    value: JSON.stringify({ ...compose, status: 'completed' }),
+  });
+  delete state.uploads;
+  f.patch('projectHostedOperations', f.recovery()._id, { recovery: JSON.stringify(state) });
+  f.decorateContext(ctx => {
+    ctx.db.system = { get: async () => ({ state: { kind: 'pending' } }) };
+  });
+  await f.transaction('fullReverse', culprit.advance, { projectId: f.projectId, runId: f.recoveryId() });
+  const current = JSON.parse(f.recovery().recovery);
+  assert.equal(current.stage, 'landing');
+  return JSON.parse(
+    [...f.tables.projectHostedCheckRuns.values()].find(r => r.runId === current.reverseRunId).value,
+  );
+}
+
+test('a failed reverse re-check widens from pair to three to four, then alerts the owner and never loops', async () => {
+  const f = await fixture(5);
+  await f.runCulprit();
+  // Reproduce red; mixed mid-search evidence establishes no single culprit.
+  await f.complete(f.probes()[0], true);
+  const pending = f.probes().find(r => r.status === 'queued');
+  await f.complete({ ...pending }, true);
+  // Continue the ordinary single-boundary path, then fail its full re-check.
+  for (let step = 0; step < 5; step++) {
+    const next = f.probes().find(r => r.status === 'queued');
+    if (!next) break;
+    await f.complete(next, true);
+  }
+  const before = [...f.tables.projectHostedAcceptances.values()].map(r => r.value);
+  for (const size of [1, 2, 3, 4]) {
+    const run = await prepareRecoveryCheck(f);
+    assert.equal(JSON.parse(f.recovery().recovery).targets?.length ?? 1, size);
+    if (size === 2) await laterAudit(f, 3);
+    await f.complete(run, true);
+    // A replayed terminal callback cannot allocate another attempt.
+    const once = f.recovery().recovery;
+    await f.complete(run, true);
+    assert.equal(f.recovery().recovery, once);
+  }
+  const stopped = JSON.parse(f.recovery().recovery);
+  assert.equal(stopped.stage, 'done');
+  assert.match(stopped.reason, /stopped after reverting 4.*owner must resolve/);
+  assert(f.tables.projectHostedMainAudits.get(f.auditRow).red, 'main stays held');
+  assert.equal(f.tables.projectHostedComposes.size, 4);
+  assert.deepEqual(
+    [...f.tables.projectHostedAcceptances.values()].map(r => r.value),
+    before,
+  );
+  assert.match((await f.readIntent(stopped.intentId)).needsFix.summary, /owner must resolve/);
+});
+
+test('pair reversal uses the real source worker, retains both author Lanes and preserves unrelated accepted bytes', async () => {
+  const { composeFixture } = await import('./hosted-compose-fixture.mjs');
+  const f = await composeFixture();
+  const flag = f.file('tests/pair-flag.txt', 'flag');
+  const testFile = f.file('tests/pair.test.mjs', 'fails only with the flag');
+  const later = f.file('later.txt', 'keep');
+  const b = f.state([f.baseFile, f.hidden, flag], [f.baseline.sha256]);
+  const aAlone = f.state([f.baseFile, f.hidden, testFile], [f.baseline.sha256]);
+  const both = f.state([f.baseFile, f.hidden, flag, testFile], [b.sha256]);
+  const main = f.state([f.baseFile, f.hidden, flag, testFile, later], [both.sha256]);
+  const authors = [await f.lane(b), await f.lane(aAlone)];
+  const reverse = [];
+  for (const [previous, accepted] of [
+    [b, both],
+    [f.baseline, b],
+  ]) {
+    const output = await f.compute({
+      schema: 1,
+      kind: 'forge-hosted-sync-input',
+      algorithm: 'forge-native-sync-v1',
+      at,
+      message: 'Pair reverse',
+      work: {
+        mode: 'revert',
+        receiptId: randomUUID(),
+        previous: { object: previous, recipe: null },
+        accepted: { object: accepted, recipe: null },
+      },
+    });
+    const result = JSON.parse(output.manifest).result;
+    assert.equal(result.status, 'merged');
+    reverse.push(await f.lane(result.state));
+  }
+  f.register(main);
+  f.moveMain(main.sha256, 'main-later');
+  const selected = f.selection(reverse, [], { expectedMain: { head: main.sha256, receiptId: 'main-later' } });
+  await f.prepare(selected);
+  await f.stage(selected);
+  const result = await f.compute((await f.progress(selected)).input);
+  const composed = JSON.parse(result.manifest).result;
+  assert.equal(composed.status, 'clean');
+  assert.deepEqual(
+    JSON.parse(f.objects.get(composed.state.sha256)).files.map(f => f.path),
+    ['a.txt', 'hidden.bin', 'later.txt'],
+  );
+  assert(
+    authors.every(l => f.objects.has(l.head)),
+    'both original saved heads survive',
+  );
 });
 
 test('stepped source worker reapplies a restored ancestor instead of treating reverted main as a fast-forward', async () => {
