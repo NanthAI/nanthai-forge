@@ -6,7 +6,7 @@
 //
 //   node scripts/check-growth.mjs                      check; prints the counts
 //   node scripts/check-growth.mjs --print [--json]     print current / baseline / phase-start counts (phase close)
-//   node scripts/check-growth.mjs --print --mac [--json]  also list the Mac dependencies and what is already off the Mac
+//   node scripts/check-growth.mjs --print --machines [--json]  also list the machine dependencies and the hosted paths guarded
 //   node scripts/check-growth.mjs --update             lower the baseline to the current counts; a rise needs --reason
 //   node scripts/check-growth.mjs --update --reason "removes X / merges Y / nothing can go because Z"
 //   node scripts/check-growth.mjs --init               write the first baseline; refuses to overwrite one
@@ -23,9 +23,12 @@
 //   cliCommands    top-level commands dispatched in src/cli.ts (`args[0] === 'x'`, `command === 'x'`,
 //                  `['a','b'].includes(args[0])` and `case 'x':`)
 //   glossaryTerms  public glossary terms: the distinct bold terms in docs/concepts.md
-//   macDependencies  entries in tests/mac-dependencies.json `needsMac` (Issue 56cf99cc): what still needs the
-//                  owner's Mac to run. Each has an Issue that removes it or a `staysBecause` reason; `offMac` records
-//                  what already moved. Print the list with `--print --mac`.
+//   machineDependencies  entries in tests/machine-dependencies.json `machineDependencies` (Issue 56cf99cc):
+//                  product paths (service, landing, checks, storage, mirror, deploys, release, backup) that need
+//                  one specific machine. Target 0. Where the lead, builders, bench, optional local check runner
+//                  and maintenance run is the user's choice and is not counted. Each entry has an Issue that
+//                  removes it or a `staysBecause` reason; `hostedPaths` is the guarded list of paths that run
+//                  hosted (moving one back onto a machine is a rise). Print the list with `--print --machines`.
 //   unreferencedExports  exported names (function, const, class, enum, type, interface) declared in src/,
 //                  web/src/, convex/ or netlify/ whose name appears nowhere else as a word in src, web/src,
 //                  convex, netlify, tests, scripts or evals (comments and strings count as a mention, and a
@@ -41,14 +44,14 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GROWTH_BASELINE = 'tests/growth-baseline.json';
-export const MAC_DEPENDENCIES = 'tests/mac-dependencies.json';
+export const MACHINE_DEPENDENCIES = 'tests/machine-dependencies.json';
 export const KINDS = [
   'tables',
   'errorCodes',
   'agentActions',
   'cliCommands',
   'glossaryTerms',
-  'macDependencies',
+  'machineDependencies',
   'unreferencedExports',
 ];
 const LABEL = {
@@ -57,7 +60,7 @@ const LABEL = {
   agentActions: 'agent actions',
   cliCommands: 'CLI commands',
   glossaryTerms: 'glossary terms',
-  macDependencies: 'Mac dependencies',
+  machineDependencies: 'machine dependencies',
   unreferencedExports: 'unreferenced exports',
 };
 const MIN_REASON = 12;
@@ -182,48 +185,50 @@ function countUnreferencedExports(root) {
   return unreferencedExportNames(exporters, others).size;
 }
 
-export function readMacDependencies(root = '.') {
-  return JSON.parse(readFileSync(resolve(root, MAC_DEPENDENCIES), 'utf8'));
+export function readMachineDependencies(root = '.') {
+  return JSON.parse(readFileSync(resolve(root, MACHINE_DEPENDENCIES), 'utf8'));
 }
 
-/** Problems with the Mac dependency list: every entry needs a removing Issue or a reason, ids are unique. */
-export function macDependencyFindings(list) {
-  if (list?.version !== 1 || !Array.isArray(list.needsMac) || !Array.isArray(list.offMac))
-    return [`${MAC_DEPENDENCIES} is not a version 1 Mac dependency list`];
+/** Problems with the machine dependency list: every entry needs a removing Issue or a reason, ids are unique. */
+export function machineDependencyFindings(list) {
+  if (list?.version !== 1 || !Array.isArray(list.machineDependencies) || !Array.isArray(list.hostedPaths))
+    return [`${MACHINE_DEPENDENCIES} is not a version 1 machine dependency list`];
   const findings = [];
   const seen = new Set();
   const text = (value, min) => typeof value === 'string' && value.trim().length >= min;
-  for (const entry of [...list.needsMac, ...list.offMac]) {
+  for (const entry of [...list.machineDependencies, ...list.hostedPaths]) {
     const id = entry?.id;
     if (typeof id !== 'string' || !/^[a-z][a-z0-9-]*$/.test(id) || seen.has(id))
       findings.push(
-        `${MAC_DEPENDENCIES}: entry id ${JSON.stringify(id)} is missing, not kebab-case or repeated`,
+        `${MACHINE_DEPENDENCIES}: entry id ${JSON.stringify(id)} is missing, not kebab-case or repeated`,
       );
     else seen.add(id);
   }
-  for (const entry of list.needsMac) {
+  for (const entry of list.machineDependencies) {
     const hasIssue = typeof entry.issue === 'string' && /^[0-9a-f]{8}$/.test(entry.issue);
     if (!text(entry.what, MIN_REASON) || (!hasIssue && !text(entry.staysBecause, MIN_REASON)))
       findings.push(
-        `${MAC_DEPENDENCIES}: ${entry.id} needs what, and an 8-hex Issue that removes it or a staysBecause reason`,
+        `${MACHINE_DEPENDENCIES}: ${entry.id} needs what, and an 8-hex Issue that removes it or a staysBecause reason`,
       );
     if (entry.issue !== undefined && !hasIssue)
-      findings.push(`${MAC_DEPENDENCIES}: ${entry.id} issue must be an 8-character Forge Issue id`);
+      findings.push(`${MACHINE_DEPENDENCIES}: ${entry.id} issue must be an 8-character Forge Issue id`);
   }
-  const needs = new Set(list.needsMac.map(entry => entry.id));
-  for (const entry of list.offMac)
+  const needs = new Set(list.machineDependencies.map(entry => entry.id));
+  for (const entry of list.hostedPaths)
     if (needs.has(entry.id) || !text(entry.how, MIN_REASON))
-      findings.push(`${MAC_DEPENDENCIES}: offMac ${entry.id} needs how, and cannot also be in needsMac`);
+      findings.push(
+        `${MACHINE_DEPENDENCIES}: hostedPaths ${entry.id} needs how, and cannot also be in machineDependencies`,
+      );
   return findings;
 }
 
-export function formatMacDependencies(list, current, baseline) {
+export function formatMachineDependencies(list, current, baseline) {
   const row = entry =>
     `  ${entry.id.padEnd(22)} ${entry.issue ? `Issue ${entry.issue}` : 'stays'.padEnd(14)}  ${entry.what}`;
   return [
-    `Mac dependencies: ${current.macDependencies} now, baseline ${baseline.counts.macDependencies}, start ${baseline.start.macDependencies}`,
-    ...list.needsMac.map(row),
-    `Already off the Mac (${list.offMac.length}): ${list.offMac.map(entry => entry.id).join(', ')}`,
+    `Machine dependencies: ${current.machineDependencies} now, baseline ${baseline.counts.machineDependencies}, start ${baseline.start.machineDependencies}`,
+    ...list.machineDependencies.map(row),
+    `Hosted paths guarded (${list.hostedPaths.length}): ${list.hostedPaths.map(entry => entry.id).join(', ')}`,
   ].join('\n');
 }
 
@@ -238,7 +243,7 @@ export function currentCounts(root = '.') {
     agentActions: agentActionNames(read('src/agent-verbs.ts')).size,
     cliCommands: cliCommandNames(read('src/cli.ts')).size,
     glossaryTerms: glossaryTerms(read('docs/concepts.md')).size,
-    macDependencies: readMacDependencies(root).needsMac.length,
+    machineDependencies: readMachineDependencies(root).machineDependencies.length,
     unreferencedExports: countUnreferencedExports(root),
   };
 }
@@ -346,11 +351,11 @@ function main(argv) {
     return refused.length ? 1 : 0;
   }
   if (flag('--print')) {
-    const list = flag('--mac') ? readMacDependencies(root) : undefined;
+    const list = flag('--machines') ? readMachineDependencies(root) : undefined;
     console.log(
       flag('--json')
-        ? JSON.stringify({ current, baseline: baseline.counts, start: baseline.start, mac: list })
-        : [formatCounts(current, baseline), list && formatMacDependencies(list, current, baseline)]
+        ? JSON.stringify({ current, baseline: baseline.counts, start: baseline.start, machines: list })
+        : [formatCounts(current, baseline), list && formatMachineDependencies(list, current, baseline)]
             .filter(Boolean)
             .join('\n\n'),
     );
@@ -358,12 +363,12 @@ function main(argv) {
   }
   if (argv.some(arg => arg.startsWith('--') && arg !== '--json')) {
     console.error(
-      'Usage: node scripts/check-growth.mjs [--print [--mac] [--json] | --update [--reason TEXT] | --init]',
+      'Usage: node scripts/check-growth.mjs [--print [--machines] [--json] | --update [--reason TEXT] | --init]',
     );
     return 1;
   }
   const findings = [
-    ...macDependencyFindings(readMacDependencies(root)),
+    ...machineDependencyFindings(readMachineDependencies(root)),
     ...growthFindings(current, baseline),
   ];
   for (const finding of findings) console.error(finding);

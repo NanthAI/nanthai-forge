@@ -85,7 +85,7 @@ under 3 s) and counts:
 | `agentActions` | agent action names in `src/agent-verbs.ts`: the lifecycle verbs, each mode flag's action, board modes, named reads and operator actions |
 | `cliCommands` | top-level commands dispatched in `src/cli.ts` |
 | `glossaryTerms` | public glossary terms: the distinct bold terms in `docs/concepts.md` |
-| `macDependencies` | entries in [`tests/mac-dependencies.json`](../../tests/mac-dependencies.json) `needsMac`: what still needs the owner's Mac to run (lead, builders, bench, operator maintenance, the optional Mac check runner). Each entry names an Issue that removes it (8-hex id) or a `staysBecause` reason; `offMac` records what already moved and how. Public repo: no private paths or machine names. Moving something off the Mac means deleting its entry, moving its id to `offMac` and running `--update` |
+| `machineDependencies` | entries in [`tests/machine-dependencies.json`](../../tests/machine-dependencies.json) `machineDependencies`: product paths (service, landing, checks, storage, mirror, deploys, release, backup) that need one specific machine. The target and today's count is 0. Where the lead session, builder sessions, the exit bench, the optional local check runner (`nforge worker`) and operator maintenance run is the user's own choice of machine; they are not counted. `hostedPaths` is the guarded list of the six paths that run hosted; one that moves back onto a machine is a rise: move its id to `machineDependencies` and run `--update --reason`. Each entry names an Issue that removes it (8-hex id) or a `staysBecause` reason. Public repo: no private paths or machine names |
 | `unreferencedExports` | exported names (function, const, class, enum, type, interface) in `src/`, `web/src/`, `convex/` and `netlify/` that no other file mentions as a word (`src`, `web/src`, `convex`, `netlify`, `tests`, `scripts`, `evals`; a comment or string counts as a mention, so it undercounts). Public entry points are excluded: Convex `query`/`mutation`/`action`/`httpAction` functions and `src/index.ts`, `src/query.ts`, `src/cli-entry.ts`. Unused `internal*` Convex functions count |
 
 The check fails when a count is above [`tests/growth-baseline.json`](../../tests/growth-baseline.json), and when
@@ -98,9 +98,9 @@ update command:
   also raises a count that rose, and appends the kind, the old and new count, the reason and the date to the
   baseline's `reasons` ledger. A reason shorter than 12 characters is refused.
 - `node scripts/check-growth.mjs --print [--json]` prints the current, baseline and phase-start counts. A phase
-  close records this table against the phase start (`start`). Add `--mac` to list every Mac dependency with its
-  Issue or reason and what is already off the Mac; the P6 close report prints this block, which shows
-  `Mac dependencies: N now, baseline N, start N`.
+  close records this table against the phase start (`start`). Add `--machines` to list every machine dependency with its
+  Issue or reason and the hosted paths guarded; the P6 close report prints this block, which shows
+  `Machine dependencies: N now, baseline N, start N`.
 - Prefer removing or merging something to recording a rise. Renaming is neutral: names are counted, not lines.
 
 ## Add a lint rule

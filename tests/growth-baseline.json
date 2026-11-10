@@ -8,7 +8,7 @@
     "agentActions": 88,
     "cliCommands": 53,
     "glossaryTerms": 34,
-    "macDependencies": 5,
+    "machineDependencies": 0,
     "unreferencedExports": 22
   },
   "counts": {
@@ -17,7 +17,7 @@
     "agentActions": 62,
     "cliCommands": 40,
     "glossaryTerms": 27,
-    "macDependencies": 5,
+    "machineDependencies": 0,
     "unreferencedExports": 68
   },
   "reasons": [

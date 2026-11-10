@@ -30,8 +30,8 @@ product settings, not permission to introduce a new policy.
   roadmap, phase plan and backlog when a decision changes them and at each stage
   close. Verify the configured GitHub mirror has caught up to accepted main.
   Session state and private handoffs are not the backlog or durable rulebook.
-- At each phase close run `node scripts/check-growth.mjs --print --mac` and record the counts, including the Mac
-  dependencies, against the phase start ([growth guard](lint-rules.md#growth-guard)).
+- At each phase close run `node scripts/check-growth.mjs --print --machines` and record the counts, including the machine
+  dependencies (product paths that need one specific machine; target 0), against the phase start ([growth guard](lint-rules.md#growth-guard)).
 - Say stages, not weeks. Continue through the authorized stages without asking
   again. Calendar waits become dated planning re-checks with a metric and failure
   action; they do not by themselves block a stage or phase close. The same holds for

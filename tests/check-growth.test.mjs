@@ -8,11 +8,12 @@ import {
   countErrorCodes,
   countTables,
   errorCodes,
+  formatMachineDependencies,
   glossaryTerms,
-  formatMacDependencies,
   growthFindings,
   initialBaseline,
-  macDependencyFindings,
+  machineDependencyFindings,
+  readMachineDependencies,
   unreferencedExportNames,
   updateBaseline,
 } from '../scripts/check-growth.mjs';
@@ -141,7 +142,7 @@ const start = {
   agentActions: 30,
   cliCommands: 40,
   glossaryTerms: 5,
-  macDependencies: 6,
+  machineDependencies: 6,
   unreferencedExports: 7,
 };
 
@@ -204,51 +205,78 @@ test('a hand-raised baseline with no ledger entry fails', () => {
   assert.match(findings[0], /above its start 10 plus recorded rises/);
 });
 
-// Mac dependency list (56cf99cc): a count that may only fall, and no entry without a way out.
+// Machine dependency list (56cf99cc): product paths that need one specific machine; target 0, may only fall.
 
-const macList = () => ({
+const machineList = () => ({
   version: 1,
-  needsMac: [
-    { id: 'lead-session', what: 'The lead agent session on the owner machine.', issue: 'd65c423c' },
+  machineDependencies: [
+    { id: 'hosted-worker', what: 'A product path pinned to one machine.', issue: 'd65c423c' },
     {
-      id: 'mac-runner',
-      what: 'The optional machine check runner.',
+      id: 'pinned-store',
+      what: 'A storage path pinned to one machine.',
       staysBecause: 'a product feature that stays',
     },
   ],
-  offMac: [{ id: 'dogfood-checks', how: 'GitHub-hosted runners run the landing check.' }],
+  hostedPaths: [{ id: 'dogfood-checks', how: 'GitHub-hosted runners run the landing check.' }],
 });
 
-test('a Mac dependency needs an Issue that removes it or a staysBecause reason; ids are unique and not both on and off', () => {
-  assert.deepEqual(macDependencyFindings(macList()), []);
-  const bare = macList();
-  bare.needsMac[0] = { id: 'lead-session', what: 'The lead agent session on the owner machine.' };
-  assert.match(macDependencyFindings(bare).join('\n'), /lead-session needs what, and an 8-hex Issue/);
-  const longIssue = macList();
-  longIssue.needsMac[0].issue = 'd65c423c-84fb-4db5-b6af-106c4ed418b1';
-  assert.match(macDependencyFindings(longIssue).join('\n'), /8-character Forge Issue id/);
-  const repeated = macList();
-  repeated.offMac.push({ id: 'lead-session', how: 'claims it moved while still listed' });
-  assert.match(macDependencyFindings(repeated).join('\n'), /repeated|cannot also be in needsMac/);
-  assert.match(macDependencyFindings({ version: 2 }).join('\n'), /not a version 1/);
+test('a machine dependency needs an Issue that removes it or a staysBecause reason; ids are unique and not both pinned and hosted', () => {
+  assert.deepEqual(machineDependencyFindings(machineList()), []);
+  const bare = machineList();
+  bare.machineDependencies[0] = { id: 'hosted-worker', what: 'A product path pinned to one machine.' };
+  assert.match(machineDependencyFindings(bare).join('\n'), /hosted-worker needs what, and an 8-hex Issue/);
+  const longIssue = machineList();
+  longIssue.machineDependencies[0].issue = 'd65c423c-84fb-4db5-b6af-106c4ed418b1';
+  assert.match(machineDependencyFindings(longIssue).join('\n'), /8-character Forge Issue id/);
+  const repeated = machineList();
+  repeated.hostedPaths.push({ id: 'hosted-worker', how: 'claims it is hosted while still listed' });
+  assert.match(
+    machineDependencyFindings(repeated).join('\n'),
+    /repeated|cannot also be in machineDependencies/,
+  );
+  assert.match(machineDependencyFindings({ version: 2 }).join('\n'), /not a version 1/);
 });
 
-test('the Mac dependency count is a growth kind: adding an entry fails until a reason is recorded', () => {
-  const baseline = initialBaseline(start, '2026-11-10');
-  const grown = { ...start, macDependencies: start.macDependencies + 1 };
-  assert.match(growthFindings(grown, baseline).join('\n'), /Mac dependencies: 7 now, baseline 6/);
-  assert.deepEqual(growthFindings({ ...start, macDependencies: 5 }, baseline), [], 'removing one passes');
-  const { baseline: lowered } = updateBaseline({ ...start, macDependencies: 5 }, baseline, undefined, 'x');
-  assert.equal(lowered.counts.macDependencies, 5, '--update lowers it');
+test('the committed list has no machine dependency and keeps the six hosted paths guarded', () => {
+  const list = readMachineDependencies('.');
+  assert.deepEqual(machineDependencyFindings(list), []);
+  assert.equal(list.machineDependencies.length, 0);
+  assert.equal(list.hostedPaths.length, 6);
+  assert.doesNotMatch(JSON.stringify(list), /\/Users\/|\/home\//, 'a public repo: no private paths');
 });
 
-test('the phase-close print lists the Mac dependencies against the start', () => {
-  const baseline = initialBaseline({ ...start, macDependencies: 2 }, '2026-11-10');
-  const text = formatMacDependencies(macList(), { macDependencies: 2 }, baseline);
-  assert.match(text, /Mac dependencies: 2 now, baseline 2, start 2/);
-  assert.match(text, /lead-session\s+Issue d65c423c/);
-  assert.match(text, /mac-runner\s+stays/);
-  assert.match(text, /Already off the Mac \(1\): dogfood-checks/);
+test('the machine dependency count is a growth kind: a hosted path moving back onto one machine fails until a reason is recorded', () => {
+  const baseline = initialBaseline({ ...start, machineDependencies: 0 }, '2026-11-10');
+  const grown = { ...start, machineDependencies: 1 };
+  assert.match(growthFindings(grown, baseline).join('\n'), /machine dependencies: 1 now, baseline 0/);
+  assert.deepEqual(growthFindings({ ...start, machineDependencies: 0 }, baseline), [], 'staying at 0 passes');
+  const raised = updateBaseline(grown, baseline, undefined, '2026-11-10');
+  assert.deepEqual(raised.refused, ['machineDependencies'], '--update without a reason refuses the rise');
+  const { baseline: recorded } = updateBaseline(
+    grown,
+    baseline,
+    'release signing moved back onto one machine for a drill',
+    '2026-11-10',
+  );
+  assert.equal(recorded.counts.machineDependencies, 1, '--update --reason records the rise');
+  const high = initialBaseline({ ...start, machineDependencies: 2 }, '2026-11-10');
+  const { baseline: lowered } = updateBaseline({ ...start, machineDependencies: 1 }, high, undefined, 'x');
+  assert.equal(lowered.counts.machineDependencies, 1, '--update lowers it');
+});
+
+test('the phase-close print lists the machine dependencies and the guarded hosted paths against the start', () => {
+  const baseline = initialBaseline({ ...start, machineDependencies: 2 }, '2026-11-10');
+  const text = formatMachineDependencies(machineList(), { machineDependencies: 2 }, baseline);
+  assert.match(text, /Machine dependencies: 2 now, baseline 2, start 2/);
+  assert.match(text, /hosted-worker\s+Issue d65c423c/);
+  assert.match(text, /pinned-store\s+stays/);
+  assert.match(text, /Hosted paths guarded \(1\): dogfood-checks/);
+  const none = formatMachineDependencies(
+    { ...machineList(), machineDependencies: [] },
+    { machineDependencies: 0 },
+    initialBaseline({ ...start, machineDependencies: 0 }, '2026-11-10'),
+  );
+  assert.match(none, /^Machine dependencies: 0 now, baseline 0, start 0\nHosted paths guarded/);
 });
 
 test('error teaching: every public code has a topic; a new untaught code or a missing command fails (0a7d6f56)', async t => {

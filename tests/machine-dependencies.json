@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "note": "Product paths that need one specific machine to run (Issue 56cf99cc). The growth guard counts machineDependencies; the baseline in growth-baseline.json only falls, and the target is 0. Where the lead session, builder sessions, the exit bench, the optional local check runner (nforge worker) and operator maintenance run is the user's own choice of machine: they are not product dependencies and are not counted. Only service, landing, checks, storage, mirror, deploys, release and backup paths count. A hosted path that moves back onto one machine is a rise: move its id from hostedPaths to machineDependencies and record it with --update --reason. Each entry needs an Issue that removes it (8-hex id) or a staysBecause reason. No private paths or machine names: this repo is public.",
+  "machineDependencies": [],
+  "hostedPaths": [
+    {
+      "id": "landing-accept",
+      "how": "Hosted main updated by compare-and-swap is the only accept path."
+    },
+    {
+      "id": "dogfood-checks",
+      "how": "Landing checks run on free GitHub-hosted ubuntu-latest runners (forge-check workflow); no check worker on any one machine is needed."
+    },
+    {
+      "id": "github-mirror",
+      "how": "The hosted GitHub mirror pushes accepted main from the server; no local push."
+    },
+    {
+      "id": "dev-deploys",
+      "how": "Convex and web deploys to dev run from GitHub Actions on every deploy-relevant push to main."
+    },
+    {
+      "id": "release-signing",
+      "how": "The release-sign workflow signs CLI releases on a GitHub-hosted runner; the key exists only in its protected environment."
+    },
+    {
+      "id": "weekly-backup",
+      "how": "The hosted-backup workflow runs on a Monday 03:00 UTC schedule with environment-scoped secrets."
+    }
+  ]
+}
