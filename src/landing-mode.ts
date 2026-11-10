@@ -144,7 +144,8 @@ export function earnedFromHistory(landings: readonly EarnLanding[], events: read
     }
     // The verdict that ended an owner's drill adds nothing, as live; a docs pass never counts.
     if ((event?.kind === 'green' && event.drill) || landing.kind === 'docs') continue;
-    if (event?.kind === 'stalled') earned = earnedAfterUnclear(earned, 1);
+    // An exact full landing audits itself, so a later stalled audit never covered it (as live).
+    if (event?.kind === 'stalled' && landing.kind === 'proof') earned = earnedAfterUnclear(earned, 1);
     earned = earnedAfterGreen(earned, 1);
   }
   return earned;

@@ -978,6 +978,11 @@ test('the owner recount replays history with the live rules: exact, own-check, s
     unclear: 2,
     drill: { at: drill.recoveredAt, sequence: 7, reverted: true, started: drill.startedAt, red: drill.redAt },
   });
+  // An exact full landing audits itself: a stalled audit after it never makes it unclear (as live).
+  assert.deepEqual(earnedFromHistory([{ sequence: 1, kind: 'exact' }], [e('stalled', 1), e('green', 1)]), {
+    audited: 1,
+    unclear: 0,
+  });
   // The same red without the owner's drill is a real red: everything before it is lost.
   const real = earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6), e('green', 7)]);
   assert.deepEqual(
