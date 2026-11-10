@@ -97,6 +97,8 @@ function fixture() {
       admitted = true,
       pad = 0,
       revert,
+      version,
+      counts,
       created = minute(at),
     } = {},
   ) => {
@@ -122,6 +124,8 @@ function fixture() {
           : {}),
         value: JSON.stringify({
           id: sub,
+          ...(version === undefined ? {} : { version }),
+          ...(counts ? { counts } : {}),
           at: iso(minute(at - 30)),
           timing: { submittedAt: iso(minute(at - 30)), committedAt: iso(minute(at)) },
           pad: 'x'.repeat(pad),
@@ -420,4 +424,43 @@ test('landings: a window of many pages with uneven bursts, fractional and tied t
     } while (cursor);
     assert.deepEqual(seen.toSorted(), wanted.toSorted(), `limit ${limit}: every landing exactly once`);
   }
+});
+
+test('landings expose stamped costs and unknown legacy counts without another row read or material page growth', async () => {
+  const stamped = fixture(),
+    legacy = fixture();
+  for (let n = 1; n <= 30; n++) {
+    const input = { at: n * 10, attempts: [[0, 'R0', `run-${n}`]] };
+    stamped.landing(n, {
+      ...input,
+      version: 10,
+      counts: { r2: [3, 12, 1000000], runnerSeconds: 3000, discardedRunnerSeconds: 120 },
+    });
+    legacy.landing(n, input);
+  }
+  const page = await stamped.read({ limit: 30 }),
+    old = await legacy.read({ limit: 30 });
+  assert.deepEqual(page.landings[0].costs, {
+    attempts: 1,
+    writes: 11,
+    r2ClassA: 3,
+    r2ClassB: 12,
+    r2BytesPut: 1000000,
+    runnerAccepted: 50,
+    runnerDiscarded: 2,
+  });
+  assert.deepEqual(old.landings[0].costs, {
+    attempts: 1,
+    writes: null,
+    r2ClassA: null,
+    r2ClassB: null,
+    r2BytesPut: null,
+    runnerAccepted: null,
+    runnerDiscarded: null,
+  });
+  assert.equal(stamped.meter.documents, legacy.meter.documents, 'same rows');
+  assert.equal(stamped.meter.queries, legacy.meter.queries, 'same indexed queries');
+  assert.equal(page.landings.length, 30);
+  assert(page.bytesRead - old.bytesRead < 4096, 'only the pre-existing stamps enlarge DB bytes');
+  assert(Buffer.byteLength(page.raw) < 64 * 1024);
 });

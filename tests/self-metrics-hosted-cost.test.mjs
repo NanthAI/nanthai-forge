@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
 import { parseRecordBill } from '../dist/metrics-bill-cli.js';
+import { speedBudgetRows } from '../dist/speed-budgets-report.js';
+import { speedBudgets } from '../dist/speed-budgets.js';
 import { formatMetrics } from '../dist/self-metrics-format.js';
 import { fixture, period, seam, at } from './self-metrics-hosted-fixture.mjs';
 
@@ -205,4 +207,100 @@ test('hosted reuse keys make reuse rate real and count fresh runs that repeated 
     { runs: 1, minutes: 1 },
   );
   assert(!metric.gaps.some(gap => gap.includes('reuse key')));
+});
+
+test('metrics projects every live cost budget from existing landing and run pages, attributing each audit once', async () => {
+  const f = fixture();
+  for (let n = 1; n <= 21; n++) {
+    f.landing(`landing-${n}`, at(n * 10), at(n * 10 + 2));
+    const row = f.tables.projectHostedLandingRequests.at(-1),
+      state = JSON.parse(row.value);
+    row.value = JSON.stringify({
+      ...state,
+      version: 11,
+      timing: { ...state.timing, committedAt: at(n * 10 + 2), ciEndedAt: at(n * 10 + 1) },
+      counts: { r2: [3, 12, 1000000], runnerSeconds: 3000 },
+    });
+  }
+  f.run('audit', at(15), at(18), 1200, { gate: { mode: 'audit' }, execution: { seconds: 1200 } });
+  const calls = f.meter.calls;
+  const { records } = await readHostedMetricPages(f.query, period);
+  assert.equal(f.meter.calls - calls, 10, 'same metric streams, bills and byte placement');
+  const rows = speedBudgetRows(records, period, speedBudgets);
+  const value = id => rows.find(row => row.id === id).value;
+  assert.equal(value('landing-attempts-mean'), 1);
+  assert.equal(value('landing-writes-mean'), 12);
+  assert.equal(value('landing-r2-class-a-mean'), 3);
+  assert.equal(value('landing-r2-class-b-mean'), 12);
+  assert.equal(value('landing-r2-bytes-put-mean'), 1000000);
+  assert.equal(value('landing-runner-accepted-mean'), 50);
+  assert.equal(value('landing-runner-discarded-mean'), 0);
+  const gaps = records.finishTimings.map((row, i) => ({
+    ...row,
+    costs: { ...row.costs, r2ClassA: i < 2 ? null : 3 },
+  }));
+  const missing = speedBudgetRows({ ...records, finishTimings: gaps.reverse() }, period, speedBudgets);
+  assert.equal(
+    missing.find(row => row.id === 'landing-r2-class-a-mean').status,
+    'unrun',
+    '19 known stamps never pass as 20',
+  );
+  assert.equal(
+    missing.find(row => row.id === 'landing-attempts-mean').value,
+    1,
+    'a missing R2 stamp does not hide known attempts',
+  );
+  const partial = speedBudgetRows(
+    { ...records, surfaceGaps: ['Status read one hosted runs page; use metrics for the remaining records.'] },
+    period,
+    speedBudgets,
+  );
+  assert.equal(
+    partial.find(row => row.id === 'landing-runner-audit-mean').status,
+    'unrun',
+    'partial run coverage cannot claim zero audit cost',
+  );
+
+  assert.equal(value('landing-runner-audit-mean'), 0, 'audit belongs to first landing, outside last 20');
+  f.run('later-audit', at(190), at(205), 2400, { gate: { mode: 'audit' }, execution: { seconds: 2400 } });
+  const latestBefore = f.meter.documents;
+  const latest = speedBudgetRows(
+    (await readHostedMetricPages(f.query, period)).records,
+    period,
+    speedBudgets,
+  );
+  const latestDocuments = f.meter.documents - latestBefore;
+  assert.equal(
+    latest.find(row => row.id === 'landing-runner-audit-mean').value,
+    2,
+    '40 minutes divided by 20 landings, once',
+  );
+  assert.equal(f.meter.writes, 0);
+  const before = { ...f.meter };
+  let addedBytes = 0,
+    projectedRows = 0;
+  const legacy = await readHostedMetricPages(async (name, args) => {
+    const raw = await f.query(name, args);
+    if (name !== 'projectSelfMetrics:page') return raw;
+    const parsed = JSON.parse(raw);
+    const old = structuredClone(parsed);
+    for (const row of old.page) {
+      delete row.costs;
+      delete row.settleSeconds;
+      delete row.auditRunnerSeconds;
+    }
+    addedBytes += Buffer.byteLength(JSON.stringify(parsed)) - Buffer.byteLength(JSON.stringify(old));
+    projectedRows += parsed.page.length;
+    return JSON.stringify(old);
+  }, period);
+  assert.equal(f.meter.calls - before.calls, 10);
+  assert.equal(f.meter.documents - before.documents, latestDocuments, 'same DB rows on each read');
+  assert(addedBytes < projectedRows * 300, 'bounded additive reply bytes per row');
+  const unknown = speedBudgetRows(legacy.records, period, speedBudgets).filter(
+    row => row.stat === 'mean' && row.measuredBy === 'landing-record',
+  );
+  assert(
+    unknown.every(row => row.status === 'unrun' && row.value === null),
+    'old deployment has no cost verdict',
+  );
 });

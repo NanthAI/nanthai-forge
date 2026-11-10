@@ -41,7 +41,7 @@ message is skipped.
 ## Cost
 
 No new polling, cron or subscription, and idle costs zero. A landing already reads and writes the row (about 3 KB,
-the last 60 samples). A transition (rare: a break or a recovery, never while a budget stays broken) schedules one
+the last 40 samples). A transition (rare: a break or a recovery, never while a budget stays broken) schedules one
 alert delivery and one Issue write action (about six Convex round trips through the ordinary Work command path).
 
 ## Seeing values
@@ -49,7 +49,10 @@ alert delivery and one Issue write action (about six Convex round trips through 
 - `nforge metrics ROOT --text` prints the **Speed budgets** block; `--report FILE.md` adds the same table, which a
   phase close report includes as it is. The window is the report period: the last 20 landings (and 20 passed
   check runs) in it. Rows say `pass`, `fail`, `unrun` (no data, or the measurer was not run) or `guarded`
-  (the build enforces it).
+  (the build enforces it). Cost means skip unknown stamps and require 20 known values. The report
+  uses the existing landing/request and run pages, with no extra calls or DB reads. Audit shard seconds
+  are attributed once to the newest landing at the audit end; the landings reply's `costs` gives
+  attempts, writes, R2 counts and accepted/discarded runner minutes directly from its row.
 - The `status` metrics headline carries `speedBudgetWarning`, one line naming each broken budget, or null.
 - `node scripts/perf-harness.mjs --cli-cold-start --bundle DIR` measures the harness-judged budgets. `--cli-cold-start` also runs the four agent commands against an address that never resolves, under `scripts/perf/first-network-preload.mjs`, which stops the CLI at its first Convex call and reports its CPU time and loaded modules (a `land` stops at its hand-off to the detached submitter). A warm compile cache is used, as the installed launcher does. `--snapshot-lane LANE_CHECKOUT` adds the snapshot budgets; run it only in a Lane of a scratch project with policy `autoSnapshot` on.
 

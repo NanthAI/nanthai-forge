@@ -18,6 +18,7 @@ import { metricReceiptRowSchema } from './self-metric-receipts.js';
 import { hostedCallerReceipts } from './self-metrics-hosted-receipts.js';
 import { readPlacement } from './self-metrics-placement.js';
 import { METRICS_CONTEXT_DAYS_DEFAULT, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
+import { landingCostsSchema } from './hosted-landings-view.js';
 export type MetricQuery = ((name: string, args: Record<string, unknown>) => Promise<unknown>) & {
   objects?: MetricObjects;
 };
@@ -47,6 +48,8 @@ const rowSchemas = {
     firstCheckRecheck: z.string().min(1).max(64).nullable().optional(),
     landedOnAdmissionRun: z.boolean().nullable().optional(),
     agentClient: z.string().max(100).nullable().optional(),
+    costs: landingCostsSchema.optional(),
+    settleSeconds: z.number().nonnegative().nullable().optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -110,6 +113,7 @@ const rowSchemas = {
       .optional(),
     selectionFallback: z.string().min(1).max(64).nullable().optional(),
     gateFallback: z.string().min(1).max(64).nullable().optional(),
+    auditRunnerSeconds: z.number().nonnegative().nullable().optional(),
   }),
   attempts: z.object({
     id: z.string(),
@@ -306,11 +310,13 @@ export async function readHostedMetricPages(
               trusted: row.trusted,
               minutes: minutesBetween(row.submittedAt ?? '', row.at) ?? null,
               onAdmissionRun: row.landedOnAdmissionRun ?? null,
+              ...(row.costs ? { costs: row.costs } : {}),
+              ...(row.settleSeconds != null ? { settleSeconds: row.settleSeconds } : {}),
             });
           } else if (stream === 'runs') {
             const row = rowSchemas.runs.parse(rawRow);
             if (row.inputPin) pins.set(`run:${row.id}`, row.inputPin);
-            const { reuseKey, flaky, selectionFallback, gateFallback, ...run } = row;
+            const { reuseKey, flaky, selectionFallback, gateFallback, auditRunnerSeconds, ...run } = row;
             if (selectionFallback === undefined) records.fallbacksUnprojected = true;
             if (reuseKey === undefined) reuseKeysProjected = false;
             if (flaky === undefined) flakesProjected = false;
@@ -325,6 +331,7 @@ export async function readHostedMetricPages(
               ...(flaky ? { flaky } : {}),
               ...(selectionFallback ? { selectionFallback } : {}),
               ...(gateFallback ? { gateFallback } : {}),
+              ...(auditRunnerSeconds !== undefined ? { auditRunnerSeconds } : {}),
             });
             // Hosted landing never adopts earlier check evidence: each run row is its own request.
             (records.checkRequests ??= []).push({

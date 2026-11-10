@@ -84,6 +84,8 @@ export type MetricRun = {
   inputs: MetricInput[];
   wallMinutes?: number | undefined;
   runnerMinutes?: number | undefined;
+  /** Shard seconds of a terminal main audit, already on its run row. */
+  auditRunnerSeconds?: number | null;
   /** Physical execution identities deduplicate adopted shards, including retries. */
   executions?: { id: string; minutes: number }[];
   reusedFrom?: string | undefined;
@@ -105,6 +107,8 @@ export type MetricRecords = {
     minutes: number | null;
     /** True: the landing took its admission check as acceptance evidence; false: it rechecked; null: not admitted or unknown. */
     onAdmissionRun?: boolean | null;
+    costs?: import('zod').infer<typeof import('./hosted-landings-view.js').landingCostsSchema>;
+    settleSeconds?: number;
   }[];
   surfaceGaps?: string[];
   observations?: MetricObservation[];

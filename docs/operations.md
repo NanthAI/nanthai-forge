@@ -1164,6 +1164,18 @@ A drop of 10% or more prints a notice to lower the value, so savings ratchet in.
 `node --import ./tests/check-runtime.mjs --test tests/landing-cost-guard.test.mjs` after
 `npm run build:core`; its diagnostics print every measured value and the per-scenario counts.
 
+**Live values.** `nforge agent ROOT landings '{"from":"…","to":"…","limit":30}'` returns
+`costs` from the landing row it already reads: attempts, writes, R2 class A/B and bytes put,
+and accepted/discarded runner minutes. `null` means no stamp, including older rows; an absent
+`costs` field means an older deployment. This adds no query or DB read. The `metrics` speed-budget
+table reports each cost's mean over the last 20 landings with that stamp, against its max;
+fewer than 20 is `unrun`. Audit minutes come from terminal audit runs in the same existing metrics
+pages, counted once on the newest landing at the audit's end. The live stamp uses report arrival;
+a delayed report can shift an audit's share across a window boundary, and the report labels this basis.
+They are not stored on the landing row. Metrics adds no calls or DB reads; reply growth is under
+300 bytes per projected row. R2 calibration uses one bounded landings page after the stamp deploy;
+keep the seeds if it contains fewer than 20 stamped landings.
+
 **Live drift alert.** Each landing's accept mutation adds its counts to the `projectLandingSpeed` row it
 already writes (the row keeps the last 40 landings, about 3.7 KB, so it does not grow). The `budgets`
 below are judged as the mean over the last 20 landings, exactly like the speed budgets: one alert and

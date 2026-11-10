@@ -21,6 +21,7 @@ import {
   LANDINGS_READ_BYTES,
   LANDINGS_REASON_CHARS,
   LANDINGS_RUN_IDS,
+  landingCosts,
 } from '../src/hosted-landings-view';
 
 type AttemptProgress = {
@@ -151,6 +152,7 @@ async function evidence(
         : null,
       // A check binding replaces an attempt without composing again: count distinct Candidates.
       recomposeCount: recomposes(attempts, last?.number),
+      costs: landingCosts(state, last?.number),
       // Each attempt restamps timing.composeStartedAt; the first compose is the first attempt's (19328518).
       firstComposeStartedAt: progress[0]?.timing?.composeStartedAt ?? state?.timing?.composeStartedAt ?? null,
       heldAfterCheck: heldAfterCheck(attempts, progress),

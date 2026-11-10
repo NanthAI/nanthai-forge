@@ -5,6 +5,7 @@ import {
   landingBudgets,
   windowValue,
   type LandingMetric,
+  type LandingSpeedState,
   type SpeedBudget,
   type SpeedBudgets,
 } from './landing-speed-alerts.js';
@@ -40,15 +41,61 @@ export function speedBudgetRows(
   const runs = (records.runs ?? []).filter(
     run => run.status === 'passed' && run.wallMinutes != null && during(run.at, period),
   );
-  const samples = (metric: LandingMetric) =>
-    (metric === 'toMain'
-      ? landings.map(row => [Date.parse(row.at), row.minutes, null] as const)
-      : runs.map(run => [Date.parse(run.at), null, run.wallMinutes ?? null] as const)
+  // Reconstruct audit attribution by run end from existing runs. The live stamp uses report arrival,
+  // so a delayed report can move its share across a window boundary; state that basis in the report.
+  const ordered = [...(records.finishTimings ?? [])].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+  const audits = new Map<string, number>();
+  let latest = -1;
+  const terminalAudits = (records.runs ?? [])
+    .filter(
+      run => run.auditRunnerSeconds != null && run.endedAt && Date.parse(run.endedAt) < Date.parse(period.to),
     )
-      .sort((a, b) => a[0] - b[0])
-      .map(
-        ([at, toMain, check]) => [at, toMain, check, ''] as [number, number | null, number | null, string],
-      );
+    .sort((a, b) => Date.parse(a.endedAt!) - Date.parse(b.endedAt!));
+  for (const run of terminalAudits) {
+    while (latest + 1 < ordered.length && Date.parse(ordered[latest + 1]!.at) <= Date.parse(run.endedAt!))
+      latest++;
+    const landing = ordered[latest];
+    if (landing) audits.set(landing.id, (audits.get(landing.id) ?? 0) + run.auditRunnerSeconds!);
+  }
+  const auditsProjected =
+    (records.runs ?? []).every(run => run.auditRunnerSeconds !== undefined) &&
+    !(records.surfaceGaps ?? []).some(gap => gap.includes('hosted runs page'));
+  const landingSamples = landings
+    .map((row): LandingSpeedState['samples'][number] => {
+      const c = row.costs;
+      return [
+        Date.parse(row.at),
+        row.minutes,
+        null,
+        row.id,
+        row.settleSeconds ?? null,
+        c?.attempts ?? null,
+        c?.writes ?? null,
+        [
+          c?.r2ClassA ?? null,
+          c?.r2ClassB ?? null,
+          c?.r2BytesPut ?? null,
+          c?.runnerAccepted == null ? null : c.runnerAccepted * 60,
+          c?.runnerDiscarded == null ? null : c.runnerDiscarded * 60,
+          c?.runnerAccepted == null || !auditsProjected ? null : (audits.get(row.id) ?? 0),
+        ],
+      ];
+    })
+    .sort((a, b) => a[0] - b[0]);
+  const samples = (metric: LandingMetric): LandingSpeedState['samples'] =>
+    metric === 'check'
+      ? runs
+          .map(
+            run =>
+              [Date.parse(run.at), null, run.wallMinutes ?? null, ''] as [
+                number,
+                null,
+                number | null,
+                string,
+              ],
+          )
+          .sort((a, b) => a[0] - b[0])
+      : landingSamples;
   const judged = new Set(landingBudgets(budgets).map(b => b.id));
   return budgets.budgets.map(b => {
     const base = {
@@ -66,15 +113,6 @@ export function speedBudgetRows(
         status: b.measuredBy === 'build-guard' ? 'guarded' : 'unrun',
         note: WHERE[b.measuredBy as keyof typeof WHERE],
       };
-    // The check-to-commit gap and the cost counts are stamped on the landing only; the metrics rows
-    // do not carry them.
-    if (b.metric !== 'toMain' && b.metric !== 'check')
-      return {
-        ...base,
-        value: null,
-        status: 'unrun',
-        note: 'judged on every landing by its accept mutation; the metrics rows do not carry it',
-      };
     const rows = samples(b.metric as LandingMetric);
     const value = windowValue(rows, b.metric as LandingMetric, b.stat!, budgets.window.landings);
     return value === null
@@ -82,13 +120,13 @@ export function speedBudgetRows(
           ...base,
           value,
           status: 'unrun',
-          note: `fewer than ${budgets.window.landings} ${b.metric === 'toMain' ? 'landings' : 'passed check runs'} in the period`,
+          note: `fewer than ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period`,
         }
       : {
           ...base,
           value,
           status: value > b.max ? 'fail' : 'pass',
-          note: `last ${budgets.window.landings} ${b.metric === 'toMain' ? 'landings' : 'passed check runs'} in the period`,
+          note: `last ${budgets.window.landings} ${b.metric === 'check' ? 'passed check runs' : 'landings with this stamp'} in the period${b.metric === 'runnerAudit' ? '; audit seconds attributed by run end (delayed reports can shift the live stamp)' : ''}`,
         };
   });
 }

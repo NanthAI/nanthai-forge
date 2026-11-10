@@ -8,7 +8,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import type { HostedLandingAttempt, HostedLandingState } from '../src/hosted-landing';
 import type { HostedRecord } from '../src/hosted-records';
-import type { HostedCheckRun } from '../src/hosted-check';
+import { hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { hostedRunReuseKey } from '../src/self-metrics-reuse-key';
 import { isScopedRecheck } from '../src/scoped-recheck-policy';
@@ -16,6 +16,8 @@ import { report } from './errors';
 import { metricReceiptCoverage } from '../src/self-metric-receipts';
 import { runFlakes } from '../src/self-metrics-flakes';
 import { contractGateFallback } from '../src/fallback-reasons';
+import { landingCosts } from '../src/hosted-landings-view';
+import { landingSpeedSample } from '../src/landing-speed-alerts';
 
 const tables = {
   acceptances: 'projectHostedAcceptances',
@@ -247,6 +249,8 @@ export const page = query({
               landedOnAdmissionRun: move.firstCheck ? move.firstCheck.landedOn === 'admission-run' : null,
               // The submitting agent run's declared client: harness and model (81d12a32).
               agentClient: move.agentClient ?? null,
+              costs: landingCosts(submitted, attempt?.number),
+              settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,
             };
           }
           if (input.stream === 'runs') {
@@ -276,6 +280,11 @@ export const page = query({
               // Fallback codes already on the run (7c2e69e1): the runner's selection and the contract gate.
               selectionFallback: run.fallback ?? null,
               gateFallback: contractGateFallback(run.gate) ?? null,
+              // Audit seconds are already on this run. Attribute once at its end, as the live stamp does.
+              auditRunnerSeconds:
+                run.gate?.mode === 'audit' && hostedCheckTerminal(run)
+                  ? (run.execution?.seconds ?? null)
+                  : null,
             };
           }
           if (input.stream === 'requests') {

@@ -5,6 +5,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { SourceWorkerReader } from '../dist/hosted-source-worker-reader.js';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { saveBytes } from '../dist/hosted-save.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
@@ -91,15 +95,15 @@ async function reference(s, input) {
   });
   return out.output;
 }
-/** No descriptor call between the first and the last of these GETs: one overlapped wave. */
-function oneWave(events, ids, label) {
-  const at = ids.map(id => events.findIndex(e => e.fetch === id));
+/** Descriptor calls can interleave with GET starts: prefetch overlaps its two branches. Assert
+ * the bounded round trips here; the controlled reader test below proves overlap without a clock. */
+function boundedWave(events, ids, label) {
   assert(
-    at.every(i => i >= 0),
+    ids.every(id => events.some(e => e.fetch === id)),
     `${label}: every input is read`,
   );
-  const between = events.slice(Math.min(...at), Math.max(...at)).filter(e => e.call === resolveCall);
-  assert.equal(between.length, 0, `${label}: read in one wave, not a descriptor round each`);
+  const calls = events.filter(e => e.call === resolveCall);
+  assert(calls.length <= 3, `${label}: descriptor calls ${calls.length}`);
 }
 function readOnce(events, label) {
   const counts = new Map();
@@ -124,7 +128,7 @@ test('conflict sync reads the merge base with the tips, then resolve reads draft
       at,
     });
     const sync = await run(s, input);
-    oneWave(sync.events, [h.lane.sha256, h.main.sha256, h.root.sha256], 'sync');
+    boundedWave(sync.events, [h.lane.sha256, h.main.sha256, h.root.sha256], 'sync');
     // The text merge and then its conflict markers use the same three blobs: read once.
     readOnce(sync.events, 'sync');
     assert.deepEqual(sync.output, await reference(s, input), 'byte-exact sync result');
@@ -163,7 +167,7 @@ test('conflict sync reads the merge base with the tips, then resolve reads draft
       at,
     });
     const resolved = await run(s, resolveInput);
-    oneWave(resolved.events, [saved.sha256, result.state.sha256, result.conflicts.sha256], 'resolve');
+    boundedWave(resolved.events, [saved.sha256, result.state.sha256, result.conflicts.sha256], 'resolve');
     readOnce(resolved.events, 'resolve');
     assert.deepEqual(resolved.output, await reference(s, resolveInput), 'byte-exact resolve result');
     assert.equal(JSON.parse(await s.bytes(resolved.output)).result.status, 'resolved');
@@ -223,5 +227,71 @@ test('compose merges from the tip manifests its graph step read, with no extra d
     t.diagnostic(JSON.stringify({ calls, reads: composed.events.filter(e => e.fetch).length }));
   } finally {
     s.restore();
+  }
+});
+
+// Incident 3e3f9fe6: a descriptor RPC between two GET starts is valid overlap. The old integration
+// assertion required zero such RPCs, so filesystem/IPC scheduling decided whether it failed.
+test('prefetch starts descriptors before known bytes finish, under both completion orders', async () => {
+  for (const first of ['known', 'unknown']) {
+    const directory = await mkdtemp(join(tmpdir(), 'forge-merge-wave-'));
+    const data = new Map(
+      ['known', 'second-known', 'unknown'].map(text => {
+        const bytes = Buffer.from(text);
+        return [digest(bytes), bytes];
+      }),
+    );
+    const [known, second, unknown] = [...data.keys()];
+    const pin = id => ({ sha256: id, size: data.get(id).length });
+    const events = [],
+      gates = new Map(),
+      started = new Map(),
+      finished = new Map();
+    for (const id of [known, unknown]) {
+      const gate = Promise.withResolvers(),
+        begin = Promise.withResolvers();
+      finished.set(id, Promise.withResolvers());
+      gates.set(id, gate);
+      started.set(id, begin);
+    }
+    const reader = new SourceWorkerReader(directory, {
+      async describeBatch(ids) {
+        events.push({ call: resolveCall, args: { digests: ids } });
+        return ids.map(id => ref(pin(id)));
+      },
+      async read(p) {
+        events.push({ fetch: p.sha256 });
+        started.get(p.sha256)?.resolve();
+        return (async function* () {
+          if (gates.has(p.sha256)) await gates.get(p.sha256).promise;
+          yield data.get(p.sha256);
+          finished.get(p.sha256)?.resolve();
+        })();
+      },
+    });
+    const pending = reader.prefetch([ref(pin(known)), ref(pin(second))], [unknown]);
+    try {
+      await started.get(known).promise;
+      assert(
+        events.some(e => e.call === resolveCall),
+        'descriptor starts while known bytes are held',
+      );
+      await started.get(unknown).promise;
+      assert.deepEqual(
+        events.slice(0, 3).map(e => e.call ?? e.fetch),
+        [known, resolveCall, unknown],
+        'valid overlap interleaves an RPC between GET starts',
+      );
+      const firstId = first === 'known' ? known : unknown;
+      gates.get(firstId).resolve();
+      await finished.get(firstId).promise;
+    } finally {
+      for (const gate of gates.values()) gate.resolve();
+      await pending;
+      await rm(directory, { recursive: true, force: true });
+    }
+    readOnce(events, first);
+    assert.equal(events.filter(e => e.call === resolveCall).length, 1, 'one batched descriptor round');
+    assert.equal(reader.metrics.downloads, 3);
   }
 });
