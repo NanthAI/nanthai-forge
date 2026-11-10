@@ -218,6 +218,8 @@ export type HostedAgentResponse = {
   action:
     | HostedAgentAction
     | 'diff'
+    | 'records'
+    | 'log'
     | 'peers'
     | 'lanes'
     | 'queue'
@@ -354,6 +356,20 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    if (requestedAction === 'records' || requestedAction === 'log') {
+      const result =
+        requestedAction === 'records'
+          ? await (await import('./hosted-agent-record-read.js')).readHostedAgentRecords(this, input)
+          : await (await import('./hosted-check-log.js')).hostedCheckLog(input, this);
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: requestedAction,
+        operationId: null,
+        resolved: null,
+        result,
+      };
+    }
     if (requestedAction === 'lanes') return liveLanes(this, input);
     if (requestedAction === 'diff')
       return {

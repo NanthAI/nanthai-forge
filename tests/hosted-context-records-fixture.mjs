@@ -5,6 +5,7 @@ import { checkArgs } from './convex-args.mjs';
 export const modules = Object.fromEntries(
   await Promise.all(
     [
+      'projectHostedRecordReads',
       'projectHostedFriction',
       'projectHostedDecisions',
       'projectHostedOverlapAcks',

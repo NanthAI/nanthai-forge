@@ -13,6 +13,8 @@ import { showHostedSource } from '../dist/mcp-hosted-source.js';
 import { hostedDoctor } from '../dist/hosted-doctor.js';
 
 const minimal = {
+  records: { collection: 'lanes' },
+  log: { runId: randomUUID() },
   lanes: {},
   diff: {},
   peers: {},

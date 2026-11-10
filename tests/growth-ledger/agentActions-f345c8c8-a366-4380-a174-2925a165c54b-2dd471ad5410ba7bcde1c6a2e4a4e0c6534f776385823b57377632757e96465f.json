@@ -1,0 +1,6 @@
+{
+  "kind": "agentActions",
+  "delta": 1,
+  "reason": "657d63ee restores the approved records MIGRATE row using the existing canonical pager and exact-version reader; MCP log merges the CLI retained-output reader. No new store, table, error or CLI command.",
+  "date": "2026-11-10"
+}

@@ -60,6 +60,7 @@ export const namedReads = [
   'observe',
   'wait',
   'log',
+  'records',
   'status',
   'diff',
   'show',
@@ -89,7 +90,6 @@ export const namedReads = [
 /** Actions of the removed native-owner mode (docs/agents/hosted-parity.md): each names the hosted
  * command that does its job. The code stays HOSTED_ACTION_UNSUPPORTED, which scripts already read. */
 export const retiredActions: Readonly<Record<string, string>> = {
-  records: 'lanes, landings, lane-history and status {laneId} read retained work',
   provenance:
     'history {op:"blame",path} and lane-history {laneId} name who changed a line and where it landed',
   candidate: "status {laneId} and observe {runId} read the Lane's Candidate and check",

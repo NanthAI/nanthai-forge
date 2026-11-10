@@ -37,7 +37,8 @@ test('prompt: every advertised verb is accepted by the hosted CLI action table',
   const task = { prompt: 'Synthetic task' };
   const text = prompt(task, 'forge', { projectName: 'fixture' });
   checkPrompt(text);
-  assert.throws(() => checkPrompt(text + " `nforge agent . log '{}'`"), /log/);
+  checkPrompt(text + " `nforge agent . log '{}'` `nforge agent . records '{}'`");
+  assert.throws(() => checkPrompt(text + " `nforge agent . views '{}'`"), /views/);
   assert.throws(() => checkPrompt(text + ' `nforge agent . land --resume-ready`'), /resume-ready/);
   const github = prompt(task, 'github', { repository: 'fixture/repo', branch: 'agent-1/task' });
   const [before, after] = template(task).split(WORKFLOW_SLOT);

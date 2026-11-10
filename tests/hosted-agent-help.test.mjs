@@ -41,6 +41,8 @@ test('hosted help and packaged docs are generated from every enforced schema', a
     hostedAgentHelpEntries.map(e => e.action),
     [
       ...Object.keys(hostedAgentCommandSchemas),
+      'records',
+      'log',
       'lanes',
       'diff',
       'peers',
@@ -82,15 +84,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
   );
   assert.equal(s.calls.length, before, 'help and docs make zero Convex calls');
   const text = hostedAgentHelp();
-  for (const unsupported of [
-    '--resume-ready',
-    'waitMs',
-    'records:',
-    'candidates:',
-    'log:',
-    'brief:',
-    'review:',
-  ])
+  for (const unsupported of ['--resume-ready', 'waitMs', 'candidates:', 'brief:', 'review:'])
     assert(!text.includes(unsupported), unsupported);
 });
 
@@ -120,9 +114,7 @@ test('hosted coordination entry points retain supported reads and their coverage
 test('unsupported actions give a supported alternative without upgrade advice or network IO', async t => {
   const s = agentFixture(t);
   for (const [action, hint] of [
-    ['log', 'observe'],
     ['land-ready', 'land --save'],
-    ['records', 'status'],
     ['candidates', 'status'],
     ...[
       'review',
@@ -280,4 +272,24 @@ test('a terminal error inside a receipt names its topic; a healthy receipt is re
     message: 'conflicts',
     learn: 'nforge agent . help conflict',
   });
+});
+
+// 657d63ee: help once advertised client reads that dispatch rejected before validation.
+test('every generated hosted action reaches dispatch validation instead of an unsupported refusal', async t => {
+  const s = agentFixture(t);
+  const transport = s.transport();
+  for (const { action } of hostedAgentHelpEntries) {
+    // CLI-owned adapters (source/board/wait) are tested at their entry points; transport
+    // actions must recognise their names before rejecting this deliberately invalid body.
+    if (['show', 'wait', 'board', 'board-post', 'board-reply', 'board-resolve'].includes(action)) continue;
+    await assert.rejects(
+      transport.dispatch(action, { unsupportedGuard: true }),
+      error => {
+        assert.notEqual(error.code, 'HOSTED_ACTION_UNSUPPORTED', action);
+        return true;
+      },
+      action,
+    );
+  }
+  assert.equal(s.calls.length, 0, 'invalid advertised commands must not start work');
 });

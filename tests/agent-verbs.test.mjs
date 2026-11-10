@@ -65,7 +65,7 @@ const rows = [
   ['link', 'retired'],
   ['status', null],
   ['pending-status', 'retired'],
-  ['records', 'retired'],
+  ['records', null],
   ['candidate', 'retired'],
   ['view', 'retired'],
   ['candidates', 'retired'],

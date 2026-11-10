@@ -11,12 +11,14 @@ with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`. Every name b
 that is not a hosted action refuses with `HOSTED_ACTION_UNSUPPORTED` and names the
 hosted command that does its job (`retiredActions` in `src/agent-verbs.ts`).
 
-- **Shipped hosted actions:** `diff`, `peers`, `log`.
-- **`records` and `provenance`** are served by existing hosted reads: `lanes`,
-  `landings`, `lane-history` and `status` for retained work; `history {op:"blame"}`
-  and `lane-history` for who changed a line and where it landed. A dedicated action
-  waits for evidence that agents need more than these (none was filed since the
-  hosted cutover). This narrows the approved MIGRATE rows and needs owner confirmation.
+- **Shipped hosted actions:** `diff`, `peers`, `log` and `records`. `log` uses
+  the retained-output reader from both CLI and `forge_check`. `records` uses one
+  current-authorized canonical page (100 heads and descriptors, no body hydration)
+  or an exact `id`/`version`, under `forge_work_overview`. Continuations keep their
+  original project, collection and filter; source references pin immutable bytes.
+- **`provenance`** remains an approved MIGRATE row, pending its canonical
+  Candidate/head read under `forge_review`. Legacy imported view reads do not
+  establish parity for current Candidates.
 - **FOLD rows** refuse and name their replacement; the replacement jobs that are
   not built yet keep their owning Issues (`save.delivery` for handoffs, Lane undo
   e7812d8f, session reports 40ad7abd).
@@ -45,7 +47,7 @@ hosted command that does its job (`retiredActions` in `src/agent-verbs.ts`).
 | `improve` | Group repeated workflow friction | FOLD | Bounded planning summaries with report IDs, costs and fixing Lanes | 88d3cfba |
 | `save --preview` (`integrate`) | Diagnose saved-Lane interactions | DROP | Remove standalone agent mode; retain preflight and composed check-only jobs | 657d63ee |
 | `land --resume-ready` (`land-ready`) | Continue dependency waits | FOLD | Original landing replay/wait command and server-driven dependency wake | 657d63ee |
-| `x undo-sync` | Restore pre-sync Lane work | FOLD | Joint Lane-undo capability; owner shapes breadth before implementation | e7812d8f |
+| `x undo-sync` | Restore pre-sync Lane work | FOLD | Lane undo restores the last or any earlier save; landed changes use checked revert | e7812d8f |
 | `land` (saved heads) | Submit saved work without local edits | FOLD | Existing finish protocol with explicit saved inputs/pins, without capture | 657d63ee; df34d40f |
 | `x accept` | Submit an exact checked Candidate | FOLD | `land --save` with exact Candidate/run under existing policy | 657d63ee; df34d40f |
 | `x undo-revert` | Compensate native optimistic revert | DROP | Retire native-specific agent surface; retain explicit checked compensation | 657d63ee |

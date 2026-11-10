@@ -15,7 +15,7 @@ import {
   hostedAgentRecordActions,
 } from '../dist/hosted-agent-contract.js';
 import { recordsFixture } from './hosted-context-records-fixture.mjs';
-const code = expected => error => error.code === expected;
+const code = expected => error => (error.code ?? error.data?.code) === expected;
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'forge-record-transport-'));
   t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -205,4 +205,117 @@ test('project friction omits Lane and Lane friction infers it using the same sin
   const lane = await s.transport.dispatch('friction', { title: 'Lane', detail: 'Detail', area: 'cli' });
   assert.equal(lane.result.laneId, laneId);
   assert.deepEqual(s.calls, ['projectHostedFriction:capture', 'projectHostedFriction:capture']);
+});
+
+test('records discovers canonical saved work in one bounded call and reads exact authorized versions', async t => {
+  const s = fixture(t);
+  const { writeHostedRecord } = await import(
+    (await import('./convex-module.mjs')).moduleUrl('../convex/projectHostedRecords.ts')
+  );
+  const parentId = randomUUID(),
+    hash = 'a'.repeat(64);
+  const records = [];
+  for (let i = 0; i < 205; i++) {
+    const record = {
+      kind: 'save',
+      id: randomUUID(),
+      version: 0,
+      at: '2026-01-01T00:00:00.000Z',
+      laneId: parentId,
+      actor: 'owner',
+      operationId: randomUUID(),
+      expectedHead: hash,
+      expectedSourceVersion: i,
+      head: hash,
+      sourceVersion: i + 1,
+      changes: { sha256: hash, size: 1 },
+    };
+    await writeHostedRecord(s.ctx, {
+      projectId: 'project',
+      actor: 'owner',
+      authorityEpoch: 1,
+      record,
+      expectedVersion: null,
+    });
+    records.push(record);
+  }
+  const before = s.counts();
+  const first = (await s.transport.dispatch('records', { collection: 'saves', parentId })).result;
+  const after = s.counts();
+  assert.equal(after.calls - before.calls, 1);
+  assert.equal(after.writes, before.writes);
+  assert.equal(
+    after.reads - before.reads,
+    201,
+    'one project, 100 heads and 100 descriptors; no bodies or project hydration',
+  );
+  assert.equal(first.items.length, 100);
+  assert(first.items.every(row => row.parentId === parentId && row.source.digest && !row.value));
+  const second = (
+    await s.transport.dispatch('records', { collection: 'saves', parentId, cursor: first.nextCursor })
+  ).result;
+  const third = (
+    await s.transport.dispatch('records', { collection: 'saves', parentId, cursor: second.nextCursor })
+  ).result;
+  assert.equal(third.nextCursor, null);
+  assert.equal(new Set([...first.items, ...second.items, ...third.items].map(row => row.id)).size, 205);
+  const calls = s.calls.length;
+  await assert.rejects(
+    s.transport.dispatch('records', { collection: 'jobs', cursor: first.nextCursor }),
+    code('BAD_ARGUMENT'),
+  );
+  await assert.rejects(
+    s.transport.dispatch('records', { collection: 'saves', parentId, status: 'active' }),
+    code('BAD_ARGUMENT'),
+  );
+  assert.equal(s.calls.length, calls, 'invalid selection cannot make a network call');
+  const selected = records[0];
+  const exact = (await s.transport.dispatch('records', { collection: 'saves', id: selected.id, version: 0 }))
+    .result;
+  assert.deepEqual(exact.record.value, selected);
+  await assert.rejects(
+    s.transport.dispatch('records', { collection: 'saves', id: selected.id, version: 1 }),
+    code('NOT_FOUND'),
+  );
+  s.caller('stranger');
+  for (const input of [{ collection: 'saves' }, { collection: 'saves', id: selected.id, version: 0 }])
+    await assert.rejects(s.transport.dispatch('records', input), code('PROJECT_UNAVAILABLE'));
+  assert.equal(s.scheduled.length, 0);
+  assert(!existsSync(join(s.root, '.forge', 'work')));
+});
+
+test('MCP dispatches records and retained check logs through the same supported read paths', async t => {
+  const s = fixture(t),
+    tools = new Map();
+  t.after(
+    registerHostedAgentWorkflow(
+      {
+        registerTool(name, configuration, call) {
+          tools.set(name, { ...configuration, call });
+        },
+      },
+      s.transport,
+    ),
+  );
+  const query = s.transport.exchange.client.query;
+  s.transport.exchange.client.query = async (ref, args) => {
+    const name = getFunctionName(ref);
+    if (name === 'projectHostedOutputRead:manifest') return { status: 'passed', complete: true };
+    if (name === 'projectHostedOutputRead:streams') return { page: [], isDone: true, continueCursor: '' };
+    return query(ref, args);
+  };
+  for (const [toolName, command] of [
+    ['forge_work_overview', { action: 'records', collection: 'candidates' }],
+    ['forge_check', { action: 'log', runId: randomUUID() }],
+  ]) {
+    const tool = tools.get(toolName);
+    const parsed = z.object(tool.inputSchema).parse({ command });
+    const reply = await tool.call(parsed);
+    assert(!reply.isError, reply.content[0].text);
+    const actual = JSON.parse(reply.content[0].text);
+    const { action, ...input } = command;
+    assert.deepEqual(actual.result, (await s.transport.dispatch(action, input)).result);
+    assert.equal(actual.action, action);
+    assert.equal(actual.operationId, null);
+  }
 });

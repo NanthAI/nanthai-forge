@@ -113,6 +113,8 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `planning` | `id?, search?, kind?, status?, initiativeId?, counts?, limit?, cursor?, reconcile?, schedule?, operationId?` |
 | `put-planning-item` | `expectedVersion?, kind?, title?, body?, status?, reason?, intentIds?, initiativeId?, itemId?, operationId?` |
 | `comment-planning-item` | `itemId, authorLabel?, text, operationId?` |
+| `records` | `collection, parentId?, status?, id?, version?, cursor?` |
+| `log` | `runId, tail?, stream?, shard?, attempt?, laneId?` |
 | `lanes` | `cursor?, limit?, view?` |
 | `diff` | `laneId?, paths?, byteBudget?, summary?, cursor?` |
 | `peers` | `laneId?, path?, detail?` |
