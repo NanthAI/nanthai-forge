@@ -21,18 +21,27 @@ function fixture(objects) {
       origin: 'github-import:job',
       ...page,
     });
-  let catalogReads = 0;
+  let catalogReads = 0,
+    catalogReadBytes = 0;
   const query = s.ctx.db.query;
   s.ctx.db.query = table => {
     const result = query(table);
     if (table !== 'projectObjectCatalog') return result;
     const take = result.take;
-    const counted = { ...result, take: async n => ((catalogReads += n), take(n)) };
+    const counted = {
+      ...result,
+      take: async n => {
+        catalogReads += n;
+        const rows = await take(n);
+        catalogReadBytes += rows.reduce((total, row) => total + Buffer.byteLength(JSON.stringify(row)), 0);
+        return rows;
+      },
+    };
     counted.withIndex = (...args) => (result.withIndex(...args), counted);
     counted.order = value => (result.order(value), counted);
     return counted;
   };
-  return { s, reads: () => catalogReads };
+  return { s, reads: () => catalogReads, bytes: () => catalogReadBytes };
 }
 const objects = Array.from({ length: 1000 }, (_, i) => ({
   digest: hex(i),
@@ -107,31 +116,58 @@ test('a request reads each catalog row once; sorted pages touch one or two rows'
   assert.deepEqual(rows[97].recipe, objects[97].recipe);
 });
 
-test('Actions source windows in digest order read neighbouring catalog rows, not one per object (686ecdde)', async () => {
-  const { directSourceWindow, sourceWindowOrder } = await import('../dist/hosted-actions-direct.js');
+test('Actions source lookup cost guard batches neighbouring catalog rows without repeated per-object pages (686ecdde, 298f9675)', async t => {
+  const { directSourceWindow, directSourceBatch, sourceWindowOrder } =
+    await import('../dist/hosted-actions-direct.js');
   // A catalog-backed tree in path order (sha order is unrelated), with one blob at two paths.
-  const tree = Array.from({ length: 20000 }, (_, i) => ({ digest: hex(`tree-${i}`), size: i }));
+  const tree = Array.from({ length: 20000 }, (_, i) => ({
+    digest: hex(`tree-${i}`),
+    size: 1024 + (i % 1024),
+  }));
   const blobs = [...tree.map(o => o.digest), tree[7].digest];
   const pages = find.catalogPages(tree).length;
-  const windows = async ordered => {
+  const sizes = new Map(tree.map(row => [row.digest, row.size]));
+  const windows = async (ordered, window = directSourceWindow) => {
     const run = fixture(tree);
-    for (let at = 0; at < ordered.length; at += directSourceWindow) {
-      const rows = await find.findObjects(
-        { ...run.s.ctx },
-        'project',
-        ordered.slice(at, at + directSourceWindow),
+    for (let at = 0; at < ordered.length; at += window) {
+      const hashes = ordered.slice(at, at + window);
+      assert(
+        hashes.reduce((bytes, hash) => bytes + sizes.get(hash), 0) < 8 * 1024 * 1024,
+        'fixture batches fit the resolver byte lookahead without an earlier prefix',
       );
+      const rows = await find.findObjects({ ...run.s.ctx }, 'project', hashes);
       assert(rows.every(Boolean));
     }
-    return run.reads();
+    return { reads: run.reads(), bytes: run.bytes() };
   };
   const ordered = sourceWindowOrder(blobs);
   assert.equal(ordered.length, tree.length, 'each object once');
   const sorted = await windows(ordered),
     pathOrder = await windows(blobs);
   const calls = Math.ceil(ordered.length / directSourceWindow);
-  assert(sorted <= pages + calls, `${sorted} catalog rows read in ${calls} sorted windows (${pages} rows)`);
-  assert(pathOrder > 10 * sorted, `path order reads ${pathOrder} rows, sorted ${sorted}`);
+  assert(
+    sorted.reads <= pages + calls,
+    `${sorted.reads} catalog rows read in ${calls} sorted windows (${pages} rows)`,
+  );
+  assert(
+    pathOrder.reads > 10 * sorted.reads,
+    `path order reads ${pathOrder.reads} rows, sorted ${sorted.reads}`,
+  );
+  const batched = await windows(ordered, directSourceBatch);
+  assert.equal(Math.ceil(ordered.length / directSourceBatch), 7);
+  assert(batched.bytes <= 1_480_000, `${batched.bytes} catalog DB bytes`);
+  assert(batched.bytes < sorted.bytes * 0.7, 'larger windows remove repeated boundary-page reads');
+  t.diagnostic(
+    JSON.stringify({
+      catalogLookup: {
+        files: tree.length,
+        before: sorted,
+        after: batched,
+        beforeCalls: calls + 1,
+        afterCalls: 8,
+      },
+    }),
+  );
 });
 
 test('catalog-backed generations resolve sourceBlobs from the catalog, others do not', async () => {

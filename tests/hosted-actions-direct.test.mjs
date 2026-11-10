@@ -975,11 +975,26 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
   await s.call(sessions, 'session', s.input());
   await s.call(sessions, 'session', { ...s.input(), timings: true });
   const pins = Array.from({ length: 6000 }, (_, i) => s.put(`synthetic source ${i}`));
+  const heads = ['base', 'candidate'].map(
+    message =>
+      s.put(
+        JSON.stringify({
+          schema: 1,
+          kind: 'forge-source-state',
+          parents: [],
+          files: [],
+          at: '2026-01-01T00:00:00.000Z',
+          message,
+        }),
+      ).sha256,
+  );
   const baseline = s.counts.length,
     scheduled = s.scheduled.length;
   let calls = 0,
     maxPage = 0,
     maxMetadataBytes = 0;
+  await s.call(source, 'resolve', { ...s.input(), digests: heads });
+  calls++;
   for (let start = 0; start < pins.length; start += 400) {
     const rows = await s.call(source, 'resolve', {
       ...s.input(),
@@ -991,7 +1006,7 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
     assert(maxMetadataBytes < 512 * 1024);
     assert(rows.every(row => row.url && row.descriptor.recipe === null));
   }
-  assert.equal(calls, 15);
+  assert.equal(calls, 16);
   assert.equal(maxPage, 400);
   assert.equal(s.scheduled.length, scheduled);
   const meters = s.counts.slice(baseline),
@@ -999,7 +1014,8 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
   assert(documents <= 6200);
   assert(meters.every(m => m.writes === 0));
   const batchBaseline = s.counts.length;
-  let batchCalls = 0,
+  await s.call(source, 'resolve', { ...s.input(), batch: true, digests: heads });
+  let batchCalls = 1,
     at = 0;
   while (at < pins.length) {
     const rows = await s.call(source, 'resolve', {
@@ -1020,17 +1036,17 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
   const afterBytes = batchMeters.reduce((n, m) => n + m.readBytes, 0);
   // Ratchet the complete job's lookup budget: one manifest window plus two
   // metadata batches, and no retained report hydration, source bytes or writes.
-  assert.equal(batchCalls, 2);
+  assert.equal(batchCalls, 3);
   assert(afterBytes < beforeBytes, `${afterBytes} bytes must improve on ${beforeBytes}`);
-  assert(afterBytes <= 2_110_000);
+  assert(afterBytes <= 2_115_000);
   assert(batchMeters.every(m => m.ranges <= 4096 && m.writes === 0));
   assert.equal(s.scheduled.length, scheduled, 'no idle or background work');
   t.diagnostic(
     JSON.stringify({
       sourceLookup: {
         files: pins.length,
-        beforeCalls: calls + 1,
-        afterCalls: batchCalls + 1,
+        beforeCalls: calls,
+        afterCalls: batchCalls,
         beforeBytes,
         afterBytes,
       },
