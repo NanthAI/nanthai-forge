@@ -128,6 +128,8 @@ export const hostedContractFeatures = [
    * row the read already loads (686ecdde). The CLI's release check and a command's first main read
    * take it instead of their own current calls. Without it the CLI reads current as before. */
   'capabilities-main',
+  /** Indexed planning filters and bounded state counts on the existing records read. */
+  'planning-filtered-reads',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 

@@ -16,6 +16,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { invariant } from '../src/errors';
 import { report } from './errors';
 import { actorSummary } from './projectActorNames';
+import { planningFilter, planningPage } from './projectPlanningList';
 import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
 const selection = {
   projectId: v.id('hostedProjects'),
@@ -72,6 +73,7 @@ export const workspace = query({
         ...(project.needsFix ? { needsFix: needsFix(project) } : {}),
         githubMirror: await githubMirrorStatus(ctx, project),
         generationId: generation._id,
+        planningFilteredReads: generation.planningSearchVersion === 2,
         backupId: generation.backupId,
         backupDigest: backup.digest,
         sourceTransport: backup.transport,
@@ -104,12 +106,24 @@ export const records = query({
   args: {
     ...selection,
     collection: v.string(),
+    planningFilter: v.optional(planningFilter),
+    counts: v.optional(v.boolean()),
     newestFirst: v.optional(v.boolean()),
     parentId: v.optional(v.string()),
     paginationOpts: paginationOptsValidator,
   },
   returns: v.object({
     ...identity,
+    coverage: v.optional(v.string()),
+    counts: v.optional(
+      v.object({
+        proposed: v.number(),
+        open: v.number(),
+        'in-progress': v.number(),
+        closed: v.number(),
+        abandoned: v.number(),
+      }),
+    ),
     ...paginationResultValidator(v.object({ id: v.string(), position: v.number(), value: v.string() }))
       .fields,
   }),
@@ -122,12 +136,18 @@ export const records = query({
       if (!generation || (input.generationId && input.generationId !== generation._id))
         return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
       const numItems = Math.min(input.paginationOpts.numItems, 100);
-      if (readsStore(project, input.collection, input.parentId)) {
+      if (
+        (input.collection === 'planningItems' && input.planningFilter) ||
+        readsStore(project, input.collection, input.parentId)
+      ) {
         const actors = new Map<string, Promise<boolean>>();
-        const page = await storePage(ctx, project._id, {
-          ...input,
-          paginationOpts: { ...input.paginationOpts, numItems },
-        });
+        const page =
+          input.planningFilter && input.collection === 'planningItems'
+            ? await planningPage(ctx, project, generation, { ...input, planningFilter: input.planningFilter })
+            : await storePage(ctx, project._id, {
+                ...input,
+                paginationOpts: { ...input.paginationOpts, numItems },
+              });
         return {
           ...page,
           generationId: generation._id,

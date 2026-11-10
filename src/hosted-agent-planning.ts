@@ -30,6 +30,7 @@ type Workspace = {
   revision?: number;
   sourceRevision?: number;
   likelyDuplicates?: unknown;
+  planningFilteredReads?: boolean;
 };
 type Page = {
   generationId: string | null;
@@ -137,11 +138,19 @@ const compact = (item: PlanningItem, intent?: string) =>
   });
 function decode(cursor: string | null, ws: Workspace): string | null {
   if (cursor === null) return null;
+  return decodeBound(cursor, ws).cursor;
+}
+function decodeBound(cursor: string, ws?: Workspace): { generationId: string; cursor: string | null } {
   invariant(cursor.startsWith(cursorPrefix), 'BAD_ARGUMENT', 'Use the returned planning cursor.');
   try {
     const bound = JSON.parse(Buffer.from(cursor.slice(cursorPrefix.length), 'base64url').toString());
-    invariant(bound.generationId === ws.generationId, 'WORK_STALE', stale);
-    return bound.cursor as string | null;
+    invariant(
+      typeof bound.generationId === 'string' && (bound.cursor === null || typeof bound.cursor === 'string'),
+      'BAD_ARGUMENT',
+      'Use the returned planning cursor.',
+    );
+    invariant(!ws || bound.generationId === ws.generationId, 'WORK_STALE', stale);
+    return bound;
   } catch (error) {
     if (error instanceof ForgeError) throw error;
     throw new ForgeError('BAD_ARGUMENT', 'Use the returned planning cursor.');
@@ -526,6 +535,36 @@ async function readPlanning(
       throw error;
     }
   }
+  const filtered = port.serverFeatures?.includes('planning-filtered-reads');
+  const planningFilter = {
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.status && input.status !== 'all' ? { status: input.status } : {}),
+    ...(input.initiativeId ? { initiativeId: input.initiativeId } : {}),
+  };
+  if (input.counts) {
+    invariant(
+      filtered,
+      'HOSTED_ACTION_UNSUPPORTED',
+      'This server needs indexed planning counts. Upgrade the deployment before retrying.',
+    );
+    const bound = input.cursor === null ? null : decodeBound(input.cursor);
+    const result = await port.query<Page & { counts: Record<string, number>; coverage?: string }>(
+      'projectWorkIndex:records',
+      {
+        ...(bound ? { generationId: bound.generationId } : {}),
+        collection: 'planningItems',
+        planningFilter,
+        counts: true,
+        paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
+      },
+    );
+    invariant(result.generationId, 'WORK_STALE', stale);
+    return {
+      counts: result.counts,
+      coverage: result.coverage ?? (result.isDone ? 'complete' : 'partial'),
+      nextCursor: result.isDone ? null : encode({ generationId: result.generationId }, result.continueCursor),
+    };
+  }
   const ws = await workspace(port);
   if (input.id) {
     const id = await resolvePlanningId(port, input.id);
@@ -567,7 +606,14 @@ async function readPlanning(
   let matches: PlanningItem[] = [];
   // A schedule covers every open Issue it can reach in the bounded pages, not just the first match.
   for (let pages = 0; pages < maxPages && !done && (input.schedule || !matches.length); pages++) {
-    const result = await page(port, ws, 'planningItems', cursor, input.limit);
+    const result = await page(
+      port,
+      ws,
+      'planningItems',
+      cursor,
+      input.limit,
+      filtered && ws.planningFilteredReads && Object.keys(planningFilter).length ? { planningFilter } : {},
+    );
     scanned += result.page.length;
     done = result.isDone;
     cursor = result.continueCursor;

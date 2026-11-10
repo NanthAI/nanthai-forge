@@ -428,6 +428,8 @@ export const hostedAgentCommandSchemas = {
       kind: z.enum(['issue', 'initiative']).optional(),
       status: z.enum([...planningStatuses, 'all']).optional(),
       initiativeId: uuid.optional(),
+      /** Return stored state counts in one bounded read; continue with the returned cursor. */
+      counts: z.boolean().optional(),
       limit: z.number().int().min(1).max(100).default(50),
       cursor: z.string().nullable().default(null),
       /** Close or abandon Issues whose Intent finished; reports what it changed. */
@@ -437,6 +439,10 @@ export const hostedAgentCommandSchemas = {
       schedule: z.boolean().optional(),
     })
     .strict()
+    .refine(
+      input => !(input.counts && (input.id || input.search || input.schedule)),
+      'Use counts with a list read.',
+    )
     .refine(input => !(input.id && input.search), 'Use id or search, not both.')
     .refine(input => !(input.schedule && (input.id || input.search)), 'Use schedule with a list read.'),
   'put-planning-item': planningPutSchema

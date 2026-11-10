@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { meterReads } from './hosted-read-set.mjs';
+import { indexedRecord } from '../dist/work-hosted-index.js';
 import { installPlanningSearch } from './planning-search-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -1716,4 +1718,219 @@ test('a comment on a friction id names the Issue it was triaged to; other failur
   p.calls.length = 0;
   await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'fine' });
   assert(!p.calls.includes('projectHostedFriction:lookup'));
+});
+
+test('filtered planning and one-read Initiative counts charge only matching rows on a 1500-item board (5a85cb5f)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  const initiativeId = randomUUID();
+  const statuses = ['open', 'open', 'proposed', 'in-progress', 'abandoned'];
+  const items = Array.from({ length: 1500 }, (_, i) => ({
+    id: randomUUID(),
+    kind: 'issue',
+    status: statuses[i] ?? 'closed',
+    initiativeId: i < 397 ? initiativeId : randomUUID(),
+    version: 1,
+    previousVersion: 0,
+    operationId: randomUUID(),
+    request: 'a'.repeat(64),
+    at: '2026-01-01T00:00:00.000Z',
+    author: 'owner',
+    provenance: 'user-declared-local',
+    title: `Synthetic item ${String(i).padStart(4, '0')}`,
+    body: 'Synthetic retained detail. '.repeat(40),
+    intentIds: [],
+  }));
+  const add = async (item, position) => {
+    for (const entry of indexedRecord('planningItems', item.id, '', position, item))
+      await s.ctx.db.insert('projectWorkRecords', { ...entry, projectId: s.projectId, generationId });
+    await s.ctx.db.insert('projectHostedRecordHeads', {
+      projectId: s.projectId,
+      kind: 'issue',
+      key: item.id,
+      version: 1,
+      parent: item.initiativeId ?? '',
+      status: item.status,
+      recordId: 'retained-record',
+      value: JSON.stringify(item),
+    });
+  };
+  for (const [i, item] of items.entries()) await add(item, i);
+  const meter = meterReads(s.ctx);
+  const filter = { status: 'open', kind: 'issue', initiativeId, limit: 100, reconcile: false };
+  const allPages = async (client, input) => {
+    const items = [];
+    let cursor = null;
+    do {
+      const page = await list(client, { ...input, cursor });
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return items;
+  };
+  const beforeClient = port(
+    s,
+    new Map(),
+    p.serverFeatures.filter(f => f !== 'planning-filtered-reads'),
+  );
+  let beforeRows;
+  const before = await meter.cost(async () => {
+    beforeRows = await allPages(beforeClient, filter);
+  });
+  let afterRows;
+  const after = await meter.cost(async () => {
+    afterRows = await allPages(p, filter);
+  });
+  assert.deepEqual(afterRows, beforeRows);
+  assert.equal(afterRows.length, 2);
+  const expected = { proposed: 1, open: 2, 'in-progress': 1, abandoned: 1, closed: 392 };
+  const beforeCount = await meter.cost(async () => {
+    const rows = await allPages(beforeClient, { status: 'all', initiativeId, limit: 100, reconcile: false });
+    assert.equal(rows.length, 397);
+  });
+  p.calls.length = 0;
+  let counted;
+  const count = await meter.cost(async () => {
+    counted = await list(p, { counts: true, initiativeId });
+  });
+  assert.deepEqual(counted.counts, expected);
+  assert.equal(counted.coverage, 'complete');
+  assert.equal(counted.nextCursor, null);
+  assert.deepEqual(p.calls, ['projectWorkIndex:records'], 'counts make one read and no reconcile writes');
+  // Growth in closed items, including closed members of this Initiative, changes no filtered read bytes.
+  for (let i = 0; i < 500; i++) await add({ ...items[100], id: randomUUID() }, 1500 + i);
+  assert.deepEqual(await meter.cost(() => allPages(p, filter)), after);
+  assert(speedBudgets.costs.some(entry => entry.metric === 'planningFilteredReadBytes'));
+  assert(speedBudgets.costs.some(entry => entry.metric === 'planningCountsReadBytes'));
+  withinLedger({ planningFilteredReadBytes: after.bytes, planningCountsReadBytes: count.bytes });
+  t.diagnostic(
+    JSON.stringify({
+      board: 1500,
+      closedGrowth: 500,
+      filteredBefore: before,
+      filteredAfter: after,
+      countBefore: beforeCount,
+      countAfter: count,
+    }),
+  );
+});
+
+test('indexed planning preserves all filter combinations, record-store bodies, paging and reconciliation (5a85cb5f)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiativeId = (await put(p, { kind: 'initiative', title: 'Group' })).result.itemId;
+  const first = (await put(p, { kind: 'issue', title: 'First', initiativeId, body: 'Done when:\n- [x] Met' }))
+    .result.itemId;
+  await put(p, { kind: 'issue', title: 'Second', initiativeId });
+  await put(p, { kind: 'issue', title: 'Elsewhere', status: 'closed' });
+  const baseline = await list(p, { reconcile: false });
+  for (const kind of [undefined, 'issue', 'initiative'])
+    for (const status of [undefined, 'open', 'closed', 'all'])
+      for (const group of [undefined, initiativeId]) {
+        const input = {
+          ...(kind ? { kind } : {}),
+          ...(status ? { status } : {}),
+          ...(group ? { initiativeId: group } : {}),
+          limit: 1,
+          reconcile: false,
+        };
+        const rows = [];
+        let cursor = null;
+        do {
+          const page = await list(p, { ...input, cursor });
+          rows.push(...page.items);
+          cursor = page.nextCursor;
+          if (cursor) assert.match(cursor, /^forge-planning-v1:/);
+        } while (cursor);
+        assert.deepEqual(
+          rows,
+          baseline.items.filter(
+            item =>
+              (!kind || item.kind === kind) &&
+              (!status || status === 'all' || item.status === status) &&
+              (!group || item.initiativeId === group),
+          ),
+        );
+      }
+  const generation = s.tables.projectWorkGenerations.get(
+    s.tables.hostedProjects.get(s.projectId).work.generationId,
+  );
+  generation.planningSearchVersion = 1;
+  assert.deepEqual(
+    (await list(p, { kind: 'issue', status: 'open', initiativeId, reconcile: false })).items,
+    baseline.items.filter(item => item.initiativeId === initiativeId),
+  );
+  assert.equal((await list(p, { counts: true, initiativeId })).coverage, 'partial-needs-preparation');
+  generation.planningSearchVersion = 2;
+  s.tables.hostedProjects.get(s.projectId).workStore = 'records';
+  // Ordinary puts in dual/records mode retain exact row bodies, including long Done-when text.
+  const long = 'x'.repeat(40000) + '\nDone when:\n- [ ] Evidence pending';
+  await put(p, { itemId: first, expectedVersion: 1, body: long });
+  p.states.set(first, 'completed');
+  const read = await list(p, { kind: 'issue', status: 'open', initiativeId });
+  assert.equal(read.items.find(item => item.id === first).bodyLength, long.length);
+  assert.equal(read.items.find(item => item.id === first).status, 'open');
+  assert.equal(read.reconciled.held[0].openLines, 1);
+  await put(p, {
+    itemId: first,
+    expectedVersion: read.reconciled.held[0].version,
+    body: 'Done when:\n- [x] Evidence met',
+  });
+  assert.equal(
+    (await list(p, { kind: 'issue', status: 'open', initiativeId })).items.find(item => item.id === first)
+      .status,
+    'closed',
+  );
+  assert(
+    !(await list(p, { kind: 'issue', status: 'open', initiativeId })).items.some(item => item.id === first),
+  );
+});
+
+test('planning counts continue bounded pages and refuse stale generations, invalid cursors and old servers (5a85cb5f)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiativeId = randomUUID();
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  for (let i = 0; i < 1001; i++) {
+    const id = randomUUID();
+    await s.ctx.db.insert('projectWorkRecords', {
+      projectId: s.projectId,
+      generationId,
+      collection: 'planningSearch',
+      key: id,
+      parent: '',
+      position: i,
+      value: '{}',
+      planning: { text: '', kind: 'issue', status: 'closed', initiativeId, open: false },
+    });
+  }
+  // Search payload fragments repeat metadata; counts include each root once.
+  await s.ctx.db.insert('projectWorkRecords', {
+    projectId: s.projectId,
+    generationId,
+    collection: 'planningSearch:payload',
+    key: 'fragment',
+    parent: '',
+    position: 0,
+    value: '',
+    planning: { text: 'fragment', kind: 'issue', status: 'closed', initiativeId, open: false },
+  });
+  const first = await list(p, { counts: true, initiativeId });
+  assert.equal(first.coverage, 'partial');
+  assert.equal(first.counts.closed, 1000);
+  const last = await list(p, { counts: true, initiativeId, cursor: first.nextCursor });
+  assert.equal(last.counts.closed, 1);
+  assert.equal(last.coverage, 'complete');
+  assert.equal(last.nextCursor, null);
+  await assert.rejects(list(p, { counts: true, cursor: 'bad' }), code('BAD_ARGUMENT'));
+  const bound = JSON.parse(Buffer.from(first.nextCursor.split(':')[1], 'base64url'));
+  const stale =
+    'forge-planning-v1:' +
+    Buffer.from(JSON.stringify({ ...bound, generationId: 'different' })).toString('base64url');
+  await assert.rejects(list(p, { counts: true, cursor: stale }), code('WORK_STALE'));
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'outsider' });
+  await assert.rejects(list(p, { counts: true, initiativeId }), code('PROJECT_UNAVAILABLE'));
+  p.serverFeatures = [];
+  await assert.rejects(list(p, { counts: true, initiativeId }), code('HOSTED_ACTION_UNSUPPORTED'));
 });

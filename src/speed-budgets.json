@@ -869,6 +869,30 @@
       "reason": "Capture #4 measured about 113 GitHub runner minutes per landing (1,110 exact by job interval in a 56.9 min window with 10 landings; $0 billed on our public repository, about $681 per 1,000 landings at list price for a private repository). Of those, 86.4 are the forge-check runs (accepted 53.8, discarded 5.5, audit 11.4, check-only and cancelled runs that never became a landing 15.7), 22.0 are this repository's own Verify Forge workflow on each push (not a user's check), 2.6 deploy, sign and smoke. The stored shard seconds (77.9, a 36-landing window) are about 90% of the forge-check minutes (86.4, a 10-landing window); the rest is the plan and static jobs, setup before the shards and runs no landing owns."
     },
     {
+      "id": "planning-filtered-read-bytes",
+      "area": "filtered planning list normalized database bytes",
+      "measuredBy": "planning-fixture",
+      "metric": "planningFilteredReadBytes",
+      "unit": "bytes",
+      "value": 11971,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs: synthetic dogfood board with 1500 items, 397 in one Initiative, and 500 added closed members. Measured at the indexed database boundary, not live billing. Filtered list: 2,798,542 B before, 11,971 B after; 500 more closed members leave the latter unchanged.",
+      "issue": "5a85cb5f",
+      "reason": "Indexed filters remove whole-board scans; bounded counts read only one Initiative and no bodies or execution state. Closed item growth cannot increase filtered-list reads."
+    },
+    {
+      "id": "planning-counts-read-bytes",
+      "area": "Initiative state counts normalized database bytes",
+      "measuredBy": "planning-fixture",
+      "metric": "planningCountsReadBytes",
+      "unit": "bytes",
+      "value": 883301,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs: synthetic dogfood board with 1500 items, 397 in one Initiative, and 500 added closed members. Measured at the indexed database boundary, not live billing. Counts: one Initiative with 397 members, 883,301 B after, one RPC before one-pass board count: 2,805,439 B.",
+      "issue": "5a85cb5f",
+      "reason": "Indexed filters remove whole-board scans; bounded counts read only one Initiative and no bodies or execution state. Closed item growth cannot increase filtered-list reads."
+    },
+    {
       "id": "planning-put-calls",
       "area": "agent put-planning-item on an existing Issue: Convex calls per write",
       "measuredBy": "planning-fixture",
