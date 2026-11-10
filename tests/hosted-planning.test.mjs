@@ -6,6 +6,7 @@ import { getFunctionName } from 'convex/server';
 import { digest } from '../dist/hash.js';
 import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
+import { moduleUrl } from './convex-module.mjs';
 const denied = error => error.data?.code === 'PROJECT_UNAVAILABLE';
 
 test('whole-project hosted planning creates a planned Intent, preserves versions/labels and reconciles a lost original reply', async t => {
@@ -225,4 +226,96 @@ test('current owner alone writes/exports project planning; existing contributor 
     denied,
     'Original replay does not reinstate old owner authority.',
   );
+});
+
+// Flip 5 S1/S2 (Issue 0695ab24): no work may be lost moving planning into the Work store.
+test('the Work store copy moves every Issue version, comment and note once, and the compare finds nothing missing or changed', async t => {
+  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const s = await setup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  const initial = await s.read(),
+    intentId = randomUUID();
+  await actions.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: intentId,
+    revision: initial.data.revision,
+    command: JSON.stringify({
+      action: 'intent',
+      outcome: 'Noted',
+      constraints: '',
+      base: initial.sourceHead,
+    }),
+  });
+  await s.send({ action: 'note', intentId, text: 'First note', kind: 'comment' });
+  await s.send({ action: 'note', intentId, text: 'Chosen', kind: 'decision' });
+  const initiative = s.item({ kind: 'initiative', title: 'Group' });
+  await s.send(initiative);
+  // A body over the index's row limit is stored in parts; the copy joins them.
+  const issue = s.item({ title: 'Large', body: 'word '.repeat(12000), initiativeId: initiative.itemId });
+  await s.send(issue);
+  await s.send({ ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'in-progress' });
+  for (const text of ['Why', 'Evidence'])
+    await s.send({
+      action: 'comment-planning-item',
+      operationId: randomUUID(),
+      itemId: issue.itemId,
+      text,
+      authorLabel: 'Owner',
+    });
+  assert(
+    [...s.tables.projectWorkRecords.values()].some(row => row.collection === 'planningVersions:payload'),
+    'the large body is stored in parts',
+  );
+  const handlers = { 'projectWorkStore:copy': store.copy, 'projectWorkStore:compare': store.compare };
+  const client = {
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    action: () => assert.fail('no action'),
+  };
+  const run = action =>
+    dispatchHostedWork(client, s.projectId, { action }).then(result => result.collections);
+  const before = await run('compare-work-store');
+  assert.deepEqual(
+    [before.planningVersions.missing, before.planningComments.missing, before.notes.missing],
+    [3, 2, 2],
+  );
+  const copied = await run('copy-work-store');
+  assert.deepEqual(
+    [copied.planningVersions.copied, copied.planningComments.copied, copied.notes.copied],
+    [3, 2, 2],
+  );
+  const compared = await run('compare-work-store');
+  for (const [name, total] of Object.entries(compared))
+    assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
+  assert.equal(compared.planningItems.matched, 2);
+  assert.equal(compared.issueHeads.matched, 2);
+  const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === issue.itemId);
+  assert.deepEqual(
+    [head.kind, head.version, head.status, head.parent],
+    ['issue', 2, 'in-progress', initiative.itemId],
+  );
+  // A second run is a no-op: everything is already stored with the same digest.
+  const again = await run('copy-work-store');
+  assert.deepEqual([again.planningVersions.copied, again.planningVersions.same, again.notes.same], [0, 3, 2]);
+  // A stored version with other bytes is reported by both, and the copy never overwrites it.
+  const stored = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'comment');
+  stored.digest = 'f'.repeat(64);
+  const changed = await run('compare-work-store');
+  assert.equal(changed.planningComments.different + changed.notes.different, 1);
+  const kept = await run('copy-work-store');
+  assert.equal(kept.planningComments.different + kept.notes.different, 1);
+  assert.equal(stored.digest, 'f'.repeat(64));
+  // Owner only, and only for a hosted-authority project.
+  s.tables.projectContributors.set('contributor', {
+    _id: 'contributor',
+    projectId: s.projectId,
+    contributor: 'member',
+  });
+  s.caller('member');
+  await assert.rejects(run('copy-work-store'), error => error.code === 'PROJECT_UNAVAILABLE');
+  await assert.rejects(run('compare-work-store'), error => error.code === 'PROJECT_UNAVAILABLE');
+  s.caller('owner');
+  delete s.tables.hostedProjects.get(s.projectId).sourceAuthority;
+  await assert.rejects(run('copy-work-store'), error => error.code === 'BAD_ARGUMENT');
 });

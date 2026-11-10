@@ -9,6 +9,7 @@ import { digest } from './portable-hash.js';
 import { invariant } from './errors.js';
 import { sourceJobControlSchema } from './hosted-source-job.js';
 import { docsMergeSchema } from './docs-resolution.js';
+import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 const version = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -131,12 +132,41 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       control: sourceJobControlSchema.optional(),
     })
     .strict(),
+  // Flip 5 Work store: one Issue or Initiative version (its planning version) and one insert-only
+  // comment (a planning comment or an Intent note; an Issue id is also its Intent id). The journal
+  // row is kept exactly as its schema reads it, so a copy compares by digest.
+  z
+    .object({
+      id: z.uuid(),
+      version,
+      at: z.string().min(1),
+      kind: z.literal('issue'),
+      item: planningItemSchema,
+    })
+    .strict(),
+  z
+    .object({
+      id: z.uuid(),
+      version: z.literal(0),
+      at: z.string().min(1),
+      kind: z.literal('comment'),
+      parent: z.uuid(),
+      /** Note order within its Intent; planning comments order by `at`. */
+      position: version,
+      comment: planningCommentSchema.optional(),
+      // The full note schema lives in work-types, which imports modules that import this one; the
+      // Work store mapper (work-store-records) validates a note with it before it is encoded here.
+      note: z
+        .looseObject({ kind: z.enum(['comment', 'decision']), text: z.string(), at: z.string() })
+        .optional(),
+    })
+    .strict(),
 ]);
 export type HostedRecord = z.infer<typeof hostedRecordSchema>;
 export type HostedRecordKind = HostedRecord['kind'];
 export const hostedRecordRefSchema = z
   .object({
-    kind: z.enum(['intent', 'lane', 'save', 'candidate', 'job']),
+    kind: z.enum(['intent', 'lane', 'save', 'candidate', 'job', 'issue', 'comment']),
     key: z.uuid(),
     version,
     digest: hash,
@@ -156,6 +186,10 @@ export function hostedRecordIndex(record: HostedRecord) {
       return { parent: record.intentId, status: record.result.status };
     case 'job':
       return { parent: record.operationId, status: record.status };
+    case 'issue':
+      return { parent: record.item.initiativeId ?? '', status: record.item.status };
+    case 'comment':
+      return { parent: record.parent, status: record.note?.kind ?? 'comment' };
   }
 }
 /** Validate and encode once when both the body and its immutable reference are needed. */

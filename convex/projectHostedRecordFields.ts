@@ -7,6 +7,8 @@ export const hostedKind = v.union(
   v.literal('save'),
   v.literal('candidate'),
   v.literal('job'),
+  v.literal('issue'),
+  v.literal('comment'),
 );
 export const hostedRef = v.object({
   kind: hostedKind,

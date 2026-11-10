@@ -14,6 +14,8 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('workspace') }).strict(),
   z.object({ action: z.literal('rebuild-index') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
+  z.object({ action: z.literal('copy-work-store') }).strict(),
+  z.object({ action: z.literal('compare-work-store') }).strict(),
   z
     .object({
       action: z.literal('records'),
@@ -123,6 +125,68 @@ export async function readIndexedWorkDetail(
     return { ...latest, value, intentPin: latest.intentPin ? JSON.parse(latest.intentPin) : null };
   }
 }
+type StoreBucket = { count: number; keys: string[] };
+type StorePage = {
+  copied?: number;
+  same?: number;
+  checked?: number;
+  matched?: number;
+  missing?: StoreBucket;
+  different: StoreBucket;
+  invalid: StoreBucket;
+  cursor: string | null;
+};
+/** Flip 5 S1/S2: the owner copies the journal's Issues, comments and notes into the Work store, or compares
+ * the two, one page per call (copy: one mutation, compare: one query) until every collection is done.
+ * A copy is idempotent by digest, so an interrupted run is simply run again. */
+async function workStorePass(
+  client: HostedWorkTransport,
+  projectId: string,
+  action: 'copy-work-store' | 'compare-work-store',
+  progress?: (line: string) => void,
+) {
+  const copy = action === 'copy-work-store';
+  invariant(
+    !copy || client.mutation,
+    'UNSUPPORTED',
+    'This transport needs hosted mutations for copy-work-store.',
+  );
+  const collections = copy
+    ? ['planningVersions', 'planningComments', 'notes']
+    : ['planningVersions', 'planningComments', 'notes', 'planningItems', 'issueHeads'];
+  const totals: Record<string, Record<string, number | string[]>> = {};
+  for (const collection of collections) {
+    const total: Record<string, number | string[]> = {};
+    let cursor: string | null = null,
+      pages = 0;
+    do {
+      const args = { projectId, collection, cursor };
+      const page = JSON.parse(
+        (copy
+          ? await client.mutation!(makeFunctionReference<'mutation'>('projectWorkStore:copy'), args)
+          : await client.query(makeFunctionReference<'query'>('projectWorkStore:compare'), args)) as string,
+      ) as StorePage;
+      for (const [name, value] of Object.entries(page)) {
+        if (name === 'cursor') continue;
+        if (typeof value === 'number') total[name] = ((total[name] as number | undefined) ?? 0) + value;
+        else if (value && typeof value === 'object') {
+          total[name] = ((total[name] as number | undefined) ?? 0) + value.count;
+          total[`${name}Keys`] = [
+            ...((total[`${name}Keys`] as string[] | undefined) ?? []),
+            ...value.keys,
+          ].slice(0, 20);
+        }
+      }
+      cursor = page.cursor;
+      pages++;
+      progress?.(
+        `Work store ${copy ? 'copy' : 'compare'} ${collection}: page ${pages}${cursor ? '' : ', done'}.`,
+      );
+    } while (cursor !== null);
+    totals[collection] = { ...total, pages };
+  }
+  return { action, collections: totals };
+}
 export async function dispatchHostedWork(
   client: HostedWorkTransport,
   projectId: string,
@@ -133,7 +197,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy, rebuild-index or migrate-record-details.',
+    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store or compare-work-store.',
   );
   try {
     const request = parsed.data;
@@ -157,6 +221,8 @@ export async function dispatchHostedWork(
       return result;
     }
 
+    if (request.action === 'copy-work-store' || request.action === 'compare-work-store')
+      return await workStorePass(client, projectId, request.action, progress);
     if (request.action === 'policy')
       return await client.query(makeFunctionReference('projectAutonomy:read'), { projectId });
     if (request.action === 'set-policy') {
