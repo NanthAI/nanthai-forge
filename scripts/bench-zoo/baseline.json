@@ -1,6 +1,6 @@
 {
  "version": 1,
- "stamp": "20261110T034816, 20261110T025402, 20261110T045601, 20261110T042016",
+ "stamp": "20261110T034816, 20261110T025402, 20261110T045601, 20261110T042016, 20261110T080125, 20261110T083157",
  "cliCommits": [
   "acb953529e52f38ae435f2bf43247a6928832708b563e743aef843330cab8a7d",
   "6f53b0317c7d23c788423b3cae1c8c8fb2b5844c63fd9990b8174218cfaa22d4",
@@ -8,7 +8,9 @@
   "45ef703ebaeb006ac7b4663d5509167ae89d2391acb0b350db534443596aff58",
   "0a9797d91b9e292827ccf1d253a2a2424ab28aee5a1827c8316e50926c5b3469",
   "acf5eee10aad7213d33b72d92e5c26a0d7c75a77c67438e065db05d7177d3c21",
-  "3db01645228aee495338626659353ec6af5394a692e8825a1e3a1aae0be0f8d8"
+  "3db01645228aee495338626659353ec6af5394a692e8825a1e3a1aae0be0f8d8",
+  "3961ac2e45cccd817dcc8cf3f2df867abd39ddbc3b121db21ab1982395a7d89a",
+  "78d8107bd79418e2c941943e429ae08dfa92ade88514d008e590d10190f00a90"
  ],
  "repos": {
   "npmws": {
@@ -165,7 +167,7 @@
    "paths": {
     "import": "pass",
     "clone": "pass",
-    "fidelity": "fail",
+    "fidelity": "pass",
     "save": "pass",
     "sync": "pass",
     "land": "pass",
@@ -606,26 +608,18 @@
   },
   "shapes-nonutf8": {
    "paths": {
-    "import": "pass",
-    "clone": "pass",
+    "import": "refused",
+    "clone": "skip",
     "fidelity": "skip",
-    "save": "pass",
-    "sync": "pass",
-    "land": "fail",
-    "landReuse": "fail",
-    "conflict": "fail",
+    "save": "skip",
+    "sync": "skip",
+    "land": "skip",
+    "landReuse": "skip",
+    "conflict": "skip",
     "resolve": "skip"
    },
    "seconds": {
-    "import": 7.94215791699999,
-    "clone": 0.9833295409999991,
-    "start": 2.3012006249999994,
-    "save": 3.239269666,
-    "land": 45.826169875000005,
-    "landReuse": 45.67505591699999,
-    "sync": 2.9193500409999977,
-    "conflict": 199.13650033300001,
-    "resolve": null
+    "import": null
    },
    "gapSeconds": null
   },
