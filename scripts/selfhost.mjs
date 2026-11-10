@@ -131,6 +131,9 @@ async function initialize(directory, archivePath, port, pinnedRelease) {
       : 'Partial component notices were not copied; originals remain in docs/vendor-notices/native-components/.',
   );
 }
+/** Index backfill pacing (rows per chunk, chunks per second). The backend's defaults keep a
+ * live deployment responsive; a scratch restore has no traffic and sets them high. */
+export const backfillKnobs = ['INDEX_BACKFILL_CHUNK_SIZE', 'INDEX_BACKFILL_CHUNK_RATE'];
 async function start(directory, storageEnv) {
   const config = await readSetup(directory);
   let storage = {};
@@ -164,7 +167,7 @@ async function start(directory, storageEnv) {
       stdio: 'inherit', // Native storage consumes only the explicitly selected storage-file settings.
       env: childEnv({
         extra: { ...storage, SENTRY_DSN: '' },
-        allow: ['RUST_LOG', 'RUST_BACKTRACE', 'SSL_CERT_FILE', 'SSL_CERT_DIR'],
+        allow: ['RUST_LOG', 'RUST_BACKTRACE', 'SSL_CERT_FILE', 'SSL_CERT_DIR', ...backfillKnobs],
       }),
     },
   );

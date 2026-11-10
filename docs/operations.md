@@ -462,41 +462,60 @@ node --env-file="$PRIVATE_R2_ENV" scripts/restore-drill.mjs \
 `PRIVATE_R2_ENV` holds the backup bucket's `R2_*` names (as for the weekly job).
 The drill reads the backup and the project's `v1/p/PROJECT_ID/` prefix with LIST
 and GET only, and writes only inside `NEW_PRIVATE_DIR`: it never calls the source
-deployment and never runs a deploy against it. Steps, each timed in the report:
+deployment and never runs a deploy against it. Nothing whole is written to disk:
+neither the backup, the one-project ZIP, an export nor the R2 prefix. Steps, each
+timed in the report:
 
-1. Pick the newest (or named) backup manifest, download its ZIP and check size and
-   SHA-256 against the manifest.
-2. Create a fresh instance with `scripts/selfhost.mjs` (pinned backend, checked
-   SHA-256) and import the ZIP into it. The CLI's progress watcher can time out on
-   a busy machine while the import continues; the import's own state row decides.
-3. Export the restored instance before any code runs and compare it with the
-   backup: every table's full rows (IDs and creation times included), every
-   stored file and each project's selected Work main. Then compare every row that
-   names the project, one by one. Differences name the table and row, never contents.
-4. Copy the project's R2 prefix into a local in-memory bucket. Every key a backup
-   row names must exist, and every `o/<sha256>` object must hash to its name.
-5. Deploy the current source to the scratch instance only (synthetic Secret Object
-   keyring; imported rows have no indexes until this push builds them), then read
-   main and every stored object of the project through the restored app's own
-   download path into an empty cache, parse each State and fetch every file of
-   every State. The cache rejects bytes that differ from their SHA-256 pin.
-6. Stop the backend and delete the directory (keep it with `--keep`).
+1. Pick the newest (or named) backup manifest. Create a fresh instance with
+   `scripts/selfhost.mjs` (pinned backend, checked SHA-256) on a free port pair
+   (`--port` to choose one) and start it, with index backfill pacing raised (a
+   scratch instance has no traffic to protect).
+2. Deploy the current source to the empty scratch instance only (synthetic Secret
+   Object keyring). Its bucket keeps only what the restored app writes and reads
+   the project's prefix through from R2 (GET only).
+3. Meanwhile stream the backup ZIP from R2 once. The same pass checks its size and
+   SHA-256 against the manifest, runs the backup verifier's whole-snapshot
+   validation, hashes every row that names the project, and writes the one-project
+   ZIP straight into the scratch import API as it goes. The import starts after the
+   deploy, so every row lands in indexed tables and is checked against the current
+   schema as it is written.
+4. Wait for the import's own state row (the CLI's progress watcher can time out on
+   a busy machine while the import continues), then delete the instance's copy of
+   the upload.
+5. Before any function is called, stop the backend and read the restored rows
+   straight from its database file (read-only; newest revision of each document).
+   Compare every row that names the project with the backup, one by one: full rows,
+   IDs and creation times included. Differences name the table and row, never
+   contents. Nothing runs in between: there are no crons, and an import brings no
+   scheduled jobs.
+6. Meanwhile check the project's R2 prefix in place: every key a backup row names
+   must exist, and every `o/<sha256>` object is streamed and must hash to its name
+   and have the size its row records. A source pack is a cache that rotates as main
+   moves, so a pack the backup names but the prefix no longer holds is counted as
+   `cacheMissing`, not as a loss.
+7. Restart the backend and read main's State and every file of it through the
+   restored app's own download path into an empty cache, which rejects bytes that
+   differ from their SHA-256 pin. Stop the backend and delete the directory (keep
+   it with `--keep`).
+
+The disk reserve (`--reserve-gib`) is checked every 2 s, not only between steps: a
+breach stops every step (`DISK_RESERVE`). The report's `disk` gives the lowest free
+space seen and the sampled peak size of the drill directory.
 
 The import holds only the project's rows (every row that names it), every row
 without a `projectId` (accounts, settings, project shells) and all table metadata
-and stored files. Importing the whole snapshot works too, but the schema push then
-rebuilds all indexes over every row: on the 780,263-document weekly backup a full
-import took 14 min and the export 37 min (every table, file and Work main equal
-under `hosted-durability.mjs verify --left-export --right-export`), and the index
-build had not finished after 30 min.
+and stored files. Importing the whole snapshot works too; it only
+costs the time and disk of every other project's rows.
 
-Measured on the 328 MB weekly backup, a GitHub-imported project with one landed
-Lane (166 rows in 57 tables, 2 States, 58 files, 20 R2 objects / 1.3 MB): 2–5.5 min
-wall time on a loaded Mac, mostly the scratch deploy (48–111 s), the two passes over
-the backup (filter and read, 45–105 s) and the import (8–47 s). Cost: 2 LIST and 22
-GET requests on the existing R2 account (the backup plus the project's objects,
-about 329 MB of free egress) and no Convex calls; peak disk is the backup, a
-project-sized instance and the pinned backend (about 0.6 GB, freed at teardown).
+Measured on the dogfood project (2026-11-10; a 372 MB backup of 854,190 documents,
+746,650 project rows in 184 tables, 92,373 objects of 4.6 GB): 13.7 minutes end to
+end. The backup stream took 88 s (the deploy, 38 s, ran inside it), the import
+10.3 minutes, the row read 15 s, the restart 37 s and the app read 55 s; the object
+check ran alongside in 4.5 minutes. Peak scratch was 3.7 GiB, almost all of it the
+restored database with its indexes. R2 served 115 LIST and 96,245 GET requests
+(free tier); the source deployment got none. Pushing the schema after the import
+instead rebuilt 407 indexes over the restored rows for over two hours, and its text
+indexes never finished (each attempt outlived the backend's retention window).
 
 Exit 0 means restored and equal, 2 a difference (the report names it), 1 a failed
 step (`failed.step`, `failed.code`; the private `drill.log` stays only with

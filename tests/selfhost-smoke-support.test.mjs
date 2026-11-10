@@ -35,7 +35,7 @@ function auth(variables) {
   return JSON.parse(JSON.stringify(exports.default));
 }
 
-test('fresh native auth reproduces the unset optional issuer failure; smoke defines it before deploy', () => {
+test('fresh native auth reproduces the unset optional issuer failure; smoke defines it before deploy', async () => {
   assert.throws(
     () => auth({ CLERK_JWT_ISSUER_DOMAIN: 'https://token.actions.githubusercontent.com' }),
     /FORGE_CLI_ISSUER.*not set/,
@@ -43,7 +43,7 @@ test('fresh native auth reproduces the unset optional issuer failure; smoke defi
   for (const issuer of ['', 'https://token.actions.githubusercontent.com']) {
     const variables = {},
       commands = [];
-    deploySmoke(
+    await deploySmoke(
       args => {
         commands.push(args);
         if (args[0] === 'env') variables[args[2]] = args[3];

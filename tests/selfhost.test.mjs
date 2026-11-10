@@ -75,7 +75,9 @@ test('self-host launch preserves existing data and refuses corrupt or exposed in
 test('optional private S3 launch uses native storage and preserves the local default and original instance', async t => {
   const previousSecret = process.env.OPENAI_API_KEY;
   process.env.OPENAI_API_KEY = 'fake-test-secret';
+  process.env.INDEX_BACKFILL_CHUNK_RATE = '64';
   t.after(() => {
+    delete process.env.INDEX_BACKFILL_CHUNK_RATE;
     if (previousSecret === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = previousSecret;
   });
@@ -88,7 +90,7 @@ test('optional private S3 launch uses native storage and preserves the local def
       storageEnv = join(directory, 's3.env');
     await writeFile(
       binary,
-      `#!${process.execPath}\nrequire('node:fs').writeFileSync('capture.json', JSON.stringify({args:process.argv.slice(2),region:process.env.AWS_REGION,key:process.env.AWS_SECRET_ACCESS_KEY,sentry:process.env.SENTRY_DSN,leaked:process.env.OPENAI_API_KEY!==undefined}),{mode:0o600});\n`,
+      `#!${process.execPath}\nrequire('node:fs').writeFileSync('capture.json', JSON.stringify({args:process.argv.slice(2),region:process.env.AWS_REGION,key:process.env.AWS_SECRET_ACCESS_KEY,sentry:process.env.SENTRY_DSN,backfill:process.env.INDEX_BACKFILL_CHUNK_RATE,leaked:process.env.OPENAI_API_KEY!==undefined}),{mode:0o600});\n`,
       { mode: 0o700 },
     );
     const config = {
@@ -106,6 +108,7 @@ test('optional private S3 launch uses native storage and preserves the local def
     await main(['start', directory]);
     const local = JSON.parse(await readFile(capture, 'utf8'));
     assert.equal(local.leaked, false);
+    assert.equal(local.backfill, '64', 'index backfill pacing reaches the backend (restore drill)');
     assert(local.args.includes('--local-storage'));
     assert(!local.args.includes('--s3-storage'));
     await writeFile(

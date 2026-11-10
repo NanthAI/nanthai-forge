@@ -5,6 +5,8 @@ export { failure } from './hosted-durability-errors.mjs';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 
 export function canonical(value) {
@@ -152,17 +154,50 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
 }
 
 /** Every snapshot entry as `{kind:'table'|'record'|'file', ...}`, streamed without extracting
- * the ZIP. Fails with SNAPSHOT_READ_FAILED when the reader cannot finish. */
-export async function* snapshotEvents(path) {
+ * the ZIP. `source` is a path or an async iterable of the ZIP's bytes (piped, never written to
+ * disk). With `filter` ({projectId, sink}) the same pass streams the one-project ZIP to
+ * `sink(readable)` (awaited; its failure fails the read) and ends with
+ * `{kind:'filtered', kept, dropped}`. `signal` stops the reader. Fails with SNAPSHOT_READ_FAILED when the reader cannot
+ * finish. */
+export async function* snapshotEvents(source, { filter, signal } = {}) {
+  const piped = typeof source !== 'string';
   const child = spawn(
     'python3',
-    [fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)), path],
-    { env: childEnv(), stdio: ['ignore', 'pipe', 'ignore'] },
+    [
+      fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)),
+      piped ? '-' : source,
+      ...(filter ? [filter.projectId] : []),
+    ],
+    {
+      env: childEnv(),
+      stdio: [piped ? 'pipe' : 'ignore', 'pipe', 'ignore', ...(filter ? ['pipe'] : [])],
+      signal,
+    },
   );
+  const sunk = filter
+    ? filter.sink(child.stdio[3]).then(
+        () => null,
+        error => {
+          child.kill();
+          return error;
+        },
+      )
+    : null;
   const completion = new Promise(resolve => {
     child.once('error', () => resolve(false));
     child.once('close', code => resolve(code === 0));
   });
+  // A source failure keeps its own code; a reader that stops early ends the pipe.
+  let sourceError = null;
+  async function* guarded() {
+    try {
+      yield* source;
+    } catch (error) {
+      sourceError = error;
+      throw error;
+    }
+  }
+  const fed = piped ? pipeline(Readable.from(guarded()), child.stdin).catch(() => child.kill()) : null;
   let finished = false;
   try {
     for await (const line of createInterface({ input: child.stdout, crlfDelay: Infinity }))
@@ -171,6 +206,10 @@ export async function* snapshotEvents(path) {
   } finally {
     if (!finished) child.kill();
     const passed = await completion;
+    await fed;
+    const sinkError = await sunk;
+    if (sourceError) throw sourceError;
+    if (sinkError) throw sinkError;
     if (finished && !passed) throw failure('SNAPSHOT_READ_FAILED');
   }
 }

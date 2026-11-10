@@ -2,7 +2,8 @@
 // A local stand-in for R2's S3 endpoint. It verifies the SigV4 query signature with the Node
 // reference presigner, then enforces what R2 enforces on presigned PUTs: signed content-length,
 // create-only `If-None-Match: *` (412) and `x-amz-checksum-sha256` (400). GET serves the stored
-// bytes (with `Range`, 206). Objects live in memory.
+// bytes (with `Range`, 206). Objects live in memory; `readThrough(key)` can serve GET and HEAD
+// misses from elsewhere (the restore drill reads its source prefix this way, never copying it).
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
 import { presign } from './presign-node-reference.mjs';
@@ -22,7 +23,7 @@ const mustSign = ['content-length', 'if-none-match', 'x-amz-checksum-sha256'];
 
 /** `local: true` serves at its own loopback origin (`fake.endpoint`, for R2_ENDPOINT) instead
  * of standing in for the account host through `install()`. */
-export async function startFakeR2(config = fakeR2Config, { local = false } = {}) {
+export async function startFakeR2(config = fakeR2Config, { local = false, readThrough = null } = {}) {
   let host = `${config.accountId}.r2.cloudflarestorage.com`;
   const objects = new Map(); // "bucket/key" -> Buffer
   const fake = {
@@ -158,8 +159,9 @@ export async function startFakeR2(config = fakeR2Config, { local = false } = {})
         objects.set(id, body);
         return send(200);
       }
+      const lookup = async () => objects.get(id) ?? (await readThrough?.(rest.join('/'))) ?? undefined;
       if (req.method === 'HEAD') {
-        const object = objects.get(id);
+        const object = await lookup();
         if (!object) return send(404);
         return send(200, { 'content-length': String(object.length), 'x-amz-checksum-sha256': b64(object) });
       }
@@ -169,7 +171,7 @@ export async function startFakeR2(config = fakeR2Config, { local = false } = {})
       }
       if (req.method === 'GET') {
         if (fake.getDelay) await new Promise(resolve => setTimeout(resolve, fake.getDelay));
-        const object = objects.get(id);
+        const object = await lookup();
         if (fake.forbidGets > 0) {
           fake.forbidGets--;
           return send(403);

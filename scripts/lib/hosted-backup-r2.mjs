@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import { once } from 'node:events';
-import { createWriteStream } from 'node:fs';
 import { presign } from '../../dist/r2-presign.js';
 import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 import { failure } from './hosted-durability-compare.mjs';
@@ -23,7 +21,7 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
     R2_SECRET_ACCESS_KEY: secretAccessKey,
   } = env;
   if (!accountId || !bucket || !accessKeyId || !secretAccessKey) throw failure('R2_NOT_CONFIGURED');
-  async function request(method, key, query = {}, body, headers = {}) {
+  async function request(method, key, query = {}, body, headers = {}, timeoutMs = 120_000) {
     try {
       const url = await presign({
         method,
@@ -41,7 +39,7 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
           ...(method === 'GET' || method === 'HEAD' ? { 'accept-encoding': 'identity' } : {}),
         },
         ...(body === undefined ? {} : { body }),
-        signal: networkTimeout(120_000),
+        signal: networkTimeout(timeoutMs),
       });
       if (method === 'HEAD' && response.status === 404) return null;
       if (!response.ok) throw failure('BACKUP_R2_FAILED');
@@ -92,24 +90,14 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
         throw failure('BACKUP_R2_FAILED');
       }
     },
-    /** Stream an object into a new owner-only file; returns its size and SHA-256. */
-    async download(key, path) {
-      const response = await request('GET', key);
-      const hash = createHash('sha256'),
-        out = createWriteStream(path, { flags: 'wx', mode: 0o600 });
-      let size = 0;
+    /** An object's bytes as a stream: the restore drill reads a backup without writing it. */
+    async *stream(key) {
+      const response = await request('GET', key, {}, undefined, {}, 3600_000);
       try {
-        for await (const bytes of response.body) {
-          hash.update(bytes);
-          size += bytes.length;
-          if (!out.write(bytes)) await once(out, 'drain');
-        }
-        await new Promise((done, fail) => out.end(error => (error ? fail(error) : done())));
+        for await (const bytes of response.body) yield bytes;
       } catch {
-        out.destroy();
         throw failure('BACKUP_R2_FAILED');
       }
-      return { size, sha256: hash.digest('hex') };
     },
     async create(key, sha256) {
       // The object key embeds the saved operation ID. Discover an initiation whose

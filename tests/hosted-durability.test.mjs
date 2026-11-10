@@ -3,9 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { createWriteStream } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
+import { pipeline } from 'node:stream/promises';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { crc32, deflateRawSync } from 'node:zlib';
 import { durabilityFixture, mainHead } from './hosted-durability-fixture.mjs';
 import {
   compareSnapshots,
@@ -15,8 +19,9 @@ import {
 import { deploymentOptions, execute, parseCommand } from '../scripts/hosted-durability.mjs';
 import {
   compareProjectRows,
-  copyProjectObjects,
   readProjectSnapshot,
+  readRestoredRows,
+  verifyProjectObjects,
 } from '../scripts/lib/restore-drill-project.mjs';
 
 function summary(tables = durabilityFixture(), fileHash = 'file-hash') {
@@ -414,32 +419,189 @@ test('restore drill compares one project row by row and names changed, missing a
     assert.doesNotMatch(JSON.stringify(result), /Retained full payload|SYNTHETIC_OTHER_PROJECT/);
   }));
 
-test('restore drill copy reads the source by list and get only and reports missing and corrupt content keys', async () => {
+/** A ZIP written the way Convex snapshot exports are: deflate with data descriptors whose sizes
+ * are 0xFFFFFFFF, the real sizes only in the zip64 central directory. */
+function streamedZip(entries) {
+  const locals = [],
+    central = [];
+  let offset = 0;
+  for (const [name, text] of entries) {
+    const raw = Buffer.from(text),
+      data = deflateRawSync(raw),
+      crc = crc32(raw),
+      file = Buffer.from(name);
+    const local = Buffer.alloc(30 + file.length + 20);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(45, 4);
+    local.writeUInt16LE(0x808, 6);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(0xffffffff, 18);
+    local.writeUInt32LE(0xffffffff, 22);
+    local.writeUInt16LE(file.length, 26);
+    local.writeUInt16LE(20, 28);
+    file.copy(local, 30);
+    local.writeUInt16LE(1, 30 + file.length);
+    local.writeUInt16LE(16, 32 + file.length);
+    const descriptor = Buffer.alloc(16);
+    descriptor.writeUInt32LE(0x08074b50, 0);
+    descriptor.writeUInt32LE(crc, 4);
+    descriptor.writeUInt32LE(0xffffffff, 8);
+    descriptor.writeUInt32LE(0xffffffff, 12);
+    const record = Buffer.alloc(46 + file.length + 28);
+    record.writeUInt32LE(0x02014b50, 0);
+    record.writeUInt16LE(0x808, 8);
+    record.writeUInt16LE(8, 10);
+    record.writeUInt32LE(crc, 16);
+    record.writeUInt32LE(0xffffffff, 20);
+    record.writeUInt32LE(0xffffffff, 24);
+    record.writeUInt16LE(file.length, 28);
+    record.writeUInt16LE(28, 30);
+    record.writeUInt32LE(0xffffffff, 42);
+    file.copy(record, 46);
+    record.writeUInt16LE(1, 46 + file.length);
+    record.writeUInt16LE(24, 48 + file.length);
+    record.writeBigUInt64LE(BigInt(raw.length), 50 + file.length);
+    record.writeBigUInt64LE(BigInt(data.length), 58 + file.length);
+    record.writeBigUInt64LE(BigInt(offset), 66 + file.length);
+    locals.push(local, data, descriptor);
+    central.push(record);
+    offset += local.length + data.length + descriptor.length;
+  }
+  const directory = Buffer.concat(central),
+    end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
+}
+
+test('restore drill streams the backup once: export-format ZIP bytes are read and filtered with nothing whole on disk', () =>
+  temporary(async directory => {
+    const id = 'k'.repeat(32),
+      other = 'z'.repeat(32),
+      tables = JSON.parse(JSON.stringify(durabilityFixture()).replaceAll('"project"', `"${id}"`));
+    tables.otherProject = [{ _id: 'other', projectId: other, text: 'SYNTHETIC_OTHER_PROJECT' }];
+    const entries = Object.entries(tables).map(([table, rows]) => [
+      `${table}/documents.jsonl`,
+      rows.map(row => JSON.stringify(row) + '\n').join(''),
+    ]);
+    entries.push(['_storage/blob', 'payload']);
+    const bytes = streamedZip(entries),
+      path = join(directory, 'backup.zip'),
+      filtered = join(directory, 'project.zip');
+    await writeFile(path, bytes);
+    // Piped in small chunks, as the R2 body arrives.
+    async function* chunks(body = bytes) {
+      for (let at = 0; at < body.length; at += 7) yield body.subarray(at, at + 7);
+    }
+    const streamed = await readProjectSnapshot(chunks(), id, {
+        sink: zip => pipeline(zip, createWriteStream(filtered, { flags: 'wx' })),
+      }),
+      fromPath = await readProjectSnapshot(path, id);
+    assert.deepEqual(streamed.deployment, fromPath.deployment);
+    assert.deepEqual([...streamed.rows], [...fromPath.rows]);
+    const userRows = Object.entries(tables).filter(([table]) => !table.startsWith('_'));
+    assert.deepEqual(streamed.filter, { kept: userRows.flatMap(([, rows]) => rows).length - 1, dropped: 1 });
+    // The one-project ZIP keeps every row and stored file except the other project's row.
+    const restored = await readProjectSnapshot(filtered, id);
+    assert.deepEqual([...restored.rows], [...fromPath.rows]);
+    assert.equal(restored.deployment.tables.otherProject.count, 0);
+    assert.deepEqual(restored.deployment.files, fromPath.deployment.files);
+    // A truncated stream, a changed central directory and a failing source never pass.
+    await assert.rejects(readProjectSnapshot(chunks(bytes.subarray(0, bytes.length - 40)), id), {
+      code: 'SNAPSHOT_READ_FAILED',
+    });
+    const renamed = Buffer.from(bytes);
+    renamed[renamed.lastIndexOf(Buffer.from('_storage/blob'))] ^= 1;
+    await assert.rejects(readProjectSnapshot(chunks(renamed), id), { code: 'SNAPSHOT_READ_FAILED' });
+    async function* failing() {
+      yield bytes.subarray(0, 100);
+      throw Object.assign(new Error('SYNTHETIC_SECRET'), { code: 'BACKUP_R2_FAILED' });
+    }
+    await assert.rejects(readProjectSnapshot(failing(), id), { code: 'BACKUP_R2_FAILED' });
+  }));
+
+test('restore drill reads restored rows from the instance database: newest revision only, deletions and inactive tables excluded', () =>
+  temporary(async directory => {
+    const id = 'k'.repeat(32),
+      path = join(directory, 'database.sqlite3'),
+      db = new DatabaseSync(path);
+    db.exec(
+      'CREATE TABLE documents (id BLOB NOT NULL, ts INTEGER NOT NULL, table_id BLOB NOT NULL, json_value TEXT NULL, deleted INTEGER NOT NULL, prev_ts INTEGER, PRIMARY KEY (ts, table_id, id))',
+    );
+    const tablet = byte => Buffer.alloc(16, byte),
+      insert = db.prepare('INSERT INTO documents VALUES (?, ?, ?, ?, ?, NULL)');
+    let ts = 0;
+    const put = (table, doc, value, deleted = 0) =>
+      insert.run(tablet(doc), ++ts, tablet(table), value === null ? null : JSON.stringify(value), deleted);
+    put(1, 1, { _id: 't', name: '_tables', state: 'active' });
+    put(1, 2, { _id: 'w', name: 'projectWorkRecords', state: 'active' });
+    put(1, 3, { _id: 'o', name: 'retired', state: 'active' });
+    put(1, 3, { _id: 'o', name: 'retired', state: 'deleting' });
+    put(2, 10, { _id: 'a', projectId: id, value: 1 });
+    put(2, 10, { _id: 'a', projectId: id, value: 2 });
+    put(2, 11, { _id: 'b', projectId: id });
+    put(2, 11, null, 1);
+    put(2, 12, { _id: 'c', projectId: 'z'.repeat(32) });
+    put(3, 20, { _id: 'd', projectId: id });
+    db.close();
+    const result = readRestoredRows(path, id);
+    assert.equal(result.tables, 1);
+    const expected = new Map([
+      [
+        'projectWorkRecords\ta',
+        createHash('sha256')
+          .update('{"_id":"a","projectId":"' + id + '","value":2}')
+          .digest('hex'),
+      ],
+    ]);
+    assert.equal(compareProjectRows(expected, result.rows).equal, true);
+    await writeFile(path, 'SYNTHETIC_PRIVATE_SENTINEL');
+    assert.throws(
+      () => readRestoredRows(path, id),
+      error => !String(error.message).includes('SYNTHETIC'),
+    );
+  }));
+
+test('restore drill checks the source prefix in place by list and get only and reports missing, corrupt and resized content keys; a rotated source pack is a cache miss, not loss', async () => {
   const id = 'k'.repeat(32),
-    good = Buffer.from('good'),
-    goodKey = `v1/p/${id}/o/${createHash('sha256').update(good).digest('hex')}`,
+    content = body => `v1/p/${id}/o/${createHash('sha256').update(body).digest('hex')}`,
+    good = content('good'),
+    resized = content('resized'),
     badKey = `v1/p/${id}/o/${'e'.repeat(64)}`,
-    lostKey = `v1/p/${id}/o/${'f'.repeat(64)}`;
-  const bucket = new Map();
-  // Any other source method (put, delete, multipart) would throw: the drill never writes the source.
+    lostKey = `v1/p/${id}/o/${'f'.repeat(64)}`,
+    checkKey = `v1/p/${id}/checks/run/log`,
+    rotatedPack = `v1/p/${id}/source-pack/${'a'.repeat(64)}/${'b'.repeat(64)}.gz`;
+  const fetched = [];
+  // Any other source method (put, delete, multipart, whole-object reads) would throw.
   const source = Object.freeze({
     async *pages(prefix) {
       assert.equal(prefix, `v1/p/${id}/`);
-      yield [goodKey, badKey];
+      yield [good, badKey];
+      yield [resized, checkKey];
     },
-    bytes: async key => (key === goodKey ? good : Buffer.from('flipped')),
+    async digest(key) {
+      fetched.push(key);
+      const body = key === badKey ? 'flipped' : key === good ? 'good' : 'resized';
+      return { size: body.length, sha256: createHash('sha256').update(body).digest('hex') };
+    },
   });
-  const result = await copyProjectObjects({
+  const result = await verifyProjectObjects({
     source,
     projectId: id,
-    referenced: new Set([goodKey, lostKey]),
-    put: (key, body) => bucket.set(key, body),
+    referenced: new Set([good, lostKey, checkKey, rotatedPack]),
+    sizes: new Map([[resized.split('/').at(-1), 99]]),
   });
-  assert.deepEqual([...bucket.keys()], [goodKey, badKey]);
+  assert.deepEqual(fetched.sort(), [badKey, good, resized].sort());
   assert.deepEqual(result.missing, [lostKey]);
+  assert.equal(result.missingCount, 1);
+  assert.equal(result.cacheMissing, 1);
   assert.deepEqual(result.digestMismatch, [badKey]);
-  assert.equal(result.unreferenced, 1);
-  assert.deepEqual(result.requests, { list: 1, get: 2 });
+  assert.deepEqual(result.sizeMismatch, [resized]);
+  assert.equal(result.unreferenced, 2);
+  assert.deepEqual(result.requests, { list: 2, get: 3 });
 });
 
 test('accepted main comes from the hosted channel row, not the hosting-time Work index (restore drill incident)', () => {

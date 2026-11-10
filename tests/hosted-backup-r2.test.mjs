@@ -124,6 +124,28 @@ test('backup HEAD and digest request unsigned identity; missing HEAD length is a
   assert.deepEqual(await client.digest('key'), { size: 4, sha256: hash('data') });
 });
 
+test('backup stream yields the exact bytes and a body failure never leaks provider text (restore drill reads backups without a file)', async () => {
+  const body = fail =>
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('snapshot '));
+        if (fail) controller.error(new Error('SYNTHETIC_SECRET'));
+        else (controller.enqueue(new TextEncoder().encode('bytes')), controller.close());
+      },
+    });
+  let fail = false;
+  const client = r2Client(fakeEnv, async (_, init) => {
+    assert.equal(init.method, 'GET');
+    return new Response(body(fail));
+  });
+  assert.equal(Buffer.concat(await Array.fromAsync(client.stream('backup/a'))).toString(), 'snapshot bytes');
+  fail = true;
+  await assert.rejects(
+    Array.fromAsync(client.stream('backup/a')),
+    error => error.code === 'BACKUP_R2_FAILED' && !String(error).includes('SYNTHETIC_'),
+  );
+});
+
 test('backup manifest reader parses format-1 JSON and rejects malformed or oversized provider content', async () => {
   const manifest = { format: 1, operationId: 'synthetic', includeFileStorage: true };
   assert.deepEqual(

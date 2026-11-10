@@ -125,7 +125,12 @@ const r2 = {
   R2_ENDPOINT: bucket.endpoint,
 };
 async function deploy(directory) {
-  deploySmoke(args => cli(directory, args), { issuer: realOidc ? githubOidcIssuer : '', token, keys, r2 });
+  await deploySmoke(args => cli(directory, args), {
+    issuer: realOidc ? githubOidcIssuer : '',
+    token,
+    keys,
+    r2,
+  });
 }
 function archiveFor(pin, platform, provided) {
   const asset = releases[pin]?.[platform];
