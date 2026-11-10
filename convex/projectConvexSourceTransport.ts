@@ -45,12 +45,16 @@ export function convexSourceTransport(
     preloaded = [],
     trees = false,
     treeRead = false,
+    treeBase,
   }: {
     overlapWrites?: boolean;
     /** The project dual-writes States in tree form (`hostedProjects.stateTrees.write`). */
     trees?: boolean;
     /** The merge reader is switched to trees (`hostedProjects.stateTrees.read` has `merge`). */
     treeRead?: boolean;
+    /** Self-heal: a State with a proven pointer that `begin` found for a save whose baseline is
+     * flat (its nearest such ancestor, else main's head). */
+    treeBase?: { state: string; pointer: StateTreePointer } | undefined;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -102,6 +106,8 @@ export function convexSourceTransport(
     }
   };
   remember(initial);
+  if (treeBase && validStateTreePointer(treeBase.pointer) && !pointers.has(treeBase.state))
+    pointers.set(treeBase.state, treeBase.pointer);
   const held = new Map<string, Uint8Array>();
   for (const value of preloaded) {
     const bytes = new TextEncoder().encode(value.text);
@@ -168,6 +174,22 @@ export function convexSourceTransport(
               put: bytes => clock.write(() => segments.store.put(bytes)),
             },
             pointer: id => pointers.get(id),
+            nearest: ids => {
+              // Breadth first over the parents this step knows, so the closest pointer wins.
+              const seen = new Set<string>();
+              let level = [...ids];
+              for (let depth = 0; level.length && depth < 64; depth++) {
+                const next: string[] = [];
+                for (const id of level) {
+                  if (seen.has(id)) continue;
+                  seen.add(id);
+                  if (pointers.has(id)) return id;
+                  next.push(...(parents.get(id) ?? []));
+                }
+                level = next;
+              }
+              return treeBase && pointers.has(treeBase.state) ? treeBase.state : undefined;
+            },
             direct: pin => segments.direct(pin),
             settled: (state, result, ms) => {
               tree.ms += ms;

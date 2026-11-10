@@ -14,6 +14,7 @@ import { runSmallSourceSave } from '../dist/hosted-source-small-save.js';
 import { readGitPack, writeGitPack } from '../dist/state-git-pack.js';
 import { emptyStateGitCache, gitObjectId, stateToGit } from '../dist/state-git.js';
 import { dualWriteStateTree } from '../dist/state-tree-dual.js';
+import { writeOutputTree } from '../dist/state-tree-output.js';
 import { saveStateTree, convertStateTree, verifyStateTreeSave } from '../dist/state-tree-save.js';
 import { TreeSession, WIDE_SEGMENT_SPREAD } from '../dist/state-tree-store.js';
 import {
@@ -455,7 +456,9 @@ test('dual-write: a pointer exists only when the stored tree reproduces the flat
     { base: { ...input().base, files: filesOf(first).filter(file => file.path !== 'README.md') } },
     'SOURCE_DIGEST_MISMATCH',
   );
-  // The store fails, or gives back other bytes than it was given.
+  // The store fails, or confirms other bytes than it was given. (The gate checks the bytes in hand
+  // while they are written; R2 confirms a PUT by the SHA-256 checksum of what it stored, so a
+  // store holding other bytes answers with another id or an error, never with this one.)
   const failing = segmentStore();
   for (const [id, bytes] of store.objects) failing.objects.set(id, bytes);
   failing.put = async () => {
@@ -466,9 +469,9 @@ test('dual-write: a pointer exists only when the stored tree reproduces the flat
   for (const [id, bytes] of store.objects) lossy.objects.set(id, bytes);
   const put = lossy.put;
   lossy.put = async bytes => {
-    const id = await put(bytes);
-    lossy.objects.get(id)[0] ^= 1;
-    return id;
+    const copy = Buffer.from(bytes);
+    copy[0] ^= 1;
+    return put(copy);
   };
   await refused({ store: lossy }, 'SOURCE_HASH_MISMATCH');
 });
@@ -580,7 +583,7 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
   );
   const saved = [...dual.writes.values()].find(bytes => bytes.includes('"forge-source-state"'));
   assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(saved)))), saved);
-  // A base without a pointer is skipped; a store that returns other bytes is refused. Both keep
+  // A base without a pointer is skipped; a store that confirms other bytes is refused. Both keep
   // the flat save exactly as it was and record no pointer.
   const none = wiring(segmentStore(), new Map());
   assert.deepEqual((await run(none.trees)).output, flat.output);
@@ -589,9 +592,9 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
   for (const [id, bytes] of store.objects) lossy.objects.set(id, Buffer.from(bytes));
   const put = lossy.put;
   lossy.put = async bytes => {
-    const id = await put(bytes);
-    lossy.objects.get(id)[0] ^= 1;
-    return id;
+    const copy = Buffer.from(bytes);
+    copy[0] ^= 1;
+    return put(copy);
   };
   const bad = wiring(lossy, new Map([[digest(first), pointers.get(digest(first))]])),
     refused = await run(bad.trees);
@@ -629,6 +632,86 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
   assert.deepEqual(merge.outcomes, ['written']);
   assert.equal(described, 0);
   assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(merged)))), merged);
+});
+
+test('dual-write gate off the critical path (dogfood +0.6 s per save 2026-11-10): no pointer before the store confirms the write, and the written segment is never read back', async () => {
+  const store = segmentStore(),
+    first = manifest(treeSample, 'first'),
+    converted = await convertStateTree(store, first, fileOf),
+    next = manifest({ ...treeSample, 'a/c/d.ts': 'changed\n' }, 'next', [digest(first)]);
+  let open, putCalled;
+  const gate = new Promise(resolve => (open = resolve)),
+    called = new Promise(resolve => (putCalled = resolve)),
+    gets = [],
+    put = store.put,
+    get = store.get;
+  store.put = async bytes => {
+    putCalled();
+    await gate;
+    return put(bytes);
+  };
+  store.get = async id => (gets.push(id), get(id));
+  const settled = [];
+  const io = {
+    write: true,
+    read: false,
+    store,
+    pointer: id => (id === digest(first) ? converted.pointer : undefined),
+    settled: (_state, result) => settled.push(result),
+  };
+  const pending = writeOutputTree(io, next, {
+    files: id => (id === digest(first) ? filesOf(first) : undefined),
+    bytes: async files => files.map(file => readBlob(file.blob)),
+  });
+  await called;
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(settled, [], 'checked while the write is in flight, but not yet a pointer');
+  open();
+  const result = await pending;
+  assert.equal(result.status, 'written');
+  assert.ok(!gets.includes(result.pointer.segment), 'no read-back GET of the written segment');
+  assert.deepEqual(Buffer.from(await cold(store, result.pointer)), next);
+});
+
+test('self-heal (dogfood flat chains 2026-11-10): a State whose parent is flat is written on the nearest State with a tree, reading Git ids from that tree', async () => {
+  const store = segmentStore(),
+    first = manifest(treeSample, 'first'),
+    converted = await convertStateTree(store, first, fileOf),
+    flat = manifest({ ...treeSample, 'a/c/d.ts': 'flat edit\n' }, 'flat', [digest(first)]),
+    next = manifest({ ...treeSample, 'a/c/d.ts': 'flat edit\n', 'new/file': 'n' }, 'next', [digest(flat)]);
+  const outcomes = [],
+    asked = [];
+  const io = nearest => ({
+    write: true,
+    read: false,
+    store,
+    pointer: id => (id === digest(first) ? converted.pointer : undefined),
+    ...(nearest ? { nearest } : {}),
+    settled: (_state, result) => outcomes.push(result),
+  });
+  const sources = {
+    // Only the flat parent's list is in hand, as in a save on a flat baseline.
+    files: id => (id === digest(flat) ? filesOf(flat) : undefined),
+    bytes: async files => (
+      asked.push(...files.map(file => file.blob)),
+      files.map(file => readBlob(file.blob))
+    ),
+  };
+  assert.deepEqual(await writeOutputTree(io(), next, sources), {
+    status: 'skipped',
+    reason: 'BASE_HAS_NO_TREE',
+  });
+  const healed = await writeOutputTree(
+    io(ids => (ids.includes(digest(flat)) ? digest(first) : undefined)),
+    next,
+    sources,
+  );
+  assert.equal(healed.status, 'written', JSON.stringify(healed));
+  assert.equal(healed.healed, digest(first));
+  assert.deepEqual(Buffer.from(await cold(store, healed.pointer)), next);
+  // Unchanged files take their Git ids from the converted tree; only the two new blobs are read.
+  assert.deepEqual(asked.sort(), [digest('flat edit\n'), digest('n')].sort());
+  assert.equal(healed.pointer.root, (await convertStateTree(segmentStore(), next, fileOf)).pointer.root);
 });
 
 /** A synthetic repository: `count` files, 9 per folder, 3 levels deep (about one folder per 8 files). */

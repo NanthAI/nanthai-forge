@@ -231,14 +231,19 @@ export class MemorySourceReader extends SourceWorkerReader {
     }
   }
   override async publishMany(bytes: Buffer[]): Promise<WorkerPin[]> {
-    // Dual-write (tree form) each State of this window before its upload records it, in order: a
-    // later State may build on an earlier one's pointer.
-    const trees = this.io.trees;
-    if (trees)
+    // Dual-write (tree form) each State of this window beside its upload, in order: a later State
+    // may build on an earlier one's pointer. The transport attaches a pointer to the State's output
+    // when both have settled, before the step commits.
+    const trees = this.io.trees,
+      window = new Map(bytes.map(value => [digest(value), value] as const));
+    const written = (async () => {
+      if (!trees) return;
       for (const value of bytes) {
         if (!value.subarray(0, 256).includes('"kind":"forge-source-state"')) continue;
         await writeOutputTree(trees, value, {
-          files: id => this.source.heldFiles(id),
+          files: id =>
+            this.source.heldFiles(id) ??
+            (window.has(id) ? parseNativeState(window.get(id)!).files : undefined),
           bytes: async files => {
             // Held bytes first, then the project's own key for a raw object (no descriptor call;
             // it also reaches a blob this job wrote that no row names yet), then descriptors.
@@ -253,7 +258,9 @@ export class MemorySourceReader extends SourceWorkerReader {
           },
         });
       }
-    const pins = await super.publishMany(bytes);
+    })();
+    written.catch(() => {});
+    const [pins] = await Promise.all([super.publishMany(bytes), written]);
     for (let i = 0; i < pins.length; i++) this.source.objects.set(pins[i]!.sha256, bytes[i]!);
     return pins;
   }

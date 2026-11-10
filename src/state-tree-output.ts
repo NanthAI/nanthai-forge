@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from './errors.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile, type NativeState } from './native-state-format.js';
 import { digest } from './portable-hash.js';
 import { dualWriteStateTree, type StateTreeDualResult } from './state-tree-dual.js';
 import type { TreeFile } from './state-tree-format.js';
 import { TreeSession, type SegmentStore, type StateTreePointer } from './state-tree-store.js';
-import { stateTreeManifest, treeChanges, treeFileAt } from './state-tree.js';
+import { stateTreeManifest, treeChanges, treeFileAt, treeFiles } from './state-tree.js';
 
 /** What a source step needs to dual-write the States it produces (projects with tree writes on).
  * The flat State stays the authority: `settled` only learns whether a pointer may be recorded. */
@@ -17,6 +17,9 @@ export type StateTreeIo = {
   store: SegmentStore;
   /** The proven pointer of a State this step knows (from its object row, or written here). */
   pointer(state: string): StateTreePointer | undefined;
+  /** Self-heal: the nearest State with a proven pointer this step knows, searching the known
+   * ancestry of these States (then any base the step was handed for this purpose). */
+  nearest?(states: readonly string[]): string | undefined;
   /** `ms` is the wall time the dual-write added to the step. */
   settled(state: string, result: StateTreeDualResult, ms: number): void;
   /** Exact bytes of a raw object this project stores under its own key, read without a
@@ -41,94 +44,37 @@ const key = (file: Pick<NativeFile, 'blob' | 'mode'>) =>
 const same = (a: NativeFile | undefined, b: NativeFile | undefined) =>
   !!a && !!b && a.blob === b.blob && a.mode === b.mode;
 
-/** Dual-write one State a step is about to publish, as edits on the first parent that has both a
- * proven pointer and a flat list in hand. A changed file's Git id comes from the step's own
- * hashes, else from a stored tree that already holds the same blob at a known path (another
- * parent, or the base before a rename), else from its bytes. Never throws; bytes that are not a
- * State are ignored. */
+/** Dual-write one State a step is about to publish, as edits on a base that has a proven pointer:
+ * the first parent with a flat list in hand, else (self-heal, so a flat State does not keep its
+ * descendants flat) the nearest State with a pointer the step knows (`io.nearest`), whose file
+ * list is then read from its own tree. Any base gives the same tree; the gate still compares with
+ * the flat manifest byte for byte. A changed file's Git id comes from the step's own hashes, else
+ * from a stored tree that already holds the same blob (the base, or another parent), else from its
+ * bytes. Never throws; bytes that are not a State are ignored. `known` skips a second parse and hash
+ * when the caller holds the State value and identity. */
 export async function writeOutputTree(
   io: StateTreeIo,
   manifest: Uint8Array,
   sources: StateTreeSources,
+  known?: { value: NativeState; state: string },
 ): Promise<StateTreeDualResult | null> {
-  let value;
-  try {
-    value = parseNativeState(manifest);
-  } catch {
-    return null;
-  }
-  const state = digest(manifest),
+  let value = known?.value;
+  if (!value)
+    try {
+      value = parseNativeState(manifest);
+    } catch {
+      return null;
+    }
+  const state = known?.state ?? digest(manifest),
     started = performance.now();
   if (!io.write || io.pointer(state)) return null;
-  const parent = value.parents.find(id => io.pointer(id) && sources.files(id));
+  const parent = value.parents.find(id => io.pointer(id) && sources.files(id)),
+    healFrom = parent ? undefined : io.nearest?.(value.parents);
   let result: StateTreeDualResult;
-  if (!parent) result = { status: 'skipped', reason: 'BASE_HAS_NO_TREE' };
-  else {
-    const pointer = io.pointer(parent)!,
-      files = sources.files(parent)!,
-      before = new Map(files.map(file => [file.path, file])),
-      after = new Map(value.files.map(file => [file.path, file])),
-      changes: { path: string; after: NativeFile | null }[] = [];
-    for (const file of value.files)
-      if (!same(before.get(file.path), file)) changes.push({ path: file.path, after: file });
-    for (const file of files) if (!after.has(file.path)) changes.push({ path: file.path, after: null });
-    // Where a stored tree already holds a changed blob: its own path in another parent, or any
-    // path of the base (a rename or copy).
-    const session = new TreeSession(io.store),
-      others = value.parents.filter(id => id !== parent && io.pointer(id)),
-      wanted = new Map(
-        changes.flatMap(change => (change.after ? [[change.after.blob, change.path] as const] : [])),
-      ),
-      inBase = new Map<string, string>();
-    for (const file of files)
-      if (wanted.has(file.blob) && !inBase.has(file.blob)) inBase.set(file.blob, file.path);
-    const stored = async (file: Pick<NativeFile, 'blob' | 'mode'>): Promise<TreeFile | undefined> => {
-      const places = [
-        ...others.map(id => [id, wanted.get(file.blob)!] as const),
-        ...(inBase.has(file.blob) ? [[parent, inBase.get(file.blob)!] as const] : []),
-      ];
-      for (const [id, path] of places) {
-        const found = await treeFileAt(session, (await session.open(io.pointer(id)!)).root, path).catch(
-          () => undefined,
-        );
-        // The Git id of a blob is the same under any file mode; a gitlink's is its commit.
-        if (found?.blob === file.blob && (found.mode === 'gitlink') === (file.mode === 'gitlink'))
-          return { mode: file.mode, blob: file.blob, oid: found.oid };
-      }
-      return undefined;
-    };
+  if (!parent && !healFrom) result = { status: 'skipped', reason: 'BASE_HAS_NO_TREE' };
+  else
     try {
-      // Git ids first, so the files nothing answers are read in one batch.
-      const added = [
-          ...new Map(changes.flatMap(change => (change.after ? [[key(change.after), change.after]] : []))),
-        ].map(([, file]) => file),
-        known = new Map<string, TreeFile | Uint8Array>();
-      await Promise.all(
-        added.map(async file => {
-          const oid = file.mode === 'gitlink' ? undefined : sources.oids?.get(file.blob),
-            found = oid ? { mode: file.mode, blob: file.blob, oid } : await stored(file);
-          if (found) known.set(key(file), found);
-        }),
-      );
-      const unknown = added.filter(file => !known.has(key(file)));
-      if (unknown.length > TREE_UNKNOWN_FILES) result = { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
-      else {
-        // Bytes this step cannot reach (a blob another step of the same job wrote and no row names
-        // yet, as in a conflict draft) leave the State flat. That is not a refusal: nothing was
-        // written and nothing disagrees.
-        const bytes = unknown.length ? await sources.bytes(unknown).catch(() => null) : [];
-        if (!bytes || bytes.some(value => !value)) result = { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
-        else {
-          unknown.forEach((file, i) => known.set(key(file), bytes[i]!));
-          result = await dualWriteStateTree({
-            store: io.store,
-            base: { pointer, state: parent, files },
-            next: { value, manifest },
-            changes,
-            gitFile: async file => known.get(key(file))!,
-          });
-        }
-      }
+      result = await writeOnBase(io, value, manifest, state, sources, (parent ?? healFrom)!);
     } catch (error) {
       result = {
         status: 'refused',
@@ -136,9 +82,106 @@ export async function writeOutputTree(
         message: error instanceof Error ? error.message : String(error),
       };
     }
-  }
   io.settled(state, result, Math.round(performance.now() - started));
   return result;
+}
+
+async function writeOnBase(
+  io: StateTreeIo,
+  value: NativeState,
+  manifest: Uint8Array,
+  state: string,
+  sources: StateTreeSources,
+  base: string,
+): Promise<StateTreeDualResult> {
+  const pointer = io.pointer(base)!,
+    session = new TreeSession(io.store),
+    /** Git ids the base's own tree names, when its file list was read from that tree. */
+    walked = new Map<string, TreeFile>();
+  let files = sources.files(base);
+  if (!files) {
+    const { root } = await session.open(pointer),
+      listed = await treeFiles(session, root);
+    for (const file of listed) walked.set(key(file), { mode: file.mode, blob: file.blob, oid: file.oid });
+    files = listed.map(({ path, blob, mode }) => ({ path, blob, mode }));
+  }
+  const before = new Map(files.map(file => [file.path, file])),
+    after = new Map(value.files.map(file => [file.path, file])),
+    changes: { path: string; after: NativeFile | null }[] = [];
+  for (const file of value.files)
+    if (!same(before.get(file.path), file)) changes.push({ path: file.path, after: file });
+  for (const file of files) if (!after.has(file.path)) changes.push({ path: file.path, after: null });
+  // Where a stored tree already holds a changed blob: its own path in another parent, or any
+  // path of the base (a rename or copy).
+  const others = value.parents.filter(id => id !== base && io.pointer(id)),
+    wanted = new Map(
+      changes.flatMap(change => (change.after ? [[change.after.blob, change.path] as const] : [])),
+    ),
+    inBase = new Map<string, string>();
+  for (const file of files)
+    if (wanted.has(file.blob) && !inBase.has(file.blob)) inBase.set(file.blob, file.path);
+  const stored = async (file: Pick<NativeFile, 'blob' | 'mode'>): Promise<TreeFile | undefined> => {
+    const places = [
+      ...others.map(id => [id, wanted.get(file.blob)!] as const),
+      ...(inBase.has(file.blob) ? [[base, inBase.get(file.blob)!] as const] : []),
+    ];
+    for (const [id, path] of places) {
+      const found = await treeFileAt(session, (await session.open(io.pointer(id)!)).root, path).catch(
+        () => undefined,
+      );
+      // The Git id of a blob is the same under any file mode; a gitlink's is its commit.
+      if (found?.blob === file.blob && (found.mode === 'gitlink') === (file.mode === 'gitlink'))
+        return { mode: file.mode, blob: file.blob, oid: found.oid };
+    }
+    return undefined;
+  };
+  // Git ids first, so the files nothing answers are read in one batch.
+  const added = [
+      ...new Map(changes.flatMap(change => (change.after ? [[key(change.after), change.after]] : []))),
+    ].map(([, file]) => file),
+    gitIds = new Map<string, TreeFile | Uint8Array>();
+  await Promise.all(
+    added.map(async file => {
+      const oid = file.mode === 'gitlink' ? undefined : sources.oids?.get(file.blob),
+        listed = walked.get(key(file)),
+        found = oid
+          ? { mode: file.mode, blob: file.blob, oid }
+          : listed
+            ? { ...listed, mode: file.mode }
+            : await stored(file);
+      if (found) gitIds.set(key(file), found);
+    }),
+  );
+  const unknown = added.filter(file => !gitIds.has(key(file)));
+  if (unknown.length > TREE_UNKNOWN_FILES) return { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
+  // Bytes this step cannot reach (a blob another step of the same job wrote and no row names
+  // yet, as in a conflict draft) leave the State flat. That is not a refusal: nothing was
+  // written and nothing disagrees.
+  const bytes = unknown.length ? await sources.bytes(unknown).catch(() => null) : [];
+  if (!bytes || bytes.some(value => !value)) return { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
+  unknown.forEach((file, i) => gitIds.set(key(file), bytes[i]!));
+  const result = await dualWriteStateTree({
+    store: io.store,
+    base: { pointer, state: base, files },
+    next: { value, manifest },
+    state,
+    changes,
+    gitFile: async file => gitIds.get(key(file))!,
+  });
+  return result.status === 'written' && !value.parents.includes(base) ? { ...result, healed: base } : result;
+}
+
+/** Read, while a save's baseline manifest downloads, the folders on the paths it changes, so its
+ * dual-write finds them in the store's cache. Best effort: a failure here is found again, and
+ * reported, by the write itself. */
+export function warmTreePaths(io: StateTreeIo, state: string, paths: readonly string[]) {
+  const pointer = io.pointer(state);
+  if (!io.write || !pointer || !paths.length || paths.length > TREE_UNKNOWN_FILES) return;
+  const session = new TreeSession(io.store);
+  session
+    .open(pointer)
+    .then(({ root }) => Promise.all(paths.map(path => treeFileAt(session, root, path))))
+    .catch(() => {});
 }
 
 /** The merge reader: a State's exact flat manifest from its stored tree and the flat list of
@@ -190,7 +233,9 @@ export function logStateTree(
     state,
     status: result.status,
     ...io,
-    ...(result.status === 'written' ? { bytes: result.bytes, records: result.records } : {}),
+    ...(result.status === 'written'
+      ? { bytes: result.bytes, records: result.records, ...(result.healed ? { healed: result.healed } : {}) }
+      : {}),
     ...(result.status === 'skipped' ? { reason: result.reason } : {}),
     ...(result.status === 'refused' ? { code: result.code.slice(0, 64) } : {}),
   });

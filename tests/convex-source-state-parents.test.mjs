@@ -134,7 +134,7 @@ test('recorded parents are written once, exact and immutable', async () => {
 
 // Trees in packs, dual-write (Issue 676efbc2): the real Convex step records a State's tree pointer
 // only for a project with tree writes on, in the commit it already makes.
-async function treeSync(write, read = false, corrupt = false, conflict = false) {
+async function treeSync(write, read = false, corrupt = false, conflict = false, flatTips = false) {
   const s = await scaleFixture();
   try {
     const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
@@ -168,7 +168,8 @@ async function treeSync(write, read = false, corrupt = false, conflict = false) 
       converted = await convertStateTree(store, await s.bytes(base), fileOf);
     assert.ok(converted.exact);
     await s.ctx.db.patch(row(base.sha256)._id, { stateTree: converted.pointer });
-    for (const side of ['lane', 'main']) {
+    // Flat tips: written before tree writes began, so only their common ancestor has a pointer.
+    for (const side of flatTips ? [] : ['lane', 'main']) {
       const changes = await Promise.all(
         Object.entries(edits[side]).map(async ([path, id]) => [
           path,
@@ -272,4 +273,51 @@ test('dual-write of a conflict draft: the draft State gets a proven pointer and 
     ),
     await draft.s.bytes({ sha256: draft.merged.digest }),
   );
+});
+
+test('self-heal (dogfood flat chains 2026-11-10): a merge of two flat tips is written as edits on their nearest State with a tree, with no extra call', async t => {
+  const off = await treeSync(false, false, false, false, true),
+    healed = await treeSync(true, false, false, false, true);
+  assert.equal(healed.output, off.output, 'the flat result is byte-identical');
+  const pointer = healed.merged.stateTree;
+  assert.ok(pointer, 'flat parents no longer keep their child flat');
+  assert.deepEqual(
+    Buffer.from((await readStateTree(new TreeSession(healed.store, { strict: true }), pointer)).manifest),
+    await healed.s.bytes({ sha256: healed.merged.digest }),
+  );
+  assert.equal(healed.project.stateTrees.refused, undefined, 'no alarm');
+  assert.equal(healed.sync.functionCalls, off.sync.functionCalls, 'calls do not rise');
+  t.diagnostic(JSON.stringify({ segmentBytes: pointer.size }));
+});
+
+test('self-heal for saves: begin hands a flat baseline its nearest first-parent ancestor with a tree, and nothing when no ancestor has one', async () => {
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { saveTreeBase } = await import(moduleUrl('../convex/projectSourceBeginReads.ts'));
+  const s = await scaleFixture();
+  try {
+    const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
+    const state = async (parents, message) =>
+      s.putSpec(
+        Buffer.from(
+          JSON.stringify({ schema: 1, kind: 'forge-source-state', parents, files: [], message, at }),
+        ),
+        undefined,
+        parents.length + 1,
+        { parents },
+      );
+    const root = await state([], 'root'),
+      converted = await state([root.sha256], 'converted'),
+      flat = await state([converted.sha256], 'flat'),
+      flatter = await state([flat.sha256], 'flatter');
+    const pointer = { segment: 'd'.repeat(64), size: 10, root: 'e'.repeat(64) };
+    await s.ctx.db.patch(row(converted.sha256)._id, { stateTree: pointer });
+    assert.deepEqual(await saveTreeBase(s.ctx, s.projectId, flatter.sha256), {
+      state: converted.sha256,
+      pointer,
+    });
+    // No ancestor with a tree, and no main to fall back to: the save stays flat, as before.
+    assert.equal(await saveTreeBase(s.ctx, s.projectId, root.sha256), null);
+  } finally {
+    s.restore();
+  }
 });

@@ -42,7 +42,7 @@ import {
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
 import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
-import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
+import { saveStepReads, saveTreeBase, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/portable-hash';
 import { publishSourceResult } from './projectSourcePublishInline';
@@ -250,6 +250,12 @@ export const begin = sourceMutation({
         for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
           locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
     }
+    // Self-heal: a save on a flat baseline gets a State with a tree to write its own on.
+    const baseline = active.job.jobKind === 'save' ? locations[1] : undefined,
+      treeBase =
+        active.project.stateTrees?.write && baseline && !baseline.stateTree
+          ? await saveTreeBase(ctx, args.projectId, baseline.descriptor.object.sha256)
+          : null;
     return canonicalPayload({
       generation: active.row.generation ?? 0,
       input: active.job.input,
@@ -261,6 +267,7 @@ export const begin = sourceMutation({
       batchId: active.row.batchId ?? null,
       ...(active.project.stateTrees?.write ? { trees: true } : {}),
       ...(active.project.stateTrees?.read?.includes('merge') ? { treeRead: true } : {}),
+      ...(treeBase ? { treeBase } : {}),
     });
   },
 });

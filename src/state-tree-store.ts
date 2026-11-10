@@ -25,7 +25,9 @@ import {
 } from './state-tree-segment.js';
 
 /** Content-addressed bytes (R2 in production). `getRange` is optional: without it every segment is
- * read whole. */
+ * read whole. `put` resolves with the bytes' SHA-256 only once the store confirmed it holds exactly
+ * those bytes (R2 checks the SHA-256 checksum of a create-only PUT); a store that cannot confirm
+ * that must read the bytes back before it resolves. */
 export interface SegmentStore {
   get(id: string): Promise<Uint8Array>;
   getRange?(id: string, offset: number, length: number): Promise<Uint8Array>;
@@ -276,8 +278,10 @@ export class TreeSession {
       root: { id, oid, at: { segment: other[0] as string, size: other[1] as number, offset, length } },
     };
   }
-  /** Write this operation's segment, read the stored bytes back and check every record in them.
-   * Only the returned pointer may be recorded for the State. */
+  /** Write this operation's segment and check every record in it. `put` resolves only once the
+   * store holds exactly these bytes (R2: a create-only PUT whose SHA-256 checksum R2 confirmed), so
+   * the check runs on the bytes in hand while the write is in flight, with no read-back. Only the
+   * returned pointer may be recorded for the State. */
   async finish(record: StateTreeRecord, root: TreeRef) {
     fail(!this.sealed);
     this.sealed = true;
@@ -287,9 +291,12 @@ export class TreeSession {
         root: [root.id, root.oid, rootIndex, root.at.offset, root.at.length],
         segments: [...this.table].map(([segment, entry]) => [segment, entry.size]),
       }),
-      segment = await this.store.put(bytes),
-      stored = await this.store.get(segment);
-    await verifySegment(stored, segment, bytes.length);
+      id = digest(bytes),
+      written = this.store.put(bytes);
+    written.catch(() => {});
+    await verifySegment(bytes, id, bytes.length);
+    const segment = await written;
+    invariant(segment === id, 'SOURCE_HASH_MISMATCH', 'A stored object differs from its pin.');
     const here = (at: Locator) => (pending(at) ? { ...at, segment, size: bytes.length } : at);
     return {
       pointer: { segment, size: bytes.length, root: root.id } satisfies StateTreePointer,

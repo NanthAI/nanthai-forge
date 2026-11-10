@@ -13,8 +13,9 @@ import type { SegmentStore } from '../src/state-tree-store';
 const wholeSegmentBytes = 1024 * 1024;
 /** Tree segments in R2 under the project's own prefix, read by their deterministic key: a tree
  * walk makes no Convex call. One store serves one action. Whole segments and ranges it fetched from R2
- * are kept for that action (they are immutable and content-addressed); bytes it only wrote are not,
- * so a read-back always sees what R2 holds. */
+ * are kept for that action (they are immutable and content-addressed), and so are segments it
+ * wrote: `put` resolves only after R2 confirmed the SHA-256 checksum of exactly these bytes, so
+ * the bytes in hand are what R2 holds and are never read back. */
 export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'hostedProjects'>) {
   const config = r2Config(),
     fetched = new Map<string, Promise<Uint8Array>>(),
@@ -92,6 +93,7 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
       stats.puts++;
       stats.putBytes += bytes.length;
       written.push({ ...pin, r2Key: stored.r2Key });
+      if (!fetched.has(pin.sha256)) fetched.set(pin.sha256, Promise.resolve(bytes));
       return pin.sha256;
     },
   };

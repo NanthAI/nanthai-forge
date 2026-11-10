@@ -11,7 +11,7 @@ EXTENDS Naturals
 CONSTANTS
   States,   \* State ids
   Contents, \* abstract file lists
-  Gate,     \* TRUE: a pointer is recorded only after the read-back equals the flat manifest
+  Gate,     \* TRUE: a pointer is recorded only after the written bytes reproduce the flat manifest
   Verify    \* TRUE: a reader checks stored bytes against the identity its pointer names
 
 None == "none"
@@ -45,8 +45,10 @@ Save(s, c) ==
   /\ flat' = [flat EXCEPT ![s] = c]
   /\ UNCHANGED <<stored, intended, pointer, writing, write, read, answer>>
 
-\* Dual-write step 1: the tree writer puts a segment. A buggy or lossy writer may store another
-\* content than the flat one (d), under a digest that stands for what it stored.
+\* Dual-write step 1: the tree writer builds a segment (d, the bytes in hand; a buggy writer may
+\* build another content than the flat one) and puts it. The step completes when the store confirms
+\* it holds exactly those bytes (R2 checks the SHA-256 checksum of the PUT), so at that moment the
+\* store holds what the digest stands for; a PUT the store cannot confirm fails and records nothing.
 PutSegment(s, d) ==
   /\ write
   /\ flat[s] # None
@@ -61,13 +63,14 @@ PutSegment(s, d) ==
 \* digest stands for; otherwise the read is refused.
 Verified(s) == stored[s] # Lost /\ stored[s] = intended[s]
 
-\* Dual-write step 2: the commit. With the gate, the pointer is recorded only when what the store
-\* gives back both verifies against its digest and reproduces the flat manifest (the model shows
-\* that the second check alone is not enough); otherwise the State stays flat-only (the alarm).
+\* Dual-write step 2: the commit. With the gate, the pointer is recorded only when the bytes the
+\* writer put (the content its digest stands for, checked while the PUT is in flight) reproduce
+\* the flat manifest; otherwise the State stays flat-only (the alarm). The store may lose or
+\* corrupt the segment before or after this; readers then refuse it (Verify).
 Commit(s) ==
   /\ writing[s]
   /\ writing' = [writing EXCEPT ![s] = FALSE]
-  /\ pointer' = [pointer EXCEPT ![s] = (~Gate) \/ (Verified(s) /\ stored[s] = flat[s])]
+  /\ pointer' = [pointer EXCEPT ![s] = (~Gate) \/ intended[s] = flat[s]]
   /\ UNCHANGED <<flat, stored, intended, write, read, answer>>
 
 \* The object store loses or corrupts a segment at any time, also after the pointer is recorded.

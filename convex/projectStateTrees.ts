@@ -52,20 +52,40 @@ export const configure = internalMutation({
   },
 });
 
-/** The flags, the alarm, and main's head with its pointer (one read each). */
+/** The flags, the alarm, and main's head with its pointer (one read each). `recent` (operator
+ * use) also reads the project's newest object rows, at most that many and 4,000, and lists the
+ * States among them, newest first, with whether each has a pointer. */
 export const status = internalQuery({
-  args: { projectId: v.id('hostedProjects'), state: v.optional(v.string()) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    state: v.optional(v.string()),
+    recent: v.optional(v.number()),
+  },
   returns: v.any(),
-  handler: async (ctx, { projectId, state }) => {
+  handler: async (ctx, { projectId, state, recent }) => {
     const project = await ctx.db.get(projectId);
     invariant(project && !project.removedAt, 'PROJECT_UNAVAILABLE', 'This project is unavailable.');
     const id = state ?? (await hostedStartMain(ctx, projectId)).head,
       row = id ? await findObject(ctx, projectId, id) : null;
+    const rows = recent
+      ? await ctx.db
+          .query('projectObjects')
+          .withIndex('by_project', q => q.eq('projectId', projectId))
+          .order('desc')
+          .take(Math.min(4000, Math.max(1, Math.floor(recent))))
+      : [];
     return {
       stateTrees: project.stateTrees ?? {},
       state: id ?? null,
       size: row?.size ?? null,
       stateTree: row?.stateTree ?? null,
+      ...(recent
+        ? {
+            states: rows
+              .filter(object => object.stateParents && !object.removed)
+              .map(object => ({ at: object._creationTime, pointer: !!object.stateTree })),
+          }
+        : {}),
     };
   },
 });
