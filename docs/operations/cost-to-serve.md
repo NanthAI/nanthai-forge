@@ -1,7 +1,7 @@
 # Cost to serve an outside repository
 
-For a 10,000-file repository, this model budgets **about $2.20/month for a solo
-developer with two agents, $10.00 for five agents, $57.81 for twenty agents, and
+For a 10,000-file repository, this model budgets **about $2.16/month for a solo
+developer with two agents, $9.88 for five agents, $57.35 for twenty agents, and
 $0.0043 while idle**, using published Starter marginal rates. These are estimates
 of Forge's Convex and R2 expense, before provider allowances, not customer prices.
 CI can be much larger; its payer follows the configured runner repository.
@@ -71,7 +71,8 @@ At an assumed calibration load of ten landings per agent-day:
 ```text
 agent_extra_day = 0.0060949964
 landing = 0.00596 - agent_extra_day / 10 = 0.00535050036
-agent_day_with_k_landings = agent_extra_day + k * landing
+agent_extra_day_after_search_cut = 0.0053947982
+agent_day_with_k_landings = selected_agent_extra_day + k * landing
 ```
 
 This split is **modeled**, not a measured marginal landing price. It assigns a
@@ -85,16 +86,20 @@ a serving-only trace tagged by initiating command is the single missing measurem
 | Unit | Brief/capture rates | Published Starter | Evidence |
 | --- | ---: | ---: | --- |
 | Landing, including its save and wait | $0.005351 | $0.005886 | Allocation of corrected capture |
-| Extra active agent-day, before/after a02991a7 resolution | $0.006095 / $0.006095 | $0.006697 / $0.006697 | Modeled activity below; no search cut shipped |
-| Agent-day with ten landings | $0.05960 | $0.06555 | Sum of the preceding two units |
+| Extra active agent-day, before/after a02991a7 resolution | $0.006095 / $0.005395 | $0.006697 / $0.005930 | Modeled 92 search pages before, 46 after |
+| Agent-day with ten landings, after search cut | $0.05890 | $0.06479 | Sum of the preceding two units |
 | Human web session | $0.000408 | $0.000448 | Modeled 30-minute session |
 | Idle repo-month, 10k files, 100 MB source | $0.004045 | $0.004295 | Modeled retained bytes below |
 
 Extra agent-day assumes 20 saves, ten syncs, 92 planning-search pages, 100 status
 commands, twenty changed-file snapshots, ten planning writes and fifty wait-page
 updates unrelated to its landing waits. These are workload assumptions inspired
-by current habits, not a measured per-agent histogram. A search page is a new
-query, including continuation pages.
+by current habits, not a measured per-agent histogram. The before model assumes
+46 duplicate checks with two search pages each; the after model uses the shipped
+one-page search with limit 10: 46 pages/day. The old pages-per-check distribution
+is unmeasured; a one-page user saves nothing, a three-page user saves two pages.
+A search page is a new query, including continuation pages. All other counts stay
+unchanged, and per-search result I/O is conservatively held constant.
 
 | Extra operation | Calls | DB I/O | Action GB-s | Convex egress | R2 A/B | Brief-rate $/operation |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -111,16 +116,18 @@ one PUT, and planning write's one mutation, have fixture guards. Other counts,
 bytes and action durations need a tagged command trace. Reactive web re-executions
 belong to web sessions, not the planning-write row.
 
-Issue `a02991a7` resolved a billing misunderstanding rather than shipping the
-proposed search-only table. The observed 7.47 MB/search is the whole search index,
+Issue `a02991a7` resolved a billing misunderstanding and shipped a one-page
+duplicate-search workflow (GitHub `7bc11e7a`). It did not ship the proposed
+search-only table. The observed 7.47 MB/search is the whole search index,
 not returned document bytes: [Convex search costs](https://docs.convex.dev/search/text-search#costs).
 At 920 searches/day this is $0.000756/day before allowances, **not $1.38/day**.
-An unshipped sevenfold index reduction would save only $0.0000648 per modeled
-agent-day (92 searches); calls and result DB I/O would remain. Thus the current
-before/after scenario prices are equal. In a shared index, query-GB can grow with
+The shipped cut saves a modeled $0.0007002/agent-day at brief rates
+($0.0007664 at Starter) from 46 fewer commands, including their calls and result
+I/O. An unshipped sevenfold index reduction alone would save only $0.0000648 per
+92-search agent-day; calls and result DB I/O would remain. In a shared index, query-GB can grow with
 all projects' indexed records; 1,000-repo extrapolation assumes the same search
 index bytes per query. Even a 1,000-fold index growth would add about $2.27 per
-active agent-month at 92 searches/day; measure this rather than calling it linear.
+active agent-month at 92 searches/day (about $1.13 at 46); measure this rather than calling it linear.
 
 A human session budgets 100 query executions including subscription reruns,
 0.9 MB DB reads, 0.2 MB Convex egress and ten R2 GETs: $0.0004076 at brief rates.
@@ -185,7 +192,7 @@ if configured, are additional, not storage-only idle expense.
 For an active 30-day month, L landings, A active agents every day and S sessions:
 
 ```text
-operations = L * 0.00535050036 + 30*A * 0.0060949964 + S * 0.0004076
+operations = L * 0.00535050036 + 30*A * 0.0053947982 + S * 0.0004076
 average_DB_GB = 0.010 + (0.0005 * L)/2
 average_search_GB = 0.001
 average_R2_GB = 0.103 + (0.0002 * L)/2 + 0.001*(L/30)*7 + 0.0001*20*A*14
@@ -205,22 +212,23 @@ there is no fixed lifetime repo cost. Existing retained bytes must be added.
 
 All use the 10k-file, 100 MB starting repository, no historical pack, 30 active
 days, existing customer-owned CI, and no new imports. Solo has two agents (one
-agent is about $0.20/month less at Starter); sessions are one, five and twenty per
-day. The same estimates apply after the a02991a7 resolution.
+agent is about $0.18/month less at Starter); sessions are one, five and twenty per
+day. These are the after-a02991a7 estimates. Before, Starter totals were
+$2.20 / $10.00 / $57.81 / $0.0043; the difference assumes the search-page mix above.
 
 | Scenario | L / month | Agent-days | Brief-rate $/month | Starter $/month | 1,000 such repos, Starter | Dominant Forge expense |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Solo, 10 landings/day | 300 | 60 | 2.00 | 2.20 | 2,204.07 | Landing/source/check orchestration |
-| Small, 50 landings/day | 1,500 | 150 | 9.09 | 10.00 | 9,996.52 | Landing/source/check orchestration |
-| Busy, 300 landings/day | 9,000 | 600 | 52.56 | 57.81 | 57,809.83 | Landing/source/check orchestration |
+| Solo, 10 landings/day | 300 | 60 | 1.96 | 2.16 | 2,158.08 | Landing/source/check orchestration |
+| Small, 50 landings/day | 1,500 | 150 | 8.98 | 9.88 | 9,881.55 | Landing/source/check orchestration |
+| Busy, 300 landings/day | 9,000 | 600 | 52.14 | 57.35 | 57,349.96 | Landing/source/check orchestration |
 | Idle | 0 | 0 | 0.004045 | 0.004295 | 4.30 | Retained storage |
 
-One thousand of **each** means 4,000 repositories: about $70,014.70/month Starter.
-An equal mix totaling **1,000** repositories (250 of each) is about $17,503.68.
+One thousand of **each** means 4,000 repositories: about $69,393.89/month Starter.
+An equal mix totaling **1,000** repositories (250 of each) is about $17,348.47.
 These are arithmetic extrapolations, not measured capacity or volume discounts.
 For a shared-deployment stress case with 1,000 times the search index bytes, the
-1,000-repo columns become about $6,735 / $21,325 / $103,122 / $4.30. An equal mix
-of 1,000 becomes about $32,797/month. This assumes index bytes grow proportionally
+1,000-repo columns become about $4,424 / $15,546 / $80,006 / $4.30. An equal mix
+of 1,000 becomes about $24,995/month. This assumes index bytes grow proportionally
 with repository count; actual retained Work rows determine the index, so it is a
 sensitivity, not a measured forecast. A 22-day
 working month replaces L, agent-days and sessions with 22-day totals and recomputes
@@ -281,7 +289,7 @@ restriction, mandatory step or payer policy follows from these findings.
 | Imports: 10 KB/file, 300 B metadata/file, throughput, pages, publication overhead and retries | One already-approved import's per-phase logs, R2 counters and retained-byte deltas; no new import is authorized here |
 | History depth-to-pack multipliers, upload throughput, auxiliary copies and indexing | One approved import with known pack bytes and final original/framed/index byte counts |
 | New-repo DB/search/R2 footprints; 0.5 MB Work, 0.2 MB source and 1 MB logs/landing; snapshot size and actual expiry | One retained-byte inventory before/after a serving-only month, by project and object family |
-| Shared-index growth and a hypothetical sevenfold reduction | One per-query index-byte reading after the existing store change; no standalone cut was shipped |
+| Shared-index growth, old pages/check and a hypothetical sevenfold reduction | One per-query index-byte reading after the existing store change; the per-query index size was not reduced |
 | Actual customer's CI minutes, account payer, OS, rounding, cache/artifact costs | One configured run's repository binding and provider billing detail, including artifacts |
 | 1,000-repo concurrency, retries and batching | One approved representative multi-project trace; linear multiplication alone proves no capacity claim |
 | Actual allowances, web delivery/hosting and other fixed operator expense | One operator billing reconciliation by provider and deployment, outside this marginal Convex/R2 model |
