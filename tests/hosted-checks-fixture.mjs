@@ -314,6 +314,7 @@ export async function checksFixture(source = null, { candidateFields = {}, state
     ).then(JSON.parse);
   return {
     ...s,
+    store: s,
     traffic,
     call,
     run,

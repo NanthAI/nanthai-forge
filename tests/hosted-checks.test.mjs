@@ -645,3 +645,162 @@ test('operational expiry keeps active checks and all verdict/source/receipt evid
   );
   await assert.rejects(reusedEvidence(randomUUID()), code('EVIDENCE_CHANGED'));
 });
+
+test('legacy catch-up resumes exact steps, pauses for landings, and stops after preserving live work and immutable evidence', async t => {
+  const s = await checksFixture();
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const passed = await s.pass(await s.activate((await s.enqueue(s.selection())).id));
+  const terminal = [...s.tables.projectHostedCheckRuns.values()][0];
+  const endedAt = new Date(Date.now() - 31 * 86_400_000).toISOString();
+  s.patch('projectHostedCheckRuns', terminal._id, {
+    value: JSON.stringify({
+      ...passed,
+      endedAt,
+      contractReports: { 'kept.test.mjs': { durationMs: 1, failed: false, attempts: [] } },
+    }),
+    proof: 'keep-exact-proof',
+  });
+  for (let i = 0; i < 19; i++)
+    s.insert('projectHostedCheckCallbacks', {
+      projectId: s.projectId,
+      runId: passed.id,
+      eventId: `legacy-${i}`,
+      digest: `digest-${i}`,
+      value: JSON.stringify({ raw: 'x'.repeat(2000) }),
+    });
+  const alias = s.insert('projectHostedCheckCallbacks', {
+    projectId: s.projectId,
+    runId: passed.id,
+    eventId: 'reuse:keep',
+    digest: 'keep',
+    value: '{"candidateId":"keep"}',
+  });
+  const activeId = randomUUID();
+  const active = s.insert('projectHostedCheckRuns', {
+    ...Object.fromEntries(Object.entries(terminal).filter(([k]) => !k.startsWith('_'))),
+    runId: activeId,
+    status: 'running',
+    value: JSON.stringify({ ...passed, id: activeId, status: 'running', endedAt: null }),
+  });
+  const liveCallback = s.insert('projectHostedCheckCallbacks', {
+    projectId: s.projectId,
+    runId: activeId,
+    eventId: 'live',
+    digest: 'live',
+    value: '{"raw":"live"}',
+  });
+  const recentId = randomUUID();
+  s.insert('projectHostedCheckRuns', {
+    ...Object.fromEntries(Object.entries(terminal).filter(([k]) => !k.startsWith('_'))),
+    runId: recentId,
+    value: JSON.stringify({ ...passed, id: recentId }),
+  });
+  const summaryId = randomUUID();
+  s.insert('projectHostedCheckRuns', {
+    ...Object.fromEntries(Object.entries(terminal).filter(([k]) => !k.startsWith('_'))),
+    runId: summaryId,
+    value: JSON.stringify({
+      ...passed,
+      id: summaryId,
+      configuration: {
+        provider: 'ci-status',
+        ci: {
+          adapter: 'github-actions',
+          repository: 'synthetic/checks',
+          workflow: '.github/workflows/test.yml',
+        },
+        runtime: 'e'.repeat(64),
+        environmentFingerprint: 'e'.repeat(64),
+      },
+    }),
+  });
+  const queueId = s.insert('projectHostedLandingQueues', {
+    projectId: s.projectId,
+    channel: 'main',
+    sequence: 0,
+    fence: 0,
+    wake: null,
+    lease: null,
+    status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
+  });
+  const immutableNames = [
+    'projectHostedRecords',
+    'projectHostedAcceptances',
+    'projectWorkEvents',
+    'projectObjects',
+  ];
+  const immutable = immutableNames.map(n => [...s.tables[n]]);
+  const liveBefore = structuredClone(s.tables.projectHostedCheckRuns.get(active));
+  const aliasBefore = structuredClone(s.tables.projectHostedCheckCallbacks.get(alias));
+  await s.store.call('dueExpiryArmsCatchup', expiry.check, {
+    projectId: s.projectId,
+    runId: activeId,
+    phase: 'callbacks',
+    operationId: 'due-live-expiry',
+    dueAt: 0,
+  });
+  assert.equal(
+    s.scheduled.filter(w => getFunctionName(w.fn) === 'projectOperationalExpiry:catchup').length,
+    1,
+  );
+  const operationId = `exhaust-catchup:v1:${s.projectId}`;
+  const call = (step, extra = {}) =>
+    s.store
+      .call('catchup', expiry.catchup, {
+        projectId: s.projectId,
+        operationId,
+        step,
+        pages: 1,
+        continue: false,
+        ...extra,
+      })
+      .then(JSON.parse);
+  let p = await call(0);
+  const first = structuredClone(p);
+  assert.deepEqual(await call(0), first, 'lost response reconciles without running another step');
+  s.patch('projectHostedLandingQueues', queueId, {
+    status: { total: 1, groups: 1, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
+  });
+  const paused = await call(p.step);
+  assert(paused.paused && paused.step === p.step);
+  assert.deepEqual(paused.totals, p.totals, 'queue growth prevents cleanup work');
+  assert((await call(p.step, { resume: true })).paused, 'explicit resume waits for an empty landing queue');
+  s.patch('projectHostedLandingQueues', queueId, {
+    status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 130 },
+  });
+  assert((await call(p.step)).paused, 'landing service-time growth also pauses');
+  p = await call(p.step, { resume: true });
+  assert(
+    !p.paused && p.step > paused.step,
+    'an explicit resume adopts the observed baseline once the queue is clear',
+  );
+  s.patch('projectHostedLandingQueues', queueId, {
+    status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
+  });
+  for (let n = 0; n < 100 && p.phase !== 'done'; n++) p = await call(p.step);
+  assert.equal(p.phase, 'done');
+  assert(p.totals.find(x => x.table === 'projectHostedCheckCallbacks').rows >= 19);
+  assert(p.totals.find(x => x.table === 'projectHostedCheckRuns').bytes > 0);
+  assert.equal(s.tables.projectHostedCheckRuns.get(terminal._id).proof, 'keep-exact-proof');
+  assert.deepEqual(s.tables.projectHostedCheckRuns.get(active), liveBefore);
+  assert.equal(s.tables.projectHostedCheckCallbacks.get(liveCallback).value, '{"raw":"live"}');
+  assert.deepEqual(s.tables.projectHostedCheckCallbacks.get(alias), aliasBefore);
+  assert.deepEqual(
+    immutableNames.map(n => [...s.tables[n]]),
+    immutable,
+  );
+  assert(
+    !s.scheduled.some(w => w.args.runId === summaryId),
+    'summary-only CI runs never arm empty cleanup wakes',
+  );
+  const wakes = s.scheduled.length;
+  assert.deepEqual(await call(p.step), p);
+  assert.equal(s.scheduled.length, wakes, 'completed catch-up adds no idle wake');
+  assert(
+    s.scheduled.some(w => w.args.runId === recentId && w.args.phase === 'callbacks'),
+    'young terminal rows get their missed future wake',
+  );
+  const { armExpiryCatchup } = await import(moduleUrl('../convex/projectOperationalExpiryCatchup.ts'));
+  await s.run('armCompletedCatchup', ctx => armExpiryCatchup(ctx, s.projectId), {});
+  assert.equal(s.scheduled.length, wakes, 'later terminal traffic does not restart the completed walk');
+});

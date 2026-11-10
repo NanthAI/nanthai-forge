@@ -512,8 +512,25 @@ builds are included even when their source binding matches. Both retirement and
 replaced-payload cleanup use up to 100 rows with a 1 MiB read target (plus at
 most one document of overshoot), keeping small-row cleanup cheap. No original State, Git object,
 landing receipt, audit or planning record is eligible. Old unarmed operational
-rows need an explicitly bounded initial run; new terminal transitions arm their
-own expiry. No blanket legacy scan is automatic.
+rows are discovered by a versioned catch-up in `projectOperationalExpiryCatchup.ts`.
+The first due expiry arms one project-local walk through existing indexed run/job
+headers; a fixed creation cutoff prevents new work extending the walk. The same
+expiry pages recheck terminal state, age and physical executions before modifying
+anything. Younger terminal rows receive their missed future wake; active work
+keeps its terminal hook. The cursor and cumulative per-table counts/JSON bytes
+reuse one existing maintenance receipt. Explicit step numbers reconcile lost
+replies without repeating work. Catch-up steps batch up to sixteen existing pages with a 256 KiB conservative
+read target (plus one bounded page of overshoot), then yield one second between scheduled
+steps, pause without polling if queue depth rises or landing service time exceeds
+its starting value by 25%, and can resume on a later due expiry or explicit step.
+An explicit `resume:true` adopts the newly observed service-time baseline only
+after the landing queue is empty.
+Generation discovery uses the existing retirement protections. A completed walk
+schedules nothing, and later due expiries do not restart it. No idle scan, new
+index, table, worker or retention window is introduced. Operators can drive the
+same steps with `continue:false` for budgeted, measured drains; each returned
+step and cumulative total is durable. Callback catch-up uses its fixed start time
+as its upper bound, including late legacy raw callbacks while retaining aliases.
 
 `tests/landing-cost-guard.test.mjs` measures **net stored JSON document bytes**
 per table around one complete check/acceptance with a controlled clock and fixed synthetic source-timing input on a fresh synthetic project and

@@ -181,3 +181,100 @@ test('source exhaust expiry waits for whole-job completion and physical tasks, p
   assert.deepEqual([...f.tables.projectHostedRecords], receipts);
   assert.deepEqual([...f.tables.projectObjects], objects);
 });
+
+test('legacy catch-up walks distinct terminal source jobs and retains live siblings without polling after completion', async t => {
+  const { scaleFixture } = await import('./convex-source-scale-fixture.mjs');
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+  const f = await scaleFixture();
+  t.after(() => f.restore());
+  const jobId = await f.enqueue(await f.json({ synthetic: 'legacy-catch-up' }));
+  const job = await f.job(jobId);
+  await f.run('oldTerminal', () =>
+    jobs.saveSourceJob(f.ctx, f.projectId, job, { ...job, status: 'completed' }, Date.now() - 8 * 86_400_000),
+  );
+  const batchId = await f.ctx.db.insert('projectSourceBatches', {
+    projectId: f.projectId,
+    jobId,
+    step: 1,
+    kind: 'states',
+    end: 17,
+    total: 17,
+    next: 17,
+    completed: 17,
+    status: 'done',
+    failure: null,
+  });
+  for (let index = 0; index < 17; index++)
+    await f.ctx.db.insert('projectSourceTasks', {
+      projectId: f.projectId,
+      jobId,
+      step: 1,
+      batchId,
+      index,
+      input: 'x'.repeat(40_000),
+      status: 'done',
+      generation: 1,
+      progress: null,
+      output: null,
+      failure: null,
+    });
+  const liveJob = await f.enqueue(await f.json({ synthetic: 'live-catch-up' }));
+  const liveBatch = await f.ctx.db.insert('projectSourceBatches', {
+    projectId: f.projectId,
+    jobId: liveJob,
+    step: 1,
+    kind: 'states',
+    end: 0,
+    total: 1,
+    next: 1,
+    completed: 0,
+    status: 'waiting',
+    failure: null,
+  });
+  const liveTask = await f.ctx.db.insert('projectSourceTasks', {
+    projectId: f.projectId,
+    jobId: liveJob,
+    step: 1,
+    batchId: liveBatch,
+    index: 0,
+    input: 'live input',
+    status: 'running',
+    generation: 1,
+    progress: null,
+    output: null,
+    failure: null,
+  });
+  const receipts = [...f.tables.projectHostedRecords];
+  const objects = [...f.tables.projectObjects];
+  let p = { step: 0 };
+  for (let n = 0; n < 50 && p.phase !== 'done'; n++)
+    p = JSON.parse(
+      await f.call('sourceCatchup', expiry.catchup, {
+        projectId: f.projectId,
+        operationId: `exhaust-catchup:v1:${f.projectId}`,
+        step: p.step,
+        continue: false,
+      }),
+    );
+  assert.equal(p.phase, 'done');
+  assert(
+    f.counts.filter(c => c.name === 'sourceCatchup').every(c => c.readBytes < 1024 * 1024),
+    'catch-up batches stay within the fixture read-byte budget',
+  );
+  assert.equal(p.totals.find(r => r.table === 'projectSourceTasks').rows, 17);
+  assert.equal(p.totals.find(r => r.table === 'projectSourceBatches').rows, 1);
+  assert(p.totals.find(r => r.table === 'projectSourceTasks').bytes > 680_000);
+  assert.equal(f.tables.projectSourceTasks.size, 1);
+  assert.equal(f.tables.projectSourceTasks.get(liveTask).input, 'live input');
+  assert.equal(f.tables.projectSourceBatches.size, 1);
+  assert.deepEqual([...f.tables.projectHostedRecords], receipts);
+  assert.deepEqual([...f.tables.projectObjects], objects);
+  const scheduled = f.scheduled.size;
+  await f.call('doneCatchup', expiry.catchup, {
+    projectId: f.projectId,
+    operationId: `exhaust-catchup:v1:${f.projectId}`,
+    step: p.step,
+  });
+  assert.equal(f.scheduled.size, scheduled);
+});
