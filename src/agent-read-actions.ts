@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 /** Agent actions that only read. They never write Work records, States, receipts
- * or presence; tests/agent-reads-never-write.test.mjs hashes the owner around each. */
+ * or presence. */
 export const SNAPSHOT_READ_ACTIONS: ReadonlySet<string> = new Set([
   'status',
   'landing',

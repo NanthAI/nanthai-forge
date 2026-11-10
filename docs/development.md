@@ -247,7 +247,7 @@ references: [SWC compilation](https://swc.rs/docs/configuration/compilation),
 Run `npm ci --ignore-scripts` and `npm run build:core` before focused core tests. Run `npm run build:web` as well before browser asset inspection or hosted UI checks; assets build into `hosted-web-dist`. Run focused tests with the private queue preload:
 
 ```sh
-node --import ./tests/check-runtime.mjs --test tests/agent-action-parse.test.mjs
+node --import ./tests/check-runtime.mjs --test tests/agent-verbs.test.mjs
 ```
 
 For new prose under `docs/`, add a matching JSON manifest under `scripts/package-documents/`: for example, `docs/operations/example.md` uses `scripts/package-documents/operations/example.json` with `{"path":"docs/operations/example.md","order":100}`. Existing order values preserve the installed documentation order; ties sort by path. Each document owns its manifest, so parallel additions do not edit one shared list. The explicit inventory avoids packaging private output. `node scripts/check-documents.mjs` validates the inventory without building.
