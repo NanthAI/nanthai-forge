@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
-import { gitlinkCommit } from './gitlink.js';
-import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
-import { readEditContext } from './agent-edit-context.js';
-import { conversationSchema } from './agent-edit-types.js';
-import { existsSync, lstatSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { readEditContext } from './agent-edit-context.js';
+import { conversationSchema } from './agent-edit-types.js';
+import { changedPaths } from './agent-sync.js';
 import { ForgeError } from './errors.js';
+import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
+import { gitlinkCommit } from './gitlink.js';
 import { digest } from './hash.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { nativeFile } from './native-file.js';
 import { snapshotBlob } from './native-snapshot-clone.js';
 import { NativeSource, nativePaths, type NativeFile } from './native-source.js';
-import { changedPaths } from './agent-sync.js';
 import { writeRecoveryState } from './recovery-state.js';
 import { readPolicy } from './work-autonomy.js';
 import { workLocked } from './work-lock.js';
@@ -88,37 +88,6 @@ function statKey(root: string, path: string) {
   // A submodule directory's stat does not move with its HEAD; its pointer is the key.
   if (stat.isDirectory()) return `gitlink:${gitlinkDirectoryPointer(root, path).toString()}`;
   return [stat.dev, stat.ino, stat.size, stat.mode, stat.mtimeNs, stat.ctimeNs].join(':');
-}
-
-/** Unsaved edits on top of the Lane's saved head, as an agent-facing notice. A
- * snapshot whose parent is no longer the head was superseded by a checkpoint. */
-export function autoSnapshotNotice(store: WorkStore, lane: Pick<Lane, 'id' | 'head' | 'state'>) {
-  const snapshot = readAutoSnapshot(store, lane.id);
-  if (!snapshot || snapshot.parent !== lane.head || ['completed', 'abandoned'].includes(lane.state))
-    return undefined;
-  return {
-    state: snapshot.state,
-    at: snapshot.at,
-    parent: snapshot.parent,
-    changedPathCount: snapshot.changedPathCount,
-    paths: snapshot.paths,
-    notice: `Unsaved edits recovered from auto-snapshot at ${snapshot.at}: ${snapshot.changedPathCount} path(s) changed since the last checkpoint. They stay in the Lane folder unless it was removed; checkpoint saves them. Read them with diff {"from":"${snapshot.parent}","to":"${snapshot.state}"} or show {"state":"${snapshot.state}","path":"…"}.`,
-  };
-}
-/** Start/status notices for every open Lane with unsaved auto-snapshot edits. */
-export function autoSnapshotNotices(store: WorkStore, actor?: string) {
-  let names: string[];
-  try {
-    names = readdirSync(autoSnapshotDirectory(store)).filter(name => /^[0-9a-f-]{36}\.json$/.test(name));
-  } catch {
-    return [];
-  }
-  return names.flatMap(name => {
-    const lane = store.select('lanes', name.slice(0, -5), 'id', true);
-    if (!lane || (actor && lane.startedBy?.name !== actor)) return [];
-    const notice = autoSnapshotNotice(store, lane);
-    return notice ? [{ laneId: lane.id, path: store.path(lane.id), ...notice }] : [];
-  });
 }
 
 export type AutoSnapshotResult =

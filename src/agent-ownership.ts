@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { PeersCache } from './agent-peers-cache.js';
-import { pageHashes, pageSize } from './work-records.js';
 import { readHostState } from './host-binding.js';
 import { PRESENCE, activityAt } from './presence.js';
 import type { WorkStore } from './work-store.js';
@@ -35,62 +33,6 @@ export function laneOwnership(
             ? 'working'
             : 'quiet',
   };
-}
-
-export function duplicateStartWarnings(
-  store: WorkStore,
-  laneId: string,
-  outcome: string,
-  overlaps: { lane: string }[] = [],
-) {
-  const tx = store.readRecords(),
-    legacy = tx ? undefined : store.load();
-  const cache = new PeersCache(store.root);
-  const lanes = tx
-    ? (tx.manifest.collections.lanes?.pages ?? []).flatMap((hash, page) => {
-        const key = `lane-fields-v1:${hash}`;
-        const cached = cache.read<Lane[]>(key);
-        if (cached) return cached;
-        const rows = Array.from(
-          { length: Math.min(pageSize, tx.manifest.collections.lanes!.count - page * pageSize) },
-          (_, offset) => tx.fieldsAt('lanes', page * pageSize + offset).record,
-        );
-        cache.write(key, rows);
-        return rows;
-      })
-    : legacy!.lanes;
-  const outcomes = new Map<string, string>();
-  if (tx) {
-    const intents = tx.manifest.collections.intents;
-    for (const [page, hash] of (intents?.pages ?? []).entries()) {
-      const key = `ownership-intents-v1:${hash}`;
-      let rows = cache.read<{ id: string; outcome: string }[]>(key);
-      if (!rows || rows.length !== Math.min(pageSize, intents!.count - page * pageSize)) {
-        const slot = `ownership-intent-slot-v1:${page}`,
-          hashes = pageHashes(store.directory, hash);
-        const prior = cache.read<{ hashes: string[]; rows: { id: string; outcome: string }[] }>(slot);
-        rows = hashes.map((id, offset) => {
-          if (prior?.hashes[offset] === id && prior.rows[offset]) return prior.rows[offset]!;
-          const intent = tx.fieldsAt('intents', page * pageSize + offset).record;
-          return { id: intent.id, outcome: intent.outcome };
-        });
-        cache.write(slot, { hashes, rows });
-        cache.write(key, rows);
-      }
-      for (const row of rows) outcomes.set(row.id, row.outcome);
-    }
-  } else for (const intent of legacy!.intents) outcomes.set(intent.id, intent.outcome);
-  const ids = new Set(overlaps.map(item => item.lane));
-  const normalized = (text: string) => text.trim().replace(/\s+/g, ' ').toLowerCase();
-  for (const lane of lanes) {
-    if (lane.id === laneId || !['active', 'paused', 'ready'].includes(lane.state)) continue;
-    const other = outcomes.get(lane.intentId);
-    if (other !== undefined && normalized(other) === normalized(outcome)) ids.add(lane.id);
-  }
-  return [...ids]
-    .sort()
-    .slice(0, 5)
-    .map(id => `Lane ${id} already does this; take it or coordinate.`);
 }
 
 export function stalledLane(

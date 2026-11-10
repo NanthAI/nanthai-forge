@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkNeverRan } from './check-run-state.js';
-import { frictionId, appendFriction } from './friction.js';
-import { pageHashes, pageSize } from './work-records.js';
-import { digest } from './hash.js';
 import type { FrictionCapture } from './friction-types.js';
-import type { CheckRun, Lane } from './work-types.js';
+import { appendFriction, frictionId } from './friction.js';
+import { digest } from './hash.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
-import type { WorkStore } from './work-store.js';
+import { pageHashes, pageSize } from './work-records.js';
+import type { CheckRun, Lane } from './work-types.js';
 
 type Occurrence = {
   operationId: string;
@@ -122,117 +121,4 @@ export function captureTransactionFriction(tx: WorkRecordTransaction, previous?:
       }
     }
   }
-}
-/** Diagnostics cannot turn an already-applied source operation into a failure. */
-export function captureAutomatic(store: WorkStore, input: Occurrence) {
-  try {
-    return store.locked(
-      () => {
-        const tx = store.records(),
-          event = automaticFriction(input);
-        const count = tx.manifest.collections.frictionEvents?.count ?? 0;
-        appendAutomatic(tx, event);
-        if (count !== tx.manifest.collections.frictionEvents?.count) store.commitRecords(tx);
-      },
-      { waitMs: 0 },
-    );
-  } catch {
-    process.stderr.write(
-      `Friction capture unavailable for operation ${input.operationId}; its original outcome is unchanged.\n`,
-    );
-  }
-}
-export function frictionReceipt(
-  store: WorkStore,
-  command: { action: string; operationId?: string | undefined; laneId?: string | undefined },
-  result: unknown,
-) {
-  const receipt = result as {
-    attempts?: { error?: { code: string }; status?: string }[];
-    entries?: { operationId: string; code?: string; status: string; retries?: number }[];
-    code?: string;
-    status?: string;
-    terminal?: boolean;
-  };
-  if (command.action === 'sync' && receipt.status === 'conflict' && command.operationId)
-    captureAutomatic(store, {
-      operationId: command.operationId,
-      category: 'sync-conflict',
-      title: 'Sync conflict',
-      area: 'sync',
-      detail: 'Sync requires conflict resolution.',
-      laneId: command.laneId,
-      evidence: [command.operationId],
-    });
-  const bounces =
-    receipt.attempts?.filter(attempt =>
-      ['CHANNEL_CHANGED', 'CONTRACT_RESYNC_REQUIRED'].includes(attempt.error?.code ?? ''),
-    ).length ?? 0;
-  const landBounces = receipt.entries?.filter(entry => (entry.retries ?? 0) > 0) ?? [];
-  for (const entry of landBounces)
-    captureAutomatic(store, {
-      operationId: entry.operationId,
-      category: 'landing-bounce',
-      title: 'Landing bounced',
-      area: 'landing',
-      detail: 'The saved-head landing needed a new attempt after main moved.',
-      count: entry.retries!,
-      retries: entry.retries!,
-      evidence: [entry.operationId],
-    });
-  const exhausted = ['WORK_BUSY', 'WORK_STALE'].includes(receipt.code ?? '');
-  const entries =
-    receipt.entries?.filter(entry => ['WORK_BUSY', 'WORK_STALE'].includes(entry.code ?? '')) ?? [];
-  if (
-    receipt.terminal !== false &&
-    command.operationId &&
-    (bounces || exhausted || receipt.status === 'retry-exhausted')
-  )
-    captureAutomatic(store, {
-      operationId: command.operationId,
-      category: bounces || receipt.status === 'retry-exhausted' ? 'landing-bounce' : 'work-retries',
-      title: bounces || receipt.status === 'retry-exhausted' ? 'Landing bounced' : 'Work retries exhausted',
-      area: bounces || receipt.status === 'retry-exhausted' ? 'landing' : 'workflow',
-      detail: 'The operation needed a retry or exhausted its retry window.',
-      laneId: command.laneId,
-      count: Math.max(1, bounces),
-      retries: Math.max(1, bounces),
-      evidence: [command.operationId],
-    });
-  for (const entry of entries)
-    captureAutomatic(store, {
-      operationId: entry.operationId,
-      category: 'work-retries',
-      title: 'Work retries exhausted',
-      area: 'workflow',
-      detail: `Landing stopped with ${entry.code}.`,
-      evidence: [entry.operationId],
-    });
-  let batchBounced = false;
-  if (['finish', 'land'].includes(command.action)) {
-    const operations = new Set([
-      command.operationId,
-      ...(receipt.entries ?? []).map(entry => entry.operationId),
-    ]);
-    const tx = store.readRecords();
-    for (let i = 0; i < (tx?.manifest.collections.landingBatches?.count ?? 0); i++) {
-      const batch = tx!.at('landingBatches', i);
-      if (batch.status === 'superseded' && batch.entryIds.some(id => operations.has(id))) {
-        batchBounced = true;
-        break;
-      }
-    }
-  }
-  return ['finish', 'land'].includes(command.action) &&
-    (bounces ||
-      batchBounced ||
-      landBounces.length ||
-      exhausted ||
-      entries.length ||
-      receipt.status === 'retry-exhausted')
-    ? {
-        frictionHint:
-          'Hit workflow friction? Add detail with nforge agent ROOT friction; nforge improve ROOT groups reports.',
-      }
-    : {};
 }

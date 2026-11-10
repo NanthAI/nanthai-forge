@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { makeFunctionReference } from 'convex/server';
-import { coordinationClient } from './coordination-client.js';
-import { cleanUrl } from './project-routes.js';
-import { basename } from 'node:path';
-import { readHostState } from './host-binding.js';
-import { safeRelative } from './safe-relative.js';
 import { invariant } from './errors.js';
-import type { WorkStore } from './work-store.js';
+import { cleanUrl } from './project-routes.js';
 
 export type LinkInput = {
   laneId?: string | undefined;
@@ -58,66 +52,4 @@ export function buildAgentLinks(
   };
   const hosted = input.projectUrl ? make(input.projectUrl) : null;
   return { hosted, preferred: hosted, pinned: !!hosted || !!input.viewId || !!input.save };
-}
-/** Read-only: does not restore a Lane, checkpoint, index, or enqueue hosted work. */
-export async function agentLinks(store: WorkStore, input: LinkInput, localOnly = false) {
-  invariant(
-    [input.laneId, input.viewId, input.save].filter(Boolean).length === 1,
-    'BAD_ARGUMENT',
-    'Select one laneId, viewId or save.',
-  );
-  invariant(!input.path || safeRelative(input.path), 'UNSAFE_PATH', 'Use a relative source path.');
-  invariant(!input.line || !!input.path, 'BAD_ARGUMENT', 'A line requires a file path.');
-  const lane = input.laneId ? store.select('lanes', input.laneId, 'id', true) : undefined;
-  const view = input.viewId ? store.select('views', input.viewId) : undefined;
-  const head = input.save ?? lane?.head ?? view?.head;
-  invariant(head, 'NOT_FOUND', 'Lane or clean Candidate not found.');
-  const binding = readHostState(store).binding;
-  let owner: string | undefined;
-  let hostedSlug: string | undefined;
-  let hostedName = binding?.name;
-  if (binding) {
-    const parts = new URL(binding.projectUrl).pathname.split('/').filter(Boolean).map(decodeURIComponent);
-    if (
-      parts.length >= 2 &&
-      parts[0] !== 'projects' &&
-      !parts[1]!.includes('~') &&
-      (localOnly || !process.env.FORGE_AUTH_TOKEN)
-    ) {
-      owner = parts[0];
-      hostedSlug = parts[1];
-    } else {
-      invariant(!localOnly, 'HOST_IDENTITY_UNAVAILABLE', 'Hosted project identity is unavailable locally.');
-      const project = await coordinationClient(binding.deployment, process.env.FORGE_AUTH_TOKEN).query(
-        makeFunctionReference<
-          'query',
-          { projectId: string },
-          { handle: string; slug: string; name: string } | null
-        >('urlProjects:resolve'),
-        { projectId: binding.projectId },
-      );
-      invariant(project, 'HOST_IDENTITY_REQUIRED', 'Hosted project identity is unavailable.');
-      owner = project.handle;
-      hostedSlug = project.slug;
-      hostedName = project.name;
-    }
-  }
-  return {
-    ...input,
-    head,
-    ...buildAgentLinks({
-      ...input,
-      head,
-      name: basename(store.root),
-      ...(binding
-        ? {
-            projectUrl: binding.projectUrl,
-            projectId: binding.projectId,
-            name: hostedName ?? binding.name,
-            ...(owner ? { owner } : {}),
-            ...(hostedSlug ? { slug: hostedSlug } : {}),
-          }
-        : {}),
-    }),
-  };
 }

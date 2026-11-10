@@ -38,3 +38,27 @@ test('cleanup joins a late detached child before removing its owner', async () =
   assert.equal(status, 0, errors);
   assert.match(output, /joined/);
 });
+
+test('cleanup ignores retired presence and advisory reservations', async () => {
+  const { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { initNative } = await import('../dist/native-work.js');
+  const { WorkStore } = await import('../dist/work-store.js');
+  const { cleanupOwner } = await import('./owner-cleanup.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'forge-cleanup-retired-'));
+  try {
+    initNative(root);
+    const store = new WorkStore(root);
+    const advisory = join(store.directory, 'agent-advisory', 'pending', 'abcd');
+    mkdirSync(advisory, { recursive: true });
+    // Old teardown waited forever for an unstarted advisory with no remaining producer.
+    writeFileSync(join(advisory, 'ticket.json'), '{}');
+    mkdirSync(join(store.directory, 'presence-owner'), { recursive: true });
+    writeFileSync(join(store.directory, 'presence-worker-123.marker'), 'retired');
+    await cleanupOwner(root);
+    assert.equal(existsSync(root), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -9,17 +9,6 @@ import { setTimeout as pause, setImmediate as yieldTurn } from 'node:timers/prom
 
 // Keep handles for in-process workers and checks; a Promise alone cannot join an unref'd child.
 const children = new Map();
-const knownPresence = new Map();
-// A fixture that spawns a grandchild can retain its exact identity before the
-// worker publishes a lease; discovering arbitrary process arguments is unsafe.
-export function registerOwnerPresence(root, identity) {
-  assertSyntheticOwner(root);
-  assert.ok(identity.startTime && identity.pid !== process.pid);
-  const canonical = realpathSync(root);
-  const registered = knownPresence.get(canonical) ?? new Map();
-  registered.set(identity.pid, { ...identity, worker: 'presence-worker' });
-  knownPresence.set(canonical, registered);
-}
 const spawn = childProcess.spawn;
 childProcess.spawn = (...args) => {
   const child = spawn(...args);
@@ -40,12 +29,6 @@ function ownerWorkers(roots, _workerDirectory, { processAlive }, WorkStore, stop
   const workers = new Map();
   for (const root of roots) {
     if (!existsSync(root)) continue;
-    const registered = knownPresence.get(realpathSync(root));
-    for (const [pid, identity] of registered ?? []) {
-      if (processAlive(identity)) workers.set(pid, identity);
-      else registered.delete(pid);
-    }
-    if (!registered?.size) knownPresence.delete(realpathSync(root));
     if (!existsSync(join(root, '.forge', 'native.json')) && !existsSync(join(root, '.git'))) continue;
     const store = new WorkStore(root),
       directory = store.directory;
@@ -59,11 +42,6 @@ function ownerWorkers(roots, _workerDirectory, { processAlive }, WorkStore, stop
         const pid = Number(match[1]),
           startTime = Buffer.from(match[2], 'base64url').toString();
         if (pid === process.pid || !processAlive({ pid, startTime })) continue;
-        if (
-          worker === 'presence-worker' &&
-          !existsSync(join(directory, 'presence-worker-' + pid + '.marker'))
-        )
-          continue;
         workers.set(pid, { pid, startTime, worker, lease: true, runId });
       }
     };
@@ -74,8 +52,6 @@ function ownerWorkers(roots, _workerDirectory, { processAlive }, WorkStore, stop
       for (const name of readdirSync(metrics))
         if (/^\.weekly-.*\.pending$/.test(name))
           workers.set(join(metrics, name), { worker: 'self-metrics-weekly-worker' });
-    queue(join(directory, 'presence-owner'), 'presence-worker');
-    queue(join(directory, 'agent-advisory', 'drain'), 'agent-advisory-worker');
     queue(join(directory, 'integration-preview-drain'), 'integration-preview-worker');
     queue(join(directory, 'post-accept-main-queue'), 'post-accept-main');
     const controllers = join(directory, 'check-controllers');
@@ -178,12 +154,6 @@ export async function waitForOwnerChildren(
   workerDirectory = resolve('dist'),
   { stopChecks = false } = {},
 ) {
-  // Only a native-owner fixture has advisories to drain; hosted roots (package smoke) never load
-  // the native advisory worker. Package smoke builds dist itself, so this import stays lazy.
-  if (existsSync(join(root, '.forge', 'native.json')) || existsSync(join(root, '.git'))) {
-    const { drainAgentAdvisories } = await import('../dist/agent-advisory-worker.js');
-    await drainAgentAdvisories(root);
-  }
   const processes = await import('../dist/local-process.js');
   const { WorkStore } = await import('../dist/work-store.js');
   const roots = [...new Set([resolve(root), realpathSync(root)])];
@@ -207,16 +177,6 @@ export async function waitForOwnerChildren(
       }
     }
     const owned = ownerWorkers(roots, workerDirectory, processes, WorkStore, stopChecks);
-    for (const worker of owned) {
-      // Presence is deliberately long-lived. Finite preview/audit workers finish their writes normally.
-      if (worker.worker === 'presence-worker' && sameProcess(processes, worker)) {
-        try {
-          process.kill(worker.pid, 'SIGTERM');
-        } catch (error) {
-          if (error.code !== 'ESRCH') throw error;
-        }
-      }
-    }
     if (!publishing && !pending.length && !owned.length) return;
     assert.ok(
       Date.now() < deadline,
