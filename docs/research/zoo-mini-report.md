@@ -381,16 +381,16 @@ with `'Hello' == 'Hello from the Lane'`. The `.bin` limit was not exercised.
 
 ## The conformance suite (Issue 70a9bd2f)
 
-[`scripts/bench-zoo/catalog.json`](../../scripts/bench-zoo/catalog.json) is the list: 25 public repositories, each with its
+[`scripts/bench-zoo/catalog.json`](../../scripts/bench-zoo/catalog.json) is the list: 26 public repositories, each with its
 upstream CI command (or, for the synthetic fixtures, a shape check), declared toolchains and cache, and the shapes it
 stands for. Twenty are real repositories forked into the NanthAI org (the five and twelve ecosystems above, plus Git LFS
 `learningequality/morango`, a 2,900-commit history `jashkenas/underscore`, and vendored multi-MiB binaries `kripken/ammo.js`).
-Five are synthetic fixtures built by [`shapes.mjs`](../../scripts/bench-zoo/shapes.mjs) with git plumbing and created as
-public NanthAI repositories: CRLF sources, file modes, live and dangling symlinks, empty and unterminated files, an LFS
-pointer and a mode change in history (`shapes-posix`); 54 MiB of binary blobs, one replaced in history (`shapes-bigbin`);
-case-only renames of a file and a directory (`shapes-case`); and two hazards a case-insensitive or UTF-8-only file system
-cannot hold, case-colliding paths (`shapes-collide`) and a raw Latin-1 path plus a composed/decomposed Unicode pair
-(`shapes-nonutf8`). Each fixture's check runs on the Candidate checkout and asserts the shape survived (modes, CRLF bytes,
+Six are synthetic fixtures built by [`shapes.mjs`](../../scripts/bench-zoo/shapes.mjs) with git plumbing and created as
+public NanthAI repositories: CRLF sources, file modes, live and dangling symlinks, empty and unterminated files, and a mode
+change in history (`shapes-posix`); 54 MiB of binary blobs, one replaced in history (`shapes-bigbin`); case-only renames
+of a file and a directory (`shapes-case`); and three hazards a case-insensitive or UTF-8-only file system cannot hold,
+case-colliding paths (`shapes-collide`), a raw Latin-1 path (`shapes-nonutf8`) and a composed/decomposed Unicode pair
+(`shapes-unicode`). Each fixture's check runs on the Candidate checkout and asserts the shape survived (modes, CRLF bytes,
 symlink targets, blob hashes, the raw path).
 
 One command per step; all take `ZOO_ROOT` (a folder whose `zoo.json` holds the machine-local `deployment`,
