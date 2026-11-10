@@ -6,6 +6,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, createPublicKey, sign } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
+import { speedBudgets } from '../dist/speed-budgets.js';
+import { judgeCosts, formatCostVerdicts } from '../dist/cost-budgets.js';
 import { checksFixture } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { actionsIssuer } from '../dist/github-actions-oidc.js';
@@ -150,9 +152,13 @@ async function landing(t, shards) {
     recipeStorage: 'recipe',
   });
   const logs = new Map();
+  let logUploadBytes = 0;
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
-    if (init.method === 'PUT') return new Response(null, { status: 200 });
+    if (init.method === 'PUT') {
+      logUploadBytes += Buffer.byteLength(init.body);
+      return new Response(null, { status: 200 });
+    }
     const known = [...logs.keys()].find(sha => url.includes(sha));
     const bytes = known
       ? logs.get(known)
@@ -258,7 +264,7 @@ async function landing(t, shards) {
         },
       }),
     });
-  return { s, id, send, post, stored, responses, conclude };
+  return { s, id, send, post, stored, responses, conclude, logUploadBytes: () => logUploadBytes };
 }
 const sum = (meters, key) => meters.reduce((n, m) => n + m[key], 0);
 const kb = n => Math.round(n / 102.4) / 10;
@@ -282,11 +288,14 @@ async function measure(t, shards, replays = []) {
     }
   }
   assert.equal(body.actions.verdictPending, true, 'the last result holds the pass for the provider');
+  const completionStart = l.s.counts.length;
   await l.conclude();
+  const completionMeters = l.s.counts.slice(completionStart);
   const row = [...l.s.tables.projectHostedCheckRuns.values()].find(row => row.runId === l.id.runId);
   return {
     l,
     calls,
+    completionMeters,
     body: l.stored(),
     runRowBytes: Buffer.byteLength(JSON.stringify(row)),
   };
@@ -336,11 +345,40 @@ test('shard result cost is flat in accumulated reports at 1, 4, 8 and 12 shards'
   t.diagnostic(JSON.stringify(rows));
 });
 
-test('realistic 8-shard landing with two replayed results: per-function totals', async t => {
-  const { calls, body, runRowBytes } = await measure(t, 8, [2, 5]);
+test('cost guard: twelve CI shards, realistic reports, inline logs, two replays and provider conclusion stay within the ledger', async t => {
+  const { l, calls, body, runRowBytes, completionMeters } = await measure(t, 12, [2, 5]);
   assert.equal(body.status, 'passed');
   const replays = calls.filter(call => call.replay);
   assert.equal(replays.length, 2);
+  // Count the complete ingest window, including the provider conclusion, rather than only
+  // the result mutation. One completed run here is one check/landing; setup is outside it.
+  const meters = [...calls.flatMap(call => call.meters), ...completionMeters];
+  const measured = {
+    calls: calls.length + 1 + meters.length, // HTTP actions + provider HTTP action + nested mutations
+    readBytes: sum(meters, 'readBytes'),
+    writeBytes: sum(meters, 'writeBytes'),
+    responseBytes: calls.reduce((n, call) => n + call.response, 0),
+    logUploadBytes: l.logUploadBytes(),
+  };
+  const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'ci-result-fixture', measured);
+  for (const line of formatCostVerdicts(verdicts)) t.diagnostic(line);
+  t.diagnostic(`ci-result measured ${JSON.stringify(measured)}`);
+  assert.equal(
+    verdicts.length,
+    5,
+    'CI ingest calls, DB reads/writes, response and log-upload bytes are budgeted',
+  );
+  assert.deepEqual(
+    verdicts.filter(v => v.status === 'fail'),
+    [],
+  );
+  // The historical diagnostic-only test accepted another whole run's I/O. Prove the ledger
+  // rejects that class of regression, independently of nominal action-duration assumptions.
+  const seeded = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'ci-result-fixture', {
+    ...measured,
+    readBytes: measured.readBytes * 2,
+  });
+  assert.equal(seeded.find(v => v.metric === 'readBytes').status, 'fail');
   t.diagnostic(
     JSON.stringify({
       runRowKB: kb(runRowBytes),

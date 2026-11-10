@@ -302,7 +302,7 @@
     "failPct": 15,
     "warnPct": 5,
     "ratchetPct": 10,
-    "scenario": "Six landings: solo, main moved during the check (recompose and re-check), and a batch of four. The client wait and observer reads, CI minutes and the GitHub mirror are not in the fixture; the live captures cover them.",
+    "scenario": "Six accepted-Candidate landings: solo, main moved during the check (source-job recompose and re-check), and a batch of four. Includes dependency-aware client observer reads. Save/initial compose, real CI ingest and GitHub mirror are outside this mix; a separate twelve-shard CI ingest guard covers inline logs, reports, retries and provider conclusion. Action GB-seconds use nominal durations, not live wall time.",
     "actionModel": {
       "v8": {
         "gb": 0.0625,
@@ -393,6 +393,90 @@
     ]
   },
   "costs": [
+    {
+      "id": "ci-result-calls",
+      "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
+      "measuredBy": "ci-result-fixture",
+      "metric": "calls",
+      "unit": "calls",
+      "value": 45,
+      "floor": 0,
+      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "issue": "65534f20",
+      "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
+    },
+    {
+      "id": "ci-result-readbytes",
+      "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
+      "measuredBy": "ci-result-fixture",
+      "metric": "readBytes",
+      "unit": "bytes",
+      "value": 625682,
+      "floor": 1024,
+      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "issue": "65534f20",
+      "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
+    },
+    {
+      "id": "ci-result-writebytes",
+      "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
+      "measuredBy": "ci-result-fixture",
+      "metric": "writeBytes",
+      "unit": "bytes",
+      "value": 743807,
+      "floor": 1024,
+      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "issue": "65534f20",
+      "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
+    },
+    {
+      "id": "ci-result-responsebytes",
+      "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
+      "measuredBy": "ci-result-fixture",
+      "metric": "responseBytes",
+      "unit": "bytes",
+      "value": 118458,
+      "floor": 1024,
+      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "issue": "65534f20",
+      "reason": "Makes the previous diagnostic-only real CI path fail on a cost increase; all reports, replay idempotence and independent provider verdict remain covered."
+    },
+    {
+      "id": "ci-result-log-upload-bytes",
+      "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
+      "measuredBy": "ci-result-fixture",
+      "metric": "logUploadBytes",
+      "unit": "bytes",
+      "value": 20047,
+      "floor": 1024,
+      "source": "tests/hosted-actions-result-growth.test.mjs on merged Lane head 1de517df: twelve shards, 886 reports, inline logs, two replays and provider conclusion; per completed run. Setup is excluded. Byte floor allows random IDs and timestamps.",
+      "issue": "65534f20",
+      "reason": "Counts outbound R2 payload bytes in the real inline result path, including replay behavior. HTTP response bytes are budgeted separately; provider-billed headers and other traffic remain live-only."
+    },
+    {
+      "id": "landing-observerqueries",
+      "area": "Dependency-aware finish observer per accepted landing",
+      "measuredBy": "landing-fixture",
+      "metric": "observerQueries",
+      "unit": "calls",
+      "value": 8.833333333333334,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs: six-landing mix, one observer per client, refreshed only when the captured Convex read set changes; core calls/bytes remain separately budgeted.",
+      "issue": "74969509",
+      "reason": "Adds the missing client wait path without weakening the zero-query core guard. No forced per-task query or idle polling; unrelated publication reruns have their existing observer contract guard."
+    },
+    {
+      "id": "landing-observerreadbytes",
+      "area": "Dependency-aware finish observer per accepted landing",
+      "measuredBy": "landing-fixture",
+      "metric": "observerReadBytes",
+      "unit": "bytes",
+      "value": 82540.16666666667,
+      "floor": 1024,
+      "source": "tests/landing-cost-guard.test.mjs: six-landing mix, one observer per client, refreshed only when the captured Convex read set changes; core calls/bytes remain separately budgeted.",
+      "issue": "74969509",
+      "reason": "Adds the missing client wait path without weakening the zero-query core guard. No forced per-task query or idle polling; unrelated publication reruns have their existing observer contract guard."
+    },
     {
       "id": "landing-queries",
       "area": "Convex queries on the landing path, per landing",

@@ -44,6 +44,7 @@ export const costBudgetSchema = z
       'snapshot-fixture',
       'planning-fixture',
       'trial-merge-fixture',
+      'ci-result-fixture',
       'capture',
     ]),
     metric: z.string().min(1),

@@ -23,6 +23,7 @@ test.after(() => {
 
 const { costs, costGuard } = speedBudgets;
 const finishApi = await import(moduleUrl('../convex/projectHostedFinish.ts'));
+const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 // Action or not, and which runtime, from the registered function and its module's 'use node'.
 const kinds = new Map();
 async function kind(name) {
@@ -59,6 +60,7 @@ function meter(f) {
     async stop() {
       globalThis.fetch = inner;
       const counts = f.counts.slice(from);
+      const observers = counts.filter(c => c.name === 'observerBudgetPage');
       const sum = key => counts.reduce((total, c) => total + c[key], 0);
       // Source tasks record themselves in convexSourceCalls with their nested actions.
       const actions = [
@@ -67,11 +69,13 @@ function meter(f) {
       ];
       const runtimes = await Promise.all(actions.map(kind));
       return {
-        queries: counts.filter(c => c.query).length,
+        queries: counts.filter(c => c.query && c.name !== 'observerBudgetPage').length,
+        observerQueries: observers.length,
+        observerReadBytes: observers.reduce((n, c) => n + c.readBytes, 0),
         mutations: counts.filter(c => !c.query).length,
         v8Actions: runtimes.filter(r => r === 'v8').length + (f.reuseDecisions?.length ?? 0) - reuseFrom,
         nodeActions: runtimes.filter(r => r === 'node').length,
-        readBytes: sum('readBytes'),
+        readBytes: sum('readBytes') - observers.reduce((n, c) => n + c.readBytes, 0),
         writeBytes: sum('writeBytes'),
         r2ClassA: r2.a,
         r2ClassB: r2.b,
@@ -89,6 +93,26 @@ function meter(f) {
 async function run(f, m, task) {
   m.tasks.push(task.name);
   await f.execute(task);
+  await m.refresh?.();
+}
+/** Convex subscriptions rerun only after a selected read dependency changes. Use the same fake
+ * read sets as the observer contract tests; no timer, polling, or forced per-task query. */
+function watch(f, m, operationId) {
+  let reads,
+    version = 0;
+  m.refresh = async () => {
+    if (reads?.()) return;
+    const page = JSON.parse(
+      await f.tx('observerBudgetPage', observe.page, {
+        projectId: f.projectId,
+        operationId,
+        nextVersion: version,
+      }),
+    );
+    reads = f.readSet();
+    version = page.nextVersion;
+  };
+  return m.refresh();
 }
 async function drain(f, m) {
   for (let steps = 0; f.pending().length; steps++) {
@@ -104,8 +128,8 @@ const landed = f =>
   [...f.tables.projectHostedLandingRequests.values()].filter(r => JSON.parse(r.value).phase === 'landed')
     .length;
 
-/** One `land --save` through server compose, check and acceptance; `moveMain` moves main during the
- * check, so it recomposes on a source job and checks again (the common dogfood case). */
+/** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
+ * the check, so it recomposes on a source job and checks again (the common dogfood case). */
 async function solo(t, { moveMain = false, extraQuery = false } = {}) {
   const f = await finishFixture(t);
   const m = meter(f);
@@ -115,10 +139,12 @@ async function solo(t, { moveMain = false, extraQuery = false } = {}) {
     assert(finishApi.status.isQuery);
     await f.tx('extraStatus', finishApi.status, { projectId: f.projectId, submissionId: state.id });
   }
+  await watch(f, m, state.operationId);
   await drain(f, m);
   for (let round = 0; round < (moveMain ? 2 : 1); round++) {
     if (moveMain && round === 0) f.moveMain();
     await f.passChecks();
+    await m.refresh();
     await drain(f, m);
   }
   assert.equal(landed(f), 1);
@@ -129,8 +155,17 @@ async function batch(t, { extraQuery = false } = {}) {
   const f = await batchesFixture(t, { count: 0, batching: 'default', batchMaxSize: null });
   const entries = [];
   for (let i = 0; i < 4; i++) entries.push(await f.add(i));
-  // Measured from enqueue on: the Candidates were composed at save, as a queued landing's are.
+  // Measured after enqueue: Candidate composition and the four enqueue mutations are outside it.
   const m = meter(f);
+  const observers = [];
+  for (const state of entries) {
+    const observer = {};
+    await watch(f, observer, state.operationId);
+    observers.push(observer.refresh);
+  }
+  m.refresh = async () => {
+    for (const refresh of observers) await refresh();
+  };
   if (extraQuery)
     for (const state of entries)
       await f.tx('extraStatus', finishApi.status, { projectId: f.projectId, submissionId: state.id });
@@ -140,6 +175,7 @@ async function batch(t, { extraQuery = false } = {}) {
     const queued = f.runs().filter(r => r.status === 'queued');
     for (const r of queued) await f.rawChecks.pass(await f.rawChecks.activate(r.id));
     // Event-driven work first; a stall alarm only when nothing else can move.
+    await m.refresh();
     const task =
       f.pending().find(x => !x.name.startsWith('projectHostedLandingStall')) ??
       (queued.length ? null : f.pending()[0]);
@@ -164,6 +200,8 @@ async function measureLandingCosts(t, options = {}) {
   const { v8, node } = costGuard.actionModel;
   const measured = {
     queries: per('queries'),
+    observerQueries: per('observerQueries'),
+    observerReadBytes: per('observerReadBytes'),
     mutations: per('mutations'),
     v8Actions: per('v8Actions'),
     nodeActions: per('nodeActions'),

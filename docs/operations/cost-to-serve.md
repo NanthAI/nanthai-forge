@@ -51,9 +51,52 @@ The [`costs` ledger](../../src/speed-budgets.json) and
 six-landing fixture: solo, recompose/recheck, and a batch of four. Per landing it
 records 27.5 mutations, 9.83 V8 actions, 0.67 Node actions, 806,895 read bytes,
 248,852 write bytes, 3.17 R2 A and 11.67 R2 B operations. Its 3.26 GB-seconds
-are modeled, using nominal durations. It excludes client waits, the GitHub mirror
+are modeled, using nominal durations. Those core quantities exclude client waits, the GitHub mirror
 and real CI activity. Pricing that fixture gives roughly $0.00058/landing;
 it is a partial fixture, **not** a production cost forecast.
+
+The guard also budgets the finish observer separately: one dependency-aware
+subscription per waiting client in the same six-landing mix. It refreshes only
+when its selected read set changes, including the four separate batch clients;
+there is no timer or forced query after every task. Keeping observer calls and
+bytes separate preserves the core's zero-query regression guard.
+
+`hosted-actions-result-growth.test.mjs` guards a separate CI ingest window:
+twelve shards, 886 synthetic file reports, inline logs, two replayed results and
+the independent provider conclusion. Its `ci-result-fixture` ledger entries cover
+HTTP and nested mutation counts, database read/written bytes, HTTP response
+bytes and inline-log upload bytes. Setup/dispatch, source downloads and CI runner minutes
+are outside this measurement. The generic check callbacks in the six-landing
+fixture already carry some CI bookkeeping: do not add both fixture totals to
+claim a full landing price. These scenarios replace diagnostic-only cost output
+with assertions while retaining report, retry and provider-verdict evidence.
+
+The fixture starts from already-composed Candidates; it does **not** measure a
+whole `land --save` (the batch starts after its four enqueue mutations). It exercises a real source-job recompose when main moves,
+but its tiny source tree does not reproduce large manifests, many durable source
+quanta or concurrent OCC attempts. Nominal action durations cannot measure time
+waiting on R2 or GitHub, and a mirror needs a separate provider fixture. Those
+remain live/isolated-fixture coverage gaps, rather than measured zero costs.
+
+For offline attribution, intersect the meter's coverage intervals with one
+bounded landing-history window and count receipts committed in that intersection.
+A window with fewer than twenty receipts cannot satisfy the live-gap measurement.
+The day journals contain function IDs and usage, without project IDs or initiating
+command/job IDs. Function coverage can identify missing endpoint families, but
+cannot split a shared source step into landing, save, sync and scratch work, or
+separate extra quanta/retries from its first execution. Report those ambiguities;
+never force an exact causal a/b/c split or reuse the old corrected $5.96 denominator
+for a different window. Provider gaps and work crossing window boundaries remain
+limitations even with twenty receipts.
+
+For Professional development workloads whose calls and action compute fit
+included usage, rank proposed fixes by **database I/O bytes saved**, showing each
+item's I/O and egress GB/day beside list-price dollars.
+Compute active-window projections as `observed bytes / covered seconds * 86400 /
+1e9`; these are conditional rates, not observed daily totals or invoice savings.
+The 50 GB/month I/O and egress allowances each average about 1.67 GB/day over a
+30-day month; apply allowances once to the team, never once to every function.
+Outside-user forecasts continue to use list rates for every resource.
 
 Capture #4 in Issue `3e3f9fe6` observed ten landings over 56.9 minutes:
 737 executions, 17.23 MB read, 3.03 MB written, 8.73 MB egress and 35 GB-seconds
