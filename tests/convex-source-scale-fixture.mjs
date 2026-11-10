@@ -37,7 +37,15 @@ const compileCache = join(
     .digest('hex')
     .slice(0, 16)}`,
 );
-export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = false, afterAction } = {}) {
+/** `treeGraceMs`: how long a step about to commit waits for its dual-write (production derives it
+ * from the step's run time; tests wait in full unless they test the deadline). */
+export async function scaleFixture({
+  parallelism = 4,
+  delay = 0,
+  guardRss = false,
+  afterAction,
+  treeGraceMs = 600_000,
+} = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),
     objects = new Map(),
@@ -49,7 +57,9 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     /** Ordered Convex function calls and R2 GETs ({ call } / { fetch }), for round-trip shape checks. */
     events = [],
     failOnce = [],
-    failRequestOnce = [];
+    failRequestOnce = [],
+    /** (message) => a promise to wait on before answering that request, or undefined. */
+    holdRequest = [];
   await f.ctx.db.patch(projectId, { sourceAuthority: { mode: 'server', epoch: 1 } });
   const config = {
     FORGE_SOURCE_PARALLELISM: String(parallelism),
@@ -58,6 +68,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     R2_BUCKET: 'synthetic',
     R2_ACCESS_KEY_ID: 'synthetic',
     R2_SECRET_ACCESS_KEY: 'synthetic',
+    FORGE_STATE_TREE_GRACE_MS: String(treeGraceMs),
   };
   const before = Object.fromEntries(Object.keys(config).map(k => [k, process.env[k]]));
   Object.assign(process.env, config);
@@ -243,6 +254,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               injected = true;
               throw new TypeError('synthetic request reset');
             }
+            for (const hold of holdRequest) await hold(message);
             if (message.kind === 'action-start') {
               calls.push(a.name);
               value = null;
@@ -394,6 +406,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
     metrics,
     failOnce,
     failRequestOnce,
+    holdRequest,
     putSpec,
     json,
     bytes,

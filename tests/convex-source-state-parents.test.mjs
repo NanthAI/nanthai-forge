@@ -134,9 +134,27 @@ test('recorded parents are written once, exact and immutable', async () => {
 
 // Trees in packs, dual-write (Issue 676efbc2): the real Convex step records a State's tree pointer
 // only for a project with tree writes on, in the commit it already makes.
-async function treeSync(write, read = false, corrupt = false, conflict = false, flatTips = false) {
-  const s = await scaleFixture();
+async function treeSync(
+  write,
+  read = false,
+  corrupt = false,
+  conflict = false,
+  flatTips = false,
+  late = false,
+) {
+  const s = await scaleFixture(late ? { treeGraceMs: 0 } : {});
   try {
+    // Late: R2 confirms the merged State's segment only once the step's commit is under way.
+    if (late) {
+      let committing;
+      const commit = new Promise(resolve => (committing = resolve));
+      s.holdRequest.push(async message => {
+        if (message.kind === 'mutation' && message.args.name === 'projectConvexSourceStore:commit')
+          committing();
+        if (message.kind === 'r2-put' && Buffer.from(message.args.bytes).subarray(-4).toString() === 'FTS1')
+          await commit;
+      });
+    }
     const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
     const store = {
       get: async id => s.bytes({ sha256: id }),
@@ -289,6 +307,21 @@ test('self-heal (dogfood flat chains 2026-11-10): a merge of two flat tips is wr
   assert.equal(healed.sync.functionCalls, off.sync.functionCalls, 'calls do not rise');
   t.diagnostic(JSON.stringify({ segmentBytes: pointer.size }));
 });
+
+test(
+  'merge deadline (flip 2 merge latency): a segment R2 has not confirmed when the step is otherwise ready commits the State flat, with no pointer, no segment row and no alarm',
+  { timeout: 120_000 },
+  async () => {
+    const onTime = await treeSync(true),
+      late = await treeSync(true, false, false, false, false, true);
+    assert.equal(late.output, onTime.output, 'the flat result is byte-identical');
+    assert.ok(onTime.merged.stateTree, 'a segment confirmed in time gives its pointer');
+    assert.equal(late.merged.stateTree, undefined, 'past the deadline the State commits flat');
+    assert.equal(late.rows, onTime.rows - 1, 'and no row names the unconfirmed segment');
+    assert.equal(late.project.stateTrees.refused, undefined, 'a late tree is no alarm');
+    assert.equal(late.sync.functionCalls, onTime.sync.functionCalls, 'calls do not rise');
+  },
+);
 
 test('self-heal for saves: begin hands a flat baseline its nearest first-parent ancestor with a tree, and nothing when no ancestor has one', async () => {
   const { moduleUrl } = await import('./convex-module.mjs');

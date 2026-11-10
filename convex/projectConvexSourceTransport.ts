@@ -20,7 +20,7 @@ import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack
 import { sourceStepClock } from '../src/source-step-clock';
 import { r2SegmentStore } from './projectStateTreeStore';
 import { validStateTreePointer, type StateTreePointer } from '../src/state-tree-store';
-import { logStateTree } from '../src/state-tree-output';
+import { logStateTree, treeLateGraceMs } from '../src/state-tree-output';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
 export const sourceResultInlineBytes = 64 * 1024;
@@ -75,10 +75,35 @@ export function convexSourceTransport(
     // Overlapped writes in upload order, at most sourceIoConcurrency in flight.
     writing: Promise<SourceOutput>[] = [];
   // Dual-write work handed over by the step (it never rejects): awaited here, beside the writes.
-  let treeWork: Promise<unknown> = Promise.resolve();
-  const settle = async () => {
+  let treeWork: Promise<unknown> = Promise.resolve(),
+    /** Set when a deadline settle stopped waiting: later outcomes record no pointer. */
+    treeClosed = false;
+  /** `deadline`: the step is about to commit, so dual-write work still running once the writes
+   * are done gets only a short grace (`treeLateGraceMs`); after it the States commit flat, with no
+   * pointer, and the next State heals on the nearest one that has a tree. Without it the work is
+   * awaited in full. */
+  const settle = async ({ deadline = false }: { deadline?: boolean } = {}) => {
     while (writing.length) outputs.push(await writing.shift()!);
-    await treeWork;
+    if (!deadline || treeClosed) await treeWork;
+    else {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const graceMs = treeLateGraceMs(clock.value().runMs, process.env.FORGE_STATE_TREE_GRACE_MS),
+        late = await Promise.race([
+          treeWork.then(() => false),
+          new Promise<boolean>(resolve => (timer = setTimeout(() => resolve(true), graceMs))),
+        ]);
+      clearTimeout(timer);
+      if (late) {
+        treeClosed = true;
+        tree.late++;
+        logStateTree(
+          { jobId, step },
+          null,
+          { status: 'late' },
+          { ms: graceMs, ...(segments?.stats ?? { gets: 0, getBytes: 0, puts: 0, putBytes: 0 }) },
+        );
+      }
+    }
     // A dual-write that overlapped its State's upload settled after that output was prepared.
     for (const output of outputs)
       if (output.stateParents && !output.stateTree && pointers.has(output.sha256))
@@ -99,6 +124,8 @@ export function convexSourceTransport(
       refused: null as { state: string; code: string } | null,
       /** States the merge reader rebuilt from their trees instead of downloading the manifest. */
       derived: 0,
+      /** Deadline settles that committed while dual-write work was still running. */
+      late: 0,
       bytes: 0,
       ms: 0,
     };
@@ -202,6 +229,13 @@ export function convexSourceTransport(
             },
             direct: pin => segments.direct(pin),
             settled: (state, result, ms) => {
+              // After a deadline settle the step has committed (or is committing) without this
+              // State's pointer; only an alarm is still worth a line.
+              if (treeClosed) {
+                if (result.status === 'refused')
+                  logStateTree({ jobId, step }, state, result, { ms, ...segments.stats });
+                return;
+              }
               tree.ms += ms;
               if (result.status === 'written') {
                 pointers.set(state, result.pointer);

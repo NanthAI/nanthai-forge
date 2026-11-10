@@ -94,7 +94,8 @@ export const step = internalAction({
             result.cursor.phase === 'done'
               ? null
               : saveSourceProgress(result.cursor, progress, durable.store).then(saved => saved.id),
-            settle(),
+            // The commit follows: dual-write still running past a short grace leaves States flat.
+            settle({ deadline: true }),
           ]);
           const outputCount = outputs.length;
           const logStep = () =>

@@ -267,12 +267,23 @@ export async function baselineFromTree(
   return manifest;
 }
 
+/** How long a step that is otherwise ready to commit waits for its dual-write: a small share
+ * of the step's run time so far, so a late tree costs the step at most that share; past it the
+ * States commit flat (`late`). */
+export const TREE_LATE_SHARE = 0.04;
+/** `fixed` (the deployment's `FORGE_STATE_TREE_GRACE_MS`, when set to a whole number of ms)
+ * replaces the share: tests that wait in full, or an operator who must. */
+export const treeLateGraceMs = (runMs: number, fixed?: string) =>
+  fixed && /^\d{1,7}$/.test(fixed) ? Number(fixed) : Math.max(0, Math.round(runMs * TREE_LATE_SHARE));
+
 /** One line per dual-write outcome, on the source-step log channel: identifiers, counts and a
- * code only. A refusal is the alarm line (`console.error`); the flat State was recorded. */
+ * code only. A refusal is the alarm line (`console.error`); the flat State was recorded. `late`
+ * (state null): the step committed after its grace with dual-write still running, so the States
+ * it had not yet proven are flat. */
 export function logStateTree(
   identity: { jobId: string; step: number },
-  state: string,
-  result: StateTreeDualResult | { status: 'read' },
+  state: string | null,
+  result: StateTreeDualResult | { status: 'read' } | { status: 'late' },
   /** The step's dual-write wall time and its segment traffic so far (R2 GETs and PUTs). */
   io: { ms: number; gets: number; getBytes: number; puts: number; putBytes: number },
 ) {
