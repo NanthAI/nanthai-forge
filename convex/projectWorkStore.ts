@@ -149,8 +149,16 @@ export async function storeVersion(
 
 /** The head's inline value: the journal row the stored body reads back as. */
 const inlineValue = ({ value }: ReturnType<typeof hostedRecordValue>) => {
-  const row = journalRow(JSON.parse(value));
-  return row === undefined ? undefined : JSON.stringify(row);
+  const record = JSON.parse(value);
+  const row = journalRow(record);
+  if (row === undefined) return undefined;
+  // The parent already carries the Intent id. Do not bill for it again on every note read.
+  if (record.kind === 'comment' && 'intentId' in (row as object)) {
+    const note = { ...(row as Record<string, unknown>) };
+    delete note.intentId;
+    return JSON.stringify(note);
+  }
+  return JSON.stringify(row);
 };
 
 async function insertVersion(

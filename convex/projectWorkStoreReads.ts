@@ -50,9 +50,9 @@ async function headValue(ctx: QueryCtx, collection: string, head: Doc<'projectHo
     return journalValue(collection, await body(ctx, await ctx.db.get(head.recordId)));
   const value = JSON.parse(head.value);
   // An Intent note is a `comment` too; an older head may still carry a note kind as its status.
-  const note = (value as { intentId?: string }).intentId !== undefined;
+  const note = head.status === 'note' || (value as { intentId?: string }).intentId !== undefined;
   if (collection === 'planningComments' ? note : collection === 'notes' && !note) return null;
-  return value;
+  return note ? { ...value, intentId: head.parent } : value;
 }
 
 /** One page in the journal's shape, one head per row. A planning comment and an Intent note on the same

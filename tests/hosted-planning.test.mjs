@@ -635,7 +635,7 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const storeCost = await costs();
   meter.restore();
   console.log(JSON.stringify({ journalCost, storeCost }));
-  for (const name of ['list', 'comments', 'detail'])
+  for (const name of ['list', 'comments', 'notes', 'detail'])
     assert.ok(
       storeCost[name].documents <= journalCost[name].documents &&
         storeCost[name].bytes <= journalCost[name].bytes,
