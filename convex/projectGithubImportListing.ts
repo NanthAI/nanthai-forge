@@ -9,15 +9,8 @@ import { exchangeFetch } from '../src/exchange-request';
 import { digest } from '../src/hash';
 import { invariant } from '../src/errors';
 import { ListingTable } from '../src/github-listing-codec';
-import type { GithubListing } from '../src/github-archive-source';
 
 type Pin = { sha256: string; size: number };
-/** The columns of a validated, sorted GitHub listing. */
-export function listingTable(listing: GithubListing) {
-  const table = ListingTable.from(listing);
-  invariant(table, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.');
-  return table;
-}
 /** Writes the file table of a commit tree to the project's R2 prefix (create-only, checksummed;
  * the key names the digest, so an existing key holds these exact bytes). */
 export async function storeListing(projectId: Id<'hostedProjects'>, tree: string, listing: ListingTable) {
@@ -63,7 +56,7 @@ export async function jobListing(
   job: Doc<'projectGithubImports'>,
   input: { id: Id<'projectGithubImports'>; actor: string },
   tree: string,
-  list: () => Promise<GithubListing | null>,
+  list: () => Promise<ListingTable | null>,
 ) {
   const started = Date.now();
   const stored = job.listing ? await readListing(job.projectId, job.listing, tree) : null;
@@ -73,9 +66,8 @@ export async function jobListing(
     );
     return { listing: stored, pin: job.listing };
   }
-  const listed = await list();
-  if (!listed) return { listing: null, pin: undefined };
-  const listing = listingTable(listed);
+  const listing = await list();
+  if (!listing) return { listing: null, pin: undefined };
   const pin = await storeListing(job.projectId, tree, listing);
   await ctx.runMutation(internal.projectGithubImportStore.pinListing, { ...input, listing: pin });
   return { listing, pin };

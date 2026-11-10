@@ -6,8 +6,15 @@ import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-projec
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
-import type { ListingTable } from './github-listing-codec.js';
-import { splitGithubTree, TreeSplitUnavailable, type GithubTreeEntry } from './github-tree-split.js';
+import { ListingBuilder, type ListingTable } from './github-listing-codec.js';
+import {
+  splitGithubTree,
+  TreeSplitUnavailable,
+  TreeRows,
+  walkSplitTree,
+  type GithubTreeEntry,
+  type SplitTree,
+} from './github-tree-split.js';
 
 const gitId = (value: unknown): value is string =>
   typeof value === 'string' && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/.test(value);
@@ -17,13 +24,14 @@ export type GithubListing = { files: GithubSourceEntry[]; totalBytes: number; su
  * (100,000 entries or about 7 MB) the same listing is assembled from smaller tree
  * reads (see splitGithubTree). Only a tree that cannot be split (one directory above
  * the limit, or more than the request cap) returns null so the caller uses
- * directory-by-directory discovery; a partial tree is never imported. */
+ * directory-by-directory discovery; a partial tree is never imported. The rows go
+ * straight into a column table: no object per file outlives GitHub's replies. */
 export async function listGithubTree(
   repository: string,
   tree: string,
   token?: string,
   request: GithubFetch = networkFetch,
-): Promise<GithubListing | null> {
+): Promise<ListingTable | null> {
   invariant(gitId(tree), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
   const reply = await githubJson<{ sha: string; truncated: boolean; tree: GithubTreeEntry[] }>(
     `/repos/${repository}/git/trees/${tree}?recursive=1`,
@@ -35,11 +43,15 @@ export async function listGithubTree(
     'GITHUB_RESPONSE',
     'GitHub returned another tree.',
   );
-  let entries = reply.tree;
-  if (reply.truncated !== false) {
-    const stats = { requests: 1, splits: 0 };
+  let listed: SplitTree | null = null,
+    stats: { requests: number; splits: number } | null = null;
+  if (reply.truncated === false) listed = { rows: new TreeRows(reply.tree), nested: [] };
+  else {
+    stats = { requests: 1, splits: 0 };
+    // The truncated reply (up to 100,000 entries) is not part of the listing: release it.
+    reply.tree = [];
     try {
-      entries = await splitGithubTree(repository, tree, token, request, stats);
+      listed = await splitGithubTree(repository, tree, token, request, stats);
     } catch (error) {
       if (!(error instanceof TreeSplitUnavailable)) throw error;
       console.log(
@@ -47,22 +59,17 @@ export async function listGithubTree(
       );
       return null;
     }
-    console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries: entries.length, rssBytes: process.memoryUsage().rss })}`,
-    );
   }
-  const paths = new Set<string>(),
-    directories = new Set<string>(['']);
-  const files: GithubSourceEntry[] = [];
+  const invalid = () =>
+    invariant(false, 'GITHUB_RESPONSE', 'GitHub returned invalid or duplicate tree paths.') as never;
+  const directories = new Set<string>(['']),
+    rows = new ListingBuilder();
   let totalBytes = 0,
-    submodules = 0;
-  for (const entry of entries) {
-    const path = entry.path;
-    invariant(
-      typeof path === 'string' && safeRelative(path) && !paths.has(path) && gitId(entry.sha),
-      'GITHUB_RESPONSE',
-      'GitHub returned invalid or duplicate tree paths.',
-    );
+    submodules = 0,
+    entries = 0;
+  walkSplitTree(listed!, (path, entry) => {
+    entries++;
+    if (typeof path !== 'string' || !safeRelative(path) || !gitId(entry.sha)) invalid();
     invariant(
       !path
         .toLowerCase()
@@ -71,15 +78,15 @@ export async function listGithubTree(
       'INVALID_NATIVE_SOURCE',
       'Imported paths cannot overlap native metadata.',
     );
-    paths.add(path);
     if (entry.type === 'tree' && entry.mode === '040000') {
+      if (directories.has(path)) invalid();
       directories.add(path);
-      continue;
+      return;
     }
     if (entry.type === 'commit' && entry.mode === '160000') {
-      files.push({ path, sha: entry.sha, mode: '160000', size: 0 });
+      if (!rows.push(path, entry.sha, 0, '160000')) invalid();
       submodules++;
-      continue;
+      return;
     }
     invariant(
       entry.type === 'blob' && ['100644', '100755', '120000'].includes(entry.mode),
@@ -91,21 +98,29 @@ export async function listGithubTree(
       entry.size! > githubBlobEndpointBytes ? 'GITHUB_BLOB_LIMIT' : 'GITHUB_RESPONSE',
       `GitHub cannot return ${path} (${entry.size} bytes); files up to 100 MB are supported. Main was not published.`,
     );
-    files.push({ path, sha: entry.sha, size: entry.size!, mode: entry.mode as GithubSourceEntry['mode'] });
+    if (!rows.push(path, entry.sha, entry.size!, entry.mode)) invalid();
     totalBytes += entry.size!;
-  }
+  });
+  listed = null;
   // Recursive replies list parents first; a file under an undeclared or file
-  // parent would be a tree GitHub never committed.
-  for (const file of files)
+  // parent would be a tree GitHub never committed, and a path is a file or a directory.
+  for (let i = 0; i < rows.length; i++) {
+    const path = rows.path(i);
     invariant(
-      directories.has(file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : ''),
+      directories.has(path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '') &&
+        !directories.has(path),
       'GITHUB_RESPONSE',
       'GitHub returned a file outside its listed directories.',
     );
+  }
   invariant(Number.isSafeInteger(totalBytes), 'GITHUB_RESPONSE', 'Repository size is invalid.');
   // Portable State order (JS code units), identical to the paged inventory keys.
-  files.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-  return { files, totalBytes, submodules };
+  const table = rows.finish(totalBytes, submodules) ?? invalid();
+  if (stats)
+    console.log(
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ phase: 'listing-split', requests: stats.requests, splits: stats.splits, entries, rssBytes: process.memoryUsage().rss })}`,
+    );
+  return table;
 }
 
 /** The commit's tarball as one gzip stream. GitHub redirects to codeload with a

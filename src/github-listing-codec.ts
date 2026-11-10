@@ -13,7 +13,8 @@ const byPath = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
  * portable State order (JS code units), so a lookup is a binary search. */
 export class ListingTable {
   readonly length: number;
-  private constructor(
+  /** @internal Use ListingTable.from, ListingTable.decode or ListingBuilder. */
+  constructor(
     private paths: string,
     private starts: Uint32Array,
     private shas: Buffer,
@@ -168,6 +169,84 @@ export class ListingTable {
     } catch {
       return null;
     }
+  }
+}
+
+/** Collects a listing's rows in any order into columns, then sorts them into a ListingTable,
+ * so building a table never holds one object per file. */
+export class ListingBuilder {
+  private paths: string[] = [];
+  private shas = Buffer.alloc(0);
+  private shaBytes = 0;
+  private sizes = new Uint32Array(0);
+  private codes = new Uint8Array(0);
+  /** False when the row cannot be a table row (Git id, size or mode). */
+  push(path: string, sha: string, size: number, mode: string) {
+    const code = modeCode.get(mode),
+      n = this.paths.length;
+    if (!this.shaBytes && gitId.test(sha)) this.shaBytes = sha.length / 2;
+    if (
+      !path ||
+      !gitId.test(sha) ||
+      sha.length !== this.shaBytes * 2 ||
+      !Number.isSafeInteger(size) ||
+      size < 0 ||
+      size > 0xffffffff ||
+      code === undefined
+    )
+      return false;
+    if (n === this.sizes.length) this.grow(Math.max(1024, n * 2));
+    this.paths.push(path);
+    this.shas.write(sha, n * this.shaBytes, 'hex');
+    this.sizes[n] = size;
+    this.codes[n] = code;
+    return true;
+  }
+  get length() {
+    return this.paths.length;
+  }
+  path(index: number) {
+    return this.paths[index]!;
+  }
+  /** The rows in portable State order; null when two rows share a path. Empties the builder. */
+  finish(totalBytes: number, submodules: number): ListingTable | null {
+    const paths = this.paths,
+      n = paths.length,
+      shaBytes = this.shaBytes || 20;
+    const order = new Uint32Array(n);
+    for (let i = 0; i < n; i++) order[i] = i;
+    order.sort((a, b) => byPath(paths[a]!, paths[b]!));
+    const shas = Buffer.alloc(n * shaBytes),
+      starts = new Uint32Array(n + 1),
+      sizes = new Uint32Array(n),
+      codes = new Uint8Array(n),
+      sorted: string[] = new Array(n);
+    let at = 0;
+    for (let k = 0; k < n; k++) {
+      const i = order[k]!;
+      if (k && paths[order[k - 1]!] === paths[i]) return null;
+      this.shas.copy(shas, k * shaBytes, i * shaBytes, (i + 1) * shaBytes);
+      sizes[k] = this.sizes[i]!;
+      codes[k] = this.codes[i]!;
+      sorted[k] = paths[i]!;
+      at += paths[i]!.length;
+      starts[k + 1] = at;
+    }
+    this.paths = [];
+    this.grow(0);
+    const joined = sorted.join('');
+    return new ListingTable(joined, starts, shas, shaBytes, sizes, codes, totalBytes, submodules);
+  }
+  private grow(capacity: number) {
+    const shas = Buffer.alloc(capacity * (this.shaBytes || 20));
+    this.shas.copy(shas, 0, 0, Math.min(this.shas.length, shas.length));
+    this.shas = shas;
+    const sizes = new Uint32Array(capacity),
+      codes = new Uint8Array(capacity);
+    sizes.set(this.sizes.subarray(0, capacity));
+    codes.set(this.codes.subarray(0, capacity));
+    this.sizes = sizes;
+    this.codes = codes;
   }
 }
 

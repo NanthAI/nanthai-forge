@@ -9,7 +9,8 @@ import { tarEntries } from '../dist/github-tar.js';
 import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
 import { listGithubTree } from '../dist/github-archive-source.js';
-import { ListingTable } from '../dist/github-listing-codec.js';
+import { ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
+import { TreeRows } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
 import { importStateFiles } from '../dist/import-state-scan.js';
 import { setFlagsFromString } from 'node:v8';
@@ -396,9 +397,10 @@ test('Issue c6426ee9: a root truncated by entry count lists as the complete tree
   // The truncated recursive root, the root without recursion, then each of the 4 directories once.
   assert.deepEqual(counts, { recursive: 1 + 4, flat: 1 });
   assert.equal(listing.submodules, 2);
-  assert.equal(listing.files.find(f => f.path === 'vendor-1').mode, '160000');
-  assert.equal(listing.files.find(f => f.path === 'dir-1/file-1').mode, '120000');
-  assert.equal(listing.files.find(f => f.path === 'dir-0/' + 'x'.repeat(90) + '-file-0').mode, '100755');
+  const mode = path => listing.mode(listing.index(path));
+  assert.equal(mode('vendor-1'), '160000');
+  assert.equal(mode('dir-1/file-1'), '120000');
+  assert.equal(mode('dir-0/' + 'x'.repeat(90) + '-file-0'), '100755');
 });
 
 test('Issue c6426ee9: a directory still truncated by reply size is split again; a nested gitlink and identical subtrees survive', async () => {
@@ -414,14 +416,15 @@ test('Issue c6426ee9: a directory still truncated by reply size is split again; 
   const counts = {};
   const listing = await listGithubTree('fixture/arch', hex(1), undefined, treeFetch(repo, counts, hex(3)));
   const reference = repo.tree.filter(e => e.type !== 'tree').map(e => e.path);
+  const paths = Array.from({ length: listing.length }, (_, i) => listing.path(i));
   assert.deepEqual(
-    listing.files.map(f => f.path),
+    paths,
     reference.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
   );
-  assert.ok(listing.files.some(f => f.path.startsWith('dir-copy/')));
+  assert.ok(paths.some(path => path.startsWith('dir-copy/')));
   // Root recursive, root flat, dir-1 recursive + flat (truncated), dir-0/2/3 recursive; dir-copy reuses dir-0's reply.
   assert.deepEqual(counts, { recursive: 1 + 4, flat: 2 });
-  assert.equal(listing.files.find(f => f.path === 'dir-1/vendor-nested').mode, '160000');
+  assert.equal(listing.mode(listing.index('dir-1/vendor-nested')), '160000');
   assert.equal(listing.submodules, 1);
 });
 
@@ -823,6 +826,63 @@ test('Issue 96f164ce: the stored file table round-trips as columns; a lookup fin
     ListingTable.from({ files: [files[0], files[0]], totalBytes: 6, submodules: 0 }),
     null,
     'duplicate',
+  );
+});
+
+test('Issue 96f164ce: a listing is built from reply columns in any order; malformed entries keep their own error', async () => {
+  const id = n => n.toString(16).padStart(40, '0');
+  const rows = new TreeRows([
+    { path: 'b/two', mode: '100755', type: 'blob', sha: id(2), size: 9, url: 'https://api.github.com/x' },
+    { path: 'b', mode: '040000', type: 'tree', sha: id(3) },
+    { path: 'a', mode: '100755', type: 'blob', sha: 'not-a-sha', size: 1 },
+    { path: 'v', mode: '100666', type: 'blob', sha: id(4), size: 1 },
+  ]);
+  assert.deepEqual(rows.entry(0), { path: 'b/two', mode: '100755', type: 'blob', sha: id(2), size: 9 });
+  assert.deepEqual(rows.entry(1), { path: 'b', mode: '040000', type: 'tree', sha: id(3) });
+  assert.equal(rows.entry(2).sha, 'not-a-sha');
+  assert.equal(rows.entry(3).mode, '100666');
+  const builder = new ListingBuilder();
+  for (const [path, n] of [
+    ['é', 1],
+    ['b/two', 2],
+    ['B', 3],
+    ['a', 4],
+  ])
+    assert.equal(builder.push(path, id(n), n, '100644'), true);
+  assert.equal(builder.push('bad', 'xyz', 1, '100644'), false);
+  assert.equal(builder.push('bad', id(5), 1, '040000'), false);
+  const table = builder.finish(10, 0);
+  assert.deepEqual(
+    Array.from({ length: table.length }, (_, i) => table.path(i)),
+    ['B', 'a', 'b/two', 'é'],
+  );
+  assert.equal(table.sha(table.index('b/two')), id(2));
+  assert.equal(table.size(table.index('é')), 1);
+  const twice = new ListingBuilder();
+  twice.push('same', id(1), 1, '100644');
+  twice.push('same', id(2), 1, '100644');
+  assert.equal(twice.finish(2, 0), null);
+  const reply = tree => async () => Response.json({ sha: id(1), truncated: false, tree });
+  await assert.rejects(
+    listGithubTree(
+      'fixture/arch',
+      id(1),
+      undefined,
+      reply([{ path: 'v', mode: '100666', type: 'blob', sha: id(4), size: 1 }]),
+    ),
+    /GITHUB_SOURCE_UNSUPPORTED|mode 100666/,
+  );
+  await assert.rejects(
+    listGithubTree(
+      'fixture/arch',
+      id(1),
+      undefined,
+      reply([
+        { path: 'd', mode: '040000', type: 'tree', sha: id(3) },
+        { path: 'd', mode: '100644', type: 'blob', sha: id(4), size: 1 },
+      ]),
+    ),
+    /GITHUB_RESPONSE|outside its listed directories/,
   );
 });
 
