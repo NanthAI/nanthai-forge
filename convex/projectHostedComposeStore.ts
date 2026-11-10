@@ -16,6 +16,7 @@ import { saveObjectSchema, saveWorkerObjectSchema } from '../src/hosted-save';
 import { notifyFinishCompose } from './projectHostedFinishWake';
 import { invariant } from '../src/errors';
 import type { SaveIdentity } from './projectHostedSaveStore';
+const count = z.number().int().nonnegative();
 const progress = z
   .object({ next: saveObjectSchema.nullable(), pages: z.number(), count: z.number() })
   .strict();
@@ -33,6 +34,9 @@ export const composeStateSchema = z
       .object({ paths: z.array(z.string()), more: z.number().int().nonnegative() })
       .strict()
       .optional(),
+    /** R2 requests the compose's source steps signed, written once at publication: class A, class B,
+     * bytes put (Issue 3e3f9fe6). The landing that adopts this compose adds them to its own counts. */
+    r2: z.tuple([count, count, count]).optional(),
     request: composeRequestSchema,
     main: saveWorkerObjectSchema,
     inputs: progress,

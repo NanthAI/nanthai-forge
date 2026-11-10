@@ -10,6 +10,7 @@ import type { SourceOutput } from './projectConvexSourceOutput';
 import { digest } from '../src/portable-hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key } from './r2';
+import { r2Counts } from './presign';
 import { ForgeError, invariant } from '../src/errors';
 import { parseNativeState } from '../src/native-state-format';
 import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state-generation';
@@ -65,7 +66,7 @@ export function convexSourceTransport(
   const locations = new Map<string, ObjectLocation>(initial.map(row => [row.descriptor.object.sha256, row])),
     outputs: SourceOutput[] = [],
     reads = { objects: 0, bytes: 0 },
-    clock = sourceStepClock(delegatedAt),
+    clock = sourceStepClock(delegatedAt, r2Counts),
     // The last few small outputs, by digest: a step's final result manifest is one of them, so
     // commit can carry it to publication without a separate action re-reading it from R2.
     small = new Map<string, string>(),

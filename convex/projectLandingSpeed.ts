@@ -9,6 +9,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { effectiveAgentDefaults } from '../src/agent-parallel-defaults';
 import {
+  addAuditSeconds,
   landingSpeedSample,
   type LandingSpeedSample,
   landingSpeedStateSchema,
@@ -31,6 +32,26 @@ export async function recordLandingSpeed(
 ) {
   const sample = landingSpeedSample(state, attempts);
   return sample ? applyLandingSample(ctx, projectId, sample) : [];
+}
+
+/** A main audit run ended: its shard seconds join the newest landing's sample. One indexed read and one
+ * patch of the row the accept mutation keeps anyway, once per audit run; no new call. */
+export async function recordAuditRunnerSeconds(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  seconds: number,
+) {
+  const row = await ctx.db
+    .query('projectLandingSpeed')
+    .withIndex('by_project', q => q.eq('projectId', projectId))
+    .unique();
+  if (!row) return;
+  try {
+    const next = addAuditSeconds(landingSpeedStateSchema.parse(JSON.parse(row.value)), seconds);
+    await ctx.db.patch(row._id, { value: canonicalPayload(next) });
+  } catch {
+    // A metric never fails the audit: an unreadable row is replaced by the next landing's fresh window.
+  }
 }
 
 async function applyLandingSample(

@@ -13,6 +13,10 @@ const stepDetail = {
   states: v.optional(v.number()),
   pages: v.optional(v.number()),
   blobs: v.optional(v.number()),
+  /** R2 requests the step signed (convex/presign.ts): class A, class B, bytes to put. */
+  r2a: v.optional(v.number()),
+  r2b: v.optional(v.number()),
+  r2put: v.optional(v.number()),
 };
 /** What one step reports with its commit or fork (src/source-step-clock.ts). */
 export const sourceStepTiming = v.object({
@@ -117,4 +121,11 @@ export async function sourceServerTiming(
       .unique()
   )?.timing;
   return timing ? { ...timing, publishedAt: Date.now() } : undefined;
+}
+
+/** R2 requests a whole execution signed (class A, class B, bytes put), summed over its recorded steps. */
+export function sourceR2Counts(timing: { steps: readonly Record<string, number | string>[] } | undefined) {
+  const sum = (key: string) =>
+    (timing?.steps ?? []).reduce((total, step) => total + (typeof step[key] === 'number' ? step[key] : 0), 0);
+  return [sum('r2a'), sum('r2b'), sum('r2put')] as [number, number, number];
 }

@@ -10,6 +10,8 @@ import { moduleUrl } from './convex-module.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { readFileSync } from 'node:fs';
 import {
+  addAuditSeconds,
+  carriedCostCounts,
   longestStage,
   landingSpeedSample,
   observeLandingSpeed,
@@ -42,6 +44,8 @@ test.after(() => {
 });
 
 const speedApi = await import(moduleUrl('../convex/projectLandingSpeed.ts'));
+const { retainCheckProgress } = await import(moduleUrl('../convex/projectHostedLandingCheckProgress.ts'));
+const { presign, r2Counts } = await import(moduleUrl('../convex/presign.ts'));
 const minute = 60_000,
   noon = Date.parse('2026-11-04T12:00:00.000Z');
 const byId = id => budgets.budgets.find(b => b.id === id);
@@ -168,10 +172,26 @@ test('incident replay 03a749a5: a check-result-to-commit gap of 300 s breaks the
   );
 });
 
-test('the row stays small: samples are capped and each carries a short landing id', () => {
-  const { state } = landings(null, normal(200));
-  assert.equal(state.samples.length, 60);
-  assert(Buffer.byteLength(JSON.stringify(state)) < 4_000, 'row stays small');
+test('the row stays small: samples are capped and each carries a short landing id and its counts', () => {
+  let state = null;
+  for (let i = 0; i < 200; i++)
+    state = observeLandingSpeed(
+      state,
+      {
+        at: noon + i * minute,
+        id: `s${i}`.padEnd(36, '0'),
+        toMain: 16.1,
+        check: 8.3,
+        settle: 8.5,
+        attempts: 2,
+        writes: 12,
+        counts: [12, 36, 1_500_000, 3264, 282, 1128],
+        stages: { queue: 5, check: 8.3, settle: 0.1 },
+      },
+      budgets,
+    ).state;
+  assert.equal(state.samples.length, 40);
+  assert(Buffer.byteLength(JSON.stringify(state)) < 5_000, 'row stays small');
 });
 
 test('samples come from the landed state only; missing stamps leave a metric unknown', () => {
@@ -193,6 +213,8 @@ test('samples come from the landed state only; missing stamps leave a metric unk
     settle: 210,
     attempts: null,
     writes: null,
+    // Nothing reported a count: unknown, except the audit slot, which starts at 0 and only grows.
+    counts: [null, null, null, null, null, 0],
     stages: { queue: 5, check: 3.5, settle: 3.5 },
   });
   // Cost counts: the accepted attempt's ordinal from the caller, the writes from the state's version.
@@ -379,6 +401,125 @@ test('live cost drift: a recompose loop breaks the attempts mean once and recove
   assert.equal(windowValue([[1, 12, 6, 'old00000', 8.5]], 'attempts', 'mean', 1), null);
 });
 
+test('live cost counts: R2 requests and runner minutes are stamped on the landing, carried across attempts and judged as means', () => {
+  // The signing seam counts by class: reads and heads are B, writes and listings A, deletes nothing.
+  const signed = {
+    host: 'h.invalid',
+    path: '/b/k',
+    accessKeyId: 'a',
+    secretAccessKey: 's',
+  };
+  const before = r2Counts();
+  return Promise.all([
+    presign({ ...signed, method: 'GET' }),
+    presign({ ...signed, method: 'HEAD' }),
+    presign({ ...signed, method: 'PUT', headers: { 'content-length': '1500' } }),
+    presign({ ...signed, method: 'GET', query: { 'list-type': '2' } }),
+    presign({ ...signed, method: 'DELETE' }),
+  ]).then(() => {
+    const after = r2Counts();
+    assert.deepEqual([after.a - before.a, after.b - before.b, after.put - before.put], [2, 2, 1500]);
+
+    // A check run that ended reports its shard seconds; a running or unreported one leaves them unknown.
+    const state = { at: '2026-11-04T10:00:00.000Z' };
+    const run = {
+      id: 'r',
+      status: 'passed',
+      counts: {},
+      planDigest: null,
+      executionId: null,
+      terminalDigest: null,
+      endedAt: '2026-11-04T10:08:00.000Z',
+      at: state.at,
+    };
+    retainCheckProgress(state, { ...run, execution: { seconds: 3039.8, shards: 12 } }, noon);
+    assert.equal(state.counts.runnerSeconds, 3040);
+    const open = { at: state.at };
+    retainCheckProgress(
+      open,
+      { ...run, status: 'running', endedAt: null, execution: { seconds: 5, shards: 1 } },
+      noon,
+    );
+    retainCheckProgress(open, { ...run, execution: undefined }, noon);
+    assert.equal(open.counts, undefined, 'an unreported run is unknown, not zero');
+
+    // A recompose adds its compose's requests and discards the earlier run; a reused check keeps its run.
+    const first = { r2: [2, 7, 1000], runnerSeconds: 3000 };
+    assert.deepEqual(carriedCostCounts(first, [1, 4, 500], false), {
+      r2: [3, 11, 1500],
+      discardedRunnerSeconds: 3000,
+    });
+    assert.deepEqual(carriedCostCounts({ ...first, discardedRunnerSeconds: 60 }, undefined, true), {
+      r2: [2, 7, 1000],
+      runnerSeconds: 3000,
+      discardedRunnerSeconds: 60,
+    });
+    assert.equal(carriedCostCounts(undefined, undefined, false), undefined);
+
+    // The sample reads the state's counts; the audit seconds join the newest landing once.
+    const landed = {
+      id: '11111111-1111-4111-8111-111111111111',
+      acceptance: { receiptId: '22222222-2222-4222-8222-222222222222' },
+      version: 11,
+      timing: { submittedAt: '2026-11-04T10:00:00.000Z', committedAt: '2026-11-04T10:12:00.000Z' },
+      counts: { r2: [3, 11, 1500], runnerSeconds: 3000, discardedRunnerSeconds: 120 },
+    };
+    const sample = landingSpeedSample(landed, 2);
+    assert.deepEqual(sample.counts, [3, 11, 1500, 3000, 120, 0]);
+    let row = observeLandingSpeed(null, sample, budgets).state;
+    row = addAuditSeconds(row, 1100);
+    assert.equal(row.samples[0][7][5], 1100);
+    assert.equal(
+      addAuditSeconds({ ...row, samples: [] }, 1100).samples.length,
+      0,
+      'no landing, nothing to join',
+    );
+
+    // Means over the window, runner seconds read as minutes; an unstamped row is skipped, never zero.
+    let rows = { samples: [], broken: {} };
+    const feed = counts => {
+      const out = observeLandingSpeed(
+        rows,
+        {
+          ...sample,
+          at: noon + n++ * minute,
+          id: `k${n}`.padEnd(8, '0'),
+          counts,
+        },
+        budgets,
+      );
+      rows = out.state;
+      return out.events;
+    };
+    for (let i = 0; i < WINDOW; i++) assert.deepEqual(feed([6, 20, 400_000, 3260, 280, 1120]), []);
+    assert.equal(windowValue(rows.samples, 'runnerAccepted', 'mean', WINDOW), 54.3);
+    assert.equal(windowValue(rows.samples, 'runnerDiscarded', 'mean', WINDOW), 4.7);
+    assert.equal(windowValue(rows.samples, 'runnerAudit', 'mean', WINDOW), 18.7);
+    assert.equal(windowValue(rows.samples, 'r2ClassB', 'mean', WINDOW), 20);
+    assert.equal(
+      windowValue([[1, 12, 6, 'old00000', 8.5, 1, 7]], 'r2ClassA', 'mean', 1),
+      null,
+      'rows from before the counts have no verdict',
+    );
+    // A compose that re-reads every object (class B) and a test set that doubles each break their own
+    // budget once, naming the next step, and stay quiet after.
+    const broke = [];
+    for (let i = 0; i < WINDOW; i++) broke.push(...feed([6, 80, 400_000, 7000, 280, 1120]));
+    assert.deepEqual(broke.map(e => [e.kind, e.budget.id]).sort(), [
+      ['broken', 'landing-r2-class-b-mean'],
+      ['broken', 'landing-runner-accepted-mean'],
+    ]);
+    const r2 = broke.find(e => e.budget.id === 'landing-r2-class-b-mean');
+    assert.match(
+      speedBudgetMessage(r2, 'forge', budgets).text,
+      /R2 class B requests per landing mean over the last 20 landings is \S+ ops; budget 36 ops/,
+    );
+    assert.match(speedBudgetMessage(r2, 'forge', budgets).text, /forge-source-step/);
+    assert.match(speedBudgetIssue(r2, 'p', budgets).body, /Decision it protects: Issue ac5200f5/);
+    assert.deepEqual(feed([6, 80, 400_000, 7000, 280, 1120]), []);
+  });
+});
+
 /** Seeds today's slow landings and the baseline relative to the landing's own clock. */
 async function seededLanding(t, stallAlerts) {
   const f = await finishFixture(t);
@@ -430,7 +571,7 @@ test('a landing that breaks a budget alerts once on the stall-alert channel and 
   assert.deepEqual(Object.keys(stored.broken), ['land-to-main-p90']);
   // Live cost counts ride in the same row write: one attempt, the landing state's seven writes.
   // (Found by its receipt id: the fixture's clock can place it before the seeded samples.)
-  assert.deepEqual(stored.samples.find(sample => sample[3].length === 36).slice(5), [1, 7]);
+  assert.deepEqual(stored.samples.find(sample => sample[3].length === 36).slice(5, 7), [1, 7]);
   // The Issue write: one scheduled action as the project owner, carrying the fixed per-budget Issue id.
   assert.equal(f.metrics.speedIssueWrites.length, 1);
   const [write] = f.metrics.speedIssueWrites;

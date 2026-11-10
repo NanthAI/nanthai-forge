@@ -188,6 +188,17 @@ export const hostedLandingStateSchema = z
       })
       .strict()
       .optional(),
+    /** Cost counts the landing carries (Issue 3e3f9fe6), stamped by writes it makes anyway: the R2 requests
+     * its composes signed (class A, class B, bytes put, over all attempts), and the shard execution seconds
+     * of its latest check run and of the runs its earlier attempts discarded. Not timestamps. */
+    counts: z
+      .object({
+        r2: z.tuple([checkNumber, checkNumber, checkNumber]).optional(),
+        runnerSeconds: z.number().min(0).optional(),
+        discardedRunnerSeconds: z.number().min(0).optional(),
+      })
+      .strict()
+      .optional(),
     observation: landingObservationSchema,
     acceptance: z
       .object({

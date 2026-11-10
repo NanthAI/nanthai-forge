@@ -9,6 +9,7 @@ import { finishHostedOperation } from './projectHostedOperations';
 import { writeHostedRecord } from './projectHostedRecords';
 import { saveObjects, type SaveIdentity } from './projectHostedSaveStore';
 import { loadSourceJob } from './projectSourceJobs';
+import { sourceR2Counts, sourceServerTiming } from './projectSourceStepTiming';
 import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
 import { digest } from '../src/portable-hash';
@@ -17,7 +18,14 @@ import type { HostedRecord } from '../src/hosted-records';
 import { invariant } from '../src/errors';
 /** Constant-size publication. Selection/edge checks were paged before dispatch;
  * ancestry and bytes are verified by the fixed worker, never client display facts. */
-export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity & { result: string }) {
+export async function publishHostedCompose(
+  ctx: MutationCtx,
+  input: SaveIdentity & {
+    result: string;
+    /** R2 requests the job's steps signed, when the committing step already holds its step row. */
+    r2?: [number, number, number];
+  },
+) {
   const { row, state, operation, project } = await loadCompose(ctx, input, false);
   if (operation.terminal) return operation.terminal;
   await loadCompose(ctx, input);
@@ -115,8 +123,11 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
     outcome: { status: 'completed' as const, result: candidate },
   };
   await finishHostedOperation(ctx, { ...input, receipt: terminal });
+  // The terminal commit hands its step row's sum in; the scheduled publish reads that row once.
+  const r2 = input.r2 ?? sourceR2Counts(await sourceServerTiming(ctx, input.projectId, row.jobId));
   await writeComposeState(ctx, row._id, {
     ...state,
+    ...(r2.some(Boolean) ? { r2 } : {}),
     ...(output.dropped ? { dropped: output.dropped } : {}),
     ...(result.status === 'conflict' && result.paths
       ? { conflictSummary: { paths: result.paths, more: result.more ?? 0 } }
@@ -128,7 +139,12 @@ export async function publishHostedCompose(ctx: MutationCtx, input: SaveIdentity
 /** The publish transaction for this job: the scheduled `publish`, or a step's terminal commit. */
 export async function publishComposeJob(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; jobId: string; result: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    jobId: string;
+    result: string;
+    r2?: [number, number, number];
+  },
 ) {
   const row = await composeForJob(ctx, input.projectId, input.jobId);
   if (!row) return null;
@@ -143,6 +159,7 @@ export async function publishComposeJob(
       operationId: row.operationId,
       actor: row.actor,
       result: input.result,
+      ...(input.r2 ? { r2: input.r2 } : {}),
     }),
   );
 }

@@ -68,7 +68,7 @@ export function speedBudgetRows(
       };
     // The check-to-commit gap and the cost counts are stamped on the landing only; the metrics rows
     // do not carry them.
-    if (b.metric === 'settle' || b.metric === 'attempts' || b.metric === 'writes')
+    if (b.metric !== 'toMain' && b.metric !== 'check')
       return {
         ...base,
         value: null,

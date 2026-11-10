@@ -21,6 +21,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { firstCheckProof } from '../src/hosted-cross-head-proof';
 import { recordLandingObservation, wakeLandingQueue } from './projectHostedLandingEvents';
 import { holdsLandingOrder } from './projectHostedLandingOrder';
+import { recordAuditRunnerSeconds } from './projectLandingSpeed';
 import {
   drillClaims,
   drillInTime,
@@ -365,6 +366,7 @@ export async function onGateRunTerminal(ctx: MutationCtx, run: HostedCheckRun): 
     return;
   }
   if (row.audit?.runId !== run.id || hostedCheckTerminal(row.audit)) return;
+  if (run.execution) await recordAuditRunnerSeconds(ctx, projectId, run.execution.seconds);
   const meta = auditMetadata(run);
   await clearAuditWake(ctx, row);
   await ctx.db.patch(row._id, { audit: { ...row.audit, status: run.status } });

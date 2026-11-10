@@ -190,9 +190,9 @@
       "metric": "writes",
       "stat": "mean",
       "unit": "writes",
-      "max": 40,
-      "source": "Cost guard fixture 2026-11-10: 7 writes for a solo landing, 14 when main moves once during its check (7 more per recompose). At the live 2.26 attempts per landing that is about 16; nothing stamped this number live before this change.",
-      "reason": "An upper bound, not a measured spread: about twice the worst window the attempts data implies, so it breaks on a write loop, not on noise. Ratchet down once 20 stamped landings exist.",
+      "max": 22,
+      "source": "Landing-state writes of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z (status version + 1): 8 writes for a landing with one attempt, 12 with two, 20 to 22 with three; mean 11.1, rolling 20-landing mean 10.2 to 11.3. Cost guard fixture 2026-11-10: 7 writes solo, 14 with one recompose.",
+      "reason": "Set from the live spread, with the attempts budget's own ceiling in mind: 8 writes plus 4 per extra attempt is 20 at 4 attempts, so 22 breaks on a write loop, not on a busy window the attempts budget allows. Ratchet down if a window of 20 stays below 14.",
       "issue": "7ecc4884"
     },
     {
@@ -224,6 +224,78 @@
       "max": null,
       "source": "Not recorded: the hosted preflight reply carries no duration and no landing stamp covers it.",
       "reason": "No number is invented. Shown as unrun until a recorded value exists; the follow-up is on Issue b7851c44."
+    },
+    {
+      "id": "landing-r2-class-a-mean",
+      "area": "R2 class A requests (writes, listings) signed by a landing's composes",
+      "measuredBy": "landing-record",
+      "metric": "r2ClassA",
+      "stat": "mean",
+      "unit": "ops",
+      "max": 10,
+      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
+      "reason": "An upper bound, not a measured spread: it breaks on a per-object write loop in a compose, not on noise. Class A costs ten times class B ($4.50 per million). Counts are the composes only; check shards (one log PUT each) and saves are not in it.",
+      "issue": "9db58ca6"
+    },
+    {
+      "id": "landing-r2-class-b-mean",
+      "area": "R2 class B requests (reads, heads) signed by a landing's composes",
+      "measuredBy": "landing-record",
+      "metric": "r2ClassB",
+      "stat": "mean",
+      "unit": "ops",
+      "max": 36,
+      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
+      "reason": "An upper bound, not a measured spread: it breaks on a per-object read loop in a compose (the object re-resolve per step the fewer-steps decision removed), not on noise.",
+      "issue": "ac5200f5"
+    },
+    {
+      "id": "landing-r2-bytes-put-mean",
+      "area": "R2 bytes put by a landing's composes",
+      "measuredBy": "landing-record",
+      "metric": "r2BytesPut",
+      "stat": "mean",
+      "unit": "bytes",
+      "max": 3000000,
+      "source": "Seeded from the cost guard fixture (landing-r2-* entries: class A 3.17, class B 11.67, 1,881 bytes per landing) times about three for real trees; no live number exists before this change stamps one (landing state counts: R2 requests signed by the landing's composes, counted at convex/presign.ts, summed over attempts). Ratchet to the first 20 stamped landings.",
+      "reason": "An upper bound, not a measured spread: stored bytes are an always-on cost, and a landing should write only new objects. A compose that re-uploads unchanged trees breaks it.",
+      "issue": "9db58ca6"
+    },
+    {
+      "id": "landing-runner-accepted-mean",
+      "area": "GitHub runner minutes of the accepted check (shard execution), per landing",
+      "measuredBy": "landing-record",
+      "metric": "runnerAccepted",
+      "stat": "mean",
+      "unit": "min",
+      "max": 70,
+      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); the live stamp is the same field of the run row, read when the landing sees the run end. Accepted check: mean 54.4 min, rolling 20-landing mean 49.2 to 57.0.",
+      "reason": "Rolling peak 57.0 plus about 20% for a heavier test set. Free on our public repository; about $0.006 a minute at list price for a private one (capture #4), so 54 minutes is about $0.33 a landing. A shard plan that stops sharding, or a test set that doubles, breaks it.",
+      "issue": "51bbbd00"
+    },
+    {
+      "id": "landing-runner-discarded-mean",
+      "area": "GitHub runner minutes of checks a landing's attempts discarded (shard execution), per landing",
+      "measuredBy": "landing-record",
+      "metric": "runnerDiscarded",
+      "stat": "mean",
+      "unit": "min",
+      "max": 12,
+      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); the live stamp is the same field of the run row, read when the landing sees the run end. Discarded: mean 4.7 min, rolling 20-landing mean 2.5 to 5.9 (3 discarded runs of about 50 to 60 min in 36 landings).",
+      "reason": "One full discarded run in 20 landings adds about 3 minutes; 12 is four of them, so it breaks when main races keep throwing checks away (incident 10d253c6), not on one unlucky window. Counts runs that ended with their shard seconds recorded; a run cancelled before it ended counts nothing.",
+      "issue": "51bbbd00"
+    },
+    {
+      "id": "landing-runner-audit-mean",
+      "area": "GitHub runner minutes of the main audit runs, per landing",
+      "measuredBy": "landing-record",
+      "metric": "runnerAudit",
+      "stat": "mean",
+      "unit": "min",
+      "max": 32,
+      "source": "Shard execution seconds of the check runs of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z, from each run's stored summary (timings.executionSeconds); the live stamp is the same field of the run row, read when the landing sees the run end. Audit: 12 audit runs shared by the 36 landings, counted once each; mean 18.8 min per landing, rolling 20-landing mean 13.3 to 23.4.",
+      "reason": "The audit's shard seconds join the newest landing when the audit ends (once per audit run). Peak 23.4 plus about 35%: an audit after every landing (about 54) breaks it, a busier cadence does not.",
+      "issue": "51bbbd00"
     }
   ],
   "costGuard": {
@@ -244,9 +316,74 @@
     },
     "reference": [
       {
-        "family": "all Convex, per 1,000 accepted landings (list price, not billed)",
+        "family": "all Convex, per 1,000 accepted landings, capture #3 (list price, not billed)",
         "usdPer1000": 5.92,
-        "source": "Capture #3, Issue 9db58ca6, 2026-11-07, N=10 (11.85 per acceptance event). Capture #4 (Issue 3e3f9fe6 line 1) replaces this when it reports."
+        "source": "Capture #3, Issue 9db58ca6, 2026-11-07, N=10 (11.85 per acceptance event). Superseded as the latest by the capture #4 lines below; kept as the earlier reading."
+      },
+      {
+        "family": "all Convex, per 1,000 accepted landings, capture #4 (list price, not billed)",
+        "usdPer1000": 9.49,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Like-for-like basis of #3 (one-off imports, purges and work/planning, mirror and signDownloads removed): 8.00 against 5.04. Per acceptance event 5.93. Target about $2. "
+      },
+      {
+        "family": "source and objects, capture #4",
+        "usdPer1000": 2.99,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 2.24, #2 1.24, #1 1.52. "
+      },
+      {
+        "family": "CI results and ingest, capture #4",
+        "usdPer1000": 1.36,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 1.03. "
+      },
+      {
+        "family": "other (one-off imports, SourceRun, ConflictMerge), capture #4",
+        "usdPer1000": 1.45,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.13; the new rows are builder one-offs in the window. "
+      },
+      {
+        "family": "lane, queue and session, capture #4",
+        "usdPer1000": 0.84,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.25. "
+      },
+      {
+        "family": "landing controller, capture #4",
+        "usdPer1000": 0.6,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.43. "
+      },
+      {
+        "family": "finish driver, capture #4",
+        "usdPer1000": 0.57,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.35. "
+      },
+      {
+        "family": "GitHub mirror, capture #4",
+        "usdPer1000": 0.45,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.32. "
+      },
+      {
+        "family": "overlap notices, capture #4",
+        "usdPer1000": 0.32,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.07. "
+      },
+      {
+        "family": "auth and device, capture #4",
+        "usdPer1000": 0.32,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.15. "
+      },
+      {
+        "family": "check reuse, capture #4",
+        "usdPer1000": 0.25,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.16. "
+      },
+      {
+        "family": "finish observer, capture #4",
+        "usdPer1000": 0.23,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.22. "
+      },
+      {
+        "family": "work and planning, capture #4",
+        "usdPer1000": 0.12,
+        "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.57; the drop is flip 5 (work store, S0 to S3). "
       }
     ]
   },
@@ -389,11 +526,11 @@
       "measuredBy": "snapshot-fixture",
       "metric": "snapshotUploads",
       "unit": "uploads",
-      "value": 2,
+      "value": 1,
       "floor": 0,
-      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: a changed snapshot uploads one page and the one changed file; unchanged files are never sent.",
+      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: a changed packed snapshot (a CLI with lane-snapshot-packs, deployed by 7ac4e32f) uploads one pack holding the page and every changed file; unchanged files are never sent. The loose path it replaced uploaded 2.",
       "issue": "7ac4e32f",
-      "reason": "A snapshot runs per command with changes, so it is charged per edit, not per landing. Any extra upload per snapshot fails."
+      "reason": "A snapshot runs per command with changes, so it is charged per edit, not per landing. One pack per snapshot; any extra upload fails. The two-upload loose path is no longer the baseline."
     },
     {
       "id": "snapshot-calls",
@@ -401,23 +538,35 @@
       "measuredBy": "snapshot-fixture",
       "metric": "snapshotCalls",
       "unit": "calls",
-      "value": 2,
+      "value": 1,
       "floor": 0,
-      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: prepare and commit; an unchanged tree costs no call.",
+      "source": "tests/hosted-lane-snapshots.test.mjs, 2026-11-10: a changed packed snapshot is one prepare call and no commit (the entry is live after prepare); an unchanged tree costs no call. The loose path it replaced was prepare and commit.",
       "issue": "7ac4e32f",
-      "reason": "Two calls per changed snapshot (prepare, commit) and zero when nothing changed; any extra call fails."
+      "reason": "One call per changed snapshot and zero when nothing changed; any extra call fails."
     },
     {
       "id": "check-minutes",
-      "area": "hosted check minutes, per landing",
+      "area": "GitHub Actions wall minutes of a landing's checks (latency, not runner minutes)",
       "measuredBy": "capture",
       "metric": "checkMinutes",
       "unit": "min",
       "value": 12.3,
       "floor": 0,
-      "source": "Dogfood main 2026-11-08 to 11-10: 421 distinct check runs for 285 accepted landings (1.48 per landing, landings read) times the check p50 of 8.3 min (speed budget check-p50).",
+      "source": "Dogfood main 2026-11-08 to 11-10: 421 distinct check runs for 285 accepted landings (1.48 per landing, landings read) times the check p50 of 8.3 min (speed budget check-p50). This is wall time, one run's shards running side by side: the runner minutes behind it are the next entry (capture #4: stored shard seconds 77.9 min per landing, mostly 12 shards of about 4.5 min each per run).",
       "issue": "51bbbd00",
-      "reason": "GitHub Actions minutes are free on the public repository (list price about $0.008 a minute); judged live by check-p50/p90 and attempts, and on change by landing-check-runs."
+      "reason": "Kept for the queue-throughput and latency decisions; judged live by check-p50/p90 and attempts, and on change by landing-check-runs. Do not read it as cost: price follows check-runner-minutes."
+    },
+    {
+      "id": "check-runner-minutes",
+      "area": "GitHub Actions runner minutes of a landing's checks (shard execution, summed over shards)",
+      "measuredBy": "capture",
+      "metric": "checkRunnerMinutes",
+      "unit": "min",
+      "value": 77.9,
+      "floor": 0,
+      "source": "Check results of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z (landings read, then the stored run summary of each run: timings.executionSeconds, the shard execution seconds the run row keeps). Per landing: accepted check 54.4 min (rolling 20-landing mean 49.2 to 57.0, 10 to 12 shards, one scoped run of 2), runs its attempts discarded 4.7 (2.5 to 5.9), the main audit that followed 18.8 (13.3 to 23.4; 12 audit runs shared by 36 landings, counted once). Live since this change: budgets landing-runner-accepted-mean, landing-runner-discarded-mean and landing-runner-audit-mean.",
+      "issue": "51bbbd00",
+      "reason": "Capture #4 measured about 113 GitHub runner minutes per landing (1,110 exact by job interval in a 56.9 min window with 10 landings; $0 billed on our public repository, about $681 per 1,000 landings at list price for a private repository). Of those, 86.4 are the forge-check runs (accepted 53.8, discarded 5.5, audit 11.4, check-only and cancelled runs that never became a landing 15.7), 22.0 are this repository's own Verify Forge workflow on each push (not a user's check), 2.6 deploy, sign and smoke. The stored shard seconds (77.9, a 36-landing window) are about 90% of the forge-check minutes (86.4, a 10-landing window); the rest is the plan and static jobs, setup before the shards and runs no landing owns."
     }
   ]
 }

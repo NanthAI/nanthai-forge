@@ -15,7 +15,9 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Web eager JavaScript (gzip) | `perf-harness --bundle` | 246 KB; budget 270 KB |
 | Unsaved-work snapshot added to a command: no changed file / one or fifty changed files (p90) | `perf-harness --snapshot-lane` | 5.9 ms / 16.2 ms (the walk and uploads run in a detached worker; before, in the command: 144 ms / 1,818 ms); budget 50 / 300 ms |
 | Idle Convex calls | the build (`check-idle-queries`, landing tests) | 0; budget 0 |
-| Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts about 2.3 (distinct Candidates over 285 landings, 2026-11-08 to 11-10; worst 20-landing window 3.55); writes 7 solo, 14 after one recompose on the fixture; budget 4 / 40 |
+| Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
+| R2 requests and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | class A, class B, bytes put; seeded at 10 / 36 / 3 MB from the fixture until 20 stamped landings exist (batch and given-Candidate landings carry none and are skipped) |
+| GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
 | Save, preflight | nothing records them yet | unrun; see below |
 
 ## How a budget breaks

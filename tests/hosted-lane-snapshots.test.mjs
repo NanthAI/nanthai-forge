@@ -151,17 +151,10 @@ test('unchanged files cost no call; a changed snapshot is two calls and only cha
   const first = await x.snap();
   assert.equal(first.status, 'saved');
   assert.deepEqual(x.calls, ['projectLaneSnapshots:prepare', 'projectLaneSnapshots:commit']);
-  // One page plus the one changed file; the unchanged head file is never sent. Judged against the
-  // cost ledger (src/speed-budgets.json, Issue 3e3f9fe6): an extra call or upload per snapshot fails.
-  const costs = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'snapshot-fixture', {
-    snapshotCalls: first.calls,
-    snapshotUploads: first.uploads,
-  });
-  assert.equal(costs.length, 2);
-  assert.deepEqual(
-    costs.filter(c => c.status !== 'pass').map(c => c.message),
-    [],
-  );
+  // The loose path (a CLI without lane-snapshot-packs): one page plus the one changed file go up, the
+  // unchanged head file never. The cost ledger judges the packed path below, which is the current one.
+  assert.equal(first.calls, 2);
+  assert.equal(first.uploads, 2);
   assert.equal(x.stored().length, 2);
   x.calls.length = 0;
   assert.deepEqual(await x.snap(), { status: 'unchanged', calls: 0 });
@@ -472,6 +465,17 @@ test('a packed snapshot is one call and one object; a file is stored once per La
   assert.equal(first.calls, 1, 'prepare only: the entry is live without a commit call');
   assert.deepEqual(x.calls, ['projectLaneSnapshots:prepare']);
   assert.equal(first.uploads, 1, 'pages and both files go up as one object');
+  // Judged against the cost ledger (src/speed-budgets.json, Issue 3e3f9fe6): an extra call or upload
+  // per changed snapshot fails; a saving asks for the ledger to be lowered.
+  const costs = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'snapshot-fixture', {
+    snapshotCalls: first.calls,
+    snapshotUploads: first.uploads,
+  });
+  assert.equal(costs.length, 2);
+  assert.deepEqual(
+    costs.filter(c => c.status !== 'pass').map(c => c.message),
+    [],
+  );
   assert.equal(x.stored().length, 1);
   assert.equal(x.rows().find(row => row.seq === 1).state, 'live');
   // Only a digest and size in Convex; the pack holds the bytes.

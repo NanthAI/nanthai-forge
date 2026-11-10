@@ -30,6 +30,9 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
       ? { ciObservedAt: new Date(now).toISOString() }
       : {}),
   };
+  // Shard execution seconds of the ended run, from the run row already in hand (Issue 3e3f9fe6).
+  if (run.endedAt && run.execution)
+    state.counts = { ...state.counts, runnerSeconds: Math.round(run.execution.seconds) };
   if (run.testFiles) state.testFiles = run.testFiles;
   if (run.fallbackReason) state.ranInFull = run.fallbackReason;
 }

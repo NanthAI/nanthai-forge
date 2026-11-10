@@ -90,6 +90,8 @@ export async function initializeFinish(ctx: MutationCtx, state: HostedLandingSta
     source = original.state.request;
     restoreBases = original.state.restoreBases;
     recoveryRunId = original.row.culpritRunId;
+    // The first attempt's compose cost rides on the landing row this call's caller writes next.
+    if (original.state.r2) state.counts = { ...state.counts, r2: original.state.r2 };
   }
   invariant(
     canonicalPayload(source.inputs.root) === canonicalPayload(attempt.candidate.inputs) &&

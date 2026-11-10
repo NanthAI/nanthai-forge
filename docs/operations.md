@@ -1172,14 +1172,38 @@ A drop of 10% or more prints a notice to lower the value, so savings ratchet in.
 `node --import ./tests/check-runtime.mjs --test tests/landing-cost-guard.test.mjs` after
 `npm run build:core`; its diagnostics print every measured value and the per-scenario counts.
 
-**Live drift alert.** Each landing's accept mutation adds its attempts (the accepted attempt's
-ordinal plus one) and its landing-state writes (the state's version plus one) to the
-`projectLandingSpeed` row it already writes. The `landing-attempts-mean` and `landing-writes-mean`
-budgets in `budgets` are judged as the mean over the last 20 landings, exactly like the speed
-budgets: one alert and one P0 Issue per break, a recovery message, nothing while it stays broken
-([speed budgets](agents/speed-budgets.md)). Idle cost is zero; a landing adds no call and two small numbers to a row it already writes (about
-0.5 KB more at 60 samples). R2 operations and billed usage are not readable inside a landing write and stay with the live
-captures.
+**Live drift alert.** Each landing's accept mutation adds its counts to the `projectLandingSpeed` row it
+already writes (the row keeps the last 40 landings, about 3.7 KB, so it does not grow). The `budgets`
+below are judged as the mean over the last 20 landings, exactly like the speed budgets: one alert and
+one P0 Issue per break, a recovery message, nothing while it stays broken
+([speed budgets](agents/speed-budgets.md)). Idle cost is zero and a landing adds no call.
+
+- `landing-attempts-mean`, `landing-writes-mean`: attempts (the accepted attempt's ordinal plus one)
+  and landing-state writes (the state's version plus one).
+- `landing-r2-class-a-mean`, `-class-b-mean`, `-bytes-put-mean`: R2 requests the landing's composes
+  signed. Every R2 request needs a URL signed in `convex/presign.ts`, which counts them by class (A:
+  writes and listings, B: reads and heads, deletes free); each source step reports its difference with
+  the step row it already writes, the compose publication sums them into the compose state, and the
+  landing adds each attempt's sum to `counts.r2`. A landing whose Candidate was not composed for it
+  (a solo fixture, a batch member) carries none and is skipped, never counted as zero. Check shard
+  logs and saves are not in these counts.
+- `landing-runner-accepted-mean`, `-discarded-mean`, `-audit-mean`: GitHub runner minutes, from the
+  shard execution seconds the check run row stores (`execution.seconds`, summed over shards). The
+  accepted run's seconds are stamped when the landing sees the run end; a recompose that cannot reuse
+  the check moves them to the discarded total; the main audit run's seconds join the newest landing's
+  sample once, when the audit ends. A run cancelled before it ended counts nothing.
+
+**Runner minutes against check minutes.** `check-minutes` (about 12 per landing) is wall time: 1.48 runs
+times the 8.3 min p50, one run's 10 to 12 shards running side by side. Runner minutes are the sum over
+those shards, about 54 per accepted check, 5 discarded and 19 for the audits, 78 in all, free on our public
+repository and about $0.006 a minute at list price for a private one. GitHub's own count for capture
+#4 was 113 a landing, of which the forge-check runs were 86 (the stored shard seconds are about 90% of
+them; the rest is plan, static and setup jobs, check-only runs and cancelled runs no landing owns), this
+repository's own Verify Forge workflow on every push 22, and deploy, sign and smoke jobs 3. A change that
+doubles the shard count or the test set shows in `landing-runner-accepted-mean`, not in the wall time.
+Billed dollars, Convex per-function costs and the R2 operations of saves and check logs still come from the
+live captures (`costGuard.reference` holds the latest per-family dollars, labelled as list-price
+estimates).
 
 ## Local cleanup
 

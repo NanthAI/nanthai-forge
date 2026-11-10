@@ -7,7 +7,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { sourceStepClock } from '../dist/source-step-clock.js';
 import { serverSyncTiming, syncTiming } from '../dist/sync-timing.js';
 import { digest } from '../dist/portable-hash.js';
-const { recordSourceStep } = await import(moduleUrl('../convex/projectSourceStepTiming.ts'));
+const { recordSourceStep, sourceR2Counts } = await import(moduleUrl('../convex/projectSourceStepTiming.ts'));
 const { inlineSourceResult } = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 
 const report = (startedAt, extra = {}) => ({
@@ -47,6 +47,24 @@ test('the step clock counts overlapping I/O of one kind once and holds a read un
   assert.equal(clock.value().readMs, settled, 'a consumed read stops counting');
   assert(clock.value().bootMs >= 50);
   assert.equal(sourceStepClock().value().bootMs, undefined);
+});
+
+test('a step reports the R2 requests its isolate signed since it began, and the step row sums them past 16 steps', () => {
+  let signed = { a: 10, b: 20, put: 100 };
+  const clock = sourceStepClock(undefined, () => ({ ...signed }));
+  signed = { a: 12, b: 29, put: 1700 };
+  const step = clock.value();
+  assert.deepEqual([step.r2a, step.r2b, step.r2put], [2, 9, 1600]);
+  assert.equal(sourceStepClock().value().r2a, undefined, 'a clock with no meter reports none');
+  let t = { queuedAt: 0, scheduledAt: 0, steps: [] };
+  for (let i = 0; i < 20; i++)
+    t = recordSourceStep(t, report(10, { r2a: 2, r2b: 9, r2put: 1600 }), 10 + i, i === 19);
+  assert.equal(t.steps.length, 16);
+  assert.deepEqual(
+    sourceR2Counts(t),
+    [40, 180, 32_000],
+    'folding keeps the sum, so a long step chain still counts every request',
+  );
 });
 
 test('the step row appends each reported step with its scheduling wait and folds past 16 steps', () => {

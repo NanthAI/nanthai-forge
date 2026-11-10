@@ -90,6 +90,9 @@ async function drain(f, m) {
     await run(f, m, f.pending()[0]);
   }
 }
+/** The cost counts each landed state carries (state.counts): what the live budgets are judged on. */
+const stamped = f =>
+  [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value).counts ?? null);
 const runs = f => [...f.tables.projectHostedCheckRuns.values()].map(r => JSON.parse(r.value));
 const landed = f =>
   [...f.tables.projectHostedLandingRequests.values()].filter(r => JSON.parse(r.value).phase === 'landed')
@@ -113,7 +116,7 @@ async function solo(t, { moveMain = false, extraQuery = false } = {}) {
     await drain(f, m);
   }
   assert.equal(landed(f), 1);
-  return { landings: 1, checkRuns: runs(f).length, ...(await m.stop()) };
+  return { landings: 1, checkRuns: runs(f).length, stamped: stamped(f), ...(await m.stop()) };
 }
 /** Four queued landings composed and checked together under the default batching policy. */
 async function batch(t, { extraQuery = false } = {}) {
@@ -138,7 +141,7 @@ async function batch(t, { extraQuery = false } = {}) {
     else if (!queued.length) break;
   }
   assert.equal(landed(f), 4);
-  return { landings: 4, checkRuns: f.runs().length, ...(await m.stop()) };
+  return { landings: 4, checkRuns: f.runs().length, stamped: stamped(f), ...(await m.stop()) };
 }
 
 /** The scripted mix in `costGuard.scenario`, per accepted landing. */
@@ -218,4 +221,24 @@ test('a saving of 10% or more asks the author to lower the ledger value, so it r
   assert.equal(warn.status, 'warn');
   assert.equal(judgeCost({ ...entry, value: 2, floor: 1 }, 3, costGuard).status, 'pass');
   assert.equal(judgeCost({ ...entry, value: 2, floor: 0.5 }, null, costGuard).status, 'fail');
+});
+
+test('live R2 stamp: a recomposed landing carries the requests its compose signed, never more than the meter saw; a landing with no compose of its own stays unknown', () => {
+  assert(baseline, 'runs after the guard measurement');
+  const { solo, mainMoved, batchOfFour } = baseline.scenarios;
+  // The solo landing took its Candidate as given (the fixture composes nothing for it).
+  assert.deepEqual(solo.stamped, [null]);
+  const [counts] = mainMoved.stamped;
+  const [a, b, put] = counts.r2;
+  assert(a > 0 && b > 0 && put > 0, 'the recompose signed writes, reads and bytes');
+  // The meter counts every R2 request of the whole scenario (checks and the begin reads too).
+  assert(
+    a <= mainMoved.r2ClassA && b <= mainMoved.r2ClassB && put <= mainMoved.r2BytesPut,
+    JSON.stringify({ counts, mainMoved }),
+  );
+  assert.deepEqual(
+    batchOfFour.stamped,
+    [null, null, null, null],
+    'batch members have no compose of their own',
+  );
 });

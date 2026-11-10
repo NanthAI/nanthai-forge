@@ -19,7 +19,7 @@ export const speedBudgetSchema = z
     metric: z.string().min(1),
     /** mean: cost budgets, where every landing's share adds up; p50/p90: speed budgets. */
     stat: z.enum(['p50', 'p90', 'mean']).optional(),
-    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes']),
+    unit: z.enum(['min', 's', 'ms', 'calls', 'bytes', 'attempts', 'writes', 'ops']),
     max: z.number().min(0).nullable(),
     source: z.string().min(1),
     reason: z.string().min(1),
@@ -43,19 +43,57 @@ export const speedBudgetsSchema = z
 export type SpeedBudget = z.infer<typeof speedBudgetSchema>;
 export type SpeedBudgets = z.infer<typeof speedBudgetsSchema>;
 /** attempts and writes are cost counts (Issue 3e3f9fe6): the landing's attempts (each a compose and a
- * check or a reuse) and its landing-state writes (the mutations of its own landing path). */
-export type LandingMetric = 'toMain' | 'check' | 'settle' | 'attempts' | 'writes';
+ * check or a reuse) and its landing-state writes (the mutations of its own landing path). The r2 and
+ * runner metrics are its other counts, kept in one `counts` entry of its sample (see COUNT). */
+export type LandingMetric =
+  | 'toMain'
+  | 'check'
+  | 'settle'
+  | 'attempts'
+  | 'writes'
+  | 'r2ClassA'
+  | 'r2ClassB'
+  | 'r2BytesPut'
+  | 'runnerAccepted'
+  | 'runnerDiscarded'
+  | 'runnerAudit';
 type Stat = 'p50' | 'p90' | 'mean';
-const METRICS: LandingMetric[] = ['toMain', 'check', 'settle', 'attempts', 'writes'];
-const INDEX: Record<LandingMetric, number> = { toMain: 1, check: 2, settle: 4, attempts: 5, writes: 6 };
+const INDEX: Partial<Record<LandingMetric, number>> = {
+  toMain: 1,
+  check: 2,
+  settle: 4,
+  attempts: 5,
+  writes: 6,
+};
+/** Position in a sample's `counts` and the divisor into the metric's unit: runner seconds become minutes. */
+const COUNT: Partial<Record<LandingMetric, [number, number]>> = {
+  r2ClassA: [0, 1],
+  r2ClassB: [1, 1],
+  r2BytesPut: [2, 1],
+  runnerAccepted: [3, 60],
+  runnerDiscarded: [4, 60],
+  runnerAudit: [5, 60],
+};
+const METRICS = [...Object.keys(INDEX), ...Object.keys(COUNT)] as LandingMetric[];
 const isLanding = (b: SpeedBudget): b is SpeedBudget & { metric: LandingMetric; stat: Stat; max: number } =>
   b.measuredBy === 'landing-record' && !!b.stat && b.max !== null && (METRICS as string[]).includes(b.metric);
 /** The budgets a landing's own stamps can judge. */
 export const landingBudgets = (budgets: SpeedBudgets) => budgets.budgets.filter(isLanding);
 
 const minute = 60_000;
-/** Retained samples per project (about 2 KB): the window plus gaps where a stamp was missing. */
-const MAX_SAMPLES = 60;
+/** Retained samples per project (about 3.7 KB with counts): the window plus gaps where a stamp was missing. */
+const MAX_SAMPLES = 40;
+/** R2 requests signed by its composes (class A, class B, bytes put), then the shard execution seconds of
+ * the accepted check run, of the runs its attempts discarded, and of the main audit run that followed it. */
+const countsSchema = z.tuple([
+  z.number().int().min(0).nullable(),
+  z.number().int().min(0).nullable(),
+  z.number().int().min(0).nullable(),
+  z.number().min(0).nullable(),
+  z.number().min(0).nullable(),
+  z.number().min(0).nullable(),
+]);
+export type LandingCounts = z.infer<typeof countsSchema>;
 const sampleSchema = z.tuple([
   z.number().int(),
   z.number().nullable(),
@@ -66,6 +104,8 @@ const sampleSchema = z.tuple([
   // Attempts and landing-state writes (cost counts); absent on rows written before them.
   z.number().nullable().optional(),
   z.number().nullable().optional(),
+  // Counts of the landing; absent on rows written before them.
+  countsSchema.nullable().optional(),
 ]);
 const brokenSchema = z
   .object({
@@ -79,7 +119,7 @@ export const landingSpeedStateSchema = z
   .object({
     schema: z.literal(2),
     /** [settled at ms, time-to-main minutes, check minutes, landing id, settle seconds, attempts,
-     * landing-state writes], oldest first. */
+     * landing-state writes, counts], oldest first. */
     samples: z.array(sampleSchema),
     /** Budgets over their limit now, by budget id: one entry means one alert and one Issue. */
     broken: z.record(z.string(), brokenSchema),
@@ -97,6 +137,8 @@ export type LandingSpeedSample = {
   /** Attempts this landing took (1 when nothing recomposed or re-ran), and its landing-state writes. */
   attempts?: number | null;
   writes?: number | null;
+  /** R2 requests and runner seconds (see countsSchema); the audit slot starts at 0 and the main audit adds to it. */
+  counts?: LandingCounts | null;
   /** Minutes in each stage of this landing: waiting and composing, check, settling. */
   stages: { queue: number | null; check: number | null; settle: number | null };
 };
@@ -134,6 +176,15 @@ export function landingSpeedSample(
     attempts,
     // The landing state starts at version 0 and every write adds one (projectHostedLandingStore).
     writes: Number.isSafeInteger(state.version) ? state.version + 1 : null,
+    // A count nobody reported stays null, so a gap never reads as zero cost.
+    counts: [
+      state.counts?.r2?.[0] ?? null,
+      state.counts?.r2?.[1] ?? null,
+      state.counts?.r2?.[2] ?? null,
+      state.counts?.runnerSeconds ?? null,
+      state.counts?.runnerSeconds === undefined ? null : (state.counts.discardedRunnerSeconds ?? 0),
+      0,
+    ],
     stages: {
       queue: span(timing.submittedAt, timing.checkReservedAt),
       check: span(timing.checkReservedAt, timing.ciEndedAt),
@@ -160,8 +211,14 @@ export function windowValue(
   stat: Stat,
   window: number,
 ) {
-  const index = INDEX[metric];
-  const values = samples.flatMap(row => (row[index] == null ? [] : [row[index] as number])).slice(-window);
+  const index = INDEX[metric],
+    count = COUNT[metric];
+  const values = samples
+    .flatMap(row => {
+      const value: number | null | undefined = count ? row[7]?.[count[0]] : (row[index!] as number | null);
+      return value == null ? [] : [value / (count?.[1] ?? 1)];
+    })
+    .slice(-window);
   if (values.length < window) return null;
   if (stat === 'mean') return round(values.reduce((sum, value) => sum + value, 0) / values.length);
   return round(percentile(values, stat === 'p50' ? 0.5 : 0.9)!);
@@ -184,13 +241,14 @@ export function observeLandingSpeed(
       sample.settle,
       sample.attempts ?? null,
       sample.writes ?? null,
+      sample.counts ?? null,
     ] as const,
   ]
     .sort((a, b) => a[0] - b[0])
     .slice(-MAX_SAMPLES)
     .map(
-      ([at, toMain, check, id, settle, attempts, writes]) =>
-        [at, toMain, check, id, settle ?? null, attempts ?? null, writes ?? null] as Row,
+      ([at, toMain, check, id, settle, attempts, writes, counts]) =>
+        [at, toMain, check, id, settle ?? null, attempts ?? null, writes ?? null, counts ?? null] as Row,
     );
   const broken = { ...previous?.broken };
   const events: SpeedBudgetEvent[] = [];
@@ -210,14 +268,33 @@ export function observeLandingSpeed(
   }
   return { state: { schema: 2, samples, broken }, events };
 }
-type Row = [number, number | null, number | null, string, number | null, number | null, number | null];
+type Row = [
+  number,
+  number | null,
+  number | null,
+  string,
+  number | null,
+  number | null,
+  number | null,
+  LandingCounts | null,
+];
 
+const R2_NEXT =
+  "Next: R2 requests signed by the landing's composes rose: compare `forge-source-step` log lines of the crossing landing " +
+  '(objects, bytes per step) and the latest change to the source steps (convex/projectConvexSource*, src/hosted-source-step*); ' +
+  'the landing check cost guard counts the same requests on a fixture.';
 const NAME: Record<LandingMetric, string> = {
   toMain: 'landing to main',
   check: 'check',
   settle: 'check result to commit',
   attempts: 'attempts per landing',
   writes: 'landing-state writes per landing',
+  r2ClassA: 'R2 class A requests per landing',
+  r2ClassB: 'R2 class B requests per landing',
+  r2BytesPut: 'R2 bytes put per landing',
+  runnerAccepted: 'runner minutes of the accepted check per landing',
+  runnerDiscarded: 'runner minutes of discarded checks per landing',
+  runnerAudit: 'runner minutes of main audits per landing',
 };
 const describe = (b: SpeedBudget) => `${NAME[b.metric as LandingMetric]} ${b.stat}`;
 const NEXT: Record<LandingMetric, string> = {
@@ -238,6 +315,18 @@ const NEXT: Record<LandingMetric, string> = {
   check:
     'Next: run `nforge metrics ROOT --text` for check minutes and flaky files; ' +
     'compare the slowest test files with the previous week and the latest change to the verify script or check runner.',
+  r2ClassA: R2_NEXT,
+  r2ClassB: R2_NEXT,
+  r2BytesPut: R2_NEXT,
+  runnerAccepted:
+    'Next: shard execution seconds of the accepted check rose: run `nforge agent ROOT status {"runId":"RUN","summary":true}` ' +
+    'on the crossing landing (timings.executionSeconds, shards, slowest files) and compare with the latest change to the test set or the shard plan. ' +
+    'These are shard test seconds from the run row; a private repository pays about $0.008 per GitHub runner minute.',
+  runnerDiscarded:
+    'Next: runs its attempts threw away rose: read `nforge agent ROOT landings` for the window (checkRunIds, recomposeCount); ' +
+    'each main race that cannot reuse its check costs a whole run (incident 10d253c6).',
+  runnerAudit:
+    'Next: audits ran longer or more often: read the main audit state (`nforge agent ROOT status`, audit) and the audit cadence setting.',
 };
 const lastLandings = (budgets: SpeedBudgets) => `the last ${budgets.window.landings} landings`;
 
@@ -303,4 +392,39 @@ export function speedBudgetIssue(event: SpeedBudgetEvent, projectId: string, bud
     comment: speedBudgetMessage(event, 'this project', budgets).text,
     reopen: event.kind === 'broken',
   });
+}
+
+type Counts = LandingSpeedState['samples'][number][7];
+/** What a new attempt carries over from the one before it (Issue 3e3f9fe6): the R2 requests of every
+ * compose so far, and the shard execution seconds of runs it discards. An attempt that reuses the
+ * earlier check keeps that run as its own evidence, so those seconds are not discarded. */
+export function carriedCostCounts(
+  counts: HostedLandingState['counts'],
+  composed: readonly [number, number, number] | undefined,
+  reused: boolean,
+): HostedLandingState['counts'] {
+  const so = counts?.r2 ?? [0, 0, 0],
+    added = composed ?? [0, 0, 0],
+    r2 = so.map((n, i) => n + added[i]!) as [number, number, number],
+    discarded = (counts?.discardedRunnerSeconds ?? 0) + (reused ? 0 : (counts?.runnerSeconds ?? 0));
+  const carried = {
+    ...(r2.some(Boolean) ? { r2 } : {}),
+    ...(reused && counts?.runnerSeconds !== undefined ? { runnerSeconds: counts.runnerSeconds } : {}),
+    ...(discarded > 0 ? { discardedRunnerSeconds: discarded } : {}),
+  };
+  return Object.keys(carried).length ? carried : undefined;
+}
+/** The main audit's runner seconds join the newest landing's sample (the landing it followed), once. */
+export function addAuditSeconds(state: LandingSpeedState, seconds: number): LandingSpeedState {
+  const last = state.samples.at(-1);
+  if (!last || !(seconds > 0)) return state;
+  const counts: NonNullable<Counts> = [
+    ...(last[7] ?? [null, null, null, null, null, 0]),
+  ] as NonNullable<Counts>;
+  counts[5] = (counts[5] ?? 0) + seconds;
+  const [at, toMain, check, id, settle, attempts, writes] = last;
+  return {
+    ...state,
+    samples: [...state.samples.slice(0, -1), [at, toMain, check, id, settle, attempts, writes, counts]],
+  };
 }

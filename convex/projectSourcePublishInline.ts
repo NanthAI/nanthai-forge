@@ -28,13 +28,15 @@ export async function publishSourceResult(
   input: { projectId: Id<'hostedProjects'>; jobId: string; result: string },
   /** The committing action runs a save's resolve chain itself; the publication keeps only a fallback. */
   chainInline: boolean,
+  /** R2 requests the job's steps signed, from the step row the commit just wrote (compose only). */
+  r2?: [number, number, number],
 ): Promise<string | null> {
   const terminal =
     kind === 'save'
       ? await publishSaveJob(ctx, input, chainInline)
       : kind === 'sync'
         ? await publishSyncJob(ctx, input)
-        : await publishComposeJob(ctx, input);
+        : await publishComposeJob(ctx, { ...input, ...(r2 ? { r2 } : {}) });
   if (terminal === null) return null;
   const row =
     kind === 'save'

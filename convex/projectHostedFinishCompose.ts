@@ -32,6 +32,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { invariant } from '../src/errors';
 import { validCrossHeadProof, type CrossHeadProof } from '../src/hosted-cross-head-proof';
+import { carriedCostCounts } from '../src/landing-speed-alerts';
 import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
@@ -493,7 +494,12 @@ export async function installFinishCompose(
       version: state.version + 1,
       attemptId: attempt.id,
       phase: 'queued',
-      timing: { submittedAt: state.at, composeStartedAt: pending.at, composedAt: new Date().toISOString() },
+      timing: {
+        submittedAt: state.at,
+        composeStartedAt: pending.at,
+        composedAt: new Date().toISOString(),
+      },
+      counts: carriedCostCounts(state.counts, source.state.r2, !!proof),
       observation: landingObservation('queued'),
       error: null,
     },

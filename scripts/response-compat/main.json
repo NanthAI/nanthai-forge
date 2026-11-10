@@ -4335,6 +4335,43 @@
           ],
           "additionalProperties": false
         },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "r2": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "runnerSeconds": {
+              "type": "number",
+              "minimum": 0
+            },
+            "discardedRunnerSeconds": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
         "observation": {
           "type": "object",
           "properties": {

@@ -15,7 +15,13 @@ export type SourceStepTiming = {
   writes: number;
   /** Node step only: from the V8 step's hand-off to this handler (runtime start and module load). */
   bootMs?: number;
+  /** R2 requests the step signed: class A (writes, listings), class B (reads, heads), bytes to put. */
+  r2a?: number;
+  r2b?: number;
+  r2put?: number;
 };
+/** Running R2 request totals of the isolate (convex/presign.ts); the step reports its own difference. */
+export type R2Meter = () => { a: number; b: number; put: number };
 function busy() {
   let active = 0,
     since = 0,
@@ -30,8 +36,9 @@ function busy() {
     ms: () => total + (active ? performance.now() - since : 0),
   };
 }
-export function sourceStepClock(delegatedAt?: number) {
-  const startedAt = Date.now(),
+export function sourceStepClock(delegatedAt?: number, r2?: R2Meter) {
+  const r2From = r2?.(),
+    startedAt = Date.now(),
     started = performance.now(),
     read = busy(),
     write = busy(),
@@ -87,6 +94,13 @@ export function sourceStepClock(delegatedAt?: number) {
         reads,
         writes,
         ...(delegatedAt === undefined ? {} : { bootMs: round(startedAt - delegatedAt) }),
+        ...(r2 && r2From
+          ? (({ a, b, put }) => ({
+              r2a: round(a - r2From.a),
+              r2b: round(b - r2From.b),
+              r2put: round(put - r2From.put),
+            }))(r2())
+          : {}),
       };
     },
   };

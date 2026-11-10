@@ -41,7 +41,7 @@ import {
   unknownSourceFailure,
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
-import { recordSourceStep, sourceStepTiming } from './projectSourceStepTiming';
+import { recordSourceStep, sourceR2Counts, sourceStepTiming } from './projectSourceStepTiming';
 import { saveStepReads, saveTreeBase, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/portable-hash';
@@ -352,6 +352,7 @@ export const commit = sourceMutation({
     delete callback.input;
     delete callback.dispatchKey;
     await receiveConvexSourceJobCallback(ctx, args.projectId, callback);
+    const timing = recordSourceStep(active.row.timing, args.timing, now, terminal);
     await ctx.db.patch(active.row._id, {
       step: args.step + 1,
       cursor: args.cursor,
@@ -364,7 +365,7 @@ export const commit = sourceMutation({
       lastFailure: undefined,
       lastFailureAt: undefined,
       retryAt: undefined,
-      timing: recordSourceStep(active.row.timing, args.timing, now, terminal),
+      timing,
     });
     if (terminal) {
       const kind = active.job.jobKind;
@@ -386,6 +387,7 @@ export const commit = sourceMutation({
             kind as 'save' | 'sync' | 'compose',
             { projectId: args.projectId, jobId: args.jobId, result: args.result! },
             args.chain === true,
+            kind === 'compose' ? sourceR2Counts(timing) : undefined,
           )
         : null;
       // A job with no operation row to publish (none in production) keeps the complete action.
