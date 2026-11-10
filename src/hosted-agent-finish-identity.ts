@@ -27,6 +27,10 @@ import { hostedActionError } from './hosted-action-error.js';
 import type { HostedLaneSelection } from './hosted-lane.js';
 import type { HostedAgentAddress, hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { diskMode } from './source-links.js';
+import { readSource } from './files.js';
+import { clientCacheRoot } from './root-paths.js';
+import { readOverlapBytes } from './hosted-overlap-text.js';
+import { storedBytes, worktreeText } from './checkout-text.js';
 
 type Command = z.infer<typeof hostedAgentCommandSchemas.finish>;
 const selectionSchema = z.object({
@@ -92,7 +96,8 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
       if (baselineFiles.has(path)) changed.push(path);
     }
   const scratch = Buffer.allocUnsafe(1024 * 1024),
-    index = readCheckoutStatIndex(root);
+    index = readCheckoutStatIndex(root),
+    text = worktreeText(root, marker.state.files);
   const marked: string[] = [];
   for (const path of local) {
     const stat = lstatSync(join(root, path));
@@ -118,6 +123,22 @@ export function scanCheckout(root: string, marker: HostedLaneCheckoutMarker) {
         if (blob !== baseline && conflictMarkersFound(scan)) marked.push(path);
       } finally {
         reader.close();
+      }
+      // The blob a save stores: `.gitattributes` text files are normalised to LF (44ef42b9).
+      if (text && blob !== baseline && text.action(path) !== 'binary') {
+        const bytes = readSource(root, path, Number.MAX_SAFE_INTEGER);
+        if (bytes) {
+          const old = baseline;
+          blob = digest(
+            storedBytes(
+              text,
+              path,
+              mode,
+              bytes,
+              old ? { blob: old, read: () => readOverlapBytes(clientCacheRoot(root), old) } : undefined,
+            ),
+          );
+        }
       }
     }
     if (!before || before.blob !== blob || before.mode !== mode) changed.push(path);

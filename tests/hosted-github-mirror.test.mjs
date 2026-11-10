@@ -570,6 +570,86 @@ test('LFS pointers parse strictly and .gitattributes rules follow Git precedence
   assert.equal(lfs('models/a/b.onnx'), true);
 });
 
+test('Issue 44ef42b9: text and eol attributes convert as git checkout and git add do with default config', async t => {
+  const { textAttributes, blobHasCrlf } = await import('../dist/git-attributes.js');
+  const dir = mkdtempSync(join(tmpdir(), 'forge-eol-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // Plain git with no user or system config: core.autocrlf false, core.eol native (LF here).
+  const env = { ...process.env, HOME: dir, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  const git = (args, input) => execFileSync('git', args, { cwd: dir, env, input });
+  const fs = await import('node:fs');
+  const attributes =
+    '* text=auto eol=lf\n*.bat text eol=crlf\n*.cmd eol=crlf\n*.ac text=auto eol=crlf\n*.bin binary\n*.txt text\nlegacy.c crlf\nsub/** -text\n';
+  // Blobs as stored (written with --no-filters so git stores them byte for byte).
+  const blobs = {
+    'gradlew.bat': '@echo off\nset A=1\n',
+    'mixed.bat': 'a\r\nb\nc',
+    'run.cmd': 'x\ny\n',
+    'lf.ac': 'x\ny\n',
+    'has.ac': 'x\r\ny\n',
+    'nul.ac': 'a\n\0b\n',
+    'data.bin': 'a\nb\n',
+    'README.md': '# r\n',
+    'notes.txt': 'n\n',
+    'legacy.c': 'int x;\n',
+    'sub/raw.bat': 'k\n',
+  };
+  git(['init', '-q']);
+  fs.writeFileSync(join(dir, '.gitattributes'), attributes);
+  const files = [{ path: '.gitattributes', text: attributes }];
+  const rules = textAttributes(files, false);
+  for (const [path, text] of Object.entries(blobs)) {
+    const id = git(['hash-object', '-w', '--no-filters', '--stdin'], Buffer.from(text)).toString().trim();
+    git(['update-index', '--add', '--cacheinfo', `100644,${id},${path}`]);
+  }
+  git(['checkout-index', '-a', '-f']);
+  for (const [path, text] of Object.entries(blobs)) {
+    const want = fs.readFileSync(join(dir, path));
+    const ours = rules.toWorktree(path, Buffer.from(text)) ?? Buffer.from(text);
+    assert.equal(ours.toString('latin1'), want.toString('latin1'), `checkout ${path}`);
+  }
+  // git add: CRLF to LF for text, guessed text keeps CRLF its blob already had, binary untouched.
+  const working = {
+    'gradlew.bat': '@echo off\r\nset A=2\r\n',
+    'README.md': '# r\r\nmore\r\n',
+    'has.ac': 'x\r\ny\r\nz\r\n',
+    'notes.txt': 'a\r\nb\rc\n',
+    'data.bin': 'a\r\nb\r\n',
+    'nul.ac': 'a\r\n\0b\r\n',
+    'new.md': 'new\r\nfile\r\n',
+    'sub/raw.bat': 'k\r\n',
+  };
+  for (const [path, text] of Object.entries(working)) fs.writeFileSync(join(dir, path), text);
+  git(['add', '-A']);
+  for (const [path, text] of Object.entries(working)) {
+    const id = git(['ls-files', '-s', '--', path]).toString().split(/\s+/)[1];
+    const want = git(['cat-file', 'blob', id]).toString('latin1');
+    const before = blobs[path];
+    const ours =
+      rules.toGit(path, Buffer.from(text), () => Boolean(before && blobHasCrlf(Buffer.from(before)))) ??
+      Buffer.from(text);
+    assert.equal(ours.toString('latin1'), want, `add ${path}`);
+  }
+  // Nothing to convert: no rule, a filter-only rule, or LFS (its working copy is the object).
+  assert.equal(
+    textAttributes([{ path: '.gitattributes', text: '*.psd filter=lfs diff=lfs merge=lfs\n' }]),
+    null,
+  );
+  const binary = textAttributes([{ path: '.gitattributes', text: '*.psd filter=lfs -text\n' }], false);
+  assert.equal(binary.toGit('a.psd', Buffer.from('a\r\n')), null);
+  assert.equal(textAttributes([{ path: 'README.md', text: '* text eol=crlf\n' }]), null);
+  const lfs = textAttributes(
+    [{ path: '.gitattributes', text: '* text eol=crlf\n*.psd filter=lfs\n' }],
+    false,
+  );
+  assert.equal(lfs.toWorktree('a.psd', Buffer.from('a\nb\n')), null);
+  assert.equal(lfs.toWorktree('a.txt', Buffer.from('a\nb\n')).toString(), 'a\r\nb\r\n');
+  assert.equal(
+    textAttributes([{ path: '.gitattributes', text: '* text=auto eol=lf\n' }], false).convertsCheckout,
+    false,
+  );
+});
+
 test('two-way: an inbound push with Git LFS pointers lands the real objects, once per oid, through the import resolver', async () => {
   const { bringInChanges } = await import('../dist/github-inbound-bytes.js');
   const { readObjectRecipe } = await import('../dist/object-chunks.js');

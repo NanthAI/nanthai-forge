@@ -11,8 +11,9 @@ import {
   writeFileSync,
   unlinkSync,
   rmSync,
+  readFileSync,
 } from 'node:fs';
-import { chmod, copyFile, open, rm } from 'node:fs/promises';
+import { chmod, copyFile, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { checkoutIo } from './checkout-io.js';
@@ -23,6 +24,8 @@ import { foldedCollisions, type NameFolding, type NativeFile } from './native-st
 import { fileFlushFlags, syncDirectory, syncFile } from './native-durability.js';
 import { fingerprintPrivateFile, readSource } from './files.js';
 import { writeSourceLink } from './source-links.js';
+import type { TextAttributes } from './git-attributes.js';
+import { stateText, workingMatches } from './checkout-text.js';
 
 /** Unlike existsSync, a dangling symlink still occupies a checkout path. */
 export function checkoutPathExists(path: string) {
@@ -35,7 +38,23 @@ export function checkoutPathExists(path: string) {
   }
 }
 export { cleanHostedCheckout } from './hosted-checkout-clean.js';
-export function installHostedFile(stage: string, objects: string, file: NativeFile, durable = true) {
+/** Whether `.gitattributes` may give this installed file other working bytes than its blob. */
+const converts = (text: TextAttributes | null | undefined, file: NativeFile) =>
+  Boolean(text && (file.mode === 'file' || file.mode === 'executable') && text.convertsAt(file.path));
+/** Rewrite a verified, installed blob as Git's checkout writes it (LF to CRLF under `eol=crlf`,
+ * Issue 44ef42b9). The stored blob never changes; save turns the working bytes back into it. */
+function convertInstalledSync(target: string, file: NativeFile, text: TextAttributes | null | undefined) {
+  if (!converts(text, file)) return;
+  const working = text!.toWorktree(file.path, readFileSync(target));
+  if (working) writeFileSync(target, working);
+}
+export function installHostedFile(
+  stage: string,
+  objects: string,
+  file: NativeFile,
+  durable = true,
+  text?: TextAttributes | null,
+) {
   const target = join(stage, file.path),
     source = join(objects, file.blob);
   mkdirSync(dirname(target), { recursive: true });
@@ -51,6 +70,7 @@ export function installHostedFile(stage: string, objects: string, file: NativeFi
     // A clone shares blocks until edited (APFS/Btrfs); other filesystems copy.
     copyFileSync(source, target, constants.COPYFILE_FICLONE | constants.COPYFILE_EXCL);
     chmodSync(target, file.mode === 'executable' ? 0o755 : 0o644);
+    convertInstalledSync(target, file, text);
     if (durable) syncFile(target);
   }
 }
@@ -109,6 +129,8 @@ export async function installHostedCheckout(
 ) {
   mkdirSync(checkout, { recursive: true });
   refuseFoldedCollisions(checkout, files);
+  // A whole State: its own `.gitattributes` decide line endings, as for a git checkout.
+  const text = stateText(objects, files);
   const root = realpathSync(checkout);
   const verified = new Set<string>();
   let sliceStart = Date.now();
@@ -132,7 +154,7 @@ export async function installHostedCheckout(
       );
       verified.add(directory);
     }
-    installHostedFile(checkout, objects, file, durable);
+    installHostedFile(checkout, objects, file, durable, text);
   }
 }
 /** Working-tree files follow git (fea47345 round 3): a checkout materialized from the verified
@@ -147,6 +169,7 @@ export function interruptedCheckoutDamage(
   root: string,
   files: readonly NativeFile[],
   installed: ReadonlyMap<string, readonly [number, number, number, number, number, string]>,
+  text?: TextAttributes | null,
 ) {
   return files.filter(file => {
     const entry = installed.get(file.path);
@@ -163,7 +186,7 @@ export function interruptedCheckoutDamage(
       )
         return false;
       const bytes = readSource(root, file.path, Number.MAX_SAFE_INTEGER);
-      return !bytes || digest(bytes) !== file.blob;
+      return !bytes || !workingMatches(text ?? null, file.path, bytes, file.blob);
     } catch {
       return false;
     }
@@ -171,7 +194,12 @@ export function interruptedCheckoutDamage(
 }
 /** Rebuild these files of an interrupted checkout from the store: each is cloned, checked against
  * its pin and flushed, inside directories that must be real. */
-export function rebuildCheckoutFiles(root: string, objects: string, files: readonly NativeFile[]) {
+export function rebuildCheckoutFiles(
+  root: string,
+  objects: string,
+  files: readonly NativeFile[],
+  text?: TextAttributes | null,
+) {
   const real = realpathSync(root);
   for (const file of files) {
     const directory = join(root, dirname(file.path));
@@ -182,10 +210,10 @@ export function rebuildCheckoutFiles(root: string, objects: string, files: reado
       'Checkout directories must be real.',
     );
     rmSync(join(root, file.path), { force: true });
-    installHostedFile(root, objects, file);
+    installHostedFile(root, objects, file, true, text);
     const bytes = readSource(root, file.path, Number.MAX_SAFE_INTEGER);
     invariant(
-      bytes && digest(bytes) === file.blob,
+      bytes && workingMatches(text ?? null, file.path, bytes, file.blob),
       'INVALID_NATIVE_SOURCE',
       'Cloned source differs from the selected content.',
     );
@@ -196,8 +224,13 @@ export function rebuildCheckoutFiles(root: string, objects: string, files: reado
 /** Stage all copies before flushing them. Interleaving clone/chmod with fsync
  * repeatedly commits filesystem metadata; separate bounded passes let it coalesce.
  * Every regular file is still verified and durable before the caller installs. */
-export async function installHostedFiles(stage: string, objects: string, files: NativeFile[]) {
-  await stageHostedFiles(stage, objects, files);
+export async function installHostedFiles(
+  stage: string,
+  objects: string,
+  files: NativeFile[],
+  text?: TextAttributes | null,
+) {
+  await stageHostedFiles(stage, objects, files, undefined, text);
   await flushHostedFiles(stage, files);
 }
 
@@ -209,6 +242,8 @@ export async function stageHostedFiles(
   objects: string,
   files: NativeFile[],
   damaged?: NativeFile[],
+  /** The target State's line-ending rules (`stateText`); files they convert get Git's working bytes. */
+  text?: TextAttributes | null,
 ) {
   await checkoutIo(async () => {
     for (const directory of new Set(files.map(file => dirname(join(stage, file.path)))))
@@ -239,6 +274,10 @@ export async function stageHostedFiles(
       return;
     }
     await checkoutIo(() => chmod(target, file.mode === 'executable' ? 0o755 : 0o644));
+    if (converts(text, file)) {
+      const working = text!.toWorktree(file.path, await checkoutIo(() => readFile(target)));
+      if (working) await checkoutIo(() => writeFile(target, working));
+    }
   });
 }
 

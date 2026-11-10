@@ -26,6 +26,7 @@ import {
 import { workLocked } from './work-lock.js';
 import { withSubmoduleCheckouts } from './submodule-checkout.js';
 import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import { stateText, textAttributeFiles } from './checkout-text.js';
 import {
   checkoutDelta,
   deltaDisplacement,
@@ -240,19 +241,21 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
     }
   }
   const stagedFiles = delta ? delta.install : state.files;
-  await objects.ensure(stagedFiles.map(file => file.blob));
+  // The State's `.gitattributes` decide working line endings (44ef42b9); their blobs join this ensure.
+  await objects.ensure([...stagedFiles, ...textAttributeFiles(state.files)].map(file => file.blob));
+  const text = stateText(objects.objects, state.files);
   const stage = mkdtempSync(join(cache, delta ? 'delta-' : 'checkout-'));
   try {
     if (delta) {
       // An in-place pull rolls forward from its journaled stage after a crash: that stage stays durable.
-      await installHostedFiles(stage, objects.objects, stagedFiles);
+      await installHostedFiles(stage, objects.objects, stagedFiles, text);
       mkdirSync(join(stage, '.forge'), { mode: 0o700 });
       save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
       await flushHostedCheckoutFiles(stage, stagedFiles);
     } else {
       // A whole new tree follows git: no fsync per file. Its marker is written and fsynced last,
       // and one rename publishes it; an interrupted publication is found and rebuilt below.
-      await stageHostedFiles(stage, objects.objects, stagedFiles);
+      await stageHostedFiles(stage, objects.objects, stagedFiles, undefined, text);
       mkdirSync(join(stage, '.forge'), { mode: 0o700 });
       save(join(stage, '.forge', 'hosted-main.json'), { selection, state });
       syncDirectory(stage);
@@ -308,7 +311,8 @@ async function checkoutMain(root: string, request: z.infer<typeof requestSchema>
         rebuildCheckoutFiles(
           root,
           objects.objects,
-          interruptedCheckoutDamage(root, stagedFiles, readCheckoutStatIndex(root).entries),
+          interruptedCheckoutDamage(root, stagedFiles, readCheckoutStatIndex(root).entries, text),
+          text,
         );
       }
       if (installed) preserveArtifacts();

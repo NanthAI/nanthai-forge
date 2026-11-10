@@ -24,6 +24,7 @@ import { getSigned } from './exchange-r2-read.js';
 import { mapExchange } from './exchange-parallel.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
 import { rebuildCheckoutFiles } from './hosted-checkout-files.js';
+import { worktreeText } from './checkout-text.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { parseHostedResponse } from './hosted-response.js';
@@ -320,7 +321,7 @@ export async function executeSnapshots(
     const removals = [...desired.entries()].filter(([, file]) => file === null).map(([path]) => path);
     for (const path of removals) rmSync(join(root, path), { force: true });
     for (const file of writes) mkdirSync(dirname(join(root, file.path)), { recursive: true });
-    rebuildCheckoutFiles(root, stage, writes);
+    rebuildCheckoutFiles(root, stage, writes, worktreeText(root, marker.state.files));
     await call(client, 'mutation', 'projectLaneSnapshots:restore', {
       projectId,
       laneId,

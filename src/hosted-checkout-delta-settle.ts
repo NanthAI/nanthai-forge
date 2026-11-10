@@ -19,6 +19,8 @@ import {
   type DeltaPin,
 } from './hosted-checkout-delta.js';
 import { exactly, parentOf, respellBack, respellForward } from './hosted-checkout-delta-respell.js';
+import type { TextAttributes } from './git-attributes.js';
+import { markerText } from './checkout-text.js';
 
 export type DeltaSettlement = {
   outcome: 'published' | 'rolled-back';
@@ -132,7 +134,9 @@ export function settleCheckoutDelta(
   const now = fileDigest(rootMarker),
     target =
       journal.targetMarker ?? fileDigest(stageMarker) ?? (legacyPublished(rootMarker, journal) ? now : null);
-  const steps = { journal, journalPath, root, cacheRoot, stage, backup };
+  // A file the checkout's `.gitattributes` converts holds its blob as CRLF (44ef42b9), not an edit.
+  const text = markerText(root, rootMarker);
+  const steps = { journal, journalPath, root, cacheRoot, stage, backup, text };
   let at = journal.operationId;
   try {
     if (now !== null && now === target) return finish(steps);
@@ -165,6 +169,7 @@ type Steps = {
   cacheRoot: string;
   stage: string;
   backup: string;
+  text: TextAttributes | null;
 };
 function rollForward(
   steps: Steps & { stageMarker: string; rootMarker: string },
@@ -201,7 +206,7 @@ function rollForward(
     installPaths.some(path => fold(directory) === path || fold(directory).startsWith(`${path}/`));
   for (const directory of journal.directories) if (flipped(directory)) removeEmptied(root, directory, track);
   const changed = journal.displace.filter(
-    file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file),
+    file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file, steps.text),
   );
   const occupied = journal.install.filter(
     file => pending.has(file.path) && exists(join(steps.root, file.path)),
@@ -267,7 +272,9 @@ function finish(steps: Steps): DeltaSettlement {
   writeCheckoutStatIndex(root, index.since, index.entries);
   const kept =
     exists(join(backup, 'occupied')) ||
-    journal.displace.some(file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file));
+    journal.displace.some(
+      file => exists(join(backup, file.path)) && !matches(join(backup, file.path), file, steps.text),
+    );
   return retire(steps, kept, 'published');
 }
 /** Regenerable folders go before the journal, so an interruption here leaves the journal to finish
@@ -298,7 +305,7 @@ function rollBack(steps: Steps, track: (path: string) => void, conflict?: ForgeE
     if (exists(join(stage, file.path)) || !present(file.path)) continue;
     track(file.path);
     guard(file.path);
-    if (!wasInstalled(at, file, journal, backup)) continue;
+    if (!wasInstalled(at, file, journal, backup, steps.text)) continue;
     rmSync(at);
     touched.push(dirname(at));
   }
@@ -336,8 +343,14 @@ function rollBack(steps: Steps, track: (path: string) => void, conflict?: ForgeE
 }
 /** An installed path is ours to remove only while it holds exactly the incoming bytes. Anything
  * else was written after the interruption and refuses, keeping the journal for a rerun. */
-function wasInstalled(at: string, file: DeltaPin, journal: DeltaJournal, backup: string) {
-  if (matches(at, file)) return true;
+function wasInstalled(
+  at: string,
+  file: DeltaPin,
+  journal: DeltaJournal,
+  backup: string,
+  text: TextAttributes | null,
+) {
+  if (matches(at, file, text)) return true;
   const displaced = journal.displace.some(item => item.path === file.path);
   // Never moved aside and never installed: it is the untouched baseline (or a user's own file).
   if (!displaced || !exists(join(backup, file.path))) return false;

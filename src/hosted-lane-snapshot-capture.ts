@@ -18,6 +18,9 @@ import { gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { forgeCachePath } from './forge-cache-paths.js';
 import { diskMode } from './source-links.js';
 import { digest } from './hash.js';
+import { clientCacheRoot } from './root-paths.js';
+import { readOverlapBytes } from './hosted-overlap-text.js';
+import { storedBytes, worktreeText } from './checkout-text.js';
 import { invariant } from './errors.js';
 import {
   indexedBlob,
@@ -131,7 +134,21 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
   const local = scanSourcePaths(root, { retained: [...baseline.keys()], onExcluded: notSaved.onExcluded });
   const changes: SaveChange[] = [],
     bytes = new Map<string, Buffer>(),
-    sources = new Map<string, string>();
+    sources = new Map<string, { path: string; mode: string }>();
+  // Bytes as a save stores them: `.gitattributes` text files are normalised to LF (44ef42b9).
+  const text = worktreeText(root, marker.state.files),
+    cache = clientCacheRoot(root);
+  const readStored = (path: string, stat: Stats, mode: string) => {
+    const value = readBytes(root, path, stat),
+      old = baseline.get(path);
+    return storedBytes(
+      text,
+      path,
+      mode,
+      value,
+      old && { blob: old.blob, read: () => readOverlapBytes(cache, old.blob) },
+    );
+  };
   for (const path of local) {
     const stat = lstatSync(join(root, path)),
       old = baseline.get(path),
@@ -155,7 +172,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
     if (!blob) {
       // A file read here is racy or new: only a rewritten index moves `since` past it.
       hashed = true;
-      read = readBytes(root, path, stat);
+      read = readStored(path, stat, mode);
       blob = digest(read);
     }
     if (!submodule) observed.set(path, statEntry(stat, blob));
@@ -166,7 +183,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
       let secret = own.verdicts.get(blob);
       if (secret === undefined) {
         if (!read && stat.size <= SECRET_SCAN_MAX_FILE_BYTES) {
-          const value = readBytes(root, path, stat);
+          const value = readStored(path, stat, mode);
           if (digest(value) === blob) read = value;
         }
         secret =
@@ -182,7 +199,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
       }
     }
     if (read) bytes.set(blob, read);
-    else sources.set(blob, path);
+    else sources.set(blob, { path, mode });
     changes.push({
       path,
       before: old ? { blob: old.blob, mode: old.mode } : null,
@@ -211,8 +228,11 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
     read(sha256) {
       const known = bytes.get(sha256);
       if (known) return known;
-      const path = sources.get(sha256);
-      const value = path === undefined ? undefined : readBytes(root, path, lstatSync(join(root, path)));
+      const source = sources.get(sha256);
+      const value =
+        source === undefined
+          ? undefined
+          : readStored(source.path, lstatSync(join(root, source.path)), source.mode);
       invariant(
         value && digest(value) === sha256,
         'SOURCE_CHANGED',

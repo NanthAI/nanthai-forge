@@ -15,6 +15,8 @@ import { readHostedLaneCheckout } from '../dist/hosted-lane-checkout-marker.js';
 import { indexedBlob, readCheckoutStatIndex, statEntry } from '../dist/checkout-stat-index.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { digest } from '../dist/hash.js';
+import { captureHostedSave } from '../dist/hosted-save-capture.js';
+import { installHostedCheckout } from '../dist/hosted-checkout-files.js';
 
 const indexPath = root => join(clientCacheRoot(root), 'checkout-stat.json');
 /** Checkout files read by `run`, relative to root (marker and cache reads excluded). */
@@ -118,3 +120,38 @@ test('an index whose client clock ran ahead of the file system is bounded by its
 function rmIndex(root) {
   fs.rmSync(indexPath(root), { force: true });
 }
+
+test('Issue 44ef42b9: eol=crlf files check out, sync, stay clean and save as git does', async t => {
+  const rules = { path: '.gitattributes', content: '*.bat text eol=crlf\n' };
+  const s = await fixture(t, undefined, [rules, { path: 'gradlew.bat', content: '@echo off\nset A=1\n' }]);
+  const bat = join(s.root, 'gradlew.bat');
+  assert.equal(readFileSync(bat, 'utf8'), '@echo off\r\nset A=1\r\n', 'the working tree has CRLF');
+  assert.equal(readFileSync(join(s.root, 'a'), 'utf8'), 'before\n', 'files without a rule are untouched');
+  // Inside the racy window the check reads the CRLF bytes and matches them to the LF blob.
+  assert.equal(hostedLaneDirty(s.root, { refresh: true }), false, 'a converted checkout is clean');
+  // A sync that changes the file installs it converted, with no edit kept aside.
+  const later = s.put('@echo off\nset A=2\n');
+  s.setFiles(s.files.map(file => (file.path === 'gradlew.bat' ? { ...file, blob: later } : file)));
+  await applyHostedSync(s.root, s.command(), s.transport);
+  assert.equal(readFileSync(bat, 'utf8'), '@echo off\r\nset A=2\r\n');
+  assert.equal(
+    readHostedLaneCheckout(s.root).state.files.find(file => file.path === 'gradlew.bat').blob,
+    later,
+  );
+  assert.equal(hostedLaneDirty(s.root, { refresh: true }), false);
+  // An edit saves the LF bytes Git stores.
+  writeFileSync(bat, '@echo off\r\nset A=3\r\n');
+  const capture = await captureHostedSave(s.root, join(s.root, '..', 'capture'));
+  assert.deepEqual(
+    capture.changes.map(change => [change.path, change.after?.blob]),
+    [['gradlew.bat', digest('@echo off\nset A=3\n')]],
+  );
+  // A Candidate checkout from verified objects converts the same way.
+  const objects = join(s.root, '..', 'objects'),
+    candidate = join(s.root, '..', 'candidate');
+  fs.mkdirSync(objects);
+  for (const [id, bytes] of s.objects) writeFileSync(join(objects, id), bytes);
+  const files = readHostedLaneCheckout(s.root).state.files;
+  await installHostedCheckout(candidate, objects, files);
+  assert.equal(readFileSync(join(candidate, 'gradlew.bat'), 'utf8'), '@echo off\r\nset A=2\r\n');
+});

@@ -14,6 +14,7 @@ import {
   installHostedFiles,
   flushHostedCheckoutFiles,
 } from './hosted-checkout-files.js';
+import { stateText } from './checkout-text.js';
 import { hostedLaneMarkerName } from './hosted-lane-checkout-marker.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { type LaneTransport } from './hosted-lane-checkout.js';
@@ -301,7 +302,7 @@ async function recoverApply(root: string, id: string, transport: LaneTransport) 
         if (checkoutPathExists(stage)) rmSync(stage, { recursive: true, force: true });
         mkdirSync(stage, { mode: 0o700 });
         try {
-          await installHostedFiles(stage, cache.objects, want);
+          await installHostedFiles(stage, cache.objects, want, stateText(cache.objects, want));
           mkdirSync(join(stage, '.forge'), { mode: 0o700, recursive: true });
           if (missingRoot)
             durableReplace(join(stage, '.forge', hostedLaneMarkerName), JSON.stringify(receipt.marker));

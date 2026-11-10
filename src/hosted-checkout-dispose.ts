@@ -13,11 +13,11 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
 import type { NativeFile } from './native-state-format.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
+import { workingMatches, worktreeText } from './checkout-text.js';
 import { keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';
 import { retainedDeltaBackups } from './hosted-checkout-delta-settle.js';
 import { diskShapeMatches, writeSourceLink } from './source-links.js';
@@ -51,6 +51,8 @@ export function disposePriorCheckout(input: {
 }): string | null {
   const { root, cacheRoot, previous, markerName, index } = input;
   const baseline = new Map(input.files.map(file => [file.path, file]));
+  // Files its `.gitattributes` convert hold their blob as CRLF (44ef42b9), not an edit.
+  const text = worktreeText(previous, input.files);
   const owned = metadata(markerName);
   const kept: KeptEntry[] = [];
   const asideName = `.forge-disposal-${randomUUID()}`,
@@ -91,7 +93,8 @@ export function disposePriorCheckout(input: {
       after.isSymbolicLink() ? readlinkSync(moved, { encoding: 'buffer' }) : readFileSync(moved);
     if (
       shaped(after, file) &&
-      ((untouched && index && indexedBlob(index, path, before, file.blob)) || digest(bytes()) === file.blob)
+      ((untouched && index && indexedBlob(index, path, before, file.blob)) ||
+        workingMatches(text, path, bytes(), file.blob, file.mode))
     ) {
       unlinkSync(moved);
       return true;

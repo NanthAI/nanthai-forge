@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { networkFetch, networkTimeout } from './network-fetch.js';
 import { assertGithubRateLimit, type GithubFetch } from './github.js';
 import { ForgeError, invariant } from './errors.js';
+import { attributeLines, attributePatternMatches } from './git-attributes.js';
 
 /** Git LFS spec: a pointer file is under 1024 bytes. */
 export const lfsPointerMaxBytes = 1024;
@@ -47,98 +48,27 @@ export const formatLfsPointer = (pointer: LfsPointer) =>
 /** One `.gitattributes` line that sets or clears `filter` for a pattern. */
 export type LfsRule = { base: string; pattern: string; lfs: boolean };
 
-const gitattributes = (path: string) => path === '.gitattributes' || path.endsWith('/.gitattributes');
-export const isGitattributesPath = gitattributes;
+export { isGitattributesPath } from './git-attributes.js';
 
 /** Rules from every `.gitattributes`, shallow files first and lines in order, so
  * the last matching rule wins as in Git (deeper files override shallower ones).
  * Macro definitions are ignored; directory-only patterns never match files. */
 export function lfsRules(files: { path: string; text: string }[]): LfsRule[] {
-  const ordered = files
-    .filter(file => gitattributes(file.path))
-    .sort((a, b) => a.path.split('/').length - b.path.split('/').length || (a.path < b.path ? -1 : 1));
   const rules: LfsRule[] = [];
-  for (const file of ordered) {
-    const base = file.path.slice(0, file.path.length - '.gitattributes'.length);
-    for (const raw of file.text.split(/\r?\n/)) {
-      const line = raw.trim();
-      if (!line || line.startsWith('#') || line.startsWith('[attr]')) continue;
-      const [pattern, rest] = splitPattern(line);
-      if (!pattern || pattern.endsWith('/') || pattern.startsWith('!')) continue;
-      let lfs: boolean | null = null;
-      for (const attribute of rest.split(/[ \t]+/))
-        if (attribute === 'filter=lfs') lfs = true;
-        else if (/^(?:filter=.*|-filter|!filter)$/.test(attribute)) lfs = false;
-      if (lfs !== null) rules.push({ base, pattern, lfs });
-    }
+  for (const { base, pattern, attributes } of attributeLines(files)) {
+    if (pattern.startsWith('[attr]')) continue;
+    let lfs: boolean | null = null;
+    for (const attribute of attributes)
+      if (attribute === 'filter=lfs') lfs = true;
+      else if (/^(?:filter=.*|-filter|!filter)$/.test(attribute)) lfs = false;
+    if (lfs !== null) rules.push({ base, pattern, lfs });
   }
   return rules;
 }
 
-function splitPattern(line: string): [string, string] {
-  if (!line.startsWith('"')) {
-    const space = line.search(/[ \t]/);
-    return space < 0 ? [line, ''] : [line.slice(0, space), line.slice(space + 1)];
-  }
-  let pattern = '',
-    index = 1;
-  for (; index < line.length && line[index] !== '"'; index++)
-    pattern += line[index] === '\\' && index + 1 < line.length ? line[++index] : line[index];
-  return index < line.length ? [pattern, line.slice(index + 1).trim()] : ['', ''];
-}
-
-const compiled = new Map<string, RegExp>();
-/** Git wildmatch for attributes: `*`, `?`, `[...]`, `**` and anchoring by slash. */
-function wildmatch(pattern: string): RegExp {
-  let cached = compiled.get(pattern);
-  if (cached) return cached;
-  const anchored = pattern.includes('/');
-  const body = pattern.replace(/^\//, '');
-  let source = '';
-  for (let i = 0; i < body.length; i++) {
-    const char = body[i]!;
-    if (char === '*' && body[i + 1] === '*') {
-      const atStart = i === 0 || body[i - 1] === '/';
-      const atEnd = i + 2 === body.length || body[i + 2] === '/';
-      if (atStart && atEnd) {
-        if (i + 2 === body.length) source += '.*';
-        else {
-          source += '(?:.*/)?';
-          i++;
-        }
-        i++;
-        continue;
-      }
-      source += '[^/]*';
-      i++;
-    } else if (char === '*') source += '[^/]*';
-    else if (char === '?') source += '[^/]';
-    else if (char === '[') {
-      const end = body.indexOf(']', i + 2);
-      if (end < 0) source += '\\[';
-      else {
-        let set = body.slice(i + 1, end);
-        if (set.startsWith('!')) set = '^' + set.slice(1);
-        source += `[${set.replace(/\\/g, '\\\\')}]`;
-        i = end;
-      }
-    } else if (char === '\\' && i + 1 < body.length) source += escape(body[++i]!);
-    else source += escape(char);
-  }
-  cached = new RegExp(anchored ? `^${source}$` : `(?:^|/)${source}$`);
-  compiled.set(pattern, cached);
-  return cached;
-}
-const escape = (char: string) => char.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
-
 export function isLfsPath(rules: LfsRule[], path: string): boolean {
   let lfs = false;
-  for (const rule of rules) {
-    if (!path.startsWith(rule.base)) continue;
-    const relative = path.slice(rule.base.length);
-    const target = rule.pattern.includes('/') ? relative : relative.slice(relative.lastIndexOf('/') + 1);
-    if (wildmatch(rule.pattern).test(target)) lfs = rule.lfs;
-  }
+  for (const rule of rules) if (attributePatternMatches(rule.base, rule.pattern, path)) lfs = rule.lfs;
   return lfs;
 }
 

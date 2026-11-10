@@ -212,6 +212,27 @@ Two-way inbound sync resolves LFS pointers in pushed files the same way; see
 When the project mirrors to GitHub, LFS paths are published back as LFS pointers
 plus objects; see [automatic main mirror](../workflows.md#automatic-main-mirror).
 
+## Line endings
+
+Imports store each file's committed bytes; `.gitattributes` never changes what is
+stored, so the mirror stays byte-identical to GitHub. A checkout (Lane, main,
+Candidate check, runner) writes the working copy as `git checkout` does with
+default settings: `text eol=crlf` files, and `text`/`text=auto` files on Windows,
+get CRLF where the blob has a lone LF (`text=auto` skips binary-looking files and
+files that already hold CR). Save, dirty checks and sync read such a file back as
+`git add` would, turning CRLF into LF for files marked text; a `text=auto` file
+whose current blob already holds CRLF keeps it, as in Git. `binary`, `-text` and
+`filter=lfs` paths are never converted. The rules come from the State's own
+`.gitattributes` objects, read locally from the verified object store (at most
+1 MiB each): no Convex call and no extra download. A tree with no converting rule
+does no work. Measured on a 4,000-file tree: 0.4 ms with
+`* text=auto eol=lf`, 1.1 ms with the Gradle wrapper's `*.bat text eol=crlf`
+rules, 1.4 ms with 200 `*.ext` lines (indexed by extension). Hundreds of
+directory globs cost more (about 170 ms for 200 `dir/**/x/*.ts` lines). Not
+applied: `ident`, `working-tree-encoding`, filter drivers other than Git LFS, and
+conflict files written by a merge (they hold LF until saved). Git settings such
+as `core.autocrlf` are not read.
+
 ## Measurement
 
 `scripts/benchmark-t3code-import.mjs` calls the same source-import start entry

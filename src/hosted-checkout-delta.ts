@@ -4,10 +4,11 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { z } from 'zod';
 import type { NativeFile } from './native-state-format.js';
-import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
 import { durableReplace } from './native-durability.js';
 import { diskShapeMatches } from './source-links.js';
+import type { TextAttributes } from './git-attributes.js';
+import { workingMatches } from './checkout-text.js';
 
 /** One pending in-place apply per client cache; the work lock serializes writers. */
 export const deltaJournalName = 'delta-apply.json';
@@ -208,14 +209,18 @@ export function deltaObstructed(root: string, delta: CheckoutDelta) {
   return null;
 }
 /** Exact bytes and mode of one path, never following a link or a second name of the inode. */
-export function deltaMatches(path: string, file: DeltaPin) {
+export function deltaMatches(path: string, file: DeltaPin, text: TextAttributes | null = null) {
   const stat = lstatSync(path);
   const bytes = stat.isSymbolicLink()
     ? readlinkSync(path, { encoding: 'buffer' })
     : stat.isFile() && stat.nlink === 1
       ? readFileSync(path)
       : null;
-  return Boolean(bytes && digest(bytes) === file.blob && diskShapeMatches(stat, file.mode));
+  return Boolean(
+    bytes &&
+    workingMatches(text, file.path, bytes, file.blob, file.mode) &&
+    diskShapeMatches(stat, file.mode),
+  );
 }
 /** Every path whose current bytes move aside, pinned to the bytes the caller verified there:
  * removed files and incoming paths a file or link already holds (its prior blob, or the incoming

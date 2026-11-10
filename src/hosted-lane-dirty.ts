@@ -9,6 +9,7 @@ import { nativePaths } from './source-paths.js';
 import { indexedBlob, readCheckoutStatIndex, statIndexRefresh } from './checkout-stat-index.js';
 import { deltaApplyPending } from './hosted-checkout-delta-pending.js';
 import { diskMode } from './source-links.js';
+import { workingMatches, worktreeText } from './checkout-text.js';
 
 const LARGE_FILE = 256 * 1024 * 1024;
 /** True when the checkout differs from its saved baseline, or when that cannot be established
@@ -25,7 +26,8 @@ export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {
     const baseline = new Map(marker.state.files.map(file => [file.path, file]));
     const refresh = statIndexRefresh(root);
     const local = nativePaths(root, [...baseline.keys()]),
-      index = readCheckoutStatIndex(root);
+      index = readCheckoutStatIndex(root),
+      text = worktreeText(root, marker.state.files);
     for (const path of local) {
       const old = baseline.get(path);
       if (!old) return true;
@@ -49,7 +51,7 @@ export function hostedLaneDirty(root: string, options: { refresh?: boolean } = {
       const bytes = stat.isSymbolicLink()
         ? readlinkSync(absolute, { encoding: 'buffer' })
         : readFileSync(absolute);
-      if (mode !== old.mode || digest(bytes) !== old.blob) return true;
+      if (mode !== old.mode || !workingMatches(text, path, bytes, old.blob, mode)) return true;
       refresh.read(path, stat, old.blob);
     }
     const present = new Set(local);

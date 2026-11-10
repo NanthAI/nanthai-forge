@@ -3,7 +3,8 @@ import { existsSync, lstatSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { scanSourcePaths } from './source-paths.js';
 import { canonicalRoot } from './root-paths.js';
-import { digest } from './hash.js';
+import type { TextAttributes } from './git-attributes.js';
+import { workingMatches, worktreeText } from './checkout-text.js';
 import { indexedBlob, readCheckoutStatIndex } from './checkout-stat-index.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { shellQuote } from './shell-quote.js';
@@ -44,9 +45,16 @@ export function unsavedMinutes(root: string, now = Date.now()) {
   if (!newer.length) return null;
   const minutes = (at: number) => Math.max(0, Math.floor((now - at) / 60_000));
   const index = baseline ? readCheckoutStatIndex(root) : null;
+  const text = baseline
+    ? worktreeText(
+        root,
+        [...baseline.entries()].map(([path, f]) => ({ path, ...f })),
+      )
+    : null;
   const budget = { files: VERIFY_FILES, bytes: VERIFY_BYTES };
   for (const file of newer.sort((a, b) => a.at - b.at))
-    if (!baseline || !index || !savedBytes(root, file.path, baseline, index, budget)) return minutes(file.at);
+    if (!baseline || !index || !savedBytes(root, file.path, baseline, index, budget, text))
+      return minutes(file.at);
   return null;
 }
 /** True when the file at path still holds its saved baseline bytes and mode. */
@@ -56,6 +64,7 @@ function savedBytes(
   baseline: Map<string, { blob: string; mode: string }>,
   index: ReturnType<typeof readCheckoutStatIndex>,
   budget: { files: number; bytes: number },
+  text: TextAttributes | null,
 ) {
   const old = baseline.get(path);
   if (!old) return false;
@@ -69,7 +78,7 @@ function savedBytes(
     if (budget.files <= 0 || budget.bytes < stat.size) return false;
     budget.files--;
     budget.bytes -= stat.size;
-    return digest(readFileSync(absolute)) === old.blob;
+    return workingMatches(text, path, readFileSync(absolute), old.blob, mode);
   } catch {
     return false;
   }

@@ -16,10 +16,11 @@ import { parseNativeState, type NativeFile } from './native-state-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { durableReplace, syncDirectory } from './native-durability.js';
 import { workLocked } from './work-lock.js';
-import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { diskShapeMatches } from './source-links.js';
+import type { TextAttributes } from './git-attributes.js';
+import { workingMatches, worktreeText } from './checkout-text.js';
 import { pendingSavePath } from './hosted-save-pending.js';
 export { pendingSavePath };
 
@@ -33,7 +34,7 @@ export function keepPatchCommand(root: string, laneId: string) {
 }
 
 /** Exact working-tree identity, never following a link target. */
-function onDisk(root: string, path: string, file: NativeFile | undefined) {
+function onDisk(root: string, path: string, file: NativeFile | undefined, text: TextAttributes | null) {
   const absolute = join(root, path);
   if (!checkoutPathExists(absolute)) return !file;
   if (!file) return false;
@@ -43,7 +44,9 @@ function onDisk(root: string, path: string, file: NativeFile | undefined) {
     : stat.isFile() && stat.nlink === 1
       ? readFileSync(absolute)
       : null;
-  return Boolean(bytes && digest(bytes) === file.blob && diskShapeMatches(stat, file.mode));
+  return Boolean(
+    bytes && workingMatches(text, path, bytes, file.blob, file.mode) && diskShapeMatches(stat, file.mode),
+  );
 }
 
 /** Move a checkout whose server Lane moved underneath it (a save that completed
@@ -87,6 +90,8 @@ export async function rebaseHostedCheckout(
   if (canonicalPayload(lane) === canonicalPayload(stale.selection)) return null;
   let state = stale.state,
     objects = '';
+  // The checkout's `.gitattributes` decide working line endings (44ef42b9) for checks and installs.
+  const text = worktreeText(root, stale.state.files);
   const install: {
     path: string;
     file: NativeFile | undefined;
@@ -114,8 +119,8 @@ export async function rebaseHostedCheckout(
       materialized.delete(path);
       if (wanted) materialized.add(path);
       // Both sides made the same change, or the path stays unmaterialized.
-      if (onDisk(root, path, wanted)) continue;
-      if (!onDisk(root, path, present)) {
+      if (onDisk(root, path, wanted, text)) continue;
+      if (!onDisk(root, path, present, text)) {
         if (keptAt) install.push({ path, file: wanted, old: present, keep: true });
         else conflicts.push(path);
       } else install.push({ path, file: wanted, old: present });
@@ -145,7 +150,7 @@ export async function rebaseHostedCheckout(
     // Recheck each path under the lock: an edit since the scan is preserved.
     for (const item of install)
       invariant(
-        item.keep || onDisk(root, item.path, item.old),
+        item.keep || onDisk(root, item.path, item.old, text),
         'SAVE_REBASE_CONFLICT',
         `${item.path} changed while the checkout was being repaired. Nothing was saved; retry the same save.`,
       );
@@ -171,7 +176,7 @@ export async function rebaseHostedCheckout(
         'UNSAFE_PATH',
         'Checkout directories must be real.',
       );
-      installHostedFile(root, objects, item.file);
+      installHostedFile(root, objects, item.file, true, text);
       syncDirectory(dirname(target));
     }
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));

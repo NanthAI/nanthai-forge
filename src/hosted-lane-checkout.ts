@@ -17,6 +17,7 @@ import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';
 import { workLocked } from './work-lock.js';
 import { indexInstalledFiles, readCheckoutStatIndex, writeCheckoutStatIndex } from './checkout-stat-index.js';
+import { stateText, textAttributeFiles, worktreeText } from './checkout-text.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
 import {
   checkoutDelta,
@@ -355,15 +356,22 @@ async function checkout(
       const repairs =
         installedHere && operation.previousMarker === null
           ? await checkoutIo(async () =>
-              interruptedCheckoutDamage(root, files, readCheckoutStatIndex(root).entries),
+              interruptedCheckoutDamage(
+                root,
+                files,
+                readCheckoutStatIndex(root).entries,
+                worktreeText(root, state.files),
+              ),
             )
           : [];
+      // The State's `.gitattributes` decide working line endings (44ef42b9); their blobs join this ensure.
       await metrics.measure('cacheVerify', () =>
         cache.ensure(
-          [...staged, ...repairs].map(file => file.blob),
+          [...staged, ...repairs, ...textAttributeFiles(state.files)].map(file => file.blob),
           { installVerifies: true },
         ),
       );
+      const text = await checkoutIo(async () => stateText(cache.objects, state.files));
       cooperative = !(await checkoutIo(async () => smallCheckout(staged, cache.objects)));
       // Reauthorize after a transfer, before writing. Bytes all from this machine's verified cache
       // arrived before this operation's access check, so a second read adds only a round trip.
@@ -379,11 +387,13 @@ async function checkout(
             const installed = await (async () => {
               const damaged: NativeFile[] = [];
               await metrics.measure('copyHash', () =>
-                stageHostedFiles(stage, cache.objects, staged, cache.repairable ? damaged : undefined),
+                stageHostedFiles(stage, cache.objects, staged, cache.repairable ? damaged : undefined, text),
               );
               if (damaged.length) {
                 await metrics.measure('cacheVerify', () => cache.repair(damaged.map(file => file.blob)));
-                await metrics.measure('copyHash', () => stageHostedFiles(stage, cache.objects, damaged));
+                await metrics.measure('copyHash', () =>
+                  stageHostedFiles(stage, cache.objects, damaged, undefined, text),
+                );
               }
               await checkoutIo(async () => mkdirSync(join(stage, '.forge'), { mode: 0o700 }));
               const marker: HostedLaneCheckoutMarker = {
@@ -444,7 +454,7 @@ async function checkout(
                           obstruction: { kind: 'baseline-mismatch', path: `.forge/${hostedLaneMarkerName}` },
                         },
                       );
-                    if (repairs.length) rebuildCheckoutFiles(root, cache.objects, repairs);
+                    if (repairs.length) rebuildCheckoutFiles(root, cache.objects, repairs, text);
                     if (current?.operationId === request.operationId) preserveArtifacts(files);
                     preserveCaches([...(current?.state.files ?? []), ...state.files]);
                     const index = readCheckoutStatIndex(root);

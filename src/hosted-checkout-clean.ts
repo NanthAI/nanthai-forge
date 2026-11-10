@@ -10,6 +10,7 @@ import { ignoredBy, ignoreLayer } from './source-ignore.js';
 import { indexedBlob, statIndexRefresh, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { diskShapeMatches, diskMode } from './source-links.js';
 import { fold } from './hosted-checkout-delta.js';
+import { workingMatches, worktreeText } from './checkout-text.js';
 
 export type CheckoutChange = { path: string; kind: 'edited' | 'extra' | 'deleted' };
 
@@ -47,6 +48,8 @@ export function cleanHostedCheckout(
   // Started before the first lstat of saved files, so its `since` precedes every observation.
   const refresh = options.index ? statIndexRefresh(root) : null;
   const sourceRoot = realpathSync(root);
+  // Files the checkout's `.gitattributes` convert hold their blob as CRLF (44ef42b9), not an edit.
+  const text = worktreeText(root, files);
   const allowed = new Map(files.map(file => [file.path, file]));
   const target = new Map(options.target?.map(file => [file.path, file]) ?? []);
   const directories = new Set<string>();
@@ -164,7 +167,10 @@ export function cleanHostedCheckout(
           : null;
       const observedDigest = bytes ? digest(bytes) : null;
       const matches = Boolean(
-        file && bytes && observedDigest === file.blob && diskShapeMatches(stat, file.mode),
+        file &&
+        bytes &&
+        (observedDigest === file.blob || workingMatches(text, path, bytes, file.blob, file.mode)) &&
+        diskShapeMatches(stat, file.mode),
       );
       if (!matches && options.collect) {
         options.collect.push({ path, kind: saved ? 'edited' : 'extra' });

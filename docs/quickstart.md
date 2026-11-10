@@ -48,8 +48,11 @@ runner. Forge paths always use `/`. Differences from macOS and Linux:
   Forge then writes a recorded link as a file holding its target, as Git does with
   `core.symlinks=false`, and reads that file back as the link: editing the file changes
   the link target. Dependency folders use junctions, which need no rights.
-- **Line endings.** Bytes are stored exactly; Forge never converts CRLF or LF. Configure
-  your editor for the project's line endings.
+- **Line endings.** Stored bytes are exactly what Git stores. A checkout follows the
+  project's `.gitattributes` the way Git does with its default settings: files marked
+  `text` (or `text=auto`) get CRLF on Windows, files marked `eol=crlf` get CRLF everywhere,
+  and saving turns their CRLF back into LF. Without such rules, bytes are never converted.
+  `core.autocrlf` and other Git settings are not read.
 - **Letter case.** Most Windows folders ignore case: a case-only rename saves as a rename,
   but two paths that differ only in case cannot both be checked out.
 - **Private files.** Forge's owner-only checks use the user profile's access list, which

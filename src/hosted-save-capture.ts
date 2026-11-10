@@ -62,6 +62,8 @@ import {
   type CheckoutStatIndex,
 } from './checkout-stat-index.js';
 import { diskMode } from './source-links.js';
+import type { TextAttributes } from './git-attributes.js';
+import { storedBytes, worktreeText } from './checkout-text.js';
 
 /** Small files hash in memory; only changed bytes ever reach the save staging. */
 const memoryLimit = 1024 * 1024;
@@ -75,6 +77,8 @@ function captureFile(
   directory: string,
   previous: NativeFile | undefined,
   index: CheckoutStatIndex,
+  text: TextAttributes | null,
+  cache: string,
 ) {
   const absolute = join(root, path),
     stat = lstatSync(absolute),
@@ -98,7 +102,8 @@ function captureFile(
       stat,
     };
   let pin: { sha256: string; size: number },
-    bytes: Buffer | null = null;
+    bytes: Buffer | null = null,
+    carriage = false;
   const markerScan = conflictMarkerScan();
   if (submodule) {
     bytes = gitlinkDirectoryPointer(root, path);
@@ -134,6 +139,7 @@ function captureFile(
     try {
       pin = source.scan(chunk => {
         scanConflictMarkers(markerScan, chunk);
+        if (!carriage && chunk.includes(13)) carriage = true;
         if (target === null) chunks.push(Buffer.from(chunk));
         else {
           let offset = 0;
@@ -151,6 +157,23 @@ function captureFile(
       if (target !== null) closeSync(target);
     }
     if (target === null) bytes = Buffer.concat(chunks);
+    // Git's `add` stores CRLF as LF for `.gitattributes` text files (44ef42b9); only bytes with a CR
+    // can change, so every other file is stored exactly as read.
+    if (carriage && text && text.action(path) !== 'binary') {
+      const working = bytes ?? readFileSync(temporary),
+        stored = storedBytes(
+          text,
+          path,
+          mode,
+          working,
+          previous && { blob: previous.blob, read: () => readOverlapBytes(cache, previous.blob) },
+        );
+      if (stored !== working) {
+        if (!bytes) rmSync(temporary, { force: true });
+        bytes = stored;
+        pin = { sha256: digest(stored), size: stored.length };
+      }
+    }
   }
   if (mode === 'gitlink') {
     invariant(
@@ -188,6 +211,7 @@ export async function captureHostedSave(
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const since = Date.now(),
     index = readCheckoutStatIndex(root),
+    text = worktreeText(root, marker.state.files),
     observedStats = new Map<string, ReturnType<typeof statEntry>>(),
     cache = clientCacheRoot(root),
     bases = overlapBaseBlobs(cache, marker.selection.base.head);
@@ -219,7 +243,7 @@ export async function captureHostedSave(
   };
   for (const path of local.sort()) {
     const old = baseline.get(path),
-      observed = captureFile(root, path, directory, old, index);
+      observed = captureFile(root, path, directory, old, index, text, cache);
     // A directory's stat does not move with its HEAD; submodules are never vouched for by it.
     if (!observed.stat.isDirectory()) observedStats.set(path, statEntry(observed.stat, observed.file.blob));
     if (observed.changed) {
