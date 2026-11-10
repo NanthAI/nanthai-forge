@@ -72,3 +72,79 @@ export function trackReadSets(ctx, tables) {
     },
   };
 }
+
+// Documents and bytes one query reads, sized as Convex stores them: every id (the fixture's `row-N`
+// and the project's) as 32 characters and every number as 8 bytes, so a page's cost does not depend
+// on how many rows the fixture created before it.
+export function meterReads(ctx) {
+  const { get, query } = ctx.db;
+  const total = { documents: 0, bytes: 0 };
+  const size = row =>
+    JSON.stringify(row, (_, value) =>
+      typeof value === 'number'
+        ? 'n'.repeat(6)
+        : typeof value === 'string' && /^row-\d+$|^project$/.test(value)
+          ? 'i'.repeat(32)
+          : value,
+    ).length;
+  const count = rows => {
+    for (const row of rows)
+      if (row) {
+        total.documents++;
+        total.bytes += size(row);
+      }
+  };
+  ctx.db.get = async id => {
+    const row = await get(id);
+    count([row]);
+    return row;
+  };
+  ctx.db.query = table => {
+    const wrap = target =>
+      new Proxy(target, {
+        get(object, key) {
+          const value = object[key];
+          if (key === 'withIndex' || key === 'order' || key === 'filter')
+            return (...args) => wrap(value.apply(object, args));
+          if (key === 'paginate')
+            return async (...args) => {
+              const page = await value.apply(object, args);
+              count(page.page);
+              return page;
+            };
+          if (key === 'take' || key === 'collect')
+            return async (...args) => {
+              const rows = await value.apply(object, args);
+              count(rows);
+              return rows;
+            };
+          if (key === 'unique' || key === 'first')
+            return async (...args) => {
+              const row = await value.apply(object, args);
+              count([row]);
+              return row;
+            };
+          if (key === Symbol.asyncIterator)
+            return async function* () {
+              for await (const row of object) {
+                count([row]);
+                yield row;
+              }
+            };
+          return typeof value === 'function' ? value.bind(object) : value;
+        },
+      });
+    return wrap(query(table));
+  };
+  return {
+    /** What `read` costs, as { documents, bytes }. */
+    async cost(read) {
+      Object.assign(total, { documents: 0, bytes: 0 });
+      await read();
+      return { ...total };
+    },
+    restore() {
+      Object.assign(ctx.db, { get, query });
+    },
+  };
+}

@@ -7,6 +7,7 @@ import { digest } from '../dist/hash.js';
 import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { readHosted } from './hosted-read.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { meterReads } from './hosted-read-set.mjs';
 const denied = error => error.data?.code === 'PROJECT_UNAVAILABLE';
 
 test('whole-project hosted planning creates a planned Intent, preserves versions/labels and reconciles a lost original reply', async t => {
@@ -596,12 +597,78 @@ test('with the store reader on, planning lists, versions, comments and detail re
     ],
     [2, 2, ['Two', 'One'], ['First note', 'Decided'], 1, ['completed']],
   );
+  // Spend freeze 2026-11-10: a store page reads no more documents or bytes than the journal page it
+  // replaces. Each head keeps its current value, so a page reads one document per row (before: head,
+  // record and body for an Issue; record and body for a comment, and the Issue's notes as well).
+  const body = `Done when: the page costs no more.\n${'Planned work in ordinary words. '.repeat(20)}`;
+  for (let i = 0; i < 20; i++) {
+    await s.send(s.item({ title: `Issue ${i}`, body }));
+    await s.send({
+      action: 'comment-planning-item',
+      operationId: randomUUID(),
+      itemId: second.itemId,
+      text: `Comment ${i}: ${'about the work. '.repeat(8)}`,
+      authorLabel: 'Owner',
+    });
+  }
+  const meter = meterReads(s.ctx);
+  const costs = async () => ({
+    list: await meter.cost(() => page('planningItems', { newestFirst: true })),
+    comments: await meter.cost(() =>
+      page('planningComments', { parentId: second.itemId, newestFirst: true }),
+    ),
+    notes: await meter.cost(() => page('notes', { parentId: intentId })),
+    detail: await meter.cost(() =>
+      index.detail._handler(s.ctx, {
+        projectId: s.projectId,
+        collection: 'planningItems',
+        id: second.itemId,
+      }),
+    ),
+  });
+  const journalCost = await costs();
+  const fromJournal = await reads();
   assert.deepEqual(await run({ action: 'set-work-store', mode: 'records' }), {
     mode: 'records',
     changed: true,
   });
+  const storeCost = await costs();
+  meter.restore();
+  console.log(JSON.stringify({ journalCost, storeCost }));
+  for (const name of ['list', 'comments', 'detail'])
+    assert.ok(
+      storeCost[name].documents <= journalCost[name].documents &&
+        storeCost[name].bytes <= journalCost[name].bytes,
+      `${name}: store ${JSON.stringify(storeCost[name])}, journal ${JSON.stringify(journalCost[name])}`,
+    );
+  assert.equal(storeCost.notes.documents, journalCost.notes.documents, 'notes: one document per note');
   const fromStore = await reads();
-  assert.deepEqual(fromStore, journal);
+  assert.deepEqual(fromStore, fromJournal);
+  // Heads stored before heads kept their value, with a note's kind as its status (dogfood's copy): the
+  // reader falls back to record and body, and the copy brings each one up to date once.
+  const old = [...s.tables.projectHostedRecordHeads.values()].filter(head => head.value !== undefined);
+  for (const head of old) {
+    delete head.value;
+    if (head.status === 'note') head.status = 'comment';
+  }
+  assert.deepEqual(
+    { ...(await reads()), notes: fromJournal.notes, issueNotes: fromJournal.issueNotes },
+    fromJournal,
+    'a head without its value reads its body; a note never shows as a comment',
+  );
+  const refresh = async () =>
+    Object.values((await run({ action: 'copy-work-store' })).collections).reduce(
+      (sum, total) => sum + (total.refreshed ?? 0),
+      0,
+    );
+  assert.deepEqual([await refresh(), await refresh()], [old.length, 0]);
+  assert.deepEqual(await reads(), fromJournal);
+  // The reader compare opens the body too: an inline value that drifted from it shows as different.
+  const drifted = [...s.tables.projectHostedRecordHeads.values()].find(head => head.status === 'comment'),
+    kept = drifted.value;
+  drifted.value = JSON.stringify({ ...JSON.parse(kept), text: 'Changed' });
+  assert.equal((await run({ action: 'compare-work-store' })).collections.readComments.different, 1);
+  drifted.value = kept;
   // The reader compare checks every journal row against what the store reader returns for it.
   const compared = (await run({ action: 'compare-work-store' })).collections;
   for (const name of ['readItems', 'readVersions', 'readComments', 'readNotes', 'readLifecycle'])
@@ -626,14 +693,9 @@ test('with the store reader on, planning lists, versions, comments and detail re
     text: 'Three',
     authorLabel: 'Owner',
   });
-  assert.deepEqual(
-    (await reads()).comments.map(([, c]) => c.text),
-    ['Three', 'Two', 'One'],
-  );
+  const texts = async () => (await reads()).comments.map(([, c]) => c.text.split(':')[0]);
+  const expected = ['Three', ...Array.from({ length: 20 }, (_, i) => `Comment ${19 - i}`), 'Two', 'One'];
+  assert.deepEqual(await texts(), expected);
   await run({ action: 'set-work-store', mode: 'dual' });
-  assert.deepEqual(
-    (await reads()).comments.map(([, c]) => c.text),
-    ['Three', 'Two', 'One'],
-    'switching back reads the journal, which has every write',
-  );
+  assert.deepEqual(await texts(), expected, 'switching back reads the journal, which has every write');
 });

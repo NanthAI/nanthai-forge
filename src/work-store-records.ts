@@ -107,3 +107,13 @@ export function workStoreRecord(
     note,
   };
 }
+
+/** What the journal index row of a stored Work record held (`undefined` for other kinds). Heads of these
+ * kinds keep it inline, so a planning page reads one document per row, as the journal did. */
+export function journalRow(record: Record<string, unknown> & { kind: string }): unknown {
+  if (record.kind === 'issue') return record.item;
+  if (record.kind === 'comment' && record.comment) return record.comment;
+  if (record.kind === 'comment' || record.kind === 'lifecycle')
+    return { ...((record.note ?? record.entry) as object), intentId: record.parent, index: record.position };
+  return undefined;
+}

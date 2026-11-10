@@ -26,6 +26,9 @@ import {
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const deployedAt = new Date('2026-10-30T10:00:00Z');
+// Fixed export time, before the fixtures' approval (12:00Z): with the real clock the approval
+// predated the export from 2026-11-10T12:00Z on, and every purge test failed APPROVAL_INVALID.
+const exportedAt = new Date('2026-11-10T11:00:00Z');
 
 function rowsFor(table, count, size = 40) {
   return Array.from({ length: count }, (_, i) => ({
@@ -119,7 +122,7 @@ test('export is private, checksummed, one read per table and never overwrites', 
     assert.equal(sha256(await readFile(join(out, 'manifest.json'), 'utf8')), manifestSha256);
     assert.equal((await verifyExport(out)).manifestSha256, manifestSha256);
     await assert.rejects(
-      exportTables(source, out, { deployment: 'dev-a' }),
+      exportTables(source, out, { deployment: 'dev-a', now: exportedAt }),
       error => error.code === 'EEXIST',
     );
     await writeFile(join(out, 'projectReturnSupersessions.jsonl'), '{"_id":"tampered"}\n');
@@ -130,7 +133,7 @@ test('export is private, checksummed, one read per table and never overwrites', 
 test('restore round trip: an export of the source rebuilds identical rows in an empty scratch deployment', async () => {
   const source = fake(dogfoodShape());
   await temporary(async directory => {
-    await exportTables(source, directory + '/out', { deployment: 'dev-a' });
+    await exportTables(source, directory + '/out', { deployment: 'dev-a', now: exportedAt });
     const scratch = fake();
     const result = await restoreTables(scratch, directory + '/out', { deployment: 'scratch-b' });
     assert.equal(result.restored.projectPublications, 19);
@@ -147,7 +150,7 @@ test('restore refuses the source deployment, a non-empty target and a lossy impo
   const source = fake(dogfoodShape());
   await temporary(async directory => {
     const out = directory + '/out';
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     await assert.rejects(
       restoreTables(fake(), out, { deployment: 'dev-a' }),
       error => error.code === 'RESTORE_TARGET_IS_SOURCE',
@@ -175,7 +178,7 @@ test('purge dry run reports tables, calls and I/O, measures the call budget and 
   const source = fake(dogfoodShape());
   await temporary(async directory => {
     const out = directory + '/out';
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     source.calls.data = 0;
     // A row created after the export must be flagged, not silently covered.
     source.store.get('projectPublicationAttempts').push({ _id: 'late', _creationTime: 9_999 });
@@ -218,7 +221,7 @@ test('purge --execute is refused without a matching approval record, then execut
   const source = fake(dogfoodShape());
   await temporary(async directory => {
     const out = directory + '/out';
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, out, { deployedAt });
     const now = new Date('2026-11-10T13:00:00Z');
     const check = patch => () => checkApproval(approvalFor(plan, patch), plan, { deployedAt, now });
@@ -278,7 +281,7 @@ test('dropped tables exported to private storage are approved by the named lead 
   const now = new Date('2026-11-10T13:00:00Z');
   await temporary(async directory => {
     const source = fake(overlap());
-    await exportTables(source, directory + '/out', { deployment: 'dev-a' });
+    await exportTables(source, directory + '/out', { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, directory + '/out', {});
     const lead = patch => ({
       ...approvalFor(plan, { backupFixClosed: false, alertReceived: false, verifiedBackup: null }),
@@ -296,7 +299,7 @@ test('dropped tables exported to private storage are approved by the named lead 
   });
   await temporary(async directory => {
     const source = fake({ ...overlap(), projectPublications: rowsFor('projectPublications', 1) });
-    await exportTables(source, directory + '/out', { deployment: 'dev-a' });
+    await exportTables(source, directory + '/out', { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, directory + '/out', { deployedAt });
     const withoutBackup = {
       ...approvalFor(plan, { verifiedBackup: null }),
@@ -313,7 +316,7 @@ test('purge rejects changed rows, wrong deployment and changed replay inputs bef
   await temporary(async directory => {
     const source = fake(dogfoodShape()),
       out = join(directory, 'export');
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, out, { deployedAt });
     const approval = join(directory, 'approval.json');
     await writeFile(approval, JSON.stringify(approvalFor(plan)));
@@ -338,7 +341,7 @@ test('unknown replacement outcome replays the same operation without repeating t
   await temporary(async directory => {
     const source = fake(dogfoodShape()),
       out = join(directory, 'export');
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, out, { deployedAt });
     const approval = join(directory, 'approval.json');
     await writeFile(approval, JSON.stringify(approvalFor(plan)));
@@ -374,7 +377,7 @@ test('concurrent identical purge requests serialize before reading live data', a
   await temporary(async directory => {
     const source = fake(dogfoodShape()),
       out = join(directory, 'export');
-    await exportTables(source, out, { deployment: 'dev-a' });
+    await exportTables(source, out, { deployment: 'dev-a', now: exportedAt });
     const plan = await purgePlan(source, out, { deployedAt });
     const approval = join(directory, 'approval.json');
     await writeFile(approval, JSON.stringify(approvalFor(plan)));

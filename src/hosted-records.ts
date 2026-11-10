@@ -213,7 +213,8 @@ export function hostedRecordIndex(record: HostedRecord) {
     case 'issue':
       return { parent: record.item.initiativeId ?? '', status: record.item.status };
     case 'comment':
-      return { parent: record.parent, status: record.note?.kind ?? 'comment' };
+      // Notes and planning comments share an Issue's id as parent; the status keeps the two pages apart.
+      return { parent: record.parent, status: record.note ? 'note' : 'comment' };
     case 'lifecycle':
       return { parent: record.parent, status: record.entry.to };
   }

@@ -58,11 +58,20 @@ export const hostedRecordTables = {
     ])
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     .index('by_project', ['projectId']),
-  projectHostedRecordHeads: defineTable({ ...identity, ...indexed, recordId: v.id('projectHostedRecords') })
+  projectHostedRecordHeads: defineTable({
+    ...identity,
+    ...indexed,
+    recordId: v.id('projectHostedRecords'),
+    /** Work store kinds (issue, comment, lifecycle): the current version as its journal row read, so a
+     * planning page reads one document per row. Absent on other kinds; a replace without it drops it. */
+    value: v.optional(v.string()),
+  })
     // Creation order within a kind: the Work store's planning list pages in the journal's append order.
     .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
+    // An Issue's comments or its Intent's notes, without reading the other.
+    .index('by_project_and_kind_and_parent_and_status', ['projectId', 'kind', 'parent', 'status'])
     .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status'])
     .index('by_project', ['projectId']),
   projectHostedOperations: defineTable({

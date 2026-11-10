@@ -16,7 +16,12 @@ import { selectedGeneration, recordPartition, record as indexRecord } from './pr
 import { recordHead, recordVersion, hostedRecordBody } from './projectHostedRecords';
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { assembleIndexValue } from '../src/work-index-value';
-import { workStoreRecord, workStoreSources, type WorkStoreSource } from '../src/work-store-records';
+import {
+  journalRow,
+  workStoreRecord,
+  workStoreSources,
+  type WorkStoreSource,
+} from '../src/work-store-records';
 import { sameValue, storeReadOf } from './projectWorkStoreReads';
 
 /** Rows per page: a copy page writes at most 3 documents per row (body, version, head). */
@@ -124,20 +129,37 @@ export async function storeVersion(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
   encoded: ReturnType<typeof hostedRecordValue>,
-): Promise<'copied' | 'same' | 'different'> {
+): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const { record, ref } = encoded;
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
-  if (old) return old.digest === ref.digest && old.bytes === ref.bytes ? 'same' : 'different';
-  await insertVersion(ctx, projectId, encoded, await recordHead(ctx, projectId, record.kind, record.id));
-  return 'copied';
+  if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
+  const head = await recordHead(ctx, projectId, record.kind, record.id);
+  if (!old) {
+    await insertVersion(ctx, projectId, encoded, head);
+    return 'copied';
+  }
+  // A head stored before heads kept their value (and notes their own status) is brought up to date.
+  const indexed = hostedRecordIndex(record),
+    value = inlineValue(encoded);
+  if (head?.recordId !== old._id || (head.value === value && head.status === indexed.status)) return 'same';
+  await ctx.db.patch(head._id, { value, status: indexed.status });
+  if (old.status !== indexed.status) await ctx.db.patch(old._id, { status: indexed.status });
+  return 'refreshed';
 }
+
+/** The head's inline value: the journal row the stored body reads back as. */
+const inlineValue = ({ value }: ReturnType<typeof hostedRecordValue>) => {
+  const row = journalRow(JSON.parse(value));
+  return row === undefined ? undefined : JSON.stringify(row);
+};
 
 async function insertVersion(
   ctx: MutationCtx,
   projectId: Id<'hostedProjects'>,
-  { record, ref, value }: ReturnType<typeof hostedRecordValue>,
+  encoded: ReturnType<typeof hostedRecordValue>,
   head: Awaited<ReturnType<typeof recordHead>>,
 ) {
+  const { record, ref, value } = encoded;
   const indexed = { ...hostedRecordIndex(record), version: record.version },
     identity = { projectId, kind: record.kind, key: record.id };
   const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId, value });
@@ -148,9 +170,10 @@ async function insertVersion(
     digest: ref.digest,
     bytes: ref.bytes,
   });
-  if (!head) await ctx.db.insert('projectHostedRecordHeads', { ...identity, ...indexed, recordId });
-  else if (head.version < record.version)
-    await ctx.db.replace(head._id, { ...identity, ...indexed, recordId });
+  const inline = inlineValue(encoded),
+    pointer = { ...identity, ...indexed, recordId, ...(inline === undefined ? {} : { value: inline }) };
+  if (!head) await ctx.db.insert('projectHostedRecordHeads', pointer);
+  else if (head.version < record.version) await ctx.db.replace(head._id, pointer);
 }
 
 /** The journal Intent `value` against its stored head. `hosted`: a Lane pinned it, so hosted paths own it.
@@ -245,6 +268,7 @@ export const copy = mutation({
       const page = await indexPage(ctx, partition, input.collection, input.cursor);
       let copied = 0,
         same = 0,
+        refreshed = 0,
         hosted = 0;
       const different = tally(),
         invalid = tally();
@@ -273,9 +297,10 @@ export const copy = mutation({
         const stored = await storeVersion(ctx, input.projectId, encoded);
         if (stored === 'copied') copied++;
         else if (stored === 'same') same++;
+        else if (stored === 'refreshed') refreshed++;
         else note(different, `${encoded.record.kind}:${encoded.record.id}:${encoded.record.version}`);
       }
-      return JSON.stringify({ copied, same, hosted, different, invalid, cursor: page.cursor });
+      return JSON.stringify({ copied, same, refreshed, hosted, different, invalid, cursor: page.cursor });
     } catch (error) {
       return report(error);
     }
