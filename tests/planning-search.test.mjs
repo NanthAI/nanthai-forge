@@ -279,7 +279,7 @@ test('source snapshot transport preserves indexed search fields', async t => {
     projectId: s.projectId,
     owner: 'owner',
     generationId: ws.generationId,
-    revision: ws.revision,
+    revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
     cursor: null,
   });
   assert.deepEqual(

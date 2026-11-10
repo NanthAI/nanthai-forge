@@ -69,9 +69,11 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
   };
   s.ctx.db.query = table => {
     tables.push(table);
+    // Flip 5 (Issue 0695ab24): never the per-project Work head either, so a journal write does not
+    // re-run the workspace in every tab; only a first-row probe of a collection the counts lack.
     assert(
-      ['projectWorkHeads', 'forgeAccounts'].includes(table),
-      'workspace never reads history, freshness or owner reports',
+      ['projectWorkRecords', 'forgeAccounts'].includes(table),
+      'workspace never reads history, freshness, owner reports or the Work head',
     );
     return query(table);
   };
@@ -81,14 +83,20 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
   const result = JSON.parse(await workspace._handler(s.ctx, { projectId: 'project' }));
   const elapsed = performance.now() - start,
     allocated = process.memoryUsage().heapUsed - heap;
-  assert.equal(result.revision, 42);
+  assert.equal(Object.hasOwn(result, 'revision'), false, 'the live revision is projectWorkIndex:revision');
   assert.equal(result.counts.intents, 1200);
+  assert.equal(result.counts.landingEntries, 1, 'a collection the counts lack is probed for one row');
   assert.equal(Object.hasOwn(result, 'freshness'), false);
   assert.equal(result.githubMirror, null, 'retained workspace mirror status is still returned');
   assert.equal(result.actor, 'synthetic-owner', 'the caller sees their own handle, never the account id');
   // Three workspace gets; the caller's own handle needs one account lookup and no project get.
   assert.equal(reads, 3);
-  assert.deepEqual(tables, ['projectWorkHeads', 'forgeAccounts']);
+  assert.deepEqual(tables, [
+    'projectWorkRecords',
+    'projectWorkRecords',
+    'projectWorkRecords',
+    'forgeAccounts',
+  ]);
   assert.ok(allocated < 16 * 1024 * 1024, `workspace heap delta ${allocated}`);
   t.diagnostic(
     JSON.stringify({

@@ -157,7 +157,7 @@ test('large record index resumes after a committed step loses its reply without 
   });
   const workspace = JSON.parse(await index.workspace._handler(f.s.ctx, { projectId: 'project' }));
   assert.equal(id, stage._id);
-  assert.equal(workspace.revision, f.data.revision);
+  assert.equal(await index.revision._handler(f.s.ctx, { projectId: 'project' }), f.data.revision);
   assert.equal(workspace.counts.intents, f.data.intents.length);
   assert.equal(workspace.sourceHead, f.data.nativeHead);
   assert.equal(workspace.counts.views, 2);
@@ -228,7 +228,7 @@ test('record rebuild replays journal events with original identities and timesta
   const second = await ensure();
   assert.notEqual(first, second);
   const workspace = JSON.parse(await index.workspace._handler(f.s.ctx, { projectId: 'project' }));
-  assert.equal(workspace.revision, f.data.revision + 1);
+  assert.equal(await index.revision._handler(f.s.ctx, { projectId: 'project' }), f.data.revision + 1);
   assert.equal(workspace.counts.notes, 1);
   const event = JSON.parse(
     (await index.detail._handler(f.s.ctx, { projectId: 'project', collection: 'events', id: operationId }))

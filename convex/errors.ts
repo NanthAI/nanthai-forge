@@ -64,6 +64,10 @@ export function report(error: unknown): never {
           ...(error instanceof SourceAuthorityStaleError ? { authority: error.authority } : {}),
           message: error.message,
           ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+          // ITEM_CHANGED names the item and both versions (flip 5); other codes keep their recovery server-side.
+          ...(error.code === 'ITEM_CHANGED' && error.recovery
+            ? { recovery: error.recovery as Record<string, string | number> }
+            : {}),
         }
       : { code: 'HOSTED_REQUEST_FAILED', message: 'The Forge request failed. Retry the original request.' },
   );

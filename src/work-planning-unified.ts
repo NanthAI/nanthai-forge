@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
-import { invariant } from './errors.js';
+import { invariant, itemChanged } from './errors.js';
 import { resolvePlanningPut } from './work-planning-put.js';
 import { resolveIntentId, type IntentAlias } from './work-intent-local.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
@@ -90,11 +90,13 @@ export function applyUnifiedPlanning(
     return comment;
   }
   const current = data.planningItems.filter(item => item.id === target.historyId).at(-1);
-  invariant(
-    (current?.version ?? 0) === command.expectedVersion,
-    'PLANNING_CHANGED',
-    'This item has a newer version. Load it before saving; your existing work remains available.',
-  );
+  if ((current?.version ?? 0) !== command.expectedVersion)
+    throw itemChanged({
+      kind: 'issue',
+      id: command.itemId,
+      expectedVersion: command.expectedVersion,
+      currentVersion: current?.version ?? 0,
+    });
   const put = resolvePlanningPut(command, current);
   invariant(
     put.kind === 'initiative' ? !target.intent : !target.initiative,

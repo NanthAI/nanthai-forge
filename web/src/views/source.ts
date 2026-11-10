@@ -22,7 +22,7 @@ export function useHostedViewSource(
       };
       return readHostedView(client, args);
     },
-    [client, projectId, workspace.generationId, workspace.revision],
+    [client, projectId, workspace.generationId],
   );
 }
 

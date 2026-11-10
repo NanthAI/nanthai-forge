@@ -21,6 +21,17 @@ import { z } from 'zod';
 import { ConvexError } from 'convex/values';
 import { ForgeError } from '../dist/errors.js';
 import { namedPaths, suggestSchedule } from '../dist/work-schedule.js';
+import { speedBudgets } from '../dist/speed-budgets.js';
+import { judgeCosts } from '../dist/cost-budgets.js';
+
+/** Judge planning write costs against the ledger (src/speed-budgets.json, flip 5): any rise fails. */
+const withinLedger = measured =>
+  assert.deepEqual(
+    judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'planning-fixture', measured)
+      .filter(v => v.metric in measured && v.status !== 'pass')
+      .map(v => v.message),
+    [],
+  );
 
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
@@ -59,7 +70,17 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
       projectHostedPlanningSearch: search,
       projectHostedPlanning: planningModule,
     }[module][fn];
-    return handler._handler(s.ctx, args);
+    const value = await handler._handler(s.ctx, args);
+    // A server before flip 5 S4 (no planning-put-mutation) still sends the live revision on its workspace.
+    if (
+      name === 'projectWorkIndex:workspace' &&
+      value &&
+      !result.serverFeatures.includes('planning-put-mutation')
+    ) {
+      const revision = await index.revision._handler(s.ctx, { projectId: args.projectId });
+      return JSON.stringify({ ...JSON.parse(value), revision });
+    }
+    return value;
   };
   const reference = ref => getFunctionName(ref);
   const result = {
@@ -106,6 +127,8 @@ const previousServerPut = z.object({
 /** Make the fixture's real handlers apply a put exactly as that previous server did: every field
  * explicit (null group = cleared), or the same schema refusal. Comments are unchanged. */
 function previousServer(p) {
+  // That server predates the revision-free put (flip 5 S5) too.
+  p.serverFeatures = p.serverFeatures.filter(name => name !== 'planning-put-mutation');
   const seen = [];
   p.intercept(async args => {
     const command = JSON.parse(args.command);
@@ -131,7 +154,11 @@ const list = (p, input = {}) => run(p, 'planning', input).then(response => respo
 
 test('a server without the V8 command receives the same original operation on the Node command', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(
+      s,
+      new Map(),
+      hostedContractFeatures.filter(name => name !== 'planning-put-mutation'),
+    );
   const invoke = p.exchange.client.action;
   const names = [];
   p.exchange.client.action = async (ref, args) => {
@@ -175,6 +202,7 @@ test('an agent comment is one revision-free mutation and its replay adds no seco
   const operationId = randomUUID();
   const first = await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'Why' }, operationId);
   assert.deepEqual(p.calls, ['projectWorkCommand:command']);
+  withinLedger({ planningCommentCalls: p.calls.length });
   // An unrelated write moves the project revision; the replay still reconciles to the original.
   await put(p, { kind: 'issue', title: 'Unrelated' });
   const again = await run(p, 'comment-planning-item', { itemId: issue.itemId, text: 'Why' }, operationId);
@@ -414,7 +442,9 @@ test('a put keeps every stored field it omits; clearing needs an explicit empty 
     status: 'open',
     reason: 'triaged',
   });
-  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActionsV8:command']);
+  // Flip 5 S5: one revision-free mutation, no workspace read first.
+  assert.deepEqual(p.calls, ['projectWorkCommand:command']);
+  withinLedger({ planningPutCalls: p.calls.length });
   assert.equal(moved.result.status, 'open');
   let item = await stored();
   assert.equal(item.body, body);
@@ -546,10 +576,7 @@ test('new CLI against the previous server (no planning-put-keeps-omitted): a put
   );
   // A stale version is refused before anything is sent.
   const before = sent.length;
-  await assert.rejects(
-    put(p, { itemId: issue, expectedVersion: 2, status: 'closed' }),
-    code('PLANNING_CHANGED'),
-  );
+  await assert.rejects(put(p, { itemId: issue, expectedVersion: 2, status: 'closed' }), code('ITEM_CHANGED'));
   assert.equal(sent.length, before);
   // Start and reconcile already hold the stored item: same calls as on the new server, body kept.
   const started = await created('Started');
@@ -605,9 +632,13 @@ test('searching by an 8-character id or a full UUID returns that item first, the
   assert.equal((await list(p, { search: id8, status: 'all' })).items[0].id, target);
 });
 
-test('a repeated operation replays, a lost reply reconciles, and a stale Work revision retries', async t => {
+test('on a server before planning-put-mutation a repeated operation replays, a lost reply reconciles, and a stale Work revision retries', async t => {
   const s = await setup(t),
-    p = port(s);
+    p = port(
+      s,
+      new Map(),
+      hostedContractFeatures.filter(name => name !== 'planning-put-mutation'),
+    );
   const input = { kind: 'issue', title: 'Replay me' };
   const first = await put(p, input);
   const events = s.tables.projectWorkEvents.size;
@@ -900,7 +931,7 @@ test('a 100-item backlog reads in three Convex calls and idle reads nothing', as
 });
 
 function transport(s, { planning, features = false }) {
-  const p = port(s),
+  const p = port(s, new Map(), features || []),
     seen = [];
   const capabilities = JSON.stringify({
     schema: 1,
@@ -1432,7 +1463,8 @@ test('Issue filing returns candidates without another call and retries retain th
   const input = { kind: 'issue', title: 'Sync failure diagnostics' };
   const filed = await put(p, input);
   assert(filed.result.likelyDuplicates.items.some(item => item.id === prior.itemId));
-  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkActionsV8:command']);
+  // The duplicates read stays for a creation only; the put itself is one mutation (flip 5 S5).
+  assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkCommand:command']);
   await s.send(s.item({ title: 'Sync failure diagnostics' }));
   const replay = await run(p, 'put-planning-item', input, filed.operationId);
   assert.deepEqual(replay.result.likelyDuplicates, filed.result.likelyDuplicates);

@@ -1157,11 +1157,13 @@ batch of four. They count queries, mutations, V8 and Node action executions, dat
 written, R2 class A (PUT) and class B (GET, HEAD) requests, R2 bytes put and check runs. Action
 GB-seconds are modeled: executions by runtime times memory times the nominal durations in
 `costGuard.actionModel`. Two snapshot entries count Convex calls and R2 uploads per changed
-snapshot. The fixture has no client waits, CI minutes or GitHub mirror; dollars come from the live
+snapshot. Three planning entries count agent Convex calls per Issue put and per comment, and the Work
+queries three open tabs re-run per planning write. The fixture has no client waits, CI minutes or GitHub mirror; dollars come from the live
 captures (Issue 9db58ca6 and its successors), never from these counts.
 
 **What the guard checks.** `tests/landing-cost-guard.test.mjs` runs the mix in the landing check
 (about 2 to 8 s) and judges every entry; `tests/hosted-lane-snapshots.test.mjs` judges the snapshot
+entries, and `tests/hosted-agent-planning.test.mjs` and `tests/hosted-contention.test.mjs` the planning
 entries. A rise of more than 15% (and more than the floor) fails, naming the quantity, the ledger and
 measured values, the decision Issue and the two ways out. A rise of 5 to 15% warns in the check log.
 A drop of 10% or more prints a notice to lower the value, so savings ratchet in.

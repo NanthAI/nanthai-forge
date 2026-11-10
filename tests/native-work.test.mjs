@@ -210,10 +210,7 @@ test('native linked planning reconciles versions and survives private export/res
   };
   await dispatch(update);
   assert.equal((await dispatch(command, 0)).result.version, 1);
-  await assert.rejects(
-    dispatch({ ...update, operationId: randomUUID() }),
-    e => e.code === 'PLANNING_CHANGED',
-  );
+  await assert.rejects(dispatch({ ...update, operationId: randomUUID() }), e => e.code === 'ITEM_CHANGED');
   await assert.rejects(
     dispatch({ ...command, body: 'Different original request' }, 0),
     e => e.code === 'WORK_OPERATION_CHANGED',

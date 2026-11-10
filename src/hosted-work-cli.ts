@@ -14,10 +14,10 @@ Run nforge login or set FORGE_AUTH_TOKEN to an existing owner/contributor Convex
 Omit dryRun to migrate; progress is on stderr, final JSON on stdout. Resume with the same operationId after interruption.
 Work detail migration: {"action":"migrate-record-details","operationId":"UUID"} saves finite pages and resumes the original operation; full run evidence and automatic results remain in immutable objects.
 Policy: {"action":"policy"}; set-policy: {"action":"set-policy","operationId":"UUID","preset":"trusted"} (current owner only).
-Workspace: {"action":"workspace"} returns source pins, current command revision, counts and capabilities.
+Workspace: {"action":"workspace"} returns source pins, the generation's counts and capabilities (no live revision: it would re-run every open tab on each write).
 Records: {"action":"records","collection":"intents","cursor":null,"pageSize":50} returns one indexed summary page.
 Continue with the returned continueCursor (it includes the generation binding); a source change is explicit WORK_STALE.
-Page/detail revision is the archive baseline; use workspace.revision for command concurrency.
+Page/detail revision is the archive baseline; planning puts and comments need no revision (a stale item is ITEM_CHANGED).
 Detail: {"action":"detail","collection":"planningItems","id":"ITEM_UUID"} hydrates only this record's full attributes.
 Collections: intents, lanes, views, runs, planningItems (current), planningVersions, planningComments, notes, lifecycle, channels, channelMoves, hostedChannels, hostedChannelMoves, events.
 Use parentId to scope notes/lifecycle to an Intent or comments/planningVersions to an item. Intent detail excludes these separately paged histories.

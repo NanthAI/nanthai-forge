@@ -81,7 +81,7 @@ test('local Issues, Initiatives and discussion retain versions/CAS and reconcile
   assert.equal(second.previousVersion, 1);
   assert.equal((await dispatch(command, 0)).result.body, first.body);
   assert.equal(work.status().planningItems.at(-1).body, second.body);
-  await assert.rejects(dispatch({ ...update, operationId: randomUUID() }), code('PLANNING_CHANGED'));
+  await assert.rejects(dispatch({ ...update, operationId: randomUUID() }), code('ITEM_CHANGED'));
   const third = (
     await dispatch(
       item({

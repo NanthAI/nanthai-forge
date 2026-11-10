@@ -50,7 +50,6 @@ function Check() {
       <p role="status">{message}</p>
       <WorkPlanning
         data={{
-          revision: 1,
           intents: [],
           planningItems: items,
           planningComments: comments,

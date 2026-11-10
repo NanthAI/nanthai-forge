@@ -584,6 +584,42 @@
       "source": "Check results of the 36 landings that settled 2026-11-10 04:06Z to 08:31Z (landings read, then the stored run summary of each run: timings.executionSeconds, the shard execution seconds the run row keeps). Per landing: accepted check 54.4 min (rolling 20-landing mean 49.2 to 57.0, 10 to 12 shards, one scoped run of 2), runs its attempts discarded 4.7 (2.5 to 5.9), the main audit that followed 18.8 (13.3 to 23.4; 12 audit runs shared by 36 landings, counted once). Live since this change: budgets landing-runner-accepted-mean, landing-runner-discarded-mean and landing-runner-audit-mean.",
       "issue": "51bbbd00",
       "reason": "Capture #4 measured about 113 GitHub runner minutes per landing (1,110 exact by job interval in a 56.9 min window with 10 landings; $0 billed on our public repository, about $681 per 1,000 landings at list price for a private repository). Of those, 86.4 are the forge-check runs (accepted 53.8, discarded 5.5, audit 11.4, check-only and cancelled runs that never became a landing 15.7), 22.0 are this repository's own Verify Forge workflow on each push (not a user's check), 2.6 deploy, sign and smoke. The stored shard seconds (77.9, a 36-landing window) are about 90% of the forge-check minutes (86.4, a 10-landing window); the rest is the plan and static jobs, setup before the shards and runs no landing owns."
+    },
+    {
+      "id": "planning-put-calls",
+      "area": "agent put-planning-item on an existing Issue: Convex calls per write",
+      "measuredBy": "planning-fixture",
+      "metric": "planningPutCalls",
+      "unit": "calls",
+      "value": 1,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs and tests/hosted-contention.test.mjs on the in-process Convex fixture, 2026-11-10: one revision-free mutation (projectWorkCommand:command). Before flip 5 S5 it was 1 workspace query plus 1 action with about 8 inner calls, and 3.0% of puts repeated all of it after an unrelated write.",
+      "issue": "0695ab24",
+      "reason": "A planning write is one mutation whose only check is its item version (ITEM_CHANGED); a revision read or retry loop coming back fails here."
+    },
+    {
+      "id": "planning-comment-calls",
+      "area": "agent comment-planning-item: Convex calls per write",
+      "measuredBy": "planning-fixture",
+      "metric": "planningCommentCalls",
+      "unit": "calls",
+      "value": 1,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs and tests/hosted-contention.test.mjs on the in-process Convex fixture, 2026-11-10: one revision-free mutation (flip 5 S0). Before: 1 workspace query plus 1 action with about 8 inner calls.",
+      "issue": "0695ab24",
+      "reason": "Comments are insert-only and need no revision; any extra call per comment fails."
+    },
+    {
+      "id": "planning-reruns",
+      "area": "Work queries re-run per planning write, three open tabs",
+      "measuredBy": "planning-fixture",
+      "metric": "planningReruns",
+      "unit": "runs",
+      "value": 6,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs and tests/hosted-contention.test.mjs on the in-process Convex fixture, 2026-11-10: the flip 5 re-run meter (10 subscriptions per tab) gives 2 per tab for a new Issue, a status change, a comment and a note; the worst write times three tabs. Before: 3 per tab (9), the workspace query re-ran on every write.",
+      "issue": "0695ab24",
+      "reason": "The workspace query is the heaviest read and must not depend on the project-wide Work revision again; one more re-run per tab fails."
     }
   ]
 }

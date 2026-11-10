@@ -85,7 +85,6 @@ function Fixture() {
       ) : (
         <WorkPlanning
           data={{
-            revision: 1,
             intents: [
               { id: 'intent-phones', outcome: 'Improve source navigation on phones', status: 'active' },
             ],

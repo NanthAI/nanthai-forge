@@ -30,9 +30,23 @@ export const workspace = query({
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
       const project = await accessibleProject(ctx, projectId, user.subject),
-        selected = await selectedGeneration(ctx, project);
-      const generation = selected ? await generationHead(ctx, selected) : null;
+        generation = await selectedGeneration(ctx, project);
       if (!generation) return null;
+      // Flip 5 (Issue 0695ab24): no read of the per-project Work head, so a journal write does not re-run
+      // this query in every open tab. Counts are the generation's; pages that need live ones count their
+      // loaded rows. A collection the generation had no rows of is probed once (its first row only).
+      const metadata = JSON.parse(generation.metadata) as { counts?: Record<string, number> };
+      const counts = { ...metadata.counts };
+      for (const collection of ['sourcePins', 'landingEntries', 'landingBatches'])
+        if (counts[collection] === undefined) {
+          const [first] = await ctx.db
+            .query('projectWorkRecords')
+            .withIndex('by_generation_and_collection_and_position', q =>
+              q.eq('generationId', recordPartition(generation)).eq('collection', collection),
+            )
+            .take(1);
+          if (first) counts[collection] = 1;
+        }
       const backup = await ctx.db.get(generation.backupId);
       invariant(backup?.projectId === projectId, 'PROJECT_UNAVAILABLE', 'Select this project’s source.');
       const owner = project.owner === user.subject;
@@ -47,7 +61,7 @@ export const workspace = query({
             .unique(),
         );
       return JSON.stringify({
-        ...hostedPaths(JSON.parse(generation.metadata)),
+        ...hostedPaths({ ...metadata, counts }),
         ...(planningDuplicateText === undefined
           ? {}
           : { likelyDuplicates: await likelyPlanningDuplicates(ctx, project, planningDuplicateText) }),
@@ -58,7 +72,6 @@ export const workspace = query({
         backupId: generation.backupId,
         backupDigest: backup.digest,
         sourceTransport: backup.transport,
-        revision: generation.revision,
         sourceRevision: generation.initialRevision,
         name: project.name,
         key: project.key,
@@ -225,6 +238,24 @@ export const detail = query({
         editable,
         intentPin,
       };
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+/** The live Work journal revision, for the few screens that show or hand it off (local handoff, source
+ * verification). It reads the per-project head, so it re-runs on every journal write: subscribe only
+ * while such a screen is open. */
+export const revision = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.union(v.number(), v.null()),
+  handler: async (ctx, { projectId }) => {
+    try {
+      const user = await ctx.auth.getUserIdentity();
+      invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
+      const project = await accessibleProject(ctx, projectId, user.subject),
+        selected = await selectedGeneration(ctx, project);
+      return selected ? (await generationHead(ctx, selected)).revision : null;
     } catch (error) {
       return report(error);
     }

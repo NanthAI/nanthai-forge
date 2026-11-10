@@ -27,7 +27,13 @@ import {
   type HostedHandoffPair,
 } from './hosted-handoff';
 import { LazyPage, useSection, useDestination } from './WorkspaceUI';
-import { useWorkIndex, useWorkRecords, useWorkRecordResult, type IntentHeader } from './hosted-work-index';
+import {
+  useWorkIndex,
+  useWorkRecords,
+  useWorkRecordResult,
+  workIndex,
+  type IntentHeader,
+} from './hosted-work-index';
 import HostedNow from './cockpit/HostedNow';
 import { type WorkflowPage } from './ProjectOverview';
 import { localAgentPrompt } from './local-agent-prompt';
@@ -178,6 +184,12 @@ export default function HostedWork({
     sourceDetailsOpen || section === 'delivery' || (inWorkflow && workflowTab === 'delivery'),
   );
   const events = useWorkRecords<HostedEvent>(projectId, workspace, 'events', undefined, sourceDetailsOpen);
+  // The live journal revision re-runs on every Work write: only the transfer screen and the open source
+  // verification hold it (flip 5); every other Work screen is unaffected by unrelated writes.
+  const liveRevision = useQuery(
+    workIndex.revision,
+    section === 'transfer' || sourceDetailsOpen ? { projectId } : 'skip',
+  );
   const snapshot = useMemo(
     (): Snapshot | null =>
       workspace
@@ -187,7 +199,7 @@ export default function HostedWork({
             channels: channels.records,
             hostedChannels: hostedChannels.records,
             data: {
-              revision: workspace.revision,
+              revision: liveRevision ?? 0,
               intents: intents.records,
               channelMoves: moves.records,
               hostedChannelMoves: hostedMoves.records,
@@ -298,17 +310,18 @@ export default function HostedWork({
         ? pending
         : {
             operationId: command && 'operationId' in command ? command.operationId : crypto.randomUUID(),
-            revision: snapshot.data.revision,
+            // Only an anchored note still takes the revision-checked action; it reads the revision once.
+            revision:
+              command?.action === 'note' && command.anchor
+                ? ((await client.query(workIndex.revision, { projectId })) ?? 0)
+                : 0,
             command: command!,
           };
     setPending(original);
     setBusy(true);
     setError('');
     try {
-      if (
-        (original.command.action === 'note' && original.command.anchor) ||
-        original.command.action === 'put-planning-item'
-      ) {
+      if (original.command.action === 'note' && original.command.anchor) {
         await client.action(api.projectWorkActions.command, {
           projectId,
           operationId: original.operationId,
@@ -524,7 +537,8 @@ export default function HostedWork({
             <p>
               Both download controls retain this exact pair across source returns. Use these matching files
               together.
-              {snapshot.data.revision !== matchingPair.revision &&
+              {liveRevision != null &&
+                liveRevision !== matchingPair.revision &&
                 ' Prepare current pair to receive newer hosted Work.'}
             </p>
           </div>
@@ -534,7 +548,7 @@ export default function HostedWork({
           inline
           projectId={projectId}
           backupId={snapshot.backupId}
-          {...(owner ? { revision: snapshot.data.revision } : {})}
+          {...(owner && liveRevision != null ? { revision: liveRevision } : {})}
           {...(snapshotTransport ? { transport: snapshotTransport } : {})}
         />
       </details>
@@ -587,7 +601,7 @@ export default function HostedWork({
             <p>
               Source <code>{snapshot.sourceHead}</code>
             </p>
-            <p>Work version {snapshot.data.revision}</p>
+            {liveRevision != null && <p>Work version {liveRevision}</p>}
             {events.records.map(event => (
               <IndexedEvent
                 key={event.id}

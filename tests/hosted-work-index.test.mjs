@@ -35,7 +35,10 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
       base: baseline.sourceHead,
     }),
   });
-  const before = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })),
+  const before = {
+      ...JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })),
+      revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
+    },
     original = s.ctx.runQuery,
     commands = [];
   const blocked = (ref, args) => {
@@ -50,7 +53,7 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
   s.ctx.storage.get = s.ctx.storage.getUrl = async () =>
     assert.fail('hot commands never read archive/source blobs');
   const send = async command => {
-    const revision = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })).revision;
+    const revision = await index.revision._handler(s.ctx, { projectId: s.projectId });
     return actions.command._handler(s.ctx, {
       projectId: s.projectId,
       operationId: command.operationId ?? randomUUID(),
@@ -88,13 +91,20 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
     text: 'Keep discussion',
     authorLabel: 'Owner',
   });
-  const after = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
+  const after = {
+    ...JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })),
+    revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
+  };
   assert.equal(after.generationId, before.generationId);
   assert.equal(after.revision, before.revision + 5);
   assert.equal(after.schema, 24); // new source owner already records its supervised policy
-  assert.equal(after.defaultIntentId, operationId);
-  assert.equal(after.counts.notes, 1);
-  assert.equal(after.counts.lifecycle, 2);
+  // Flip 5: live metadata stays on the Work head row; the workspace every tab holds serves the
+  // generation's, so a write does not re-run it.
+  const live = JSON.parse([...s.tables.projectWorkHeads.values()][0].metadata);
+  assert.equal(live.defaultIntentId, operationId);
+  assert.equal(live.counts.notes, 1);
+  assert.equal(live.counts.lifecycle, 2);
+  assert.equal(after.counts.notes, before.counts.notes);
   assert.equal((await page(s, 'notes', operationId)).page.length, 1);
   assert.equal((await page(s, 'lifecycle', operationId)).page.length, 2);
   assert.equal((await page(s, 'planningItems')).page.length, 1);
@@ -306,7 +316,7 @@ test('a warm note pages selected attributes with bounded overhead for 10 or 4000
     await actions.command._handler(s.ctx, {
       projectId: s.projectId,
       operationId: randomUUID(),
-      revision: workspace.revision,
+      revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
       command: JSON.stringify({ action: 'note', intentId, text: 'One more', kind: 'comment' }),
     });
     observations.push({ reads, blobReads, attributeParts });

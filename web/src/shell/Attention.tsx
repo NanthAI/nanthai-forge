@@ -184,7 +184,6 @@ export function HostedAttention({
     () =>
       hostedAttention(
         {
-          revision: workspace?.revision,
           needsFix: workspace?.needsFix,
           intents: intents.records,
           lanes: lanes.records,

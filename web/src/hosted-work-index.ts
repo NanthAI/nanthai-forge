@@ -37,6 +37,8 @@ export const workIndex = {
     Detail
   >('projectWorkIndex:detail'),
   checksum: makeFunctionReference<'action', Project, string>('projectWorkIndexActions:checksum'),
+  /** The live journal revision; it re-runs on every Work write, so only open handoff screens hold it. */
+  revision: makeFunctionReference<'query', Project, number | null>('projectWorkIndex:revision'),
 };
 export type WorkIndexWorkspace = {
   needsFix?: readonly import('./cockpit/needs-fix').NeedsFixNotice[];
@@ -45,7 +47,6 @@ export type WorkIndexWorkspace = {
   landingWorker?: import('../../src/pending-status').PendingStatus['landingWorker'];
   repairNotices?: import('../../src/agent-conflict-notice').ConflictNotice[];
   generationId: string;
-  revision: number;
   backupId: Id<'projectBackups'>;
   backupDigest: string;
   sourceTransport?: 'objects';

@@ -37,6 +37,7 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
   s.ctx.storage.getUrl = async () => assert.fail('metadata queries never read source/history archives');
   const detail = await parse(query({ action: 'view', viewId: p.view.id }));
   const workspace = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
+  const revision = await index.revision._handler(s.ctx, { projectId: s.projectId });
   assert.equal(workspace.counts.viewDetails, 2);
   assert.equal(workspace.counts.viewFiles, 2);
   assert.equal(workspace.counts.laneViews, 4);
@@ -79,7 +80,7 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
   );
   assert.equal(
     (await parse(query({ action: 'view', viewId: p.view.id }))).revision,
-    workspace.revision + 1,
+    revision + 1,
     'provenance plans pin the current Work head',
   );
   assert.equal(

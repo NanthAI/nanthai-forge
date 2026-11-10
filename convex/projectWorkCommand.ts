@@ -17,10 +17,14 @@ import { generationHead } from './projectWorkHead';
 import { commandKeys, commandProjection, commandAliasRows } from './projectWorkProjection';
 import { appendWork } from './projectWork';
 
+/** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
+ * (ITEM_CHANGED); the project revision is read in the same transaction, so an unrelated write never
+ * refuses it. Anchored notes and Channel acceptance need Node-only readers and stay in the action. */
 export const commutativeCommand = (command: { action: string; anchor?: unknown }) =>
   command.action === 'intent' ||
   command.action === 'intent-status' ||
   command.action === 'comment-planning-item' ||
+  command.action === 'put-planning-item' ||
   (command.action === 'note' && !command.anchor);
 
 export async function executeCommand(
@@ -44,7 +48,7 @@ export async function executeCommand(
     'BAD_ARGUMENT',
     'Use an original Work operation UUID.',
   );
-  if (command.action === 'comment-planning-item') {
+  if (command.action === 'comment-planning-item' || command.action === 'put-planning-item') {
     invariant(
       project.owner === user.subject,
       'PROJECT_UNAVAILABLE',

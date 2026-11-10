@@ -173,7 +173,6 @@ function Fixture() {
       ) : section === 'planning' ? (
         <WorkPlanning
           data={{
-            revision: 1,
             intents: records.intents,
             planningItems: [],
             planningComments: [],

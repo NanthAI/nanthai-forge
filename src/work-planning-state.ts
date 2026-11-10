@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { digest } from './portable-hash.js';
-import { invariant } from './errors.js';
+import { invariant, itemChanged } from './errors.js';
 import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';
 import { isUnifiedWork } from './work-unified-types.js';
@@ -60,11 +60,13 @@ export function applyPlanningMetadata(data: WorkData, command: PlanningWrite, at
     data.planningComments.push(comment);
     return comment;
   }
-  invariant(
-    (current?.version ?? 0) === command.expectedVersion,
-    'PLANNING_CHANGED',
-    'This item has a newer version. Load it before saving; your existing work remains available.',
-  );
+  if ((current?.version ?? 0) !== command.expectedVersion)
+    throw itemChanged({
+      kind: 'issue',
+      id: command.itemId,
+      expectedVersion: command.expectedVersion,
+      currentVersion: current?.version ?? 0,
+    });
   const put = resolvePlanningPut(command, current);
   invariant(
     !current || current.kind === put.kind,

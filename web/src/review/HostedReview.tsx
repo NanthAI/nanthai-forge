@@ -74,6 +74,7 @@ export function HostedReview({
   const [story, setStory] = useState<ReviewRead | null>(null),
     [error, setError] = useState('');
   const [runs, setRuns] = useState<HostedRunSummary[]>([]);
+  const viewVersion = JSON.stringify(view);
   useEffect(() => {
     let active = true;
     setStory(null);
@@ -106,7 +107,8 @@ export function HostedReview({
     return () => {
       active = false;
     };
-  }, [client, read, projectId, view.id, workspace.revision, readAttempt]);
+    // The story follows this View's own record (head, status, acceptance), not every Work write.
+  }, [client, read, projectId, view.id, viewVersion, readAttempt]);
   const landing = useHostedLanding(projectId, view.id, story?.why.outcome ?? intent?.outcome ?? 'Candidate');
   const main = useQuery(landingMain, { projectId });
   const mainHead = main ? (JSON.parse(main).head as string) : undefined;

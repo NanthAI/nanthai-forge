@@ -31,7 +31,7 @@ import type { PlanningCommand, PlanningItem, PlanningWrite, WorkData } from '../
 
 export type PlanningData = Pick<
   WorkData,
-  'revision' | 'intents' | 'planningItems' | 'planningComments' | 'hostedEvents'
+  'intents' | 'planningItems' | 'planningComments' | 'hostedEvents'
 > & { lanes?: readonly PlanningLane[] };
 export type PlanningExport = { json: string; filename: string; sha256: string };
 export type PlanningAct = (command: PlanningWrite) => Promise<{ operationId: string } | void>;

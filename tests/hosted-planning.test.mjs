@@ -120,7 +120,7 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
   ];
   for (const command of invalid)
     await assert.rejects(s.send(command), error =>
-      ['NOT_FOUND', 'BAD_ARGUMENT', 'PLANNING_CHANGED'].includes(error.data.code),
+      ['NOT_FOUND', 'BAD_ARGUMENT', 'ITEM_CHANGED'].includes(error.data.code),
     );
   assert.equal(s.tables.projectWorkEvents.size, count);
   await assert.rejects(
@@ -142,7 +142,7 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
   };
   await assert.rejects(s.send(planned, current.data.revision), error => error.data.code === 'WORK_STALE');
   s.ctx.runMutation = append;
-  await assert.rejects(s.send(planned), error => error.data.code === 'PLANNING_CHANGED');
+  await assert.rejects(s.send(planned), error => error.data.code === 'ITEM_CHANGED');
   assert.deepEqual(
     (await s.read()).data.planningItems.map(item => item.title),
     ['Synthetic issue', 'Other retained version'],

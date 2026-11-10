@@ -163,7 +163,7 @@ test('owner grants retry-safe reader access; reader sees real Work with no write
   assert.deepEqual(s.tables, before);
 });
 
-test('a journal write moves the Work head row: the live revision query reads it, the project state every tab holds does not', async t => {
+test('a journal write moves the Work head row: only the live revision query reads it, not the project state or workspace every tab holds', async t => {
   // Each query that reads the head row re-runs for every open tab on every journal write (review E75).
   const s = setup(t);
   s.tables.projectWorkHeads.set('head', {
@@ -188,8 +188,15 @@ test('a journal write moves the Work head row: the live revision query reads it,
       await modules.projectWorkIndex.workspace._handler(s.ctx, { projectId: 'project' }),
     );
   });
-  assert(workspaceTables.includes('projectWorkHeads'), 'the live revision still comes from the head row');
-  assert.equal(workspace.revision, 7);
+  // Flip 5 (Issue 0695ab24): the workspace no longer reads the head, so a write re-runs 2 queries per tab, not 3.
+  assert(!workspaceTables.includes('projectWorkHeads'), `workspace reads ${workspaceTables}`);
+  assert.equal(Object.hasOwn(workspace, 'revision'), false);
+  let revision;
+  const revisionTables = await tablesRead(async () => {
+    revision = await modules.projectWorkIndex.revision._handler(s.ctx, { projectId: 'project' });
+  });
+  assert(revisionTables.includes('projectWorkHeads'), 'the live revision comes from the head row');
+  assert.equal(revision, 7);
 });
 
 test('reader revocation is immediate; replaying an old grant cannot resurrect it', async t => {

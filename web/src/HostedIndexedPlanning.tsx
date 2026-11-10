@@ -141,7 +141,6 @@ function ItemHistory({
     true,
   );
   const data: PlanningData = {
-    revision: workspace.revision,
     intents,
     planningItems: versions.records,
     planningComments: comments.records,
@@ -353,7 +352,6 @@ export default function HostedIndexedPlanning(
   );
   const attributedOrigins = usePlanningActors(props.projectId, props.workspace, origins.records);
   const data: PlanningData = {
-    revision: props.workspace.revision,
     intents: props.intents,
     lanes: lanes.records,
     planningItems: items.records,

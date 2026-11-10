@@ -7,7 +7,7 @@ import { HostedAgentJournal } from './hosted-agent-journal.js';
 import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { readIndexedWorkDetail } from './hosted-work-client.js';
-import { ForgeError, invariant } from './errors.js';
+import { ForgeError, invariant, itemChanged } from './errors.js';
 import { isPlanningPrefix, planningIdMaxCandidates } from './planning-id.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import type { PlanningItem, PlanningWrite } from './work-planning-types.js';
@@ -26,7 +26,8 @@ export type PlanningPort = Pick<
 };
 type Workspace = {
   generationId: string;
-  revision: number;
+  /** Present on servers before flip 5 S4; the revision-free writes need none. */
+  revision?: number;
   sourceRevision?: number;
   likelyDuplicates?: unknown;
 };
@@ -168,11 +169,13 @@ async function compatiblePut(
     if (command.expectedVersion === 0) return { ...rest, ...(initiativeId ? { initiativeId } : {}) };
     const item = stored ?? (await fullItem(port, await workspace(port), command.itemId));
     invariant(item, 'NOT_FOUND', 'Planning item not found.');
-    invariant(
-      item.version === command.expectedVersion,
-      'PLANNING_CHANGED',
-      `The planning item is at version ${item.version}, not ${command.expectedVersion}. Read it again.`,
-    );
+    if (item.version !== command.expectedVersion)
+      throw itemChanged({
+        kind: 'issue',
+        id: command.itemId,
+        expectedVersion: command.expectedVersion,
+        currentVersion: item.version,
+      });
     const group = initiativeId === null ? undefined : (initiativeId ?? item.initiativeId);
     return {
       ...rest,
@@ -187,8 +190,11 @@ async function compatiblePut(
   return journal ? journal.retain('planning-compatible-put', fill) : fill();
 }
 
-/** Writes carry the original operation; a stale or moved Work revision is retried a few times with
- * the revision each attempt used retained, so a lost reply replays instead of repeating. */
+/** Writes carry the original operation, so a lost reply replays instead of repeating. Comments (flip 5 S0)
+ * and, on a server with planning-put-mutation, puts (S5) take the revision-free mutation the web uses: one
+ * call, and an unrelated Work write never refuses them; a put's only check is its item version
+ * (ITEM_CHANGED). A creation still reads the likely duplicates first (one query, creations only). An older
+ * server gets the revision-checked action, retried when an unrelated write moved the revision. */
 async function writePlanning(
   port: PlanningPort,
   request: PlanningWrite,
@@ -196,53 +202,53 @@ async function writePlanning(
   hints?: { likelyDuplicates?: unknown },
   stored?: PlanningItem,
 ) {
-  // Comments are insert-only: they take the revision-free mutation the web uses (flip 5 S0), one call,
-  // and an unrelated Work write never refuses them. The operation id reconciles a retry.
-  if (request.action === 'comment-planning-item')
+  const command = await compatiblePut(port, request, journal, stored);
+  const creation =
+    command.action === 'put-planning-item' && command.kind === 'issue' && command.expectedVersion === 0;
+  const observe = async () => {
+    const ws = await workspace(port, creation ? `${command.title ?? ''} ${command.body ?? ''}` : undefined);
+    return {
+      ...(ws.revision === undefined ? {} : { revision: ws.revision }),
+      ...(ws.likelyDuplicates === undefined ? {} : { likelyDuplicates: ws.likelyDuplicates }),
+    };
+  };
+  const mutation =
+    command.action === 'comment-planning-item' || port.serverFeatures?.includes('planning-put-mutation');
+  if (mutation) {
+    if (creation && hints) {
+      const observed = journal ? await journal.retain('planning-duplicates', observe) : await observe();
+      if ('likelyDuplicates' in observed) hints.likelyDuplicates = observed.likelyDuplicates;
+    }
     return (
       await port
         .mutation<{ revision: number }>('projectWorkCommand:command', {
-          operationId: request.operationId,
-          command: JSON.stringify(request),
+          operationId: command.operationId,
+          command: JSON.stringify(command),
         })
         .catch(error => {
           throw hostedActionError(error, 'planning write');
         })
     ).revision;
-  const command = await compatiblePut(port, request, journal, stored);
+  }
   for (let attempt = 0; ; attempt++) {
-    const observe = async () => {
-      const ws = await workspace(
-        port,
-        command.action === 'put-planning-item' && command.kind === 'issue' && command.expectedVersion === 0
-          ? `${command.title ?? ''} ${command.body ?? ''}`
-          : undefined,
-      );
-      return {
-        revision: ws.revision,
-        ...(ws.likelyDuplicates === undefined ? {} : { likelyDuplicates: ws.likelyDuplicates }),
-      };
-    };
     const retained = journal
       ? await journal.retain(`planning-revision-${attempt}`, observe)
       : await observe();
     // Existing retry journals retain just the revision number.
     const observed = typeof retained === 'number' ? { revision: retained } : retained;
-    const revision = observed.revision;
     if (hints && 'likelyDuplicates' in observed) hints.likelyDuplicates = observed.likelyDuplicates;
     try {
       const args = {
         projectId: port.address.projectId,
         operationId: command.operationId,
-        revision,
+        revision: observed.revision ?? 0,
         command: JSON.stringify(command),
       };
       const call = (name: string) =>
         port.exchange.client.action(makeFunctionReference<'action'>(name), args) as Promise<{
           revision: number;
         }>;
-      // The 64 MiB V8 command (Issue 85801d6f). A server deployed before it has no such function, and a
-      // call that never found its function ran nothing: the same original operation goes to the Node one.
+      // The 64 MiB V8 command (Issue 85801d6f); a server deployed before it has the Node one only.
       const event = await call('projectWorkActionsV8:command').catch(error => {
         if (!/Could not find public function/.test(error instanceof Error ? error.message : '')) throw error;
         return call('projectWorkActions:command');

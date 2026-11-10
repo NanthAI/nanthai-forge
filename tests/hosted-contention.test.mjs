@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { setup, actions, work } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { trackReadSets } from './hosted-read-set.mjs';
+import { speedBudgets } from '../dist/speed-budgets.js';
+import { judgeCosts } from '../dist/cost-budgets.js';
 const mutations = await import(moduleUrl('../convex/projectWorkCommand.ts'));
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -62,9 +64,10 @@ test('hosted note contention and reactive read-set measurement', async t => {
   const invalidated = tracking.invalidated(dependencies);
   assert.equal(
     invalidated,
-    // 4 -> 3 (435c7c2f): the project state every tab holds no longer reads the Work head row.
-    3,
-    'Workspace, Intent list and notes page change; the project state and unrelated pages stay subscribed',
+    // 4 -> 3 (435c7c2f): the project state every tab holds no longer reads the Work head row; 3 -> 2
+    // (flip 5 S4): neither does the workspace query.
+    2,
+    'Intent list and notes page change; the workspace, project state and unrelated pages stay subscribed',
   );
   assert.deepEqual(await send({ ...firstInput, revision: 0 }), first, 'retry does not depend on revision');
   await assert.rejects(
@@ -116,8 +119,9 @@ test('hosted note contention and reactive read-set measurement', async t => {
 });
 
 // Flip 5 acceptance meter: Work query re-runs per planning write for one open tab (Issue 0695ab24). Three
-// tabs re-run three times this. Baseline today: every write re-runs 3 (the workspace query reads the
-// project head row on every write); the flip's target is 2 for an Issue write and at most 2 for a comment.
+// tabs re-run three times this. Before S4 every write re-ran 3 (the workspace query read the project head
+// row on every write); with the workspace off the head it is 2 (6 for three tabs): the Intent list, since an
+// Issue is also an Intent row, and the one page holding the written item.
 test('flip 5 re-run meter: Work queries one tab re-runs per planning write', async t => {
   const s = await setup(t);
   const initial = await s.read(),
@@ -185,13 +189,21 @@ test('flip 5 re-run meter: Work queries one tab re-runs per planning write', asy
     'Intent note': await rerun(() => s.send({ action: 'note', intentId, text: 'n', kind: 'comment' })),
   };
   assert.deepEqual(measured, {
-    'new Issue': ['workspace', 'intents', 'planningItems'],
-    'Issue status': ['workspace', 'intents', 'planningItems'],
-    'Issue comment': ['workspace', 'intents', 'planningComments'],
-    'Intent note': ['workspace', 'intents', 'notes'],
+    'new Issue': ['intents', 'planningItems'],
+    'Issue status': ['intents', 'planningItems'],
+    'Issue comment': ['intents', 'planningComments'],
+    'Intent note': ['intents', 'notes'],
   });
   console.log(
     JSON.stringify({ perTab: Object.fromEntries(Object.entries(measured).map(([k, v]) => [k, v.length])) }),
+  );
+  // Ledger entry planning-reruns (src/speed-budgets.json): the worst write with three tabs open.
+  const planningReruns = 3 * Math.max(...Object.values(measured).map(v => v.length));
+  assert.deepEqual(
+    judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'planning-fixture', { planningReruns })
+      .filter(v => v.metric === 'planningReruns' && v.status !== 'pass')
+      .map(v => v.message),
+    [],
   );
 });
 
@@ -238,4 +250,50 @@ test('revision-free planning comments and contributor notes retain authorization
   await assert.rejects(send(note, operationId), e => e.data.code === 'PROJECT_UNAVAILABLE');
   s.caller(null);
   await assert.rejects(send(note), e => e.data.code === 'PROJECT_UNAVAILABLE');
+});
+
+// Flip 5 S5 (Issue 0695ab24): 57 of 60 refused planning writes were unrelated writes moving the project-wide
+// revision. A put now runs in the revision-free mutation: its only check is its own item version.
+test('planning puts in the revision-free mutation: unrelated writes never refuse, a stale item names ITEM_CHANGED', async t => {
+  const s = await setup(t);
+  const send = command =>
+    mutations.command._handler(s.ctx, {
+      projectId: s.projectId,
+      operationId: command.operationId,
+      command: JSON.stringify(command),
+    });
+  const issue = s.item({ title: 'Put without revision' }),
+    other = s.item({ title: 'Unrelated' });
+  await send(issue);
+  await send(other);
+  await send({ ...other, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
+  const move = { ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'in-progress' };
+  const first = await send(move);
+  assert.deepEqual(await send(move), first, 'a replay returns the original receipt, not a second version');
+  const stored = (await s.read()).data.planningItems.filter(item => item.id === issue.itemId);
+  assert.deepEqual(
+    stored.map(item => [item.version, item.status]),
+    [
+      [1, 'open'],
+      [2, 'in-progress'],
+    ],
+  );
+  await assert.rejects(
+    send({ ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'closed' }),
+    e =>
+      e.data.code === 'ITEM_CHANGED' &&
+      JSON.stringify(e.data.recovery) ===
+        JSON.stringify({ kind: 'issue', id: issue.itemId, expectedVersion: 1, currentVersion: 2 }),
+  );
+  s.tables.projectContributors.set('contributor', {
+    _id: 'contributor',
+    projectId: s.projectId,
+    contributor: 'member',
+  });
+  s.caller('member');
+  await assert.rejects(
+    send({ ...issue, operationId: randomUUID(), expectedVersion: 2, status: 'closed' }),
+    e => e.data.code === 'PROJECT_UNAVAILABLE',
+    'planning stays owner-only',
+  );
 });

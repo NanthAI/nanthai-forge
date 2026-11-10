@@ -10,7 +10,13 @@ export function hostedActionError(error: unknown, phase: string): ForgeError {
   if (error instanceof ForgeError) return error;
   if (networkFailure(error)) return new ForgeError(error.code, error.message);
   if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
-    const data = error.data as { code?: unknown; message?: unknown; authority?: unknown; retryAt?: unknown };
+    const data = error.data as {
+      code?: unknown;
+      message?: unknown;
+      authority?: unknown;
+      retryAt?: unknown;
+      recovery?: unknown;
+    };
     if (data.code === 'SOURCE_AUTHORITY_STALE') {
       const authority = sourceAuthoritySchema.safeParse(data.authority);
       if (authority.success) return new SourceAuthorityStaleError(authority.data);
@@ -21,6 +27,9 @@ export function hostedActionError(error: unknown, phase: string): ForgeError {
         data.code,
         data.message,
         Number.isSafeInteger(data.retryAt) ? (data.retryAt as number) : undefined,
+        data.code === 'ITEM_CHANGED' && data.recovery && typeof data.recovery === 'object'
+          ? (data.recovery as Record<string, unknown>)
+          : undefined,
       );
   }
   const requestId =
