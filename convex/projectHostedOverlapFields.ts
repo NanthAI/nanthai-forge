@@ -98,6 +98,8 @@ export const hostedOverlapTables = {
     goal: v.string(),
     paths: v.array(v.string()),
     pathCount: v.number(),
+    /** Optional for stored rows from before the all-path filter (Issue 427a12b0). */
+    pathBloom: v.optional(v.string()),
     /** Last Lane record time (ms). */
     at: v.number(),
   })

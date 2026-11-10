@@ -26,8 +26,9 @@ export const PRESENCE_REFRESH_MS = 10 * 60_000;
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((path, i) => path === b[i]);
 
 /** Written inside the Lane record write that already runs (no added call, no added read: the
- * overlap row it already read holds the pointer). Writes ~0.4 KB only when the Issue, goal, actor
- * or saved paths change, or activity moved by 10 minutes. A closed Lane's row is deleted, so the
+ * overlap row it already read holds the pointer). Writes slim metadata plus a 512-character path
+ * filter (only for truncated paths) when the Issue, goal, actor or saved paths change, or activity moved
+ * by 10 minutes. A closed Lane's row is deleted, so the
  * table only holds open Lanes. Returns the pointer to keep on the overlap row. */
 export async function trackHostedPresence(
   ctx: MutationCtx,
@@ -67,6 +68,7 @@ export async function trackHostedPresence(
       old.goal.slice(0, PRESENCE_GOAL_CHARS) === row.goal &&
       before.pathCount === row.pathCount &&
       same(before.paths, row.paths) &&
+      before.pathBloom === row.pathBloom &&
       row.at - pointer.at < PRESENCE_REFRESH_MS
     )
       return pointer;

@@ -11,6 +11,7 @@ import { invariant } from '../src/errors';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { sameResolution, sameStack, type OverlapChange } from '../src/hosted-overlap';
 import { overlapMainSince } from './projectHostedOverlapMainLog';
+import { presenceMayShare } from '../src/hosted-presence';
 import type { TrialTask } from '../src/hosted-trial-merge';
 import {
   TRIAL_FILE_BYTES,
@@ -130,12 +131,9 @@ export async function planTrialMerge(
     .withIndex('by_project_and_at', q => q.eq('projectId', projectId))
     .order('desc')
     .take(PEER_WINDOW);
+  const minePaths = new Set(mine.keys());
   const candidates = presence
-    .filter(
-      peer =>
-        peer.laneId !== row.laneId &&
-        (peer.pathCount > peer.paths.length || peer.paths.some(path => mine.has(path))),
-    )
+    .filter(peer => peer.laneId !== row.laneId && presenceMayShare(peer, minePaths))
     .slice(0, TRIAL_PEERS * 2);
   const peerRows = (
     await Promise.all(

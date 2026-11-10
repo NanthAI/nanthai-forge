@@ -9,6 +9,10 @@ import { trialMerge, TrialUnavailable } from '../dist/hosted-trial-merge.js';
 import { nativeConflictRegions } from '../dist/native-text-merge.js';
 import { exactConflictNotice, exactConflictBanner } from '../dist/hosted-conflict-notice.js';
 import { state } from './hosted-fixture.mjs';
+import { lanesFixture } from './hosted-lanes-fixture.mjs';
+import { presencePaths, presenceMayShare } from '../dist/hosted-presence.js';
+import { speedBudgets } from '../dist/speed-budgets.js';
+import { judgeCosts } from '../dist/cost-budgets.js';
 import { moduleUrl } from './convex-module.mjs';
 
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
@@ -420,4 +424,121 @@ test('a clean trial merge closes an earlier notice; landing or abandoning one si
     }),
   );
   assert.equal(f.rows().length, before);
+});
+
+test('truncated disjoint peers cost zero overlap-row reads; hidden shared paths still trial-merge (427a12b0)', async t => {
+  async function measure(filtered, shared = false) {
+    const s = lanesFixture();
+    const changed = text(['a', 'peer', 'c', 'd', 'e', 'f', 'g', 'h']);
+    const own = text(['a', 'mine', 'c', 'd', 'e', 'f', 'g', 'h']);
+    const paths = Array.from({ length: 40 }, (_, i) => `src/peer/file-${i}.ts`);
+    const changes = paths.map(path => ({ path, before: file(BASE), after: file(changed) }));
+    const peer = {
+      projectId: 'project',
+      laneId: 'peer',
+      intentId: 'peer-intent',
+      actor: 'owner',
+      intent: 'peer goal',
+      head: '1'.repeat(64),
+      baseHead: 'b'.repeat(64),
+      baseReceiptId: 'base',
+      baseSequence: null,
+      recordVersion: 1,
+      open: true,
+      changes: JSON.stringify(changes),
+      complete: true,
+    };
+    s.insert('projectHostedOverlapLanes', peer);
+    const projection = presencePaths(peer.changes);
+    if (!filtered) delete projection.pathBloom;
+    s.insert('projectHostedPresence', {
+      projectId: 'project',
+      laneId: 'peer',
+      intentId: 'peer-intent',
+      actor: 'owner',
+      goal: 'peer goal',
+      ...projection,
+      at: 1,
+    });
+    const mine = {
+      ...peer,
+      laneId: 'mine',
+      changes: JSON.stringify([
+        { path: shared ? paths.at(-1) : 'src/mine.ts', before: file(BASE), after: file(own) },
+      ]),
+    };
+    await s.call(
+      'save-trial',
+      { _handler: ctx => conflicts.planTrialMerge(ctx, 'project', mine, 'old') },
+      {},
+    );
+    const meter = s.counts.at(-1);
+    return { s, meter, changed, own };
+  }
+  const legacy = await measure(false),
+    filtered = await measure(true);
+  const peerReads = filtered.meter.readRangesByTable.projectHostedOverlapLanes ?? 0;
+  assert.equal(peerReads, 0, 'a truncated, disjoint peer costs no full-row point read');
+  assert.equal(filtered.s.scheduled.length, 0, 'no file shared, no action scheduled');
+  assert.equal(legacy.meter.readRangesByTable.projectHostedOverlapLanes, 1, 'older rows remain conservative');
+  assert(
+    legacy.meter.readBytes - filtered.meter.readBytes > 8000,
+    'bytes saved include the new slim-row filter cost',
+  );
+  const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'trial-merge-fixture', {
+    peerOverlapReads: peerReads,
+  });
+  assert.equal(verdicts.length, 1);
+  assert.deepEqual(
+    verdicts.filter(v => v.status !== 'pass'),
+    [],
+  );
+  const shared = await measure(true, true),
+    oldShared = await measure(false, true);
+  assert.equal(shared.meter.readRangesByTable.projectHostedOverlapLanes, 1);
+  const plan = JSON.parse(shared.s.scheduled[0].args.plan);
+  assert.deepEqual(
+    plan.tasks,
+    JSON.parse(oldShared.s.scheduled[0].args.plan).tasks,
+    'same trial tasks as before',
+  );
+  const result = await trialMerge(plan.tasks, store(BASE, shared.own, shared.changed));
+  assert.equal(result.conflicts.length, 1, 'a shared path outside the first ten still produces its conflict');
+  const summary = presencePaths(
+    JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ path: `src/long/${i}/${'x'.repeat(170)}` }))),
+  );
+  for (let i = 0; i < 1000; i++)
+    assert(
+      presenceMayShare(summary, new Set([`src/long/${i}/${'x'.repeat(170)}`])),
+      'no saved path is a false negative, including long omitted paths',
+    );
+  t.diagnostic(
+    JSON.stringify({
+      legacyReadBytes: legacy.meter.readBytes,
+      filteredReadBytes: filtered.meter.readBytes,
+      filterBytes: 512,
+      peerOverlapReads: peerReads,
+    }),
+  );
+});
+
+test('a save changing only paths beyond the presence list refreshes its filter before the next peer save', async () => {
+  const f = fixture(),
+    peer = randomUUID(),
+    mine = randomUUID();
+  const bytes = text(['a', 'changed', 'c', 'd', 'e', 'f', 'g', 'h']);
+  const files = Object.fromEntries(Array.from({ length: 11 }, (_, i) => [`src/first-${i}.ts`, bytes]));
+  await f.write(peer, 'b'.repeat(64));
+  await f.write(peer, '1'.repeat(64), files);
+  delete files['src/first-10.ts'];
+  files['src/new-hidden.ts'] = bytes;
+  await f.write(peer, '2'.repeat(64), files);
+  await f.write(mine, 'b'.repeat(64));
+  await f.write(mine, '3'.repeat(64), { 'src/new-hidden.ts': bytes });
+  const plan = JSON.parse(f.s.scheduled.at(-1).args.plan);
+  assert.deepEqual(
+    plan.tasks.map(task => task.path),
+    ['src/new-hidden.ts'],
+  );
+  assert.equal(plan.tasks[0].peers[0].laneId, peer);
 });

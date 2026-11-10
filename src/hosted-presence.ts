@@ -141,6 +141,36 @@ export function rankPresence(
   };
 }
 
+// A 2,048-bit Bloom filter covers every saved path, including paths omitted from the slim list.
+// A collision can cause an extra read; a missing bit always proves the peer cannot share that path.
+const BLOOM_BYTES = 256;
+function pathBits(path: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < path.length; i++) hash = Math.imul(hash ^ path.charCodeAt(i), 16777619);
+  const step = (hash >>> 16) | 1;
+  return [0, 1, 2, 3].map(i => (hash + Math.imul(i, step)) & (BLOOM_BYTES * 8 - 1));
+}
+function pathBloom(paths: string[]) {
+  const bits = new Uint8Array(BLOOM_BYTES);
+  for (const path of paths) for (const bit of pathBits(path)) bits[bit >>> 3]! |= 1 << (bit & 7);
+  return Array.from(bits, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+export function presenceMayShare(
+  peer: { paths: string[]; pathCount: number; pathBloom?: string },
+  paths: ReadonlySet<string>,
+) {
+  if (peer.paths.some(path => paths.has(path))) return true;
+  if (peer.pathCount <= peer.paths.length) return false;
+  const bloom = peer.pathBloom;
+  // Older rows stay conservative until an ordinary presence refresh supplies the filter.
+  if (!bloom || !/^[a-f0-9]{512}$/.test(bloom)) return true;
+  return [...paths].some(path =>
+    pathBits(path).every(
+      bit => (parseInt(bloom.slice((bit >>> 3) * 2, (bit >>> 3) * 2 + 2), 16) & (1 << (bit & 7))) !== 0,
+    ),
+  );
+}
+
 /** The slim row written with each Lane record; only open Lanes keep one. */
 export function presencePaths(changes: string) {
   let parsed: { path?: unknown }[] = [];
@@ -150,9 +180,11 @@ export function presencePaths(changes: string) {
     parsed = [];
   }
   const paths = parsed.map(change => change.path).filter((path): path is string => typeof path === 'string');
+  const shown = paths.filter(path => path.length <= PRESENCE_PATH_CHARS).slice(0, PRESENCE_PATHS);
   return {
-    paths: paths.filter(path => path.length <= PRESENCE_PATH_CHARS).slice(0, PRESENCE_PATHS),
+    paths: shown,
     pathCount: paths.length,
+    ...(shown.length < paths.length ? { pathBloom: pathBloom(paths) } : {}),
   };
 }
 

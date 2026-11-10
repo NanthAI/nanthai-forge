@@ -644,6 +644,18 @@
       "source": "convex logs --success sample, 2026-11-10 (Issue a02991a7): textIndexQueryBytes 7.47 MB for every projectHostedPlanningSearch:search, projectHostedFriction:capture and projectWorkIndex:workspace search. Convex docs (search/text-search#costs) and convex-backend usage_tracking: each query counts the full on-disk size of the index, once per search.",
       "issue": "a02991a7",
       "reason": "Billed as Search queries at $0.11 per 1,000 query-GB (Starter), about $0.0000008 per search and $0.0008 a day at 920 searches; it grows with every projectWorkRecords row of every generation, not with the limit. Judged on change by planning-index-searches."
+    },
+    {
+      "id": "save-trial-peer-overlap-reads",
+      "area": "Save-time trial merge: full overlap-row reads for a truncated disjoint peer, per save",
+      "measuredBy": "trial-merge-fixture",
+      "metric": "peerOverlapReads",
+      "unit": "reads",
+      "value": 0,
+      "floor": 0,
+      "source": "tests/hosted-trial-merge.test.mjs: a 40-path disjoint peer reads zero full overlap rows; legacy rows without the optional filter stay conservative, and an omitted shared path still gets the same trial merge. Synthetic DB bytes are metered, not billed usage.",
+      "issue": "427a12b0",
+      "reason": "Replaces unconditional full-row reads for truncated peers with a 512-character all-path filter. At the capture #4 mix (60,000 old peer bytes/save, 1.6 head moves/landing), 1,000 landings avoid 96 MB of peer rows before false positives and rollout. At a full 51-row presence window the added field costs at most about 27 KB/save, leaving about 53 MB net read savings/1,000 landings; shared peers, false positives, writes and other presence reads reduce the net. Calls unchanged; idle zero."
     }
   ]
 }
