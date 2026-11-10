@@ -13,6 +13,8 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'path' | 'root'>;
+
 export const RECEIPT_ANCESTRY_READS = 16;
 
 /** Per-read overlay: even text merge's put() stays in memory. Never publishes objects. */
@@ -24,7 +26,7 @@ export class PeersSource extends NativeSource {
   private readonly states = new Map<string, NativeState>();
   private ancestryReads = 0;
   constructor(
-    private readonly store: WorkStore,
+    private readonly store: StoreAccess,
     private readonly boundary: string,
     private readonly maxAncestryReads = Infinity,
   ) {

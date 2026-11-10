@@ -7,6 +7,8 @@ import { recoverySaves } from './recovery-saves.js';
 import { sourceManifestSchema } from './work-archive-metadata.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'locked' | 'pinnedData'>;
+
 const pin = z.object({ sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().nonnegative() });
 export const recoveryCaptureSchema = z.object({
   schema: z.literal(1),
@@ -61,7 +63,7 @@ export function recoveryTiming(directory: string): {
 /** Local observation only. Exports are not evidence of an off-machine copy. This
  * sidecar never changes Work, the exchange payload or a successful publication. */
 export function retainRecoveryCapture(
-  store: WorkStore,
+  store: StoreAccess,
   directory: string,
   manifestPin: { sha256: string; size: number },
   options: {

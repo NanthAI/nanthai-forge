@@ -7,6 +7,11 @@ import { pendingRecordWriter } from './work-record-staging.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'observing' | 'pointer' | 'prepareSave' | 'publishSave'
+>;
+
 /** Internal retry signal for a changed Work pointer or collected prepared source. */
 export class PreparationChanged extends ForgeError {
   constructor(
@@ -23,7 +28,7 @@ export class PreparationChanged extends ForgeError {
  * Two optimistic attempts keep holds short; a third prepares under the lock so
  * a long preparation always makes progress under steady concurrent writes. */
 export function editWork<T>(
-  store: WorkStore,
+  store: StoreAccess,
   edit: (data: WorkData) => T,
   beforePublish?: () => void,
   validatePreparation?: () => void,
@@ -38,7 +43,7 @@ export function editWork<T>(
   return editWorkOnce(store, edit, beforePublish, validatePreparation, true);
 }
 function editWorkOnce<T>(
-  store: WorkStore,
+  store: StoreAccess,
   edit: (data: WorkData) => T,
   beforePublish: (() => void) | undefined,
   validatePreparation: (() => void) | undefined,
@@ -100,7 +105,7 @@ function editWorkOnce<T>(
 
 /** Retry publication races only. A changed binding/operation reported by edit is
  * a semantic conflict: return it immediately rather than retrying stale inputs. */
-export async function retryWorkEdit<T>(store: WorkStore, operationId: string, edit: (data: WorkData) => T) {
+export async function retryWorkEdit<T>(store: StoreAccess, operationId: string, edit: (data: WorkData) => T) {
   const result = await retryWorkPhase(operationId, () => {
     try {
       return { value: editWork(store, edit) };

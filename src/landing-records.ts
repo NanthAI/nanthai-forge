@@ -9,6 +9,11 @@ import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'directory' | 'load' | 'lockedAsync' | 'prepareCommitRecords' | 'readRecords'
+>;
+
 export type LandingRecordSelection = {
   selectedOnly?: boolean;
   entries?: string[];
@@ -22,7 +27,7 @@ const writable = ['landingEntries', 'landingBatches', 'views', 'runs'] as const;
  * conversations, saves and unrelated runs cannot delay queue admission/settlement.
  * Header status only selects records; every selected record is fully validated. */
 export function landingRecords(
-  store: WorkStore,
+  store: StoreAccess,
   channel?: string,
   tx = store.readRecords?.(),
   selectedId?: string,
@@ -129,7 +134,7 @@ export function landingRecords(
 /** Prepare only changed queue records outside the writer lock, then publish
  * under the driver fence and exact-pointer CAS. Never save a projection as whole Work. */
 export function editLandingRecords<T>(
-  store: WorkStore,
+  store: StoreAccess,
   channel: string | undefined,
   edit: (data: WorkData) => T,
   tx: WorkRecordTransaction,
@@ -168,7 +173,7 @@ export function editLandingRecords<T>(
 
 /** Locate a runner's exact prefix without hydrating completed diagnoses or Work.
  * The nested lookup is advisory location only; validate the retained prefix. */
-export function landingCheckPrefix(store: WorkStore, viewId: string) {
+export function landingCheckPrefix(store: StoreAccess, viewId: string) {
   const tx = store.readRecords?.();
   if (!tx)
     return store

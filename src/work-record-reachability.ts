@@ -9,6 +9,8 @@ import { recordManifest, recordObject, readWorkFile, type RecordCollection } fro
 import { RETENTION_MS } from './clean-retention.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'select'>;
+
 const hash = /^[0-9a-f]{64}$/;
 export type RecordRoots = {
   kept: Map<string, Set<string>>;
@@ -17,7 +19,7 @@ export type RecordRoots = {
 };
 /** Mark exact record links; opaque extension pins are conservatively retained too.
  * Source hashes are never opened or collected by this walker. */
-export function recordRoots(store: WorkStore, available: Set<string>, now = Date.now()): RecordRoots {
+export function recordRoots(store: StoreAccess, available: Set<string>, now = Date.now()): RecordRoots {
   const kept = new Map<string, Set<string>>(),
     metadata: string[] = [],
     details = new Map<string, { sha256: string; size: number }>();

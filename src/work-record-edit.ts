@@ -5,11 +5,13 @@ import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import type { WorkCollection, WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'lockedAsync' | 'prepareCommitRecords'>;
+
 /** Publish only changed selected records. The projection is never saved as a
  * complete Work snapshot. A caller already owning the lock can stage against
  * its fresh selected pointer without another admission or whole-Work prepare. */
 export function editRecordProjection<T>(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   data: WorkData,
   writable: readonly WorkCollection[],

@@ -4,8 +4,13 @@ import { postAcceptRecords, preparePostAcceptRecords } from './post-accept-recor
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'commitRecords' | 'directory' | 'load' | 'lockedAsync' | 'prepareCommitRecords' | 'readRecords' | 'save'
+>;
+
 export async function recoveryEdit<T>(
-  store: WorkStore,
+  store: StoreAccess,
   edit: (data: WorkData) => T,
   viewIds: string[] = [],
   moveIds: string[] = [],

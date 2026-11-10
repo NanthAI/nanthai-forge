@@ -9,9 +9,11 @@ import { readHostState } from './host-binding.js';
 import { ForgeError } from './errors.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load'>;
+
 /** The binding is already durable Work. Retry publication from that same pushed
  * commit after a lost reply; never repeat a Git push to refresh hosted status. */
-export async function publishGithubStatus(store: WorkStore, supplied?: Pick<ConvexHttpClient, 'mutation'>) {
+export async function publishGithubStatus(store: StoreAccess, supplied?: Pick<ConvexHttpClient, 'mutation'>) {
   const host = readHostState(store).binding;
   if (!host) return { status: 'unbound' };
   const data = store.load(),

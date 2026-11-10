@@ -11,6 +11,8 @@ import type { WorkStore } from './work-store.js';
 import type { Check, CheckEnvironment, Lane } from './work-types.js';
 import { forgeTempDir } from './forge-disk.js';
 
+type StoreAccess = Pick<WorkStore, 'path' | 'root'>;
+
 export type PreviewCheck = Pick<Check, 'name' | 'executable' | 'args'> &
   Partial<Pick<Check, 'id' | 'definition' | 'env' | 'credentials'>>;
 export type PreviewObservation = {
@@ -42,7 +44,7 @@ export class PreviewChecks {
   readonly directory = forgeTempDir('forge-integration');
   private dependencies: { signature: string; path: string } | undefined;
   constructor(
-    private readonly store: WorkStore,
+    private readonly store: StoreAccess,
     private readonly source: NativeSource,
     private readonly lanes: Lane[],
     private readonly checks: PreviewCheck[],

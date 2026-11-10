@@ -2,10 +2,12 @@
 import { landingWorkerStates } from './landing-worker-status.js';
 import { notifyWorker } from './local-worker-notifications.js';
 import type { WorkStore } from './work-store.js';
+
+type StoreAccess = Pick<WorkStore, 'directory'>;
 const pending = new Map<string, { excludedId: string | undefined }>();
 /** Invalidation after publication or driver release, deferred past the owner lock.
  * No daemon is spawned and no timer exists while idle. Startup repairs lost wakes. */
-export function wakeLandingWorker(store: WorkStore, excludedId?: string) {
+export function wakeLandingWorker(store: StoreAccess, excludedId?: string) {
   const previous = pending.get(store.directory);
   if (previous) {
     // Coalescing keeps the union of recipients. A durable Work publication

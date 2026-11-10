@@ -15,10 +15,12 @@ import { artifactArchivePlan, validateArtifactAliasRecords } from './native-arti
 import { readSource } from './files.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
+
+type StoreAccess = Pick<WorkStore, 'root' | 'load'>;
 type Manifest = z.infer<typeof nativeManifestSchema>;
 
 // Shared by independent full restoration and lossless archive conversion.
-export function validateNativeArchiveRecords(store: WorkStore, manifest: Manifest, data: WorkData) {
+export function validateNativeArchiveRecords(store: StoreAccess, manifest: Manifest, data: WorkData) {
   invariant(
     data.nativeHead === manifest.head && data.revision === manifest.revision,
     'INVALID_WORK_BACKUP',
@@ -69,7 +71,7 @@ export async function withValidatedNativeArchive<T>(
     nativeMarker(owner);
     renameSync(directory, work);
     moved = true;
-    validateNativeArchiveRecords(new WorkStore(owner), manifest, data);
+    validateNativeArchiveRecords(WorkStore.open<'root' | 'load'>(owner), manifest, data);
     return await use({ directory: work, manifest, data, physicalPath: path => aliases.get(path) ?? path });
   } finally {
     if (moved) renameSync(work, directory);

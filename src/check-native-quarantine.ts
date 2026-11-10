@@ -6,8 +6,24 @@ import { checkQuarantineResult } from './check-quarantine.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 import { isStandardForgeCheck } from './standard-check.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'select'
+>;
 export function nativeQuarantine(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   path: string,
   exitCode: number | null,

@@ -6,6 +6,11 @@ import { workGithubApi } from './work-github.js';
 import { githubApprovalSchema, githubCheckSchema, type Invariant, type WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'root' | 'save' | 'snapshotBytes'
+>;
+
 type Approval = z.infer<typeof githubApprovalSchema>;
 const reviewSchema = z.object({
   id: z.number().int().positive().safe(),
@@ -34,7 +39,7 @@ export function matchesReviewMapping(data: WorkData, policy: Invariant, observat
   );
 }
 export async function observeGithubReviews(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   policy: Invariant,
   head: string,

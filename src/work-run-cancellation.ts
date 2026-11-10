@@ -7,6 +7,8 @@ import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { CheckRun, WorkView } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'locked' | 'readRecords' | 'records' | 'select'>;
+
 /** Candidate family order is retained Work order, matching the read model. */
 export function runCandidateFamily(tx: WorkRecordTransaction, view: WorkView) {
   const key = (inputs: CheckRun['inputs']) => JSON.stringify(inputs.map(i => i.laneId).sort());
@@ -48,7 +50,7 @@ function supersedingCandidate(tx: WorkRecordTransaction, run: CheckRun) {
 
 /** First observed request wins, including when a controller is adopted or retried. */
 function requestRunCancellation(
-  store: WorkStore,
+  store: StoreAccess,
   id: string,
   cancellation: NonNullable<CheckRun['cancellation']>,
 ) {
@@ -74,7 +76,7 @@ function requestRunCancellation(
 
 /** Use the same ordered Intent/Lane family as the Candidate read model. */
 export function remoteCancellation(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   observation?: Pick<NonNullable<CheckRun['cancellation']>, 'reason' | 'signal'>,
 ) {

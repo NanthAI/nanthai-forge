@@ -7,13 +7,15 @@ import { interactionRequestSchema, type CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 import type { z } from 'zod';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'native' | 'root'>;
+
 export const pathsOverlap = (a: string, b: string) =>
   a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
 
 /** Runner-derived facts, separate from the command's reported test selection.
  * Ineligible evidence retains its reason for ordinary merged-View selection. */
 export function interactionEvidence(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   request: z.infer<typeof interactionRequestSchema>,
 ): NonNullable<CheckRun['interaction']> {

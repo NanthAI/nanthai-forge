@@ -15,11 +15,25 @@ import type { WorkStore } from './work-store.js';
 import type { CheckRun, EvidenceCommand } from './work-types.js';
 import { explicitTestsRunner } from './explicit-test-runner.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'observing'
+  | 'readRecords'
+  | 'records'
+  | 'root'
+  | 'save'
+  | 'select'
+>;
+
 type RunCommand = Extract<EvidenceCommand, { action: 'run-check' }>;
 /** Prepare exact source/input evidence and immutable run pages before the owner
  * lock. Registration validates this pointer, definitions and Playbook ownership;
  * no runner starts until the run record is committed. */
-export function prepareRunRegistration(store: WorkStore, command: RunCommand, sequenceId?: string) {
+export function prepareRunRegistration(store: StoreAccess, command: RunCommand, sequenceId?: string) {
   try {
     if (!store.readRecords()) store.locked(() => store.records(), { operation: 'run migration' });
     return store.observing(() => {

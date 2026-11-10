@@ -11,9 +11,11 @@ import { workLocked } from './work-lock.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'native' | 'root'>;
+
 /** Under the timing lock, settle a previous writer before preparing any newer sample.
  * This closes the history/marker crash gap even after the bounded run ledger rolls over. */
-function publishPending(store: WorkStore) {
+function publishPending(store: StoreAccess) {
   const path = join(store.directory, 'test-timings-pending.json');
   if (!existsSync(path)) return;
   const pending = JSON.parse(readFileSync(path, 'utf8'));
@@ -26,7 +28,7 @@ function publishPending(store: WorkStore) {
 
 /** Called on terminal receipt reconciliation, never while a shard is still running.
  * History is advisory; failure to retain it cannot change check evidence or routing. */
-export function recordCheckTimings(store: WorkStore, run: CheckRun, directory: string): boolean {
+export function recordCheckTimings(store: StoreAccess, run: CheckRun, directory: string): boolean {
   if (!store.native || !['passed', 'failed'].includes(run.status) || !run.checkSelection) return false;
   const marker = join(directory, 'test-timings-recorded');
   if (existsSync(marker)) return true;

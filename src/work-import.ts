@@ -13,6 +13,11 @@ import { workGithubApi, withGithubTransport } from './work-github.js';
 import { githubObservationSchema, githubWorkSchema, type GithubObservation } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'root' | 'save' | 'snapshotBytes'
+>;
+
 const oid = githubObservationSchema.shape.head;
 const pullSchema = z.object({
   number: z.number().int().positive(),
@@ -55,7 +60,7 @@ export function prLocation(input: string) {
   );
   return { repository: selected.repository, number: Number(match[3]) };
 }
-export async function readPull(store: WorkStore, repository: string, number: number): Promise<Pull> {
+export async function readPull(store: StoreAccess, repository: string, number: number): Promise<Pull> {
   const parsed = pullSchema.safeParse(await workGithubApi(store, `repos/${repository}/pulls/${number}`));
   invariant(
     parsed.success,
@@ -74,7 +79,7 @@ export async function readPull(store: WorkStore, repository: string, number: num
   return pull;
 }
 export async function observe(
-  store: WorkStore,
+  store: StoreAccess,
   pull: Pull,
   importSource: boolean,
   matchesCandidate = true,
@@ -163,7 +168,7 @@ export async function observe(
   );
 }
 
-export async function githubWork(store: WorkStore, input: unknown, expectedRevision: number) {
+export async function githubWork(store: StoreAccess, input: unknown, expectedRevision: number) {
   const parsed = githubWorkSchema.safeParse(input);
   invariant(
     parsed.success && Number.isSafeInteger(expectedRevision) && expectedRevision >= 0,

@@ -7,6 +7,8 @@ import { workGit } from './work-git.js';
 import { workspaceTestRunner } from './workspace-test-runner.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'native' | 'root'>;
+
 type Check = { executable: string; args: readonly string[] };
 /** Forge's standard check runs explicit files through its own runner, which reads only this layout. */
 const forgeTestFile = (path: string) => path.startsWith('tests/') && path.endsWith('.test.mjs');
@@ -16,7 +18,7 @@ const forgeTestFile = (path: string) => path.startsWith('tests/') && path.endsWi
  * (src/project-test-runner.ts), present at that head. Reads the head's path list and package.json;
  * runs nothing. Returns the runner for a non-standard check. */
 export function explicitTestsRunner(
-  store: WorkStore,
+  store: StoreAccess,
   check: Check,
   head: string,
   tests: readonly string[],

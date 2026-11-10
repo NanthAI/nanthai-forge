@@ -2,6 +2,8 @@
 import type { WorkData, Lane, DependencyPin } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'native' | 'readRecords'>;
+
 const savedCount = Symbol('preview saved checkpoints');
 /** Availability from a pinned record header, or a complete legacy Lane. No
  * preview consumer uses checkpoint contents as source or check evidence. */
@@ -11,7 +13,7 @@ export const hasPreviewSave = (lane: Lane) =>
 /** Pinned preview inputs and dependency closure. Preview readers need saved/not
  * saved availability, not every old checkpoint or every Intent conversation.
  * This projection is read-only and must never be saved as complete Work. */
-export function landingPreviewRecords(store: WorkStore, laneIds: string[]) {
+export function landingPreviewRecords(store: StoreAccess, laneIds: string[]) {
   const tx = store.native ? store.readRecords?.() : undefined;
   if (!tx) return store.load();
   const data = tx.data();

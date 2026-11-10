@@ -11,10 +11,24 @@ import {
 import { NativeSource } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'path'
+  | 'readRecords'
+  | 'root'
+  | 'save'
+  | 'select'
+>;
+
 /** Reopening restores protection immediately; a later closure starts a fresh
  * window. Legacy closed Lanes without lifecycle history use the snapshot time.
  * Inconsistent history or invalid timestamps retain protection. */
-function expired(store: WorkStore, snapshot: AutoSnapshot, now: number) {
+function expired(store: StoreAccess, snapshot: AutoSnapshot, now: number) {
   const lane = store.select('lanes', snapshot.laneId);
   if (!lane || !['completed', 'abandoned'].includes(lane.state)) return false;
   const closed = lane.lifecycle?.at(-1);
@@ -22,7 +36,7 @@ function expired(store: WorkStore, snapshot: AutoSnapshot, now: number) {
   const at = Math.max(Date.parse(snapshot.at), Date.parse(closed?.at ?? snapshot.at));
   return Number.isFinite(at) && now - at > RETENTION_MS;
 }
-function snapshots(store: WorkStore, laneId?: string) {
+function snapshots(store: StoreAccess, laneId?: string) {
   const directory = autoSnapshotDirectory(store);
   try {
     if (realpathSync(directory) !== directory) return [];
@@ -43,7 +57,7 @@ function objects(source: NativeSource, snapshot: AutoSnapshot) {
 }
 /** Called under the owner and snapshot publication locks by object collection. */
 export function autoSnapshotObjects(
-  store: WorkStore,
+  store: StoreAccess,
   source = new NativeSource(store.root),
   now = Date.now(),
 ) {
@@ -68,7 +82,7 @@ export type SnapshotRetentionItem = {
 /** Only pointer/cache bytes are removed here. Snapshot object bytes are reported
  * separately: they can be shared with main, other Lanes or retained history. */
 export function autoSnapshotRetentionPlan(
-  store: WorkStore,
+  store: StoreAccess,
   now = Date.now(),
   laneId?: string,
 ): SnapshotRetentionItem[] {
@@ -105,7 +119,7 @@ export function autoSnapshotRetentionPlan(
 }
 /** Current snapshot footprint, including protected open Lanes. Shared objects
  * count once here, but may also belong to other source/history roots. */
-export function autoSnapshotDiskUsage(store: WorkStore) {
+export function autoSnapshotDiskUsage(store: StoreAccess) {
   const source = new NativeSource(store.root),
     entries = snapshots(store),
     ids = new Set<string>();
@@ -149,7 +163,7 @@ export function autoSnapshotDiskUsage(store: WorkStore) {
 
 /** The caller holds the owner lock, so lifecycle cannot change. Publication is
  * excluded while the current pointer/cache are revalidated and removed. */
-export function removeAutoSnapshot(store: WorkStore, item: SnapshotRetentionItem): string | undefined {
+export function removeAutoSnapshot(store: StoreAccess, item: SnapshotRetentionItem): string | undefined {
   return withAutoSnapshotLock(store, () => {
     const current = autoSnapshotRetentionPlan(store, Date.now(), item.laneId).find(
       candidate => candidate.id === item.id,

@@ -13,13 +13,18 @@ import { parseWorkBytes, validateWorkSize } from './work-metadata.js';
 import type { GitProjection, GithubObservation, WorkData } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
-function readWork(store: WorkStore) {
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'root' | 'save' | 'snapshotBytes'
+>;
+
+function readWork(store: StoreAccess) {
   const bytes = store.snapshotBytes();
   invariant(bytes, 'INVALID_WORK_STORE', 'Original native Work metadata is unavailable.');
   return parseWorkBytes(bytes);
 }
 
-export function nativeGitBindings(store: WorkStore, data: WorkData, mapping: Buffer) {
+export function nativeGitBindings(store: StoreAccess, data: WorkData, mapping: Buffer) {
   const source = new NativeSource(store.root),
     ancestry = source.ancestry(),
     known = new Map<string, string>();
@@ -63,7 +68,7 @@ export function nativeGitBindings(store: WorkStore, data: WorkData, mapping: Buf
 // timestamps/signatures remain byte-exact in the complete Git bundle. Native
 // parents are existing boundaries actually encountered in that commit's DAG.
 export function nativeGitSnapshots(
-  store: WorkStore,
+  store: StoreAccess,
   path: string,
   observation: Pick<GithubObservation, 'head' | 'base' | 'at'>,
   bundle: Buffer,
@@ -147,7 +152,7 @@ export function nativeGitSnapshots(
 }
 
 export async function nativeGithubWork(
-  store: WorkStore,
+  store: StoreAccess,
   command: { action: 'import-pr'; url: string } | { action: 'check-pr'; intentId: string },
   revision: number,
 ) {

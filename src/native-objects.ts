@@ -11,13 +11,27 @@ import { withAutoSnapshotLock } from './lane-auto-snapshot.js';
 import { autoSnapshotObjects } from './lane-auto-snapshot-retention.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'path'
+  | 'readRecords'
+  | 'root'
+  | 'save'
+  | 'select'
+>;
+
 export const nativeObjectCommandSchema = z.object({
   action: z.enum(['inspect-native-objects', 'collect-native-objects']),
 });
 
 // Collection shares the existing Work lock with every referencing CAS registration.
 // No ages, cached scans, temporary-file cleanup or background deletion are involved.
-export function nativeObjects(store: WorkStore, input: unknown) {
+export function nativeObjects(store: StoreAccess, input: unknown) {
   const command = nativeObjectCommandSchema.parse(input);
   invariant(
     store.native,

@@ -7,6 +7,8 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 type Header = {
   id: string;
   channel: string;
@@ -18,12 +20,12 @@ type Header = {
   runIds?: string[];
 };
 type Selection = { pages: string; headers: Map<string, Header>; positions: Map<string, number[]> };
-const snapshots = new WeakMap<WorkStore, Map<string, Selection>>();
+const snapshots = new WeakMap<StoreAccess, Map<string, Selection>>();
 /** An advisory secondary index over immutable headers, compatible with existing
  * stores. Retain only the current collection's hashes; selected records are always
  * read and schema-validated afresh. Cold/revised indexes can be built cooperatively. */
 function* selection(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   collection: 'landingEntries' | 'landingBatches',
 ) {
@@ -121,7 +123,7 @@ function* selection(
   cache.set(collection, current);
   return current;
 }
-export async function prepareLandingRecords(store: WorkStore, tx: WorkRecordTransaction) {
+export async function prepareLandingRecords(store: StoreAccess, tx: WorkRecordTransaction) {
   let turn = performance.now();
   for (const collection of ['landingEntries', 'landingBatches'] as const) {
     const build = selection(store, tx, collection);
@@ -134,7 +136,7 @@ export async function prepareLandingRecords(store: WorkStore, tx: WorkRecordTran
   }
 }
 export function landingPositions(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   collection: 'landingEntries' | 'landingBatches',
   statuses: string[],
@@ -160,7 +162,7 @@ export function landingPositions(
 
 /** Selected history membership from the same disposable immutable-header index. */
 export function landingMatch(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   collection: 'landingEntries' | 'landingBatches',
   field: 'entryId' | 'acceptanceId' | 'runId',
@@ -172,7 +174,7 @@ export function landingMatch(
   return next.value.positions.get(JSON.stringify([field, value])) ?? [];
 }
 export function landingRunBatch(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   runId: string,
   viewId: string,

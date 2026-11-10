@@ -10,6 +10,8 @@ import { hydrateRun, actionResult, type WorkDetailPin } from './work-record-deta
 import type { WorkStore } from './work-store.js';
 import type { CheckRun, WorkData } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 export function detailWriter(directory: string, pending = false) {
   let release: ReturnType<typeof pendingRecordWriter> | undefined;
   const put = (value: Uint8Array): WorkDetailPin => {
@@ -51,8 +53,9 @@ export function detailReader(directory: string) {
     return bytes;
   };
 }
-export const runDetails = (store: WorkStore, run: CheckRun) => hydrateRun(run, detailReader(store.directory));
+export const runDetails = (store: StoreAccess, run: CheckRun) =>
+  hydrateRun(run, detailReader(store.directory));
 export const automaticResult = (
-  store: WorkStore,
+  store: StoreAccess,
   action: NonNullable<WorkData['automaticActions']>[number] | undefined,
 ) => actionResult(action, detailReader(store.directory));

@@ -17,9 +17,15 @@ import {
 } from './autonomy-policy.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData, WorkView } from './work-types.js';
+
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'readRecords' | 'root' | 'save' | 'select'
+>;
 export const localPerson = (): AcceptanceActor => ({ kind: 'person', id: userInfo().username });
-export const readPolicy = (store: WorkStore) => effectivePolicy(store.readRecords()?.data() ?? store.load());
-export function setPolicy(store: WorkStore, input: unknown, actor: AcceptanceActor, revision: number) {
+export const readPolicy = (store: StoreAccess) =>
+  effectivePolicy(store.readRecords()?.data() ?? store.load());
+export function setPolicy(store: StoreAccess, input: unknown, actor: AcceptanceActor, revision: number) {
   const parsed = policyWriteSchema.safeParse(input);
   invariant(
     parsed.success,
@@ -63,7 +69,7 @@ export function setPolicy(store: WorkStore, input: unknown, actor: AcceptanceAct
     return { revision: data.revision, result: change };
   });
 }
-export function acceptancePaths(store: WorkStore, view: WorkView, previous: string | null): string[] {
+export function acceptancePaths(store: StoreAccess, view: WorkView, previous: string | null): string[] {
   const bases = [...new Set([view.base, ...(previous ? [previous] : [])])];
   if (store.native) {
     const source = new NativeSource(store.root),
@@ -100,7 +106,7 @@ export function acceptancePaths(store: WorkStore, view: WorkView, previous: stri
   ];
 }
 export function enforceAcceptance(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   view: WorkView,
   previous: string | null,

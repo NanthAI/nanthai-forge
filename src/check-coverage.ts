@@ -15,9 +15,11 @@ export { coverageSourcePath } from './check-log-policy.js';
 import { coverageSourcePath } from './check-log-policy.js';
 import { pruneCoverageCache } from './check-coverage-cache.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'native' | 'readRecords' | 'root'>;
+
 /** Compact check artifact reconstructed from compact reports or legacy execution logs, with runner-owned source pins. */
 export function retainCheckCoverage(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   directory: string,
   selection?: { scope: string; tests: string[] },
@@ -65,7 +67,7 @@ export function retainCheckCoverage(
 }
 
 /** Only accepted main heads and passed full runs establish trace provenance/age. */
-export function latestCheckCoverage(store: WorkStore, main: string): CoverageInput | undefined {
+export function latestCheckCoverage(store: StoreAccess, main: string): CoverageInput | undefined {
   if (!store.native) return undefined;
   try {
     pruneCoverageCache(store);

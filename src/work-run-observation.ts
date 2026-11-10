@@ -5,13 +5,15 @@ import { readWorkFile, recordManifest, readRecordPage } from './work-records.js'
 import { checkRunSchema, type CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load'>;
+
 /** Cache only observations from the existing Work owner, never a second run authority. */
 export class SelectedRunObserver {
   private position?: number;
   private revision?: number;
   private observed?: CheckRun;
   constructor(
-    private readonly store: WorkStore,
+    private readonly store: StoreAccess,
     private readonly id: string,
   ) {}
   read(): CheckRun {

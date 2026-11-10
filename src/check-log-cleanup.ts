@@ -8,9 +8,11 @@ import { retainCompactCheckReports } from './check-compact-output.js';
 import { coverageCacheFiles } from './check-coverage-cache.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'revision'>;
+
 /** Explicit provider-log migration, or age-based local retention during lifecycle work.
  * Never follows links or removes result/recipe/build-output files. Apply re-observes exact bytes. */
-export function localCheckLogPlan(store: WorkStore, now = Date.now(), providers = false) {
+export function localCheckLogPlan(store: StoreAccess, now = Date.now(), providers = false) {
   const files: { path: string; size: number; sha256: string; runId: string }[] = [];
   for (const run of store.load().runs) {
     if (!run.endedAt || ['queued', 'preparing', 'running'].includes(run.status) || run.backend?.retryable)
@@ -54,7 +56,7 @@ export function localCheckLogPlan(store: WorkStore, now = Date.now(), providers 
   return { files, bytes: files.reduce((sum, file) => sum + file.size, 0) };
 }
 export function cleanLocalCheckLogs(
-  store: WorkStore,
+  store: StoreAccess,
   input: {
     apply?: boolean;
     providers?: boolean;

@@ -5,10 +5,12 @@ import type { WorkStore } from './work-store.js';
 import { plausibleTestFile } from './test-file-name.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 /** Retained shard pins identify failed files; missing/static/ambiguous evidence
  * keeps ordinary affected-test selection, never invents passing shard results. */
 export function failedAuditTests(
-  store: WorkStore,
+  store: StoreAccess,
   audit: CheckRun,
   isTest: (file: string) => boolean = plausibleTestFile,
 ): string[] | undefined {

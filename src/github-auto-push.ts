@@ -19,11 +19,25 @@ import { processAlive, processIdentity } from './local-process.js';
 import { ForgeError } from './errors.js';
 import type { GithubAutoPush } from './github-sync-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'observing'
+  | 'pointer'
+  | 'prepareSave'
+  | 'publishSave'
+  | 'readRecords'
+  | 'root'
+>;
+
 const undo =
   'Disable future pushes with set-policy githubMirror.autoPush:false. Published history is retained; undo source through a compensating Lane.';
 /** Accepted main and retained sync mappings are the durable queue. Status and
  * later acceptances recover lost wakeups, using the original pending push UUID. */
-export function wakeGithubPush(store: WorkStore) {
+export function wakeGithubPush(store: StoreAccess) {
   try {
     if (!store.native || serverRecoveryAuthority(readHostState(store))) return;
     const summary = store.readRecords()?.data() ?? store.load();
@@ -56,7 +70,7 @@ export function wakeGithubPush(store: WorkStore) {
   }
 }
 export async function drainGithubPush(
-  store: WorkStore,
+  store: StoreAccess,
   options: {
     debounceMs?: number;
     retryMs?: number;
@@ -203,7 +217,20 @@ export async function drainGithubPush(
   }
 }
 if (isMainModule(import.meta.url)) {
-  drainGithubPush(new WorkStore(process.argv[2]!)).catch(() => {
+  drainGithubPush(
+    WorkStore.open<
+      | 'directory'
+      | 'load'
+      | 'locked'
+      | 'native'
+      | 'observing'
+      | 'pointer'
+      | 'prepareSave'
+      | 'publishSave'
+      | 'readRecords'
+      | 'root'
+    >(process.argv[2]!),
+  ).catch(() => {
     process.exitCode = 1;
   });
 }

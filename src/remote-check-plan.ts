@@ -19,9 +19,22 @@ import { lockfileDigest } from './project-lockfile.js';
 import { scanSecretPaths } from './secret-scan.js';
 import { LazySourceFiles } from './lazy-source-files.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'lockedAsync'
+  | 'native'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'root'
+  | 'select'
+>;
+
 // Historical modal-* filenames are shared Actions receipt formats; retain them for replay.
 export async function remoteCheckPlan(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   path: string,
   shards?: number,

@@ -7,6 +7,8 @@ import { durableReplace } from './native-durability.js';
 import type { WorkStore } from './work-store.js';
 import type { TestObservation } from './check-flake-evidence.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'readRecords' | 'revision'>;
+
 const stateSchema = z.object({
   flakes: z.array(z.number()),
   quarantined: z.boolean(),
@@ -56,7 +58,7 @@ const snapshotSchema = z.object({
   fixes: z.array(z.string()),
   states: z.array(z.tuple([z.string(), stateSchema])),
 });
-function readSnapshot(store: WorkStore) {
+function readSnapshot(store: StoreAccess) {
   const path = join(store.directory, 'check-quarantine-ledger.json');
   let snapshot: z.infer<typeof snapshotSchema> = { count: 0, pending: [], fixes: [], states: [] };
   try {
@@ -66,12 +68,12 @@ function readSnapshot(store: WorkStore) {
   }
   return snapshot;
 }
-export const quarantineOverLimit = (store: WorkStore) =>
+export const quarantineOverLimit = (store: StoreAccess) =>
   readSnapshot(store).states.filter(([, state]) => state.quarantined).length > 10;
 
 /** Incremental local projection. Clean checks write only their existing run receipt.
  * Metadata is paged by the record store; at most one run's test detail is hydrated at a time. */
-export function quarantineHistory(store: WorkStore, fixes: TestObservation[], current?: TestObservation) {
+export function quarantineHistory(store: StoreAccess, fixes: TestObservation[], current?: TestObservation) {
   const path = join(store.directory, 'check-quarantine-ledger.json');
   let snapshot = readSnapshot(store);
   const tx = store.readRecords();

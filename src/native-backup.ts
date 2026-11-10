@@ -55,19 +55,24 @@ import { restoreWorkFormat } from './work-restore-format.js';
 import { stageRecords, publishRecords } from './work-records.js';
 import { publishDirectory } from './native-durability.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'pinnedData' | 'root' | 'save' | 'snapshotBytes'
+>;
+
 export function exportNativeWork(
-  store: WorkStore,
+  store: StoreAccess,
   revision: number,
   archive: boolean,
   deduplicateArtifacts = false,
 ) {
   return exportSnapshot(store, revision, archive, undefined, deduplicateArtifacts);
 }
-export function exportNativeSource(store: WorkStore, revision: number, head: string) {
+export function exportNativeSource(store: StoreAccess, revision: number, head: string) {
   return exportSnapshot(store, revision, true, head);
 }
 async function exportSnapshot(
-  store: WorkStore,
+  store: StoreAccess,
   revision: number,
   archive: boolean,
   head?: string,
@@ -365,7 +370,7 @@ async function restoreDirectory(
       }
     }
     // Validate original logical records and archive pins before changing representation.
-    validateNativeArchiveRecords(new WorkStore(owner), manifest, snapshot);
+    validateNativeArchiveRecords(WorkStore.open<'root' | 'load'>(owner), manifest, snapshot);
     const data = restoreWorkFormat(snapshot);
     if (snapshot.schema !== data.schema) publishRecords(work, stageRecords(work, data));
     const materialized = join(scratch, 'materialized'),

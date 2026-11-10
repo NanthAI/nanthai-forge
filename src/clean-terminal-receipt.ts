@@ -5,9 +5,11 @@ import { receiptSchema } from './work-run-receipt.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'select'>;
+
 /** Missing completion evidence never authorizes log pruning. An explicit,
  * retained supersession can authorize only regenerable source copies. */
-export function terminalReceipt(store: WorkStore, run: CheckRun, directory: string) {
+export function terminalReceipt(store: StoreAccess, run: CheckRun, directory: string) {
   try {
     const bytes = readSource(directory, 'result.json', 4 * 1024 * 1024);
     if (bytes) {

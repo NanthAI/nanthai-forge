@@ -7,6 +7,8 @@ import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 
+type StoreAccess = Pick<WorkStore, 'commitRecords' | 'load' | 'locked' | 'readRecords' | 'records'>;
+
 export function frictionId(key: string) {
   const bytes = createHash('sha256').update(`forge-friction:${key}`).digest().subarray(0, 16);
   bytes[6] = (bytes[6]! & 15) | 80;
@@ -14,7 +16,7 @@ export function frictionId(key: string) {
   const h = bytes.toString('hex');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
-export function frictionEvents(store: WorkStore): FrictionEvent[] {
+export function frictionEvents(store: StoreAccess): FrictionEvent[] {
   const tx = store.readRecords();
   if (tx)
     return Array.from({ length: tx.manifest.collections.frictionEvents?.count ?? 0 }, (_, i) =>
@@ -35,7 +37,7 @@ export function appendFriction(tx: WorkRecordTransaction, event: FrictionEvent) 
   tx.append('frictionEvents', event);
   return event;
 }
-export function captureFriction(store: WorkStore, input: z.infer<typeof frictionInputSchema>) {
+export function captureFriction(store: StoreAccess, input: z.infer<typeof frictionInputSchema>) {
   const operationId = input.operationId ?? randomUUID(),
     command = frictionInputSchema.parse({ ...input, operationId });
   return store.locked(() => {

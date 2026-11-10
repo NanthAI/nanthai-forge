@@ -20,6 +20,22 @@ import type { CheckRun } from './work-types.js';
 import type { CheckExecutionEvent } from './check-execution-event.js';
 import { testFlakeEvidence, type TestVerdict, type TestObservation } from './check-flake-evidence.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'locked'
+  | 'lockedAsync'
+  | 'native'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'records'
+  | 'revision'
+  | 'root'
+  | 'select'
+>;
+
 type Verdict = TestVerdict;
 type Observation = TestObservation;
 const fixesSchema = z.array(z.object({ id: z.uuid(), at: z.string(), test: z.string() }));
@@ -35,7 +51,7 @@ export function quarantineLedger(observations: readonly Observation[]) {
   }
   return quarantineList(states);
 }
-function fixes(store: WorkStore): Observation[] {
+function fixes(store: StoreAccess): Observation[] {
   let bytes: string;
   try {
     bytes = readFileSync(join(store.directory, 'check-quarantine-fixes.json'), 'utf8');
@@ -47,11 +63,11 @@ function fixes(store: WorkStore): Observation[] {
     .parse(JSON.parse(bytes))
     .map(({ id, at, test }) => ({ id, at, tests: [{ test, verdict: 'fixed' }] }));
 }
-export function checkQuarantine(store: WorkStore) {
+export function checkQuarantine(store: StoreAccess) {
   return { needsYou: quarantineList(quarantineHistory(store, fixes(store)).states) };
 }
 /** Explicit fix is retry-safe and only releases the named test; later flakes count anew. */
-export function fixQuarantinedTest(store: WorkStore, operationId: string, test: string) {
+export function fixQuarantinedTest(store: StoreAccess, operationId: string, test: string) {
   z.uuid().parse(operationId);
   invariant(test.length > 0, 'BAD_ARGUMENT', 'Supply the exact test identity from the quarantine ledger.');
   return store.locked(() => {
@@ -78,7 +94,7 @@ export function fixQuarantinedTest(store: WorkStore, operationId: string, test: 
 }
 
 export function assessTestQuarantine(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   observed: ReturnType<typeof testExecutionVerdicts>,
   at: string,
@@ -217,7 +233,7 @@ type Assessment = {
   details: string;
 };
 export function checkQuarantineResult(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   result: Extract<CheckExecutionEvent, { kind: 'result' }>,
   groups: string[][],

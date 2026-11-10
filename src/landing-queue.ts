@@ -9,9 +9,11 @@ import { CheckQueue, queueHolder } from './check-queue.js';
 import { digest } from './hash.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 export type LandingPosition = { status: 'waiting to land' | 'landing'; position: number };
 const held = new AsyncLocalStorage<ReadonlySet<string>>();
-export const landingDirectory = (store: WorkStore, channel: string) =>
+export const landingDirectory = (store: StoreAccess, channel: string) =>
   join(store.directory, 'landing-queue', digest(channel));
 
 /** Reuse H1's cross-process bakery tickets and kernel process identities. No Work
@@ -81,7 +83,7 @@ export async function withQueueSlot<T>(
   }
 }
 export function withLandingSlot<T>(
-  store: WorkStore,
+  store: StoreAccess,
   channel: string,
   task: () => Promise<T>,
   options?: Parameters<typeof withQueueSlot<T>>[2],

@@ -16,6 +16,8 @@ import {
 } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'locked' | 'native' | 'root' | 'save'>;
+
 export function evidenceView(data: WorkData, id: string, head: string) {
   const view = data.views.find(v => v.id === id);
   invariant(
@@ -105,7 +107,7 @@ export function runApplicability(data: WorkData, run: CheckRun, environment: Che
 }
 
 export async function importChecks(
-  store: WorkStore,
+  store: StoreAccess,
   command: Extract<EvidenceCommand, { action: 'import-checks' }>,
   revision: number,
 ) {

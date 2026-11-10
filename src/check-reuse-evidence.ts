@@ -10,6 +10,11 @@ import { receiptSchema } from './work-run-receipt.js';
 import { checkRunSchema, type CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'readRecords' | 'root' | 'save' | 'select'
+>;
+
 export const successfulCheck = (run: CheckRun) =>
   run.status === 'passed' &&
   run.checkSelection?.scope !== 'partial' &&
@@ -20,7 +25,7 @@ export const successfulCheck = (run: CheckRun) =>
   !run.cancelRequested &&
   !run.cancellation &&
   !run.error;
-export const readCheckJson = (store: WorkStore, id: string, name: string) => {
+export const readCheckJson = (store: StoreAccess, id: string, name: string) => {
   const bytes = readSource(store.directory, `check-${id}/${name}`, 4 * 1024 * 1024);
   return bytes ? JSON.parse(bytes.toString('utf8')) : undefined;
 };
@@ -29,7 +34,7 @@ export const executionSelection = (selection: { scope: string; tests: string[] }
 export const checkEvidenceFingerprint = (run: CheckRun) => digest(JSON.stringify(run));
 
 /** Work's verdict alone is insufficient: the retained completion and recipe must agree. */
-export function retainedPassedCheck(store: WorkStore, value: unknown): CheckRun | undefined {
+export function retainedPassedCheck(store: StoreAccess, value: unknown): CheckRun | undefined {
   try {
     const run = runDetails(store, checkRunSchema.parse(value));
     if (
@@ -68,7 +73,7 @@ export function retainedPassedCheck(store: WorkStore, value: unknown): CheckRun 
 }
 
 /** A reused run is a new exact-Candidate receipt, never a second execution. */
-export function validateReusedCheck(store: WorkStore, run: CheckRun) {
+export function validateReusedCheck(store: StoreAccess, run: CheckRun) {
   invariant(
     run.checkSelection?.scope !== 'partial',
     'CHECK_REQUIRED',

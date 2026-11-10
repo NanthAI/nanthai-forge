@@ -10,8 +10,13 @@ import { matchesReviewMapping, observeGithubReviews } from './work-review-policy
 import type { WorkStore } from './work-store.js';
 import type { InvariantAssessment, InvariantCommand, WorkData } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'readRecords' | 'root' | 'save' | 'select' | 'snapshotBytes'
+>;
+
 export function assessInvariant(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   command: Extract<InvariantCommand, { action: 'assess-invariant' }>,
   githubReview?: InvariantAssessment['githubReview'],
@@ -145,7 +150,7 @@ export function assessInvariant(
   };
 }
 
-export async function invariantWork(store: WorkStore, command: InvariantCommand, revision: number) {
+export async function invariantWork(store: StoreAccess, command: InvariantCommand, revision: number) {
   invariant(Number.isSafeInteger(revision) && revision >= 0, 'BAD_ARGUMENT', 'Send a valid work revision.');
   if (command.action === 'assess-invariant') {
     const data = store.locked(() => {

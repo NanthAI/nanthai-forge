@@ -17,8 +17,10 @@ import { receiptSchema } from './work-run-receipt.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 import { syncDirectory, syncReadOnlyDescriptor } from './native-durability.js';
+
+type StoreAccess = Pick<WorkStore, 'root'>;
 /** Validate and flush retained evidence before authorizing removal of its disposable copy. */
-export function checkCleanupBlocker(store: WorkStore, run: CheckRun, directory: string) {
+export function checkCleanupBlocker(store: StoreAccess, run: CheckRun, directory: string) {
   if (run.error?.code === 'DISK_LOW')
     return 'DISK_LOW refused execution; existing workspace and runtime files are retained.';
   try {

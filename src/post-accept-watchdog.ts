@@ -6,6 +6,8 @@ import { saveMainAuditState } from './post-accept-state.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'readRecords'>;
+
 /** Unrelated owner commits are not audit progress. Provider observations and
  * command output keep a genuinely running audit alive, even without Work edits. */
 export class MainAuditWatchdog {
@@ -13,7 +15,7 @@ export class MainAuditWatchdog {
   private lastProgress = Date.now();
   private runs: WorkData['runs'] = [];
   constructor(
-    private store: WorkStore,
+    private store: StoreAccess,
     private stallMs: number,
   ) {}
   update(data: WorkData) {

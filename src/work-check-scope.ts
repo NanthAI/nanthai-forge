@@ -8,8 +8,21 @@ import { workGit } from './work-git.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'lockedAsync'
+  | 'native'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'root'
+  | 'select'
+>;
+
 /** Compare immutable saved source without materializing or executing it. */
-export function checkChangedPaths(store: WorkStore, base: string, head: string) {
+export function checkChangedPaths(store: StoreAccess, base: string, head: string) {
   let paths: string[];
   if (store.native) {
     const source = new NativeSource(store.root);
@@ -39,7 +52,7 @@ export function checkChangedPaths(store: WorkStore, base: string, head: string) 
 }
 
 /** Runner-owned comparison of immutable inputs, never the mutable Lane or current main. */
-export function writeCheckScope(store: WorkStore, run: CheckRun, directory: string) {
+export function writeCheckScope(store: StoreAccess, run: CheckRun, directory: string) {
   const base = run.comparisonBase ?? run.base;
   let paths = checkChangedPaths(store, base, run.head);
   if (store.native) {

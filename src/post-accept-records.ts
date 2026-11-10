@@ -8,6 +8,8 @@ import type { WorkStore } from './work-store.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
 import type { WorkData, ChannelMove, CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'readRecords'>;
+
 type Collection = 'channelMoves' | 'runs';
 type HeaderFields = {
   id: string;
@@ -26,8 +28,8 @@ type HeaderFields = {
 };
 type Header = { position: number; fields: HeaderFields };
 type Index = { pages: string; hashes: Map<string, HeaderFields>; rows: Header[] };
-const indexes = new WeakMap<WorkStore, Map<Collection, Index>>();
-function* headers(store: WorkStore, tx: WorkRecordTransaction, collection: Collection) {
+const indexes = new WeakMap<StoreAccess, Map<Collection, Index>>();
+function* headers(store: StoreAccess, tx: WorkRecordTransaction, collection: Collection) {
   let owner = indexes.get(store);
   if (!owner) indexes.set(store, (owner = new Map()));
   const index = tx.manifest.collections[collection],
@@ -71,14 +73,14 @@ function* headers(store: WorkStore, tx: WorkRecordTransaction, collection: Colle
   owner.set(collection, { pages, hashes, rows });
   return rows;
 }
-function retainedHeaders(store: WorkStore, tx: WorkRecordTransaction, collection: Collection) {
+function retainedHeaders(store: StoreAccess, tx: WorkRecordTransaction, collection: Collection) {
   const read = headers(store, tx, collection);
   let next = read.next();
   while (!next.done) next = read.next();
   return next.value;
 }
 export async function preparePostAcceptRecords(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   signal?: AbortSignal,
 ) {
@@ -98,7 +100,7 @@ export async function preparePostAcceptRecords(
  * active audits and only unresolved failed evidence. Header hints locate rows;
  * every selected record is read and validated by the pinned transaction. */
 export function postAcceptRecords(
-  store: WorkStore,
+  store: StoreAccess,
   tx: WorkRecordTransaction,
   push?: { channel: string; checkId: string },
   historyChannel?: string,
@@ -200,7 +202,7 @@ export function postAcceptRecords(
   return data;
 }
 export async function observePostAcceptRecords(
-  store: WorkStore,
+  store: StoreAccess,
   push?: { channel: string; checkId: string },
   signal?: AbortSignal,
 ) {
@@ -214,7 +216,7 @@ export async function observePostAcceptRecords(
   }
 }
 
-export async function observeRecoveryRecords(store: WorkStore, channel: string) {
+export async function observeRecoveryRecords(store: StoreAccess, channel: string) {
   const tx = store.readRecords();
   if (!tx) return store.load();
   try {

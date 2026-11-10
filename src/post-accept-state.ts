@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { durableReplace } from './native-durability.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'directory'>;
+
 export type MainAuditState = {
   schema: 1;
   status: 'running' | 'waiting' | 'stalled' | 'idle';
@@ -13,8 +15,8 @@ export type MainAuditState = {
   code?: string;
   retryAt?: string;
 };
-const path = (store: WorkStore) => join(store.directory, 'post-accept-main-state.json');
-export function readMainAuditState(store: WorkStore): MainAuditState | undefined {
+const path = (store: StoreAccess) => join(store.directory, 'post-accept-main-state.json');
+export function readMainAuditState(store: StoreAccess): MainAuditState | undefined {
   try {
     const value = JSON.parse(readFileSync(path(store), 'utf8')) as MainAuditState;
     return value.schema === 1 ? value : undefined;
@@ -24,7 +26,7 @@ export function readMainAuditState(store: WorkStore): MainAuditState | undefined
 }
 /** Owner-local driver diagnosis. Accepted source and pending audit/run records
  * remain authoritative; ending this driver never cancels or replaces a check. */
-export function saveMainAuditState(store: WorkStore, state: Omit<MainAuditState, 'schema' | 'updatedAt'>) {
+export function saveMainAuditState(store: StoreAccess, state: Omit<MainAuditState, 'schema' | 'updatedAt'>) {
   const previous = readMainAuditState(store);
   const next = { schema: 1 as const, ...state };
   if (previous && JSON.stringify({ ...previous, updatedAt: undefined }) === JSON.stringify(next)) return;

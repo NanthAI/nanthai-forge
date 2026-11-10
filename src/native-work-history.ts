@@ -14,7 +14,9 @@ import { isCheckLogPath, runLogRecord } from './check-log-policy.js';
 import { parseWorkBytes } from './work-metadata.js';
 import { forgeTempDir } from './forge-disk.js';
 
-export function validateHistoricalObjects(store: WorkStore, records: HistoricalWork[]) {
+type StoreAccess = Pick<WorkStore, 'load' | 'locked' | 'native' | 'root' | 'save'>;
+
+export function validateHistoricalObjects(store: Pick<WorkStore, 'root'>, records: HistoricalWork[]) {
   const source = new NativeSource(store.root);
   return records.map(record => {
     const bytes = source.object(record.archive.sha256);
@@ -27,7 +29,7 @@ export function validateHistoricalObjects(store: WorkStore, records: HistoricalW
   });
 }
 
-export async function historicalWork(store: WorkStore, input: unknown, revision: number) {
+export async function historicalWork(store: StoreAccess, input: unknown, revision: number) {
   invariant(
     store.native,
     'UNSUPPORTED_NATIVE_WORK',

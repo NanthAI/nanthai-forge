@@ -11,6 +11,11 @@ import { selfMetricReuseKey } from './self-metrics-reuse-key.js';
 import type { CheckRun, CheckEnvironment } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  'directory' | 'load' | 'locked' | 'native' | 'readRecords' | 'root' | 'save' | 'select'
+>;
+
 /** Runtime strings remain intact in receipts; only Node major.minor is an input. */
 export function checkNodeVersion(run: Pick<CheckRun, 'backend' | 'environment'>) {
   return run.backend && run.backend.actual !== 'local'
@@ -20,7 +25,7 @@ export function checkNodeVersion(run: Pick<CheckRun, 'backend' | 'environment'>)
 
 /** Paths, timestamps and process/install fingerprints are observations, not content. */
 export function checkReuseKey(
-  store: WorkStore,
+  store: StoreAccess,
   run: Pick<CheckRun, 'head' | 'check' | 'environment' | 'backend' | 'inputObservations'>,
 ): string | undefined {
   try {
@@ -90,7 +95,7 @@ export function reusableCheckInputs(run: CheckRun) {
 
 /** Re-observe declared inputs; never manufacture keys for legacy receipts. */
 export function currentCheckReuseKey(
-  store: WorkStore,
+  store: StoreAccess,
   run: CheckRun,
   environment: CheckEnvironment,
   backend?: CheckRun['backend'],

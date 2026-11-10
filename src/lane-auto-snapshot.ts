@@ -19,6 +19,20 @@ import { workLocked } from './work-lock.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'directory'
+  | 'laneLocked'
+  | 'load'
+  | 'locked'
+  | 'native'
+  | 'path'
+  | 'readRecords'
+  | 'root'
+  | 'save'
+  | 'select'
+>;
+
 const oid = z.string().regex(/^[0-9a-f]{64}$/);
 const pointerSchema = z.object({
   schema: z.literal(1),
@@ -48,13 +62,13 @@ const cacheSchema = z.object({
   ),
 });
 
-export const autoSnapshotDirectory = (store: WorkStore) => join(store.directory, 'auto-snapshots');
-const pointerPath = (store: WorkStore, laneId: string) =>
+export const autoSnapshotDirectory = (store: StoreAccess) => join(store.directory, 'auto-snapshots');
+const pointerPath = (store: StoreAccess, laneId: string) =>
   join(autoSnapshotDirectory(store), `${laneId}.json`);
-const cachePath = (store: WorkStore, laneId: string) =>
+const cachePath = (store: StoreAccess, laneId: string) =>
   join(autoSnapshotDirectory(store), `${laneId}.cache.json`);
 /** Short publication section shared only with native object collection. */
-export function withAutoSnapshotLock<T>(store: WorkStore, run: () => T, waitMs = 2_000): T {
+export function withAutoSnapshotLock<T>(store: StoreAccess, run: () => T, waitMs = 2_000): T {
   mkdirBelow(store.directory, autoSnapshotDirectory(store));
   return workLocked(join(autoSnapshotDirectory(store), 'lock'), run, {
     waitMs,
@@ -62,7 +76,7 @@ export function withAutoSnapshotLock<T>(store: WorkStore, run: () => T, waitMs =
   });
 }
 
-export function readAutoSnapshot(store: WorkStore, laneId: string): AutoSnapshot | undefined {
+export function readAutoSnapshot(store: StoreAccess, laneId: string): AutoSnapshot | undefined {
   try {
     const value = pointerSchema.parse(JSON.parse(readFileSync(pointerPath(store, laneId), 'utf8')));
     return value.laneId === laneId ? value : undefined;
@@ -70,7 +84,7 @@ export function readAutoSnapshot(store: WorkStore, laneId: string): AutoSnapshot
     return undefined;
   }
 }
-function readCache(store: WorkStore, laneId: string) {
+function readCache(store: StoreAccess, laneId: string) {
   try {
     const parsed = cacheSchema.parse(JSON.parse(readFileSync(cachePath(store, laneId), 'utf8')));
     return new Map(parsed.entries.map(([path, key, blob, mode]) => [path, { key, blob, mode }]));
@@ -78,7 +92,7 @@ function readCache(store: WorkStore, laneId: string) {
     return new Map<string, CacheEntry>();
   }
 }
-function writeCache(store: WorkStore, laneId: string, cache: Map<string, CacheEntry>) {
+function writeCache(store: StoreAccess, laneId: string, cache: Map<string, CacheEntry>) {
   const entries = [...cache].map(([path, entry]) => [path, entry.key, entry.blob, entry.mode]);
   mkdirBelow(store.directory, autoSnapshotDirectory(store));
   writeRecoveryState(cachePath(store, laneId), { schema: 1, entries });
@@ -100,7 +114,7 @@ const pending = (lane: Lane) => !!(lane.pendingMerge || lane.pendingSync || lane
 /** Capture an open native Lane into a content-addressed State without touching
  * Work, sync, landing or hosted push. Only the Lane lock (never waited for) and the
  * short publication lock are taken; a running sync, merge or checkpoint wins. */
-export function snapshotLane(store: WorkStore, laneId: string): AutoSnapshotResult {
+export function snapshotLane(store: StoreAccess, laneId: string): AutoSnapshotResult {
   if (!store.native) return { status: 'skipped', reason: 'not-native' };
   if (readPolicy(store).autoSnapshot === false) return { status: 'skipped', reason: 'disabled' };
   const outer = store.select('lanes', laneId);
@@ -119,7 +133,7 @@ export function snapshotLane(store: WorkStore, laneId: string): AutoSnapshotResu
     throw error;
   }
 }
-function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
+function capture(store: StoreAccess, laneId: string): AutoSnapshotResult {
   const began = Date.now();
   const lane = store.select('lanes', laneId);
   if (!lane || ['completed', 'abandoned'].includes(lane.state))

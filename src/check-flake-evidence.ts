@@ -7,6 +7,19 @@ import { selectTests, selectionSourcePath } from '../scripts/test-impact.mjs';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
 
+type StoreAccess = Pick<
+  WorkStore,
+  | 'commitRecords'
+  | 'directory'
+  | 'load'
+  | 'lockedAsync'
+  | 'native'
+  | 'prepareCommitRecords'
+  | 'readRecords'
+  | 'root'
+  | 'select'
+>;
+
 export type TestVerdict = NonNullable<NonNullable<CheckRun['backend']>['testVerdicts']>[number];
 export type TestObservation = {
   id: string;
@@ -17,7 +30,7 @@ export type TestObservation = {
 type Relation = 'related-change' | 'unrelated-change' | 'unchanged-source' | 'unknown';
 
 /** Static impact is partial: unavailable or full-domain comparisons cannot establish a flake. */
-export function testFlakeEvidence(store: WorkStore, run: CheckRun, history: TestObservation[]) {
+export function testFlakeEvidence(store: StoreAccess, run: CheckRun, history: TestObservation[]) {
   const source = new NativeSource(store.root);
   let files: Map<string, string> | undefined;
   const comparisons = new Map<string, (test: string) => Relation>();

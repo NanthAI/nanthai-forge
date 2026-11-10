@@ -15,6 +15,8 @@ import { mkdirBelow } from './mkdir-below.js';
 import { processAlive } from './local-process.js';
 import type { WorkStore } from './work-store.js';
 import { syncDirectory } from './native-durability.js';
+
+type StoreAccess = Pick<WorkStore, 'directory'>;
 const schema = z.object({
   schema: z.literal(1),
   id: z.uuid(),
@@ -33,14 +35,14 @@ const schema = z.object({
     .optional(),
 });
 export type LandingWorkerState = z.infer<typeof schema>;
-export function landingWorkerStates(store: WorkStore) {
+export function landingWorkerStates(store: StoreAccess) {
   const directory = join(store.directory, 'landing-workers');
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
     .filter(name => /^[0-9a-f-]+\.json$/.test(name))
     .map(name => schema.parse(JSON.parse(readFileSync(join(directory, name), 'utf8'))));
 }
-export function saveLandingWorkerState(store: WorkStore, state: LandingWorkerState) {
+export function saveLandingWorkerState(store: StoreAccess, state: LandingWorkerState) {
   const directory = join(store.directory, 'landing-workers');
   mkdirBelow(store.directory, directory);
   const path = join(directory, `${state.id}.json`),
@@ -56,7 +58,7 @@ export function saveLandingWorkerState(store: WorkStore, state: LandingWorkerSta
   syncDirectory(directory);
 }
 /** A last event time plus current kernel identity, never a periodic heartbeat. */
-export function readLandingWorkerStatus(store: WorkStore) {
+export function readLandingWorkerStatus(store: StoreAccess) {
   const states = landingWorkerStates(store).sort((a, b) => b.observedAt.localeCompare(a.observedAt));
   const live = states.filter(state => state.status !== 'stopped' && processAlive(state.worker));
   const selected =

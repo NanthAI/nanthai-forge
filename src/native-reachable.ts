@@ -10,8 +10,10 @@ import { validateHistoricalObjects } from './native-work-history.js';
 import { nativeDependencyHead, validateNativePr } from './native-pr-pins.js';
 import { invariant, ForgeError } from './errors.js';
 
+type StoreAccess = Pick<WorkStore, 'root' | 'load'>;
+
 export function nativeReachable(
-  store: WorkStore,
+  store: StoreAccess,
   data = store.load(),
   onObject?: (id: string, bytes: Buffer, state: boolean) => void,
   retained: Iterable<string> = [],

@@ -15,13 +15,15 @@ import { checkEnvironment } from './work-run.js';
 import type { Check, CheckEnvironment, CheckRun, WorkData, WorkView } from './work-types.js';
 import type { WorkStore } from './work-store.js';
 
+type StoreAccess = Pick<WorkStore, 'load' | 'locked' | 'native' | 'root'>;
+
 const unknown = (input: DeclaredInput, details: string): InputObservation => ({
   input,
   status: 'unknown',
   producer: 'local-observation',
   details,
 });
-function sourceFile(store: WorkStore, head: string, path: string) {
+function sourceFile(store: StoreAccess, head: string, path: string) {
   if (store.native) {
     const source = new NativeSource(store.root),
       entry = source.state(head).files.find(file => file.path === path);
@@ -84,7 +86,7 @@ function toolFile(executable: string, environment: CheckEnvironment) {
   }
 }
 export function observeCheckInputs(
-  store: WorkStore,
+  store: StoreAccess,
   check: Check,
   head: string,
   environment: CheckEnvironment,
@@ -201,7 +203,7 @@ function validationApplicability(
   };
 }
 export function declaredInputApplicability(
-  store: WorkStore,
+  store: StoreAccess,
   data: WorkData,
   run: CheckRun,
   environment: CheckEnvironment,
@@ -251,7 +253,7 @@ export function declaredInputApplicability(
       'Only declared, observed inputs are compared. Undeclared dependencies and external effects remain unknown; this diagnostic never reuses evidence, skips checks or supplies approval.',
   };
 }
-export function assessCheckInputs(store: WorkStore, input: unknown, revision: number) {
+export function assessCheckInputs(store: StoreAccess, input: unknown, revision: number) {
   const parsed = inputAssessmentCommandSchema.safeParse(input);
   invariant(
     parsed.success && Number.isSafeInteger(revision) && revision >= 0,

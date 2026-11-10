@@ -32,6 +32,8 @@ import { shownGitPath } from './git-path-bytes.js';
 import { createWork } from './work-create.js';
 import { publishDirectory } from './native-durability.js';
 
+type StoreAccess = Pick<WorkStore, 'directory' | 'native' | 'root' | 'save'>;
+
 const gitId = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/;
 export function filesFromGit(root: string, head: string, source: NativeSource): NativeFile[] {
   const bytes = workGit(
@@ -335,7 +337,7 @@ export async function exportNativeGit(input: string, head: string, target: strin
 }
 
 // This is an explicit Git boundary; ordinary native Work never uses the projection as source authority.
-export async function prepareNativeProjection(store: WorkStore, head: string) {
+export async function prepareNativeProjection(store: StoreAccess, head: string) {
   const scratch = mkdtempSync(join(store.directory, 'projection-'));
   try {
     const exported = await exportNativeGit(store.root, head, join(scratch, 'export'));
