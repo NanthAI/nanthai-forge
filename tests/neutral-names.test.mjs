@@ -44,7 +44,7 @@ test('hostname() only identifies a process or hashes a runner id; it never becom
             found.push(`${file.slice(root.length)}:${index + 1}: ${line.trim()}`);
         });
   assert.deepEqual(found, []);
-  for (const file of ['src/auth-cli.ts', 'src/agent-setup.ts'])
+  for (const file of ['src/auth-cli.ts'])
     assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /hostname\s*[,}]|\bhostname\(\)/, file);
 });
 

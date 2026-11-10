@@ -153,12 +153,13 @@ export default function LocalChecks({
       setBusy(false);
     }
   }
-  const command = `nforge local-checks /path/to/your/local/project ${import.meta.env.VITE_CONVEX_URL || 'DEPLOYMENT_URL'} ${projectId}`;
+  // Checks run on the project's configured runner; `nforge local-checks` is retired.
+  const command = `nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/RUNNER_REPOSITORY"}'`;
   return (
     <div className="fx-connected-checks">
       <div className="local-checks">
         <div className="local-checks-heading">
-          <Disclosure title="Connect a local runner">
+          <Disclosure title="Set the check runner">
             <pre>
               <code>{command}</code>
             </pre>

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { PRESENCE } from './presence.js';
-import { startPresenceWorker } from './presence-worker-start.js';
 import { createHash } from 'node:crypto';
 import { readHostState, updateHostState } from './host-binding.js';
 import { localActor } from './work-actor.js';
@@ -163,7 +162,6 @@ export function recordAgentActivity(
               context: { laneId: lane.id, intentId: lane.intentId, head: lane.head },
               fingerprint,
             };
-            if (!completed) startPresenceWorker(store);
           }
         },
         { ownerLock: false },

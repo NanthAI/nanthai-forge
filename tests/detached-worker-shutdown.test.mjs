@@ -10,7 +10,7 @@ import { hostname } from 'node:os';
 import { initNative } from '../dist/native-work.js';
 import { processIdentity } from '../dist/local-process.js';
 
-for (const worker of ['post-accept-main', 'presence-worker'])
+for (const worker of ['post-accept-main'])
   test(`${worker} handles SIGTERM with a busy owner and leaves retained work intact`, async t => {
     const root = mkdtempSync(join(tmpdir(), 'forge-worker-term-'));
     t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
@@ -41,7 +41,7 @@ for (const worker of ['post-accept-main', 'presence-worker'])
       messages.push(message);
       if (message === 'ready') break;
     }
-    if (worker === 'post-accept-main') assert.ok(messages.includes('contended'));
+    assert.ok(messages.includes('contended'));
     child.kill('SIGTERM');
     const [code, signal] = await exited;
     assert.equal(signal, null);
@@ -58,7 +58,7 @@ test('detached worker lock admission yields instead of blocking signal delivery'
   const lock = join(root, 'lock');
   writeFileSync(lock, JSON.stringify({ ...processIdentity(), host: hostname() }));
   await detachedWorker(async () => {
-    // Presence callbacks run on later event-loop turns, retaining lock context.
+    // Worker callbacks run on later event-loop turns, retaining lock context.
     await new Promise(resolve => setImmediate(resolve));
     assert.throws(() => workLocked(lock, () => assert.fail('busy lock acquired')), { code: 'WORK_BUSY' });
   });

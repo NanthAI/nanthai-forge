@@ -141,7 +141,7 @@ test('finite wait receipts preserve current queue and early conflict metadata wi
 });
 
 test('verify guard: finite response and bound hosted read may attach cached advice but never call preview composition', () => {
-  for (const file of ['src/hosted-agent-transport.ts', 'src/hosted-agent-bound-read.ts']) {
+  for (const file of ['src/hosted-agent-transport.ts']) {
     const source = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     assert(!/await\s+enrichHostedQueueAhead/.test(source), file);
     assert(!/\bhostedQueueAhead\(/.test(source), file);

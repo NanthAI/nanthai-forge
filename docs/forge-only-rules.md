@@ -101,7 +101,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/agent-preflight.ts` | `tests-folder` | 1 | the Forge-layout runner fallback inventory | their runner's test globs |
 | `src/agent-preflight.ts` | `npm-lockfile` | 1 | the Forge-layout selector inventory | declared dependencies of every manifest |
 | `src/agent-preflight.ts` | `node-test` | 1 | Forge-layout preflight runs Node's runner | their runner's command (`runnerCommand`) |
-| `src/agent-lane-tests.ts` | `tests-folder` | 1 | the Forge-layout tests read | their runner's test files |
 | `src/junit-coverage.ts` | `tests-folder` | 1 | Cargo's own `tests/NAME.rs` test-binary layout, not Forge's (JUnit coverage of Rust union tests) | — (Cargo's convention for every Rust crate) |
 | `src/intent-test-contract.ts` | `tests-folder` | 1 | `standardTestPath`: the files Forge's selector and shards read | `contractTestPath`: any test path |
 | `src/scoped-recheck.ts` | `tests-folder` | 1 | the scoped recheck of the standard plan | their whole command, or the selection their command reports |

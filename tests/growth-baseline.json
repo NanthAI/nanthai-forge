@@ -13,12 +13,12 @@
   },
   "counts": {
     "tables": 178,
-    "errorCodes": 493,
-    "agentActions": 63,
+    "errorCodes": 488,
+    "agentActions": 62,
     "cliCommands": 40,
     "glossaryTerms": 27,
     "macDependencies": 5,
-    "unreferencedExports": 19
+    "unreferencedExports": 68
   },
   "reasons": [
     {
@@ -47,6 +47,13 @@
       "from": 180,
       "to": 181,
       "reason": "flip 4 (853fcde3) adds projectHostedConflictNotices for exact trial-merge conflicts; its subtraction slice deletes projectHostedOverlapAcks and projectHostedOverlapDeliveries (net -1) after the side-by-side",
+      "at": "2026-11-10"
+    },
+    {
+      "kind": "unreferencedExports",
+      "from": 19,
+      "to": 68,
+      "reason": "One client mode S1 deletes the native landing driver (70+ src files); the exports they used are now unreferenced and the follow-up cascade Lanes (Issue 657d63ee) remove them and lower this back to 19",
       "at": "2026-11-10"
     }
   ]

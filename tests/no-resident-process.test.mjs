@@ -22,7 +22,6 @@ const DETACHED_JOBS = {
   'integration-preview-auto.ts': 'owner-store: one integration preview after a saved event',
   'local-watcher-client.ts': 'owner-store: shared file-watch helper',
   'post-accept-main.ts': 'owner-store: applies one acceptance',
-  'presence-worker-start.ts': 'owner-store: presence touches',
   'push-audit-wait.ts': 'waits on one mirror push audit',
   'self-metrics-weekly.ts': 'writes one weekly self-metrics report',
 };
