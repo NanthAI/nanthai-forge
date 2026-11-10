@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "flip 4 (853fcde3) adds projectHostedConflictNotices for exact trial-merge conflicts; its subtraction slice deletes projectHostedOverlapAcks and projectHostedOverlapDeliveries (net -1) after the side-by-side",
+  "date": "2026-11-10"
+}

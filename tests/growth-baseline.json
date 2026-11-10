@@ -1,7 +1,6 @@
 {
-  "version": 1,
+  "version": 2,
   "phase": "P6",
-  "recordedAt": "2026-11-09",
   "start": {
     "tables": 181,
     "errorCodes": 501,
@@ -10,58 +9,5 @@
     "glossaryTerms": 34,
     "machineDependencies": 0,
     "unreferencedExports": 22
-  },
-  "counts": {
-    "tables": 179,
-    "errorCodes": 485,
-    "agentActions": 62,
-    "cliCommands": 40,
-    "glossaryTerms": 27,
-    "machineDependencies": 0,
-    "unreferencedExports": 2
-  },
-  "reasons": [
-    {
-      "kind": "tables",
-      "from": 179,
-      "to": 180,
-      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
-      "at": "2026-11-09"
-    },
-    {
-      "kind": "errorCodes",
-      "from": 500,
-      "to": 501,
-      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
-      "at": "2026-11-09"
-    },
-    {
-      "kind": "agentActions",
-      "from": 88,
-      "to": 89,
-      "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
-      "at": "2026-11-09"
-    },
-    {
-      "kind": "tables",
-      "from": 180,
-      "to": 181,
-      "reason": "flip 4 (853fcde3) adds projectHostedConflictNotices for exact trial-merge conflicts; its subtraction slice deletes projectHostedOverlapAcks and projectHostedOverlapDeliveries (net -1) after the side-by-side",
-      "at": "2026-11-10"
-    },
-    {
-      "kind": "unreferencedExports",
-      "from": 19,
-      "to": 68,
-      "reason": "One client mode S1 deletes the native landing driver (70+ src files); the exports they used are now unreferenced and the follow-up cascade Lanes (Issue 657d63ee) remove them and lower this back to 19",
-      "at": "2026-11-10"
-    },
-    {
-      "kind": "tables",
-      "from": 178,
-      "to": 179,
-      "reason": "750c5929: projectHostedOverlapMainLog (one ~0.3 KB row per landing, newest 64) replaces the whole 140 KB main path-history read on every save, sync, resolve and overlap read of a Lane behind main, and the landing completion's read+rewrite of that row. Nothing can go yet: the whole row stays as the fallback for Lanes more than 64 landings behind; dropping its changes field is the follow-up.",
-      "at": "2026-11-10"
-    }
-  ]
+  }
 }

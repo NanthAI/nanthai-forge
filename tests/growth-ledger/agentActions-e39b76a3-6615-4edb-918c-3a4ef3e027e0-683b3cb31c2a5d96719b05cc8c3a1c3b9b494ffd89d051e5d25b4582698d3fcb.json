@@ -1,0 +1,6 @@
+{
+  "kind": "agentActions",
+  "delta": 1,
+  "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
+  "date": "2026-11-09"
+}

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   KINDS,
   agentActionNames,
@@ -16,6 +19,8 @@ import {
   readMachineDependencies,
   unreferencedExportNames,
   updateBaseline,
+  readBaseline,
+  writeLedger,
 } from '../scripts/check-growth.mjs';
 
 // Growth guard (ed28fc6b): one row per counted kind, then fail-on-rise and pass-with-reason.
@@ -173,10 +178,9 @@ test('--update refuses a rise without a real reason and raises it with one, reco
   assert.deepEqual(next.reasons, [
     {
       kind: 'tables',
-      from: 10,
-      to: 11,
+      delta: 1,
       reason: 'adds the board table; merges the old notes table into it',
-      at: '2026-11-10',
+      date: '2026-11-10',
     },
   ]);
   assert.deepEqual(growthFindings(grown, next), [], 'the recorded rise now passes');
@@ -194,7 +198,9 @@ test('--update lowers counts that fell and never raises one without a reason', (
   assert.deepEqual(refused, ['cliCommands']);
   assert.equal(next.counts.errorCodes, 15);
   assert.equal(next.counts.cliCommands, 40);
-  assert.deepEqual(next.reasons, []);
+  assert.deepEqual(next.reasons, [
+    { kind: 'errorCodes', delta: -5, reason: 'Lower baseline to the current count', date: 'x' },
+  ]);
 });
 
 test('an unreferenced-export rise needs an Issue id in --update --reason; prose alone is refused (re-baselined 19 -> 68 silently, ed28fc6b)', () => {
@@ -209,15 +215,14 @@ test('an unreferenced-export rise needs an Issue id in --update --reason; prose 
     '2026-11-10',
   );
   assert.deepEqual(refused, []);
-  assert.equal(next.reasons[0].issue, '657d63ee');
+  assert.match(next.reasons[0].reason, /657d63ee/);
   assert.deepEqual(growthFindings(grown, next), []);
   const handWritten = structuredClone(next);
   handWritten.reasons[0] = {
     ...handWritten.reasons[0],
     reason: 'cascade Lane deletes them again',
-    issue: undefined,
   };
-  assert.match(growthFindings(grown, handWritten).join('\n'), /rise \d+ -> \d+ names no Issue/);
+  assert.match(growthFindings(grown, handWritten).join('\n'), /rise \+\d+ names no Issue/);
 });
 
 test('a hand-raised baseline with no ledger entry fails', () => {
@@ -225,7 +230,48 @@ test('a hand-raised baseline with no ledger entry fails', () => {
   baseline.counts.tables = 12;
   const findings = growthFindings({ ...start, tables: 12 }, baseline);
   assert.equal(findings.length, 1);
-  assert.match(findings[0], /above its start 10 plus recorded rises/);
+  assert.match(findings[0], /differs from its start 10 plus recorded deltas/);
+});
+
+test('independent growth updates merge by adding distinct files, for different kinds and the same kind (2ecf5b44)', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-growth-ledger-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'tests'));
+  const header = JSON.stringify({ version: 2, phase: 'P6', start });
+  writeFileSync(join(root, 'tests/growth-baseline.json'), header);
+  const base = readBaseline(root);
+  const changes = [
+    { ...start, tables: 11 },
+    { ...start, errorCodes: 21 },
+    { ...start, tables: 12 },
+  ].map(
+    (counts, i) =>
+      updateBaseline(counts, base, `independent change ${i} needs these names`, '2026-11-10').baseline,
+  );
+  const files = changes.flatMap(change => writeLedger(root, change.reasons));
+  assert.equal(new Set(files).size, 3, 'concurrent updates add different paths, with no shared edit');
+  const merged = readBaseline(root);
+  assert.deepEqual(merged.counts, { ...start, tables: 13, errorCodes: 21 });
+  assert.deepEqual(growthFindings(merged.counts, merged), []);
+  assert.match(growthFindings({ ...merged.counts, tables: 14 }, merged).join('\n'), /14 now, baseline 13/);
+  assert.equal(readFileSync(join(root, 'tests/growth-baseline.json'), 'utf8'), header);
+  const identical = writeLedger(root, changes[0].reasons);
+  assert.notEqual(
+    identical[0],
+    files[0],
+    'two independent updates with the same reason and date still have separate deltas',
+  );
+  assert.equal(readBaseline(root).counts.tables, 14);
+  const path = join(root, 'tests/growth-ledger', files[0]);
+  const entry = JSON.parse(readFileSync(path));
+  entry.delta++;
+  writeFileSync(path, JSON.stringify(entry));
+  assert.throws(() => readBaseline(root), /invalid entry or content hash/);
+  writeFileSync(
+    join(root, 'tests/growth-baseline.json'),
+    JSON.stringify({ version: 2, phase: 'P6', start, counts: start }),
+  );
+  assert.throws(() => readBaseline(root), /counts come from/);
 });
 
 // Machine dependency list (56cf99cc): product paths that need one specific machine; target 0, may only fall.

@@ -1,0 +1,6 @@
+{
+  "kind": "cliCommands",
+  "delta": -13,
+  "reason": "Preserve the existing P6 ratchet after the recorded removals (Issue 2ecf5b44)",
+  "date": "2026-11-10"
+}

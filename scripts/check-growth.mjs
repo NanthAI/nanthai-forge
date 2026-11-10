@@ -37,14 +37,15 @@
 //                  are not counted: Convex query/mutation/action/httpAction functions (clients call them by
 //                  address) and the package entry files src/index.ts, src/query.ts and src/cli-entry.ts.
 //
-// The baseline moves only through --update. A rise is recorded in its `reasons` ledger with the reason
-// (what the change removes or merges, or why nothing can go); the check fails when a count is above the
-// baseline or when the baseline is above its start plus the recorded rises (a hand edit).
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+// The baseline is phase start plus the deltas in tests/growth-ledger/. --update adds one hashed JSON
+// file per changed kind, with the reason and date; no shared count or reasons array is rewritten.
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const GROWTH_BASELINE = 'tests/growth-baseline.json';
+const LEDGER = 'tests/growth-ledger';
 export const MACHINE_DEPENDENCIES = 'tests/machine-dependencies.json';
 export const KINDS = [
   'tables',
@@ -254,64 +255,102 @@ export function currentCounts(root = '.') {
   };
 }
 
-export function readBaseline(root = '.') {
-  const baseline = JSON.parse(readFileSync(resolve(root, GROWTH_BASELINE), 'utf8'));
-  if (baseline?.version !== 1 || !baseline.counts || !baseline.start || !Array.isArray(baseline.reasons))
-    throw new Error(`${GROWTH_BASELINE} is not a version 1 growth baseline`);
-  return baseline;
+const ledgerText = entry => `${JSON.stringify(entry, null, 2)}\n`;
+const ledgerHash = text => createHash('sha256').update(text).digest('hex');
+
+/** Each update adds unique, content-verified files, including identical deltas from different Lanes. */
+export function writeLedger(root, entries) {
+  mkdirSync(resolve(root, LEDGER), { recursive: true });
+  return entries.map(entry => {
+    const text = ledgerText(entry),
+      name = `${entry.kind}-${randomUUID()}-${ledgerHash(text)}.json`;
+    const path = resolve(root, LEDGER, name);
+    writeFileSync(path, text, { flag: 'wx' });
+    return name;
+  });
 }
 
-/** The recorded rises for one kind, in order. */
-const rises = (baseline, kind) => baseline.reasons.filter(entry => entry.kind === kind);
+export function readBaseline(root = '.') {
+  const baseline = JSON.parse(readFileSync(resolve(root, GROWTH_BASELINE), 'utf8'));
+  if (
+    baseline?.version !== 2 ||
+    typeof baseline.phase !== 'string' ||
+    Object.keys(baseline).some(key => !['version', 'phase', 'start'].includes(key)) ||
+    !KINDS.every(kind => Number.isInteger(baseline.start?.[kind]) && baseline.start[kind] >= 0)
+  )
+    throw new Error(
+      `${GROWTH_BASELINE} must contain only version 2, phase and start; counts come from ${LEDGER}`,
+    );
+  const directory = resolve(root, LEDGER);
+  const reasons = existsSync(directory)
+    ? readdirSync(directory)
+        .sort()
+        .map(name => {
+          const text = readFileSync(join(directory, name), 'utf8'),
+            entry = JSON.parse(text);
+          if (
+            !KINDS.includes(entry.kind) ||
+            !Number.isInteger(entry.delta) ||
+            entry.delta === 0 ||
+            typeof entry.reason !== 'string' ||
+            entry.reason.trim().length < MIN_REASON ||
+            !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) ||
+            Object.keys(entry).some(key => !['kind', 'delta', 'reason', 'date'].includes(key)) ||
+            !name.startsWith(`${entry.kind}-`) ||
+            !/^[a-zA-Z]+-[a-f0-9-]{36}-[a-f0-9]{64}\.json$/.test(name) ||
+            !name.endsWith(`-${ledgerHash(text)}.json`)
+          )
+            throw new Error(`${LEDGER}/${name}: invalid entry or content hash; use --update`);
+          return entry;
+        })
+    : [];
+  const counts = { ...baseline.start };
+  for (const { kind, delta } of reasons) counts[kind] += delta;
+  return { ...baseline, counts, reasons };
+}
 
-/** Findings: counts above the baseline, and baselines above start plus recorded rises (hand edits). */
+/** Findings: counts above the ratchet, invalid reasons, and derived counts changed by hand. */
 export function growthFindings(current, baseline) {
   const findings = [];
   for (const kind of KINDS) {
     const allowed = baseline.counts[kind];
-    if (!Number.isInteger(allowed)) {
-      findings.push(`${GROWTH_BASELINE}: no baseline count for ${kind}`);
+    if (!Number.isInteger(allowed) || allowed < 0) {
+      findings.push(`${GROWTH_BASELINE}: no valid baseline count for ${kind}`);
       continue;
     }
     if (current[kind] > allowed)
       findings.push(
         `${LABEL[kind]}: ${current[kind]} now, baseline ${allowed}. Remove or merge one, or record why nothing can go: node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`,
       );
-    for (const entry of rises(baseline, kind))
-      if (ISSUE_KINDS.has(kind) && entry.to > entry.from && !issueOf(entry.issue ?? entry.reason))
+    const entries = baseline.reasons.filter(entry => entry.kind === kind);
+    for (const entry of entries)
+      if (ISSUE_KINDS.has(kind) && entry.delta > 0 && !issueOf(entry.reason))
         findings.push(
-          `${GROWTH_BASELINE}: the ${LABEL[kind]} rise ${entry.from} -> ${entry.to} names no Issue; a rise needs the 8-hex Issue that removes it: --update --reason "<what it removes, Issue ID>"`,
+          `${LEDGER}: the ${LABEL[kind]} rise +${entry.delta} names no Issue; a rise needs the 8-hex Issue that removes it: --update --reason "<what it removes, Issue ID>"`,
         );
-    const ceiling =
-      (baseline.start[kind] ?? 0) +
-      rises(baseline, kind).reduce((sum, entry) => sum + (entry.to - entry.from), 0);
-    if (allowed > ceiling)
+    const expected = baseline.start[kind] + entries.reduce((sum, entry) => sum + entry.delta, 0);
+    if (allowed !== expected)
       findings.push(
-        `${GROWTH_BASELINE}: ${kind} baseline ${allowed} is above its start ${baseline.start[kind]} plus recorded rises (${ceiling}); raise it only with --update --reason`,
+        `${GROWTH_BASELINE}: ${kind} baseline ${allowed} differs from its start ${baseline.start[kind]} plus recorded deltas (${expected}); change it only with --update`,
       );
   }
   return findings;
 }
 
-/**
- * The baseline after --update. Counts below the baseline are lowered; counts above it are raised only
- * when `reason` is given, and each rise is appended to the ledger. Returns { baseline, refused }.
- */
-export function updateBaseline(current, baseline, reason, at) {
-  const next = structuredClone(baseline);
-  const refused = [];
+/** Lower counts freely; every rise still needs a reason, and unused exports also need an Issue. */
+export function updateBaseline(current, baseline, reason, date) {
+  const next = structuredClone(baseline),
+    refused = [];
   const why = typeof reason === 'string' ? reason.trim() : '';
   for (const kind of KINDS) {
-    if (current[kind] <= baseline.counts[kind]) next.counts[kind] = current[kind];
-    else if (why.length >= MIN_REASON && (!ISSUE_KINDS.has(kind) || issueOf(why))) {
-      const issue = ISSUE_KINDS.has(kind) ? issueOf(why) : undefined;
+    const delta = current[kind] - baseline.counts[kind];
+    if (!delta) continue;
+    if (delta < 0 || (why.length >= MIN_REASON && (!ISSUE_KINDS.has(kind) || issueOf(why)))) {
       next.reasons.push({
         kind,
-        from: baseline.counts[kind],
-        to: current[kind],
-        reason: why,
-        ...(issue && { issue }),
-        at,
+        delta,
+        reason: why.length >= MIN_REASON ? why : 'Lower baseline to the current count',
+        date,
       });
       next.counts[kind] = current[kind];
     } else refused.push(kind);
@@ -319,15 +358,8 @@ export function updateBaseline(current, baseline, reason, at) {
   return { baseline: next, refused };
 }
 
-export function initialBaseline(current, at) {
-  return {
-    version: 1,
-    phase: 'P6',
-    recordedAt: at,
-    start: { ...current },
-    counts: { ...current },
-    reasons: [],
-  };
+export function initialBaseline(current) {
+  return { version: 2, phase: 'P6', start: { ...current }, counts: { ...current }, reasons: [] };
 }
 
 export function formatCounts(current, baseline) {
@@ -354,14 +386,15 @@ function main(argv) {
       console.error(`${GROWTH_BASELINE} exists; --init only writes the first baseline. Use --update.`);
       return 1;
     }
-    writeFileSync(target, `${JSON.stringify(initialBaseline(current, today), null, 2)}\n`);
+    const { counts, reasons, ...header } = initialBaseline(current);
+    writeFileSync(target, `${JSON.stringify(header, null, 2)}\n`);
     console.log(`Wrote ${GROWTH_BASELINE}: ${JSON.stringify(current)}`);
     return 0;
   }
   const baseline = readBaseline(root);
   if (flag('--update')) {
     const { baseline: next, refused } = updateBaseline(current, baseline, reason, today);
-    writeFileSync(target, `${JSON.stringify(next, null, 2)}\n`);
+    writeLedger(root, next.reasons.slice(baseline.reasons.length));
     console.log(formatCounts(current, next));
     for (const kind of refused)
       console.error(

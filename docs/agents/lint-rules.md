@@ -88,18 +88,21 @@ under 3 s) and counts:
 | `machineDependencies` | entries in [`tests/machine-dependencies.json`](../../tests/machine-dependencies.json) `machineDependencies`: product paths (service, landing, checks, storage, mirror, deploys, release, backup) that need one specific machine. The target and today's count is 0. Where the lead session, builder sessions, the exit bench, the optional local check runner (`nforge worker`) and operator maintenance run is the user's own choice of machine; they are not counted. `hostedPaths` is the guarded list of the six paths that run hosted; one that moves back onto a machine is a rise: move its id to `machineDependencies` and run `--update --reason`. Each entry names an Issue that removes it (8-hex id) or a `staysBecause` reason. Public repo: no private paths or machine names |
 | `unreferencedExports` | exported names (function, const, class, enum, type, interface) in `src/`, `web/src/`, `convex/` and `netlify/` that no other file mentions as a word (`src`, `web/src`, `convex`, `netlify`, `tests`, `scripts`, `evals`; a comment or string counts as a mention, so it undercounts). Public entry points are excluded: Convex `query`/`mutation`/`action`/`httpAction` functions and `src/index.ts`, `src/query.ts`, `src/cli-entry.ts`. Unused `internal*` Convex functions count |
 
-The check fails when a count is above [`tests/growth-baseline.json`](../../tests/growth-baseline.json), and when
-a baseline is above its phase start plus its recorded rises (a hand edit). The baseline moves only through the
-update command:
+The check fails when a count is above its baseline: phase `start` in
+[`tests/growth-baseline.json`](../../tests/growth-baseline.json) plus the sum of deltas in
+`tests/growth-ledger/`. The header holds only version, phase and start. Each ledger file records
+`kind`, `delta`, `reason` and `date`; its filename includes a unique update id and its content hash, so even equal deltas stay separate. Hand-edited counts,
+invalid entries and mismatched hashes fail. The baseline moves through the update command:
 
 - `node scripts/check-growth.mjs --update` lowers the baseline to the current counts. Run it after a change
   that removes something. It never raises a count.
 - `node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`
-  also raises a count that rose, and appends the kind, the old and new count, the reason and the date to the
-  baseline's `reasons` ledger. A reason shorter than 12 characters is refused.
+  also raises a count that rose. Each rise or drop adds its own hashed JSON ledger file;
+  concurrent Lanes add separate files instead of editing shared counts or a shared array. A reason shorter than 12 characters is refused.
   A rise of `unreferencedExports` also needs the 8-hex Forge Issue that deletes the extra exports in the reason
   (the same rule as a machine dependency); a reason without one is refused, and a ledger rise with no Issue fails the check.
-  Lowering never needs a reason, so two Lanes that both lower the baseline merge by re-running `--update` after the sync.
+  Lowering never needs a reason. After combining removals, re-run `--update` to reconcile any further fall;
+  the check still refuses a count above the combined baseline.
 - `node scripts/check-growth.mjs --print [--json]` prints the current, baseline and phase-start counts. A phase
   close records this table against the phase start (`start`). Add `--machines` to list every machine dependency with its
   Issue or reason and the hosted paths guarded; the P6 close report prints this block, which shows

@@ -1,0 +1,6 @@
+{
+  "kind": "unreferencedExports",
+  "delta": 49,
+  "reason": "One client mode S1 deletes the native landing driver (70+ src files); the exports they used are now unreferenced and the follow-up cascade Lanes (Issue 657d63ee) remove them and lower this back to 19",
+  "date": "2026-11-10"
+}

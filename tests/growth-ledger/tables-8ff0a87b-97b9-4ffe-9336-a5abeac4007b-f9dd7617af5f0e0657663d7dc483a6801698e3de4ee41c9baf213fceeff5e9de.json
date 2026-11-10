@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "750c5929: projectHostedOverlapMainLog (one ~0.3 KB row per landing, newest 64) replaces the whole 140 KB main path-history read on every save, sync, resolve and overlap read of a Lane behind main, and the landing completion's read+rewrite of that row. Nothing can go yet: the whole row stays as the fallback for Lanes more than 64 landings behind; dropping its changes field is the follow-up.",
+  "date": "2026-11-10"
+}
