@@ -836,6 +836,30 @@
       "source": "One observer query by a contributor reading another actor, a synthetic 19 KB project row and the same landing fixture: 25,510 -> 6,787 B. Existing exact read projections, public mapping included.",
       "issue": "3e3f9fe6",
       "reason": "Keeps identity mapping on the existing exact read projection through the whole observer query. Removes a full project reread; current membership and reader masking still apply."
+    },
+    {
+      "id": "landing-driver-finish-step-read-bytes",
+      "area": "Finish driver steps across dogfood solo and main-race landings",
+      "measuredBy": "driver-fixture",
+      "metric": "finishStepReadBytes",
+      "unit": "bytes",
+      "value": 1399500,
+      "floor": 2048,
+      "source": "Completed solo plus completed main-race control tails on merged main; 1,000 reports, ten shards, 19 KB project. Finish steps 1,686,061 -> 1,399,474 B/landing; three drivers 3,047,372 -> 2,760,785 B/landing. 13 finish steps, three advances and one reuse completion across two accepted landings, unchanged.",
+      "issue": "3e3f9fe6",
+      "reason": "Publication already validates the exact passed run; skip cancellation only for that run. Solo and batch paths share the cut; different live retained runs still release. Calls unchanged."
+    },
+    {
+      "id": "landing-driver-tail-read-bytes",
+      "area": "Landing, finish and reuse controls after checks at dogfood row sizes",
+      "measuredBy": "driver-fixture",
+      "metric": "driverTailReadBytes",
+      "unit": "bytes",
+      "value": 2760810,
+      "floor": 2048,
+      "source": "Completed solo plus completed main-race control tails on merged main; 1,000 reports, ten shards, 19 KB project. Finish steps 1,686,061 -> 1,399,474 B/landing; three drivers 3,047,372 -> 2,760,785 B/landing. 13 finish steps, three advances and one reuse completion across two accepted landings, unchanged.",
+      "issue": "3e3f9fe6",
+      "reason": "Publication already validates the exact passed run; skip cancellation only for that run. Solo and batch paths share the cut; different live retained runs still release. Calls unchanged."
     }
   ]
 }

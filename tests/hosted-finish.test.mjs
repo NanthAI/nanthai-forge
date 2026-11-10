@@ -984,3 +984,25 @@ test('5,000-file / 512 MB finish recomposes after main advances and lands throug
     else process.env.FORGE_SOURCE_PROVIDER = previous;
   }
 });
+
+test('publication still releases a different live run retained on the landing row', async t => {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  while ((await f.current(state.id)).submission.phase !== 'ready') await f.execute();
+  const other = await f.rawChecks.enqueue(f.rawChecks.selection());
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id);
+  f.patch('projectHostedLandingRequests', row._id, { runId: other.id });
+  for (let n = 0; (await f.current(state.id)).submission.phase !== 'landed'; n++) {
+    assert(n < 20, 'finite exact publication');
+    const task = f.pending().find(task => task.name === 'projectHostedFinishDriver:drive');
+    assert(task);
+    await f.execute(task);
+  }
+  assert.equal(
+    (await f.rawChecks.status(other.id)).status,
+    'cancelled',
+    'only the just-validated passed run may skip release',
+  );
+});

@@ -7,6 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
+import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { metricRunRow } from '../dist/self-metrics-run.js';
@@ -306,13 +307,7 @@ test('live R2 stamp: a recomposed landing carries the requests its compose signe
   );
 });
 
-// Dogfood-sized control path: 1,000 retained test reports, ten completed shards. The runner
-// callbacks finish before we enlarge the retained row, so this isolates the landing drivers.
-async function dogfoodDriverCosts(t) {
-  const f = await finishFixture(t);
-  const state = await f.enqueue(f.request());
-  await f.drain();
-  await f.passChecks();
+function inflateDogfoodChecks(f) {
   const reports = Object.fromEntries(
     Array.from({ length: 1000 }, (_, i) => [
       `tests/hosted-${String(i).padStart(4, '0')}-${'synthetic-path-'.repeat(10)}.test.mjs`,
@@ -322,6 +317,7 @@ async function dogfoodDriverCosts(t) {
   let runBytes = 0;
   for (const row of f.tables.projectHostedCheckRuns.values()) {
     const run = JSON.parse(row.value);
+    if (run.status !== 'passed') continue;
     run.contractReports = reports;
     run.plan.shardCount = 10;
     run.counts = { completed: 10, passed: 10, failed: 0 };
@@ -329,6 +325,17 @@ async function dogfoodDriverCosts(t) {
     runBytes = Buffer.byteLength(value);
     f.patch('projectHostedCheckRuns', row._id, { value });
   }
+  return runBytes;
+}
+
+// Dogfood-sized control path: 1,000 retained test reports, ten completed shards. The runner
+// callbacks finish before we enlarge the retained row, so this isolates the landing drivers.
+async function dogfoodDriverCosts(t) {
+  const f = await finishFixture(t);
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  const runBytes = inflateDogfoodChecks(f);
   const from = f.counts.length;
   await f.drain();
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
@@ -374,4 +381,60 @@ test('observer driver bytes include public identity mapping and recheck current 
   f.insert('projectReaders', { projectId: f.projectId, reader: 'viewer' });
   const reader = JSON.parse(await f.tx('driverObserveReader', observe.page, input, 'viewer'));
   assert.equal(reader.submission.actor, undefined, 'a read grant does not disclose another person');
+});
+
+async function dogfoodControlTail(t, race) {
+  const f = await finishFixture(t);
+  f.patch('hostedProjects', f.projectId, { agentGuidance: 'synthetic'.repeat(2000) });
+  const state = await f.enqueue(f.request({ agent: true }));
+  await f.drain();
+  const first = (await f.status(state.id)).attempt;
+  const selection = f.c.put(JSON.stringify({ scope: 'full', tests: [] }));
+  await passWithSelection(f, first.check.runId, selection);
+  if (race) {
+    while ((await f.current(state.id)).submission.phase !== 'ready') await f.execute();
+    f.moveMain();
+    await seedFullMain(f, selection);
+  }
+  inflateDogfoodChecks(f);
+  const from = f.counts.length;
+  await f.drain();
+  if (race) {
+    await f.passChecks();
+    inflateDogfoodChecks(f);
+    await f.drain();
+  }
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  return Object.fromEntries(
+    ['finishStep', 'finishLandingAdvance', 'reuseComplete'].map(name => {
+      const rows = f.counts.slice(from).filter(c => c.name === name);
+      return [
+        name,
+        {
+          calls: rows.length,
+          readBytes: rows.reduce((sum, c) => sum + c.readBytes, 0),
+          runReads: rows.reduce((sum, c) => sum + (c.readDocumentsByTable.projectHostedCheckRuns ?? 0), 0),
+        },
+      ];
+    }),
+  );
+}
+
+test('dogfood control tails budget finish reads across a completed solo landing and main-race recheck', async t => {
+  const scenarios = [await dogfoodControlTail(t, false), await dogfoodControlTail(t, true)];
+  const total = (name, key) => scenarios.reduce((sum, s) => sum + s[name][key], 0);
+  const measured = {
+    finishStepReadBytes: total('finishStep', 'readBytes') / 2,
+    driverTailReadBytes:
+      scenarios.reduce((sum, s) => sum + Object.values(s).reduce((n, c) => n + c.readBytes, 0), 0) / 2,
+  };
+  assert.equal(total('finishStep', 'calls'), 13, 'no additional finish step at dogfood row sizes');
+  assert.equal(total('finishLandingAdvance', 'calls'), 3, 'no additional landing advance');
+  assert.equal(total('reuseComplete', 'calls'), 1, 'one proof completion for the main race');
+  for (const [metric, bytes] of Object.entries(measured)) {
+    const budget = costs.find(c => c.metric === metric);
+    assert(budget, `${metric} has a ledger entry`);
+    assert.notEqual(judgeCost(budget, bytes, costGuard).status, 'fail');
+  }
+  t.diagnostic(JSON.stringify({ dogfoodTail: { scenarios, measured } }));
 });

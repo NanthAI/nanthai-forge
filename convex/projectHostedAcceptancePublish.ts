@@ -420,7 +420,8 @@ export async function publishAcceptance(
     observation: landingObservation('accepted'),
     error: null,
   };
-  await writeLanding(ctx, row, next, false);
+  // Exact evidence above already proved this run terminal. A different retained run still releases.
+  await writeLanding(ctx, row, next, false, row.runId !== run?.id);
   await endLandedApprovals(ctx, approvals);
   await settleLandingOperation(ctx, next);
   await releaseLandingQueue(ctx, queue, now);

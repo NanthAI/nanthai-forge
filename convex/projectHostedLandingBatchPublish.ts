@@ -415,7 +415,8 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
     // using the preloaded row strands passing successor groups without a wake.
     const currentRow = await landingRow(ctx, { projectId: claim.projectId, submissionId: member.state.id });
     invariant(currentRow, 'SOURCE_UNAVAILABLE', 'The batch member disappeared.');
-    await writeLanding(ctx, currentRow, next, false);
+    // The shared run was just proved passed; preserve cleanup for any different retained run.
+    await writeLanding(ctx, currentRow, next, false, currentRow.runId !== run.id);
     await settleLandingOperation(ctx, next);
     if (member.plan.inputPages) completions.push({ identity, planId: member.plan._id });
     receipts.push(receipt);

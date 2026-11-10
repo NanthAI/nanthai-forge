@@ -1192,7 +1192,11 @@ retained test reports and ten completed shards (about a 274 KB check-run value).
 read-byte entries cover the driver path separately from the small six-landing mix; they are
 synthetic row-I/O observations, not measured bills or latency claims. The observer entry includes
 public identity mapping by another contributor, so naming a peer cannot silently add a full
-project-row read after the handler finishes.
+project-row read after the handler finishes. The completed solo/main-race control-tail entries
+include 1,000 retained reports, ten shards and a 19 KB project row; they count finish, landing
+and reuse mutations from check completion through acceptance (source and CI callbacks are
+outside this subtotal). The finish steps retain exact publication evidence and skip cancellation
+only for the same run that evidence already proved terminal.
 
 **Updating the ledger.** Fix the change, or edit the entry in the same Lane: the new `value`, a
 `source` naming the run and date, and a `reason` for the move. Run
