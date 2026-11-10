@@ -64,7 +64,8 @@ author and requester are the owner or a contributor. An outside contributor's Ca
   setting refuses it.
 - When main's commit is not on the mirror yet, the check settles `runner-unavailable`; check
   again once the mirror is synced.
-- A Candidate over eight 100-object windows fails visibly. Git LFS objects are not published.
+- A Candidate over eight 100-object windows fails visibly. Git LFS paths publish pointers and upload
+  missing objects through the mirror's existing LFS transport before creating the Candidate ref.
 - Candidate branches stay on the mirror; delete them on GitHub when you no longer need them.
 
 Code: `src/ci-status.ts` (adapters and verdict), `convex/projectCiStatus.ts` (run, events),

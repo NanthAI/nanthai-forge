@@ -397,3 +397,84 @@ test('proof counts only failures on base with a passing non-flaky head report', 
     { proven: 1, passedOnBase: 1, inconclusive: 3 },
   );
 });
+
+// Exercise the registered publisher with synthetic source/GitHub boundaries; no live credentials.
+test('ci-status: Candidate LFS objects upload before its ref exists, and upload failure leaves no branch', async t => {
+  const { moduleSource } = await import('./convex-module.mjs');
+  const { mirrorFixture } = await import('./hosted-github-mirror-fixture.mjs');
+  const { digest } = await import('../dist/hash.js');
+  const { parseLfsPointer } = await import('../dist/github-lfs.js');
+  const fixtureKey = `__ciPublish_${randomUUID().replaceAll('-', '')}`;
+  t.after(() => {
+    delete globalThis[fixtureKey];
+  });
+  for (const failedUpload of [false, true]) {
+    const object = 'synthetic-lfs-bytes'.repeat(100);
+    const f = mirrorFixture({
+      before: { '.gitattributes': '*.bin filter=lfs -text\n' },
+      after: { '.gitattributes': '*.bin filter=lfs -text\n', 'model.bin': object },
+    });
+    f.seed.branch = branch;
+    const transfers = [];
+    globalThis[fixtureKey] = {
+      installationTokenMinter: async () => async () => 'synthetic-token',
+      mirrorPermissionsFor: () => ({ contents: 'write' }),
+      projectSource: () => f.io,
+      githubRequest: () => f.io.api,
+      lfsBatch: async (repository, operation, objects) => {
+        assert.equal(repository, f.seed.repository);
+        assert.equal(operation, 'upload');
+        assert.deepEqual(objects, [{ oid: digest(Buffer.from(object)), size: Buffer.byteLength(object) }]);
+        return objects.map(object => ({
+          ...object,
+          upload: { href: 'https://lfs.example/upload', header: {} },
+        }));
+      },
+      uploadLfsObject: async (pointer, bytes) => {
+        assert.equal(f.branches.size, 0, 'no branch can trigger CI with an unavailable LFS object');
+        assert.equal(bytes.toString(), object);
+        transfers.push(pointer.oid);
+        if (failedUpload) throw new Error('synthetic upload unavailable');
+      },
+    };
+    let source = moduleSource('../convex/projectCiStatusPublish.ts');
+    for (const names of [
+      'installationTokenMinter, mirrorPermissionsFor',
+      'projectSource',
+      'githubRequest',
+      'lfsBatch, uploadLfsObject',
+    ])
+      source = source.replace(
+        new RegExp(`import \\{ ${names} \\} from [^;]+;`),
+        `const { ${names} } = globalThis.${fixtureKey};`,
+      );
+    const { publish } = await import(
+      `data:text/javascript;base64,${Buffer.from(source).toString('base64')}#${failedUpload}`
+    );
+    const outcomes = [];
+    await publish._handler(
+      {
+        runMutation: async (ref, input) => {
+          const name = getFunctionName(ref);
+          if (name === 'projectCiStatus:prepare') return JSON.stringify(f.seed);
+          outcomes.push({ name, input });
+          return null;
+        },
+      },
+      { projectId: 'synthetic-project', runId },
+    );
+    assert.equal(transfers.length, 1);
+    assert.equal(outcomes.length, 1);
+    assert.equal(outcomes[0].name, failedUpload ? 'projectCiStatus:failed' : 'projectCiStatus:published');
+    assert.equal(f.branches.size, failedUpload ? 0 : 1);
+    if (!failedUpload) {
+      assert.equal(f.branches.get(branch), outcomes[0].input.commit);
+      const pointerBlob = [...f.githubBlobs.values()].find(bytes => parseLfsPointer(bytes));
+      assert.deepEqual(parseLfsPointer(pointerBlob), {
+        oid: digest(Buffer.from(object)),
+        size: Buffer.byteLength(object),
+      });
+      assert.equal(f.remote(), f.root.commit, 'Candidate publication preserves main');
+    }
+  }
+});

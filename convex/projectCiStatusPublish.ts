@@ -14,6 +14,7 @@ import {
   type MirrorPlan,
   type MirrorSeed,
 } from '../src/hosted-github-mirror';
+import { lfsBatch, uploadLfsObject } from '../src/github-lfs';
 import { unexpectedMirrorFailure } from '../src/hosted-github-retry';
 import { ForgeError, invariant } from '../src/errors';
 
@@ -36,18 +37,28 @@ export const publish = internalAction({
       let plan: MirrorPlan | undefined;
       const mint = await installationTokenMinter(ctx, input.projectId, seed.repository);
       let client: Promise<GithubRequest> | undefined;
+      const apiClient = () =>
+        (client ??= mint(mirrorPermissionsFor(plan)).then(minted => {
+          token = minted;
+          return githubRequest(minted);
+        }));
       const api: GithubRequest = async <T>(path: string, method?: string, body?: unknown): Promise<T> =>
-        (
-          await (client ??= mint(mirrorPermissionsFor(plan)).then(minted => {
-            token = minted;
-            return githubRequest(minted);
-          }))
-        )<T>(path, method, body);
+        (await apiClient())<T>(path, method, body);
       const io: MirrorIO = {
         ...projectSource(ctx, digests =>
           ctx.runQuery(internal.gitServeLaneStore.resolve, { projectId: input.projectId, digests }),
         ),
         api,
+        lfs: {
+          batch: async objects => {
+            await apiClient();
+            return lfsBatch(seed.repository, 'upload', objects, token);
+          },
+          upload: async (object, bytes) => {
+            await apiClient();
+            await uploadLfsObject(object, bytes, token);
+          },
+        },
       };
       plan = await prepareMirror(seed, io);
       for (let step = 0; plan.phase !== 'done'; step++) {
