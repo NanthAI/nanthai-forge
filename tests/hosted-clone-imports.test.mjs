@@ -24,8 +24,11 @@ for (const command of ['clone', 'pull'])
       loaded.add(url.split('/').at(-1));
       return next(url, context);
     }});
-    process.argv = ['node', 'cli-entry.js', '${command}', '--help'];
-    await import('./dist/cli-entry.js');
+    // dist/cli-entry.js is a bundle (Issue 7b2ae8d8): its chunks carry no module names, so the modules
+    // the entry imports for this command are loaded from the tsc output, which has the same graph.
+    await import('./dist/cli-command-ready.js');
+    await import('./dist/hosted-clone-cli.js');
+    ${command === 'pull' ? "await import('./dist/hosted-pull-cli.js');" : ''}
     console.log(JSON.stringify([...loaded]));
   `,
       ],

@@ -17,7 +17,7 @@ npm run format               # oxfmt --write; run before committing
 | `npm run check` | Validates JSON, Markdown links, license inventory freshness and required root files; rejects machine-specific home paths, JS/TS sources whose first line (after any shebang) is not the SPDX header, scripts/docs/workflows that print environment values or process listings, and live-query arguments or `refreshKey` values driven by the clock (idle tabs must cost nothing); rejects network calls in `src/` and `scripts/` that bypass `networkFetch`, `networkTimeout` or `deadlineConvexClient` (scripts import them from `dist/`) |
 | `npm run typecheck` | Native TypeScript for all four scopes, including web JSX |
 | `npm run typecheck:tsc` | Explicit tsc 5.9.3 fallback for all four projects |
-| `npm run build:core` | Native TypeScript JavaScript and published declarations |
+| `npm run build:core` | Native TypeScript JavaScript and published declarations, the edit-hook bundle and the CLI bundle: `dist/cli-entry.js` and its `dist/cli-bundle-*.js` chunks replace the tsc output of that one entry (`scripts/build-cli-bundle.mjs`); every other `dist/*.js` file is the tsc output that tests, hooks and workers load |
 | `npm run build:core:tsc` | Explicit tsc 5.9.3 build fallback |
 | `npm run lint` | Oxlint with the explicit TypeScript rule map, no warnings allowed |
 | `npm run format:check` | Oxfmt checks the existing JS/TS-only formatting scope |

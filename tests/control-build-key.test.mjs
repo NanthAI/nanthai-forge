@@ -18,6 +18,7 @@ function fixture(t) {
   write('tsconfig.json', '{}');
   write('scripts/prepare-convex-api.mjs', 'a');
   write('scripts/build-edit-hook.mjs', 'b');
+  write('scripts/build-cli-bundle.mjs', 'c');
   write('scripts/child-env.mjs', 'export const childEnv = 1;');
   write('scripts/child-env.d.mts', 'export const childEnv: number;');
   write('scripts/other-tool.mjs', 'runtime only');
@@ -60,6 +61,7 @@ test('control build key follows the lockfile and build sources, not the commit o
     ['scripts/child-env.mjs', 'export const childEnv = 2;'],
     ['scripts/child-env.d.mts', 'export const childEnv: string;'],
     ['scripts/build-edit-hook.mjs', 'changed'],
+    ['scripts/build-cli-bundle.mjs', 'changed'],
     ['scripts/prepare-convex-api.mjs', 'changed'],
   ]) {
     const before = controlBuildKey(root);
@@ -73,5 +75,7 @@ test('the key covers every module the vite bundle inlines and the repo build inp
   assert(files.includes('src/agent-edit-hook.ts'));
   assert(files.includes('scripts/child-env.mjs'), 'bundled scripts feed dist/agent-edit-hook.js');
   assert(!files.includes('scripts/hosted-actions-job.mjs'), 'entry points outside the bundle stay out');
+  const cli = bundled('.', 'src/cli-entry.ts');
+  assert(cli.includes('scripts/node-runtime.mjs'), 'bundled scripts feed the dist/cli-entry.js bundle');
   assert.match(controlBuildKey('.'), /^[0-9a-f]{64}$/);
 });

@@ -2,7 +2,7 @@
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
-import ts from 'typescript';
+import { loadTypescript } from './lazy-typescript.js';
 import { z } from 'zod';
 import { CODE_FILE } from './js-import-graph.js';
 
@@ -113,7 +113,7 @@ function missingPackages(root: string, file: string) {
       continue;
     }
     const dir = dirname(path);
-    for (const { fileName: specifier } of ts.preProcessFile(text, true, true).importedFiles) {
+    for (const { fileName: specifier } of loadTypescript().preProcessFile(text, true, true).importedFiles) {
       if (specifier.startsWith('.') || specifier.startsWith('/')) {
         const local = resolveLocal(dir, specifier);
         if (local && relative(root, local).split('/')[0] !== '..') queue.push(local);

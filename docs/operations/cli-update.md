@@ -69,7 +69,10 @@ command from an unverified runtime. An unconfigured package reports
 Update source uses Forge's existing hash-verified paged checkout and R2 downloads.
 The updater serializes installations, reuses product-managed dependencies only
 for the exact package, lockfile, platform and Node major identity, and installs
-missing dependencies using `npm ci --ignore-scripts`. It builds and smoke-checks
+missing dependencies using `npm ci --ignore-scripts`. It builds (`npm run build:core`,
+which also writes the CLI bundle: `dist/cli-entry.js` and its `dist/cli-bundle-*.js` chunks,
+built from `src/cli-entry.ts` so a command loads about 150 files instead of about 700;
+workers, hooks and the launcher stay on the tsc output beside them) and smoke-checks
 the staged CLI with a synthetic home. Activation has two steps.
 `installCliBuild` makes the complete stage an installed build at `builds/HEAD`;
 that build is installed but not active, and nothing selects it yet. Then

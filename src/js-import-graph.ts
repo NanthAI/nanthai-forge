@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { builtinModules } from 'node:module';
 import { posix } from 'node:path';
-import ts from 'typescript';
+import { loadTypescript } from './lazy-typescript.js';
 
 /** A static import graph of any JavaScript or TypeScript repository, for test selection with any
  * project test runner (Forge's own Node layout keeps scripts/test-import-graph.mjs).
@@ -36,7 +36,7 @@ const record = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === 'object' && !Array.isArray(value);
 const parseJson = (text: string | undefined): Record<string, unknown> | undefined => {
   if (text === undefined) return undefined;
-  const parsed = ts.parseConfigFileTextToJson('config.json', text);
+  const parsed = loadTypescript().parseConfigFileTextToJson('config.json', text);
   return parsed.error || !record(parsed.config) ? undefined : parsed.config;
 };
 const packageName = (specifier: string) =>
@@ -168,7 +168,7 @@ export function jsImportGraph(
     if (total > IMPORT_GRAPH_LIMITS.totalBytes)
       return { error: `code bytes exceed the import graph bound (${IMPORT_GRAPH_LIMITS.totalBytes})` };
     if (COMPUTED.test(text)) open.add(path);
-    for (const { fileName } of ts.preProcessFile(text, true, true).importedFiles) {
+    for (const { fileName } of loadTypescript().preProcessFile(text, true, true).importedFiles) {
       const targets = resolve(path, fileName);
       if (targets === null) open.add(path);
       else if (targets !== 'external') for (const target of targets) edge(target, path);

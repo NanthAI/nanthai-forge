@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { budgets, measurement, eagerFiles, landingTiming } from '../scripts/perf/report.mjs';
 import { cliColdStartSamples, cpuMs, options } from '../scripts/perf-harness.mjs';
+import { agentCommands, firstNetworkSamples } from '../scripts/perf/cli-first-network.mjs';
 import { successfulSample } from '../scripts/perf/browser.mjs';
 
 test('budget medians include the boundary, and an empty or incomplete run never passes', () => {
@@ -53,11 +54,12 @@ function loadedModules(args, input = '') {
 }
 
 test('381c62df: --version, --help and an idle turn-end hook stay on a minimal import path', () => {
+  // dist/cli-entry.js is a bundle (7b2ae8d8): its command graph is chunks named for their first module.
   const heavy =
-    /\/node_modules\/|\/(agent-cli|agent-install-hooks|hosted-agent-transport|agent-turn-work)\.js$/;
+    /\/node_modules\/|\/(?:cli-bundle-)?(agent-cli|agent-install-hooks|hosted-agent-transport|agent-turn-work)(?:-[\w-]+)?\.js$/;
   const cases = [
-    ['--version', ['dist/cli-entry.js', '--version'], '', 45],
-    ['--help', ['dist/cli-entry.js', '--help'], '', 45],
+    ['--version', ['dist/cli-entry.js', '--version'], '', 30],
+    ['--help', ['dist/cli-entry.js', '--help'], '', 30],
     [
       'idle turn-end hook',
       ['dist/agent-stop-hook.js', '--forge-turn-end'],
@@ -76,6 +78,31 @@ test('381c62df: --version, --help and an idle turn-end hook stay on a minimal im
     assert.deepEqual(loaded, [], `${name} loaded the command graph`);
     assert.ok(mine.length <= ceiling, `${name} loaded ${mine.length} modules (ceiling ${ceiling})`);
   }
+});
+
+test('7b2ae8d8: agent status, planning, save and land reach their first network call without the TypeScript compiler, zod locales or the command graph', () => {
+  // The bundled CLI loads about 150 chunks for each (700 modules before); a ceiling with margin keeps
+  // the schemas and the executors from sliding back into one eager graph. No timing is asserted.
+  for (const name of Object.keys(agentCommands)) {
+    const [sample] = firstNetworkSamples(1, name, { modules: true });
+    assert.ok(Number.isFinite(sample.durationMs), `${name} never reached its first network call`);
+    assert.ok(sample.modules.length <= 190, `${name} loaded ${sample.modules.length} modules (ceiling 190)`);
+    assert.deepEqual(
+      sample.modules.filter(url => /\/typescript\/|\/zod\/v4\/locales\//.test(url)),
+      [],
+      `${name} loaded the TypeScript compiler or zod locales`,
+    );
+  }
+});
+
+test('7b2ae8d8: a run that never reaches a network call, or fails, is a failed sample and never passes', () => {
+  const never = fileURLToPath(new URL('../scripts/node-runtime.mjs', import.meta.url));
+  const samples = firstNetworkSamples(1, 'cliAgentStatusCpu', { cli: never });
+  assert.ok(Number.isNaN(samples[0].durationMs));
+  assert.equal(measurement('cliAgentStatusCpu', samples).status, 'failed');
+  const max = budgets.cliAgentStatusCpu;
+  assert.equal(measurement('cliAgentStatusCpu', [{ durationMs: max }]).status, 'pass');
+  assert.equal(measurement('cliAgentStatusCpu', [{ durationMs: max + 1 }]).status, 'fail');
 });
 
 test('bundle accounting follows shared static imports once and excludes dynamic route chunks', () => {

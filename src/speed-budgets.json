@@ -70,6 +70,46 @@
       "reason": "CPU time, because wall time moves with machine load. About 2.5 times the loaded median, so a slower CI runner passes, while the command graph loading again (320 ms measured at the same load) fails. tests/perf-harness.test.mjs also counts the modules --version, --help and an idle turn-end hook load."
     },
     {
+      "id": "cli-agent-status",
+      "area": "agent status: CPU before the first network call",
+      "measuredBy": "perf-harness",
+      "metric": "cliAgentStatusCpu",
+      "unit": "ms",
+      "max": 500,
+      "source": "Issue 7b2ae8d8, 2026-11-10, nforge agent ROOT status: CPU time (user+sys) before the first network call, 9 runs per build alternating at machine load 8-13 with a warm compile cache, as the installed launcher runs it. Median 713 ms before the bundled CLI entry (about 700 modules), 415 ms after (151-158 modules, p90 467). Measured by `node scripts/perf-harness.mjs --cli-cold-start`, which stops the CLI at its first Convex call (land: at the hand-off to its detached submitter) against an address that never resolves.",
+      "reason": "The lead's bar: an agent command is under 0.5 s of CPU before its first network call at the median (p90 under 0.7 s). CPU time, because wall time moves with machine load. tests/perf-harness.test.mjs counts the modules each of the four loads, so the graph growing back fails the landing check without a timing run."
+    },
+    {
+      "id": "cli-agent-planning",
+      "area": "agent planning: CPU before the first network call",
+      "measuredBy": "perf-harness",
+      "metric": "cliAgentPlanningCpu",
+      "unit": "ms",
+      "max": 500,
+      "source": "Issue 7b2ae8d8, 2026-11-10, nforge agent ROOT planning: CPU time (user+sys) before the first network call, 9 runs per build alternating at machine load 8-13 with a warm compile cache, as the installed launcher runs it. Median 385 ms before the bundled CLI entry (about 700 modules), 246 ms after (151-158 modules, p90 450). Measured by `node scripts/perf-harness.mjs --cli-cold-start`, which stops the CLI at its first Convex call (land: at the hand-off to its detached submitter) against an address that never resolves.",
+      "reason": "The lead's bar: an agent command is under 0.5 s of CPU before its first network call at the median (p90 under 0.7 s). CPU time, because wall time moves with machine load. tests/perf-harness.test.mjs counts the modules each of the four loads, so the graph growing back fails the landing check without a timing run."
+    },
+    {
+      "id": "cli-agent-save",
+      "area": "agent save: CPU before the first network call",
+      "measuredBy": "perf-harness",
+      "metric": "cliAgentSaveCpu",
+      "unit": "ms",
+      "max": 500,
+      "source": "Issue 7b2ae8d8, 2026-11-10, nforge agent ROOT save: CPU time (user+sys) before the first network call, 9 runs per build alternating at machine load 8-13 with a warm compile cache, as the installed launcher runs it. Median 312 ms before the bundled CLI entry (about 700 modules), 182 ms after (151-158 modules, p90 338). Measured by `node scripts/perf-harness.mjs --cli-cold-start`, which stops the CLI at its first Convex call (land: at the hand-off to its detached submitter) against an address that never resolves.",
+      "reason": "The lead's bar: an agent command is under 0.5 s of CPU before its first network call at the median (p90 under 0.7 s). CPU time, because wall time moves with machine load. tests/perf-harness.test.mjs counts the modules each of the four loads, so the graph growing back fails the landing check without a timing run."
+    },
+    {
+      "id": "cli-agent-land",
+      "area": "agent land --save: CPU before the first network call or hand-off",
+      "measuredBy": "perf-harness",
+      "metric": "cliAgentLandCpu",
+      "unit": "ms",
+      "max": 500,
+      "source": "Issue 7b2ae8d8, 2026-11-10, nforge agent ROOT land --save: CPU time (user+sys) before the first network call, 9 runs per build alternating at machine load 8-13 with a warm compile cache, as the installed launcher runs it. Median 597 ms before the bundled CLI entry (about 700 modules), 400 ms after (151-158 modules, p90 529). Measured by `node scripts/perf-harness.mjs --cli-cold-start`, which stops the CLI at its first Convex call (land: at the hand-off to its detached submitter) against an address that never resolves.",
+      "reason": "The lead's bar: an agent command is under 0.5 s of CPU before its first network call at the median (p90 under 0.7 s). CPU time, because wall time moves with machine load. tests/perf-harness.test.mjs counts the modules each of the four loads, so the graph growing back fails the landing check without a timing run."
+    },
+    {
       "id": "snapshot-added-unchanged",
       "area": "unsaved-work snapshot: added to a Forge command, no changed file",
       "measuredBy": "perf-harness",

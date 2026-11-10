@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdir, writeFile, rename, stat } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { budgets, bundleSummary, landingTiming, measurement, runtimeBuildHash } from './perf/report.mjs';
+import { agentCommands, firstNetworkSamples } from './perf/cli-first-network.mjs';
 
 export const usage = `Usage: node scripts/perf-harness.mjs [--out private-artifacts/perf/result.json]
   [--bundle hosted-web-dist] [--build-hash SOURCE_OR_DEPLOYED_HASH] [--samples 3]
@@ -19,7 +20,9 @@ Enable QA readiness markers with VITE_FORGE_PERF=1 in the measured frontend.
 Without --live, browser numbers are unrun. --cli-cold-start runs the built CLI's
 --version (node dist/cli-entry.js) --samples times and judges its CPU time (user+sys,
 which a loaded machine barely moves) against the cliColdStartCpu budget; it needs
-/usr/bin/time and is unrun otherwise. --snapshot-lane runs in a Lane checkout of a scratch project with
+/usr/bin/time and is unrun otherwise. The same flag runs agent status, planning, save and land the
+same number of times against an address that never resolves and judges the CPU each spends before
+its first network call (the cliAgent*Cpu budgets); nothing leaves the machine. --snapshot-lane runs in a Lane checkout of a scratch project with
 policy autoSnapshot on (never a real project's Lane) and judges what a snapshot adds to a command
 against the snapshotAdded* budgets; it needs a network and is unrun otherwise. Budgets live in
 src/speed-budgets.json.
@@ -165,6 +168,10 @@ export async function main(args) {
         [],
         'Pass --cli-cold-start to run the built CLI (needs npm run build:core).',
       );
+  for (const name of Object.keys(agentCommands))
+    record.measurements[name] = config['cli-cold-start']
+      ? measurement(name, firstNetworkSamples(config.samples, name))
+      : measurement(name, [], 'Pass --cli-cold-start to run the built CLI (needs npm run build:core).');
   const snapshotReason = 'Pass --snapshot-lane LANE_CHECKOUT (a scratch project with autoSnapshot on).';
   record.measurements.snapshotAddedUnchangedMs = measurement('snapshotAddedUnchangedMs', [], snapshotReason);
   record.measurements.snapshotAddedChangedMs = measurement('snapshotAddedChangedMs', [], snapshotReason);

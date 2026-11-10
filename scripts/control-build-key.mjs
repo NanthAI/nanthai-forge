@@ -9,8 +9,9 @@ import { join, posix, resolve } from 'node:path';
 
 // package.json "build:core": prepare-convex-api.mjs (writes only convex/_generated, outside dist),
 // tsc over tsconfig.json "include" (src/**/*.ts plus the scripts/*.d.mts typings src imports), then
-// build-edit-hook.mjs (vite bundle of src/agent-edit-hook.ts). The lockfile pins the compilers.
-// The vite bundle also inlines every module reachable from its entry, including scripts/*.mjs.
+// build-edit-hook.mjs (vite bundle of src/agent-edit-hook.ts) and build-cli-bundle.mjs (vite bundle of
+// src/cli-entry.ts). The lockfile pins the compilers. Each vite bundle also inlines every module
+// reachable from its entry, including scripts/*.mjs.
 export const controlBuildInputs = {
   files: [
     'package.json',
@@ -18,13 +19,14 @@ export const controlBuildInputs = {
     'tsconfig.json',
     'scripts/prepare-convex-api.mjs',
     'scripts/build-edit-hook.mjs',
+    'scripts/build-cli-bundle.mjs',
     'scripts/control-build-key.mjs',
   ],
   directories: [
     { path: 'src', match: /\.(?:ts|mts|cts|json)$/ },
     { path: 'scripts', match: /\.d\.mts$/, depth: 1 },
   ],
-  bundleEntry: 'src/agent-edit-hook.ts',
+  bundleEntries: ['src/agent-edit-hook.ts', 'src/cli-entry.ts'],
 };
 
 /** Files the bundle inlines: the entry plus its relative imports, followed transitively. */
@@ -72,7 +74,7 @@ export function controlBuildKey(root = '.', inputs = controlBuildInputs) {
   const paths = [
     ...inputs.files,
     ...inputs.directories.flatMap(directory => listed(base, directory)),
-    ...(inputs.bundleEntry ? bundled(base, inputs.bundleEntry) : []),
+    ...(inputs.bundleEntries ?? []).flatMap(entry => bundled(base, entry)),
   ];
   const hash = createHash('sha256');
   for (const path of [...new Set(paths)].sort()) {

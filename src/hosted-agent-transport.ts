@@ -65,12 +65,11 @@ import {
   unknownActionError,
 } from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
-import { checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
+import { checkpointNudge, unsavedMinutes } from './agent-nudge.js';
 import { composedLanes, landGatesArgument } from './hosted-land-gate-client.js';
 import { preflightResult } from './hosted-land-gates.js';
 import type { LandGateEntry } from './hosted-land-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
-import { preflightPlan, readPreflightReceipt, runPreflight } from './agent-preflight.js';
 import { rememberLandingPaths } from './preflight-learned.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { deltaApplyPending, finishPendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
@@ -1023,6 +1022,8 @@ export class HostedAgentTransport {
               : read;
           // The paths this landing carries, so its check failure can teach the next preflight.
           if (advice.changedPaths?.complete) rememberLandingPaths(root, laneId, advice.changedPaths.paths);
+          // The gates read the preflight planner and the test-selection graph; only a finish loads them.
+          const { finishGates } = await import('./agent-default-gates.js');
           const gates = finishGates(
             root,
             capabilities.agentDefaults,
@@ -1598,6 +1599,7 @@ export class HostedAgentTransport {
       'HOSTED_CHECKOUT_REQUIRED',
       'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
     );
+    const { preflightPlan, readPreflightReceipt, runPreflight } = await import('./agent-preflight.js');
     const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
     invariant(
       !command.retry || stopped?.length,
