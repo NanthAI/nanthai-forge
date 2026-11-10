@@ -1145,3 +1145,41 @@ test('SM-E forge/verify: a final status that never reached GitHub is recorded, s
   assert.equal(queueRow(f).verifyFailedId, undefined);
   assert.notEqual((await mirrorStatus(f)).status, 'failed');
 });
+
+test('ci-status: mirror commit wakes indexed waiters in bounded pages and replay adds no publication', async () => {
+  const f = fixture();
+  const first = f.receipt();
+  await f.enqueue(first);
+  const job = [...f.tables.projectGithubMirrorJobs.values()][0];
+  job.ciWaiters = true;
+  for (let i = 0; i < 19; i++)
+    f.insert('projectHostedCheckRuns', {
+      projectId: f.projectId,
+      runId: `ci-${i}`,
+      candidateId: `candidate-${i}`,
+      status: i === 18 ? 'cancelled' : 'queued',
+      ciMirrorJob: job._id,
+      value: 'x'.repeat(128 * 1024),
+    });
+  const input = {
+    jobId: job._id,
+    step: 0,
+    cursor: null,
+    mapping: JSON.stringify({ ...mirrorFixture().root, acceptanceId: first.id, state: first.candidate.head }),
+  };
+  await f.run('commit-with-ci-waiters', store.commit._handler, input);
+  const wake = await import(moduleUrl('../convex/projectCiStatusMirror.ts'));
+  for (let i = 0; i < 2; i++) await f.run('wake-page', wake.wake._handler, { jobId: job._id });
+  assert.equal(f.scheduled.filter(s => s.name === 'projectCiStatusPublish:publish').length, 18);
+  assert.equal(f.scheduled.filter(s => s.name === 'projectCiStatusMirror:wake').length, 2);
+  assert([...f.tables.projectHostedCheckRuns.values()].every(row => row.ciMirrorJob === undefined));
+  const calls = f.scheduled.length;
+  await f.run('replay-with-ci-waiters', store.commit._handler, input);
+  await f.run('wake-drained', wake.wake._handler, { jobId: job._id });
+  assert.equal(f.scheduled.length, calls);
+  for (const count of f.counts.filter(c => ['commit-with-ci-waiters', 'wake-page'].includes(c.name)))
+    assert(
+      (count.readBytesByTable.projectHostedCheckRuns ?? 0) < 1100 * 1024,
+      'each page reads at most eight 128 KiB legacy run rows, not the waiting cohort',
+    );
+});

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { wakeCiMirrorWaiters } from './projectCiStatusMirror';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
@@ -175,6 +176,7 @@ export const commit = internalMutation({
         ...(outcome?.note ? { inbound: canonicalPayload({ ...outcome, note: false }) } : {}),
       });
       if (next[0]) await scheduleMirror(ctx, next[0]);
+      if (job.ciWaiters) await wakeCiMirrorWaiters(ctx, job._id);
     } else {
       invariant(input.cursor, 'SOURCE_UNAVAILABLE', 'Mirror continuation is unavailable.');
       await ctx.db.patch(job._id, {
@@ -261,6 +263,7 @@ export const failed = internalMutation({
       nextAttemptAt: delay === null ? undefined : Date.now() + delay,
     });
     if (delay !== null) await scheduleMirror(ctx, { _id: job._id, step }, delay);
+    else if (job.ciWaiters) await wakeCiMirrorWaiters(ctx, job._id);
     return null;
   },
 });

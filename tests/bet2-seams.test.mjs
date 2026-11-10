@@ -121,6 +121,7 @@ test('old check and landing documents remain valid; additive metadata is validat
   assert.deepEqual(names, [
     'by_project',
     'by_project_and_metrics_projection',
+    'by_ci_mirror_job',
     'by_run',
     'by_project_and_run',
     'by_project_and_verdict',

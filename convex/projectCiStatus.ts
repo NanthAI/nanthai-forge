@@ -144,10 +144,19 @@ export const prepare = internalMutation({
       .query('projectGithubMirrors')
       .withIndex('by_project', q => q.eq('projectId', input.projectId))
       .unique();
+    const repository = ci.ci.repository;
+    let waitingForMirror = false;
     const base =
       mirror && mirror.repository.toLowerCase() === ci.ci.repository.toLowerCase()
-        ? await mirroredBase(ctx, input.projectId, run.candidate.base, mirror.mapping)
+        ? await mirroredBase(ctx, input.projectId, run.candidate.base, mirror.mapping, async job => {
+            if (job.repository.toLowerCase() !== repository.toLowerCase()) return false;
+            if (row.ciMirrorJob !== job._id) await ctx.db.patch(row._id, { ciMirrorJob: job._id });
+            if (!job.ciWaiters) await ctx.db.patch(job._id, { ciWaiters: true });
+            waitingForMirror = true;
+            return true;
+          })
         : null;
+    if (!base && waitingForMirror) return null;
     if (!base) {
       await settle(
         ctx,

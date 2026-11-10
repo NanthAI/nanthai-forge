@@ -33,6 +33,8 @@ export const githubMirrorTables = {
       v.literal('done'),
     ),
     state: v.string(),
+    /** Only lagging CI checks add a wake on completion; healthy mirrors do no extra reads. */
+    ciWaiters: v.optional(v.literal(true)),
     seed: v.optional(v.string()),
     step: v.number(),
     cursor: v.union(v.string(), v.null()),

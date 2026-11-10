@@ -123,6 +123,7 @@ export async function mirroredBase(
   projectId: Id<'hostedProjects'>,
   base: { head: string; receiptId: string },
   mapping: string | null,
+  onPending?: (job: Doc<'projectGithubMirrorJobs'>) => Promise<boolean>,
 ) {
   const lane = { baseHead: base.head, baseReceiptId: base.receiptId };
   const parse = (mapping: string | null | undefined) => {
@@ -144,7 +145,13 @@ export async function mirroredBase(
   ];
   let value = null;
   for (const job of jobs) if (!value && job.status === 'done' && !job.inbound) value = parse(job.mapping);
-  return value ?? parse(mapping);
+  const baseCommit = value ?? parse(mapping);
+  if (!baseCommit && onPending) {
+    for (const job of jobs)
+      if (!job.inbound && job.state === base.head && ['queued', 'running', 'retrying'].includes(job.status))
+        if (await onPending(job)) break;
+  }
+  return baseCommit;
 }
 /** Without a mirror, main's Git commits are the imported commit and the commits Forge built for
  * its landings (Issue 3bd4a8e9): the newest Forge pack's tip (with its tree listing) needs no

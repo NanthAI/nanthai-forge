@@ -200,7 +200,7 @@ const { getFunctionName } = await import('convex/server');
 const ciStatus = await import(moduleUrl('../convex/projectCiStatus.ts'));
 const webhooks = await import(moduleUrl('../convex/projectHostedActionsWebhook.ts'));
 
-async function providerFixture(t, { creator } = {}) {
+async function providerFixture(t, { creator, prepare = true } = {}) {
   const s = await checksFixture(),
     scheduled = [];
   s.decorateContext(ctx => {
@@ -256,6 +256,7 @@ async function providerFixture(t, { creator } = {}) {
     }),
   );
   const id = { projectId: s.projectId, runId: run.id };
+  if (!prepare) return { s, run, id, scheduled, main, configuration };
   if (creator) {
     const head = [...s.tables.projectHostedRecordHeads.values()].find(
       row => row.kind === 'candidate' && row.key === run.request.candidateId,
@@ -477,4 +478,76 @@ test('ci-status: Candidate LFS objects upload before its ref exists, and upload 
       assert.equal(f.remote(), f.root.commit, 'Candidate publication preserves main');
     }
   }
+});
+
+test('ci-status: mirror lag resumes the same check only when its exact base publication settles, without polling', async t => {
+  const { s, run, id, scheduled, main } = await providerFixture(t, { prepare: false });
+  const mirror = [...s.tables.projectGithubMirrors.values()][0];
+  mirror.mapping = null;
+  const jobId = s.insert('projectGithubMirrorJobs', {
+    projectId: s.projectId,
+    repository: 'acme/app',
+    receiptId: run.candidate.base.receiptId,
+    sequence: 1,
+    authorityEpoch: 1,
+    status: 'running',
+    state: run.candidate.base.head,
+    step: 0,
+    cursor: null,
+  });
+  mirror.activeId = jobId;
+  const before = scheduled.length;
+  assert.equal(await s.transaction('wait-for-mirror', ciStatus.prepare, id), null);
+  assert.equal((await s.status(run.id)).status, 'queued');
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  assert.equal(row.ciMirrorJob, jobId);
+  assert.equal(s.tables.projectGithubMirrorJobs.get(jobId).ciWaiters, true);
+  assert.equal(scheduled.length, before, 'waiting schedules no timer or polling call');
+  // Replayed prepare remains on the same publication and starts no second run.
+  assert.equal(await s.transaction('wait-for-mirror-replay', ciStatus.prepare, id), null);
+  const wakes = await import(moduleUrl('../convex/projectCiStatusMirror.ts'));
+  await s.transaction('early-wake', wakes.wake, { jobId });
+  assert.equal(scheduled.length, before, 'an unsettled mirror cannot wake it');
+  const job = s.tables.projectGithubMirrorJobs.get(jobId);
+  job.status = 'done';
+  job.mapping = JSON.stringify(main);
+  await s.transaction('mirror-done', wakes.wake, { jobId });
+  assert.equal(s.tables.projectHostedCheckRuns.get(row._id).ciMirrorJob, undefined);
+  assert.equal(scheduled.length, before + 1);
+  assert.deepEqual(scheduled.at(-1), { name: 'projectCiStatusPublish:publish', input: id });
+  await s.transaction('mirror-done-replay', wakes.wake, { jobId });
+  assert.equal(scheduled.length, before + 1, 'duplicate completion has no work left');
+  const seed = JSON.parse(await s.transaction('retry-same-check', ciStatus.prepare, id));
+  assert.equal(seed.binding.commit, main.commit);
+  assert.equal(seed.branch, candidateBranch(run.id));
+});
+
+test('ci-status: a terminal mirror failure settles its waiting check and cancelled waiters never publish', async t => {
+  const { s, run, id, scheduled } = await providerFixture(t, { prepare: false });
+  const mirror = [...s.tables.projectGithubMirrors.values()][0];
+  mirror.mapping = null;
+  const jobId = s.insert('projectGithubMirrorJobs', {
+    projectId: s.projectId,
+    repository: 'acme/app',
+    receiptId: run.candidate.base.receiptId,
+    sequence: 1,
+    authorityEpoch: 1,
+    status: 'retrying',
+    state: run.candidate.base.head,
+    step: 0,
+    cursor: null,
+  });
+  await s.transaction('wait-for-failing-mirror', ciStatus.prepare, id);
+  const wakes = await import(moduleUrl('../convex/projectCiStatusMirror.ts'));
+  s.tables.projectGithubMirrorJobs.get(jobId).status = 'failed';
+  await s.transaction('mirror-failed', wakes.wake, { jobId });
+  assert.equal(await s.transaction('retry-failed-mirror', ciStatus.prepare, id), null);
+  assert.equal((await s.status(run.id)).status, 'runner-unavailable');
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  row.ciMirrorJob = jobId;
+  row.status = 'cancelled';
+  const before = scheduled.length;
+  await s.transaction('cancelled-waiter', wakes.wake, { jobId });
+  assert.equal(s.tables.projectHostedCheckRuns.get(row._id).ciMirrorJob, undefined);
+  assert.equal(scheduled.length, before);
 });

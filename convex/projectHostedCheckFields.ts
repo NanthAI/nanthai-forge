@@ -53,6 +53,8 @@ export const hostedCheckTables = {
     runId: v.string(),
     candidateId: v.string(),
     verdictKey: v.optional(v.string()),
+    /** The exact mirror publication this CI run waits for; indexed, never polled. */
+    ciMirrorJob: v.optional(v.id('projectGithubMirrorJobs')),
     reportParts: v.optional(v.number()),
     reportDigest: v.optional(v.string()),
     reportFlakes: v.optional(v.string()),
@@ -65,6 +67,7 @@ export const hostedCheckTables = {
   })
     .index('by_project', ['projectId'])
     .index('by_project_and_metrics_projection', ['projectId', 'metricsProjected'])
+    .index('by_ci_mirror_job', ['ciMirrorJob'])
     .index('by_run', ['runId'])
     .index('by_project_and_run', ['projectId', 'runId'])
     .index('by_project_and_verdict', ['projectId', 'verdictKey'])

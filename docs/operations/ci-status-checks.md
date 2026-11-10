@@ -62,8 +62,9 @@ author and requester are the owner or a contributor. An outside contributor's Ca
 - GitHub Actions publishes. GitLab CI is verified by the contract test (its pipeline record read
   through the GitLab API decides; its webhook is only a wake) but cannot publish yet, so the
   setting refuses it.
-- When main's commit is not on the mirror yet, the check settles `runner-unavailable`; check
-  again once the mirror is synced.
+- When the Candidate base has a queued or running mirror publication, the same check waits for
+  that exact publication and retries automatically when it completes, without polling. A terminal
+  mirror failure settles the check visibly; a base with no publication still reports unavailable.
 - A Candidate over eight 100-object windows fails visibly. Git LFS paths publish pointers and upload
   missing objects through the mirror's existing LFS transport before creating the Candidate ref.
 - Candidate branches stay on the mirror; delete them on GitHub when you no longer need them.
