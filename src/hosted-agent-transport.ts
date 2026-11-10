@@ -142,6 +142,8 @@ import { openLaneRoot } from './hosted-lane-location.js';
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
 /** Actions that capture the working files themselves (a save) or snapshot them as part of their
  * own move (`snapshots`) take no snapshot first. */
+/** Actions whose first main read follows capability discovery at once (capabilities-main). */
+const mainFirstActions = new Set(['start', 'sync', 'compose']);
 const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'compose', 'snapshots']);
 /** Actions that may rewrite or remove working files: their snapshot is taken first, in this process,
  * whatever the timed interval says. Every other command hands a timed snapshot to a short-lived
@@ -981,6 +983,7 @@ export class HostedAgentTransport {
       this.onOperation?.(action, journal.operationId);
       // The finish gate's judgement of the checkout's saved head, sent again with the landing.
       let gatedLane: LandGateEntry | undefined;
+      let carriedMain = mainFirstActions.has(action) ? capabilities.main : undefined;
       const session: HostedAgentSession = {
         root,
         address: this.address,
@@ -998,10 +1001,13 @@ export class HostedAgentTransport {
         mutation: this.mutation.bind(this),
         action: this.action.bind(this),
         main: async () => {
-          const main = parseHostedResponse(
-            hostedMainV2Schema,
-            await this.query('projectHostedChannels:current', {}),
-          );
+          // A start, sync or compose reads main first: the capability read of this same command
+          // already carries it (capabilities-main), once. Later reads, and other actions, read current.
+          const taken = carriedMain;
+          carriedMain = undefined;
+          const main =
+            taken ??
+            parseHostedResponse(hostedMainV2Schema, await this.query('projectHostedChannels:current', {}));
           invariant(
             main.projectId === this.address.projectId,
             'PROJECT_UNAVAILABLE',

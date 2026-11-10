@@ -5,6 +5,7 @@ import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
 import { channelRow } from './projectHostedChannels';
+import { hostedMainV2Schema } from '../src/hosted-main';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import {
   hostedAgentActions,
@@ -36,6 +37,21 @@ async function settledSave(
   } catch {
     return { operationId, terminal: null };
   }
+}
+/** Main exactly as projectHostedChannels:current returns it, only where that read would succeed. */
+function carriedMain(
+  selection: string | undefined,
+  projectId: Id<'hostedProjects'>,
+  authority: ReturnType<typeof sourceAuthority>,
+) {
+  const main = selection ? hostedMainV2Schema.safeParse(JSON.parse(selection)) : null;
+  return main?.success &&
+    main.data.projectId === projectId &&
+    authority.mode !== 'native-owner' &&
+    authority.mode === main.data.authority.mode &&
+    authority.epoch === main.data.authority.epoch
+    ? { main: main.data }
+    : {};
 }
 export const capabilities = query({
   args: {
@@ -92,8 +108,13 @@ export const capabilities = query({
         'BAD_ARGUMENT',
         `Name at most ${MAX_CONTRACT_FEATURES} contract features.`,
       );
+      // One channel read serves mainReady and, for capabilities-main, the main a command reads next.
+      const channel = await channelRow(ctx, projectId);
       return canonicalPayload(
         hostedAgentCapabilitiesSchema.parse({
+          ...(features?.includes('capabilities-main')
+            ? carriedMain(channel?.selection, projectId, authority)
+            : {}),
           ...(landingMessageVersion === 1 ? { landingMessageVersion: 1 } : {}),
           ...(features ? { features: advertisedFeatures(features) } : {}),
           // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.
@@ -137,7 +158,7 @@ export const capabilities = query({
                     (!(hostedAgentPlanningActions as readonly string[]).includes(action) ||
                       planningVersion === 1),
                 ),
-          mainReady: (await channelRow(ctx, projectId)) !== null,
+          mainReady: channel !== null,
           sourceWorkerConfigured: (process.env.FORGE_SOURCE_PROVIDER ?? 'convex') === 'convex',
           checkCallbackConfigured: Boolean(process.env.FORGE_HOSTED_CHECK_KEY_ID),
           nativeOwnerRequired: false,

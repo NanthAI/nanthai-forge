@@ -339,6 +339,28 @@ async function observeHostedSubmissionsOnce(
       cursor: cursor.encode(),
     });
   };
+  // The latest value of each operation's live page subscription. A wake drains from it instead of
+  // reading the same page again (686ecdde: one call per wake, not two), when it is complete from the
+  // cursor on; an older, partial or resnapshot value falls back to the read.
+  const live = new Map<string, unknown>();
+  const livePage = (operationId: string, nextVersion: number) => {
+    const page = live.get(operationId) as
+      | { isDone?: unknown; resnapshot?: unknown; nextVersion?: unknown; events?: unknown }
+      | undefined;
+    if (
+      !page ||
+      page.isDone !== true ||
+      page.resnapshot !== false ||
+      typeof page.nextVersion !== 'number' ||
+      page.nextVersion < nextVersion ||
+      !Array.isArray(page.events)
+    )
+      return undefined;
+    const version = (event: unknown) =>
+      (event as { submission?: { version?: unknown } } | null)?.submission?.version;
+    if (!page.events.every(event => typeof version(event) === 'number')) return undefined;
+    return { ...page, events: page.events.filter(event => (version(event) as number) >= nextVersion) };
+  };
   const drain = async (operationId: string) => {
     for (;;) {
       if (stopped || signal.aborted) return;
@@ -346,7 +368,8 @@ async function observeHostedSubmissionsOnce(
       const read = parseHostedOutcome(
         pageSchema,
         stableSubmissionPageSchema,
-        decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
+        livePage(operationId, nextVersion) ??
+          decode(await transport.query('projectHostedFinishObserve:page', { operationId, nextVersion })),
       );
       if (read.skew) skew = read.skew;
       // The stable read carries every other field as sent; authority keeps its normal form so a
@@ -504,6 +527,19 @@ async function observeHostedSubmissionsOnce(
       if (boardWait) waker = boardWaker(boardWait, delivery => resolve(result('message', delivery)));
       // Board-only changes of the page value (a note arrived) wake the waker, never a page drain.
       let pageKey: string | undefined;
+      const offer = (operationId: string, value: unknown) => {
+        try {
+          const decoded = decode(value);
+          // The board note is the waker's; the drained page is the reply a read would return.
+          if (decoded && typeof decoded === 'object') {
+            const page = { ...(decoded as Record<string, unknown>) };
+            delete page.board;
+            live.set(operationId, page);
+          }
+        } catch {
+          /* Unreadable: the next drain reads the page itself. */
+        }
+      };
       const update = (value: unknown) => {
         const decoded = waker ? decode(value) : undefined;
         if (waker && decoded && typeof decoded === 'object') {
@@ -529,7 +565,15 @@ async function observeHostedSubmissionsOnce(
                   }
                 : {}),
             },
-            boardWait && index === 0 ? update : () => refresh(),
+            boardWait && index === 0
+              ? value => {
+                  offer(operationId, value);
+                  update(value);
+                }
+              : value => {
+                  offer(operationId, value);
+                  refresh();
+                },
             error => reject(hostedActionError(error, 'submission observation')),
           ),
         );

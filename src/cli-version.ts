@@ -229,7 +229,13 @@ export async function cliStartup(
       expectedCurrent === null ||
       (existsSync(rollbackPath) && JSON.parse(readFileSync(rollbackPath, 'utf8')).head === expectedCurrent);
     if (!restoreMain && inheritedVerification(installed, installation)) return true;
-    const released = await check(installed, async () => (selected = await source.current()));
+    // An agent command in the release project reads main on its early capability read: no second read.
+    const { carriedMain } = await import('./hosted-capabilities-carried-main.js');
+    const released = await check(
+      installed,
+      async () =>
+        (selected = (await carriedMain(address.url, address.projectId)) ?? (await source.current())),
+    );
     if (released === installed && !restoreMain) return true;
     // A build the canary refused (or an owner rolled back) never strands anyone: reads and writes
     // keep running on the working build, with one notice line, until the back-off ends or main moves.

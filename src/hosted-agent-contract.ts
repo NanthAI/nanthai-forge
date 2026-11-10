@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { landingMessageSchema } from './landing-message.js';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
+import { hostedMainV2Schema } from './hosted-main.js';
 import { revertTargetSchema } from './hosted-sync.js';
 import { saveExpectedSchema } from './hosted-save.js';
 import { snapshotsCommandSchema } from './lane-snapshot-contract.js';
@@ -108,6 +109,9 @@ export const hostedAgentCapabilitiesSchema = z
     authority: sourceAuthoritySchema,
     actions: z.array(z.enum(hostedAgentActions)),
     mainReady: z.boolean(),
+    /** Feature capabilities-main: hosted main as projectHostedChannels:current returns it, read with
+     * this reply; absent when main is unseeded or its authority differs from the project's. */
+    main: hostedMainV2Schema.optional(),
     sourceWorkerConfigured: z.boolean(),
     checkCallbackConfigured: z.boolean(),
     nativeOwnerRequired: z.literal(false),

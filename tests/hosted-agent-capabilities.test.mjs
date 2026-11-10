@@ -141,3 +141,72 @@ test('contract features: the server names the asked features its code implements
   await assert.rejects(ask(Array.from({ length: 65 }, (_, index) => `f${index}`)), code('BAD_ARGUMENT'));
   assert(s.counts.every(count => count.writes === 0));
 });
+test('capabilities-main: discovery carries main exactly as projectHostedChannels:current, from its one channel read (686ecdde)', async () => {
+  const s = setup();
+  const { current } = await import(moduleUrl('../convex/projectHostedChannels.ts'));
+  const ask = features =>
+    s.call('capabilities', capabilities, { projectId: s.projectId, features }, 'owner').then(JSON.parse);
+  assert.equal('main' in (await ask(['capabilities-main'])), false, 'unseeded main is not carried');
+  const main = {
+    schema: 2,
+    projectId: s.projectId,
+    snapshotId: 'snapshot',
+    sourceRevision: 3,
+    authority: { mode: 'server', epoch: 2 },
+    channel: 'main',
+    head: 'a'.repeat(64),
+    receipt: { id: 'receipt', kind: 'server', previousHead: null, previousReceiptId: null },
+  };
+  const channel = s.insert('projectHostedChannels', {
+    projectId: s.projectId,
+    name: 'main',
+    selection: JSON.stringify(main),
+    operationId: 'synthetic',
+  });
+  s.counts.length = 0;
+  const carried = await ask(['capabilities-main']);
+  const read = JSON.parse(await s.call('current', current, { projectId: s.projectId }, 'owner'));
+  assert.deepEqual(carried.main, read);
+  assert.equal(carried.mainReady, true);
+  // The same documents as discovery without the feature: the channel row is read once.
+  assert(s.counts[0].documents <= 3, `${s.counts[0].documents} documents`);
+  // Only callers that ask see it; a main whose authority differs (current refuses it) is not carried.
+  assert.equal('main' in (await s.read('owner')), false);
+  s.patch('projectHostedChannels', channel, {
+    selection: JSON.stringify({ ...main, authority: { mode: 'server', epoch: 1 } }),
+  });
+  assert.equal('main' in (await ask(['capabilities-main'])), false);
+  await assert.rejects(
+    s.call('current', current, { projectId: s.projectId }, 'owner'),
+    code('SOURCE_AUTHORITY_CHANGED'),
+  );
+});
+test('capabilities-main: the release check takes main only from this command’s read of the same project', async () => {
+  const { noteEarlyCapabilities, carriedMain } = await import('../dist/hosted-capabilities-carried-main.js');
+  const main = {
+    schema: 2,
+    projectId: 'carried-project',
+    snapshotId: 'snapshot',
+    sourceRevision: 1,
+    authority: { mode: 'server', epoch: 1 },
+    channel: 'main',
+    head: 'b'.repeat(64),
+    receipt: { id: 'receipt', kind: 'server', previousHead: null, previousReceiptId: null },
+  };
+  assert.equal(await carriedMain('https://carried.invalid', 'carried-project'), null, 'no read: no main');
+  noteEarlyCapabilities('https://carried.invalid/', 'carried-project', Promise.resolve({ main }));
+  assert.deepEqual(await carriedMain('https://carried.invalid', 'carried-project'), main);
+  assert.equal(await carriedMain('https://other.invalid', 'carried-project'), null);
+  assert.equal(await carriedMain('https://carried.invalid', 'another-project'), null);
+  // An older server (no main), a failed read or a main of another project: the check reads current.
+  noteEarlyCapabilities('https://carried.invalid', 'carried-project', Promise.resolve({ mainReady: true }));
+  assert.equal(await carriedMain('https://carried.invalid', 'carried-project'), null);
+  noteEarlyCapabilities('https://carried.invalid', 'carried-project', Promise.reject(new Error('offline')));
+  assert.equal(await carriedMain('https://carried.invalid', 'carried-project'), null);
+  noteEarlyCapabilities(
+    'https://carried.invalid',
+    'carried-project',
+    Promise.resolve({ main: { ...main, projectId: 'another-project' } }),
+  );
+  assert.equal(await carriedMain('https://carried.invalid', 'carried-project'), null);
+});

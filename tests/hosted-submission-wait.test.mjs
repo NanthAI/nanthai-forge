@@ -115,6 +115,14 @@ async function fixture() {
     wake: () => {
       for (const s of subscriptions) s.next(null);
     },
+    /** A live delivery as Convex sends one transition: every subscribed page's current value, together. */
+    deliver: async () => {
+      const live = [...subscriptions];
+      const values = await Promise.all(
+        live.map(s => f.call('landingWaitLive', observe.page, { ...s.args, projectId: f.projectId }, actor)),
+      );
+      live.forEach((s, index) => s.next(values[index]));
+    },
     fail: error => {
       for (const s of subscriptions) s.fail(error);
     },
@@ -1163,4 +1171,43 @@ test('a wait across a server deploy that changes the landed reply shape returns 
     unknown.result.message,
     /nforge agent '\/synthetic' landings '\{"url":"https:\/\/fixture\.invalid"/,
   );
+});
+
+test('a live page delivery drains from its value: one call per wake, not a second page read (686ecdde)', async () => {
+  const s = await fixture(),
+    a = await s.start(),
+    b = await s.start();
+  const waiting = s.wait({ operationIds: [a.request.operationId, b.request.operationId] });
+  await turn();
+  // Before the subscription: one drain per operation, then the register-then-reread drain.
+  const reads = s.counts().reads;
+  await s.update(a.state.id, 'checking');
+  await s.deliver();
+  await turn();
+  await s.update(a.state.id, 'landed');
+  await s.deliver();
+  await turn();
+  assert.equal(s.counts().reads, reads, 'delivered pages are drained without a page read');
+  await s.update(b.state.id, 'landed');
+  await s.deliver();
+  const result = await waiting;
+  assert.equal(result.result.status, 'terminal');
+  assert.equal(result.result.successful, true);
+  assert.equal(s.counts().reads, reads);
+  // Every version is published once, as a read-driven drain publishes it.
+  assert.deepEqual(
+    s.events.filter(e => e.operationId === a.request.operationId).map(e => e.version),
+    [0, 1, 2],
+  );
+  // A delivery older than the cursor (or a bare wake) falls back to the read.
+  const stale = await s.start();
+  const again = s.wait({ operationIds: [stale.request.operationId] });
+  await turn();
+  const before = s.counts().reads;
+  s.wake();
+  await turn();
+  assert.equal(s.counts().reads, before + 1);
+  await s.update(stale.state.id, 'landed');
+  await s.deliver();
+  assert.equal((await again).result.status, 'terminal');
 });

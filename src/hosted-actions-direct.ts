@@ -18,6 +18,10 @@ import { contractTestPath } from './intent-test-contract.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 export const directSourceWindow = 400;
+/** Source windows hold each object once, sorted by digest. The object catalog keeps digests in sorted
+ * rows (~48 KB each), so a sorted window reads its few neighbouring rows, where a window in path
+ * order reads up to one row per object (686ecdde: up to 400 rows, ~19 MB, per resolve call). */
+export const sourceWindowOrder = (digests: readonly string[]) => [...new Set(digests)].sort();
 export const directLogBytes = 64 * 1024;
 export const directLogSchema = z
   .object({

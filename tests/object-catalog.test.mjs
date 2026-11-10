@@ -107,6 +107,33 @@ test('a request reads each catalog row once; sorted pages touch one or two rows'
   assert.deepEqual(rows[97].recipe, objects[97].recipe);
 });
 
+test('Actions source windows in digest order read neighbouring catalog rows, not one per object (686ecdde)', async () => {
+  const { directSourceWindow, sourceWindowOrder } = await import('../dist/hosted-actions-direct.js');
+  // A catalog-backed tree in path order (sha order is unrelated), with one blob at two paths.
+  const tree = Array.from({ length: 20000 }, (_, i) => ({ digest: hex(`tree-${i}`), size: i }));
+  const blobs = [...tree.map(o => o.digest), tree[7].digest];
+  const pages = find.catalogPages(tree).length;
+  const windows = async ordered => {
+    const run = fixture(tree);
+    for (let at = 0; at < ordered.length; at += directSourceWindow) {
+      const rows = await find.findObjects(
+        { ...run.s.ctx },
+        'project',
+        ordered.slice(at, at + directSourceWindow),
+      );
+      assert(rows.every(Boolean));
+    }
+    return run.reads();
+  };
+  const ordered = sourceWindowOrder(blobs);
+  assert.equal(ordered.length, tree.length, 'each object once');
+  const sorted = await windows(ordered),
+    pathOrder = await windows(blobs);
+  const calls = Math.ceil(ordered.length / directSourceWindow);
+  assert(sorted <= pages + calls, `${sorted} catalog rows read in ${calls} sorted windows (${pages} rows)`);
+  assert(pathOrder > 10 * sorted, `path order reads ${pathOrder} rows, sorted ${sorted}`);
+});
+
 test('catalog-backed generations resolve sourceBlobs from the catalog, others do not', async () => {
   const { s } = fixture(objects);
   s.tables.projectWorkGenerations.set('catalogued', {

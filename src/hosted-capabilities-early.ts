@@ -6,6 +6,7 @@ import { hostedContractFeatures } from './hosted-contract-features.js';
 import { hostedAgentPlanningActions, type HostedAgentAddress } from './hosted-agent-contract.js';
 import { backgroundSaveOperation } from './hosted-save-pending.js';
 import { readHostedMainSelection } from './hosted-main-marker.js';
+import { noteEarlyCapabilities } from './hosted-capabilities-carried-main.js';
 
 /** The capability discovery request of an agent command (one read). `settling` names this
  * checkout's save that returned before its settle (fea47345 C); the reply carries its outcome. */
@@ -75,6 +76,8 @@ export function startEarlyCapabilities(root: string, address: HostedAgentAddress
     .then(value => (typeof value === 'string' ? JSON.parse(value) : value));
   call.catch(() => undefined);
   started.set(key(address, args), call);
+  // The release check reads main from this reply when it checks the same project (capabilities-main).
+  noteEarlyCapabilities(address.url, address.projectId, call);
 }
 
 /** The early read of exactly this request, at most once. */

@@ -4,7 +4,7 @@ import { stat, lstat, rm, mkdir, copyFile, writeFile, readlink } from 'node:fs/p
 import { join } from 'node:path';
 import { fileDigest, createSourcePack } from './source-pack-archive.js';
 import { refreshSourcePack } from './source-pack.js';
-import { directSourceWindow } from './hosted-actions-direct.js';
+import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
 import type { ActionsJobClient } from './hosted-actions-job-client.js';
 import type { materializeActionsSource } from './hosted-actions-job-source.js';
 import type { NativeState } from './native-state-format.js';
@@ -39,8 +39,9 @@ export async function refreshActionsSourcePack(
         missing.push(file.blob);
       }
     }
-    for (let start = 0; start < missing.length; start += directSourceWindow) {
-      const hashes = missing.slice(start, start + directSourceWindow);
+    const objects = sourceWindowOrder(missing);
+    for (let start = 0; start < objects.length; start += directSourceWindow) {
+      const hashes = objects.slice(start, start + directSourceWindow);
       await source.connection.resolve(hashes);
       await source.connection.prepareRecipes(hashes);
       await source.reader.resolveMany(hashes);

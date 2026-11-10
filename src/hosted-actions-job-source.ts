@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
 import { parseNativeState, type NativeState } from './native-state-format.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
-import { directSourceWindow } from './hosted-actions-direct.js';
+import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';
 import { digest } from './hash.js';
 import { invariant, type ForgeError } from './errors.js';
@@ -142,22 +142,24 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
         'The pack job publishes one after this plan; repair now with: nforge x ROOT source-pack',
     );
   const download = async () => {
+    // Each object once, in digest order: a window then reads a few neighbouring object catalog rows
+    // instead of up to one per object (686ecdde). Files are written from state.files below.
+    const objects = sourceWindowOrder(selected.map(file => file.blob));
     let next = 0,
       completed = 0,
       failed = false;
     const worker = async () => {
       try {
-        while (!failed && next < selected.length) {
+        while (!failed && next < objects.length) {
           const start = next;
           next += directSourceWindow;
-          const page = selected.slice(start, start + directSourceWindow),
-            hashes = page.map(file => file.blob);
+          const hashes = objects.slice(start, start + directSourceWindow);
           await resolve(hashes);
           await prepareRecipes(hashes);
           await reader.resolveMany(hashes);
-          completed += page.length;
+          completed += hashes.length;
           console.log(
-            `Actions source: ${completed}/${selected.length} files, ${reader.metrics.downloadedBytes} bytes, ${((Date.now() - started) / 1000).toFixed(1)}s`,
+            `Actions source: ${completed}/${objects.length} objects, ${reader.metrics.downloadedBytes} bytes, ${((Date.now() - started) / 1000).toFixed(1)}s`,
           );
         }
       } catch (error) {

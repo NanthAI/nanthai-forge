@@ -121,6 +121,10 @@ export const hostedContractFeatures = [
    * call, the item version is its only check (ITEM_CHANGED). Without it the CLI reads the Work
    * revision and calls the revision-checked action, retrying when an unrelated write moved it. */
   'planning-put-mutation',
+  /** Capabilities carry `main`, the selection projectHostedChannels:current returns, from the channel
+   * row the read already loads (686ecdde). The CLI's release check and a command's first main read
+   * take it instead of their own current calls. Without it the CLI reads current as before. */
+  'capabilities-main',
 ] as const;
 export type HostedContractFeature = (typeof hostedContractFeatures)[number];
 
