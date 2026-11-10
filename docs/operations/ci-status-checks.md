@@ -69,3 +69,53 @@ author and requester are the owner or a contributor. An outside contributor's Ca
 
 Code: `src/ci-status.ts` (adapters and verdict), `convex/projectCiStatus.ts` (run, events),
 `convex/projectCiStatusPublish.ts` (branch publish), `tests/ci-status-contract.test.mjs`.
+
+## Optional proof on landing
+
+Run `nforge x ROOT set-policy '{"acceptance":{"proofOnLanding":true}}'` to retain optional
+proof evidence. It defaults off. This field is explicitly exempt from owner-gate classification:
+it adds evidence, changes no acceptance rule, and never invalidates a queued landing's policy pin.
+Proof never passes or fails the provider check; a project without a reporting step has no proof.
+
+Any CI can submit the provider-neutral report after comparing the same head tests against base
+and head. Supply the exact Forge run ID, Candidate State head and bound provider execution ID.
+With an existing Forge project credential in your CI secret store, the step can use the Convex
+client (the credential must already have project write access):
+
+```js
+import { ConvexHttpClient } from 'convex/browser';
+import { makeFunctionReference } from 'convex/server';
+const client = new ConvexHttpClient(process.env.FORGE_CONVEX_URL);
+client.setAuth(process.env.FORGE_CI_TOKEN);
+await client.mutation(makeFunctionReference('projectLandingProof:report'), {
+  projectId: process.env.FORGE_PROJECT_ID,
+  runId: process.env.FORGE_RUN_ID,
+  head: process.env.FORGE_CANDIDATE_HEAD,
+  executionId: process.env.FORGE_EXECUTION_ID,
+  report: JSON.stringify({kind:'proof', reports:[
+    {file:'tests/regression.test.mjs', base:'failed', head:'passed'},
+  ]}),
+});
+```
+
+Run each changed head test once on the base source, then on the head. Report `error` when setup
+or execution cannot establish a test result, `passed` when it passes on base too, and `failed`
+when it fails on base. Reports name at most twenty distinct test files; the same report can be
+retried, while a different report cannot replace it. This is job-reported evidence, not an
+independent provider attestation. GitHub Actions and GitLab CI share this report contract; the
+existing GitLab publishing limitation above still applies.
+
+Forge's runner adds the optional `hosted-proof` job only for its standard check when changed test
+files are present and the installed workflow supports it. It reuses verified base blobs already
+in the plan's cache, reconstructs the base with head tests, installs/builds it and runs each file
+once with the same Candidate isolation as shards. A cold cache missing base blobs, setup failure
+or unavailable isolation gives inconclusive evidence without extra source calls. Opaque commands
+can report from their own CI using the step above. Forge joins base outcomes to its normal head
+reports; a failed or flaky head test never proves a change.
+
+The job is excluded from the required-job verdict, so acceptance never waits for it. One mutation
+retains the report beside the run. Acceptance reads and `land`/`wait` summaries join that evidence
+on the exact run; it can arrive after landing, and the immutable receipt stays unchanged. With
+proof off there is no proof output, job, artifact data or call. With it on, budget one optional
+job (roughly 2–4 runner-minutes plus tests), one mutation and one small run-side metadata field.
+Public runners are paid for by their repository's existing CI arrangement; no new service is used.

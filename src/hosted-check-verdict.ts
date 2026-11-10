@@ -30,6 +30,7 @@ export const hostedCheckOutputSettled = (run: Pick<HostedCheckRun, 'status' | 'a
 
 /** The optional source-pack job's name in forge-check.yml: continue-on-error, so the run's conclusion
  * never depends on it, but the conclusion still waits for it to finish (friction 0064c3b2). */
+export const OPTIONAL_PROOF_JOB = 'Collect optional Forge landing proof';
 export const OPTIONAL_PACK_JOB = 'Refresh optional Forge source pack';
 
 /**
@@ -46,7 +47,7 @@ export function requiredJobsConclusion(body: unknown): string | null {
     jobs?: { name?: unknown; status?: unknown; conclusion?: unknown }[];
   };
   if (!Array.isArray(page?.jobs) || page.total_count !== page.jobs.length) return null;
-  const required = page.jobs.filter(job => job.name !== OPTIONAL_PACK_JOB);
+  const required = page.jobs.filter(job => job.name !== OPTIONAL_PACK_JOB && job.name !== OPTIONAL_PROOF_JOB);
   if (!required.length || required.some(job => job.status !== 'completed')) return null;
   const failed = required.find(job => job.conclusion !== 'success' && job.conclusion !== 'skipped');
   if (failed) return typeof failed.conclusion === 'string' ? failed.conclusion.slice(0, 40) : 'unknown';

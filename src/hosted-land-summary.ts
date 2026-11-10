@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { proofLine, type proofSummarySchema } from './landing-proof.js';
+import type { z } from 'zod';
 import { checkTerminal, checkUnsuccessful } from './check-run-state.js';
 import type { HostedAgentResponse } from './hosted-agent-transport.js';
 import { scrubText } from './client-error-text.js';
@@ -21,6 +23,7 @@ type Result = {
     acceptance?: {
       receiptId: string;
       head: string;
+      proof?: z.infer<typeof proofSummarySchema>;
       acceptedBy?: { kind: 'person' | 'auto'; actor?: string; note: string };
     };
     testFiles?: {
@@ -94,6 +97,7 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
           : ''
       }`,
       // A person's acceptance or policy's, never inferred from the submitter (fe5bea80).
+      ...(submission?.acceptance?.proof ? [proofLine(submission.acceptance.proof)] : []),
       ...(submission?.acceptance?.acceptedBy ? [acceptedByLine(submission.acceptance.acceptedBy)] : []),
     ]);
   if (submission?.observation?.state === 'superseded' || phase === 'superseded')

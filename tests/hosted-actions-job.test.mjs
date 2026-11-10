@@ -284,6 +284,223 @@ function fixture(
   };
 }
 
+test('proof off adds no planning output, artifact data, source bytes or Convex calls', async t => {
+  const { prepareLandingProof } = await import('../dist/hosted-actions-job-proof.js');
+  const absent = new Proxy(
+    {},
+    {
+      get() {
+        throw new Error('off must not inspect source');
+      },
+    },
+  );
+  assert.equal(prepareLandingProof({ proofOnLanding: false }, true, absent, absent, '/unused'), undefined);
+  const s = fixture(t);
+  const prepared = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'objects'),
+    undefined,
+    'hosted-proof:',
+  );
+  assert.equal(Object.hasOwn(prepared, 'proof'), false);
+  assert.equal(Object.hasOwn(prepared.packRefresh, 'proof'), false);
+  assert.equal(s.calls.filter(c => c.kind === 'proof').length, 0);
+});
+
+test('proof runs the head regression on base once and retains fail-on-base evidence', async t => {
+  const { prepareLandingProof, executeLandingProof } = await import('../dist/hosted-actions-job-proof.js');
+  const { proofSummary, proofLine } = await import('../dist/landing-proof.js');
+  const folder = mkdtempSync(join(tmpdir(), 'forge-proof-fixture-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const directory = join(folder, 'candidate'),
+    cache = join(folder, 'objects');
+  mkdirSync(join(directory, 'tests'), { recursive: true });
+  mkdirSync(cache);
+  const put = (path, text) => {
+    const blob = digest(text);
+    writeFileSync(join(cache, blob), text);
+    return { path, mode: 'file', blob };
+  };
+  const pkg = JSON.stringify({
+    name: 'proof-fixture',
+    version: '1.0.0',
+    type: 'module',
+    scripts: { 'build:core': 'node -e ""', 'build:web': 'node -e ""' },
+  });
+  const lock = JSON.stringify({
+    name: 'proof-fixture',
+    version: '1.0.0',
+    lockfileVersion: 3,
+    packages: { '': { name: 'proof-fixture', version: '1.0.0' } },
+  });
+  const shared = [put('package.json', pkg), put('package-lock.json', lock)];
+  const outside = join(folder, 'outside');
+  mkdirSync(outside);
+  writeFileSync(join(outside, 'keep'), 'kept outside the base tree');
+  const base = {
+    files: [...shared, put('value.js', 'export const value = 1;\n'), put('nested/keep', 'base content')],
+  };
+  const head = {
+    files: [
+      ...shared,
+      put('value.js', 'export const value = 2;\n'),
+      { ...put('nested', outside), mode: 'symlink' },
+      put(
+        'tests/value.test.mjs',
+        "import test from 'node:test'; import assert from 'node:assert/strict'; import { value } from '../value.js'; test('value is two', () => assert.equal(value, 2));\n",
+      ),
+    ],
+  };
+  for (const file of head.files) {
+    const bytes = readFileSync(join(cache, file.blob));
+    if (file.mode === 'symlink') fs.symlinkSync(bytes.toString(), join(directory, file.path));
+    else writeFileSync(join(directory, file.path), bytes);
+  }
+  const run = {
+    id: randomUUID(),
+    projectId: 'synthetic',
+    request: { expectedHead: 'a'.repeat(64) },
+    executionId: '123',
+    proofOnLanding: true,
+    configuration: { provider: 'github-actions', isolation: 'shared' },
+  };
+  const plan = prepareLandingProof(run, true, base, head, cache);
+  const reports = [];
+  const oldFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), 'https://proof.invalid/api/mutation');
+    const call = JSON.parse(init.body);
+    assert.equal(call.path, 'projectLandingProof:report');
+    assert.equal(call.format, 'convex_encoded_json');
+    assert.equal(call.args[0].ticket, 'a'.repeat(64));
+    assert.equal('signature' in call.args[0], false);
+    reports.push(JSON.parse(call.args[0].report));
+    return Response.json({ status: 'success', value: null });
+  };
+  t.after(() => {
+    globalThis.fetch = oldFetch;
+  });
+  const client = {
+    run,
+    proofTicket: { endpoint: 'https://proof.invalid', signature: 'a'.repeat(64) },
+    holdRunnerTokens() {},
+    request: (url, init) => globalThis.fetch(url, init),
+  };
+  await executeLandingProof(client, directory, plan, { mode: 'shared', reason: 'synthetic fixture' });
+  assert.equal(
+    readFileSync(join(outside, 'keep'), 'utf8'),
+    'kept outside the base tree',
+    'base reconstruction never follows a head symlink while removing old child paths',
+  );
+  assert.equal(reports.length, 1, 'one Convex call per proof');
+  assert.equal(reports[0].reports[0].base, 'failed');
+  const headCode = execFileSync(process.execPath, ['--test', '--test-reporter=tap', 'tests/value.test.mjs'], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: { ...process.env, NODE_TEST_CONTEXT: undefined },
+  });
+  assert.match(headCode, /# pass 1/);
+  assert.equal(
+    proofLine(proofSummary(reports[0], { contractReports: { 'tests/value.test.mjs': { failed: false } } })),
+    'proof: 1 tests fail on base and pass on head',
+  );
+  // A cold cache cannot buy extra source calls or mislabel setup failure as a regression.
+  rmSync(join(cache, base.files.at(-1).blob));
+  assert.equal(prepareLandingProof(run, true, base, head, cache).unavailable, true);
+});
+
+test('proof cost ledger pins zero default cost and one optional report call with its metadata bytes', async () => {
+  const { speedBudgets } = await import('../dist/speed-budgets.js');
+  const { judgeCosts } = await import('../dist/cost-budgets.js');
+  const report = {
+    kind: 'proof',
+    reports: Array.from({ length: 20 }, (_, i) => ({
+      file: `tests/regression-${i}.test.mjs`,
+      base: 'failed',
+      head: 'passed',
+    })),
+  };
+  const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'proof-fixture', {
+    offCalls: 0,
+    onCalls: 1,
+    reportBytes: Buffer.byteLength(JSON.stringify(report)),
+  });
+  assert.equal(verdicts.length, 3);
+  assert(
+    verdicts.every(v => v.status === 'pass'),
+    JSON.stringify(verdicts),
+  );
+});
+
+test('changed tests opt into one proof job without changing the pinned check recipe or its call count', async t => {
+  const s = fixture(t);
+  const candidate = s.state([
+    ...s.files,
+    s.entry('tests/proof.test.mjs', "import test from 'node:test'; test('example', () => {});"),
+  ]);
+  s.run.request.expectedHead = candidate.sha256;
+  const inner = s.client.request;
+  s.client.request = async (url, init) => {
+    const reply = await inner(url, init);
+    if (String(url).endsWith('/checks/actions') && JSON.parse(init.body).command.kind === 'plan') {
+      reply.headers.set(
+        'X-Forge-Landing-Proof',
+        JSON.stringify({ endpoint: 'https://proof.invalid', signature: 'a'.repeat(64) }),
+      );
+    }
+    return reply;
+  };
+  const off = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'off'),
+    join(s.directory, 'objects'),
+    undefined,
+    'hosted-proof:',
+  );
+  const offCalls = s.calls.length;
+  s.run.proofOnLanding = true;
+  const on = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'on'),
+    join(s.directory, 'objects'),
+    undefined,
+    'hosted-proof:',
+  );
+  assert.equal(on.proof, true);
+  assert.deepEqual(on.packRefresh.proof.tests, ['tests/proof.test.mjs']);
+  assert.deepEqual(on.recipe, off.recipe, 'optional evidence never changes the exact check pin');
+  assert.equal(s.calls.length - offCalls, offCalls, 'planning adds no Convex call');
+  const oldWorkflow = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'old'),
+    join(s.directory, 'objects'),
+    undefined,
+    'hosted-pack:',
+  );
+  assert.equal(Object.hasOwn(oldWorkflow, 'proof'), false, 'an older installed workflow has no proof job');
+  const validTicket = s.client.request;
+  s.client.request = async (url, init) => {
+    const reply = await validTicket(url, init);
+    if (String(url).endsWith('/checks/actions') && JSON.parse(init.body).command.kind === 'plan')
+      reply.headers.set('X-Forge-Landing-Proof', '{malformed');
+    return reply;
+  };
+  const malformed = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'malformed'),
+    join(s.directory, 'objects'),
+    undefined,
+    'hosted-proof:',
+  );
+  assert.equal(
+    Object.hasOwn(malformed, 'proof'),
+    false,
+    'unavailable optional evidence never fails planning',
+  );
+  assert.deepEqual(malformed.recipe, on.recipe);
+});
+
 test('the candidate and base State reads overlap: the same GETs, one round trip of wait', async t => {
   const s = fixture(t, { downloadDelay: 20 });
   const states = new Set([s.run.request.expectedHead, s.run.candidate.base.head]),
@@ -1116,7 +1333,7 @@ test('workflow keeps the native plan branch and uses OIDC without GitHub secrets
   assert.match(workflow, /id-token: write/);
   assert.equal(
     (workflow.match(/runs-on: \$\{\{ fromJSON\(inputs\.runs_on \|\| '"ubuntu-latest"'\) \}\}/g) ?? []).length,
-    3,
+    4,
   );
   assert.equal((workflow.match(/runs-on: "ubuntu-latest"/g) ?? []).length, 2);
   assert.match(workflow, /runs_on:\n\s+description: JSON runner label or label array/);

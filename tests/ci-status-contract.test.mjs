@@ -340,3 +340,60 @@ test("ci-status: an outside contributor's Candidate never reaches a job that hol
   assert.equal(settled.ci, undefined);
   assert.match(settled.failureReason, /outside contributor/);
 });
+
+for (const [name, a] of Object.entries(adapters)) {
+  test(`${name}: optional proof reports share one contract and never decide the check verdict`, () => {
+    const proof = {
+      kind: 'proof',
+      reports: [{ file: 'tests/regression.test.mjs', base: 'failed', head: 'passed' }],
+    };
+    assert.deepEqual(
+      ciStatusVerdict(a.provider, bound(), { source: 'job-report', claims: a.claims, status: proof }),
+      { outcome: 'proof', proof },
+    );
+    assert.equal(
+      ciStatusVerdict(a.provider, bound(), { source: 'job-report', claims: {}, status: proof }).outcome,
+      'refused',
+    );
+    assert.equal(
+      ciStatusVerdict(a.provider, bound(), {
+        source: 'job-report',
+        claims: a.claims,
+        status: { ...proof, reports: [{ file: '../secret', base: 'failed' }] },
+      }).outcome,
+      'refused',
+    );
+    assert.equal(
+      ciStatusVerdict(a.provider, bound(), a.record()).status,
+      'passed',
+      'provider success needs no proof',
+    );
+    assert.equal(
+      ciStatusVerdict(a.provider, bound(), a.record({ result: 'failed' })).status,
+      'failed',
+      'proof never overrides the provider failure',
+    );
+  });
+}
+
+test('proof counts only failures on base with a passing non-flaky head report', async () => {
+  const { proofSummary } = await import('../dist/landing-proof.js');
+  const proof = {
+    kind: 'proof',
+    reports: ['a', 'b', 'c', 'd', 'e'].map(file => ({
+      file: `tests/${file}.test.mjs`,
+      base: file === 'd' ? 'passed' : file === 'e' ? 'error' : 'failed',
+      head: 'passed',
+    })),
+  };
+  assert.deepEqual(
+    proofSummary(proof, {
+      contractReports: {
+        'tests/a.test.mjs': { failed: false },
+        'tests/b.test.mjs': { failed: true },
+        'tests/c.test.mjs': { failed: false, flaky: true },
+      },
+    }),
+    { proven: 1, passedOnBase: 1, inconclusive: 3 },
+  );
+});

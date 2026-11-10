@@ -254,6 +254,7 @@ export async function enqueueHostedCheck(
   const run = hostedCheckRunSchema.parse({
     ...(gate ? { gate } : {}),
     ...(semantic && semantic.members.length > 1 ? { semanticPlan: semantic } : {}),
+    ...(project.autonomyPolicy?.acceptance.proofOnLanding ? { proofOnLanding: true } : {}),
     schema: 1,
     id,
     projectId: input.projectId,

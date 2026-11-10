@@ -9,7 +9,8 @@ import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
  * `custom`). Agent defaults, notifications, the GitHub mirror (read
  * live after acceptance) and trust in shadow mode (`enabled:false` records history, changes no gate) do
  * not change an attempt, so editing them never invalidates a pinned landing. Neither does the landing
- * mode: it is read live when a first-check proof is decided and again when it is published. */
+ * mode: it is read live when a first-check proof is decided and again when it is published. Optional
+ * proof on landing adds evidence only, so it also never invalidates an attempt. */
 function landingPolicy(policy: AutonomyPolicy) {
   const kept: Partial<AutonomyPolicy> = { ...policy, acceptance: withoutLandingMode(policy) };
   delete kept.agentDefaults;
@@ -20,8 +21,9 @@ function landingPolicy(policy: AutonomyPolicy) {
   return kept;
 }
 function withoutLandingMode(policy: AutonomyPolicy) {
-  const { landingMode: _mode, ...acceptance } = policy.acceptance;
+  const { landingMode: _mode, proofOnLanding: _proof, ...acceptance } = policy.acceptance;
   void _mode;
+  void _proof;
   return acceptance;
 }
 /** The policy a landing is pinned to. */
@@ -95,6 +97,9 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   },
   // Recipients are who receives project notices outside Forge.
   'agentDefaults.stallAlerts.email': 'gated',
+  'acceptance.proofOnLanding': {
+    exempt: 'adds optional evidence only; never changes the landing verdict or waits for proof',
+  },
   'acceptance.mode': 'gated',
   'acceptance.gate': 'gated',
   'acceptance.disjointFastPath': 'gated',

@@ -767,3 +767,73 @@ test('a landing stamps an unrelated open legacy overlap row from its Lane record
   assert.equal(row.lastActivityAt, Date.parse((await f.readLane(idle.laneId)).at));
   assert.equal(row.open, true, 'the idle Lane stays open; only its activity is now known');
 });
+
+test('fixture landing shows late proof beside its unchanged immutable receipt and rejects changed proof', async () => {
+  const { report } = await import(moduleUrl('../convex/projectLandingProof.ts'));
+  const { landSummary } = await import('../dist/hosted-land-summary.js');
+  const f = await acceptanceFixture();
+  const policy = policyPreset('trusted');
+  policy.acceptance.proofOnLanding = true;
+  const { state } = await checked(f, null, policy);
+  const [id, row] = [...f.tables.projectHostedCheckRuns.entries()][0];
+  const run = JSON.parse(row.value);
+  run.contractReports = {
+    'tests/regression.test.mjs': { failed: false },
+    'tests/old.test.mjs': { failed: false },
+  };
+  f.patch('projectHostedCheckRuns', id, { value: JSON.stringify(run) });
+  const result = await f.accept(state);
+  const receiptBefore = [...f.tables.projectHostedAcceptances.values()][0].value;
+  const input = {
+    projectId: f.projectId,
+    runId: run.id,
+    head: run.request.expectedHead,
+    executionId: run.executionId,
+    report: JSON.stringify({
+      kind: 'proof',
+      reports: [
+        { file: 'tests/regression.test.mjs', base: 'failed' },
+        { file: 'tests/old.test.mjs', base: 'passed' },
+      ],
+    }),
+  };
+  const from = f.counts.length;
+  await f.transaction('optionalProof', report, input);
+  const costs = f.counts.slice(from);
+  assert.equal(costs.length, 1, 'one mutation with no nested calls');
+  assert.equal(costs[0].writes, 1, 'only the existing run row is patched');
+  assert(
+    costs[0].readBytes < 30_000 && costs[0].writeBytes < 20_000,
+    'bounded run metadata; no source bytes',
+  );
+  await f.transaction('optionalProofRetry', report, input);
+  assert.equal(f.counts.at(-1).writes, 0, 'same report is a no-op retry');
+  await assert.rejects(
+    f.transaction('optionalProofDifferentHead', report, { ...input, head: 'f'.repeat(64) }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await assert.rejects(
+    f.transaction('optionalProofDifferentExecution', report, { ...input, executionId: 'other' }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await assert.rejects(
+    f.transaction('optionalProofDifferentReport', report, {
+      ...input,
+      report: JSON.stringify({ kind: 'proof', reports: [] }),
+    }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await assert.rejects(
+    f.transaction('optionalProofOutside', report, input, 'outside'),
+    code('PROJECT_UNAVAILABLE'),
+  );
+  const status = await f.status(state.id);
+  assert.deepEqual(status.request.acceptance.proof, { proven: 1, passedOnBase: 1, inconclusive: 0 });
+  assert(
+    landSummary({ result: { submission: status.request } }).includes(
+      'proof: 1 tests fail on base and pass on head; 1 pass on base too',
+    ),
+  );
+  assert.equal([...f.tables.projectHostedAcceptances.values()][0].value, receiptBefore);
+  assert.equal(result.status, 'landed');
+});

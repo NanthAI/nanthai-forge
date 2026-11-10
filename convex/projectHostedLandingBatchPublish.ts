@@ -404,6 +404,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       acceptance: {
         receiptId: receipt.id,
         head,
+        ...(run.proofOnLanding ? { proofRunId: run.id } : {}),
         ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
         acceptedBy: landingAcceptedBy({ actor: receipt.actor, at: receipt.at }),
       },

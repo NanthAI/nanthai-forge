@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { prepareLandingProof } from './hosted-actions-job-proof.js';
 import { mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -280,8 +281,14 @@ export async function prepareActionsJob(
   } else client.run = planned as typeof run;
   lap('planCallMs');
   console.log(`plan: phases ${JSON.stringify(phases)}`);
+  const proof =
+    client.proofTicket && workflow?.includes('hosted-proof:')
+      ? prepareLandingProof(run, standard, base, state, cache)
+      : undefined;
   return {
+    ...(proof ? { proof: true as const } : {}),
     packRefresh: {
+      ...(proof ? { proof } : {}),
       refresh: packRefresh,
       state,
       base,

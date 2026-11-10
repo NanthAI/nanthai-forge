@@ -2714,3 +2714,61 @@ test('Issue 6ba1539d: the owner opt-in publicLogs lets a private project run in 
   assert.notEqual(run.status, 'runner-unavailable');
   assert.equal(run.configuration.publicLogs, true);
 });
+
+test('optional landing proof neither delays nor fails the required-job verdict', async () => {
+  const { OPTIONAL_PROOF_JOB } = await import('../dist/hosted-check-verdict.js');
+  const required = { name: 'Required tests', status: 'completed', conclusion: 'success' };
+  for (const optional of [
+    { name: OPTIONAL_PROOF_JOB, status: 'in_progress', conclusion: null },
+    { name: OPTIONAL_PROOF_JOB, status: 'completed', conclusion: 'failure' },
+  ])
+    assert.equal(requiredJobsConclusion({ total_count: 2, jobs: [required, optional] }), 'success');
+  assert.equal(
+    requiredJobsConclusion({
+      total_count: 2,
+      jobs: [
+        { ...required, status: 'in_progress' },
+        { name: OPTIONAL_PROOF_JOB, status: 'completed', conclusion: 'success' },
+      ],
+    }),
+    null,
+  );
+});
+
+test('proof write ticket is scoped to the exact run and cannot reuse the read-only preflight ticket', async t => {
+  const s = await fixture(t);
+  const proof = await import(moduleUrl('../convex/projectLandingProof.ts'));
+  const { landingProofSignature } = await import('../dist/hosted-actions-preflight.js');
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === s.run.id);
+  s.patch('projectHostedCheckRuns', row._id, {
+    value: JSON.stringify({ ...JSON.parse(row.value), proofOnLanding: true }),
+  });
+  await s.bind();
+  await s.prepare();
+  const run = await s.status(s.run.id);
+  const input = {
+    ...s.id,
+    head: run.request.expectedHead,
+    executionId: run.executionId,
+    report: JSON.stringify({ kind: 'proof', reports: [{ file: 'tests/a.test.mjs', base: 'error' }] }),
+  };
+  await assert.rejects(
+    s.transaction('proofBadTicket', proof.report, { ...input, ticket: 'a'.repeat(64) }),
+    code('EVIDENCE_CHANGED'),
+  );
+  await assert.rejects(
+    s.transaction('proofReadOnlyTicket', proof.report, {
+      ...input,
+      ticket: actionsPreflightSignature(run, 'synthetic-check-key'),
+    }),
+    code('EVIDENCE_CHANGED'),
+  );
+  const signature = landingProofSignature(run, 'synthetic-check-key');
+  await s.transaction('proofExactTicket', proof.report, { ...input, ticket: signature });
+  assert.equal(JSON.parse(s.tables.projectHostedCheckRuns.get(row._id).proof).reports[0].base, 'error');
+  s.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify({ ...run, fence: run.fence + 1 }) });
+  await assert.rejects(
+    s.transaction('proofStaleTicket', proof.report, { ...input, ticket: signature }),
+    code('EVIDENCE_CHANGED'),
+  );
+});

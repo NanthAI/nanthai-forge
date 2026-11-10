@@ -1149,3 +1149,13 @@ test('each policy field is held, exempt or relax-only for an agent edit, one cas
     assert.equal(changed, rule === 'gated', `${field} is ${rule === 'gated' ? 'held' : 'exempt'}`);
   }
 });
+
+test('optional landing proof adds evidence without changing oversight or invalidating queued landings', async () => {
+  const { ownerGated, acceptancePolicyDigest } = await import(moduleUrl('../src/policy-digest.ts'));
+  const { policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
+  const base = policyPreset('trusted');
+  const enabled = { ...base, acceptance: { ...base.acceptance, proofOnLanding: true } };
+  assert.equal(ownerGated(base, enabled), false);
+  assert.equal(ownerGated(enabled, base), false);
+  assert.equal(acceptancePolicyDigest(enabled), acceptancePolicyDigest(base));
+});

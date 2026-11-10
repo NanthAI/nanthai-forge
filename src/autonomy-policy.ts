@@ -41,6 +41,8 @@ export const autonomyPolicySchema = z.object({
   agentDefaults: agentDefaultsSchema.optional(),
   preset: z.enum(['supervised', 'trusted', 'autonomous', 'custom']),
   acceptance: z.object({
+    /** Optional evidence only; absent is off. */
+    proofOnLanding: z.boolean().optional(),
     mode: z.enum(['review', 'auto-on-pass']),
     /** Absent preserves the full hosted gate. */
     gate: z.enum(['full', 'contract']).optional(),

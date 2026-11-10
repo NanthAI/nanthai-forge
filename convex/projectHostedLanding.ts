@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { runProof } from './projectLandingProof';
 import { held, heldPolicy, noteHeldPolicy } from './projectHostedOwnerReview';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { finishPendingForReader } from '../src/hosted-finish';
@@ -125,6 +126,14 @@ export const status = query({
     try {
       const project = await reader(ctx, input.projectId);
       const { row, state } = await loadLanding(ctx, input);
+      if (state.acceptance?.proofRunId) {
+        const proofRun = await loadHostedCheck(ctx, {
+          projectId: input.projectId,
+          runId: state.acceptance.proofRunId,
+        });
+        const proof = runProof(proofRun.row, proofRun.run);
+        if (proof) state.acceptance = { ...state.acceptance, proof };
+      }
       const wouldConflict = state.phase === 'queued' ? readWouldConflict(row) : undefined;
       const stallAlert = await latestStallAlert(ctx, input, state);
       const attempt = await loadLandingAttempt(ctx, {
@@ -451,6 +460,14 @@ export const candidate = query({
       const run = attempt.check
         ? (await loadHostedCheck(ctx, { projectId: input.projectId, runId: attempt.check.runId })).run
         : null;
+      if (state.acceptance?.proofRunId) {
+        const proofRun = await loadHostedCheck(ctx, {
+          projectId: input.projectId,
+          runId: state.acceptance.proofRunId,
+        });
+        const proof = runProof(proofRun.row, proofRun.run);
+        if (proof) state.acceptance = { ...state.acceptance, proof };
+      }
       const finish = await finishRow(ctx, { projectId: input.projectId, submissionId: state.id });
       const receipt = state.acceptance
         ? await acceptanceRow(ctx, { projectId: input.projectId, receiptId: state.acceptance.receiptId })

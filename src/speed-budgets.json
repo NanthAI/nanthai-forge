@@ -394,6 +394,42 @@
   },
   "costs": [
     {
+      "id": "proof-off-calls",
+      "area": "Optional landing proof, default off",
+      "measuredBy": "proof-fixture",
+      "metric": "offCalls",
+      "unit": "calls",
+      "value": 0,
+      "floor": 0,
+      "source": "tests/hosted-actions-job.test.mjs and hosted-acceptance.test.mjs: synthetic proof, default-off planning and one run-side reporting mutation; no billed live measurement.",
+      "issue": "aa9fb5b1",
+      "reason": "Off does no work. On reuses cached base bytes and existing artifacts; one run-side metadata write, no table, no source request or receipt rewrite. CI adds about 2-4 runner-minutes plus tests."
+    },
+    {
+      "id": "proof-on-calls",
+      "area": "Optional proof, one mutation per report",
+      "measuredBy": "proof-fixture",
+      "metric": "onCalls",
+      "unit": "calls",
+      "value": 1,
+      "floor": 0,
+      "source": "tests/hosted-actions-job.test.mjs and hosted-acceptance.test.mjs: synthetic proof, default-off planning and one run-side reporting mutation; no billed live measurement.",
+      "issue": "aa9fb5b1",
+      "reason": "Off does no work. On reuses cached base bytes and existing artifacts; one run-side metadata write, no table, no source request or receipt rewrite. CI adds about 2-4 runner-minutes plus tests."
+    },
+    {
+      "id": "proof-report-bytes",
+      "area": "Optional proof metadata, twenty synthetic file outcomes",
+      "measuredBy": "proof-fixture",
+      "metric": "reportBytes",
+      "unit": "bytes",
+      "value": 1458,
+      "floor": 0,
+      "source": "tests/hosted-actions-job.test.mjs and hosted-acceptance.test.mjs: synthetic proof, default-off planning and one run-side reporting mutation; no billed live measurement.",
+      "issue": "aa9fb5b1",
+      "reason": "Off does no work. On reuses cached base bytes and existing artifacts; one run-side metadata write, no table, no source request or receipt rewrite. CI adds about 2-4 runner-minutes plus tests."
+    },
+    {
       "id": "ci-result-calls",
       "area": "CI ingest: twelve shards, 886 reports, inline logs, two replays, provider conclusion",
       "measuredBy": "ci-result-fixture",

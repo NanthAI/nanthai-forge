@@ -414,6 +414,7 @@ export async function publishAcceptance(
     acceptance: {
       receiptId: receipt.id,
       head,
+      ...(run?.proofOnLanding ? { proofRunId: run!.id } : {}),
       ...(receipt.docsResolution ? { docsResolution: receipt.docsResolution } : {}),
       acceptedBy,
     },

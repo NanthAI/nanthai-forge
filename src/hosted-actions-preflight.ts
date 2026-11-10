@@ -17,7 +17,7 @@ export type ActionsPreflightTicket = z.infer<typeof actionsPreflightTicketSchema
 /** Only the OIDC-authenticated session issues this run-scoped, read-only proof.
  * It inherits the run's lifetime/fence; every use rechecks current authority and
  * cancellation. It grants no source, results, provider IO or signing authority. */
-export function actionsPreflightSignature(run: HostedCheckRun, key: string) {
+function signatureFor(run: HostedCheckRun, key: string, domain: string) {
   invariant(key.length, 'RUNNER_UNAVAILABLE', 'Trusted check configuration is unavailable.');
   return bytesToHex(
     hmac(
@@ -25,7 +25,7 @@ export function actionsPreflightSignature(run: HostedCheckRun, key: string) {
       utf8ToBytes(key),
       utf8ToBytes(
         canonicalPayload({
-          domain: 'forge-actions-preflight-v1',
+          domain,
           projectId: run.projectId,
           runId: run.id,
           actor: run.actor,
@@ -38,6 +38,11 @@ export function actionsPreflightSignature(run: HostedCheckRun, key: string) {
     ),
   );
 }
+export const actionsPreflightSignature = (run: HostedCheckRun, key: string) =>
+  signatureFor(run, key, 'forge-actions-preflight-v1');
+/** Write-only optional proof capability, separate from the read-only preflight ticket. */
+export const landingProofSignature = (run: HostedCheckRun, key: string) =>
+  signatureFor(run, key, 'forge-landing-proof-v1');
 export function verifyActionsPreflight(run: HostedCheckRun, signature: string, key: string) {
   const expected = actionsPreflightSignature(run, key);
   let difference = expected.length ^ signature.length;

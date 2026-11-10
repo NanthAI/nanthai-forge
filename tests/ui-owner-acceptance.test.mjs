@@ -135,3 +135,21 @@ test('feedback resumes Working only on a new save, leaving the reviewed Candidat
   assert.equal(feedbackWorking(false, inputs, [{ id: 'lane', head: 'new-save' }]), false);
   assert.equal(inputs[0].head, 'reviewed');
 });
+
+test('landed acceptance shows optional proof beside the receipt and hides absent evidence', () => {
+  const props = variantProps('03-landed');
+  const original = render(h(LandingDecision, props));
+  assert.doesNotMatch(original, /tests fail on base/);
+  const read = {
+    ...props.read,
+    request: {
+      ...props.read.request,
+      acceptance: {
+        ...props.read.request.acceptance,
+        proof: { proven: 3, passedOnBase: 1, inconclusive: 0 },
+      },
+    },
+  };
+  const html = render(h(LandingDecision, { ...props, read }));
+  assert.match(html, /proof: 3 tests fail on base and pass on head; 1 pass on base too/);
+});

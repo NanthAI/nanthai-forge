@@ -30,6 +30,7 @@ export class ActionsJobClient {
   capabilities: string[] = [];
   sourcePack: SourcePackDownload | null = null;
   preflightTicket: ActionsPreflightTicket | null = null;
+  proofTicket: ActionsPreflightTicket | null = null;
   /** Shard pool claim targets from the plan bundle (unvalidated until used). */
   poolClaims: unknown = null;
   private token = '';
@@ -108,6 +109,17 @@ export class ActionsJobClient {
       const ticket = actionsPreflightTicketSchema.safeParse(raw);
       invariant(ticket.success, 'RUNNER_UNAVAILABLE', 'Pre-spawn authorization is unavailable.');
       this.preflightTicket = ticket.data;
+    }
+    if (command.kind === 'plan' && this.run?.proofOnLanding) {
+      this.proofTicket = null;
+      try {
+        const ticket = actionsPreflightTicketSchema.safeParse(
+          JSON.parse(response.headers.get('X-Forge-Landing-Proof') ?? 'null'),
+        );
+        this.proofTicket = ticket.success ? ticket.data : null;
+      } catch {
+        // Optional evidence must never fail the required planning job.
+      }
     }
     return value;
   }

@@ -52,6 +52,8 @@ export const hostedCheckTables = {
     projectId: v.id('hostedProjects'),
     runId: v.string(),
     candidateId: v.string(),
+    /** Optional proof metadata beside the run; immutable receipts never change. */
+    proof: v.optional(v.string()),
     machineId: v.optional(v.string()),
     status: v.string(),
     value: v.string(),

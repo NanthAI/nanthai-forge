@@ -3,6 +3,7 @@ import { batchDiagnosticSchema } from './hosted-batch-diagnosis.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticConflictsSchema, semanticPlanSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
+import { proofSummarySchema } from './landing-proof.js';
 import { landingMessageSchema } from './landing-message.js';
 import { landingStallSchema } from './landing-stall-schema.js';
 import { mainExpectationSchema } from './hosted-main.js';
@@ -204,6 +205,8 @@ export const hostedLandingStateSchema = z
       .object({
         receiptId: z.uuid(),
         head: hash,
+        proofRunId: z.uuid().optional(),
+        proof: proofSummarySchema.optional(),
         docsResolution: docsResolutionSchema.optional(),
         /** Who accepted it: a person, or policy with no person (fe5bea80). Absent on older landings. */
         acceptedBy: landingAcceptedBySchema.optional(),

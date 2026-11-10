@@ -39,6 +39,7 @@ export const costBudgetSchema = z
     /** landing-, snapshot-, planning-, metrics- and trial-merge-fixture: judged on change by the landing check. capture: a
      * live number for reading, judged nowhere (no deterministic measure exists). */
     measuredBy: z.enum([
+      'proof-fixture',
       'landing-fixture',
       'driver-fixture',
       'snapshot-fixture',

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { proofLine } from '../../../src/landing-proof';
 import { useState, type ReactNode } from 'react';
 import { Button, Panel } from '../ui/primitives';
 import { Glyph } from '../ui/Glyph';
@@ -117,6 +118,7 @@ export function LandingDecision(props: LandingDecisionProps) {
             check={run?.status === 'passed' ? run.check.name : undefined}
             acceptance={props.acceptance ?? landedAcceptance(props.read!)}
           />
+          {props.read?.request.acceptance?.proof && <p>{proofLine(props.read.request.acceptance.proof)}</p>}
           {reversed && (
             <ReviewDisposition
               reverted={{

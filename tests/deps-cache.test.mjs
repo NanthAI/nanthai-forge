@@ -38,11 +38,11 @@ test('workflow: only the default branch writes the dependency cache, before Cand
     /github\.ref == format\('refs\/heads\/\{0\}', github\.event\.repository\.default_branch\)/,
   );
   assert.match(saves[0][1], /steps\.deps\.outputs\.cache-hit != 'true'/);
-  // Restores in test and pack jobs never save, and no job restores a prefix or a Candidate-keyed entry.
+  // Restores in test, pack and proof jobs never save, and no job restores a prefix or a Candidate-keyed entry.
   assert.doesNotMatch(workflow, /restore-keys:/);
-  // Planning: restore, save, npm-cache restore; shards: one restore; pack job: one restore.
+  // Planning: restore, save, npm-cache restore; shards: one restore; pack and proof: one each.
   assert.equal((workflow.match(/key: \$\{\{ steps\.keys\.outputs\.deps \}\}/g) ?? []).length, 4);
-  assert.equal((workflow.match(/key: \$\{\{ steps\.deps-key\.outputs\.key \}\}/g) ?? []).length, 1);
+  assert.equal((workflow.match(/key: \$\{\{ steps\.deps-key\.outputs\.key \}\}/g) ?? []).length, 2);
   const plan = workflow.split('\n  hosted-plan:\n')[1].split(/\n  hosted-check:\n/)[0];
   assert(plan.indexOf('actions/cache/save@') < plan.indexOf('- id: plan'));
 });

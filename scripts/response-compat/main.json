@@ -2599,6 +2599,10 @@
           ],
           "additionalProperties": false
         },
+        "proofOnLanding": {
+          "type": "boolean",
+          "const": true
+        },
         "semanticPlan": {},
         "contractReports": {
           "type": "object",
@@ -4592,6 +4596,37 @@
             "head": {
               "type": "string",
               "pattern": "^[0-9a-f]{64}$"
+            },
+            "proofRunId": {
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
+            },
+            "proof": {
+              "type": "object",
+              "properties": {
+                "proven": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "passedOnBase": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "inconclusive": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "proven",
+                "passedOnBase",
+                "inconclusive"
+              ],
+              "additionalProperties": false
             },
             "docsResolution": {
               "type": "object",

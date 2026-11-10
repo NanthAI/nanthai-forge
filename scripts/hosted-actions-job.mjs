@@ -55,6 +55,7 @@ try {
         ...result.run,
         capabilities: client.capabilities,
         preflightTicket: client.preflightTicket,
+        ...(client.proofTicket ? { proofTicket: client.proofTicket } : {}),
         // Shard pool claim targets: read by the fixed supervisor only, never logged.
         ...(result.claims ? { poolClaims: result.claims } : {}),
       }),
@@ -68,13 +69,21 @@ try {
       `matrix=${JSON.stringify(result.matrix)}\nsingle_shard=${result.singleShard}\npack_refresh=${result.packRefresh.refresh}\n` +
         // Declared toolchains and dependency cache for the workflow's setup steps (single-line JSON).
         `toolchains=${JSON.stringify(result.toolchains)}\ndeps_cache=${JSON.stringify(result.depsCache)}\n` +
-        `npm_cache=${npmCache}\n`,
+        `npm_cache=${npmCache}\n` +
+        (result.proof ? 'proof=true\n' : ''),
     );
     // Keep source refresh out of the plan/artifact dependency path.
     writeFileSync(
       resolve(process.env.RUNNER_TEMP, 'forge-pack-refresh.json'),
       JSON.stringify(result.packRefresh),
     );
+  } else if (process.argv[2] === 'proof') {
+    restoreRun();
+    const { executeLandingProof } = await import('../dist/hosted-actions-job-proof.js');
+    const source = JSON.parse(
+      readFileSync(resolve(process.env.RUNNER_TEMP, 'forge-pack-refresh.json'), 'utf8'),
+    );
+    if (source.proof) await executeLandingProof(client, directory, source.proof);
   } else if (process.argv[2] === 'pack') {
     const { refreshActionsSourcePack } = await import('../dist/hosted-actions-job-pack.js');
     const { SourceWorkerReader } = await import('../dist/hosted-source-worker-reader.js');
@@ -126,11 +135,13 @@ function restoreRun() {
     capabilities = [],
     preflightTicket = null,
     poolClaims = null,
+    proofTicket = null,
     ...run
   } = JSON.parse(readFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'), 'utf8'));
   client.run = hostedCheckRunSchema.parse(run);
   client.preflightTicket = preflightTicket;
   client.poolClaims = poolClaims;
+  client.proofTicket = proofTicket;
   client.capabilities = Array.isArray(capabilities)
     ? capabilities.filter(value => typeof value === 'string')
     : [];

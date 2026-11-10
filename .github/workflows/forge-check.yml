@@ -79,6 +79,7 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       pack_refresh: ${{ steps.plan.outputs.pack_refresh }}
+      proof: ${{ steps.plan.outputs.proof }}
       toolchains: ${{ steps.plan.outputs.toolchains }}
       deps_cache: ${{ steps.plan.outputs.deps_cache }}
       npm_cache: ${{ steps.plan.outputs.npm_cache }}
@@ -533,6 +534,56 @@ jobs:
           tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
           tar -xf "$RUNNER_TEMP/control-dist.tar" -C control
       - run: node control/scripts/hosted-actions-job.mjs pack
+        env:
+          FORGE_CONVEX_SITE: ${{ inputs.deployment }}
+          FORGE_PROJECT_ID: ${{ inputs.projectId }}
+          FORGE_RUN_ID: ${{ inputs.runId }}
+          FORGE_CANDIDATE: ${{ runner.temp }}/candidate
+
+  hosted-proof:
+    if: ${{ needs.hosted-plan.outputs.proof == 'true' }}
+    needs: hosted-plan
+    name: Collect optional Forge landing proof
+    continue-on-error: true
+    runs-on: ${{ fromJSON(inputs.runs_on || '"ubuntu-latest"') }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          path: control
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      # Key from the pinned control lockfile only (scripts/control-deps-key.mjs; any CI computes it).
+      - id: deps-key
+        run: echo "key=$(node scripts/control-deps-key.mjs)" >> "$GITHUB_OUTPUT"
+        working-directory: control
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: deps
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: '1'
+        with:
+          path: |
+            control/node_modules
+            ~/.npm
+          key: ${{ steps.deps-key.outputs.key }}
+      # A miss retains the cold install; dist comes from this run's pinned control commit.
+      - if: steps.deps.outputs.cache-hit != 'true'
+        run: npm ci --ignore-scripts
+        working-directory: control
+        timeout-minutes: 5
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: forge-candidate
+          path: ${{ runner.temp }}
+      - run: |
+          tar -xf "$RUNNER_TEMP/candidate.tar" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/control-dist.tar" -C control
+      - run: node control/scripts/hosted-actions-job.mjs proof
         env:
           FORGE_CONVEX_SITE: ${{ inputs.deployment }}
           FORGE_PROJECT_ID: ${{ inputs.projectId }}

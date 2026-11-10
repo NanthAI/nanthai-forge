@@ -60,6 +60,7 @@ export const autonomyPolicy = v.object({
     v.literal('custom'),
   ),
   acceptance: v.object({
+    proofOnLanding: v.optional(v.boolean()),
     mode: v.union(v.literal('review'), v.literal('auto-on-pass')),
     gate: v.optional(v.union(v.literal('full'), v.literal('contract'))),
     disjointFastPath: v.optional(v.boolean()),

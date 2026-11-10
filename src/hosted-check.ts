@@ -246,6 +246,7 @@ export const hostedCheckRunSchema = z
     check: checkSchema.strict(),
     configuration: hostedCheckRunnerSchema,
     gate: checkGateSchema.optional(),
+    proofOnLanding: z.literal(true).optional(),
     semanticPlan: semanticPlanSchema.optional(),
     contractReports: semanticReportsSchema.optional(),
     // Shard pool files yielded by a home shard and not yet reported by any shard (usually empty).

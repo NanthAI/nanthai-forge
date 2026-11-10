@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { proofReportSchema } from './landing-proof.js';
 
 /**
  * Checks as a status any CI reports for a Candidate (flip 3, Issue 4e4204b6): a second check provider
@@ -79,6 +80,7 @@ export type CiVerdict =
   | { outcome: 'refused'; code: 'EVIDENCE_CHANGED'; reason: string }
   /** A job's report matched the binding: read the provider record now (no polling) and keep the summary. */
   | { outcome: 'read-provider'; summary: string; link: string }
+  | { outcome: 'proof'; proof: z.infer<typeof proofReportSchema> }
   | { outcome: 'pending'; executionId: string }
   | {
       outcome: 'terminal';
@@ -123,6 +125,8 @@ function decide(
 /** A job's report: checked against the binding, then only ever a wake (`read-provider`). */
 function jobReport(identity: string | null, status: unknown): CiVerdict {
   if (identity) return refuse(identity);
+  const proof = proofReportSchema.safeParse(status);
+  if (proof.success) return { outcome: 'proof', proof: proof.data };
   const parsed = reportedStatusSchema.safeParse(status);
   if (!parsed.success) return refuse('The status report is malformed.');
   return { outcome: 'read-provider', summary: parsed.data.summary, link: parsed.data.link };

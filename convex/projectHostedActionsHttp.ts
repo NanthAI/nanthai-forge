@@ -16,6 +16,7 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { convexValueLimit } from '../src/convex-value-limit';
+import { landingProofSignature } from '../src/hosted-actions-preflight';
 import { runnerPublicCode } from '../src/runner-visibility';
 import { storeSourceBytes } from './projectSourceBytes';
 import { savePin } from '../src/hosted-save';
@@ -279,6 +280,14 @@ export const handle = httpAction(async (ctx, request) => {
       value = await settleResult(ctx, input, command.result, phase => (reason = phase));
     }
     const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
+    if (command.kind === 'plan') {
+      const run = ((value as { run?: HostedCheckRun }).run ?? value) as HostedCheckRun;
+      if (run.proofOnLanding)
+        headers['X-Forge-Landing-Proof'] = JSON.stringify({
+          endpoint: process.env.CONVEX_CLOUD_URL!,
+          signature: landingProofSignature(run, outputSigningKey(run.keyId)),
+        });
+    }
     if (command.kind === 'session') {
       const run = (command.timings ? (value as { run: HostedCheckRun }).run : value) as HostedCheckRun;
       // Additive header keeps the oldest session JSON shape unchanged.
