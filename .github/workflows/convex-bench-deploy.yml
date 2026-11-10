@@ -1,0 +1,58 @@
+name: Deploy bench Convex
+# The exit bench's own deployment (Issue 2e1f5fbd), never user-facing. It never deploys on a
+# push: the lead dispatches it on purpose, between bench batches, with the pinned harness commit.
+run-name: Deploy bench Convex at ${{ inputs.ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Full Git commit on main to deploy (the pinned harness commit)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: convex-deploy-good-monitor-687
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Its own environment and deploy key: this key reaches only the bench deployment, and the
+    # dev deploy key (convex-dev) never reaches this job.
+    environment: convex-bench
+    steps:
+      - name: Refuse a commit that is not on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::ref must be a full 40-hex Git commit"
+            exit 1
+          fi
+          status=$(gh api "repos/$REPO/compare/$REF...main" --jq .status)
+          case "$status" in
+            identical | ahead) ;;
+            *)
+              echo "::error::$REF is not on main ($status)"
+              exit 1
+              ;;
+          esac
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.22.1'
+      - run: npm ci --ignore-scripts
+      - name: Deploy functions and schema to the bench deployment
+        run: npx --no-install convex deploy --typecheck enable
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}

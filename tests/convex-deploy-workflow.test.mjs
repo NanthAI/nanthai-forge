@@ -102,3 +102,20 @@ test('stale-head check deploys at the tip, after docs-only commits and on unclea
   assert.equal(failed.output, 'deploy=true');
   assert.match(failed.stdout, /^::warning::/m);
 });
+
+// The exit bench's own deployment (Issue 2e1f5fbd): deployed code may move only when the lead
+// dispatches it, from a commit on main, with a key that reaches no other deployment.
+test('bench Convex deploys only on dispatch, from a main commit, inside its own environment', () => {
+  const bench = readFileSync('.github/workflows/convex-bench-deploy.yml', 'utf8');
+  const on = bench.slice(bench.indexOf('\non:'), bench.indexOf('\npermissions:'));
+  assert.match(on, /workflow_dispatch:/);
+  assert.doesNotMatch(on, /push:|pull_request|schedule:|workflow_run/);
+  assert.match(bench, /environment: convex-bench/);
+  assert.doesNotMatch(bench, /environment: convex-dev/);
+  assert.equal(bench.match(/secrets\./g).length, 1);
+  assert.match(bench, /persist-credentials: false/);
+  assert.match(bench, /cancel-in-progress: false/);
+  assert.match(bench, /compare\/\$REF\.\.\.main/);
+  // The guard runs before the checkout and the deploy.
+  assert(bench.indexOf('Refuse a commit that is not on main') < bench.indexOf('actions/checkout'));
+});
