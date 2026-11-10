@@ -934,6 +934,12 @@ test('owner-device settings writes apply before the first landing and are held f
   )(f.rawChecks.selection);
   assert.equal((await f.accept(await prepared(f, ['src/app.ts']), 'contributor')).status, 'landed');
 
+  // Alert recipients receive project notices outside Forge: an agent cannot add one alone.
+  const email = await settings.policy(
+    DEVICE,
+    policyCommand({ agentDefaults: { stallAlerts: { email: ['alerts@example.com'] } } }),
+  );
+  assert.equal(email.rule, 'held');
   // fe7d67a8: switching fast landing on relaxes what lands on its own check, so an agent's switch is held
   // although the landing mode is outside the pinned digest; going back to strict needs no one.
   const fast = await settings.policy(DEVICE, policyCommand({ acceptance: { landingMode: 'fast' } }));
@@ -1030,4 +1036,41 @@ test('owner-device settings writes apply before the first landing and are held f
   assert.equal(personRunner.rule, 'owner-person');
   // Settings requests never hold a landing: the gate's live read does not see them.
   assert.equal([...f.tables.projectHostedApprovals.values()].filter(row => row.live).length, 0);
+});
+
+// Owner gate (Issue 470ef29b, fe7d67a8): a policy field nobody classified must not reach an agent's
+// unheld edit. Every field of the policy schema is listed as gated, relax-only or exempt with a reason.
+test('every set-policy field is classified for the owner gate, and an unlisted field is gated', async () => {
+  const { OWNER_GATE, ownerGated } = await import(moduleUrl('../src/policy-digest.ts'));
+  const { autonomyPolicySchema, policyPreset } = await import(moduleUrl('../src/autonomy-policy.ts'));
+  const leaves = (schema, prefix) => {
+    let node = schema;
+    while (['optional', 'default', 'nullable'].includes(node.def.type)) node = node.def.innerType;
+    return node.def.type === 'object'
+      ? Object.entries(node.shape).flatMap(([key, child]) => leaves(child, prefix ? `${prefix}.${key}` : key))
+      : [prefix];
+  };
+  const fields = leaves(autonomyPolicySchema, '').sort();
+  assert.deepEqual(
+    fields.filter(field => !(field in OWNER_GATE)),
+    [],
+    'classify each new policy field in OWNER_GATE (src/policy-digest.ts)',
+  );
+  assert.deepEqual(
+    Object.keys(OWNER_GATE).filter(field => !fields.includes(field)),
+    [],
+    'no stale entries',
+  );
+  for (const [field, rule] of Object.entries(OWNER_GATE))
+    if (typeof rule === 'object') assert.ok(rule.exempt.length > 10, `${field} states why it is exempt`);
+  const base = policyPreset('trusted');
+  // Deny by default: a field the table does not know about is held.
+  assert.equal(ownerGated(base, { ...base, futureField: true }), true);
+  assert.equal(ownerGated(base, { ...base, agentDefaults: { futureKnob: 1 } }), true);
+  // Exempt fields apply at once, also when their object was absent before.
+  assert.equal(ownerGated(base, { ...base, agentDefaults: { stacking: 'auto' } }), false);
+  assert.equal(ownerGated(base, { ...base, notify: { awaySummary: false } }), false);
+  // Trust in shadow mode changes no gate; enabling it does.
+  assert.equal(ownerGated(base, { ...base, trust: { enabled: false, trustedAt: 3 } }), false);
+  assert.equal(ownerGated(base, { ...base, trust: { enabled: true } }), true);
 });

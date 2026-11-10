@@ -23,7 +23,7 @@ import {
   type AutonomyPolicy,
 } from '../src/autonomy-policy';
 import { invariant } from '../src/errors';
-import { acceptancePolicyDigest } from '../src/policy-digest';
+import { acceptancePolicyDigest, ownerGated } from '../src/policy-digest';
 import { landingQueue } from './projectHostedLandingEvents';
 import { report } from './errors';
 import { recordMutationReceipt } from './projectSelfMetricReceiptStore';
@@ -75,16 +75,6 @@ const settingRuleValidator = v.union(
   v.literal('held'),
 );
 const POLICY_KEY = settingKey('policy');
-/** Issue 470ef29b: an agent's edit needs the owner person when it changes what a landing may accept
- * (the acceptance digest: gate, mode, protected and owner-approval paths, auto actors, checks,
- * lifecycle, enforced trust), where accepted source is mirrored, or switches fast landing on. The
- * landing mode is outside the digest so pinned landings survive it; an agent may still go back to
- * strict alone (fe7d67a8: an agent's set-policy turned fast on unheld). */
-const landingMode = (policy: AutonomyPolicy) => policy.acceptance.landingMode ?? 'strict';
-const gatesLandings = (previous: AutonomyPolicy, policy: AutonomyPolicy) =>
-  acceptancePolicyDigest(previous) !== acceptancePolicyDigest(policy) ||
-  (landingMode(policy) !== 'strict' && landingMode(policy) !== landingMode(previous)) ||
-  canonicalPayload(previous.githubMirror ?? null) !== canonicalPayload(policy.githubMirror ?? null);
 /** What a held edit is pinned to: the parts an agent may not change alone, so a later edit of agent
  * defaults or notifications does not void the owner's pending grant. */
 const policyBase = (policy: AutonomyPolicy) =>
@@ -260,7 +250,7 @@ export const set = mutation({
         await requireStoredRepositoryBinding(ctx, input.projectId, policy.githubMirror.repo);
       const rule: SettingRule = !device
         ? 'owner-person'
-        : gatesLandings(previous, policy)
+        : ownerGated(previous, policy)
           ? await agentSettingRule(ctx, input.projectId, user)
           : 'no-gate-change';
       if (rule === 'held') {
