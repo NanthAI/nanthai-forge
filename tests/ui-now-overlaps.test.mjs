@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { moduleUrl } from './convex-module.mjs';
 import { overlapNowFixture } from './hosted-cockpit-fixture.mjs';
 import { laneSummary } from '../dist/work-hosted-summary.js';
+import { laneSchema, noteSchema } from '../dist/work-types.js';
 import { nowOverlapSignals } from '../dist/now-overlap-signals.js';
 const { hostedAttention } = await import(moduleUrl('../web/src/shell/Attention.tsx'));
 const { HostedNowView } = await import(moduleUrl('../web/src/cockpit/HostedNow.tsx'));
@@ -47,7 +48,6 @@ test('A, B, B2, B3 and C render the same shell; shared files never ask a person 
 });
 test('current source pins outrank old coordination events and stale index heads are explicitly incomplete', () => {
   const f = overlapNowFixture('B');
-  for (const lane of f.records.lanes) lane.overlaps = [];
   f.records.lanes[0].head = 'new-head';
   let model = hostedAttention(f.records, f.live, f.now);
   assert.equal(model.decisions.length, 0);
@@ -63,15 +63,33 @@ test('current source pins outrank old coordination events and stale index heads 
   model = hostedAttention(f.records, f.live, f.now);
   assert.deepEqual(model.overlaps, [], 'fresh empty path projections replace stale event paths');
 });
-test('old Lane summaries stay valid and delivery summaries are capped at twenty', () => {
-  const f = overlapNowFixture('C'),
-    lane = {
-      ...f.records.lanes[0],
-      overlapInbox: Array.from({ length: 25 }, () => f.records.lanes[0].overlaps[0]),
-    };
-  assert.equal(laneSummary(lane).overlaps.length, 20);
-  delete lane.overlapInbox;
+test('stored Lane and note rows with retired path-notice fields stay readable without republishing notices (3d001cb2)', () => {
+  const f = overlapNowFixture('C');
+  const notice = {
+    noticeId: 'a'.repeat(64),
+    file: 'old.ts',
+    lanes: [f.records.lanes[0].id],
+    at: new Date(f.now).toISOString(),
+  };
+  const lane = { ...f.records.lanes[0], target: '', overlapInbox: [notice] };
+  const parsed = laneSchema.parse(lane);
+  assert.equal(parsed.head, lane.head);
+  assert.equal(parsed.overlapInbox, undefined);
   assert.equal(laneSummary(lane).overlaps, undefined);
+  const note = noteSchema.parse({
+    text: 'Retained decision',
+    kind: 'decision',
+    at: notice.at,
+    overlapAnswer: {
+      laneId: lane.id,
+      noticeId: notice.noticeId,
+      deliveryId: 'old',
+      disposition: 'acknowledged',
+    },
+  });
+  assert.equal(note.text, 'Retained decision');
+  assert.equal(note.kind, 'decision');
+  assert.equal(note.overlapAnswer, undefined);
 });
 test('project signals include behind-main files', () => {
   const entry = (laneId, paths) => ({

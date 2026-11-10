@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { conversationSchema, type Conversation } from './agent-edit-types.js';
-export { conversationSchema, overlapAnswerSchema, type Conversation } from './agent-edit-types.js';
+export { conversationSchema, type Conversation } from './agent-edit-types.js';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 

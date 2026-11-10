@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { semanticPlanSchema } from './intent-semantic-conflict.js';
-import { conversationSchema, overlapAnswerSchema } from './agent-edit-types.js';
+import { conversationSchema } from './agent-edit-types.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { decisionRecordSchema } from './decision-types.js';
 import { frictionEventSchema } from './friction-types.js';
@@ -68,7 +68,6 @@ export const noteSchema = z.object({
   id: z.uuid().optional(),
   operationId: z.uuid().optional(),
   request: z.string().optional(),
-  overlapAnswer: overlapAnswerSchema.optional(),
   conversation: conversationSchema.optional(),
   handoff: deliveryHandoffSchema.optional(),
   text: z.string().min(1).max(4000),
@@ -177,9 +176,6 @@ const checkpointSchema = z.object({
 });
 export const afterSchema = z.union([z.object({ intentId: id }).strict(), z.object({ viewId: id }).strict()]);
 export const laneSchema = z.object({
-  overlapInbox: z
-    .array(z.object({ noticeId: z.string(), file: z.string(), lanes: z.array(z.string()), at: z.string() }))
-    .optional(),
   startReceipt: z
     .object({
       revision: z.number().safe().nonnegative(),

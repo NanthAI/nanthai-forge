@@ -21,7 +21,6 @@ export function overlapNowFixture(state = 'C') {
     [1, 3, 4],
     [2, 1, 5],
   ];
-  const counts = [[0, 1, 2, 3], [0, 1, 4], [5], [4]];
   const lanes = names.map((name, i) => ({
     id: id(i + 1),
     intentId: id(10 + i),
@@ -33,12 +32,6 @@ export function overlapNowFixture(state = 'C') {
     startedBy: { kind: 'agent', name: agents[i] },
     checkpoints: [],
     checkpointCount: 1,
-    overlaps: counts[i].map(n => ({
-      noticeId: String(n + 1).padStart(64, '0'),
-      file: paths[notices[n][2]],
-      lanes: notices[n].slice(0, 2).map(i => id(i + 1)),
-      at: new Date(now - (i === 3 ? 120 : 41) * 60000).toISOString(),
-    })),
   }));
   const sessions = agents.map((name, i) => ({
     sessionId: id(20 + i),
@@ -52,14 +45,9 @@ export function overlapNowFixture(state = 'C') {
     lastSeen: now - [41, 1, 4, 120][i] * 60000,
     sequence: 1,
   }));
-  if (state === 'A') for (const lane of lanes) lane.overlaps = [];
-  if (['B', 'B2', 'B3'].includes(state)) {
-    lanes[0].overlaps = lanes[0].overlaps.slice(0, 1);
-    for (const lane of lanes.slice(1)) lane.overlaps = [];
-    if (state === 'B2') {
-      sessions[0].status = 'working';
-      sessions[0].lastSeen = now - 60000;
-    }
+  if (state === 'B2') {
+    sessions[0].status = 'working';
+    sessions[0].lastSeen = now - 60000;
   }
   const edits = lanes.map((lane, i) => ({
     laneId: lane.id,

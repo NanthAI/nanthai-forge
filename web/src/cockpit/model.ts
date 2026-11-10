@@ -12,7 +12,6 @@ import { checkNeverRan, checkRunState } from '../../../src/check-run-state';
 
 /** The cockpit's view of one Lane: everything a row needs, derived only from recorded Work. */
 export type CockpitLane = {
-  overlaps?: import('../../../src/work-hosted-summary').HostedLaneSummary['overlaps'];
   id: string;
   name: string;
   head: string;
@@ -80,7 +79,6 @@ export type CockpitWork = {
     handoffs?: import('./queue-model').HandoffSummary[];
   }[];
   lanes: readonly (Pick<Lane, 'id' | 'intentId' | 'name' | 'head' | 'base' | 'state' | 'assignment'> & {
-    overlaps?: CockpitLane['overlaps'];
     startedBy?: Lane['startedBy'];
     after?: Lane['after'];
     stack?: Lane['stack'];
@@ -261,7 +259,6 @@ export function cockpitLanes(work: CockpitWork, queue?: ReadonlyMap<string, Queu
     }
     return {
       id: lane.id,
-      ...(lane.overlaps?.length ? { overlaps: lane.overlaps } : {}),
       name: lane.name,
       head: lane.head,
       intentId: lane.intentId,

@@ -9,9 +9,3 @@ export const conversationSchema = z.object({
   link: z.string().min(1).max(2048).optional(),
 });
 export type Conversation = z.infer<typeof conversationSchema>;
-export const overlapAnswerSchema = z.object({
-  laneId: z.uuid(),
-  noticeId: z.string().regex(/^[a-f0-9]{64}$/),
-  deliveryId: z.string().min(1),
-  disposition: z.enum(['acknowledged', 'routed-around']),
-});

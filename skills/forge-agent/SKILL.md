@@ -3,7 +3,7 @@ name: forge-agent
 description: Concise recorded Forge Intent/Lane/check/acceptance workflow and optional graph context. Ordinary local-file questions need no skill, index, or Work setup.
 ---
 
-Forge runs hosted projects only: work in a Forge clone or Lane (`nforge host ROOT` makes a Git folder a hosted project). Use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. Replay requires the full original parameters, including message; use the receipt replay command. Hosted land accepts `overlapAnswer:"accept-order"` in the same request.
+Forge runs hosted projects only: work in a Forge clone or Lane (`nforge host ROOT` makes a Git folder a hosted project). Use `nforge agent ROOT --help` and `nforge docs agents/hosted`: both are generated from the enforced hosted contract. Replay requires the full original parameters, including message; use the receipt replay command. Saved file overlaps need no answer; real merge conflicts arrive as `conflictNotice`.
 
 Use ordinary search/read/edit tools on the selected source. For recorded delivery use the installed `nforge` command; `nforge agent ROOT VERB [--MODE] --help` gives parameters (`--command-file FILE` avoids JSON quoting). `nforge agent ROOT help TOPIC` prints one short how-to section (`help` lists the topics). Every refusal prints `{code,message,next,learn}`: run `next`, and run `learn` once for its topic. The first CLI run installs advisory first-write hooks that never deny edits; `help hosted` says how to turn them off.
 
