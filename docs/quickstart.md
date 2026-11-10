@@ -147,7 +147,7 @@ Two things can stay running, both opt-in and each with one job:
 A command may start a helper for one job, such as submitting a landing; it ends
 with that job (`tests/no-resident-process.test.mjs` lists every such child). The old dogfood owner service (a launchd job on one Mac)
 is retired because the hosted queue lands changes
-([retired setup](operations/landing-batches.md#owner-mac-launchd-setup-retired)).
+(removed with one client mode).
 Its remaining code is removed under the cleanup work, not something to run.
 
 ## Keep the project folder current

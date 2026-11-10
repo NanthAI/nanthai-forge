@@ -94,7 +94,6 @@ calls use local fakes, so these figures measure projection and continuation
 overhead, not hosted network latency or a production build duration. The
 separate 128 MB record fixture checks the action memory and RPC page budgets.
 
-
 Copy the whole export outside the project. It holds private history and check evidence, including opted-in local logs within retention, so treat it as private. Restore always writes to a new, unused directory. It validates every file against the manifest and recreates Lanes and Candidates. Unfinished commands are marked interrupted and never restart. The original owner is untouched, so keep it until you have checked the copy.
 
 Not included: uncheckpointed edits, ignored credentials, dependency caches and disposable workspaces. Checkpoint what you want first. To move between machines, restore on the target.
@@ -652,7 +651,6 @@ first. Source objects in this fixture are below the large-file threshold, so lar
 is not benchmarked. A 20 ms earlier intermediate build measured 96.2 s → 23.5 s; performance depends
 on latency and shared-machine load. These results do not establish a deployed-provider speedup.
 
-
 Release needs the rebuilt CLI and updated Convex schema/functions together (`historyBackfilling`,
 current-first publication, larger upload batches, batched ancestry and `completeHistory`). An
 old CLI's pending full-host operation retains its original behavior. The CLI does not deploy.
@@ -1084,18 +1082,6 @@ node --import ./tests/check-runtime.mjs --test --test-concurrency=2 \
   tests/hosted-mac-runner.test.mjs
 ```
 
-The restart cases create disposable native owners and real gated check processes.
-They seed keyed passed checks, stop the owner controller with SIGTERM or SIGKILL
-mid-check, and start a replacement controller. Both solo admission and combined
-checks must land the original entries without resubmission. A dead local
-controller or a service-stop signal retains the old run and reserves one
-deterministic replacement operation for its unfinished check. Its diagnosis and
-entry `infrastructureRetries` record the original run. Passed content-keyed evidence
-is tried first. Explicit cancellation, failed source checks and preparation errors
-retain their normal outcomes. A surviving orphan process group keeps its check
-capacity until it exits. Cancel the original landing entry to stop its recovery.
-Standalone `run` operations still retain their original interrupted outcome.
-
 The hosted cases use in-memory backend transactions, a fake provider and fake R2
 objects. They keep one remote check running across a 30-minute client clock jump
 or a 10-minute transport outage, then deliver its retained signed completion.
@@ -1106,24 +1092,17 @@ and terminal delivery when no runner returns. These are deterministic simulation
 they do not sleep the test Mac, disable Wi-Fi or contact a live service.
 
 Each lifecycle case prints JSON with simulated outage duration, elapsed wall time,
-passed-check re-runs, stranded entries and recovery mutations. The initial restart
-replay ended one in-flight entry as `cancelled` (SIGTERM) or `interrupted` (SIGKILL),
-requiring resubmission to continue. The measured recovery cases all landed with
+passed-check re-runs, stranded entries and recovery mutations. The measured recovery cases all landed with
 zero re-runs of passed checks, zero stranded entries and zero requester mutations
 to settle:
 
 | Case | Simulated outage | Measured wall time |
 | --- | --- | --- |
-| Solo check, SIGTERM restart | Service stop/start | 20.018 s |
-| Solo check, SIGKILL restart | Service stop/start | 19.426 s |
-| Combined check, SIGTERM restart | Service stop/start | 18.651 s |
-| Combined check, SIGKILL restart | Service stop/start | 16.061 s |
 | Hosted remote check, sleep | 30 minutes | 0.485 s |
 | Hosted remote check, network loss | 10 minutes | 0.489 s |
 
 These are synthetic drill times, not production latency or
-runner-billing measurements; fault injection and starting the replacement service
-are excluded from recovery-mutation counts. Repeat output gives current timings.
+runner-billing measurements; fault injection is excluded from recovery-mutation counts. Repeat output gives current timings.
 
 For Phase 5 metrics, this qualifies metric 5's recovery path without a manual retry
 and metric 6's preservation of passed work; production interventions per landing,
@@ -1349,7 +1328,6 @@ The [scheduled import benchmark guard](operations/import-benchmark-guard.md)
 counts observed project executions, cancels scheduled import/index work on the
 approved benchmark stop conditions, runs temporary-project deletion and proves
 a quiet window without idle function polling.
-
 
 ## State generation pass
 

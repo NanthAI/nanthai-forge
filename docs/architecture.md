@@ -33,30 +33,14 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 Forge has one client mode: hosted. Hosted main, Lanes and the landing queue are canonical; the CLI keeps regenerable caches and retry journals and cannot accept. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`; "offline" means a Lane keeps working and lands once back online. The native-owner mode (local source authority, its landing driver and local Work store commands) is removed; the shared kernel below (State format, merge, durable writes) serves hosted clients and the server. Exchange push, source return and the `autoExchange` policy are retired. See [source exchange](operations/source-exchange.md).
 
 Projects land exclusively through the [hosted landing queue](#hosted-landing-request-queue).
-Landing clients submit a durable goal and observe its handle. Native `land`
-returns by default; only the owner controller composes, checks and settles it.
-The read-only `landing` action reconciles no work and starts no service. Native
-operation aliases share original queue entries. Under hosted source authority,
-a goal registered while the first composition runs owns a fenced server wake;
-source completion resumes that goal into the existing hosted check/acceptance
-controller. The owner driver builds a disposable index of immutable landing
-headers cooperatively, then observes queued/checking entries and live batches
-through selected, freshly validated reads. It recovers already-on-main Lane
-completion when the relevant records change. Work publication waits asynchronously
-in the existing FIFO queue; legacy synchronous driver phases return contention to
-their asynchronous retry instead of blocking the owner event loop. Direct batch
-drains enter that yielding context with inherited lock patience. GitHub landing
-checks use detached check controllers, isolating provider polling from driver work.
-Receipt progress selects the submitted entry's batch history and recent Channel
-moves, rather than hydrating all landing records. One pinned observation shares
-immutable selected-record reads. Worker journal discovery yields while checking
-file identities and only decodes changed journals; unchanged journal saves do not
-fsync or wake the driver. These paths are shared by owner services and detached
-presence workers. Presence-worker termination aborts its driver without cancelling
-submitted checks, with a one-second exit backstop.
-Domain failures roll back admission before a separate terminal
-failure publication. Upload/save preparation remains an explicit pre-admission
-phase. Hosted aliases and observations recheck current project access.
+Landing clients submit a durable goal and observe its handle. The read-only `landing`
+action reconciles no work and starts no service. A goal registered while the first
+composition runs owns a fenced server wake; source completion resumes that goal into the
+hosted check and acceptance controller. Domain failures roll back admission before a
+separate terminal failure publication. Upload/save preparation remains an explicit
+pre-admission phase. Hosted aliases and observations recheck current project access. The
+native-owner landing driver, its owner services and the presence workers were removed with
+one client mode (Issue 657d63ee).
 
 Server-authority main publication also records an indexed GitHub mirror job and
 schedules its first fixed Convex action atomically. A single active job per
@@ -72,8 +56,7 @@ creation uses the last mapped `base_tree`; commit dates and bytes are pinned to
 the acceptance so replay retains its SHA. Ref publication observes expected
 main and updates with `force:false`. Errors remain on the original job for
 explicit same-step recovery, with zero idle scheduling. GitHub App installation
-tokens are transient and scoped to the selected repository. Server-authority
-bindings stop the native Mac pusher. See [mirror operation](workflows.md#automatic-main-mirror).
+tokens are transient and scoped to the selected repository. See [mirror operation](workflows.md#automatic-main-mirror).
 
 ## Local filesystem watching
 
@@ -250,7 +233,7 @@ worker concurrency are unchanged.
 
 Automatic snapshots reuse unchanged content-addressed blobs and clone newly changed regular files through the same filesystem helper. Every new clone is verified against the captured bytes before object publication; edits racing a clone retain the original captured bytes. Snapshot pointers record clone/copy counts and fallback reasons. State identities, symlink bytes, checkpoint behavior and the existing snapshot retention window are unchanged.
 
-**Work records.** Native owners keep Work in `.forge/work`. Git-backed owners keep it in the Git common directory under `forge-work`. `work.json` is a small manifest that points to immutable, content-addressed record pages. A save writes new records, syncs them, then atomically replaces the manifest. An interrupted save leaves the previous snapshot in place. Lock-free pointer readers validate one open descriptor, allowing atomic replacement to unlink that descriptor while retaining its coherent bytes. In-place mutation and unsafe file types still fail explicitly; source capture retains its separate pathname validation. The owner lock serializes manifest publication and shared Channel mutations. Landing queue edits, native acceptance, main-audit selection and GitHub mirror recording prepare against one committed pointer outside that lock. They stage changed immutable records, then verify the exact pointer and driver/authority fences before publishing; a concurrent commit retries without overwriting either writer. Git/network operations hold no Work writer lock. When enabled for the publication, derived peer caches warm after writer release and before the mutation receipt returns, using their immutable page pins. Owner workspace refresh serializes on its own lock and selects current main after admission. Agent Lane operations also take a per-Lane lock: checkpoint capture and native sync file writes run outside the owner lock; sync publishes only its Lane into a fresh manifest with a source-field CAS, preserving concurrent changes to other Lanes. Native start reserves its records, materializes outside the owner lock, then publishes activation. Start activation also retains its original receipt metadata in the Lane, without local filesystem paths. Start/checkpoint publish without inline preview preparation or peer indexing. Outside the owner writer lock, their receipts include queued hosted activity, indexed peer observations, pending overlap delivery, coordination recording, friction and start warnings. Hosted activity uses the transport-state lock shared by binding writers, without entering the owner writer queue. A local per-operation receipt preserves those observations on replay. Incomplete indexes remain explicitly `local-incomplete`. Checkpoint preparation primes saved region summaries before publication. Checkpoint receipts retain overlap-save metrics from immutable manifests, using the latest save delta and excluding accepted peer heads; missing ancestry or source leaves metric coverage incomplete. Receipts compare those summaries and committed contract data, retain observed conflict identities with current repair/sync lineage, and resolve links only from local identity (otherwise returning `links.error`). CLI/MCP source re-indexing, overlap recomputation and enabled previews run in a finite detached refresh; that refresh never marks unreturned notices delivered. A pending ticket makes worker startup visible; MCP shutdown and synthetic-owner teardown join scheduled refreshes. Read-only actions never schedule a refresh. Stacked start replay preserves original head/base while reporting the latest saved `currentHead`. Exact-operation checkpoint replay reads retained history without source capture or workspace restoration. Check execution and observation hold no Work, Lane or Channel lock; after a Channel CAS race finish either proves the enabled disjoint fast-path or syncs, composes and checks a fresh pinned attempt before rejoining the acceptance queue. Transient contention at the final cancellation/spawn journal step retries without rematerializing, changing the run ID or releasing its machine-capacity ticket; a never-started command is not marked failed merely because this lock was busy. The per-operation finish journal guard prevents duplicate drivers of the same operation; it does not exclude other agents.
+**Work records.** Local projects keep Work in `.forge/work`; the local landing driver that wrote through the paths below was removed with one client mode, and hosted projects keep Work on the server. Git-backed owners keep it in the Git common directory under `forge-work`. `work.json` is a small manifest that points to immutable, content-addressed record pages. A save writes new records, syncs them, then atomically replaces the manifest. An interrupted save leaves the previous snapshot in place. Lock-free pointer readers validate one open descriptor, allowing atomic replacement to unlink that descriptor while retaining its coherent bytes. In-place mutation and unsafe file types still fail explicitly; source capture retains its separate pathname validation. The owner lock serializes manifest publication and shared Channel mutations. Landing queue edits, native acceptance, main-audit selection and GitHub mirror recording prepare against one committed pointer outside that lock. They stage changed immutable records, then verify the exact pointer and driver/authority fences before publishing; a concurrent commit retries without overwriting either writer. Git/network operations hold no Work writer lock. When enabled for the publication, derived peer caches warm after writer release and before the mutation receipt returns, using their immutable page pins. Owner workspace refresh serializes on its own lock and selects current main after admission. Agent Lane operations also take a per-Lane lock: checkpoint capture and native sync file writes run outside the owner lock; sync publishes only its Lane into a fresh manifest with a source-field CAS, preserving concurrent changes to other Lanes. Native start reserves its records, materializes outside the owner lock, then publishes activation. Start activation also retains its original receipt metadata in the Lane, without local filesystem paths. Start/checkpoint publish without inline preview preparation or peer indexing. Outside the owner writer lock, their receipts include queued hosted activity, indexed peer observations, pending overlap delivery, coordination recording, friction and start warnings. Hosted activity uses the transport-state lock shared by binding writers, without entering the owner writer queue. A local per-operation receipt preserves those observations on replay. Incomplete indexes remain explicitly `local-incomplete`. Checkpoint preparation primes saved region summaries before publication. Checkpoint receipts retain overlap-save metrics from immutable manifests, using the latest save delta and excluding accepted peer heads; missing ancestry or source leaves metric coverage incomplete. Receipts compare those summaries and committed contract data, retain observed conflict identities with current repair/sync lineage, and resolve links only from local identity (otherwise returning `links.error`). CLI/MCP source re-indexing, overlap recomputation and enabled previews run in a finite detached refresh; that refresh never marks unreturned notices delivered. A pending ticket makes worker startup visible; MCP shutdown and synthetic-owner teardown join scheduled refreshes. Read-only actions never schedule a refresh. Stacked start replay preserves original head/base while reporting the latest saved `currentHead`. Exact-operation checkpoint replay reads retained history without source capture or workspace restoration. Check execution and observation hold no Work, Lane or Channel lock; after a Channel CAS race finish either proves the enabled disjoint fast-path or syncs, composes and checks a fresh pinned attempt before rejoining the acceptance queue. Transient contention at the final cancellation/spawn journal step retries without rematerializing, changing the run ID or releasing its machine-capacity ticket; a never-started command is not marked failed merely because this lock was busy. The per-operation finish journal guard prevents duplicate drivers of the same operation; it does not exclude other agents.
 
 Native Work formats 23 (separate Intents) and 24 (unified Intents) retain run
 selection inventories, coverage details and named verdicts in hash-bound Work
@@ -450,7 +433,7 @@ Hosted checks run on the project's configured runner (`configure-runner`); the l
 
 ## Making-of record
 
-`making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Candidates, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing; loading and the `report` mutation live in `src/making-of-read.ts`. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
+`making-of` is a read model over existing records: the Intent, its Lanes (by `intentId`), its Candidates, their runs and accepted Channel moves (by `viewId`), plus local presence and self-reports from `hosted-binding.json`. Records-v2 owners read only those indexed records; older owners read loaded Work. The derivation (`src/making-of.ts`) is pure and omits values whose inputs are missing. Runs record `queuedAt` at creation and move `startedAt` forward when the command spawns, which separates queue from running time. Self-reports are keyed by Lane, actor and optional session, keep their applied operation IDs for replay, and never change the Work revision or format.
 
 Designed, not built: an opt-in OpenTelemetry intake. Claude Code and Codex can export OTLP metrics (token and cost counters with model and session attributes) when the user enables telemetry. A future telemetry listener would accept OTLP/HTTP JSON, map the session to a Lane through a `forge.lane_id` resource attribute set from the Lane environment, and write the same self-report record. It stays off unless the user configures the exporter, and it drops prompt and tool-content attributes.
 
@@ -840,7 +823,7 @@ H01 envelopes before external work and retains original terminal outcomes for 90
 project's older receipts through the creation-time index (one extra indexed range, zero bytes when none
 expired), skipping legacy cancel receipts that metrics read. No timer exists and an idle project does nothing; a
 retry of an operation id older than that starts a new operation.
-Native-owner projects retain their existing Work owner and are not converted.
+Native-owner projects are not converted in place; their owner moves them with `nforge host`.
 Existing Intent/planning journal commands and portable Work formats are unchanged.
 
 `projectHostedSnapshots` stages recovery/export snapshots as immutable pages of
@@ -951,19 +934,8 @@ The existing coordination journal retains an advisory notice for both participan
 local brief messages include the pinned diagnostics and peers surfaces the advice
 while both saved heads remain current. Notices require no acknowledgement and never serve as acceptance evidence.
 
-With automatic previews enabled, `land` previews precisely its saved selection
-and `finish` previews its saved Candidate inputs before a landing check starts.
-The batch driver also previews the actual queued batch against its pinned base,
-including independently submitted finishes. Exact cached inputs are reused.
-Failing individuals are excluded; for a failing pair, the later selected input is
-excluded while the first is retained. Exclusions retain main, Lane/head, cache key
-and diagnostic pins in the result; safe selected Lanes continue through normal
-checks. A grouped finish stops with `preview-excluded` if any input is excluded.
-Submit a new operation with `preview:"skip"` on `finish` or `land` to override this
-preflight (ordinary landing checks still apply). A skipped queued entry is never
-excluded by another entry's preview. Baseline failures, text conflicts, missing
-configuration, higher-order-only failures and unavailable preview execution use
-the existing landing/check path; preview advice never substitutes for evidence.
+Landing does not run these previews: the hosted queue checks each Candidate itself, and preview
+advice never substitutes for evidence.
 
 A per-owner preview lock serializes execution. The disposable cache keys accepted
 main, ordered Lane/head pins, static definitions and the clean runtime fingerprint.
@@ -1025,27 +997,6 @@ states through the parent index in 100-row/128-KiB transport windows. Continue i
 cursor until `isDone`; no total sibling or project-history ceiling is imposed.
 All reads recheck current project access, including historical records.
 
-### Native Lane stacks
-
-A stacked Lane stores its parent Lane ID, saved parent State and target Channel.
-The stack pin is independent of an Intent's source base and of a Candidate's
-inputs. Start reserves it with the new Lane before materializing source. Sync
-uses the pinned parent tree as its explicit three-way base, then writes the
-child's aggregate delta as a new State on the selected target, retaining the prior
-child head as a second parent. This preserves causal history for ordinary Candidate
-composition without reintroducing the old parent's tree. Checkpoint history
-retains pre-restack source; conflicts retain the selected target until resolution.
-Sync's durable selection and checkpoint receipts also retain the old/new stack
-pins, so interrupted application and undo restore the same base.
-
-A retained accepted Candidate input and Channel receipt establish parent landing;
-source containment or lifecycle status alone does not. Landing retargets the
-child's next sync to main without mutating its live files. Finish/land preserve
-the existing dependency wait, including multi-level chains. Work formats 21/22
-protect stack metadata from older writers, with legacy/unified Intent semantics
-respectively; record pages, source exchange and explicit Intent conversion retain
-the pins. See [stacked Lanes](agents/workflow.md#stacked-lanes).
-
 ## Trusted remote source computation
 
 The default fixed-code Convex source provider runs bounded Node actions over the
@@ -1083,7 +1034,7 @@ Abandon and reopen retain source, saves and acceptance history and never move
 main. Known dirty client abandonment uses an explicit save-first child; unknown
 disconnected drafts remain on that client and are never claimed saved. Reopen
 requires no reason and changes only its selected target. Intent reopen retains
-independent child lifecycle states. Native-owner menus keep their owner path.
+independent child lifecycle states.
 
 Intent abandonment can cascade over active children. Bounded parent-index pages
 stage private immutable Lane versions and events. Every canonical Lane writer
@@ -1394,7 +1345,7 @@ checks under current project access. Configuration contains a Mac machine identi
 GitHub Actions repository, App installation and selected `runsOn` label, exact
 runtime/environment fingerprints and a credential-use reference, never account
 credential values or a local credential file. These APIs do not configure a live
-provider or change existing native-owner checks.
+provider.
 
 `projectHostedChecks:enqueue` freezes one clean canonical Candidate, its registered
 State, input/dependency roots, base receipt, definition, runner configuration and
@@ -1610,7 +1561,7 @@ receipt, authority epoch and optional exact check run or check request. Actor ki
 comes from the existing account/device acceptance boundary. The check-request
 variant calls the same H10 enqueue transaction, retaining one child operation and
 run before any provider I/O. This API does not require a check for person requests
-or publish source. Native-owner projects retain their current acceptance route.
+or publish source.
 
 Requests and attempts have their own indexed tables, separate from Work/display
 projections. An attempt freezes canonical Candidate digest/input/dependency roots,
@@ -1936,10 +1887,9 @@ is reported as `alreadyApplied` and left untouched; the handoff's baseline copy 
 for a marker that is missing or unreadable, never for a newer one. Recovery removes its exact journaled baseline
 stage even after an interrupted earlier run.
 
-
 `HostedAgentTransport` is the shared hosted CLI/agent boundary. `agent-cli` selects
 an explicit deployment/project, a verified Lane marker or a retained client
-address before constructing native owner services. All hosted actions reuse the
+address before constructing any client service. All hosted actions reuse the
 canonical start, checkout, delta save, paged compose, sync/revert, check, durable
 finish and lifecycle APIs. Source bytes use the existing verified exchange and
 object transport, without a native owner or listener. Native addressing retains
@@ -1993,7 +1943,6 @@ before deletion. Digests with unusually many references continue through the exi
 Automatic expiry uses the same resumable planner with one project sweep identity;
 finite continuations stop after draining due receipts, with no idle timer. Hosted source staging records object provenance before publication; each bounded save or publication batch marks every newly referenced object and appends one cleanup fence atomically. A new source batch changes the cleanup guard, so a reviewed cleanup cannot delete bytes that became source during the operation. Replaying an already marked batch performs no protection writes.
 
-
 Hosted agent `diff` pins Lane base/head, reads their R2 manifests and at most 100
 blob descriptors per 50-path page. Source/hunk budgets report omissions; cursors
 retain the pair. Exact State `show` checks project membership even on cache hits;
@@ -2019,7 +1968,6 @@ Metadata uses existing calls and records, with zero idle calls. Each message add
 at most 2,061 JSON bytes; the first cohort receipt adds at most 16,427 more for
 eight messages. Only legacy pending finishes need an indexed finish-record read.
 Source and cursor artifact bytes remain in R2.
-
 
 ### GitHub containment and adoption
 

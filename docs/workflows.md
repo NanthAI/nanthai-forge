@@ -253,58 +253,24 @@ A built-in preset replaces all settings; selecting custom retains the current fi
 
 `acceptance.autoActors` contains local actor IDs or hosted accounts; hosted reads show those accounts to writers as Forge handles and omit them for public readers. Omitted/empty means all agents; it does not grant project authority. `FORGE_ACTOR` selects the local agent label (default: OS username). `acceptance.protectedPaths` contains case-sensitive, repository-relative globs (`*`, `**`, `?`, character classes and brace alternatives); additions, deletions, mode changes and both sides of a renamed path are covered. Matching changes always need a person. Automatic acceptance requires a recorded passing check for the exact Candidate ID and source head. It cannot roll main back or omit its current accepted head.
 
-The Autonomy setting `acceptance.disjointFastPath` permits native acceptance to
-reuse current passing evidence across disjoint changes on newer main. It defaults
-to off in new projects and presets. Enabled acceptance proves ancestry and exact
-manifest-path disjointness, composes cleanly, records structured proof and schedules
-a full main check automatically after acceptance. Pending main checks coalesce on
-the newest accepted head. A red result stays in Needs you and creates one
-“Fix main: <check> failed after <landing>” Intent per failing head, linking the run
-and a copyable agent prompt. Repair from current main and check and accept the new
-Candidate normally. This native post-accept worker only opens the Fix main Intent; it never
-rewinds or reverts accepted work. A hosted project's main audit also finds and reverts a proven
-culprit (see [hosted acceptance gate](#hosted-acceptance-gate); `acceptance.autoRevert`). The option
-does not change supervised person review, trusted passing-check requirements,
-protected paths or actor selection. Scoped standard-check acceptances also schedule full main checks
-while this option is off. See [agent workflow](agents/workflow.md#disjoint-fast-path-landing)
-for receipts, queue recovery and the format-14 compatibility boundary.
+The native-owner settings `acceptance.disjointFastPath`, `ownerRootUpdates` and `laneUpdates` went
+with the local landing driver (one client mode, Issue 657d63ee); stored values stay readable and
+have no effect. On the hosted queue, [landing modes](pre-queue-checks.md#landing-modes) decide when
+a change lands on its own check, and the main audit finds and reverts a proven culprit
+(`acceptance.autoRevert`; see [hosted acceptance gate](#hosted-acceptance-gate)). See
+[agent workflow](agents/workflow.md#disjoint-fast-path-landing) for receipts.
 
-Native owners can enable `ownerRootUpdates:true` with `nforge set-policy ROOT
-'{"operationId":"UUID","ownerRootUpdates":true}'`. It defaults off in all presets
-and older policies. Set it to false to stop automatic refresh. After each durable
-acceptance into main, Forge updates the owner folder’s tracked files under the
-owner lock, including composed disjoint and concurrent acceptances. Acceptance
-receipts and local status report the refresh result and undo guidance. `.forge/`
-source paths are never applied; existing metadata, untracked files and ignored
-local content are preserved. Refresh adds its own recovery metadata under
-`.forge/work` and uses private atomic replacement files under `.forge`.
-
-Any tracked edit, deletion, mode change or untracked obstruction skips refresh;
-acceptance still succeeds. Local **Needs you** shows the reason and exact
-`nforge owner refresh 'ROOT'` command. Save or move local edits and obstructions,
-restore tracked files to the last refreshed main named in the diagnostic, then
-run that command. There is no force mode. Explicit refresh works with the policy
-off and uses the same guard. Without a previous refresh receipt, explicit refresh
-uses the retained bootstrap State as its initial baseline, so an untouched owner
-can catch up after several acceptances with the policy off. An interrupted update
-retains its exact old and new
-States; retry or a later acceptance completes that target before advancing to
-current main. Replaying an old acceptance never rewinds the folder. Refresh does
-not change retained source history or the Work format.
-
-For native Lanes, with `laneUpdates:"ask"`, finish checkpoints and stops at `sync-required` with “main moved; run sync”. With `auto`, finish records each successful sync in Lane checkpoint/timeline data and returns “Updated from main: N files”, the changed paths and undo instructions. Git-backed Lanes use the same recorded sync/undo workflow, with hooks, filters and external merge drivers disabled. Untracked or ignored obstructions are preserved and reported. `undo-sync` for a local Lane takes its `syncOperationId` (successful or pending conflict) and returns its head to the pre-sync checkpoint. It leaves main and checkpoint history intact. Newer checkpoints or uncaptured edits cause refusal; explicit `force:true` captures dirty source before restoring the working copy and returns a warning. Retry uses the same operation ID. Restore main with `sync`, or materialize a retained newer State.
-
-Hosted finish composes and checks against current main automatically, as a merge queue does. Hosted settings hide the native-only `laneUpdates` toggle. On overlap, hosted agents edit the returned sibling conflict Lane, call `resolve`, then run its returned `finish` command; see [hosted conflict recovery](operations/source-exchange.md#hosted-conflict-recovery).
+Hosted finish composes and checks against current main automatically, as a merge queue does. On overlap, hosted agents edit the returned sibling conflict Lane, call `resolve`, then run its returned `finish` command; see [hosted conflict recovery](operations/source-exchange.md#hosted-conflict-recovery).
 
 `lifecycle.completeOnAccept` controls completion of local accepted input Lanes and their Intent (when all its Lanes are complete); `keepOpen:true` leaves them open. On a hosted project, landing also completes the landed Lanes' Intent by default even when the Lane stays open, so the Issue closes (when its Done-when lines are ticked) without a hand-close; with lines still open the next planning read holds it open (no auto-close) and names the open lines and the close command; `closes:false` (also keeps the Lanes open, like `keepOpen`) or policy `lifecycle.closeOnLand:"off"` makes a landing refs-only (see [workflow](agents/workflow.md)). Undo completion with `reopen`. The existing `lifecycle.cleanRegenerableCopies` switch enables automatic `lanes`, `lane-deps`, `check-workspaces`, `check-retention` and `exchange-staging` cleanup after local Lane completion or abandonment and accepted-work completion. Acceptance also sweeps eligible closed copies left from earlier work. Only Autonomous enables this switch by default. `completeOnAccept` is on for every preset of a new project; migrated projects keep their stored value. Completion and cleanup have retry-safe action receipts; replay does not complete or remove a subsequently reopened active Lane. An automatic cleanup with eligible items records removed paths, skipped items and reasons, and restore instructions. An empty sweep returns its skipped reasons without recording an action or advancing Work. Completed or abandoned Lane folders are removed only when their source equals the retained head, no source operation is pending, and no local process is working there. Active, dirty, in-use and unverifiable copies stay. Automatic whole-Lane cleanup also retains excluded local settings and arbitrary ignored files outside recognized regenerable build directories. Source States, Lane records, saves, history, result receipts, log tails, artifacts and reachable objects are retained. The owner-approved seven-day policy removes eligible unpinned old check source/shard copies and bulky log prefixes, and unreferenced old exchange staging; see [local cleanup](operations.md#local-cleanup). Run `reopen` with the Lane id to re-materialize its head; restore dependencies with `npm ci --ignore-scripts` and the project's build.
 
 A hosted project owner can pin a Lane with `nforge x ROOT pin '{"laneId":"LANE_ID"}'` (`"pinned":false` unpins; `laneId` is filled from inside a Lane directory). A pinned Lane is skipped by complete-merged, `completeOnAccept`, the Intent cascade, `nforge prune` and client cache GC, and an explicit `complete` or `abandon` refuses it with `LANE_PINNED` until it is unpinned. Reopen still works, and any Lane state can be pinned.
 
-Terminal native checks retain the existing immediate cleanup behavior across presets. With cleanup enabled, after a terminal receipt is durable and published, the shared cleanup validator rechecks receipt/log/artifact durability, source equality, host and process state under the owner lock, then removes eligible workspace and private runtime directories. When eligible copies are selected, its automatic-action receipt lists removals and reasons for retaining other copies; run evidence stays unchanged. With the switch off, the runner retains legacy cleanup without creating automatic-action records or promoting the Work format. Rerun the check to reconstruct its workspace. Missing or incomplete evidence, changed source, a running process or another host retains the copy. A local process working anywhere in the check directory retains both its workspace and private runtime together. A `DISK_LOW` refusal retains materialized workspace and runtime files through terminal handling and later automatic sweeps; explicit `clean` remains available. The cleanup switch also permits eligible leftovers to be retried by subsequent lifecycle cleanup. Seven-day retention runs on these lifecycle events under the same opt-in, with no background cleanup daemon. Custom auto-on-pass settings may retain this explicit cleanup opt-in. `notify.awaySummary` is a preference exposed for the separately implemented cockpit; it starts no notification transport.
+`notify.awaySummary` is a preference exposed for the separately implemented cockpit; it starts no notification transport.
 
 Hosted policy is independent of uploaded local policy. Source exchange/return preserves hosted Channel receipts and cannot change hosted policy. A person can select a clean Candidate without a prior local acceptance receipt (`acceptanceId` is optional). A person may explicitly select an earlier retained local acceptance for rollback; automatic acceptance cannot. Native object checkpoints support source-byte path/ancestry validation; legacy archives/Git checkpoints retain local Candidate/acceptance provenance, and unavailable protected-path coverage requires a person. Hosted check records remain reports from the local execution owner, not independently verified execution.
 
-Policy and reversible-action records use Work format 11; upgrade every local CLI, MCP writer, server and recovery reader before using this version to mutate a shared owner (acceptance, automatic lifecycle and sync records also write format 11). Older readers reject format 11. Existing owners without policy fields migrate lazily at read time to custom without rewriting their metadata or stopping concurrent older dogfooding writers. New native owners (including Git imports), new Git Work stores and newly registered hosted projects receive supervised. Deploy the new hosted schema/functions and upgrade all local writers together before relying on enforcement.
+New hosted projects, including GitHub imports, receive the supervised preset.
 
 ## Checks
 
@@ -412,17 +378,11 @@ saves a minute. The proposal is the `selection` to add and the one line above.
 A check without `selection` keeps today's behaviour: one full job. Local and self-hosted machine runners
 already supply the same file to every command and run it as one job.
 
-Choose the native project's runner once through the existing owner-only
-`set-policy` command: `checks.runner` is `local` (default), `github-actions`
-(`repo`, `runsOn`, optional `shards`). Use `policy` or `status` to show the
-configured runner. Modal is retired: existing policies remain readable, but a
-new runner selection must use `local` or `github-actions`. Each terminal receipt records `backend.cost`
-with billed quantities, estimated USD and its basis; `status.checkCosts.months`
-summarizes available estimates per month and runner, marking unknown and legacy
-inputs. See [runner selection and cost basis](operations.md#runner-selection)
-for commands, configurable label rates and allowance exclusions.
-
-Configured native runners batch queued code candidates as checked prefixes. `land-ready` resumes retained batches; cancellation preserves earlier passing prefixes. Batches retain the selecting driver's clean environment for resumed runs and identify incompatible entries by changed environment field. See [landing batches](operations/landing-batches.md) and [agent workflow](agents/workflow.md#landing-queue).
+Choose the project's runner once with `nforge agent ROOT configure-runner` (owner only); see
+[GitHub Actions checks](operations/github-actions-checks.md). Each terminal receipt records
+`backend.cost` with billed quantities, estimated USD and its basis; see
+[runner selection and cost basis](operations.md#runner-selection) for label rates and allowance
+exclusions. Queued code candidates land through the [hosted landing queue](agents/workflow.md#landing-queue).
 
 Shared check evidence retains named test verdicts and quarantines. Two supported
 flake verdicts within seven days quarantine the exact test; it continues running.
@@ -452,7 +412,6 @@ A Channel is a named pointer to accepted source. Accept a clean Candidate with t
 Local acceptance uses a **landing queue**: a crash-safe FIFO slot per owner and Channel, shared by finish and person acceptance through CLI/MCP. Initial Lane checks and check-only work remain parallel under the machine check queue. When main moves during a finish check, finish releases the slot for the retry's sync → compose → fresh exact-Candidate check, then rejoins only for acceptance with expected-head CAS. `finish.maxRetries` defaults to three retries after the initial attempt; waiting costs no attempts. Receipts retain all attempt pins/child IDs and observed queue positions (`waiting to land`). Conflicts, failed checks, policy-required review and exhausted retries stop explicitly. See [agent workflow](agents/workflow.md#landing-queue) for replay and bounded observation.
 
 Supervised projects still require a person. If main moves before a person's acceptance, it returns `CHANNEL_CHANGED` (or `CHANNEL_DIVERGED` for a Candidate missing current main) with “main moved; re-check needed”. Sync and check a new Candidate, then review and accept that Candidate; no prior approval is carried forward. Explicit person rollback to an earlier accepted Candidate remains available. This queue coordinates local writers on the same owner; upgrade all those writers. Hosted Channel selection retains its hosted authority/concurrency rules.
-
 
 ## Hosted project and companion
 
@@ -529,7 +488,6 @@ repository/head/access; do not silently switch to uploading everything. Test pub
 access revocation, inaccessible commits, local-only history and interrupted import recovery before
 exposing the flag. Ordinary `host` remains the implemented path.
 
-
 Bound pull checks out the selected hosted `main` into a new client directory. Without `--target`,
 the sibling name is `ROOT-hosted-main`. The original owner remains intact. `exchange ROOT push` is
 refused with `CLI_UPGRADE_REQUIRED`: there is no push path any more (see
@@ -597,9 +555,7 @@ blobs in windows of at most 100 and 8 MiB (or one larger file), then creates a
 tree with `base_tree`, a deterministic commit and a non-forced fast-forward
 update of `main`. The commit keeps the supplied landing message and trailers, falling back to the
 Intent outcome when no message was supplied, and uses the existing noreply sync identity. A source-unchanged landing
-advances its mapping without an empty commit. Native-owner and shadow projects
-keep the local worker described below; server bindings and a pending server
-cutover stop that Mac worker.
+advances its mapping without an empty commit.
 
 Git LFS paths (`filter=lfs` in the target State's `.gitattributes`) are
 published as Git's clean filter would: GitHub's tree gets the LFS pointer, built
@@ -701,27 +657,15 @@ published history is retained.
 
 `nforge github connect` turns the mirror on in the owner's one GitHub authorization
 (`--no-mirror` connects only; see [GitHub App](operations/github-app.md#connect-and-inspect)).
-To change it later on the native owner, through CLI or the agent MCP `set-policy` action:
+To change it later, use the agent `set-policy` action (CLI or MCP):
 
 ```sh
-nforge set-policy ROOT '{"operationId":"UUID","githubMirror":{"repo":"OWNER/NAME","autoPush":true,"laneRefs":false}}'
+nforge x ROOT set-policy '{"githubMirror":{"repo":"OWNER/NAME","autoPush":true,"laneRefs":false}}'
 ```
 
 The setting defaults off and survives autonomy preset changes. Set `autoPush:false`
-with the same repo and `laneRefs:false` to stop future automatic attempts. Publication
-uses the existing local Git/gh credentials; it does not require a new login path.
-Only main is published. Lane refs remain unpublished.
-
-Acceptance queues a detached worker and returns without waiting for GitHub. The
-worker coalesces a short burst, then mirrors the newest green main. Unchecked
-human acceptances wait for an exact passing check; scoped/fast acceptances wait
-for their full post-accept main check. Each acceptance normally has its own mapped
-commit; a contained external merge adopts the newest main in one commit, as above.
-The acceptance and pending mapping survive worker interruption; a later
-acceptance, check completion or local status observation resumes pending work.
-Transient failures retry the original operation with exponential backoff up to
-one minute between attempts. Disabling the policy stops future attempts; an
-already-sent Git request may still complete.
+with the same repo to stop future automatic attempts. Only main is published. Lane
+refs remain unpublished.
 
 Automatic projection also omits paths protected by capture's credential-name and
 metadata rules even when an imported State retained them. It shares native
@@ -747,7 +691,6 @@ Lane, never by automatically rewinding GitHub.
 
 Two-way GitHub sync (`githubMirror.inbound: true`) brings pushes to GitHub `main` back in as Forge landings and gives every pull request into `main` a Forge check-only run whose result is the `forge/verify` commit status (a fork PR's run waits until a project owner approves it, GitHub's approve-and-run norm); a newer push to the PR supersedes the older run. With the ruleset that `nforge github connect` and `nforge github status` print, imported once by a repository admin, GitHub merges only after `forge/verify` passes and refuses direct pushes to `main`; status reports `protected` or names each missing rule. Details: [two-way sync](operations/github-app.md#two-way-sync).
 
-
 - **Publish:** in a clean Candidate, choose a repository and optional base. Forge pushes the Candidate's Git projection to `forge/publish/<operation-id>` and opens a PR using your local `gh` login. It never merges. "Check GitHub PR" records the provider's state. Acceptance is reported only after GitHub confirms the merge.
 - **Import a PR:** paste a PR URL. This reads with your local `gh` access and writes nothing remotely. It creates an External Intent with the PR's exact head and base. "Create native Candidate" then selects that head. Later pushes appear as new observations. Nothing is absorbed silently.
 - **Mirror:** copy an accepted Channel's full history to a new branch `forge/mirror/<id>` in a repository you pick. Existing branches, PRs and `main` are untouched. An optional destination can fast-forward a named branch from an exact previous commit. It is never forced.
@@ -764,7 +707,6 @@ For the project owner, Needs you also lists each open approval request that wait
 Needs you and the situation line wait for the records they derive from: while the Intents, Lanes, Candidates, runs and moves load, or the inbox and overlap signals have not all arrived, an empty panel reads “Reading what needs you…”, and when a record page was refused or failed it reads “Can’t read what needs you.” (reload to try again); only a complete read says “Nothing needs you.” **Not now** hides one decision for the browser session and is keyed by the item plus what it is about (the Lane head, the failed run or the notice), so a new save, a new failure or a new notice for the same Lane or Intent shows again; older dismissals of an item that is listed under a newer version are dropped, and each tab keeps at most 200. The Intent board’s Needs-you pill and Home’s “N need you across your projects” use the panel's own rule for a Lane (a conflict, a landing waiting for review or failed, or a passed check with no landing record). Home reads no check runs or landing entries, so its number covers conflicts and can be lower than the panel's, never higher.
 
 Above 20 rows, Now’s changing Lanes and Work’s Intents, Lanes and Candidates collapse into recorded Initiative groups. Intents without an Initiative remain in No Initiative. When an Intent is linked to several Initiatives, its primary group is the first by Initiative record id, so totals do not double count; Planning retains all links. Groups print exact observed counts and open five rows at a time. Needs you groups by decision kind at scale. People, overlaps and accepted groups also have continuation. Small lists keep their ordinary rows. Planning search also matches an issue’s Initiative title; a matching Initiative with no matching issues remains selectable. Hosted presence reads continue beyond the first 30 roots, and Activity can load earlier events beyond the first 40. Saved source views do not store cockpit filters; ownership areas, labels, maintainer queues and batch actions are not available.
-
 
 Journey rails show four stops: edited, saved, checked and accepted. Hover or focus a rail for its current state; the Progress header’s (i) explains the stops. Project names have no mode badge.
 
@@ -886,7 +828,6 @@ request arrived. Hosted Review keeps connected-runner requests alongside the ret
 record. Hosted output reads the selected object checkpoint; when the log is only on the runner
 (or in a legacy archive), use `nforge agent ROOT log {runId}` for its retained tail, or
 `observe {runId}` and its CI provider link. Scope labels appear only when recorded scope is available.
-
 
 ### Settings and outside contributions
 

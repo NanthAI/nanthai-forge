@@ -6,7 +6,7 @@ before moving an existing native owner's authority. It does not enable that
 move. Canonical-owner migration is deferred to Phase 5; changing a transport
 address does not make the local landing train server-capable.
 
-Read [landing batches](landing-batches.md#submission-observations) for the native
+Read [landing batches](landing-batches.md#submission-observations) for the
 submission model and [source exchange](source-exchange.md#hosted-landing-queue-api)
 for the hosted API. The [architecture](../architecture.md#hosted-final-acceptance)
 describes the implemented publication boundary. The candidate slices below are
@@ -344,7 +344,7 @@ pending work. Test crashes before/after every retained child, a lost acceptance
 reply and hash-format differences without reselection or duplicate execution.
 
 Pointers: `src/agent-finish-journal.ts`, `src/land-journal.ts`,
-`src/landing-worker-journals.ts`, `src/native-backup.ts`,
+`src/native-backup.ts`,
 `src/hosted-agent-journal.ts`, `src/hosted-source-operation.ts`,
 `convex/projectHostedOperations.ts` and `convex/projectHostedFinishCompose.ts`.
 
@@ -357,8 +357,7 @@ that its landing request was cancelled. Add an explicit idempotent request
 cancellation path with retained outcome and late-publication fencing, preserving
 already accepted source. Test a final-CAS race and delayed check/source callback.
 
-Pointers: `src/landing-batch-cancel.ts`, `src/landing-batch-step.ts`,
-`src/hosted-agent-contract.ts` (`hostedAgentActions`),
+Pointers: `src/hosted-agent-contract.ts` (`hostedAgentActions`),
 `src/hosted-landing.ts` (`hostedLandingStateSchema`),
 `convex/projectHostedLanding.ts`, `convex/projectHostedFinishControl.ts` and
 `convex/projectHostedLifecycle.ts`.

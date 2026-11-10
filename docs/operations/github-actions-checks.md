@@ -1,22 +1,17 @@
 # GitHub Actions checks
 
-Native owners can run the pinned check candidate on GitHub-hosted
-compute (any `runsOn` label; Forge's own project uses free `ubuntu-latest` runners and stopped using Blacksmith on 2026-10-25) using the owner's existing `gh` authentication and Git credentials:
+Checks run on the project's configured runner. For GitHub Actions, the owner picks a runner
+repository once with `configure-runner`. Convex then dispatches each check through the Forge
+GitHub App ([Convex dispatch with the GitHub App](#convex-dispatch-with-the-github-app)):
 
 ```sh
-nforge x OWNER set-policy '{"checks":{"runner":"github-actions","repo":"OWNER/REPO","runsOn":"ubuntu-latest"}}'
-# Or select the installed Blacksmith label:
-nforge x OWNER set-policy '{"checks":{"runsOn":"blacksmith-4vcpu-ubuntu-2404"}}'
+nforge agent ROOT configure-runner '{"provider":"github-actions","repository":"OWNER/NAME","runsOn":"ubuntu-latest"}'
 ```
 
-The target must be a repository the owner intends to receive this source. Private
-source needs a private target. The credential must permit Git pushes and workflow
-dispatch. GitHub requires `.github/workflows/forge-check.yml` to be registered on
-the target's default branch before dispatching a different ref. The operator must
-install the workflow returned by `githubActionsWorkflow()` from the installed
-`dist/github-actions-workflow.js` there once. Forge never writes the default branch.
-See [GitHub's dispatch API](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
-No deployment, repository creation or default-branch update happens automatically.
+Forge's own project uses free `ubuntu-latest` runners; it stopped using Blacksmith on
+2026-10-25. Other CI can run the same check plan: `githubActionsWorkflow()` exports the workflow
+for bring-your-own CI, and the [BYOCI parity test](../forge-only-rules.md#byoci-parity) keeps
+the landing fast paths working there.
 
 `runsOn` defaults to `ubuntu-latest`. Omitted `shards` uses the same duration-balanced
 provider-neutral check plan; a positive shard count explicitly partitions all selected test files.
@@ -178,8 +173,8 @@ Git timeout, Node heap cap); Forge's own check scripts see no change. Planrecipe
 pins (Node) are provided by the control workflow: raise the pin through the executor Lane first.
 
 For this repository, code verification runs document validation and the installed
-package smoke in the shared `scripts/verify.mjs` entry point. Native-owner landing
-checks, hosted landing checks and the public mirror therefore exercise the same
+package smoke in the shared `scripts/verify.mjs` entry point. Hosted landing checks
+and the public mirror therefore exercise the same
 static and package contracts. Docs-only checks retain their documentation path.
 Package smoke runs once in the static job, after its other verification completes,
 because it rebuilds `dist` before installing the archive in a disposable directory.
@@ -339,8 +334,7 @@ the replacement job without another rerun. Original and replacement compact test
 cost observations remain separate. The run-owned ref stays retained while that
 replacement is unresolved. Recovery uses the original source, definition, shard
 selection, repository and runner label even if current runner settings change;
-new settings apply to new operations. Durable recovery receipts explicitly wake
-the owner landing worker, including before Work metadata reconciliation.
+new settings apply to new operations.
 Unrecoverable incomplete runs are interrupted. A live controller requests provider
 cancellation and observes the retained execution. If the local controller is dead,
 the cancel command or worker recovery promptly writes a terminal `cancelled`
@@ -371,7 +365,7 @@ the pinned per-label rate. Unknown timestamps or unpriced custom labels retain
 unknown quantities, not zero. Blacksmith Ubuntu x64 defaults to vCPU/2 ×
 $0.004/job-minute, before its shared free allowance. Override any label through
 `checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#runner-selection). Selected output files are currently marked unavailable;
-remote native process resource metrics are unavailable.
+remote process resource metrics are unavailable.
 
 The result and compact test evidence are recorded before deleting a terminal run’s ref,
 including failed and cancelled executions. Unresolved dispatches and reruns keep
@@ -527,7 +521,7 @@ also get the provider notice. No runner is blocked based on this notice.
 Hosted dispatch passes `runs_on` as a JSON string or array. Both hosted jobs use
 `fromJSON(inputs.runs_on || '"ubuntu-latest"')` in `runs-on`. GitHub supports
 [dispatch inputs in runs-on expressions](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idruns-on).
-The native/BYOCI jobs and generated single-label workflows retain their behavior.
+The BYOCI jobs and generated single-label workflows retain their behavior.
 OIDC accepts GitHub's `github-hosted` and `self-hosted` runner environments with
 the same signature, repository, workflow, execution and SHA checks.
 
@@ -546,7 +540,7 @@ Actions read/write, Contents read/write (the check token requests only read),
 Metadata read, and the Workflow run event. Its webhook remains `/github/webhook`.
 
 The checked-in workflow branches on `deployment`. Empty deployment preserves the
-native/BYOCI `plan` input and export jobs. Convex dispatches on `main` with
+BYOCI `plan` input and export jobs. Convex dispatches on `main` with
 `runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
 A hung shard is bounded by `timeout_minutes` (shard jobs and the single-shard step; the planning
 job's whole budget when set), else by the repository variable `FORGE_CHECK_TIMEOUT_MINUTES`, else the
@@ -596,9 +590,9 @@ split when history is missing or invalid. Complete per-file reports already carr
 by shard results train that history once when a check passes or fails. Hosted Mac
 completions use the same store and algorithm. Cancelled and interrupted checks do
 not train it. The indexed `projectHostedTestTimings` document uses the same JSON
-format and EWMA as native `.forge/work/test-timings.json`, with `timingHistoryLimits`
+format and EWMA as the local `.forge/work/test-timings.json`, with `timingHistoryLimits`
 (4,096 files, 128 runs, 1 MiB) and space reserved for the containing Convex document.
-Native owner-local history is not automatically uploaded. On a missing hosted
+Local history is not uploaded. On a missing hosted
 history document, the session bootstraps from at most the latest passed and latest
 failed hosted run's retained reports through their status indexes. With no usable
 reports, planning uses round-robin. Partial hosted selections
@@ -808,7 +802,6 @@ Then change the runner configuration with its expected digest; already-enqueued
 Mac runs keep their original configuration and execution owner. Acceptance policy
 and outbound GitHub mirroring are independent prerequisites and are not changed
 by configuring this runner.
-
 
 ### Warm hosted Actions jobs and optional setup
 
@@ -1265,7 +1258,7 @@ read-only. Lane code never writes an entry that another Lane restores.
 
 **Where the steps live.**
 
-- Native export (`githubActionsWorkflow()`): the declared steps are inlined after
+- BYOCI export (`githubActionsWorkflow()`): the declared steps are inlined after
   `setup-node` in each job, and the generated workflow is committed with the run's
   ref. Per-run refs restore only entries the default branch saved.
 - App/OIDC dispatch: one fixed `forge-check.yml` serves every project of its runner

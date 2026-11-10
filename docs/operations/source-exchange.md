@@ -30,7 +30,7 @@ Use `nforge host ROOT` to create and bind a hosted project. Bound pull checks ou
 nforge exchange ROOT pull --target NEW_DIR
 ```
 
-Omitting `--target` uses a sibling named `ROOT-hosted-main`. Full Work recovery is the separate `restore` command below. Native owners continue to support local saves and export without a hosted project.
+Omitting `--target` uses a sibling named `ROOT-hosted-main`. Full Work recovery is the separate `restore` command below. A project without a hosted copy moves to one with `nforge host`; the local landing driver is gone (one client mode).
 
 Source return and exchange push are removed, including push preparation, whole-closure missing-object negotiation, whole-Work publication fallback, bound push queues, automatic exchange and its spend pause. Old CLI push commands and the former publication RPC addresses return structured `CLI_UPGRADE_REQUIRED` errors before source or transport work. Stored local requests and historical receipts remain recovery inputs; these tombstones do not replay publication.
 
@@ -133,7 +133,7 @@ For an object proposal, download its receive request (`{url,projectId,proposalId
 nforge exchange ROOT receive-proposal --command-file forge-proposal-receive.json
 ```
 
-This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. Use an existing local Intent when importing into a retained native owner. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
+This downloads and validates the proposal, then imports it into a separate Lane in the existing owner using the original operation ID. `pull-proposal` with `{url,projectId,proposalId,cacheRoot?}` is also available to retain an unpacked export in a fresh directory. Use that directory as `archivePath` in the existing `import-native-contribution` request and its manifest SHA-256 as `archiveSha256`. These compatibility field names also accept local archives with their original compressed digest. The importer validates complete source closure and creates a separate Lane; contributor Work and check claims never become owner evidence.
 
 ## Hosted main client checkout
 
@@ -751,7 +751,6 @@ Fast paths (fea47345 B; each falls back to the full path when it cannot prove it
   (land, finish, lifecycle) keep the inline step. The web UI does not show a failed settle yet;
   a P7 Issue tracks that.
 
-
 ## Hosted check output API
 
 The provider-neutral output contracts are in `src/hosted-check-output.ts`.
@@ -1049,7 +1048,6 @@ resumes its retained page/entry cursor after a lost reply or stopped task. A nam
 internal call can repair a failed task; there is no idle scan. Completion never
 closes a newer saved/reopened version or an entire Intent. Accepted-source receipt
 and completion-ledger visibility do not wait for these canonical status projections.
-
 
 ## Hosted saved-work lifecycle API
 
@@ -1412,7 +1410,6 @@ the owner transition, bound exchange, owner request consumer and hosted transpor
 advances the matching binding pin; delayed errors cannot rewind a newer epoch.
 There is no polling or scheduled authority job.
 
-
 ### Check-log closure
 
 Portable closure retains source, results, bounded failure summaries, compact test
@@ -1427,8 +1424,6 @@ provider link or a retained summary after expiry. Streamed output follows the
 same policy: fixed provider collectors retain compact reports/excerpts; Mac raw
 upload carries the explicit project setting and a finite expiry. Lifecycle events
 wake already-due expiries and schedule no idle expiry timer.
-
-
 
 ### Hosted conflict recovery
 
