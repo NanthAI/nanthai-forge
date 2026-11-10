@@ -60,7 +60,7 @@ test('a planning command runs in V8 without a Node call, replays by operation id
     nodeEvent = await actions.command._handler(s.ctx, secondInput);
   assert.equal(nodeEvent.revision, secondInput.revision + 1);
   assert.deepEqual(Object.keys(nodeEvent).sort(), Object.keys(event).sort());
-  // Same errors as before: a stale revision and a changed request on an original id.
+  // A changed original request still fails; an unrelated project revision no longer does.
   await assert.rejects(
     v8.command._handler(s.ctx, {
       ...firstInput,
@@ -70,9 +70,10 @@ test('a planning command runs in V8 without a Node call, replays by operation id
     e => e.data.code === 'WORK_OPERATION_CHANGED',
   );
   const stale = s.item();
-  await assert.rejects(
-    v8.command._handler(s.ctx, { ...(await input(stale)), revision: firstInput.revision }),
-    e => e.data.code === 'WORK_STALE',
+  assert.equal(
+    (await v8.command._handler(s.ctx, { ...(await input(stale)), revision: firstInput.revision }))
+      .operationId,
+    stale.operationId,
   );
   assert.deepEqual(delegated, []);
   const signedOut = await input(s.item());
@@ -185,5 +186,81 @@ test('rows over the V8 budget hand over to Node, which has no budget', async () 
   await assert.rejects(
     core.indexedCommand(contextFor(generation(limit + 1), []), input, 'owner', command, 'request', {}),
     e => e.message === 'past the budget gate',
+  );
+});
+
+test('legacy metadata actions use item concurrency for all five commands and reconcile across revision changes', async t => {
+  for (const endpoint of [v8.command, actions.command]) {
+    const s = await setup(t);
+    const initial = await s.read(),
+      intentId = randomUUID(),
+      issue = s.item();
+    const run = (command, operationId = command.operationId ?? randomUUID()) =>
+      endpoint._handler(s.ctx, {
+        projectId: s.projectId,
+        operationId,
+        revision: initial.data.revision,
+        command: JSON.stringify(command),
+      });
+    // Reuse the same now-stale project revision for every distinct metadata operation.
+    await run(
+      { action: 'intent', outcome: 'Legacy metadata', constraints: '', base: initial.sourceHead },
+      intentId,
+    );
+    await run(issue);
+    await run({ action: 'note', intentId, text: 'Kept note', kind: 'comment' });
+    await run({ action: 'intent-status', intentId, status: 'completed' });
+    await run({ ...issue, operationId: randomUUID(), expectedVersion: 1, title: 'Updated item' });
+    const comment = {
+      action: 'comment-planning-item',
+      operationId: randomUUID(),
+      itemId: issue.itemId,
+      text: 'Kept comment',
+      authorLabel: '',
+    };
+    const receipt = await run(comment);
+    assert.equal((await run(comment))._id, receipt._id);
+    await assert.rejects(
+      run({ ...issue, operationId: randomUUID(), expectedVersion: 1 }),
+      e =>
+        e.data.code === 'ITEM_CHANGED' &&
+        e.data.recovery.id === issue.itemId &&
+        e.data.recovery.expectedVersion === 1 &&
+        e.data.recovery.currentVersion === 2,
+    );
+    await assert.rejects(
+      run({ ...comment, text: 'Changed original operation' }),
+      e => e.data.code === 'WORK_OPERATION_CHANGED',
+    );
+    const current = await s.read();
+    assert.equal(current.data.planningComments.length, 1);
+    assert.equal(current.data.intents.find(item => item.id === intentId).notes.length, 1);
+    assert.equal(current.data.intents.find(item => item.id === intentId).status, 'completed');
+  }
+});
+
+test('scheduled metadata keeps its trusted actor while the mutation rechecks current project authority', async t => {
+  const s = await setup(t);
+  const commands = await import(moduleUrl('../convex/projectWorkCommand.ts'));
+  const issue = s.item();
+  const input = {
+    projectId: s.projectId,
+    owner: 'owner',
+    operationId: issue.operationId,
+    command: JSON.stringify(issue),
+  };
+  s.caller(null);
+  const receipt = await commands.commandFromAction._handler(s.ctx, input);
+  assert.equal(receipt.actor, 'owner');
+  assert.deepEqual(await commands.commandFromAction._handler(s.ctx, input), receipt);
+  await assert.rejects(
+    commands.commandFromAction._handler(s.ctx, { ...input, owner: 'stranger' }),
+    e => e.data.code === 'PROJECT_UNAVAILABLE',
+  );
+  // A project changing owners cannot replay a formerly authorized scheduled command.
+  s.tables.hostedProjects.get(s.projectId).owner = 'new-owner';
+  await assert.rejects(
+    commands.commandFromAction._handler(s.ctx, input),
+    e => e.data.code === 'PROJECT_UNAVAILABLE',
   );
 });

@@ -76,22 +76,23 @@ export function trackReadSets(ctx, tables) {
 // Documents and bytes one query reads, sized as Convex stores them: every id (the fixture's `row-N`
 // and the project's) as 32 characters and every number as 8 bytes, so a page's cost does not depend
 // on how many rows the fixture created before it.
+const documentBytes = row =>
+  JSON.stringify(row, (_, value) =>
+    typeof value === 'number'
+      ? 'n'.repeat(6)
+      : typeof value === 'string' && /^row-\d+$|^project$/.test(value)
+        ? 'i'.repeat(32)
+        : value,
+  ).length;
+
 export function meterReads(ctx) {
   const { get, query } = ctx.db;
   const total = { documents: 0, bytes: 0 };
-  const size = row =>
-    JSON.stringify(row, (_, value) =>
-      typeof value === 'number'
-        ? 'n'.repeat(6)
-        : typeof value === 'string' && /^row-\d+$|^project$/.test(value)
-          ? 'i'.repeat(32)
-          : value,
-    ).length;
   const count = rows => {
     for (const row of rows)
       if (row) {
         total.documents++;
-        total.bytes += size(row);
+        total.bytes += documentBytes(row);
       }
   };
   ctx.db.get = async id => {
@@ -145,6 +146,43 @@ export function meterReads(ctx) {
     },
     restore() {
       Object.assign(ctx.db, { get, query });
+    },
+  };
+}
+
+// Synthetic transaction I/O, using the same document sizing as the page meter. No extra db.get is
+// inserted into the measured path: fixture tables identify each written document after its write.
+export function meterWorkIO(ctx, tables) {
+  const reads = meterReads(ctx);
+  const methods = Object.fromEntries(
+    ['insert', 'patch', 'replace', 'delete'].map(name => [name, ctx.db[name]]),
+  );
+  let writeDocuments = 0,
+    writeBytes = 0,
+    migrationWrites = 0;
+  for (const [name, method] of Object.entries(methods))
+    ctx.db[name] = async (...args) => {
+      const result = await method(...args);
+      const id = name === 'insert' ? result : args[0];
+      const row = Object.values(tables)
+        .find(rows => rows.has(id))
+        ?.get(id);
+      writeDocuments++;
+      if (row) {
+        writeBytes += documentBytes(row);
+        if (row.collection?.startsWith('_workStore')) migrationWrites++;
+      }
+      return result;
+    };
+  return {
+    async cost(write) {
+      writeDocuments = writeBytes = migrationWrites = 0;
+      const { documents: readDocuments, bytes: readBytes } = await reads.cost(write);
+      return { readDocuments, readBytes, writeDocuments, writeBytes, migrationWrites };
+    },
+    restore() {
+      reads.restore();
+      Object.assign(ctx.db, methods);
     },
   };
 }

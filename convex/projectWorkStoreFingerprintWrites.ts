@@ -3,6 +3,16 @@ import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedRecordRef } from '../src/hosted-records';
 
+/** Migration telemetry stops once every eligible command owns retained versions. Reader rollback
+ * alone does not restart it; removing a primary writer invalidates coverage in setMode first. */
+export const workStoreMigrationActive = (
+  project: Pick<Doc<'hostedProjects'>, 'workStore' | 'workStoreWriters'>,
+) =>
+  Boolean(project.workStore) &&
+  !['note', 'intent', 'intent-status', 'planning'].every(action =>
+    project.workStoreWriters?.some(writer => writer === action),
+  );
+
 /** Kept dependency-free so canonical record writes never import their own readers. */
 export async function writeFingerprint(
   ctx: MutationCtx,
@@ -41,7 +51,7 @@ export async function fingerprintHostedIntent(
   position: number,
   status: string,
 ) {
-  if (!project.workStore || !project.work?.generationId) return;
+  if (!workStoreMigrationActive(project) || !project.work?.generationId) return;
   const generation = await ctx.db.get(project.work.generationId);
   if (!generation) return;
   await writeFingerprint(

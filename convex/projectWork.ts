@@ -29,6 +29,7 @@ import { internal } from './_generated/api';
 import { report } from './errors';
 import { emitChange, workChange } from './coordinationWrite';
 import { storeProjection } from './projectWorkStore';
+import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
 
 /** The project record every open tab subscribes to (name, owner, selected source). It does not read the
  * Work head row, so a journal write does not re-run it for each tab; `work.revision` here is the seed
@@ -373,7 +374,7 @@ export async function appendWork(
           project._id,
           project.owner,
           input.projection.entries,
-          recordPartition(generation),
+          workStoreMigrationActive(project) ? recordPartition(generation) : undefined,
           frozen
             ? {
                 projectId: event.projectId,

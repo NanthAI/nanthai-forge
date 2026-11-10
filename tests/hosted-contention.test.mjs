@@ -310,3 +310,100 @@ test('planning puts in the revision-free mutation: unrelated writes never refuse
     'planning stays owner-only',
   );
 });
+
+// Part 9: completing cutover removes disposable source/target fingerprints from ordinary writes.
+// The before fixture leaves an unrelated writer in migration, so the measured command already owns
+// primary provenance on both sides; the difference is its migration telemetry alone.
+test('primary Work writes retire migration I/O without changing item versions or tab reads', async t => {
+  const { meterWorkIO } = await import('./hosted-read-set.mjs');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const { writeHostedRecord } = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const writers = ['note', 'intent', 'intent-status', 'planning'];
+  const measure = async primary => {
+    const s = await setup(t);
+    const project = s.tables.hostedProjects.get(s.projectId);
+    project.sourceAuthority = { mode: 'server', epoch: 1 };
+    await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers });
+    const base = (await s.read()).sourceHead;
+    const intentId = randomUUID(),
+      issue = s.item();
+    const send = (command, operationId = command.operationId ?? randomUUID()) =>
+      mutations.command._handler(s.ctx, {
+        projectId: s.projectId,
+        operationId,
+        command: JSON.stringify(command),
+      });
+    await send({ action: 'intent', outcome: 'I/O fixture', constraints: '', base }, intentId);
+    await send(issue);
+    const io = meterWorkIO(s.ctx, s.tables);
+    const costs = {};
+    for (const [name, command] of [
+      ['note', { action: 'note', intentId, text: 'A retained note', kind: 'comment' }],
+      ['intent', { action: 'intent', outcome: 'Next fixture', constraints: '', base }],
+      ['status', { action: 'intent-status', intentId, status: 'completed' }],
+      ['put', { ...issue, operationId: randomUUID(), expectedVersion: 1, status: 'closed' }],
+      [
+        'comment',
+        {
+          action: 'comment-planning-item',
+          operationId: randomUUID(),
+          itemId: issue.itemId,
+          text: 'A retained comment',
+          authorLabel: '',
+        },
+      ],
+    ]) {
+      // Every measured command is primary, including in the migration-maintenance baseline.
+      project.workStoreWriters = primary
+        ? writers
+        : writers.filter(writer => writer !== (name === 'intent' ? 'note' : 'intent'));
+      costs[name] = await io.cost(() => send(command));
+    }
+    project.workStoreWriters = primary ? writers : writers.filter(writer => writer !== 'note');
+    costs.hostedIntent = await io.cost(() =>
+      writeHostedRecord(s.ctx, {
+        projectId: s.projectId,
+        actor: 'owner',
+        authorityEpoch: 1,
+        expectedVersion: null,
+        record: {
+          kind: 'intent',
+          id: randomUUID(),
+          version: 0,
+          at: '2026-01-01T00:00:00.000Z',
+          creatorAccountId: 'owner',
+          outcome: 'Pinned fixture',
+          constraints: '',
+          status: 'active',
+          assigneeAccountIds: [],
+          base: { head: base, receiptId: 'fixture-receipt' },
+        },
+      }),
+    );
+    io.restore();
+    return costs;
+  };
+  const before = await measure(false),
+    after = await measure(true);
+  for (const name of Object.keys(after)) {
+    assert.ok(before[name].migrationWrites > 0, `${name}: baseline exercises migration maintenance`);
+    assert.equal(after[name].migrationWrites, 0, `${name}: primary writes no migration metadata`);
+    for (const dimension of ['readDocuments', 'readBytes', 'writeDocuments', 'writeBytes'])
+      assert.ok(
+        after[name][dimension] < before[name][dimension],
+        JSON.stringify({ name, dimension, before: before[name], after: after[name] }),
+      );
+  }
+  const measured = {
+    planningPrimaryReadBytes: Math.max(...Object.values(after).map(cost => cost.readBytes)),
+    planningPrimaryWriteBytes: Math.max(...Object.values(after).map(cost => cost.writeBytes)),
+    planningMigrationWrites: Math.max(...Object.values(after).map(cost => cost.migrationWrites)),
+  };
+  assert.deepEqual(
+    judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'planning-fixture', measured)
+      .filter(v => v.metric in measured && v.status !== 'pass')
+      .map(v => v.message),
+    [],
+  );
+  console.log(JSON.stringify({ primaryWorkIO: { before, after } }));
+});

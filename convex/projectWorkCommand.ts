@@ -17,22 +17,19 @@ import { selectedGeneration, record, recordPartition } from './projectWorkIndexS
 import { generationHead } from './projectWorkHead';
 import { commandKeys, commandProjection, commandAliasRows } from './projectWorkProjection';
 import { appendWork } from './projectWork';
+import { commutativeCommand } from './projectWorkCommandRun';
+import { internalMutation } from './server';
 
 /** Commands this revision-free mutation runs. A planning put (flip 5 S5) checks only its item version
  * (ITEM_CHANGED); the project revision is read in the same transaction, so an unrelated write never
  * refuses it. Anchored notes and Channel acceptance need Node-only readers and stay in the action. */
-export const commutativeCommand = (command: { action: string; anchor?: unknown }) =>
-  command.action === 'intent' ||
-  command.action === 'intent-status' ||
-  command.action === 'comment-planning-item' ||
-  command.action === 'put-planning-item' ||
-  (command.action === 'note' && !command.anchor);
-
 export async function executeCommand(
   ctx: MutationCtx,
   input: { projectId: Id<'hostedProjects'>; operationId: string; command: string },
+  actor?: string,
 ) {
-  const user = await ctx.auth.getUserIdentity();
+  // Only trusted internal actions supply actor (scheduled budget Issues have no user session).
+  const user = actor ? { subject: actor } : await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
   const project = await activeProject(ctx, input.projectId, user.subject);
   let parsed;
@@ -196,6 +193,25 @@ export const command = mutation({
   handler: async (ctx, input) => {
     try {
       return await executeCommand(ctx, input);
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
+/** Older action clients and scheduled commands share the same atomic reducer. The action has
+ * already resolved its actor; access is checked again here before original-operation reconciliation. */
+export const commandFromAction = internalMutation({
+  args: {
+    projectId: v.id('hostedProjects'),
+    operationId: v.string(),
+    command: v.string(),
+    owner: v.string(),
+  },
+  returns: hostedWorkEventDocument,
+  handler: async (ctx, { owner, ...input }) => {
+    try {
+      return await executeCommand(ctx, input, owner);
     } catch (error) {
       return report(error);
     }

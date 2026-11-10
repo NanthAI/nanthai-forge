@@ -744,6 +744,42 @@
       "reason": "The workspace query is the heaviest read and must not depend on the project-wide Work revision again; one more re-run per tab fails."
     },
     {
+      "id": "planning-primary-read-bytes",
+      "area": "largest synthetic primary Work command: normalized database read bytes",
+      "measuredBy": "planning-fixture",
+      "metric": "planningPrimaryReadBytes",
+      "unit": "bytes",
+      "value": 14934,
+      "floor": 0,
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture, hosted run 830b45f1 on 2026-11-10: maximum over note, Intent, status, Issue put/comment and hosted Intent. Before migration telemetry retirement: 23859 B; after: 14934 B. Same commands already retain primary provenance on both fixture paths; the baseline leaves an unrelated writer in migration. Normalized fixture bytes, not provider billing.",
+      "issue": "0695ab24",
+      "reason": "Ratchets removal of source fingerprints, target pointers and migration reader hashes from completed primary writes. Per-command paired assertions also require fewer documents and bytes; ordinary tab reads and idle calls do not rise."
+    },
+    {
+      "id": "planning-primary-write-bytes",
+      "area": "largest synthetic primary Work command: normalized database write bytes",
+      "measuredBy": "planning-fixture",
+      "metric": "planningPrimaryWriteBytes",
+      "unit": "bytes",
+      "value": 12225,
+      "floor": 0,
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture, hosted run 830b45f1 on 2026-11-10: maximum over note, Intent, status, Issue put/comment and hosted Intent. Before migration telemetry retirement: 17905 B; after: 12225 B. Same commands already retain primary provenance on both fixture paths; the baseline leaves an unrelated writer in migration. Normalized fixture bytes, not provider billing.",
+      "issue": "0695ab24",
+      "reason": "Ratchets removal of source fingerprints, target pointers and migration reader hashes from completed primary writes. Per-command paired assertions also require fewer documents and bytes; ordinary tab reads and idle calls do not rise."
+    },
+    {
+      "id": "planning-migration-writes",
+      "area": "migration-only fingerprint documents written per primary Work command",
+      "measuredBy": "planning-fixture",
+      "metric": "planningMigrationWrites",
+      "unit": "ops",
+      "value": 0,
+      "floor": 0,
+      "source": "tests/hosted-contention.test.mjs primary Work I/O fixture: the five metadata commands and canonical hosted Intent writes, with all eligible writers primary. Before retirement each projected item maintained source fingerprints and canonical target pointers; after cutover no primary write maintains either.",
+      "issue": "0695ab24",
+      "reason": "Retires migration-only hot-path I/O after S5/S6. Zero is a hard ratchet: any disposable migration write returning to the completed primary path fails the landing check."
+    },
+    {
       "id": "planning-index-searches",
       "area": "Search-index queries per planning search and per new-Issue duplicate check",
       "measuredBy": "planning-fixture",

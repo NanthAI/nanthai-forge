@@ -8,10 +8,9 @@ import { hostedWorkEventDocument } from './schema';
 import { caller, runWorkCommand } from './projectWorkCommandRun';
 import { indexedCommand, NodeCommandRequired } from './projectWorkIndexedCommand';
 
-/** `projectWorkActions:command` for the 64 MiB V8 runtime (Issue 85801d6f). The command waits on about
- * ten Convex round trips and reads under 100 KB, so a 512 MiB Node action billed 8x the memory-time for
- * the same wait. Acceptance and anchored notes need Node-only readers, and a command whose rows pass the
- * V8 budget would not leave headroom; both run in the Node action, which holds the same logic. */
+/** Compatibility action in the 64 MiB V8 runtime (Issue 85801d6f). Metadata delegates directly to
+ * its atomic mutation. Acceptance and anchored notes retain Node-only validation; oversized pinned
+ * command projections also hand over before any write. */
 export const command = action({
   args: {
     projectId: v.id('hostedProjects'),

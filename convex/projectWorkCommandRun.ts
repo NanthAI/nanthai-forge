@@ -9,6 +9,13 @@ import { metadataRequest } from '../src/work-metadata';
 import type { HostedEvent } from '../src/work-types';
 import type { indexedCommand } from './projectWorkIndexedCommand';
 
+export const commutativeCommand = (command: { action: string; anchor?: unknown }) =>
+  command.action === 'intent' ||
+  command.action === 'intent-status' ||
+  command.action === 'comment-planning-item' ||
+  command.action === 'put-planning-item' ||
+  (command.action === 'note' && !command.anchor);
+
 export async function caller(ctx: ActionCtx) {
   const user = await ctx.auth.getUserIdentity();
   invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to use your Forge project.');
@@ -41,14 +48,6 @@ export async function runWorkCommand(
   invariant(parsed.success, 'BAD_ARGUMENT', 'Send a supported hosted Work command.');
   const command = parsed.data,
     request = metadataRequest(command);
-  if (command.action === 'put-planning-item' || command.action === 'comment-planning-item') {
-    await ctx.runQuery(internal.projectWork.owner, { projectId: input.projectId, owner });
-    invariant(
-      command.operationId === input.operationId,
-      'BAD_ARGUMENT',
-      'Use the planning command’s original operation UUID.',
-    );
-  }
   invariant(
     /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.operationId) &&
       Number.isSafeInteger(input.revision) &&
@@ -56,6 +55,13 @@ export async function runWorkCommand(
     'BAD_ARGUMENT',
     'Use an original operation UUID and Work revision.',
   );
+  if (commutativeCommand(command))
+    return await ctx.runMutation(internal.projectWorkCommand.commandFromAction, {
+      projectId: input.projectId,
+      operationId: input.operationId,
+      command: input.command,
+      owner,
+    });
   const original: StoredWorkEvent | null = await ctx.runQuery(internal.projectWork.find, {
     projectId: input.projectId,
     owner,

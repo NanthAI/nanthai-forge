@@ -24,7 +24,7 @@ test('whole-project hosted planning creates a planned Intent, preserves versions
     let dropped = false;
     s.ctx.runMutation = async (ref, args) => {
       const result = await append(ref, args);
-      if (!dropped && getFunctionName(ref) === 'projectWork:append') {
+      if (!dropped && getFunctionName(ref) === 'projectWorkCommand:commandFromAction') {
         dropped = true;
         throw Error('Lost committed reply');
       }
@@ -124,15 +124,23 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
       ['NOT_FOUND', 'BAD_ARGUMENT', 'ITEM_CHANGED'].includes(error.data.code),
     );
   assert.equal(s.tables.projectWorkEvents.size, count);
-  await assert.rejects(
-    s.send(s.item(), current.data.revision - 1),
-    error => error.data.code === 'WORK_STALE',
-  );
+  const unrelated = {
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: first.itemId,
+    authorLabel: '',
+    text: 'Independent write',
+  };
+  assert.equal((await s.send(unrelated, current.data.revision - 1)).operationId, unrelated.operationId);
   const planned = s.item({ itemId: first.itemId, expectedVersion: 1, title: 'Concurrent edit' }),
     append = s.ctx.runMutation;
   let raced = false;
   s.ctx.runMutation = async (ref, args) => {
-    if (!raced && getFunctionName(ref) === 'projectWork:append' && args.operationId === planned.operationId) {
+    if (
+      !raced &&
+      getFunctionName(ref) === 'projectWorkCommand:commandFromAction' &&
+      args.operationId === planned.operationId
+    ) {
       raced = true;
       await s.send(
         s.item({ itemId: first.itemId, expectedVersion: 1, title: 'Other retained version' }),
@@ -141,7 +149,7 @@ test('planning rejects stale versions, invalid links/kind changes and concurrent
     }
     return append(ref, args);
   };
-  await assert.rejects(s.send(planned, current.data.revision), error => error.data.code === 'WORK_STALE');
+  await assert.rejects(s.send(planned, current.data.revision), error => error.data.code === 'ITEM_CHANGED');
   s.ctx.runMutation = append;
   await assert.rejects(s.send(planned), error => error.data.code === 'ITEM_CHANGED');
   assert.deepEqual(
@@ -193,7 +201,7 @@ test('current owner alone writes/exports project planning; existing contributor 
   s.caller('owner');
   const append = s.ctx.runMutation;
   s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectWork:append') {
+    if (getFunctionName(ref) === 'projectWorkCommand:commandFromAction') {
       s.tables.hostedProjects.get(s.projectId).owner = 'new-owner';
       s.tables.projectContributors.set('old-owner', {
         _id: 'old-owner',
@@ -973,14 +981,8 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
     events.every(row => !row.bodyId),
     'one retained row per event, no second body or head',
   );
-  const get = s.ctx.db.get;
-  s.ctx.db.get = id => {
-    assert.ok(
-      !s.tables.projectHostedRecords.get(id)?.inline,
-      'matching target hashes never read inline primary payloads',
-    );
-    return get(id);
-  };
+  // Primary projects no longer maintain migration fingerprints. Explicit comparisons must open
+  // current records, even if an old baseline was seeded after the switch.
   const digestNotes = JSON.parse(
     await store.compare._handler(s.ctx, {
       projectId: s.projectId,
@@ -989,12 +991,11 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
       newest: 200,
     }),
   );
-  assert.equal(digestNotes.method, 'digest');
+  assert.equal(digestNotes.method, 'full');
   assert.deepEqual(
     [digestNotes.different.count, digestNotes.missing.count, digestNotes.invalid.count],
     [0, 0, 0],
   );
-  s.ctx.db.get = get;
   const expected = await s.read();
   assert.equal(expected.data.intents.find(i => i.id === intentId).notes.length, 2);
   assert.equal(expected.data.intents.find(i => i.id === intentId).status, 'completed');
@@ -1064,6 +1065,22 @@ test('frozen Work writers retain replay, export, rebuild and note projections wi
     journalSize,
     'a no-op status retains its primary Intent version too',
   );
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: [] });
+  const rollback = JSON.parse(
+    await store.compare._handler(s.ctx, {
+      projectId: s.projectId,
+      collection: 'readNotes',
+      cursor: null,
+      newest: 200,
+    }),
+  );
+  assert.equal(
+    rollback.method,
+    'full',
+    'writer rollback invalidates fingerprints skipped during primary writes',
+  );
+  assert.equal(rollback.different.count + rollback.missing.count + rollback.invalid.count, 0);
+  await store.setMode._handler(s.ctx, { projectId: s.projectId, mode: 'records', writers: frozen });
   assert.equal((await s.read()).data.intents.find(i => i.id === intentId).status, 'completed');
   // A damaged retained row never silently replays different source.
   const damaged = events[0],

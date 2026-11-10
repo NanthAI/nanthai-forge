@@ -39,11 +39,9 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
       ...JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId })),
       revision: await index.revision._handler(s.ctx, { projectId: s.projectId }),
     },
-    original = s.ctx.runQuery,
-    commands = [];
+    original = s.ctx.runQuery;
   const blocked = (ref, args) => {
     const name = getFunctionName(ref);
-    commands.push(name);
     assert.notEqual(name, 'projectWork:events', 'hot commands never replay events');
     return original(ref, args);
   };
@@ -126,7 +124,6 @@ test('indexed hosted commands avoid archive/history replay, preserve reducer res
   assert.equal(intent.lifecycle.length, 2);
   assert.equal(full.data.planningItems[0].id, planning.itemId);
   assert.equal(full.data.planningComments.length, 1);
-  assert.ok(commands.includes('projectWorkIndexStore:lookups'));
 });
 
 test('generation publication is atomic, resumable and source-pinned; access loss and cross-project lookups fail', async t => {

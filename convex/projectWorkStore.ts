@@ -13,6 +13,7 @@ import {
   workReadDigest,
 } from './projectWorkStoreDigests';
 import { workProject } from './projectWorkHead';
+import { workStoreMigrationActive } from './projectWorkStoreFingerprintWrites';
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -140,13 +141,14 @@ export async function storeVersion(
   projectId: Id<'hostedProjects'>,
   encoded: ReturnType<typeof hostedRecordValue>,
   provenance?: WorkProvenance,
+  migrationDigests = true,
 ): Promise<'copied' | 'same' | 'refreshed' | 'different'> {
   const { record, ref } = encoded;
   const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
   if (old && (old.digest !== ref.digest || old.bytes !== ref.bytes)) return 'different';
   const head = await recordHead(ctx, projectId, record.kind, record.id);
   if (!old) {
-    await insertVersion(ctx, projectId, encoded, head, provenance);
+    await insertVersion(ctx, projectId, encoded, head, provenance, migrationDigests);
     return 'copied';
   }
   // A head stored before heads kept their value (and notes their own status) is brought up to date.
@@ -178,6 +180,7 @@ async function insertVersion(
   encoded: ReturnType<typeof hostedRecordValue>,
   head: Awaited<ReturnType<typeof recordHead>>,
   provenance?: WorkProvenance,
+  migrationDigests = true,
 ) {
   const { record, ref, value } = encoded;
   const indexed = { ...hostedRecordIndex(record), version: record.version },
@@ -193,7 +196,7 @@ async function insertVersion(
     ...(provenance ? { inline: value } : {}),
     digest: ref.digest,
     bytes: ref.bytes,
-    ...(journalRow(record as unknown as { kind: string }) === undefined
+    ...(!migrationDigests || journalRow(record as unknown as { kind: string }) === undefined
       ? {}
       : { workReadDigest: workReadDigest(journalRow(record as unknown as { kind: string })) }),
   });
@@ -213,6 +216,7 @@ export async function storeIntent(
   value: unknown,
   write: boolean,
   provenance?: WorkProvenance,
+  migrationDigests = true,
 ): Promise<'copied' | 'same' | 'different' | 'hosted' | 'missing'> {
   const id = (value as { id: string }).id;
   const head = await recordHead(ctx, projectId, 'intent', id);
@@ -222,7 +226,7 @@ export async function storeIntent(
     if (!stored || (stored.base?.receiptId && !provenance)) return 'hosted';
     if (stored.base?.receiptId && provenance) {
       const encoded = hostedRecordValue({ ...stored, version: head.version + 1, at: provenance.at });
-      await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance);
+      await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance, migrationDigests);
       return 'copied';
     }
     const same = hostedRecordValue(workStoreRecord('intents', value, { owner, version: head.version }));
@@ -232,7 +236,7 @@ export async function storeIntent(
   const encoded = hostedRecordValue(
     workStoreRecord('intents', value, { owner, version: head ? head.version + 1 : 0 }),
   );
-  await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance);
+  await insertVersion(ctx as MutationCtx, projectId, encoded, head, provenance, migrationDigests);
   return 'copied';
 }
 
@@ -280,9 +284,16 @@ export async function storeProjection(
       : header;
     const audit = collection === primary ? provenance : undefined;
     try {
-      if (collection === 'intents') await storeIntent(ctx, projectId, owner, value, true, audit);
+      if (collection === 'intents')
+        await storeIntent(ctx, projectId, owner, value, true, audit, Boolean(partition));
       else if (entry.collection !== 'planningItems')
-        await storeVersion(ctx, projectId, hostedRecordValue(workStoreRecord(collection, value)), audit);
+        await storeVersion(
+          ctx,
+          projectId,
+          hostedRecordValue(workStoreRecord(collection, value)),
+          audit,
+          Boolean(partition),
+        );
     } catch (error) {
       if (audit) throw error;
       // A failed dual write is observable by its independently updated source fingerprint below.
@@ -329,24 +340,24 @@ export const setMode = mutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      const { project } = await ownerStore(ctx, input.projectId);
+      const { project, partition } = await ownerStore(ctx, input.projectId);
       const workStore = input.mode === 'journal' ? undefined : input.mode;
-      if (project.workStore !== workStore) {
-        await ctx.db.patch(project._id, { workStore });
-        if (!project.workStore || !workStore) {
-          const selected = await selectedGeneration(ctx, project);
-          const partition = selected && recordPartition(selected);
-          if (partition) {
-            const coverage = await ctx.db
-              .query('projectWorkRecords')
-              .withIndex('by_generation_and_collection_and_key', q =>
-                q.eq('generationId', partition).eq('collection', '_workStoreDigestCoverage'),
-              )
-              .take(100);
-            for (const row of coverage)
-              await ctx.db.patch(row._id, { value: JSON.stringify({ invalidated: true }) });
-          }
-        }
+      const next = { ...project, workStore, workStoreWriters: input.writers ?? project.workStoreWriters };
+      const invalidate =
+        Boolean(project.workStore) !== Boolean(workStore) ||
+        workStoreMigrationActive(project) !== workStoreMigrationActive(next);
+      if (project.workStore !== workStore) await ctx.db.patch(project._id, { workStore });
+      if (invalidate) {
+        // No per-write invalidation: crossing the migration boundary invalidates its disposable
+        // baseline once. Rollback cannot trust fingerprints skipped while writers were primary.
+        const coverage = await ctx.db
+          .query('projectWorkRecords')
+          .withIndex('by_generation_and_collection_and_key', q =>
+            q.eq('generationId', partition).eq('collection', '_workStoreDigestCoverage'),
+          )
+          .take(100);
+        for (const row of coverage)
+          await ctx.db.patch(row._id, { value: JSON.stringify({ invalidated: true }) });
       }
       if (input.writers !== undefined) {
         const current = await workProject(ctx, project);
@@ -519,16 +530,20 @@ export const compare = query({
         };
       if (
         mode === 'digest' ||
-        (mode !== 'full' && project.workStore && (input.digestOnly ?? input.newest !== undefined))
+        (mode !== 'full' &&
+          workStoreMigrationActive(project) &&
+          (input.digestOnly ?? input.newest !== undefined))
       ) {
-        const compared = await compareFingerprints(
-          ctx,
-          input.projectId,
-          partition,
-          input.collection,
-          input.cursor,
-          input.newest ?? 100,
-        );
+        const compared = workStoreMigrationActive(project)
+          ? await compareFingerprints(
+              ctx,
+              input.projectId,
+              partition,
+              input.collection,
+              input.cursor,
+              input.newest ?? 100,
+            )
+          : null;
         invariant(
           compared || mode !== 'digest',
           'WORK_STALE',

@@ -160,7 +160,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
     let dropped = false;
     s.ctx.runMutation = async (ref, input) => {
       const result = await native(ref, input);
-      if (getFunctionName(ref) === 'projectWork:append' && !dropped) {
+      if (getFunctionName(ref) === 'projectWorkCommand:commandFromAction' && !dropped) {
         dropped = true;
         throw new Error('lost committed reply');
       }
@@ -184,9 +184,10 @@ test('hosted Intent authority reconciles original operations, retains concurrent
       }),
       e => e.data.code === 'WORK_OPERATION_CHANGED',
     );
-    await assert.rejects(
-      actions.command._handler(s.ctx, { ...create, operationId: randomUUID() }),
-      e => e.data.code === 'WORK_STALE',
+    assert.equal(
+      (await actions.command._handler(s.ctx, { ...create, revision: initialRevision + 100 }))._id,
+      replay._id,
+      'metadata retries reconcile by original operation and ignore an unrelated project revision',
     );
     await assert.rejects(
       actions.command._handler(s.ctx, {
@@ -221,10 +222,14 @@ test('hosted Intent authority reconciles original operations, retains concurrent
         text: 'Commands remain local',
       }),
     };
-    // A second original operation commits after the first action read but before its atomic append.
+    // Another operation commits before the metadata mutation; both independent commands survive.
     let raced = false;
     s.ctx.runMutation = async (ref, input) => {
-      if (getFunctionName(ref) === 'projectWork:append' && input.operationId === note.operationId && !raced) {
+      if (
+        getFunctionName(ref) === 'projectWorkCommand:commandFromAction' &&
+        input.operationId === note.operationId &&
+        !raced
+      ) {
         raced = true;
         await actions.command._handler(s.ctx, {
           ...note,
@@ -234,9 +239,9 @@ test('hosted Intent authority reconciles original operations, retains concurrent
       }
       return native(ref, input);
     };
-    await assert.rejects(actions.command._handler(s.ctx, note), e => e.data.code === 'WORK_STALE');
+    await actions.command._handler(s.ctx, note);
     s.ctx.runMutation = native;
-    assert.equal(s.tables.projectWorkEvents.size, 2);
+    assert.equal(s.tables.projectWorkEvents.size, 3);
     assert.equal(
       (await actions.command._handler(s.ctx, create)).revision,
       initialRevision + 1,

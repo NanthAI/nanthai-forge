@@ -62,9 +62,8 @@ const nodeCommand = (
   runWorkCommand(ctx, input, owner, (command, request) =>
     indexedCommand(ctx, input, owner, command, request, nodeCommandHooks),
   );
-/** Full Node implementation. Current clients call `projectWorkActionsV8:command`, which runs the
- * commands that fit the 64 MiB V8 runtime and hands the rest to `commandNode`; this public name stays
- * for older clients and keeps the exact same behaviour. */
+/** Compatibility entry for older clients. Metadata delegates to the revision-free mutation;
+ * anchored notes and Channel acceptance retain their pinned Node validation. */
 export const command = action({
   args: commandArgs,
   returns: hostedWorkEventDocument,

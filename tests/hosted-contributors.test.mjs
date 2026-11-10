@@ -288,7 +288,7 @@ test('contributor retries are actor-bound, grant revocation during final append 
   let lost = false;
   s.ctx.runMutation = async (ref, args) => {
     const result = await native(ref, args);
-    if (getFunctionName(ref) === 'projectWork:append' && !lost) {
+    if (getFunctionName(ref) === 'projectWorkCommand:commandFromAction' && !lost) {
       lost = true;
       throw Error('lost reply');
     }
@@ -302,7 +302,7 @@ test('contributor retries are actor-bound, grant revocation during final append 
   s.caller('contributor');
   const before = structuredClone(s.tables.hostedProjects.get('project'));
   s.ctx.runMutation = async (ref, args) => {
-    if (getFunctionName(ref) === 'projectWork:append') s.tables.projectContributors.clear();
+    if (getFunctionName(ref) === 'projectWorkCommand:commandFromAction') s.tables.projectContributors.clear();
     return native(ref, args);
   };
   await assert.rejects(
