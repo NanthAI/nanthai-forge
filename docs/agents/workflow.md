@@ -368,12 +368,12 @@ Old names keep working for at least one released version and print their new for
 
 ## The backlog is Forge planning
 
-`planning {"counts":true,"initiativeId":"INITIATIVE_UUID"}` returns stored planning counts by
-status (`proposed`, `open`, `in-progress`, `closed`, `abandoned`) in one bounded read,
-without reconciliation or execution-state reads. `coverage:"complete"` covers the selected
-range; `partial` carries the existing planning `nextCursor`. Continue with the same filters
-and add the page counts for a larger Initiative. `partial-needs-preparation` identifies an
-older search projection with incomplete coverage; it is not a complete board count.
+`planning {"counts":true,"initiativeId":"INITIATIVE_UUID"}` sums stored counts by status
+(`proposed`, `open`, `in-progress`, `closed`, `abandoned`) across up to 20 pages in one command
+without reconciliation or execution-state reads, returning `coverage:"complete"` when finished
+or `partial` with `nextCursor` and instructions to continue and add totals when capped.
+`partial-needs-preparation` identifies an older search projection with incomplete coverage;
+it is not a complete board count.
 Ordinary list reads keep reconciliation and the `forge-planning-v1:` cursor envelope.
 On a current projection, kind/status/initiative filters use ordinary database indexes,
 read only matching roots and hydrate only those items. They do not run a billed text search.

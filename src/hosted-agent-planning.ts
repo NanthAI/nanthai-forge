@@ -47,6 +47,8 @@ const marked = <T extends object>(result: T): T & { notice: string } => ({
 });
 const cursorPrefix = 'forge-planning-v1:';
 const maxPages = 5;
+// Ten times the live 397-Issue count's two pages; <=20 MB of bounded DB pages per invocation.
+const maxCountPages = 20;
 const maxReconcile = 10;
 const stale = 'Hosted Work changed. Start again from a fresh planning read.';
 
@@ -547,22 +549,41 @@ async function readPlanning(
       'HOSTED_ACTION_UNSUPPORTED',
       'This server needs indexed planning counts. Upgrade the deployment before retrying.',
     );
-    const bound = input.cursor === null ? null : decodeBound(input.cursor);
-    const result = await port.query<Page & { counts: Record<string, number>; coverage?: string }>(
-      'projectWorkIndex:records',
-      {
-        ...(bound ? { generationId: bound.generationId } : {}),
-        collection: 'planningItems',
-        planningFilter,
-        counts: true,
-        paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
-      },
-    );
-    invariant(result.generationId, 'WORK_STALE', stale);
+    let bound = input.cursor === null ? null : decodeBound(input.cursor);
+    const counts: Record<string, number> = {};
+    let done = false;
+    let needsPreparation = false;
+    for (let pages = 0; pages < maxCountPages && !done; pages++) {
+      const result = await port.query<Page & { counts: Record<string, number>; coverage?: string }>(
+        'projectWorkIndex:records',
+        {
+          ...(bound ? { generationId: bound.generationId } : {}),
+          collection: 'planningItems',
+          planningFilter,
+          counts: true,
+          paginationOpts: { cursor: bound?.cursor ?? null, numItems: 1000 },
+        },
+      );
+      invariant(
+        result.generationId && (!bound || result.generationId === bound.generationId),
+        'WORK_STALE',
+        stale,
+      );
+      for (const [status, count] of Object.entries(result.counts))
+        counts[status] = (counts[status] ?? 0) + count;
+      needsPreparation ||= result.coverage === 'partial-needs-preparation';
+      done = result.isDone;
+      bound = { generationId: result.generationId, cursor: result.continueCursor };
+    }
     return {
-      counts: result.counts,
-      coverage: result.coverage ?? (result.isDone ? 'complete' : 'partial'),
-      nextCursor: result.isDone ? null : encode({ generationId: result.generationId }, result.continueCursor),
+      counts,
+      coverage: needsPreparation ? 'partial-needs-preparation' : done ? 'complete' : 'partial',
+      nextCursor: done ? null : encode(bound!, bound!.cursor!),
+      ...(!done
+        ? {
+            next: `These counts are incomplete after ${maxCountPages} pages. Run planning with counts:true, the same filters and nextCursor as cursor, then add the returned counts to these totals.`,
+          }
+        : {}),
     };
   }
   const ws = await workspace(port);

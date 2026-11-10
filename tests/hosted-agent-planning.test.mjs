@@ -1887,7 +1887,7 @@ test('indexed planning preserves all filter combinations, record-store bodies, p
   );
 });
 
-test('planning counts continue bounded pages and refuse stale generations, invalid cursors and old servers (5a85cb5f)', async t => {
+test('planning counts sum every page and refuse stale generations, invalid cursors and old servers (5a85cb5f)', async t => {
   const s = await setup(t),
     p = port(s);
   const initiativeId = randomUUID();
@@ -1902,7 +1902,13 @@ test('planning counts continue bounded pages and refuse stale generations, inval
       parent: '',
       position: i,
       value: '{}',
-      planning: { text: '', kind: 'issue', status: 'closed', initiativeId, open: false },
+      planning: {
+        text: '',
+        kind: 'issue',
+        status: i % 2 ? 'open' : 'closed',
+        initiativeId,
+        open: i % 2 === 1,
+      },
     });
   }
   // Search payload fragments repeat metadata; counts include each root once.
@@ -1916,21 +1922,61 @@ test('planning counts continue bounded pages and refuse stale generations, inval
     value: '',
     planning: { text: 'fragment', kind: 'issue', status: 'closed', initiativeId, open: false },
   });
-  const first = await list(p, { counts: true, initiativeId });
-  assert.equal(first.coverage, 'partial');
-  assert.equal(first.counts.closed, 1000);
-  const last = await list(p, { counts: true, initiativeId, cursor: first.nextCursor });
-  assert.equal(last.counts.closed, 1);
-  assert.equal(last.coverage, 'complete');
-  assert.equal(last.nextCursor, null);
+  const counted = await list(p, { counts: true, initiativeId });
+  assert.deepEqual(counted.counts, { proposed: 0, open: 500, 'in-progress': 0, closed: 501, abandoned: 0 });
+  assert.equal(counted.coverage, 'complete');
+  assert.equal(counted.nextCursor, null);
+  assert.equal(counted.next, undefined);
+  assert.equal(p.calls.length, 2, 'one read per page, no workspace, reconciliation or per-item reads');
   await assert.rejects(list(p, { counts: true, cursor: 'bad' }), code('BAD_ARGUMENT'));
-  const bound = JSON.parse(Buffer.from(first.nextCursor.split(':')[1], 'base64url'));
   const stale =
     'forge-planning-v1:' +
-    Buffer.from(JSON.stringify({ ...bound, generationId: 'different' })).toString('base64url');
+    Buffer.from(JSON.stringify({ cursor: null, generationId: 'different' })).toString('base64url');
   await assert.rejects(list(p, { counts: true, cursor: stale }), code('WORK_STALE'));
+
+  const query = p.query;
+  p.query = async (name, args) => {
+    const result = await query(name, args);
+    // A source publication replaces the generation between count pages.
+    s.tables.hostedProjects.get(s.projectId).work.generationId = 'replaced';
+    return result;
+  };
+  await assert.rejects(list(p, { counts: true, initiativeId }), code('WORK_STALE'));
+  s.tables.hostedProjects.get(s.projectId).work.generationId = generationId;
+  p.query = query;
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'outsider' });
   await assert.rejects(list(p, { counts: true, initiativeId }), code('PROJECT_UNAVAILABLE'));
   p.serverFeatures = [];
   await assert.rejects(list(p, { counts: true, initiativeId }), code('HOSTED_ACTION_UNSUPPORTED'));
+});
+
+test('planning count page cap labels incomplete totals and continues without losing or repeating rows (5a85cb5f)', async t => {
+  const s = await setup(t),
+    p = port(s);
+  const initiativeId = randomUUID();
+  const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
+  for (let i = 0; i < 20001; i++)
+    await s.ctx.db.insert('projectWorkRecords', {
+      projectId: s.projectId,
+      generationId,
+      collection: 'planningSearch',
+      key: randomUUID(),
+      parent: '',
+      position: i,
+      value: '{}',
+      planning: { text: '', kind: 'issue', status: 'closed', initiativeId, open: false },
+    });
+  const first = await list(p, { counts: true, initiativeId });
+  assert.equal(first.coverage, 'partial');
+  assert.equal(first.counts.closed, 20000);
+  assert.match(first.nextCursor, /^forge-planning-v1:/);
+  assert.match(first.next, /counts are incomplete after 20 pages/);
+  assert.match(first.next, /same filters and nextCursor as cursor/);
+  assert.match(first.next, /add the returned counts/);
+  assert.equal(p.calls.length, 20, 'bounded to 20 records reads and no writes');
+  const last = await list(p, { counts: true, initiativeId, cursor: first.nextCursor });
+  assert.equal(first.counts.closed + last.counts.closed, 20001);
+  assert.equal(last.coverage, 'complete');
+  assert.equal(last.nextCursor, null);
+  assert.equal(last.next, undefined);
 });
