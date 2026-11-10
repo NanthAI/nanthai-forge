@@ -824,3 +824,79 @@ test('journaled composition reports a merged JS file that no longer parses, matc
     } else assert.equal(result.status, 'clean', c.name);
   }
 });
+
+// Issue aa9fb5b1 (no-merge paths): two Lanes add entries to the same shared lists. Main's forge.json
+// `merge` declares them, so both the journaled step and the fixed worker compose clean, keep both
+// sides' entries (main first) and record the paths; the same declaration made only by the Lane is
+// ignored and the lists still conflict.
+test('forge.json merge lists compose without a conflict and keep both entries in both hosted paths', async () => {
+  const config = JSON.stringify({
+    merge: { union: ['lists/*.txt'], fragments: ['packages/*/CHANGELOG.md'] },
+  });
+  const LIST = 'lists/features.txt',
+    LOG = 'packages/web/CHANGELOG.md';
+  const log = who => `# Changelog\n\n## Next\n- ${who} change\n\n## 1.0\n- first\n`;
+  for (const declaredBy of ['main', 'lane']) {
+    const x = fixture(),
+      file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 }),
+      forge = file('forge.json', config);
+    const base = x.state([file(LIST, 'alpha\nzeta\n'), file(LOG, '# Changelog\n\n## 1.0\n- first\n')]);
+    const left = x.state(
+        [
+          ...(declaredBy === 'main' ? [forge] : []),
+          file(LIST, 'alpha\nbilling\nzeta\n'),
+          file(LOG, log('main')),
+        ],
+        [base.sha256],
+      ),
+      right = x.state(
+        [
+          ...(declaredBy === 'lane' ? [forge] : []),
+          file(LIST, 'alpha\nbilling-export\nzeta\n'),
+          file(LOG, log('lane')),
+        ],
+        [base.sha256],
+      );
+    const inputs = buildComposePages([
+        {
+          laneId: randomUUID(),
+          head: right.sha256,
+          version: 0,
+          sourceVersion: 0,
+          lifecycleVersion: 0,
+          state: { object: right, recipe: null },
+        },
+      ]),
+      dependencies = buildComposePages([]);
+    for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+    const input = x.json({
+      schema: 1,
+      kind: 'forge-hosted-compose-input',
+      base: { head: left.sha256, receiptId: 'main' },
+      main: { object: left, recipe: null },
+      inputs: inputs.manifest,
+      dependencies: dependencies.manifest,
+      algorithm: 'forge-native-compose-v1',
+      message: 'merge',
+      at,
+    });
+    const expected = await buildHostedSourceState(input, x.io),
+      actual = await drain(x, input, true);
+    assert.deepEqual(actual.cursor.output, expected.output, `${declaredBy}: journaled equals fixed worker`);
+    const { result } = JSON.parse(x.objects.get(actual.cursor.output.sha256));
+    if (declaredBy === 'lane') {
+      assert.equal(result.status, 'conflict', 'a Lane cannot declare a merge rule for its own landing');
+      assert.deepEqual(result.paths, [LIST, LOG]);
+      continue;
+    }
+    assert.equal(result.status, 'clean');
+    assert.deepEqual(result.docs, { paths: [LIST, LOG], rule: 'keep both sides, main first' });
+    const files = JSON.parse(x.objects.get(result.state.sha256)).files,
+      bytes = path => x.objects.get(files.find(f => f.path === path).blob).toString();
+    assert.equal(bytes(LIST), 'alpha\nbilling\nbilling-export\nzeta\n');
+    assert.equal(
+      bytes(LOG),
+      '# Changelog\n\n## Next\n- main change\n\n## Next\n- lane change\n\n## 1.0\n- first\n',
+    );
+  }
+});

@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,11 @@ import {
   snapshotAccumulator,
 } from '../scripts/lib/hosted-durability-compare.mjs';
 import { deploymentOptions, execute, parseCommand } from '../scripts/hosted-durability.mjs';
+import {
+  compareProjectRows,
+  copyProjectObjects,
+  readProjectSnapshot,
+} from '../scripts/lib/restore-drill-project.mjs';
 
 function summary(tables = durabilityFixture(), fileHash = 'file-hash') {
   const result = snapshotAccumulator();
@@ -349,3 +355,90 @@ test('every durability command reports a named sub-step and one next step on fai
       assert.ok(error.nextStep);
     }
   }));
+
+test('restore drill compares one project row by row and names changed, missing and extra rows without contents', () =>
+  temporary(async directory => {
+    const id = 'k'.repeat(32),
+      fixture = () => {
+        const tables = JSON.parse(JSON.stringify(durabilityFixture()).replaceAll('"project"', `"${id}"`));
+        tables.projectObjects = [
+          {
+            _id: 'object',
+            projectId: id,
+            digest: 'c'.repeat(64),
+            size: 3,
+            removed: false,
+            r2Key: `v1/p/${id}/o/${'c'.repeat(64)}`,
+          },
+        ];
+        tables.otherProject = [{ _id: 'other', projectId: 'z'.repeat(32), text: 'SYNTHETIC_OTHER_PROJECT' }];
+        return tables;
+      };
+    const left = join(directory, 'left.zip'),
+      right = join(directory, 'right.zip');
+    await zip(left, fixture());
+    const changed = fixture();
+    changed.projectWorkHeads[0].revision = 4;
+    changed.projectWorkRecords.pop();
+    changed.projectObjects.push({
+      _id: 'late',
+      projectId: id,
+      digest: 'd'.repeat(64),
+      size: 1,
+      removed: false,
+    });
+    await zip(right, changed);
+    const backup = await readProjectSnapshot(left, id),
+      restored = await readProjectSnapshot(right, id);
+    assert.deepEqual([...backup.objects], [['c'.repeat(64), 3]]);
+    assert.deepEqual([...backup.r2Keys], [`v1/p/${id}/o/${'c'.repeat(64)}`]);
+    assert.equal(compareProjectRows(backup.rows, backup.rows).equal, true);
+    const result = compareProjectRows(backup.rows, restored.rows);
+    assert.equal(result.equal, false);
+    assert.deepEqual(result.differing.map(row => row.reason).sort(), ['changed', 'extra', 'missing']);
+    assert.equal(
+      result.tables.some(table => table.table === 'otherProject'),
+      false,
+    );
+    assert.doesNotMatch(JSON.stringify(result), /Retained full payload|SYNTHETIC_OTHER_PROJECT/);
+  }));
+
+test('restore drill copy reads the source by list and get only and reports missing and corrupt content keys', async () => {
+  const id = 'k'.repeat(32),
+    good = Buffer.from('good'),
+    goodKey = `v1/p/${id}/o/${createHash('sha256').update(good).digest('hex')}`,
+    badKey = `v1/p/${id}/o/${'e'.repeat(64)}`,
+    lostKey = `v1/p/${id}/o/${'f'.repeat(64)}`;
+  const bucket = new Map();
+  // Any other source method (put, delete, multipart) would throw: the drill never writes the source.
+  const source = Object.freeze({
+    async *pages(prefix) {
+      assert.equal(prefix, `v1/p/${id}/`);
+      yield [goodKey, badKey];
+    },
+    bytes: async key => (key === goodKey ? good : Buffer.from('flipped')),
+  });
+  const result = await copyProjectObjects({
+    source,
+    projectId: id,
+    referenced: new Set([goodKey, lostKey]),
+    put: (key, body) => bucket.set(key, body),
+  });
+  assert.deepEqual([...bucket.keys()], [goodKey, badKey]);
+  assert.deepEqual(result.missing, [lostKey]);
+  assert.deepEqual(result.digestMismatch, [badKey]);
+  assert.equal(result.unreferenced, 1);
+  assert.deepEqual(result.requests, { list: 1, get: 2 });
+});
+
+test('accepted main comes from the hosted channel row, not the hosting-time Work index (restore drill incident)', () => {
+  const fixture = durabilityFixture(),
+    landed = 'b'.repeat(64);
+  fixture.projectHostedChannels = [
+    { _id: 'channel', projectId: 'project', name: 'main', selection: { head: landed, schema: 2 } },
+  ];
+  assert.equal(summary(fixture).work[0].main, landed);
+  assert.equal(summary().work[0].main, mainHead);
+  fixture.projectHostedChannels.push({ ...fixture.projectHostedChannels[0], _id: 'second' });
+  assert.throws(() => summary(fixture), { code: 'WORK_INDEX_INVALID' });
+});

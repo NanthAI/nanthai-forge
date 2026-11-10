@@ -10,7 +10,8 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { SourceIoError, sourceCall } from './hosted-source-io-error.js';
 import { invariant } from './errors.js';
 import { syntaxConflictReason } from './native-merge-syntax.js';
-import { docsMainSide, resolveMarkdownText } from './native-docs-resolve.js';
+import { docsMainSide, resolveListText } from './native-docs-resolve.js';
+import type { ListMergeRule } from './project-config.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with
  * bytes and with line count, so a file over either bound that both sides changed
  * is reported as a conflict instead of merged line by line (Git hosts do the same). */
@@ -34,6 +35,8 @@ export type SourceCalculation = {
   labels?: [string, string];
   /** Compose only: a merged file the syntax gate covers that fails to parse although both sides do is a conflict. */
   syntax?: true;
+  /** Docs only: the declared list rule (forge.json `merge`); absent is the Markdown docs rule. */
+  rule?: ListMergeRule;
 };
 export type SourceCalculationResult = {
   key: string;
@@ -60,9 +63,15 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
     channel = 'target',
     syntax = false,
     labels?: [string, string],
+    rule?: ListMergeRule,
   ) => {
     // Sync keys keep their shape (no `labels`), so journaled sync calculations replay unchanged.
-    const extra = { ...(labels ? { labels } : {}), ...(syntax ? { syntax: true as const } : {}) },
+    // Docs keys gain `rule` only for a declared list, so Markdown docs keys replay unchanged too.
+    const extra = {
+        ...(labels ? { labels } : {}),
+        ...(syntax ? { syntax: true as const } : {}),
+        ...(rule ? { rule } : {}),
+      },
       key = canonicalPayload({ kind, item, order, channel, ...extra }),
       prior = c.calculations?.[key];
     if (prior?.reason) reasons.set(item.path, prior.reason);
@@ -90,8 +99,10 @@ export function journalSourceCalculations(c: SourceStepCursor, source: MemoryMer
     if (result) resolutions.push(...result.resolutions);
     return result?.blob ?? null;
   };
-  // The Markdown docs rule's bytes (native-docs-resolve) are a calculation like a text merge.
-  source.docsContent = (item, order) => request('docs', item, order)?.blob ?? null;
+  // The docs and declared list rules' bytes (native-docs-resolve) are a calculation like a text merge.
+  source.docsContent = (item, order, rule) =>
+    request('docs', item, order, 'target', false, undefined, rule === 'docs' ? undefined : rule)?.blob ??
+    null;
   source.conflictContent = (item, [left, right]) => {
     const result = request(
       'conflict',
@@ -233,10 +244,14 @@ export async function calculateSourceFiles(
     } else if (request.kind === 'docs') {
       const main = docsMainSide(request.order) === 'left' ? left : right,
         lane = main === left ? right : left;
-      bytes = await sourceCall('merge-text', async () => resolveMarkdownText(base, main, lane), {
-        size: base.length + left.length + right.length,
-        objects: required.length,
-      });
+      bytes = await sourceCall(
+        'merge-text',
+        async () => resolveListText(base, main, lane, request.rule ?? 'docs'),
+        {
+          size: base.length + left.length + right.length,
+          objects: required.length,
+        },
+      );
       if (bytes) kind = 'text';
     } else {
       const marked = await sourceCall(

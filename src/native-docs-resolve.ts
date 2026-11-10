@@ -4,6 +4,13 @@ import { overlappingPaths, type NativeFile, type NativeSource } from './native-s
 import { nativeMergeMessage, type NativeMergeResolution } from './native-merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import { markdownDoc } from './docs-resolution.js';
+import { globPattern } from './autonomy-policy.js';
+import {
+  declaredMergePaths,
+  FORGE_CONFIG_FILE,
+  type DeclaredMergePaths,
+  type ListMergeRule,
+} from './project-config.js';
 export { DOCS_RULE, markdownDoc } from './docs-resolution.js';
 
 type Edit = { start: number; end: number; lines: string[]; side: 0 | 1 };
@@ -19,12 +26,50 @@ const overlaps = (a: Edit, b: Edit) => {
         ? b.start >= a.start && b.start <= a.end
         : a.start < b.end && b.start < a.end;
 };
+/** Which rule merges a conflict at `path`: a forge.json `merge` declaration first (fragments, then
+ * union), else the Markdown docs rule; undefined keeps the conflict. */
+export type ConflictRule = 'docs' | ListMergeRule;
+export function conflictRule(path: string, declared: DeclaredMergePaths): ConflictRule | undefined {
+  const matches = (globs: string[]) =>
+    globs.some(glob => {
+      try {
+        return globPattern(glob).test(path);
+      } catch {
+        return false;
+      }
+    });
+  if (matches(declared.fragments)) return 'fragments';
+  if (matches(declared.union)) return 'union';
+  return markdownDoc(path) ? 'docs' : undefined;
+}
+/** forge.json files above this size declare no merge paths (the file is settings, not data). */
+const CONFIG_MAX_BYTES = 128 * 1024;
+/** The merge paths accepted `main` declares. Read from main only: the Lane being merged cannot
+ * widen the rule for its own landing. One small object read, only on a conflicted composition. */
+function mainMergePaths(source: NativeSource, main: string): DeclaredMergePaths {
+  const file = source.state(main).files.find(item => item.path === FORGE_CONFIG_FILE);
+  if (!file || file.mode !== 'file') return { union: [], fragments: [] };
+  const bytes = source.object(file.blob);
+  return bytes.length > CONFIG_MAX_BYTES
+    ? { union: [], fragments: [] }
+    : declaredMergePaths(bytes.toString('utf8'));
+}
 
-/** Deterministic resolution of a Markdown diff3 conflict, or null when any hunk is
- * ambiguous. Positional hunks keep both insertions (main first). Overlapping edits
- * resolve only inside list/table/blank lines: both sides' new lines, main first; or
- * when both sides only appended text to the end of one prose line: main's text first. */
-export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): Buffer | null {
+/** diff3 groups of both sides' edits; each group with edits on both sides goes to `both`, which
+ * returns its merged lines or null (the whole file then stays a conflict). */
+function resolveGroups(
+  base: Buffer,
+  main: Buffer,
+  lane: Buffer,
+  both: (
+    group: Edit[],
+    original: string[],
+    x: string[],
+    y: string[],
+    start: number,
+    end: number,
+  ) => string[] | null,
+): Buffer | null {
   const original = lines(base),
     a = lines(main),
     b = lines(lane);
@@ -61,9 +106,7 @@ export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): B
           : y
         : x.join('') === y.join('')
           ? x
-          : (positional(group, original) ??
-            listUnion(x, y, original.slice(start, end)) ??
-            lineAppends(group, original));
+          : both(group, original, x, y, start, end);
     if (!resolved) return null;
     output.push(...resolved);
   }
@@ -72,6 +115,76 @@ export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): B
   return Buffer.from(
     output.map((line, i) => (i < output.length - 1 && !line.endsWith('\n') ? `${line}\n` : line)).join(''),
   );
+}
+
+/** Deterministic resolution of a Markdown diff3 conflict, or null when any hunk is
+ * ambiguous. Positional hunks keep both insertions (main first). Overlapping edits
+ * resolve only inside list/table/blank lines: both sides' new lines, main first; or
+ * when both sides only appended text to the end of one prose line: main's text first. */
+export function resolveMarkdownText(base: Buffer, main: Buffer, lane: Buffer): Buffer | null {
+  return resolveGroups(
+    base,
+    main,
+    lane,
+    (group, original, x, y, start, end) =>
+      positional(group, original) ??
+      listUnion(x, y, original.slice(start, end)) ??
+      lineAppends(group, original),
+  );
+}
+
+/** A declared shared list (forge.json `merge`): every conflicting hunk keeps main's entries, then
+ * the Lane's new ones; an entry either side removed stays removed and an entry both added appears
+ * once. `union` entries are lines; `fragments` entries are blocks separated by blank lines, so a
+ * multi-line entry (a changelog section) stays whole. Text only; binary input stays a conflict. */
+export function resolveListText(base: Buffer, main: Buffer, lane: Buffer, rule: ConflictRule): Buffer | null {
+  if (rule === 'docs') return resolveMarkdownText(base, main, lane);
+  return resolveGroups(base, main, lane, (_group, original, x, y, start, end) => {
+    const region = original.slice(start, end);
+    if (rule === 'union') return entryUnion(x.map(one), y.map(one), region.map(one)).flat();
+    return joinBlocks(entryUnion(blocks(x), blocks(y), blocks(region)));
+  });
+}
+const one = (line: string) => [line];
+const blank = (line: string) => !line.trim();
+const key = (entry: string[]) =>
+  entry
+    .filter(line => !blank(line))
+    .map(line => line.trimEnd())
+    .join('\n');
+/** Main's entries (less base entries the Lane removed), then the Lane's entries main lacks. */
+function entryUnion(x: string[][], y: string[][], region: string[][]) {
+  const keys = (entries: string[][]) => new Set(entries.map(key)),
+    base = keys(region),
+    lane = keys(y),
+    main = keys(x);
+  return [
+    ...x.filter(entry => !base.has(key(entry)) || lane.has(key(entry))),
+    ...y.filter(entry => !main.has(key(entry)) && !base.has(key(entry))),
+  ];
+}
+/** Blocks: each run of non-blank lines with the blank lines after it; leading blank lines alone. */
+function blocks(region: string[]) {
+  const result: string[][] = [];
+  for (const line of region) {
+    const last = result.at(-1);
+    if (last && (blank(line) || !blank(last.at(-1)!))) last.push(line);
+    else result.push([line]);
+  }
+  return result;
+}
+/** Blocks back to lines, with a blank line between two blocks that had none. */
+function joinBlocks(entries: string[][]) {
+  const output: string[] = [];
+  for (const entry of entries) {
+    const last = output.at(-1);
+    if (last !== undefined && !blank(last) && !blank(entry[0]!)) {
+      if (!last.endsWith('\n')) output[output.length - 1] = `${last}\n`;
+      output.push(last.endsWith('\r\n') ? '\r\n' : '\n');
+    }
+    output.push(...entry);
+  }
+  return output;
 }
 function apply(group: Edit[], original: string[], side: 0 | 1, start: number, end: number) {
   const result: string[] = [];
@@ -141,9 +254,9 @@ function listUnion(x: string[], y: string[], region: string[]) {
  * left side for a left-first (main-oriented) one. */
 export const docsMainSide = (order: NativeInsertionOrder) => (order === 'right-first' ? 'right' : 'left');
 
-/** Compose `lane` with `main`, resolving Markdown-only text conflicts with the
- * deterministic rule above. Null when any conflict is outside Markdown docs,
- * binary, a delete, a path clash or an ambiguous hunk; callers keep conflicts.
+/** Compose `lane` with `main`, resolving conflicts in Markdown docs and in main's declared shared
+ * lists (forge.json `merge`) with the deterministic rules above. Null when any conflict is outside
+ * them, binary, a delete, a path clash or an ambiguous hunk; callers keep conflicts.
  * `mainFirst` orients the merge as hosted compose does (main left, parents main then Lane);
  * the default orients it as a Lane sync (Lane left). A source that journals byte calculations
  * (`docsContent`) resolves each file there; the rule is the same. */
@@ -161,28 +274,28 @@ export function resolveDocsComposition(
   if (!merged.conflicts.length) return null;
   const mainOf = docsMainSide(order),
     laneOf = mainOf === 'left' ? 'right' : 'left';
-  // Every conflict qualifies before any bytes are read or requested.
-  for (const item of merged.conflicts) {
+  // Every conflict qualifies before any file bytes are read or requested. forge.json is read only
+  // when main has one; without it only Markdown docs can qualify.
+  const configured = source.state(main).files.some(item => item.path === FORGE_CONFIG_FILE);
+  if (!configured && !merged.conflicts.every(item => markdownDoc(item.path))) return null;
+  const declared = configured ? mainMergePaths(source, main) : { union: [], fragments: [] },
+    rules = merged.conflicts.map(item => conflictRule(item.path, declared));
+  for (const [i, item] of merged.conflicts.entries()) {
     const ours = item[mainOf],
       theirs = item[laneOf];
-    if (
-      !markdownDoc(item.path) ||
-      item.reason ||
-      !ours ||
-      !theirs ||
-      (!item.base && ours.mode !== theirs.mode)
-    )
+    if (!rules[i] || item.reason || !ours || !theirs || (!item.base && ours.mode !== theirs.mode))
       return null;
   }
   const files: NativeFile[] = [...merged.files];
-  const blobs = merged.conflicts.map(item =>
+  const blobs = merged.conflicts.map((item, i) =>
     source.docsContent
-      ? source.docsContent(item, order)
+      ? source.docsContent(item, order, rules[i]!)
       : (() => {
-          const bytes = resolveMarkdownText(
+          const bytes = resolveListText(
             item.base ? source.object(item.base.blob) : Buffer.alloc(0),
             source.object(item[mainOf]!.blob),
             source.object(item[laneOf]!.blob),
+            rules[i]!,
           );
           return bytes ? source.put(bytes) : null;
         })(),

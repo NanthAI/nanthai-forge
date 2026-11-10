@@ -113,8 +113,12 @@ export class NativeSource {
     item: NativeMergeConflict,
     labels: [left: string, right: string],
   ) => { file?: NativeFile; kind: 'text' | 'binary' };
-  /** The Markdown docs rule's bytes for one conflict (native-docs-resolve), as a blob or null. */
-  docsContent?: (item: NativeMergeConflict, order: NativeInsertionOrder) => string | null;
+  /** The docs or declared list rule's bytes for one conflict (native-docs-resolve), as a blob or null. */
+  docsContent?: (
+    item: NativeMergeConflict,
+    order: NativeInsertionOrder,
+    rule: import('./native-docs-resolve.js').ConflictRule,
+  ) => string | null;
   private batchingObjects = false;
   readonly directory: string;
   readonly owner: string;

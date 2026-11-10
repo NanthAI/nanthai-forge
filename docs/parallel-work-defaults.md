@@ -257,7 +257,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   `{"packages": {"commands": {"cargo": ["cargo", "test", "--all-features", "{packages}"]}}}`, a
   per-ecosystem test command template (cargo, go, python, dotnet, gradle, maven) for the package
   graph below: `{packages}` expands to what Forge selected after the tool (`-p a -p b`, the Go
-  packages, the pytest paths, the Gradle tasks, the Maven selection and phase). A JS project may instead keep the same `preflight` object under `forge` in
+  packages, the pytest paths, the Gradle tasks, the Maven selection and phase), and
+  `{"merge": {"union": […], "fragments": […]}}`, globs of shared list files whose conflicting
+  hunks keep both sides, main first, read from main only
+  ([shared lists](agents/workflow.md#markdown-conflict-resolution-on-finish)). A JS project may instead keep the same `preflight` object under `forge` in
   `package.json`; a key set in both files is an error, never a silent pick, and a `forge.json` that
   is not a JSON object makes the plan unavailable. Forge reads it as data and never runs it; keys
   it does not know are ignored.

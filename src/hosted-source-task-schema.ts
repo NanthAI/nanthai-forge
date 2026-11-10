@@ -26,6 +26,8 @@ const calculation = z
     channel: z.string(),
     labels: z.tuple([z.string(), z.string()]).optional(),
     syntax: z.literal(true).optional(),
+    /** A docs calculation's declared list rule (forge.json `merge`); absent is the Markdown docs rule. */
+    rule: z.enum(['union', 'fragments']).optional(),
   })
   .strict();
 export const sourceCalculationResultSchema = z

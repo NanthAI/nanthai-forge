@@ -581,7 +581,7 @@ history; unchanged finish/land journals reuse their validated snapshots. An
 unchanged land journal is not rewritten. Stopping the presence worker aborts its
 driver while detached provider checks continue in their controllers.
 
-Concurrent agents: if another Lane was accepted after yours started, under `laneUpdates:"auto"`, finish merges main into your Lane first (a `Sync main` checkpoint with two parents). Overlapping edits stop finish with `phase:"sync"`, `status:"conflict"` and Git-style markers (`<<<<<<< lane`, `=======`, `>>>>>>> main`) in the listed files (text follows Git's rule and markers keep the hunk's line ending, as stated at the top of this page); binary conflicts keep the Lane version. Checkpoint refuses files that still contain markers (`CONFLICT_MARKERS`). Resolve, then finish again. When every conflict is a text conflict in Markdown documentation (`*.md` at the root or under `docs/`), finish resolves it instead of stopping: see [Markdown conflict resolution](#markdown-conflict-resolution-on-finish). `sync` (`{"laneId":"LANE_ID"}`) does the merge on its own and returns `up-to-date`, `merged` or `conflict`; it needs a checkpointed Lane (`LANE_DIRTY`). sync writes files before recording the new head, so an interrupted sync can simply be repeated. A hosted sync that applies its result or prepares conflict files also returns `timing` (`totalMs`, `stepsMs` with `settle`, `submit`, `hostedWait` and `apply` or `conflict`), so the server compose and wait show apart from the local write; a completed hosted `resolve` returns the same `timing` with `save`, `submit`, `hostedWait`, `apply` and `select` (the follow-up landing). Both come from local clock reads only and add no call. Acceptance refuses any Candidate that does not contain the Channel's current head (`CHANNEL_DIVERGED`), with earlier accepted-head rollback available only to a person. Each automatic successful sync records its changed paths and undo instructions; `undo-sync` takes `laneId` and `syncOperationId`, refusing newer edits unless explicitly forced. `laneUpdates:"ask"` stops with `sync-required`: run sync, then start a new finish operation. Git-backed Lanes also sync and retain both merge parents after staged conflict resolution.
+Concurrent agents: if another Lane was accepted after yours started, under `laneUpdates:"auto"`, finish merges main into your Lane first (a `Sync main` checkpoint with two parents). Overlapping edits stop finish with `phase:"sync"`, `status:"conflict"` and Git-style markers (`<<<<<<< lane`, `=======`, `>>>>>>> main`) in the listed files (text follows Git's rule and markers keep the hunk's line ending, as stated at the top of this page); binary conflicts keep the Lane version. Checkpoint refuses files that still contain markers (`CONFLICT_MARKERS`). Resolve, then finish again. When every conflict is a text conflict in Markdown documentation (`*.md` at the root or under `docs/`) or in a shared list main's `forge.json` declares (`merge`), finish resolves it instead of stopping: see [Markdown conflict resolution](#markdown-conflict-resolution-on-finish). `sync` (`{"laneId":"LANE_ID"}`) does the merge on its own and returns `up-to-date`, `merged` or `conflict`; it needs a checkpointed Lane (`LANE_DIRTY`). sync writes files before recording the new head, so an interrupted sync can simply be repeated. A hosted sync that applies its result or prepares conflict files also returns `timing` (`totalMs`, `stepsMs` with `settle`, `submit`, `hostedWait` and `apply` or `conflict`), so the server compose and wait show apart from the local write; a completed hosted `resolve` returns the same `timing` with `save`, `submit`, `hostedWait`, `apply` and `select` (the follow-up landing). Both come from local clock reads only and add no call. Acceptance refuses any Candidate that does not contain the Channel's current head (`CHANNEL_DIVERGED`), with earlier accepted-head rollback available only to a person. Each automatic successful sync records its changed paths and undo instructions; `undo-sync` takes `laneId` and `syncOperationId`, refusing newer edits unless explicitly forced. `laneUpdates:"ask"` stops with `sync-required`: run sync, then start a new finish operation. Git-backed Lanes also sync and retain both merge parents after staged conflict resolution.
 
 ### Queue controls
 
@@ -1308,6 +1308,22 @@ the line keeps main's addition, then the Lane's. Other edited prose, deletes,
 binary or mode changes, path clashes and any code conflict keep today's
 behavior: finish stops with `status:"conflict"` and markers. Markers are never
 written into a resolved file, and no side's new line is dropped.
+
+**Shared lists that never conflict.** A project names its shared list files
+(changelogs, registries, ignore lists) in the root `forge.json`:
+`{"merge": {"union": ["lists/*.txt"], "fragments": ["packages/*/CHANGELOG.md"]}}`.
+Where the line merge stops in a declared file, every conflicting hunk keeps
+main's entries, then the Lane's new ones; an entry either side removed stays
+removed and an entry both sides added appears once. `union` treats each line as
+an entry; `fragments` treats each blank-line-separated block as one, so a
+multi-line changelog section stays whole. A declaration counts only once it is
+on main: the Lane being merged cannot add one for its own landing. It takes
+precedence over the Markdown rule, applies wherever that rule does (finish
+sync, hosted sync, compose and every recompose) and is recorded the same way
+(`docsResolution` paths, same `rule` and `undo`). Binary files, deletes and
+mode changes still conflict, and the result is plain text: a list whose syntax
+needs a separator on every entry but the last (a JSON array) can still need a
+fix after landing, which the landing check catches.
 
 The `Sync main` checkpoint records the resolved paths and rule in its automatic
 summary and undo instructions (`undo-sync`); the finish receipt's `sync` has

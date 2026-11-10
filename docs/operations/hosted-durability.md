@@ -154,9 +154,10 @@ under its own credential, then compare the local ZIPs.
 
 The JSON report contains:
 
-- Selected accepted `main` head per active hosted Work project, preferring
-  `hostedChannels/main` over local `channels/main`, and Intent/Lane/Candidate counts
-  from the selected ready generation's actual record partition.
+- Accepted `main` head per active hosted Work project: the project's
+  `projectHostedChannels` main row (server authority), else the Work index's
+  `hostedChannels/main`, else its hosting-time `channels/main`; plus Intent/Lane/Candidate
+  counts from the selected ready generation's actual record partition.
 - Counts and SHA-256 digests of every exported table's canonical full records,
   including IDs, creation times, payload chunks, journals, other projects and
   historical/unselected generations. JSON key and row order do not matter; string

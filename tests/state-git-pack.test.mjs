@@ -10,6 +10,7 @@ import { deflateSync, inflateSync } from 'node:zlib';
 import { digest } from '../dist/hash.js';
 import { readGitPack, writeGitPack } from '../dist/state-git-pack.js';
 import { emptyStateGitCache, gitObjectId, stateToGit } from '../dist/state-git.js';
+import { dualWriteStateTree } from '../dist/state-tree-dual.js';
 import { saveStateTree, convertStateTree, verifyStateTreeSave } from '../dist/state-tree-save.js';
 import { TreeSession, WIDE_SEGMENT_SPREAD } from '../dist/state-tree-store.js';
 import {
@@ -403,6 +404,70 @@ test('tree form: a wide folder whose names hit no chunk cut is still read, edite
   });
   assert.deepEqual(Buffer.from(await cold(store, saved.pointer)), next);
   assert.equal((await convertStateTree(segmentStore(), next, fileOf)).pointer.root, saved.pointer.root);
+});
+
+test('dual-write: a pointer exists only when the stored tree reproduces the flat State; any doubt keeps it flat', async () => {
+  const store = segmentStore(),
+    first = manifest(treeSample, 'first'),
+    converted = await convertStateTree(store, first, fileOf),
+    { link: _removed, ...kept } = treeSample,
+    next = manifest({ ...kept, 'a/c/d.ts': 'changed\n', 'new/file': 'n' }, 'next', [digest(first)]);
+  const input = (over = {}) => ({
+    store,
+    base: { pointer: converted.pointer, state: digest(first), files: filesOf(first) },
+    next: { value: JSON.parse(next.toString()), manifest: next },
+    changes: editsBetween(first, next).map(([path, file]) => ({
+      path,
+      after: file && { blob: file.blob, mode: file.mode },
+    })),
+    gitFile: async file => readBlob(file.blob),
+    ...over,
+  });
+  const written = await dualWriteStateTree(input());
+  assert.equal(written.status, 'written');
+  assert.deepEqual(Buffer.from(await cold(store, written.pointer)), next);
+  assert.equal(written.pointer.root, (await convertStateTree(segmentStore(), next, fileOf)).pointer.root);
+  // A Git id the caller already derived is used without reading the file again.
+  const known = await dualWriteStateTree(input({ gitFile: async file => fileOf(file) }));
+  assert.deepEqual(known.pointer, written.pointer);
+  // The base has no tree form yet: nothing is written and nothing is wrong.
+  const puts = store.puts;
+  assert.deepEqual(await dualWriteStateTree(input({ base: { ...input().base, pointer: undefined } })), {
+    status: 'skipped',
+    reason: 'BASE_HAS_NO_TREE',
+  });
+  assert.equal(store.puts, puts);
+  // Refusals: each returns its reason and never throws, so the flat save is untouched.
+  const refused = async (over, code) => {
+    const result = await dualWriteStateTree(input(over));
+    assert.equal(result.status, 'refused', JSON.stringify(result));
+    assert.equal(result.code, code);
+  };
+  // The change list misses a path: the stored tree would not be this State.
+  await refused({ changes: input().changes.slice(1) }, 'SOURCE_DIGEST_MISMATCH');
+  // File bytes that are not the named blob.
+  await refused({ gitFile: async () => Buffer.from('other bytes') }, 'SOURCE_DIGEST_MISMATCH');
+  // The base's flat list is not what its tree holds.
+  await refused(
+    { base: { ...input().base, files: filesOf(first).filter(file => file.path !== 'README.md') } },
+    'SOURCE_DIGEST_MISMATCH',
+  );
+  // The store fails, or gives back other bytes than it was given.
+  const failing = segmentStore();
+  for (const [id, bytes] of store.objects) failing.objects.set(id, bytes);
+  failing.put = async () => {
+    throw new Error('store is down');
+  };
+  await refused({ store: failing }, 'unexpected');
+  const lossy = segmentStore();
+  for (const [id, bytes] of store.objects) lossy.objects.set(id, bytes);
+  const put = lossy.put;
+  lossy.put = async bytes => {
+    const id = await put(bytes);
+    lossy.objects.get(id)[0] ^= 1;
+    return id;
+  };
+  await refused({ store: lossy }, 'SOURCE_HASH_MISMATCH');
 });
 
 /** A synthetic repository: `count` files, 9 per folder, 3 levels deep (about one folder per 8 files). */

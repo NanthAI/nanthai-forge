@@ -6,7 +6,8 @@ import { atStep, durabilityError } from './lib/hosted-durability-errors.mjs';
 import { failure } from './lib/hosted-durability-compare.mjs';
 
 const day = 24 * 60 * 60 * 1000;
-const name =
+/** `<time>-<operation UUID>/manifest.json` under the backup prefix. */
+export const backupManifestName =
   /^(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z)-([a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})\/manifest\.json$/;
 
 // A manifest is published only after the existing backup's full R2 readback passes.
@@ -18,14 +19,18 @@ export async function backupFreshness({ client, prefix, deployment, now = new Da
   await atStep('freshness.list', async () => {
     for await (const page of client.pages(prefix)) {
       for (const key of page) {
-        if (key.startsWith(prefix) && name.test(key.slice(prefix.length)) && (!newest || key > newest))
+        if (
+          key.startsWith(prefix) &&
+          backupManifestName.test(key.slice(prefix.length)) &&
+          (!newest || key > newest)
+        )
           newest = key;
       }
     }
   });
   if (!newest) return { operation: 'backup-freshness', ageDays: null, overdue: true };
   const manifest = await atStep('freshness.manifest', () => client.manifest(newest));
-  const [, time, id] = name.exec(newest.slice(prefix.length));
+  const [, time, id] = backupManifestName.exec(newest.slice(prefix.length));
   const observed = Date.parse(manifest.time);
   if (
     manifest.format !== 1 ||

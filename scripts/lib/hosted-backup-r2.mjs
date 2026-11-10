@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
+import { createWriteStream } from 'node:fs';
 import { presign } from '../../dist/r2-presign.js';
 import { networkFetch, networkTimeout } from '../../dist/network-fetch.js';
 import { failure } from './hosted-durability-compare.mjs';
@@ -78,6 +80,34 @@ export function r2Client(env = process.env, fetcher = networkFetch) {
       for await (const bytes of response.body) {
         hash.update(bytes);
         size += bytes.length;
+      }
+      return { size, sha256: hash.digest('hex') };
+    },
+    /** Exact object bytes in memory (restore drill: one project's objects). */
+    async bytes(key) {
+      const response = await request('GET', key);
+      try {
+        return Buffer.from(await response.arrayBuffer());
+      } catch {
+        throw failure('BACKUP_R2_FAILED');
+      }
+    },
+    /** Stream an object into a new owner-only file; returns its size and SHA-256. */
+    async download(key, path) {
+      const response = await request('GET', key);
+      const hash = createHash('sha256'),
+        out = createWriteStream(path, { flags: 'wx', mode: 0o600 });
+      let size = 0;
+      try {
+        for await (const bytes of response.body) {
+          hash.update(bytes);
+          size += bytes.length;
+          if (!out.write(bytes)) await once(out, 'drain');
+        }
+        await new Promise((done, fail) => out.end(error => (error ? fail(error) : done())));
+      } catch {
+        out.destroy();
+        throw failure('BACKUP_R2_FAILED');
       }
       return { size, sha256: hash.digest('hex') };
     },

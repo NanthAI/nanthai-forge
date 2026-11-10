@@ -70,3 +70,38 @@ export function declaredPreflight(
     return { value: fromPackage, from: 'package.json', label: `forge.preflight.${key}` };
   return undefined;
 }
+
+/** Rules that merge a conflict in a shared list instead of stopping (Issue aa9fb5b1). */
+export type ListMergeRule = 'union' | 'fragments';
+export type DeclaredMergePaths = Record<ListMergeRule, string[]>;
+/** At most this many globs per rule; a longer list declares nothing. */
+const MERGE_PATHS_MAX = 64;
+const globs = (value: unknown) =>
+  Array.isArray(value) &&
+  value.length <= MERGE_PATHS_MAX &&
+  value.every(
+    glob =>
+      typeof glob === 'string' &&
+      glob.length > 0 &&
+      glob.length <= 200 &&
+      !glob.startsWith('/') &&
+      !glob.split('/').includes('..'),
+  )
+    ? (value as string[])
+    : [];
+
+/** `merge.union` and `merge.fragments` in forge.json: repository-relative globs of shared list
+ * files whose conflicting hunks keep both sides (main first) instead of stopping. Callers read the
+ * file from accepted main, never from the Lane being merged, so a Lane cannot widen the rule for its
+ * own landing. A malformed file or value declares nothing; merging never throws over it. */
+export function declaredMergePaths(forgeJson: string | undefined): DeclaredMergePaths {
+  let merge: unknown;
+  try {
+    merge = parseForgeJson(forgeJson)?.merge;
+  } catch {
+    merge = undefined;
+  }
+  return record(merge)
+    ? { union: globs(merge.union), fragments: globs(merge.fragments) }
+    : { union: [], fragments: [] };
+}

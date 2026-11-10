@@ -10,7 +10,14 @@ import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { NativeSource } from '../dist/native-source.js';
-import { resolveMarkdownText, resolveDocsComposition } from '../dist/native-docs-resolve.js';
+import {
+  conflictRule,
+  resolveDocsComposition,
+  resolveListText,
+  resolveMarkdownText,
+} from '../dist/native-docs-resolve.js';
+import { declaredMergePaths } from '../dist/project-config.js';
+import { mergeNativeText } from '../dist/native-text-merge.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { agentSync } from '../dist/agent-sync.js';
 import { trustAgents } from './autonomy-fixture.mjs';
@@ -104,7 +111,46 @@ test('Markdown resolution keeps both sides deterministically, main first', () =>
   assert.equal(resolveMarkdownText(Buffer.from('a\n'), Buffer.from([0, 1]), Buffer.from('a\n')), null);
 });
 
-async function setup(t) {
+// Issue aa9fb5b1 (no-merge paths): a forge.json `merge` list keeps both sides' entries where the
+// line merge stops; `fragments` keeps multi-line entries whole.
+test('declared list rules merge shared lists that the line merge refuses', () => {
+  const list = (base, main, lane, rule) => {
+    assert.equal(mergeNativeText(Buffer.from(base), Buffer.from(main), Buffer.from(lane)), null);
+    return resolveListText(Buffer.from(base), Buffer.from(main), Buffer.from(lane), rule)?.toString() ?? null;
+  };
+  // Two entries added at one point where one name starts with the other.
+  assert.equal(
+    list('alpha\nzeta\n', 'alpha\nbilling\nzeta\n', 'alpha\nbilling-export\nzeta\n', 'union'),
+    'alpha\nbilling\nbilling-export\nzeta\n',
+  );
+  // Both append to a last line without a newline: the shared line once, then main's, then the Lane's.
+  assert.equal(list('a\nb', 'a\nb\nc', 'a\nb\nd', 'union'), 'a\nb\nc\nd');
+  // Both replace one entry: both replacements, the old entry removed.
+  assert.equal(list('a\nb\nc\n', 'a\nB1\nc\n', 'a\nB2\nc\n', 'union'), 'a\nB1\nB2\nc\n');
+  // Fragments: each blank-line block is one entry, so two changelog sections stay whole.
+  const log = '# Log\n\n## 1.0\n- x\n',
+    section = who => `# Log\n\n## Next\n- ${who} thing\n\n## 1.0\n- x\n`;
+  assert.equal(
+    list(log, section('main'), section('lane'), 'fragments'),
+    '# Log\n\n## Next\n- main thing\n\n## Next\n- lane thing\n\n## 1.0\n- x\n',
+  );
+  assert.equal(resolveListText(Buffer.from('a\n'), Buffer.from([0, 1]), Buffer.from('b\n'), 'union'), null);
+  // forge.json: fragments win over union, Markdown docs keep their rule, nothing else qualifies.
+  const declared = declaredMergePaths(
+    JSON.stringify({
+      merge: { union: ['lists/*.txt', 'packages/**'], fragments: ['packages/*/CHANGELOG.md'] },
+    }),
+  );
+  assert.equal(conflictRule('lists/features.txt', declared), 'union');
+  assert.equal(conflictRule('packages/web/CHANGELOG.md', declared), 'fragments');
+  assert.equal(conflictRule('docs/guide.md', declared), 'docs');
+  assert.equal(conflictRule('src/x.ts', declared), undefined);
+  // A malformed file or value declares nothing; merging never throws over it.
+  for (const text of ['{', '[]', '{"merge":{"union":["/abs"]}}', '{"merge":{"union":"x"}}'])
+    assert.deepEqual(declaredMergePaths(text), { union: [], fragments: [] }, text);
+});
+
+async function setup(t, seedFiles = {}) {
   const root = mkdtempSync(join(tmpdir(), 'forge-docmerge-'));
   t.after(() => cleanupOwner(root));
   for (const dir of ['docs', 'src', 'tests']) mkdirSync(join(root, dir));
@@ -134,6 +180,10 @@ async function setup(t) {
   });
   const seed = (await dispatch(agent, { action: 'start', outcome: 'seed main' })).result;
   writeFileSync(join(seed.path, 'README.md'), 'seed\n');
+  for (const [path, bytes] of Object.entries(seedFiles)) {
+    mkdirSync(join(seed.path, path, '..'), { recursive: true });
+    writeFileSync(join(seed.path, path), bytes);
+  }
   const initial = (
     await dispatch(agent, { action: 'finish', laneId: seed.laneId, message: 'seed', accept: true })
   ).result;
@@ -227,6 +277,31 @@ test('finish lands a docs-only sync conflict with docs scope and replays idempot
   ).result;
   assert.equal(again.head, receipt.sync.head);
   assert.deepEqual(again.docsResolution, receipt.sync.docsResolution);
+});
+
+// Issue aa9fb5b1 fixture proof: two Lanes add entries to the same declared list and both land.
+test('two Lanes adding to a forge.json merge list both land without a conflict and keep both lines', async t => {
+  scoped(t);
+  const LIST = 'lists/features.txt';
+  const f = await setup(t, {
+    'forge.json': JSON.stringify({ merge: { union: ['lists/*.txt'] } }),
+    [LIST]: 'alpha\nzeta\n',
+  });
+  writeFileSync(join(f.b.path, LIST), 'alpha\nbilling\nzeta\n');
+  writeFileSync(join(f.a.path, LIST), 'alpha\nbilling-export\nzeta\n');
+  const main = (
+    await dispatch(f.agent, { action: 'finish', laneId: f.b.laneId, message: 'main', accept: true })
+  ).result;
+  assert.equal(main.status, 'accepted');
+  const receipt = (
+    await dispatch(f.agent, { action: 'finish', laneId: f.a.laneId, message: 'list', accept: true })
+  ).result;
+  assert.equal(receipt.status, 'accepted', JSON.stringify(receipt));
+  assert.deepEqual(receipt.sync.docsResolution.paths, ['docs/status.md', LIST]);
+  const source = new NativeSource(f.root),
+    file = source.state(receipt.acceptance.head).files.find(item => item.path === LIST);
+  assert.equal(source.object(file.blob).toString(), 'alpha\nbilling\nbilling-export\nzeta\n');
+  await drainPostAccept(f.store);
 });
 
 test('interaction retry after a docs conflict re-checks with docs scope and records the resolution', async t => {

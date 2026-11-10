@@ -466,6 +466,64 @@ manifest validation and snapshot retention. Restoring a portable native archive
 creates an independent local copy; it does not grant hosted acceptance authority.
 Native-owner recovery/reconnect and return-to-owner authority are removed.
 
+### Restore drill
+
+One command restores the newest weekly backup into a fresh local self-hosted
+deployment and checks one project byte for byte. It is the gate before any change
+that moves real data switches its readers (flips 2 and 5): run it on a backup
+taken after the new writes start, and switch only when it exits 0.
+
+```sh
+npm run build:core
+node --env-file="$PRIVATE_R2_ENV" scripts/restore-drill.mjs \
+  --project PROJECT_ID --dir NEW_PRIVATE_DIR [--backup NAME] [--reserve-gib N]
+```
+
+`PRIVATE_R2_ENV` holds the backup bucket's `R2_*` names (as for the weekly job).
+The drill reads the backup and the project's `v1/p/PROJECT_ID/` prefix with LIST
+and GET only, and writes only inside `NEW_PRIVATE_DIR`: it never calls the source
+deployment and never runs a deploy against it. Steps, each timed in the report:
+
+1. Pick the newest (or named) backup manifest, download its ZIP and check size and
+   SHA-256 against the manifest.
+2. Create a fresh instance with `scripts/selfhost.mjs` (pinned backend, checked
+   SHA-256) and import the ZIP into it. The CLI's progress watcher can time out on
+   a busy machine while the import continues; the import's own state row decides.
+3. Export the restored instance before any code runs and compare it with the
+   backup: every table's full rows (IDs and creation times included), every
+   stored file and each project's selected Work main. Then compare every row that
+   names the project, one by one. Differences name the table and row, never contents.
+4. Copy the project's R2 prefix into a local in-memory bucket. Every key a backup
+   row names must exist, and every `o/<sha256>` object must hash to its name.
+5. Deploy the current source to the scratch instance only (synthetic Secret Object
+   keyring; imported rows have no indexes until this push builds them), then read
+   main and every stored object of the project through the restored app's own
+   download path into an empty cache, parse each State and fetch every file of
+   every State. The cache rejects bytes that differ from their SHA-256 pin.
+6. Stop the backend and delete the directory (keep it with `--keep`).
+
+The import holds only the project's rows (every row that names it), every row
+without a `projectId` (accounts, settings, project shells) and all table metadata
+and stored files. Importing the whole snapshot works too, but the schema push then
+rebuilds all indexes over every row: on the 780,263-document weekly backup a full
+import took 14 min and the export 37 min (every table, file and Work main equal
+under `hosted-durability.mjs verify --left-export --right-export`), and the index
+build had not finished after 30 min.
+
+Measured on the 328 MB weekly backup, a GitHub-imported project with one landed
+Lane (166 rows in 57 tables, 2 States, 58 files, 20 R2 objects / 1.3 MB): 2–5.5 min
+wall time on a loaded Mac, mostly the scratch deploy (48–111 s), the two passes over
+the backup (filter and read, 45–105 s) and the import (8–47 s). Cost: 2 LIST and 22
+GET requests on the existing R2 account (the backup plus the project's objects,
+about 329 MB of free egress) and no Convex calls; peak disk is the backup, a
+project-sized instance and the pinned backend (about 0.6 GB, freed at teardown).
+
+Exit 0 means restored and equal, 2 a difference (the report names it), 1 a failed
+step (`failed.step`, `failed.code`; the private `drill.log` stays only with
+`--keep`). Not covered: real auth configuration and Secret Object values (synthetic
+keyring), and projects whose R2 prefix was purged after the backup: their rows
+restore but their bytes are gone, so choose a project that still exists.
+
 ### Route B: recover a runner and cache from hosted
 
 This section applies to server authority; native-owner recovery/reconnect is removed.
@@ -536,7 +594,7 @@ server authority.
 
 For whole-deployment Convex snapshots, fresh-target restore and offline/live
 comparison tooling, see [hosted deployment durability](operations/hosted-durability.md).
-This complements project archives; the live restore drill remains unverified.
+This complements project archives; the [restore drill](#restore-drill) runs it end to end.
 
 Hosted projects store the same archives. In the browser, "Stored checkpoints" lists them: upload a source and Work archive exported from Forge, "Download source and Work" to fetch one, or "Reconcile original upload" after an unknown reply. To work on hosted Intents locally, download the pinned archive and the current journal together, then run `nforge restore-native ARCHIVE NEW_DIR --journal HOSTED_WORK.json`. There is no way to return that local copy to the hosted project: push and source return were removed, and their old RPC addresses only answer `CLI_UPGRADE_REQUIRED`. Hosted work continues through hosted Lanes and landing.
 

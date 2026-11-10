@@ -36,6 +36,7 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
     projects = [],
     generations = new Map(),
     partitions = new Map(),
+    hostedMains = new Map(),
     storageIds = new Set(),
     artifactRefs = new Set(),
     committedArtifacts = new Set();
@@ -77,6 +78,12 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
     }
     if (event.table === '_storage') storageIds.add(row._id);
     if (event.table === 'hostedProjects') projects.push(row);
+    // Server-authority main lives in its channel row; the Work index keeps the hosting-time copy.
+    if (event.table === 'projectHostedChannels' && row.name === 'main') {
+      const selection = typeof row.selection === 'string' ? JSON.parse(row.selection) : row.selection;
+      if (hostedMains.has(row.projectId)) throw failure('WORK_INDEX_INVALID');
+      hostedMains.set(row.projectId, selection?.head);
+    }
     if (event.table === 'projectWorkGenerations') generations.set(row._id, row);
     if (event.table === 'projectWorkRecords') {
       let partition = partitions.get(row.generationId);
@@ -115,7 +122,11 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
         if (generation.backupId !== project.work.backupId) throw unavailable('backup-mismatch', project);
         const partition = partitions.get(generation.recordsGenerationId ?? generation._id);
         if (!partition) throw unavailable('partition-missing', project);
-        const main = partition.channels.get('hostedChannels') ?? partition.channels.get('channels') ?? null;
+        const main =
+          hostedMains.get(project._id) ??
+          partition.channels.get('hostedChannels') ??
+          partition.channels.get('channels') ??
+          null;
         if (main !== null && (typeof main !== 'string' || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(main)))
           throw failure('WORK_INDEX_INVALID');
         return {
@@ -140,7 +151,9 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
   return { add, finish };
 }
 
-export async function readSnapshot(path, options = {}) {
+/** Every snapshot entry as `{kind:'table'|'record'|'file', ...}`, streamed without extracting
+ * the ZIP. Fails with SNAPSHOT_READ_FAILED when the reader cannot finish. */
+export async function* snapshotEvents(path) {
   const child = spawn(
     'python3',
     [fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)), path],
@@ -150,20 +163,27 @@ export async function readSnapshot(path, options = {}) {
     child.once('error', () => resolve(false));
     child.once('close', code => resolve(code === 0));
   });
-  const accumulator = snapshotAccumulator(options);
+  let finished = false;
   try {
     for await (const line of createInterface({ input: child.stdout, crlfDelay: Infinity }))
-      accumulator.add(JSON.parse(line));
-    if (!(await completion)) throw failure('SNAPSHOT_READ_FAILED');
+      yield JSON.parse(line);
+    finished = true;
+  } finally {
+    if (!finished) child.kill();
+    const passed = await completion;
+    if (finished && !passed) throw failure('SNAPSHOT_READ_FAILED');
+  }
+}
+
+export async function readSnapshot(path, options = {}) {
+  const accumulator = snapshotAccumulator(options);
+  try {
+    for await (const event of snapshotEvents(path)) accumulator.add(event);
     return accumulator.finish();
   } catch (error) {
-    child.kill();
-    await completion;
     if (error.code?.startsWith('WORK_')) throw error;
     throw failure(
-      error.code?.startsWith('WORK_') ||
-        error.code === 'STORAGE_INCOMPLETE' ||
-        error.code === 'DATABASE_ONLY_STORAGE_REMAINS'
+      error.code === 'STORAGE_INCOMPLETE' || error.code === 'DATABASE_ONLY_STORAGE_REMAINS'
         ? error.code
         : 'SNAPSHOT_READ_FAILED',
     );
