@@ -122,8 +122,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/shared-dependencies.ts` | `npm-lockfile` | 2 | Lanes share an npm install keyed by the exact lockfile | each Lane installs with its own tooling |
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
-| `src/maintainer-release-schema.ts` | `build-folders` | 1 | Forge's own release stage names | not used |
-| `src/maintainer-release-stages.ts` | `build-folders` | 1 | Forge's own release runs `npm run build` | not used |
 | `src/agent-preflight.ts` | `package-json-config` | 6 | preflight config, guards and the Forge-layout inventory live in package.json (any-ecosystem slice F, e89be958) | after F: a neutral root file, package.json as fallback |
 | `src/cli-update.ts` | `package-json-config` | 1 | Forge's own CLI package manifest | not used |
 | `src/explicit-test-runner.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
@@ -134,7 +132,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/intent-contract-selection.ts` | `package-json-config` | 2 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/js-import-graph.ts` | `package-json-config` | 1 | every package.json is data for the JS/TS import graph | the same for every JS/TS repository; others keep path selection |
 | `src/landing-environment.ts` | `package-json-config` | 1 | Forge's own runtime manifest pins the landing runtime | not used |
-| `src/maintainer-release-stages.ts` | `package-json-config` | 2 | Forge's own release | not used |
 | `src/remote-check-plan.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |
 | `src/shared-dependencies.ts` | `package-json-config` | 6 | Lane dependency sharing is npm-only (any-ecosystem slice H, 4ce67b9a) | each Lane installs with its own tooling |
 | `src/workspace-test-runner.ts` | `package-json-config` | 1 | the project test runner declaration (any-ecosystem slice F, e89be958) | after F: a neutral root file |

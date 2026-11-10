@@ -37,8 +37,6 @@ import { scheduleIntegrationPreview } from '../dist/integration-preview-auto.js'
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { updateHostState } from '../dist/host-binding.js';
-import { releaseChild } from '../dist/maintainer-release-child.js';
-import { releaseCommand } from '../dist/maintainer-release-stages.js';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 
@@ -295,29 +293,6 @@ test('detached host backfill drops unrelated secrets and keeps Forge authenticat
   assert.equal(call.options.env.FORGE_AUTH_TOKEN, 'fake-test-secret');
 });
 
-test('release stage worker launch and ordinary command both drop planted unrelated secrets', t => {
-  plant(t);
-  const options = [];
-  t.mock.method(childProcess, 'spawnSync', (_command, _args, opts) => {
-    options.push(opts);
-    return { status: 0, signal: null };
-  });
-  syncBuiltinESMExports();
-  t.after(() => {
-    t.mock.restoreAll();
-    syncBuiltinESMExports();
-  });
-  const directory = mkdtempSync(join(tmpdir(), 'forge-release-env-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  releaseChild(
-    { node: process.execPath, stages: [{ name: 'package', attempts: [{ id: randomUUID(), directory }] }] },
-    'package',
-    directory,
-  );
-  releaseCommand(process.execPath, ['--version'], directory);
-  assert.equal(options.length, 2);
-  for (const option of options) clean(option.env);
-});
 test('Actions check launcher drops unrelated credentials from its runner environment', t => {
   plant(t);
   const directory = mkdtempSync(join(tmpdir(), 'forge-actions-env-'));

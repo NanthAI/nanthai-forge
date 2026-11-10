@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { releaseStages } from '../dist/maintainer-release-schema.js';
 import { RECOVERY_HELP, recoveryCli } from '../dist/recovery-cli.js';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -22,6 +21,8 @@ const retiredRuntimePaths = [
   'src/recovery-owner.ts',
   'src/local-acceptance.ts',
   'src/maintainer-release-owner.ts',
+  'src/maintainer-release.ts',
+  'src/maintainer-release-worker.ts',
   'src/release-owner-supervisor.ts',
   'src/release-owner-runtime.ts',
   'src/release-owner-selection.ts',
@@ -29,7 +30,6 @@ const retiredRuntimePaths = [
 ];
 test('retired owner runtime entry points remain removed', () => {
   for (const path of retiredRuntimePaths) assert.equal(existsSync(join(root, path)), false, path);
-  assert(!releaseStages.includes('owner'));
   const cli = readFileSync(join(root, 'src/cli.ts'), 'utf8');
   assert.doesNotMatch(cli, /nforge serve|args\[0\] === 'serve'/);
   assert.doesNotMatch(RECOVERY_HELP, /reconnect\|client/);

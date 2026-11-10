@@ -13,7 +13,7 @@
   },
   "counts": {
     "tables": 181,
-    "errorCodes": 500,
+    "errorCodes": 494,
     "agentActions": 66,
     "cliCommands": 40,
     "glossaryTerms": 27,
