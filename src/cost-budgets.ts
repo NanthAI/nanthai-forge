@@ -40,7 +40,7 @@ export const costBudgetSchema = z
      * number for reading, judged nowhere (no deterministic measure exists). */
     measuredBy: z.enum(['landing-fixture', 'snapshot-fixture', 'capture']),
     metric: z.string().min(1),
-    unit: z.enum(['calls', 'bytes', 'GB-s', 'ops', 'runs', 'uploads', 'min']),
+    unit: z.enum(['calls', 'reads', 'bytes', 'GB-s', 'ops', 'runs', 'uploads', 'min']),
     /** Per accepted landing (snapshot-fixture: per changed snapshot). */
     value: z.number().min(0),
     /** Absolute change a measurement may move before any rule applies, so tiny counts never flap. */

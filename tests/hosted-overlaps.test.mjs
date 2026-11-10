@@ -20,6 +20,7 @@ import {
   advanceOverlapMain,
   boundOverlapChanges,
   recordOverlapLanding,
+  overlapLandingLabel,
   driftNudge,
   DRIFT_NUDGE_MIN_LANDINGS,
   DRIFT_LANDING_LOG,
@@ -35,6 +36,7 @@ const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
 const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
 const tracking = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
 const landed = await import(moduleUrl('../convex/projectHostedOverlapLanded.ts'));
+const mainLog = await import(moduleUrl('../convex/projectHostedOverlapMainLog.ts'));
 const capabilities = await import(moduleUrl('../convex/projectHostedAgent.ts'));
 // Path notices are gone (flip 4, Issue 853fcde3); peers stay readable on a detail read.
 const peerEvidence = async (s, laneId, name = 'peers') =>
@@ -269,7 +271,7 @@ async function setup(t, options = {}) {
 }
 
 /** Save path changes on a Lane's record. A Lane with none cannot overlap and is read without its peers. */
-const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change') =>
+const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change', baseSequence = 0) =>
   s.transaction(
     'track-change',
     {
@@ -293,7 +295,7 @@ const trackChange = (s, lane, paths = [delta('a.txt')], intent = 'My change') =>
             sourceVersion: current.sourceVersion + 1,
           },
           overlap: {
-            baseSequence: 0,
+            baseSequence,
             intent,
             changes: paths.map(change => ({
               ...change,
@@ -1318,6 +1320,150 @@ test('overlap read: a Lane level with main never reads the main path history; a 
   assert.deepEqual(response.behindMain.conflictingPaths, ['src/area-3/file.ts']);
 });
 
+// Main path log (Issue 750c5929): the Forge main row is 140 KB, and every save of a Lane behind main
+// and every overlap read of one read it whole. The same three landings after the Lane's base, kept on
+// the whole row only (as before the log existed) and through the acceptance write that also logs them.
+async function behindByThree(t, { logged }) {
+  const { s, lane } = await busyProject(t, { behind: true });
+  const base = 5;
+  const mineRow = [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === lane.id);
+  s.patch('projectHostedOverlapLanes', mineRow._id, { baseSequence: base });
+  const onMain = [['src/area-3/file.ts'], ['elsewhere/a.ts'], ['src/area-4/file.ts', 'src/area-5/file.ts']];
+  const names = onMain.map((_, n) => ({
+    receiptId: `${n}`.repeat(36),
+    laneId: `${n + 4}`.repeat(36),
+    actor: 'owner/calm-fox',
+  }));
+  for (const [n, paths] of onMain.entries()) {
+    const sequence = base + 1 + n;
+    if (logged) {
+      await s.transaction(
+        'landing',
+        { _handler: ctx => tracking.trackHostedOverlapMain(ctx, s.projectId, sequence, paths) },
+        {},
+      );
+      await s.transaction(
+        'landed',
+        {
+          _handler: ctx =>
+            mainLog.labelOverlapMainLog(ctx, s.projectId, sequence, async () =>
+              overlapLandingLabel(names[n]),
+            ),
+        },
+        {},
+      );
+    } else {
+      const row = [...s.tables.projectHostedOverlapMain.values()][0];
+      const { _id, _creationTime, projectId, ...fields } = {
+        ...row,
+        ...advanceOverlapMain(row, sequence, paths),
+        landings: recordOverlapLanding(row.landings, { sequence, ...names[n] }),
+      };
+      s.patch('projectHostedOverlapMain', row._id, fields);
+    }
+  }
+  const channelId = [...s.tables.projectHostedChannels.keys()][0];
+  s.patch('projectHostedChannels', channelId, {
+    selection: JSON.stringify({
+      ...JSON.parse([...s.tables.projectHostedChannels.values()][0].selection),
+      sourceRevision: base + onMain.length,
+    }),
+  });
+  return { s, lane, base };
+}
+
+test('main path log: a Lane behind main reads only the landings after its base, with the same behindMain answer and nudge', async t => {
+  const whole = await behindByThree(t, { logged: false });
+  const logged = await behindByThree(t, { logged: true });
+  assert.equal(logged.s.tables.projectHostedOverlapMainLog.size, 3, 'one row per landing');
+  const read = await metered(whole.s, whole.lane, 'whole');
+  const fromLog = await metered(logged.s, logged.lane, 'log');
+  assert(read.meter.touched.includes('projectHostedOverlapMain'), 'no log: the whole row, as before');
+  assert(!fromLog.meter.touched.includes('projectHostedOverlapMain'), 'the log answers: no whole-row read');
+  assert(read.meter.readBytes - fromLog.meter.readBytes > 40 * 1024, 'the 1,500-path row is the saving');
+  assert.deepEqual(fromLog.response.behindMain.conflictingPaths, [
+    'src/area-3/file.ts',
+    'src/area-4/file.ts',
+    'src/area-5/file.ts',
+  ]);
+  // Each fixture has its own Lane id (in the nudge's sync command) and main head.
+  const same = (behindMain, laneId) => {
+    const { head, ...rest } = behindMain;
+    void head;
+    return { ...rest, nudge: rest.nudge.replace(laneId, 'LANE') };
+  };
+  const answer = same(fromLog.response.behindMain, logged.lane.id);
+  assert.deepEqual(
+    answer,
+    same(read.response.behindMain, whole.lane.id),
+    'same commits, paths, coverage and named nudge',
+  );
+  assert.match(answer.nudge, /2 landings changed them since your base: 2222222/);
+  t.diagnostic(
+    JSON.stringify({ wholeRowReadBytes: read.meter.readBytes, logReadBytes: fromLog.meter.readBytes }),
+  );
+});
+
+test("main path log: a save behind main finds main's changed paths without reading the whole row", async t => {
+  const saves = {};
+  for (const logged of [false, true]) {
+    const { s, lane, base } = await behindByThree(t, { logged });
+    const paths = Array.from({ length: 25 }, (_, i) => delta(`src/area-${i}/file.ts`));
+    await trackChange(s, lane, paths, 'My change', base);
+    saves[logged ? 'log' : 'whole'] = s.counts.at(-1);
+  }
+  assert(saves.whole.touched.includes('projectHostedOverlapMain'), 'no log: the whole row, as before');
+  assert(!saves.log.touched.includes('projectHostedOverlapMain'), 'the log answers the save');
+  assert(saves.whole.readBytes - saves.log.readBytes > 40 * 1024);
+  t.diagnostic(
+    JSON.stringify({ wholeRowSaveReadBytes: saves.whole.readBytes, logSaveReadBytes: saves.log.readBytes }),
+  );
+});
+
+test('main path log: a gap, an unknown-path landing or a Lane past the window falls back to the whole row', async t => {
+  const { s, lane, base } = await behindByThree(t, { logged: true });
+  const log = () =>
+    [...s.tables.projectHostedOverlapMainLog.values()].sort((a, b) => a.sequence - b.sequence);
+  const whole = async ctx => (await mainLog.overlapMainSince(ctx, s.projectId, base)) === null;
+  const since = () => s.transaction('since', { _handler: whole }, {});
+  assert.equal(await since(), false, 'a full chain from the base answers');
+  // A Lane based before the log began (its first row's previous sequence is after the base).
+  assert.equal(
+    await s.transaction(
+      'older',
+      { _handler: async ctx => (await mainLog.overlapMainSince(ctx, s.projectId, base - 1)) === null },
+      {},
+    ),
+    true,
+  );
+  // A landing whose paths are unknown or too many for a row.
+  await s.transaction(
+    'unknown',
+    { _handler: ctx => tracking.trackHostedOverlapMain(ctx, s.projectId, base + 4, null) },
+    {},
+  );
+  assert.equal(log().at(-1).paths, null);
+  assert.equal(await since(), true);
+  // The window: a landing keeps MAIN_LOG_WINDOW rows and drops the oldest.
+  for (let n = 5; n <= mainLog.MAIN_LOG_WINDOW + 6; n++)
+    await s.transaction(
+      'more',
+      { _handler: ctx => tracking.trackHostedOverlapMain(ctx, s.projectId, base + n, [`more/${n}.ts`]) },
+      {},
+    );
+  assert.equal(log().length, mainLog.MAIN_LOG_WINDOW);
+  assert.equal(await since(), true, 'more than the window behind');
+  // A replayed acceptance write logs nothing twice.
+  const last = log().at(-1).sequence;
+  await s.transaction(
+    'replay',
+    { _handler: ctx => tracking.trackHostedOverlapMain(ctx, s.projectId, last, ['other.ts']) },
+    {},
+  );
+  assert.equal(log().filter(row => row.sequence === last).length, 1);
+  assert.equal(JSON.parse(log().at(-1).paths)[0], `more/${last - base}.ts`);
+});
+
 // Drift nudge (Issue 8dfede85): a Lane behind main by >= N landings on its own saved paths.
 async function driftRead(t, landingsOnMain) {
   const { s, lane } = await busyProject(t, { behind: true });
@@ -1495,7 +1641,7 @@ test('drift nudge: a landing completion logs receipt, Lane and public actor on t
       next: null,
     }),
   });
-  const retire = () =>
+  const retire = (sequence = 6) =>
     s.transaction(
       'retire',
       {
@@ -1506,7 +1652,7 @@ test('drift nudge: a landing completion logs receipt, Lane and public actor on t
             {
               commit: 'c'.repeat(64),
               at: new Date().toISOString(),
-              sequence: 6,
+              sequence,
             },
           ),
       },
@@ -1517,6 +1663,15 @@ test('drift nudge: a landing completion logs receipt, Lane and public actor on t
   const main = [...s.tables.projectHostedOverlapMain.values()][0];
   assert.deepEqual(JSON.parse(main.landings), [[6, receiptId.slice(0, 8), lane.id.slice(0, 8), row.actor]]);
   assert.equal(main.changes, advanceOverlapMain(null, 6, ['a']).changes, 'path history untouched');
+  // A landing on the main path log (Issue 750c5929) is named on its own small row: the whole main row
+  // is neither read nor rewritten.
+  s.insert('projectHostedOverlapMainLog', { projectId: s.projectId, sequence: 7, after: 6, paths: '["a"]' });
+  s.patch('projectHostedOverlapLanes', row._id, { open: true, landed: undefined });
+  await retire(7);
+  assert(!s.counts.at(-1).touched.includes('projectHostedOverlapMain'), 'no whole-row read');
+  const [logged] = [...s.tables.projectHostedOverlapMainLog.values()];
+  assert.equal(logged.label, overlapLandingLabel({ receiptId, laneId: lane.id, actor: row.actor }));
+  assert.equal([...s.tables.projectHostedOverlapMain.values()][0].landings, main.landings);
 });
 
 // Issue 9a19b304 (friction 2904bf4f): the behind-main nudge printed the landing actor's account id.

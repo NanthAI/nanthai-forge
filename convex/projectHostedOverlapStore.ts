@@ -7,6 +7,7 @@ import { mergeOverlapChanges, advanceOverlapMain, type OverlapChange } from '../
 import { trackHostedPresence } from './projectHostedPresence';
 import { notifyStackDependents, trackStackDependent } from './projectHostedStackNotice';
 import { closeConflictNotices, planTrialMerge } from './projectHostedConflicts';
+import { appendOverlapMainLog } from './projectHostedOverlapMainLog';
 
 export async function trackHostedOverlapLane(
   ctx: MutationCtx,
@@ -153,9 +154,12 @@ export async function trackHostedOverlapMain(
     .query('projectHostedOverlapMain')
     .withIndex('by_project', q => q.eq('projectId', projectId))
     .unique();
+  // A replayed publication finds the row already at this sequence: nothing moves, nothing is logged twice.
+  if (old?.sequence === sequence) return;
   const value = { projectId, ...advanceOverlapMain(old, sequence, paths) };
   if (old) await ctx.db.replace(old._id, value);
   else await ctx.db.insert('projectHostedOverlapMain', value);
+  await appendOverlapMainLog(ctx, projectId, old ? old.sequence : sequence - 1, sequence, paths);
 }
 
 /** Staged cascade visibility follows its existing atomic applied marker. */

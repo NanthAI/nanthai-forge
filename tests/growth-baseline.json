@@ -12,7 +12,7 @@
     "unreferencedExports": 22
   },
   "counts": {
-    "tables": 178,
+    "tables": 179,
     "errorCodes": 488,
     "agentActions": 62,
     "cliCommands": 40,
@@ -54,6 +54,13 @@
       "from": 19,
       "to": 68,
       "reason": "One client mode S1 deletes the native landing driver (70+ src files); the exports they used are now unreferenced and the follow-up cascade Lanes (Issue 657d63ee) remove them and lower this back to 19",
+      "at": "2026-11-10"
+    },
+    {
+      "kind": "tables",
+      "from": 178,
+      "to": 179,
+      "reason": "750c5929: projectHostedOverlapMainLog (one ~0.3 KB row per landing, newest 64) replaces the whole 140 KB main path-history read on every save, sync, resolve and overlap read of a Lane behind main, and the landing completion's read+rewrite of that row. Nothing can go yet: the whole row stays as the fallback for Lanes more than 64 landings behind; dropping its changes field is the follow-up.",
       "at": "2026-11-10"
     }
   ]

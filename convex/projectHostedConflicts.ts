@@ -10,6 +10,7 @@ import { report } from './errors';
 import { invariant } from '../src/errors';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import { sameResolution, sameStack, type OverlapChange } from '../src/hosted-overlap';
+import { overlapMainSince } from './projectHostedOverlapMainLog';
 import type { TrialTask } from '../src/hosted-trial-merge';
 import {
   TRIAL_FILE_BYTES,
@@ -93,13 +94,16 @@ const changesOf = (row: Pick<Row, 'changes'>): OverlapChange[] => {
 };
 const fileOf = (file: OverlapChange['before']) => (file ? { blob: file.blob, mode: file.mode } : null);
 
-/** Main's changed paths after the Lane's base, from the main path history the overlap read uses. */
+/** Main's changed paths after the Lane's base: the per-landing log after the base (Issue 750c5929),
+ * or the whole main path history the overlap read uses when the log cannot answer. */
 async function mainChanged(ctx: QueryCtx, projectId: Id<'hostedProjects'>, row: Row, paths: Set<string>) {
   if (row.baseSequence === null) return new Set<string>();
-  const history = await ctx.db
-    .query('projectHostedOverlapMain')
-    .withIndex('by_project', q => q.eq('projectId', projectId))
-    .unique();
+  const history =
+    (await overlapMainSince(ctx, projectId, row.baseSequence)) ??
+    (await ctx.db
+      .query('projectHostedOverlapMain')
+      .withIndex('by_project', q => q.eq('projectId', projectId))
+      .unique());
   if (!history || history.sequence <= row.baseSequence) return new Set<string>();
   const changed = new Set<string>();
   for (const [path, sequence] of JSON.parse(history.changes) as [string, number][])

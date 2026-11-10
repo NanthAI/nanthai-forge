@@ -144,4 +144,16 @@ export const hostedOverlapTables = {
     /** Recent landings for the drift nudge (see OverlapMain.landings); absent on rows written before it. */
     landings: v.optional(v.string()),
   }).index('by_project', ['projectId']),
+  /** One row per landing (Issue 750c5929): the paths it touched, so a Lane a few landings behind reads
+   * those rows instead of the whole main row above. Written with that row; keeps MAIN_LOG_WINDOW rows. */
+  projectHostedOverlapMainLog: defineTable({
+    projectId: v.id('hostedProjects'),
+    sequence: v.number(),
+    /** The main row's sequence before this landing: the chain readers check for a gap. */
+    after: v.number(),
+    /** Sorted JSON path list; null when the landing's paths are unknown or too many for a row. */
+    paths: v.union(v.string(), v.null()),
+    /** Drift-nudge name, JSON `[receiptId8, laneId8, publicActor]`, set when the landing completes. */
+    label: v.optional(v.string()),
+  }).index('by_project_and_sequence', ['projectId', 'sequence']),
 };

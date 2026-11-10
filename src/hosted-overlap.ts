@@ -192,14 +192,55 @@ export function recordOverlapLanding(
 ) {
   const entries = landingEntries(landings);
   if (entries.some(entry => entry[0] === landing.sequence)) return landings!;
-  entries.push([
-    landing.sequence,
-    landing.receiptId.slice(0, 8),
-    landing.laneId.slice(0, 8),
-    landing.actor.slice(0, 80),
-  ]);
+  entries.push([landing.sequence, ...landingName(landing)]);
   entries.sort((a, b) => a[0] - b[0]);
   return JSON.stringify(entries.slice(-DRIFT_LANDING_LOG));
+}
+const landingName = (landing: { receiptId: string; laneId: string; actor: string }) =>
+  [landing.receiptId.slice(0, 8), landing.laneId.slice(0, 8), landing.actor.slice(0, 80)] as const;
+/** A landing's drift-nudge name as stored on its main log row: JSON `[receiptId8, laneId8, publicActor]`. */
+export const overlapLandingLabel = (landing: { receiptId: string; laneId: string; actor: string }) =>
+  JSON.stringify(landingName(landing));
+/** Landing-log entries from main log rows' labels, oldest first, for the drift nudge. */
+export function landingsFromLabels(rows: { sequence: number; label?: string }[]) {
+  const entries: LandingEntry[] = [];
+  for (const row of rows)
+    if (row.label)
+      try {
+        entries.push([row.sequence, ...(JSON.parse(row.label) as [string, string, string])]);
+      } catch {
+        // An unreadable label leaves the landing named by its sequence.
+      }
+  entries.sort((a, b) => a[0] - b[0]);
+  return entries.length ? JSON.stringify(entries.slice(-DRIFT_LANDING_LOG)) : undefined;
+}
+/** Merge two landing logs (per sequence, the second wins), newest DRIFT_LANDING_LOG kept. */
+export function mergeLandingLogs(first: string | undefined, second: string | undefined) {
+  const entries = new Map(landingEntries(first).map(entry => [entry[0], entry]));
+  for (const entry of landingEntries(second)) entries.set(entry[0], entry);
+  const merged = [...entries.values()].sort((a, b) => a[0] - b[0]).slice(-DRIFT_LANDING_LOG);
+  return merged.length ? JSON.stringify(merged) : undefined;
+}
+
+/** The main row's view after `base`, from the per-landing log rows (ascending, a gap-free chain from
+ * `base`, every row with known paths): the latest touch per path, as advanceOverlapMain keeps it, and
+ * the landing names on those rows. Coverage is complete from `base` on. */
+export function overlapMainFromLog(
+  rows: { sequence: number; paths: string; label?: string }[],
+  base: number,
+  sequence: number,
+): OverlapMain {
+  const changes = new Map<string, number>();
+  for (const row of rows)
+    for (const path of JSON.parse(row.paths) as string[]) changes.set(path, row.sequence);
+  const ordered = [...changes].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const landings = landingsFromLabels(rows);
+  return {
+    sequence,
+    coverageAfter: base,
+    changes: JSON.stringify(ordered),
+    ...(landings ? { landings } : {}),
+  };
 }
 
 /** Landing-log entries written before the handle fix stored the account id; the nudge leaves those out. */

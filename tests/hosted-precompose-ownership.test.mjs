@@ -113,9 +113,12 @@ for (const history of [575, 1150])
     // for receipts older than 90 days to delete; nothing is expired here, so no document is read. Calls and writes unchanged.
     // Reads 1351 -> 1352 (10d253c6): a submission reads its Intent's previous landing (one indexed row, take 1) to
     // grant a landing reservation after a supersession; here the second landing finds the first. Calls and writes unchanged.
+    // Reads 1352 -> 1354 (750c5929): each of the 2 completion ticks first point-reads the landing's main path log row
+    // to name it. On a real deployment that row exists and replaces the 140 KB main-row read. This fixture has
+    // neither row, so the main-row lookup stays as well. Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1352 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1354 &&
         source.reduce((n, c) => n + c.writes, 0) <= 414,
       JSON.stringify({
         ...budget,

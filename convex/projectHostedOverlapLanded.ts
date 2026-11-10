@@ -3,7 +3,8 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { acceptancePage, type ReceiptIdentity } from './projectHostedAcceptanceStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
-import { recordOverlapLanding } from '../src/hosted-overlap';
+import { overlapLandingLabel, recordOverlapLanding } from '../src/hosted-overlap';
+import { labelOverlapMainLog } from './projectHostedOverlapMainLog';
 import { publicActorLabel } from './publicPeople';
 import { readHostedRecord } from './projectHostedRecords';
 
@@ -35,23 +36,33 @@ export async function retireLandedOverlapLanes(
       )
       .unique();
     if (!row || row.head !== lane.data.head) continue;
-    // The drift nudge names landings: the first landed Lane's public identity goes on the main row's
-    // landing log (one indexed read, one account read for the handle and one replace per landing completion, idempotent
-    // per sequence; never the account id, which the nudge would print to every agent behind main).
+    // The drift nudge names landings: the first landed Lane's public identity goes on the landing's
+    // main log row (one account read for the handle, one point read and one patch of a ~0.3 KB row per
+    // landing completion, idempotent; never the account id, which the nudge would print to every agent
+    // behind main). A landing logged before that table existed keeps the main row's own landing log,
+    // which costs a read and a replace of the whole 140 KB row (Issue 750c5929).
     if (!logged && landed?.sequence !== undefined) {
       logged = true;
-      const main = await ctx.db
-        .query('projectHostedOverlapMain')
-        .withIndex('by_project', q => q.eq('projectId', identity.projectId))
-        .unique();
-      if (main) {
-        const next = recordOverlapLanding(main.landings, {
-          sequence: landed.sequence,
-          receiptId: identity.receiptId,
-          laneId: row.laneId,
-          actor: await publicActorLabel(ctx, row.actor, row.agent),
-        });
-        if (next !== main.landings) await ctx.db.patch(main._id, { landings: next });
+      const sequence = landed.sequence;
+      const landing = async () => ({
+        sequence,
+        receiptId: identity.receiptId,
+        laneId: row.laneId,
+        actor: await publicActorLabel(ctx, row.actor, row.agent),
+      });
+      if (
+        !(await labelOverlapMainLog(ctx, identity.projectId, sequence, async () =>
+          overlapLandingLabel(await landing()),
+        ))
+      ) {
+        const main = await ctx.db
+          .query('projectHostedOverlapMain')
+          .withIndex('by_project', q => q.eq('projectId', identity.projectId))
+          .unique();
+        if (main) {
+          const next = recordOverlapLanding(main.landings, await landing());
+          if (next !== main.landings) await ctx.db.patch(main._id, { landings: next });
+        }
       }
     }
     // Landing evidence rides on the same row patch: Lane status reads it with no extra call.

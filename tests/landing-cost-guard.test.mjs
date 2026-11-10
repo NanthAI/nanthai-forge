@@ -76,6 +76,12 @@ function meter(f) {
         r2ClassA: r2.a,
         r2ClassB: r2.b,
         r2BytesPut: r2.bytesPut,
+        // Whole-row reads of main's path history (Issue 750c5929: 140 KB on Forge, read only by the
+        // acceptance write that moves it; landing names and Lanes behind main use the per-landing log).
+        mainHistoryReads: counts.reduce(
+          (total, c) => total + (c.readDocumentsByTable?.projectHostedOverlapMain ?? 0),
+          0,
+        ),
       };
     },
   };
@@ -168,6 +174,7 @@ async function measureLandingCosts(t, options = {}) {
     r2ClassB: per('r2ClassB'),
     r2BytesPut: per('r2BytesPut'),
     checkRuns: per('checkRuns'),
+    mainHistoryReads: per('mainHistoryReads'),
   };
   return { measured, scenarios, landings };
 }

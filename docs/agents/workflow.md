@@ -1762,7 +1762,7 @@ first ran land and when the Lane started, for reading lead time later.
 
 Hosted agent start, save and Lane status responses include
 `behindMain:{commits,conflictingPaths,more,coverage}` when the server advertises
-`overlapVersion:1`. `behindMain.nudge` (one line) appears only when at least 2 distinct landings touched your saved paths since your base: it names up to 3 (receipt, Lane, public actor) and the exact `sync` command; absent otherwise, so the answer is unchanged. It reads the path history `behindMain` already loads plus a 50-entry landing log on the same row, with no extra call (a count of distinct landings by latest touch per path, so a floor). `peers` evidence names the peer
+`overlapVersion:1`. `behindMain.nudge` (one line) appears only when at least 2 distinct landings touched your saved paths since your base: it names up to 3 (receipt, Lane, public actor) and the exact `sync` command; absent otherwise, so the answer is unchanged. It reads the path history `behindMain` already loads, with each landing's name on its per-landing row (a Lane further behind than those rows reads up to 3 names by key), with no extra call (a count of distinct landings by latest touch per path, so a floor). `peers` evidence names the peer
 Lane, actor, Intent and shared saved path, with `class:"blocking"|"advisory"` and a `reason`. Saving, checking and landing never wait on it: path overlap notices and their answers were removed (Issue 853fcde3), and a real conflict comes back as `conflictNotice` ([exact conflicts at save](#exact-conflicts-at-save));
 no polling, subscriptions or idle work are added.
 
@@ -1794,7 +1794,11 @@ summaries still save normally. `overlapEvidenceVersion:1` is negotiated through
 the existing capability read; clients omit range metadata for older strict save
 APIs, without an extra per-save probe. Reverting a file to its saved base clears its projected change. Main
 acceptance updates the latest accepted sequence touching each retained path, so
-status compares against the Lane base without walking acceptance history.
+status compares against the Lane base without walking acceptance history. The same
+write logs each landing's touched paths on a small row, keeping the newest 64; a save,
+sync, resolve or status of a Lane at most 64 landings behind reads only the rows after
+its base, and only a Lane further behind (or a landing with too many paths for a row)
+reads the whole compact history, up to 128 KB.
 `conflictingPaths` predicts shared files, not a proven text merge conflict.
 Five peer evidence items and ten main paths are shown per response. Metadata windows,
 older source without a projection, syncs without path evidence and unknown base

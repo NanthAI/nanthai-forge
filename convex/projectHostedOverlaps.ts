@@ -18,6 +18,7 @@ import { stackOffer, SCOPE_PATHS, SCOPE_PATH_CHARS } from '../src/hosted-overlap
 import { effectivePolicy } from '../src/autonomy-policy';
 import { stackingMode } from '../src/agent-parallel-defaults';
 import { laneConflicts } from './projectHostedConflicts';
+import { overlapMainFor } from './projectHostedOverlapMainLog';
 
 /** Path notices were removed (flip 4, Issue 853fcde3); exact trial-merge conflicts replace them. */
 const RETIRED_OVERLAPS = { count: 0, items: [], coverage: 'unavailable' } as const;
@@ -81,23 +82,12 @@ export const read = query({
       invariant(record, 'NOT_FOUND', 'Hosted Lane not found on this project.');
       const lane = hostedLaneSchema.parse(JSON.parse(record.value));
       const channel = hostedStartMain(ctx, projectId);
-      // The compact main path history (up to 128 KB, grows with project history) only feeds
-      // `behindMain`, and hostedOverlapAdvice ignores it for a Lane based on the current main head
-      // (no conflicts, coverage complete). Level Lanes therefore never read it.
-      const [mine, main, latest] = await Promise.all([
+      const [mine, main] = await Promise.all([
         ctx.db
           .query('projectHostedOverlapLanes')
           .withIndex('by_project_and_lane', q => q.eq('projectId', projectId).eq('laneId', laneId))
           .unique(),
         channel,
-        channel.then(current =>
-          lane.base.head === current.head
-            ? null
-            : ctx.db
-                .query('projectHostedOverlapMain')
-                .withIndex('by_project', q => q.eq('projectId', projectId))
-                .unique(),
-        ),
       ]);
       let baseSequence = mine?.baseSequence ?? null;
       if (baseSequence === null) {
@@ -142,6 +132,14 @@ export const read = query({
               changes: '[]',
               complete: lane.head === lane.base.head,
             };
+      // Main's path history only feeds `behindMain`, and hostedOverlapAdvice ignores it for a Lane based
+      // on the current main head (no conflicts, coverage complete): level Lanes never read it. A Lane
+      // behind reads the landings after its base from the per-landing log (Issue 750c5929); only one
+      // further behind than the log reads the whole compact row (up to 128 KB).
+      const latest =
+        lane.base.head === main.head
+          ? null
+          : await overlapMainFor(ctx, projectId, baseSequence, new Set(savedPaths(focus.changes)));
       // A Lane with no saved path changes cannot overlap anything: skip the peer and head
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
       const idle = !path && !scope?.length && focus.complete && focus.changes === '[]';

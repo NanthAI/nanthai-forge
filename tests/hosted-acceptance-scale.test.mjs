@@ -44,7 +44,10 @@ test('205 included Lanes and 10,050 retained receipts keep final CAS constant; c
   // are retained on the plan, so a lost tick is replayed. Calls are unchanged; the tick cancels the guard.
   // Ranges/documents 40 -> 41, writes 16 -> 17 (45f49fb7): the landing reads and rewrites the project's
   // landing-speed row (regression ladder rung 1, under 16 KB); still constant in history.
-  assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 17, JSON.stringify(final));
+  // Writes 17 -> 18 (750c5929): the landing appends its ~0.3 KB main path log row, so saves and overlap reads
+  // stop reading the whole main path-history row. The window trim is one indexed range that finds no
+  // documents here. Still constant in history.
+  assert(source.ranges <= 41 && source.documents <= 41 && source.writes <= 18, JSON.stringify(final));
   assert(source.readBytes < 40 * 1024 && source.writeBytes < 16 * 1024);
   assert(!final.touched.includes('projectHostedAcceptancePages'));
   // 41 = 39 plus the one submission-order read before claiming main (incident e4aee4fe) and the
