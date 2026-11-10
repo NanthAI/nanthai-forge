@@ -18,7 +18,7 @@ it was set from and why. Change a number there, with the new data, and nowhere e
 | Attempts and landing-state writes per landing, mean (cost drift, Issue 3e3f9fe6) | every landing | attempts 1.6 over the 36 landings of 2026-11-10 (2.3 over 285 landings 11-08 to 11-10; worst 20-landing window 3.55); writes 11.1 live (8, 12, 20 to 22 for one, two, three attempts); budget 4 / 22 |
 | R2 requests and bytes put by a landing's composes, mean (Issue 3e3f9fe6) | every recomposed landing | 4.1 class A / 0.55 class B / 895,243 bytes put over the last 20 stamped landings at 2026-11-10 12:57Z; budgets 6.2 / 0.9 / 1.35 MB (about 1.5x live; missing stamps are skipped) |
 | GitHub runner minutes of a landing's checks, mean: accepted / discarded / audit (Issue 3e3f9fe6) | every landing | 54.4 / 4.7 / 18.8 shard minutes over the 36 landings of 2026-11-10 (rolling 20-landing means 49 to 57 / 2.5 to 5.9 / 13 to 23); budget 70 / 12 / 32 min |
-| Save, preflight | nothing records them yet | unrun; see below |
+| Save / preflight, p90 | every landing with a recorded duration | initial budgets 30 / 120 s; sources and calibration below |
 
 ## How a budget breaks
 
@@ -56,11 +56,32 @@ alert delivery and one Issue write action (about six Convex round trips through 
 - The `status` metrics headline carries `speedBudgetWarning`, one line naming each broken budget, or null.
 - `node scripts/perf-harness.mjs --cli-cold-start --bundle DIR` measures the harness-judged budgets. `--cli-cold-start` also runs the four agent commands against an address that never resolves, under `scripts/perf/first-network-preload.mjs`, which stops the CLI at its first Convex call and reports its CPU time and loaded modules (a `land` stops at its hand-off to the detached submitter). A warm compile cache is used, as the installed launcher does. `--snapshot-lane LANE_CHECKOUT` adds the snapshot budgets; run it only in a Lane of a scratch project with policy `autoSnapshot` on.
 
-## Not recorded yet
+## Save and preflight timing
 
-Save and preflight have no recorded duration: the CLI keeps the save steps in its own process and prints one
-stderr line (`src/land-timing.ts`), and the hosted preflight reply carries no duration. They show as `unrun`
-rather than carry an invented number. Recording them is tracked on Issue b7851c44.
+The negotiated `save-preflight-timing` feature adds the CLI's elapsed save milliseconds to its existing
+final submit call. The server adds submit-to-publication time on its own clock, then writes `durationMs`
+on the existing save record and receipt. It excludes the final call's transit and the client's receipt
+application. Replays retain the first measurement. Background saves include their server settle time.
+The CLI caches that receipt locally for the exact Lane/head; no timing fetch is needed.
+
+Preflight already returns a local receipt with `durationMs` (planning is excluded). The landing's existing
+`gates` argument carries that duration and the saved duration for matching source into `timing.ms`
+(the compact pair `[saveMs, preflightMs]`, with null for a missing duration). Multi-Lane landings use the longest known duration. Malformed optional timing stays unknown;
+extracting a metric never adds a landing refusal or changes preflight policy. Old clients/servers,
+missing receipts and a different source head leave stamps unknown. The same rolling 20-landing p90,
+alerts, recovery and fixed P0 Issue ids judge both budgets, including with preflight policy off.
+
+Initial save budget: 30 s, from the 15 s synthetic client-plus-server fixture; dogfood save 9677e70e took 4.029 s through submission (its released client did not time
+background settlement). The budget source distinguishes that incomplete sample from the fixture. Initial preflight budget: 120 s, rounding twice the successful dogfood
+49.779 s receipt (5 test files) up to whole minutes. These are initial regression guards, not a claim
+about the population p90; revisit when 20 stamped landings exist. The bounded local calibration read
+was under 1 MB and required no hosted call.
+
+No calls, database reads/writes, tables, indexes, timers or services are added. Small numeric fields
+ride existing rows and replies (about 100 bytes per save/preflight); the alert window adds at most two
+numbers per retained sample. Source bytes remain in R2. The report and status use their existing
+landing pages. Nothing can be removed from the source paths; this replaces the two unrecorded budgets
+and shares the existing timing receipts and alert path.
 
 ## Drill
 

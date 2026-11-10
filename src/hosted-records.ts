@@ -92,6 +92,7 @@ export const hostedRecordSchema = z.discriminatedUnion('kind', [
       head: hash,
       sourceVersion: version,
       changes: object,
+      durationMs: z.number().int().nonnegative().optional(),
     })
     .strict(),
   z

@@ -16,7 +16,7 @@ import { writeHostedRecord } from './projectHostedRecords';
 import { loadSourceJob } from './projectSourceJobs';
 import { sourceServerTiming } from './projectSourceStepTiming';
 import { hostedSaveInput } from './projectHostedSaves';
-import { saveResultSchema, savePin } from '../src/hosted-save';
+import { saveResultSchema, savePin, saveDurationMs } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { digest } from '../src/portable-hash';
@@ -30,7 +30,7 @@ import { invariant } from '../src/errors';
 export const chainFallbackMs = 5_000;
 export async function publishHostedSave(
   ctx: MutationCtx,
-  input: SaveIdentity & { result: string | null },
+  input: SaveIdentity & { result: string | null; clientMs?: number | undefined },
   /** The caller runs the save-then-resolve chain itself (`runResolveChain`); only a fallback is scheduled. */
   chainInline = false,
 ) {
@@ -157,7 +157,10 @@ export async function publishHostedSave(
         submissionIds: finishes.syncRequired,
       })
     : [];
+  const clientMs = state.clientMs ?? input.clientMs;
+  const durationMs = saveDurationMs(clientMs, Math.max(0, Date.now() - (state.submittedAt ?? Date.now())));
   const result = saveResultSchema.parse({
+    ...(durationMs === undefined ? {} : { durationMs }),
     schema: 1,
     operationId: input.operationId,
     laneId: lane.id,
@@ -179,6 +182,7 @@ export async function publishHostedSave(
     expectedVersion: null,
     record: {
       kind: 'save',
+      ...(durationMs === undefined ? {} : { durationMs }),
       id: result.saveId,
       version: 0,
       at: first.at,

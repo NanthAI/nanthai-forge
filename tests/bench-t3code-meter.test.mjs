@@ -527,3 +527,259 @@ test('one incomplete execution cannot erase known costs of other executions or s
     ['daily', 'function'],
   );
 });
+
+const { spendPlan, billingPeriod, billingSummary, periodRows, planAlerts } =
+  await import('../scripts/convex-spend-plan.mjs');
+const BILL_DAY = 86_400_000;
+const proConfig = extra => ({
+  name: 'Professional',
+  monthlyUsd: 25,
+  periodStart: '2026-11-10T00:00:00Z',
+  renewalDay: 27,
+  prorateFirstPeriod: true,
+  allowances: {
+    calls: 25e6,
+    compute: 250,
+    io: 50,
+    egress: 50,
+    databaseStorage: 50,
+    fileStorage: 100,
+    search: 50000,
+  },
+  ...extra,
+});
+function planEvent(at, identifier, usage, deployment = 'one') {
+  return {
+    kind: 'execution',
+    id: `${at}:${identifier}:${deployment}`,
+    at: Date.parse(at),
+    day: at.slice(0, 10),
+    deployment,
+    identifier,
+    usage: { calls: 0, io: 0, compute: 0, egress: 0, search: 0, ...usage },
+    missingFields: [],
+  };
+}
+
+test('Professional first period uses conservative 17/31 allowances and separately shows the normal 30-day pace', () => {
+  const plan = spendPlan(proConfig()),
+    now = Date.parse('2026-11-11T00:00:00Z');
+  const report = billingSummary(plan, [], now);
+  assert.equal(report.period.start, '2026-11-10T00:00:00.000Z');
+  assert.equal(report.period.end, '2026-11-27T00:00:00.000Z');
+  closeTo(report.period.allowanceFactor, 17 / 31);
+  closeTo(report.classes.io.allowance, (50 * 17) / 31);
+  closeTo(report.classes.egress.allowance, (50 * 17) / 31);
+  closeTo(report.classes.io.normalDailyAllowance, 50 / 30);
+  closeTo(report.classes.io.periodDailyAllowance, 50 / 31);
+  closeTo(report.classes.io.allowanceToDate, 50 / 31);
+  assert.equal(report.subscriptionMonthlyUsd, 25);
+  assert.equal(report.overageAlertUsd, 25);
+  const corrected = billingSummary(spendPlan(proConfig({ prorateFirstPeriod: false })), [], now);
+  assert.equal(corrected.classes.io.allowance, 50, 'invoice correction stays in private config');
+});
+
+test('renewal on the 27th resets allowances and short-month renewal clamps without drifting', () => {
+  const plan = spendPlan(proConfig());
+  const next = billingPeriod(plan, Date.parse('2026-11-27T00:00:00Z'));
+  assert.equal(new Date(next.start).toISOString(), '2026-11-27T00:00:00.000Z');
+  assert.equal(new Date(next.end).toISOString(), '2026-12-27T00:00:00.000Z');
+  assert.equal(next.allowanceFactor, 1);
+  const leap = spendPlan(proConfig({ periodStart: '2028-01-31T00:00:00Z', renewalDay: 31 }));
+  assert.equal(
+    new Date(billingPeriod(leap, Date.parse('2028-02-15T00:00:00Z')).end).toISOString(),
+    '2028-02-29T00:00:00.000Z',
+  );
+  assert.equal(
+    new Date(billingPeriod(leap, Date.parse('2028-03-01T00:00:00Z')).end).toISOString(),
+    '2028-03-31T00:00:00.000Z',
+  );
+});
+
+test('shared plan allowances apply once across functions and deployments; list-rate and allocated overage stay separate', () => {
+  const plan = spendPlan(proConfig({ periodStart: '2026-10-27T00:00:00Z' }));
+  const at = '2026-11-10T00:00:00Z',
+    now = Date.parse('2026-11-11T00:00:00Z');
+  const rows = [
+    planEvent(at, 'a', { io: 30e9, calls: 13e6 }, 'one'),
+    planEvent(at, 'b', { io: 30e9, calls: 13e6 }, 'two'),
+  ];
+  for (const deployment of ['one', 'two'])
+    rows.push({ kind: 'coverage', deployment, from: Date.parse(at), to: now });
+  const report = billingSummary(plan, [daySummary('2026-11-10', rows, now)], now, ['one', 'two']);
+  assert.equal(report.classes.io.observedUsage, 60);
+  assert.equal(report.classes.io.overageUsd, 2);
+  assert.equal(report.classes.calls.overageUsd, 2);
+  assert.equal(report.knownOverageUsd, 4);
+  assert.equal(report.listRateUsd, 64);
+  assert.equal(report.perFunction.length, 2);
+  assert.equal(report.perFunction[0].allocatedOverageUsd, 2);
+  assert.equal(report.perFunction[0].listRateUsd, 32);
+  assert.equal(report.classes.databaseStorage.observedUsage, null, 'function logs cannot invent storage use');
+  assert.equal(report.projectedOverageUsd, null, 'the complete bill remains unknown');
+});
+
+test('late capture projects the whole billing period and cannot silently treat earlier unwatched time as free', () => {
+  const plan = spendPlan(proConfig()),
+    now = Date.parse('2026-11-20T00:00:00Z');
+  const at = '2026-11-19T00:00:00Z';
+  const report = billingSummary(
+    plan,
+    [
+      daySummary(
+        '2026-11-19',
+        [
+          planEvent(at, 'io-work', { io: 1.7e9 }),
+          { kind: 'coverage', deployment: 'one', from: Date.parse(at), to: now },
+        ],
+        now,
+      ),
+    ],
+    now,
+    ['one'],
+  );
+  assert.equal(report.classes.io.observedUsage, 1.7);
+  closeTo(report.classes.io.projectedKnownUsage, 1.7 * 17);
+  assert(report.classes.io.projectedKnownUsage > report.classes.io.allowance);
+  assert(planAlerts(report).some(alert => alert.kind === 'allowance' && alert.class === 'io'));
+  assert(planAlerts(report).some(alert => alert.kind === 'billing-coverage'));
+});
+
+test('known overage still alerts with zero coverage or missing usage, and monthly thresholds are strict', () => {
+  const plan = spendPlan(proConfig({ periodStart: '2026-10-27T00:00:00Z' }));
+  const now = Date.parse('2026-11-11T00:00:00Z');
+  const event = planEvent('2026-11-10T00:00:00Z', 'known', { io: 200e9 });
+  const missing = planEvent('2026-11-10T00:00:01Z', 'missing', { io: null });
+  const report = billingSummary(plan, [daySummary('2026-11-10', [event, missing], now)], now);
+  assert.equal(report.classes.io.observedUsage, null);
+  assert.equal(report.classes.io.knownOverageUsd, 30);
+  assert(planAlerts(report).some(alert => alert.kind === 'month-overage'));
+  assert(planAlerts(report).some(alert => alert.class === 'io'));
+  const exact = {
+    ...report,
+    missing: [],
+    projectedKnownOverageUsd: 25,
+    classes: {
+      io: { projectedKnownUsage: 50, allowance: 50 },
+      egress: { projectedKnownUsage: 50, allowance: 50 },
+    },
+  };
+  assert.deepEqual(planAlerts(exact), []);
+  assert.deepEqual(
+    planAlerts({ ...exact, projectedKnownOverageUsd: 25.001 }).map(a => a.kind),
+    ['month-overage'],
+  );
+  assert.deepEqual(
+    planAlerts({
+      ...exact,
+      classes: { ...exact.classes, egress: { projectedKnownUsage: 50.001, allowance: 50 } },
+    }).map(a => a.class),
+    ['egress'],
+  );
+});
+
+test('billing clips a partial upgrade day, excludes earlier executions, and retains torn-record uncertainty', () => {
+  const from = Date.parse('2026-11-10T12:00:00Z'),
+    to = from + BILL_DAY;
+  const before = planEvent('2026-11-10T11:59:59Z', 'before', { io: 50e9 });
+  const after = planEvent('2026-11-10T12:00:00Z', 'after', { io: 2e9 });
+  const rows = periodRows(
+    [
+      before,
+      after,
+      { kind: 'coverage', deployment: 'one', from: from - 1000, to: to + 1000 },
+      { kind: 'gap', reason: 'torn-or-invalid-journal-record', at: to + 1000 },
+    ],
+    from,
+    to,
+  );
+  assert.equal(rows.filter(r => r.kind === 'execution').length, 1);
+  assert.equal(rows.find(r => r.kind === 'coverage').from, from);
+  assert.equal(rows.find(r => r.kind === 'coverage').to, to);
+  assert.equal(rows.filter(r => r.kind === 'gap').length, 1);
+});
+
+test('billing restarts deduplicate, reuse closed summaries and invalidate them on late journal writes', async t => {
+  const dir = dailyDirectory(t),
+    journal = new SpendJournal(dir);
+  const plan = spendPlan(proConfig()),
+    now = Date.parse('2026-11-12T00:00:00Z');
+  const first = planEvent('2026-11-10T01:00:00Z', 'first', { io: 1e9 });
+  await journal.append(first);
+  let report = await journal.billing(plan, now);
+  assert.equal(report.classes.io.observedUsage, 1);
+  const rawRead = journal.readDay.bind(journal);
+  journal.readDay = () => {
+    throw Error('closed day replayed');
+  };
+  assert.equal((await journal.billing(plan, now)).classes.io.observedUsage, 1);
+  journal.readDay = rawRead;
+  const restarted = new SpendJournal(dir);
+  assert.equal(await restarted.append(first), false);
+  await restarted.append(planEvent('2026-11-10T02:00:00Z', 'late', { io: 2e9 }));
+  report = await journal.billing(plan, now);
+  assert.equal(report.classes.io.observedUsage, 3);
+  assert.equal((await new SpendJournal(dir).billing(plan, now)).classes.io.observedUsage, 3);
+  const alert = planAlerts(report).find(a => a.kind === 'billing-coverage');
+  await journal.append({ kind: 'alert', key: alert.key, at: now });
+  assert(!planAlerts(await journal.billing(plan, now)).some(a => a.kind === 'billing-coverage'));
+});
+
+test('private plan rejects misspelled or invalid allowances, while optional storage snapshots remain explicit', () => {
+  assert.equal(spendPlan(undefined), null);
+  for (const bad of [
+    { renewalDay: 0 },
+    { periodStart: '2026-02-30T00:00:00Z' },
+    { overageAlertUsd: -1 },
+    { allowances: { ...proConfig().allowances, io: -1 } },
+    { allowance: 100 },
+    { overageRates: [] },
+  ])
+    assert.throws(() => spendPlan(proConfig(bad)), /SPEND_PLAN_CONFIG/);
+  const now = Date.parse('2026-11-11T00:00:00Z');
+  const report = billingSummary(
+    spendPlan(
+      proConfig({
+        storageUsage: { asOf: '2026-11-10T12:00:00Z', databaseStorage: 7.5, fileStorage: 0.0013 },
+      }),
+    ),
+    [],
+    now,
+  );
+  assert.equal(report.classes.databaseStorage.observedUsage, 7.5);
+  assert.equal(report.classes.databaseStorage.overageUsd, 0);
+  assert.equal(
+    report.classes.databaseStorage.normalDailyAllowance,
+    null,
+    'capacity is a gauge, never a daily counter',
+  );
+});
+
+test('plan-aware stdin/print reports overage and list-rate columns without any provider command', t => {
+  const dir = dailyDirectory(t),
+    config = join(dir, 'plan.json');
+  const today = new Date().toISOString().slice(0, 10);
+  writeFileSync(
+    config,
+    JSON.stringify({
+      stateDirectory: dir,
+      deployments: ['synthetic'],
+      plan: proConfig({ periodStart: today + 'T00:00:00Z' }),
+    }),
+  );
+  const output = execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--config', config, '--stdin'], {
+    input: JSON.stringify(dailyEvent({ timestamp: Date.now() / 1000 })) + '\n',
+    encoding: 'utf8',
+  });
+  assert(!output.includes('"kind":"daily"'), 'plan mode replaces the old list-price daily alerts');
+  const printed = JSON.parse(
+    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--config', config, '--print'], {
+      encoding: 'utf8',
+    }),
+  );
+  assert.equal(printed.billing.subscriptionMonthlyUsd, 25);
+  assert.equal(printed.billing.top10[0].identifier, 'synthetic:work');
+  assert.equal(typeof printed.billing.top10[0].listRateUsd, 'number');
+  assert.equal(typeof printed.billing.top10[0].allocatedOverageUsd, 'number');
+  assert.equal(printed.today.usage.calls, 1);
+});

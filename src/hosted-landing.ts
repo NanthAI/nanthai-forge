@@ -175,6 +175,10 @@ export const hostedLandingStateSchema = z
     timing: z
       .object({
         submittedAt: z.iso.datetime(),
+        /** Save and preflight milliseconds; compact because landing rows are read at every stage. */
+        ms: z
+          .tuple([z.number().int().nonnegative().nullable(), z.number().int().nonnegative().nullable()])
+          .optional(),
         selectedAt: z.iso.datetime().optional(),
         composeStartedAt: z.iso.datetime().optional(),
         composedAt: z.iso.datetime().optional(),

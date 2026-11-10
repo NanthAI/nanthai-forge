@@ -208,22 +208,24 @@
     {
       "id": "save",
       "area": "Lane save",
-      "measuredBy": "unrecorded",
+      "measuredBy": "landing-record",
       "metric": "saveMs",
       "unit": "ms",
-      "max": null,
-      "source": "Not recorded anywhere that can be read back: src/land-timing.ts keeps the save steps in the submitting CLI and prints one stderr line; nothing sends them to the server.",
-      "reason": "No number is invented. Shown as unrun until a recorded value exists; the follow-up is on Issue b7851c44."
+      "max": 30000,
+      "source": "Synthetic save fixture: 12,000 ms client work plus 3,000 ms server submit-to-publication = 15,000 ms. Dogfood save on 2026-11-10 (9677e70e) reported 4,029 ms through submission (capture 1,328, prepare 647, upload 476, submit 1,504); its background settle was not timed by that released client. The bounded local calibration read was 48,584 bytes; no retained full save duration existed.",
+      "reason": "Initial p90 regression guard at twice the first observed baseline, rounded up; missing stamps stay unknown. Ratchet with a full 20-landing window; this alert adds no gate or user step.",
+      "stat": "p90"
     },
     {
       "id": "preflight",
       "area": "Lane preflight",
-      "measuredBy": "unrecorded",
+      "measuredBy": "landing-record",
       "metric": "preflightMs",
       "unit": "ms",
-      "max": null,
-      "source": "Not recorded: the hosted preflight reply carries no duration and no landing stamp covers it.",
-      "reason": "No number is invented. Shown as unrun until a recorded value exists; the follow-up is on Issue b7851c44."
+      "max": 120000,
+      "source": "Dogfood clone-local successful preflight receipt at 2026-11-10T13:29:07.371Z, one bounded 1,649-byte read: 49,779 ms total for 5 test files, 9,003 ms build and 26,708 ms tests.",
+      "reason": "Initial p90 regression guard at twice the first observed baseline, rounded up; missing stamps stay unknown. Ratchet with a full 20-landing window; this alert adds no gate or user step.",
+      "stat": "p90"
     },
     {
       "id": "landing-r2-class-a-mean",
@@ -879,11 +881,11 @@
       "measuredBy": "driver-fixture",
       "metric": "finishStepReadBytes",
       "unit": "bytes",
-      "value": 1399500,
+      "value": 1256600,
       "floor": 2048,
-      "source": "Completed solo plus completed main-race control tails on merged main; 1,000 reports, ten shards, 19 KB project. Finish steps 1,686,061 -> 1,399,474 B/landing; three drivers 3,047,372 -> 2,760,785 B/landing. 13 finish steps, three advances and one reuse completion across two accepted landings, unchanged.",
+      "source": "Completed solo plus main-race control tails on merged main 5d97289f, 1,000 reports, ten shards and 19 KB project. Reuse completion 1,869,565 -> 963,183 B/call (one completion across two landings); finish 1,399,875 -> 1,256,506 B/landing; three drivers 2,761,733 -> 2,165,174 B/landing. Calls stay 13/3/1.",
       "issue": "3e3f9fe6",
-      "reason": "Publication already validates the exact passed run; skip cancellation only for that run. Solo and batch paths share the cut; different live retained runs still release. Calls unchanged."
+      "reason": "Removes duplicate canonical run, compose, finish and landing reads within the transaction; fresh authority, settings, policy and exact proof checks remain. Already-loaded audit runs also serve publication and batch validation. No new records or RPCs."
     },
     {
       "id": "landing-driver-tail-read-bytes",
@@ -891,11 +893,23 @@
       "measuredBy": "driver-fixture",
       "metric": "driverTailReadBytes",
       "unit": "bytes",
-      "value": 2760810,
+      "value": 2165300,
       "floor": 2048,
-      "source": "Completed solo plus completed main-race control tails on merged main; 1,000 reports, ten shards, 19 KB project. Finish steps 1,686,061 -> 1,399,474 B/landing; three drivers 3,047,372 -> 2,760,785 B/landing. 13 finish steps, three advances and one reuse completion across two accepted landings, unchanged.",
+      "source": "Completed solo plus main-race control tails on merged main 5d97289f, 1,000 reports, ten shards and 19 KB project. Reuse completion 1,869,565 -> 963,183 B/call (one completion across two landings); finish 1,399,875 -> 1,256,506 B/landing; three drivers 2,761,733 -> 2,165,174 B/landing. Calls stay 13/3/1.",
       "issue": "3e3f9fe6",
-      "reason": "Publication already validates the exact passed run; skip cancellation only for that run. Solo and batch paths share the cut; different live retained runs still release. Calls unchanged."
+      "reason": "Removes duplicate canonical run, compose, finish and landing reads within the transaction; fresh authority, settings, policy and exact proof checks remain. Already-loaded audit runs also serve publication and batch validation. No new records or RPCs."
+    },
+    {
+      "id": "landing-driver-reuse-complete-read-bytes",
+      "area": "Reuse completion amortized across dogfood solo and main-race landings",
+      "measuredBy": "driver-fixture",
+      "metric": "reuseCompleteReadBytes",
+      "unit": "bytes",
+      "value": 481650,
+      "floor": 2048,
+      "source": "Completed solo plus main-race control tails on merged main 5d97289f, 1,000 reports, ten shards and 19 KB project. Reuse completion 1,869,565 -> 963,183 B/call (one completion across two landings); finish 1,399,875 -> 1,256,506 B/landing; three drivers 2,761,733 -> 2,165,174 B/landing. Calls stay 13/3/1.",
+      "issue": "3e3f9fe6",
+      "reason": "Removes duplicate canonical run, compose, finish and landing reads within the transaction; fresh authority, settings, policy and exact proof checks remain. Already-loaded audit runs also serve publication and batch validation. No new records or RPCs."
     }
   ]
 }

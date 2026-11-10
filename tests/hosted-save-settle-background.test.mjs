@@ -25,6 +25,7 @@ const contract = {
   prepareTargets: true,
   runPublish: true,
   settleBackground: true,
+  durations: true,
 };
 
 async function setup(t, { fromBase = false } = {}) {

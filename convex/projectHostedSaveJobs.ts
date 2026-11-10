@@ -22,7 +22,7 @@ import { publishHostedSave, publishSaveJob, saveForJob } from './projectHostedSa
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
 import { requireMemberAuthorityById } from './projectLaneAuthority';
 import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operation';
-import { savePin } from '../src/hosted-save';
+import { savePin, saveDurationMs } from '../src/hosted-save';
 import { blobStore } from './blobStore';
 import { presignGet, r2Config } from './r2';
 import { invariant } from '../src/errors';
@@ -38,6 +38,7 @@ export const submit = mutation({
   args: {
     ...identity,
     /** The last delta page (contract feature save-submit-page), staged here first. */
+    clientMs: v.optional(v.number()),
     index: v.optional(v.number()),
     page: v.optional(v.string()),
   },
@@ -55,13 +56,18 @@ export const submit = mutation({
 /** Submit, as the public mutation or (`inline`) inside the submitting action's transaction. */
 export async function submitHostedSave(
   ctx: MutationCtx,
-  input: SaveIdentity & { index?: number | undefined; page?: string | undefined },
+  input: SaveIdentity & {
+    index?: number | undefined;
+    page?: string | undefined;
+    clientMs?: number | undefined;
+  },
   inline = false,
   /** Split save (fea47345 C): the caller returns before the settle, so record its changed paths for
    * overlap now; peers and the caller's own overlap read see them without waiting for the step. */
   background = false,
 ): Promise<{ payload: string; run: string | null }> {
-  const { index, page, ...auth } = input;
+  const { index, page, clientMs: measuredMs, ...auth } = input;
+  const clientMs = saveDurationMs(measuredMs);
   const prior = await loadSave(ctx, auth, false);
   if (prior.operation.terminal) return { payload: canonicalPayload(prior.operation.terminal), run: null };
   invariant(
@@ -74,7 +80,7 @@ export async function submitHostedSave(
   await loadSave(ctx, auth);
   if (!state.request.pages)
     return {
-      payload: canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null })),
+      payload: canonicalPayload(await publishHostedSave(ctx, { ...auth, result: null, clientMs })),
       run: null,
     };
   invariant(
@@ -114,7 +120,12 @@ export async function submitHostedSave(
         ids: { job: row.jobId },
       },
     });
-    await writeSaveState(ctx, row._id, { ...state, status: 'submitted', submittedAt: Date.now() });
+    await writeSaveState(ctx, row._id, {
+      ...state,
+      status: 'submitted',
+      submittedAt: Date.now(),
+      ...(clientMs === undefined ? {} : { clientMs }),
+    });
     if (background && state.overlapChanges !== undefined) {
       const lane = await saveLane(ctx, { ...auth, laneId: state.request.laneId });
       // Only for the exact Lane this save was prepared on, by its author or the project owner (as

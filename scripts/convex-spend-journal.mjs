@@ -16,12 +16,14 @@ import { DatabaseSync } from 'node:sqlite';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 import { daySummary, utcDay } from './convex-spend-model.mjs';
+import { billingPeriod, billingSummary, periodRows } from './convex-spend-plan.mjs';
 
 /** Append-only numeric day journals are both the restart ledger and the report source. */
 export class SpendJournal {
   constructor(directory) {
     this.directory = directory;
     this.days = new Map();
+    this.billingDays = new Map();
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   async load(day) {
@@ -93,11 +95,69 @@ export class SpendJournal {
       from = end;
     }
   }
-  writeSummary(report) {
+  signature(day) {
+    const path = join(this.directory, `${day}.jsonl`);
+    if (!existsSync(path)) return 'absent';
+    const stat = statSync(path);
+    return `${stat.size}:${stat.mtimeMs}`;
+  }
+  writeSummary(report, signature = this.signature(report.day)) {
     const path = join(this.directory, `${report.day}.summary.json`);
     const temporary = `${path}.${process.pid}.tmp`;
-    writeFileSync(temporary, JSON.stringify(report) + '\n', { mode: 0o600 });
+    writeFileSync(temporary, JSON.stringify({ ...report, sourceSignature: signature }) + '\n', {
+      mode: 0o600,
+    });
     renameSync(temporary, path);
+  }
+  /** Closed days reuse compact, source-fingerprinted summaries. At most one day journal is
+   * replayed at a time; the live day keeps its existing cache. No repeated month-wide raw scan. */
+  async billing(plan, now = Date.now(), deployments = []) {
+    const period = billingPeriod(plan, now),
+      reports = [],
+      today = utcDay(now);
+    if (this.billingStart !== period.start) {
+      this.billingDays.clear();
+      this.billingStart = period.start;
+    }
+    for (let at = Date.parse(utcDay(period.start)); at <= now; at += 86_400_000) {
+      const day = utcDay(at),
+        whole = at >= period.start && at + 86_400_000 <= now;
+      const signature = this.signature(day),
+        cached = this.billingDays.get(day);
+      if (day !== today && cached?.signature === signature) {
+        reports.push(cached.report);
+        continue;
+      }
+      let report;
+      const path = join(this.directory, `${day}.summary.json`);
+      if (whole && existsSync(path)) {
+        try {
+          const saved = JSON.parse(readFileSync(path, 'utf8'));
+          if (
+            saved.day === day &&
+            saved.sourceSignature === signature &&
+            saved.knownUsage &&
+            saved.perFunction.every(fn => fn.knownUsage) &&
+            saved.deployments.every(dep => dep.knownUsage)
+          ) {
+            delete saved.billing;
+            report = saved;
+          }
+        } catch {
+          /* Derived summaries are disposable; the numeric journal remains authoritative. */
+        }
+      }
+      if (!report) {
+        const state = day === today ? await this.load(day) : await this.readDay(day);
+        report = daySummary(day, periodRows(state.rows, period.start, now), now);
+        if (day !== today) this.days.delete(day);
+        if (whole && this.signature(day) === signature) this.writeSummary(report, signature);
+      }
+      if (day !== today && this.signature(day) === signature)
+        this.billingDays.set(day, { signature, report });
+      reports.push(report);
+    }
+    return billingSummary(plan, reports, now, deployments);
   }
   async report(day = utcDay(Date.now()), now = Date.now()) {
     return daySummary(day, (await this.load(day)).rows, now);

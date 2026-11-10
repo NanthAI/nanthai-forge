@@ -67,6 +67,7 @@ import {
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
 import { checkpointNudge, unsavedMinutes } from './agent-nudge.js';
 import { composedLanes, landGatesArgument } from './hosted-land-gate-client.js';
+import { savedDuration } from './hosted-save-pending.js';
 import { preflightResult } from './hosted-land-gates.js';
 import type { LandGateEntry } from './hosted-land-gates.js';
 import { liveLanding, ownsLiveLanding } from './landing-freeze.js';
@@ -1058,6 +1059,14 @@ export class HostedAgentTransport {
           );
           // The server requires this preflight result again at enqueue (Issue 029138ef).
           gatedLane = { laneId, head, preflight: preflightResult(gates.preflight) };
+          if (this.serverFeatures?.includes('save-preflight-timing')) {
+            const { readPreflightReceipt } = await import('./agent-preflight.js');
+            const receipt = readPreflightReceipt(root, laneId);
+            const saveMs = savedDuration(root, laneId, head);
+            if (saveMs !== undefined) gatedLane.saveMs = saveMs;
+            if (receipt && (receipt.tree && tree ? receipt.tree === tree : receipt.head === head))
+              gatedLane.preflightMs = Math.round(receipt.durationMs);
+          }
           return gates;
         },
         landGates: (composeOperationId: string) => {

@@ -79,6 +79,8 @@ export function speedBudgetRows(
           c?.runnerDiscarded == null ? null : c.runnerDiscarded * 60,
           c?.runnerAccepted == null || !auditsProjected ? null : (audits.get(row.id) ?? 0),
         ],
+        row.saveMs ?? null,
+        row.preflightMs ?? null,
       ];
     })
     .sort((a, b) => a[0] - b[0]);

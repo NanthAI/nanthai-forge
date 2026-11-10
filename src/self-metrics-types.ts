@@ -109,6 +109,8 @@ export type MetricRecords = {
     onAdmissionRun?: boolean | null;
     costs?: import('zod').infer<typeof import('./hosted-landings-view.js').landingCostsSchema>;
     settleSeconds?: number;
+    saveMs?: number;
+    preflightMs?: number;
   }[];
   surfaceGaps?: string[];
   observations?: MetricObservation[];

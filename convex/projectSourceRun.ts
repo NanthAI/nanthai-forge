@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { saveDurationMs } from '../src/hosted-save';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { action } from './cliServer';
@@ -44,6 +45,7 @@ export const submit = action({
     /** Raw uploads to commit first (at most 100), as `projectObjectCommit:commitBatch` takes them. */
     objects: v.optional(v.array(v.object({ id: v.id('projectObjects') }))),
     /** A save's last delta page (save-submit-page). */
+    clientMs: v.optional(v.number()),
     index: v.optional(v.number()),
     page: v.optional(v.string()),
     /** The job input text the caller uploaded (at most 64 KiB): the step checks it against the
@@ -60,6 +62,7 @@ export const submit = action({
   },
   returns: v.string(),
   handler: async (ctx, input): Promise<string> => {
+    const receivedAt = Date.now();
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to submit hosted source.');
@@ -73,13 +76,15 @@ export const submit = action({
         'BAD_ARGUMENT',
         'Only a save settles in the background.',
       );
-      const { objects, input: text, progress: shaped, settle, ...submit } = input;
+      const { objects, input: text, progress: shaped, settle, clientMs, ...submit } = input;
       // Upload-pack members the commit read and checked; the step reads small ones from memory.
       const held = new Map<string, Uint8Array>();
       const verified = objects?.length ? await commitObjects(ctx, user.subject, objects, held) : [];
+      const measuredMs = saveDurationMs(clientMs, Math.max(0, Date.now() - receivedAt));
       const submitted: { payload: string; run: string | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceRunStore:submit'), {
           ...submit,
+          ...(measuredMs === undefined ? {} : { clientMs: measuredMs }),
           actor: user.subject,
           ...(settle ? { background: true } : {}),
         }),

@@ -30,6 +30,7 @@ import {
   landTimingLine,
   markLandStep,
   startLandTiming,
+  saveTimingMs,
 } from '../dist/land-timing.js';
 import { digest } from '../dist/hash.js';
 
@@ -233,6 +234,11 @@ test('land --save receipt splits the time before submission and prints one line'
   startLandTiming(origin - 400);
   markLandStep('ready', origin + 600);
   markLandStep('saveStarted', origin + 700);
+  assert.equal(
+    saveTimingMs(origin + 1700),
+    1000,
+    'save total sent before the final call starts at saveStarted',
+  );
   markLandStep('captured', origin + 1_200);
   markLandStep('captured', origin + 9_999); // a replay keeps the first time
   markLandStep('saved', origin + 6_600);

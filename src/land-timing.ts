@@ -60,6 +60,12 @@ export function landTiming(): LandTiming | null {
   };
 }
 
+/** Local save work up to the final submit; the server adds submit-to-publication on its clock. */
+export function saveTimingMs(at = Date.now()): number | undefined {
+  const start = marks?.get('saveStarted');
+  return start === undefined ? undefined : Math.max(0, Math.round(at - start));
+}
+
 /** One stderr line once this process submitted: "land: submitted in 12.3 s (spawn 0.4, ...)". */
 export function landTimingLine(timing: LandTiming | null | undefined) {
   if (!timing || timing.totalMs === null) return null;

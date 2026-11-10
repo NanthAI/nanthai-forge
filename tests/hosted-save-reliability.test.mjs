@@ -98,7 +98,12 @@ async function fixture(t) {
         if (name === 'projectHostedSaves:prepare') return f.call('prepare', api.prepare, args);
         if (name === 'projectHostedSaves:stage') return f.call('stage', api.stage, args);
         assert.equal(name, 'projectHostedSaveJobs:submit');
-        return JSON.stringify(await f.submit({ request: { operationId: args.operationId } }));
+        return JSON.stringify(
+          await f.submit(
+            { request: { operationId: args.operationId } },
+            args.clientMs === undefined ? {} : { clientMs: args.clientMs },
+          ),
+        );
       },
       query: async (ref, args) => {
         const name = getFunctionName(ref);
@@ -710,4 +715,35 @@ test('guard b8c0a4f6: no retained request reads main inline; main-pinned request
   assert.deepEqual(offenders, [], 'wrap the request in sendMainPinned (src/hosted-main-pin.ts)');
   for (const name of ['hosted-agent-source.ts', 'hosted-agent-actions.ts'])
     assert.match(readFileSync(join('src', name), 'utf8'), /sendMainPinned\(/, name);
+});
+
+test('negotiated save timing rides the final save call and caches only the completed matching head', async t => {
+  const { saveHostedLane } = await import('../dist/hosted-save-client.js');
+  const { savedDuration } = await import('../dist/hosted-save-pending.js');
+  const { saveContract } = await import('../dist/hosted-save-client.js');
+  assert.equal(saveContract({}).durations, false);
+  const counts = [];
+  for (const durations of [false, true]) {
+    const s = await fixture(t);
+    writeFileSync(join(s.root, 'a.txt'), 'timed edit');
+    const command = { operationId: randomUUID(), message: 'timed save' };
+    const progress = await saveHostedLane(s.root, command, s.exchange, {
+      overlapEvidence: false,
+      submitPage: false,
+      durations,
+    });
+    const terminal = await s.complete(command.operationId);
+    const { applyObservedSaveOutcome } = await import('../dist/hosted-save-client.js');
+    // The ordinary observed-save path applies the returned receipt and local timing together.
+    await applyObservedSaveOutcome(s.root, command.operationId, terminal);
+    counts.push(s.calls);
+    const value = savedDuration(s.root, s.laneId, terminal.outcome.result.head);
+    assert.equal(typeof value, durations ? 'number' : 'undefined');
+    assert.equal(
+      savedDuration(s.root, s.laneId, 'f'.repeat(64)),
+      undefined,
+      'never attribute another source head',
+    );
+  }
+  assert.deepEqual(counts[1], counts[0], 'timing introduces no Convex call');
 });

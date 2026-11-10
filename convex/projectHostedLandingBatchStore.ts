@@ -305,7 +305,11 @@ export async function retryLandingBatch(
         phase: 'queued',
         observation: landingObservation('queued'),
         error: null,
-        timing: { submittedAt: state.at, composeStartedAt: new Date(Date.now()).toISOString() },
+        timing: {
+          submittedAt: state.at,
+          ...(state.timing?.ms ? { ms: state.timing.ms } : {}),
+          composeStartedAt: new Date(Date.now()).toISOString(),
+        },
       },
       false,
     );

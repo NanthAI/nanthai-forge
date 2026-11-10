@@ -640,3 +640,45 @@ test('landing-message negotiation reuses discovery and retains legacy request sh
     'legacy finish still carries the message through its original composition',
   );
 });
+
+test('preflight timing reaches the existing landing request without another Convex call, with old-server and source-head compatibility', async t => {
+  const calls = [];
+  for (const timed of [false, true]) {
+    const s = agentFixture(t);
+    s.caps.features = ['land-gates', ...(timed ? ['save-preflight-timing'] : [])];
+    s.caps.agentDefaults = effectiveAgentDefaults({ preflight: 'off' });
+    await s.transport().dispatch('open', { laneId: s.lane.laneId });
+    const marker = readHostedLaneCheckout(s.root);
+    const receipt = runPreflight(
+      s.root,
+      s.lane.laneId,
+      marker.selection.head,
+      {
+        status: 'planned',
+        scope: 'none',
+        reason: 'empty selection',
+        tests: [],
+        estimateMinutes: 0,
+        command: null,
+      },
+      marker.tree,
+    );
+    const { clientCacheRoot } = await import('../dist/root-paths.js');
+    writeFileSync(
+      join(clientCacheRoot(s.root), 'save-timing.json'),
+      JSON.stringify({ laneId: s.lane.laneId, head: marker.selection.head, saveMs: 15000 }),
+    );
+    const before = s.calls.length;
+    await s.transport().dispatch('preflight', { laneId: s.lane.laneId, run: false });
+    await s.transport().dispatch('finish', { laneId: s.lane.laneId });
+    calls.push(s.calls.slice(before).map(call => call.name));
+    const submit = s.calls.find(call =>
+      ['projectHostedLandingDesired:submit', 'projectHostedLanding:enqueue'].includes(call.name),
+    );
+    const [gate] = JSON.parse(submit.args.gates).lanes;
+    assert.equal(gate.saveMs, timed ? 15000 : undefined);
+    assert.equal(gate.preflightMs, timed ? Math.round(receipt.durationMs) : undefined);
+    assert(Buffer.byteLength(JSON.stringify({ saveMs: gate.saveMs, preflightMs: gate.preflightMs })) <= 100);
+  }
+  assert.deepEqual(calls[1], calls[0], 'preflight and finish call counts are unchanged by recording timing');
+});

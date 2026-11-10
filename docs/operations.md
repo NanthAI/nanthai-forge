@@ -1196,7 +1196,10 @@ project-row read after the handler finishes. The completed solo/main-race contro
 include 1,000 retained reports, ten shards and a 19 KB project row; they count finish, landing
 and reuse mutations from check completion through acceptance (source and CI callbacks are
 outside this subtotal). The finish steps retain exact publication evidence and skip cancellation
-only for the same run that evidence already proved terminal.
+only for the same run that evidence already proved terminal. Reuse completion passes canonical
+rows already read in its transaction into installation and proof validation. Authority, current
+settings and policy still recheck; those rows never enter the action response. Its byte entry is
+amortized over the same two completed landings (one proof completion).
 
 **Updating the ledger.** Fix the change, or edit the entry in the same Lane: the new `value`, a
 `source` naming the run and date, and a `reason` for the move. Run

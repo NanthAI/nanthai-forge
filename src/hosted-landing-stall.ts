@@ -3,7 +3,10 @@ import type { HostedQueueStatus } from './hosted-queue-status.js';
 import { latestLandingProgress, landingStall } from './landing-stall.js';
 import type { HostedLandingState } from './hosted-landing.js';
 export const hostedLandingProgressAt = (state: HostedLandingState) =>
-  latestLandingProgress([state.at, ...Object.values(state.timing ?? {})]);
+  latestLandingProgress([
+    state.at,
+    ...Object.values(state.timing ?? {}).filter((value): value is string => typeof value === 'string'),
+  ]);
 export function hostedLandingStall(
   state: HostedLandingState,
   now = Date.now(),

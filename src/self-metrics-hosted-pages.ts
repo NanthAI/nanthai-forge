@@ -50,6 +50,8 @@ const rowSchemas = {
     agentClient: z.string().max(100).nullable().optional(),
     costs: landingCostsSchema.optional(),
     settleSeconds: z.number().nonnegative().nullable().optional(),
+    saveMs: z.number().nonnegative().optional(),
+    preflightMs: z.number().nonnegative().optional(),
   }),
   requests: z.object({
     id: z.string(),
@@ -328,6 +330,8 @@ export async function readHostedMetricPages(
               minutes: minutesBetween(row.submittedAt ?? '', row.at) ?? null,
               onAdmissionRun: row.landedOnAdmissionRun ?? null,
               ...(row.costs ? { costs: row.costs } : {}),
+              ...(row.saveMs === undefined ? {} : { saveMs: row.saveMs }),
+              ...(row.preflightMs === undefined ? {} : { preflightMs: row.preflightMs }),
               ...(row.settleSeconds != null ? { settleSeconds: row.settleSeconds } : {}),
             });
           } else if (stream === 'runs') {

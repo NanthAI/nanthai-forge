@@ -143,10 +143,27 @@ const landed = f =>
 
 /** One accepted-Candidate submission through check and acceptance; `moveMain` moves main during
  * the check, so it recomposes on a source job and checks again (the common dogfood case). */
-async function solo(t, { moveMain = false, extraQuery = false } = {}) {
+async function solo(t, { moveMain = false, extraQuery = false, durations = false } = {}) {
   const f = await finishFixture(t);
   const m = meter(f);
-  const state = await f.enqueue(f.request());
+  const state = await f.enqueue(
+    f.request(),
+    durations
+      ? {
+          gates: JSON.stringify({
+            lanes: [
+              {
+                laneId: f.lane.laneId,
+                head: f.lane.head,
+                preflight: 'passed',
+                saveMs: 15000,
+                preflightMs: 49779,
+              },
+            ],
+          }),
+        }
+      : {},
+  );
   if (extraQuery) {
     // The seeded regression: one more query per landing (a status read on the landing path).
     assert(finishApi.status.isQuery);
@@ -425,6 +442,7 @@ test('dogfood control tails budget finish reads across a completed solo landing 
   const total = (name, key) => scenarios.reduce((sum, s) => sum + s[name][key], 0);
   const measured = {
     finishStepReadBytes: total('finishStep', 'readBytes') / 2,
+    reuseCompleteReadBytes: total('reuseComplete', 'readBytes') / 2,
     driverTailReadBytes:
       scenarios.reduce((sum, s) => sum + Object.values(s).reduce((n, c) => n + c.readBytes, 0), 0) / 2,
   };
@@ -437,4 +455,16 @@ test('dogfood control tails budget finish reads across a completed solo landing 
     assert.notEqual(judgeCost(budget, bytes, costGuard).status, 'fail');
   }
   t.diagnostic(JSON.stringify({ dogfoodTail: { scenarios, measured } }));
+});
+
+test('save/preflight timing keeps landing cost guard bytes within one percent without extra calls', async t => {
+  const before = await solo(t, { moveMain: true });
+  const after = await solo(t, { moveMain: true, durations: true });
+  for (const key of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions'])
+    assert.equal(after[key], before[key], `${key}: no new call`);
+  for (const key of ['readBytes', 'writeBytes', 'observerReadBytes'])
+    assert(after[key] <= before[key] * 1.01, `${key}: ${after[key]} <= ${before[key]} + 1%`);
+  t.diagnostic(
+    `duration bytes: read ${after.readBytes - before.readBytes}, write ${after.writeBytes - before.writeBytes}; baseline ${before.readBytes}/${before.writeBytes}`,
+  );
 });

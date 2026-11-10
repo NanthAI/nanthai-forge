@@ -558,3 +558,16 @@ for (const [name, member] of [
     assert.deepEqual(f.reuseDecisions, []);
   });
 }
+
+test('reuse installation still releases a different live run retained on its landing row', async t => {
+  const { f, state, before } = await readyRace(t);
+  const args = await pendingProof(f, state);
+  const owner = await f.tx('proofClaimBeforeInstall', reuse.claim, args);
+  assert(owner);
+  const other = await f.rawChecks.enqueue(f.rawChecks.selection());
+  const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id);
+  f.patch('projectHostedLandingRequests', row._id, { runId: other.id });
+  await f.tx('proofInstallFallback', reuse.complete, { ...args, owner, proof: null });
+  assert.equal((await f.rawChecks.status(other.id)).status, 'cancelled');
+  assert.equal((await f.rawChecks.status(before.check.runId)).status, 'passed');
+});

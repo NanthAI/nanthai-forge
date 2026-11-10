@@ -46,6 +46,8 @@ export type SpeedBudgets = z.infer<typeof speedBudgetsSchema>;
  * check or a reuse) and its landing-state writes (the mutations of its own landing path). The r2 and
  * runner metrics are its other counts, kept in one `counts` entry of its sample (see COUNT). */
 export type LandingMetric =
+  | 'saveMs'
+  | 'preflightMs'
   | 'toMain'
   | 'check'
   | 'settle'
@@ -60,6 +62,8 @@ export type LandingMetric =
 type Stat = 'p50' | 'p90' | 'mean';
 const INDEX: Partial<Record<LandingMetric, number>> = {
   toMain: 1,
+  saveMs: 8,
+  preflightMs: 9,
   check: 2,
   settle: 4,
   attempts: 5,
@@ -106,6 +110,8 @@ const sampleSchema = z.tuple([
   z.number().nullable().optional(),
   // Counts of the landing; absent on rows written before them.
   countsSchema.nullable().optional(),
+  z.number().nonnegative().nullable().optional(),
+  z.number().nonnegative().nullable().optional(),
 ]);
 const brokenSchema = z
   .object({
@@ -128,6 +134,8 @@ export const landingSpeedStateSchema = z
 export type LandingSpeedState = z.infer<typeof landingSpeedStateSchema>;
 export type LandingSpeedSample = {
   at: number;
+  saveMs?: number | null;
+  preflightMs?: number | null;
   /** The landed state's acceptance receipt: names the landing that crossed a budget. */
   id: string;
   toMain: number | null;
@@ -169,6 +177,8 @@ export function landingSpeedSample(
   if (!timing || !Number.isFinite(at)) return null;
   return {
     at,
+    saveMs: timing.ms?.[0] ?? null,
+    preflightMs: timing.ms?.[1] ?? null,
     id: state.acceptance?.receiptId ?? state.id,
     toMain: span(timing.submittedAt, timing.committedAt),
     check: span(timing.checkReservedAt, timing.ciEndedAt),
@@ -242,13 +252,26 @@ export function observeLandingSpeed(
       sample.attempts ?? null,
       sample.writes ?? null,
       sample.counts ?? null,
+      ...(sample.saveMs == null && sample.preflightMs == null
+        ? []
+        : [sample.saveMs ?? null, sample.preflightMs ?? null]),
     ] as const,
   ]
     .sort((a, b) => a[0] - b[0])
     .slice(-MAX_SAMPLES)
     .map(
-      ([at, toMain, check, id, settle, attempts, writes, counts]) =>
-        [at, toMain, check, id, settle ?? null, attempts ?? null, writes ?? null, counts ?? null] as Row,
+      ([at, toMain, check, id, settle, attempts, writes, counts, ...durations]) =>
+        [
+          at,
+          toMain,
+          check,
+          id,
+          settle ?? null,
+          attempts ?? null,
+          writes ?? null,
+          counts ?? null,
+          ...durations,
+        ] as Row,
     );
   const broken = { ...previous?.broken };
   const events: SpeedBudgetEvent[] = [];
@@ -277,6 +300,8 @@ type Row = [
   number | null,
   number | null,
   LandingCounts | null,
+  (number | null)?,
+  (number | null)?,
 ];
 
 const R2_NEXT =
@@ -285,6 +310,8 @@ const R2_NEXT =
   'the landing check cost guard counts the same requests on a fixture.';
 const NAME: Record<LandingMetric, string> = {
   toMain: 'landing to main',
+  saveMs: 'save',
+  preflightMs: 'preflight',
   check: 'check',
   settle: 'check result to commit',
   attempts: 'attempts per landing',
@@ -298,6 +325,10 @@ const NAME: Record<LandingMetric, string> = {
 };
 const describe = (b: SpeedBudget) => `${NAME[b.metric as LandingMetric]} ${b.stat}`;
 const NEXT: Record<LandingMetric, string> = {
+  saveMs:
+    'Next: compare the crossing landing save receipt durationMs and its CLI capture, upload and server step timings; inspect the latest save path change.',
+  preflightMs:
+    'Next: compare the crossing landing preflight receipt durationMs, buildMs, testMs and slowest files; inspect the latest preflight selection or runner change.',
   toMain:
     'Next: run `nforge metrics ROOT --text` for waste by cause and main-race re-checks; ' +
     'if queue or compose gaps grew, run the landing-loop dry micro-bench (regression ladder rung 2) on the latest landing-loop change.',
@@ -422,9 +453,12 @@ export function addAuditSeconds(state: LandingSpeedState, seconds: number): Land
     ...(last[7] ?? [null, null, null, null, null, 0]),
   ] as NonNullable<Counts>;
   counts[5] = (counts[5] ?? 0) + seconds;
-  const [at, toMain, check, id, settle, attempts, writes] = last;
+  const [at, toMain, check, id, settle, attempts, writes, , ...durations] = last;
   return {
     ...state,
-    samples: [...state.samples.slice(0, -1), [at, toMain, check, id, settle, attempts, writes, counts]],
+    samples: [
+      ...state.samples.slice(0, -1),
+      [at, toMain, check, id, settle, attempts, writes, counts, ...durations],
+    ],
   };
 }

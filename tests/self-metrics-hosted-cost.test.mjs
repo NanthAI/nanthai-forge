@@ -218,7 +218,7 @@ test('metrics projects every live cost budget from existing landing and run page
     row.value = JSON.stringify({
       ...state,
       version: 11,
-      timing: { ...state.timing, committedAt: at(n * 10 + 2), ciEndedAt: at(n * 10 + 1) },
+      timing: { ...state.timing, committedAt: at(n * 10 + 2), ciEndedAt: at(n * 10 + 1), ms: [15000, 49779] },
       counts: { r2: [3, 12, 1000000], runnerSeconds: 3000 },
     });
   }
@@ -232,6 +232,8 @@ test('metrics projects every live cost budget from existing landing and run page
   );
   const rows = speedBudgetRows(records, period, speedBudgets);
   const value = id => rows.find(row => row.id === id).value;
+  assert.equal(value('save'), 15000);
+  assert.equal(value('preflight'), 49779);
   assert.equal(value('landing-attempts-mean'), 1);
   assert.equal(value('landing-writes-mean'), 12);
   assert.equal(value('landing-r2-class-a-mean'), 3);

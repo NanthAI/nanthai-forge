@@ -4,6 +4,7 @@ import { requireHostedCheckEvidence } from './projectHostedCheckRead';
 import type { HostedLandingAttempt } from '../src/hosted-landing';
 import { scopedRecheckPolicy, type ScopedRecheckBasis } from '../src/scoped-recheck-policy';
 import { ForgeError } from '../src/errors';
+import type { HostedCheckRun } from '../src/hosted-check';
 
 /** The basis is the latest exact full pass of this finish's own (non-batch)
  * Candidate. A scoped or cancelled retry keeps the basis it inherited; it never
@@ -11,6 +12,7 @@ import { ForgeError } from '../src/errors';
 export async function scopedRecheckBasis(
   ctx: MutationCtx,
   previous: HostedLandingAttempt,
+  checkedRun?: HostedCheckRun,
 ): Promise<ScopedRecheckBasis | undefined> {
   // Either gate (Issue fc215574); the actor and main rules apply when the recheck is enqueued.
   if (!scopedRecheckPolicy(previous.policy.acceptance)) return undefined;
@@ -30,14 +32,18 @@ export async function scopedRecheckBasis(
       : null;
   if (own && previous.check && !previous.semanticPlan?.members.length) {
     try {
-      const run = await requireHostedCheckEvidence(ctx, {
-        projectId: previous.projectId as Parameters<typeof requireHostedCheckEvidence>[1]['projectId'],
-        actor: previous.actor.id,
-        candidateId: own.checked.id,
-        head: own.checked.head,
-        authorityEpoch: previous.authorityEpoch,
-        ...previous.check,
-      });
+      const run = await requireHostedCheckEvidence(
+        ctx,
+        {
+          projectId: previous.projectId as Parameters<typeof requireHostedCheckEvidence>[1]['projectId'],
+          actor: previous.actor.id,
+          candidateId: own.checked.id,
+          head: own.checked.head,
+          authorityEpoch: previous.authorityEpoch,
+          ...previous.check,
+        },
+        checkedRun,
+      );
       // A run with no gate (a project with no configured gate) ran the whole check, or its docs
       // selection for a docs-only change; a gated run says so in its echoed effective gate.
       const whole = run.gate === undefined || run.gate.effective === 'full';

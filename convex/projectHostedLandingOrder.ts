@@ -388,7 +388,9 @@ export function landingStateForReader(state: HostedLandingState, priorityInfo?: 
   // Message provenance stays in canonical records, not released strict wait DTOs.
   void _message;
   void _requestedMessage;
-  const readable = { ...publicState, request: publicRequest };
+  const { ms: _ms, ...timing } = state.timing ?? { submittedAt: state.at };
+  void _ms;
+  const readable = { ...publicState, ...(state.timing ? { timing } : {}), request: publicRequest };
   if (priorityInfo === 1) return readable;
   const { priority: _priority, priorityReason: _reason, priorityVersion: _version, ...legacy } = readable;
   const { priority: _requested, ...request } = readable.request;

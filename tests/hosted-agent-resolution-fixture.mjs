@@ -73,7 +73,12 @@ export async function resolutionFixture(t, options = {}) {
         }[kind];
         const state = [...f.tables[table].values()].find(row => row.operationId === args.operationId);
         const progressModule = modules[`projectHosted${kind === 'Save' ? 'Saves' : kind}`];
-        const progress = JSON.parse(await f.tx('sourceProgress', progressModule.progress, args));
+        const progress = JSON.parse(
+          await f.tx('sourceProgress', progressModule.progress, {
+            projectId: args.projectId,
+            operationId: args.operationId,
+          }),
+        );
         const output = await f.c.compute(progress.input);
         const job = await f.c.activate(state.jobId);
         await f.c.callback(job, { status: 'completed', output: output.output });

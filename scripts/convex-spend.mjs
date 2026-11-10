@@ -6,6 +6,7 @@ import { resolve } from 'node:path';
 import { childEnv } from './child-env.mjs';
 import { isMainModule } from './main-module.mjs';
 import { spendEvent, pendingAlerts, utcDay, spendRates } from './convex-spend-model.mjs';
+import { spendPlan, planAlerts } from './convex-spend-plan.mjs';
 import { SpendJournal, journalLock, privateConfig } from './convex-spend-journal.mjs';
 
 export async function notifySpend(hook, alert) {
@@ -41,7 +42,7 @@ export async function notifySpend(hook, alert) {
   });
 }
 
-export async function printSpend(journal, now = Date.now()) {
+export async function printSpend(journal, now = Date.now(), plan = null, deployments = []) {
   const days = [];
   for (let i = 0; i < 7; i++) {
     const day = utcDay(now - i * 86_400_000);
@@ -51,6 +52,7 @@ export async function printSpend(journal, now = Date.now()) {
   console.log(
     JSON.stringify(
       {
+        ...(plan ? { billing: await journal.billing(plan, now, deployments) } : {}),
         rates: spendRates,
         units: { calls: 'calls', io: 'bytes', search: 'query-bytes', compute: 'GB-hours', egress: 'bytes' },
         today: days[0],
@@ -90,11 +92,12 @@ export async function runSpend(args = process.argv.slice(2)) {
     return;
   }
   const config = privateConfig(values.config);
+  const plan = spendPlan(config.plan);
   const state = values.state ?? config.stateDirectory;
   if (typeof state !== 'string' || !state) throw Error('SPEND_STATE_REQUIRED');
   const journal = new SpendJournal(resolve(state));
   if (values.print) {
-    await printSpend(journal);
+    await printSpend(journal, Date.now(), plan, values.deployment ?? config.deployments ?? []);
     return;
   }
   const selected = values.deployment ?? config.deployments ?? ['dev'];
@@ -124,12 +127,14 @@ export async function runSpend(args = process.argv.slice(2)) {
       covered.set(deployment, at);
     }
     const report = await journal.report(utcDay(at), at);
-    for (const alert of pendingAlerts(report)) {
-      console.log(JSON.stringify({ ...alert, coverage: report.coverage }));
+    if (plan) report.billing = await journal.billing(plan, at, deployments);
+    for (const alert of plan ? planAlerts(report.billing) : pendingAlerts(report)) {
+      console.log(JSON.stringify({ ...alert, coverage: alert.coverage ?? report.coverage }));
       try {
         await notifySpend(config.notifier, alert);
         await journal.append({ kind: 'alert', key: alert.key, at });
         report.alerts.push(alert.key);
+        if (plan) report.billing.alerts.push(alert.key);
       } catch {
         console.error('SPEND_HOOK_FAILED (will retry; hook must deduplicate alert.key)');
       }

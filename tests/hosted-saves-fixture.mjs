@@ -153,7 +153,7 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
       });
     }
   };
-  const submit = async x => {
+  const submit = async (x, timing = {}) => {
     const progress = JSON.parse(
       await call('progress', api.progress, { projectId, operationId: x.request.operationId }),
     );
@@ -171,7 +171,7 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
     });
     try {
       return JSON.parse(
-        await call('submit', jobApi.submit, { projectId, operationId: x.request.operationId }),
+        await call('submit', jobApi.submit, { projectId, operationId: x.request.operationId, ...timing }),
       );
     } finally {
       for (const [key, value] of Object.entries(before)) {

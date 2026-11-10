@@ -257,6 +257,8 @@ export const page = query({
               // The submitting agent run's declared client: harness and model (81d12a32).
               agentClient: move.agentClient ?? null,
               costs: landingCosts(submitted, attempt?.number),
+              ...(submitted?.timing?.ms?.[0] == null ? {} : { saveMs: submitted.timing.ms[0] }),
+              ...(submitted?.timing?.ms?.[1] == null ? {} : { preflightMs: submitted.timing.ms[1] }),
               settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,
             };
           }
@@ -272,7 +274,7 @@ export const page = query({
               attemptId: request.attemptId ?? ('attemptId' in row ? row.attemptId : request.id),
               endedAt: request.timing?.settledAt ?? request.timing?.committedAt ?? null,
               runIds: 'runId' in row && row.runId ? [row.runId] : [],
-              progressAt: Object.values(request.timing ?? {}),
+              progressAt: Object.values(request.timing ?? {}).filter(value => typeof value === 'string'),
               errorCode: request.error?.code ?? null,
               compensating: 'revertOf' in row && !!row.revertOf,
               // Second-check evidence for every entry, failed ones included (81d12a32): why its own

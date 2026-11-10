@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { z } from 'zod';
 import type { ConflictContinuation } from './hosted-conflict-precheck.js';
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
@@ -38,7 +39,7 @@ export { backgroundSaveOperation };
 import type { ConvexExchange } from './exchange-client.js';
 import type { SaveChange, SaveRequest } from './hosted-save.js';
 import type { ContentPin } from './native-exchange.js';
-import { markLandStep } from './land-timing.js';
+import { markLandStep, saveTimingMs } from './land-timing.js';
 import { buildUploadPack, uploadPackMembers } from './object-pack-upload.js';
 import type { StepTimer } from './sync-timing.js';
 import { operationWait } from './agent-operation-wait.js';
@@ -71,6 +72,7 @@ export const overlapEvidenceLevel = (capabilities: {
 export type SaveContract = {
   overlapEvidence: OverlapEvidenceLevel;
   submitPage: boolean;
+  durations?: boolean;
   submitRun?: boolean;
   /** prepare-upload-targets: prepare takes the save's uploads and returns their targets. */
   prepareTargets?: boolean;
@@ -91,6 +93,7 @@ export const saveContract = (capabilities: {
 }): SaveContract => ({
   overlapEvidence: overlapEvidenceLevel(capabilities),
   submitPage: capabilities.features?.includes('save-submit-page') ?? false,
+  durations: capabilities.features?.includes('save-preflight-timing') ?? false,
   submitRun: capabilities.features?.includes('source-submit-run') ?? false,
   prepareTargets: capabilities.features?.includes('prepare-upload-targets') ?? false,
   runPublish: capabilities.features?.includes('source-run-publish') ?? false,
@@ -189,6 +192,7 @@ async function saveOnce(
   timing?: StepTimer,
   observe?: (reply: unknown) => void,
 ) {
+  const started = performance.now();
   const { overlapEvidence, submitPage, submitRun, then, prepareTargets, runPublish } = contract,
     pack = contract.uploadPacks === true;
   saveCommandSchema.parse(command);
@@ -429,6 +433,22 @@ async function saveOnce(
     dropStagedBlobs(directory);
   }
   timing?.mark('upload');
+  const measured = () => {
+    if (!contract.durations) return {};
+    const path = join(directory, 'submit-timing.json');
+    if (!checkoutPathExists(path))
+      durableReplace(
+        path,
+        JSON.stringify(saveTimingMs() ?? Math.max(0, Math.round(performance.now() - started))),
+      );
+    return {
+      clientMs: z
+        .number()
+        .int()
+        .nonnegative()
+        .parse(JSON.parse(readFileSync(path, 'utf8'))),
+    };
+  };
   if (run) {
     // Recorded before the call: a save whose reply is lost is still reported by the next command.
     if (background) durableReplace(join(directory, backgroundSaveName), '');
@@ -437,6 +457,7 @@ async function saveOnce(
       await exchange.client.action(makeFunctionReference<'action'>('projectSourceRun:submit'), {
         ...args,
         kind: 'save',
+        ...measured(),
         ...(committedInRun.length ? { objects: committedInRun } : {}),
         ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
         ...(background ? { settle: 'background' } : {}),
@@ -485,10 +506,11 @@ async function saveOnce(
     if (progress.input) await objects.put(Buffer.from(saveBytes(progress.input)));
   }
   const result = JSON.parse(
-    await exchange.client.mutation(
-      makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'),
-      last === null ? args : { ...args, index: last, page: canonicalPayload(pages[last]!.value) },
-    ),
+    await exchange.client.mutation(makeFunctionReference<'mutation'>('projectHostedSaveJobs:submit'), {
+      ...args,
+      ...measured(),
+      ...(last === null ? {} : { index: last, page: canonicalPayload(pages[last]!.value) }),
+    }),
   );
   markLandStep('saveSubmitted');
   timing?.mark('submit');
@@ -607,6 +629,11 @@ function applyHostedSaveReceipt(
       },
     });
     durableReplace(join(root, '.forge/hosted-lane.json'), JSON.stringify(marker));
+    if (result.durationMs !== undefined)
+      durableReplace(
+        join(clientCacheRoot(root), 'save-timing.json'),
+        JSON.stringify({ laneId: result.laneId, head: result.head, saveMs: result.durationMs }),
+      );
     clearPending();
   });
   settleSave(root, request.operationId, terminal);

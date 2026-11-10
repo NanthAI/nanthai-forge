@@ -15,7 +15,7 @@ intended development project:
 
 ```sh
 node scripts/convex-spend.mjs --config /absolute/private/spend.json
-node scripts/convex-spend.mjs --state /absolute/private/spend-data --print
+node scripts/convex-spend.mjs --config /absolute/private/spend.json --print
 ```
 
 The private JSON configuration is:
@@ -24,6 +24,30 @@ The private JSON configuration is:
 {
   "stateDirectory": "/absolute/private/spend-data",
   "deployments": ["dev", "team-slug:bench-project:dev/operator"],
+  "plan": {
+    "name": "Convex Professional",
+    "monthlyUsd": 25,
+    "periodStart": "2026-11-10T00:00:00Z",
+    "renewalDay": 27,
+    "prorateFirstPeriod": true,
+    "overageAlertUsd": 25,
+    "allowances": {
+      "calls": 25000000,
+      "compute": 250,
+      "io": 50,
+      "egress": 50,
+      "databaseStorage": 50,
+      "fileStorage": 100,
+      "search": 50000
+    },
+    "overageRates": {
+      "calls": 0.000002,
+      "compute": 0.30,
+      "io": 0.20,
+      "egress": 0.12,
+      "search": 0.00011
+    }
+  },
   "notifier": {
     "command": ["/absolute/private/notify-spend"],
     "topic": "YOUR_PRIVATE_TOPIC",
@@ -42,8 +66,8 @@ identity in each log event. No production deployment is needed for this workflow
 
 Omit `notifier` to print alerts only. Topic and target come only from the private
 config; no service, topic, target or credential is built into the script. The hook
-receives one JSON object on stdin with `topic`, `target`, stable `key`, UTC `day`,
-threshold and observed/projected dollars. Its stdout/stderr are discarded. It runs
+receives one JSON object on stdin with `topic`, `target`, stable `key`, billing
+period (or legacy UTC `day`), and the alert threshold/usage/dollars or coverage gaps. Its stdout/stderr are discarded. It runs
 without a shell and inherits ordinary OS settings only; credentials, if needed,
 come from the hook's own private setup. Exit zero means delivered. Failed hooks
 retry on the next local 30-second tick. Deduplicate on `key` in the hook: a crash
@@ -54,11 +78,73 @@ stream or replay, use `--stdin --deployment LABEL`; this reads JSONL from stdin 
 never starts the Convex CLI. Reuse the same label on replay.
 
 `--print` performs no network request and prints JSON with today, yesterday, the
-seven UTC-day trend, raw usage and dollars by cost class, deployment coverage,
-missing fields, gaps, and today's top ten functions by dollars. Empty days have
+seven UTC-day trend, raw usage and list-rate dollars by cost class, deployment
+coverage, missing fields, gaps, and today's top ten functions by list-rate dollars.
+With `--config` and a plan, `billing` comes first: the active billing period, each
+class's captured month-to-date use against its allowance, daily pace, observed and
+projected overage, and a period-wide function list with both dollar columns. Empty days have
 no coverage and unknown completeness; their observed zero is not a zero bill.
 
-## Cost and alert semantics
+## Plan, allowances and billing alerts
+
+Private config is the billing source of truth; a plan name never fetches or selects
+provider prices. Allowances use calls, decimal GB, GB-hours and query-GB, rather
+than raw log bytes. Overage rates use dollars per corresponding unit. The five
+logged classes default to the list rates below when their overrides are omitted.
+Keep the allowances/rates private so invoice corrections need no source change.
+`overageAlertUsd` defaults to 25. The subscription's $25 monthly fee is shown
+separately; the meter does not guess a first-invoice fee or allocate it to functions.
+
+`periodStart` is the UTC upgrade timestamp, and `renewalDay` starts later monthly
+periods at midnight UTC. A renewal on a nonexistent date clamps to that month's last
+day, then returns to the configured day. With `prorateFirstPeriod: true`, all first
+period allowances multiply by active time / the containing renewal cycle's time.
+For November 10–27, 2026, that is **17/31** of the October 27–November 27 cycle:
+I/O and egress each receive about **27.419 GB**. This deliberately assumes the
+smaller allowance until the invoice establishes the provider's upgrade treatment.
+Set `prorateFirstPeriod: false` if the invoice gives the full allowance, or correct
+the configured monthly allowances. Later complete periods receive full allowances.
+
+Each logged class reports `normalDailyAllowance` (monthly / 30, about **1.67 GB/day**
+for I/O and egress), separately from `periodDailyAllowance` (effective allowance /
+actual period days, about 1.613 GB/day for this 31-day cycle) and `allowanceToDate`.
+Only usage above the effective period allowance incurs `overageUsd`; a separate
+`listRateUsd` preserves outside-scale cost-to-serve. Allowances pool across every
+listed deployment and function once. `billing.perFunction` keeps both
+`allocatedOverageUsd` and `listRateUsd`; overage is attributed proportionally to
+known usage in each class, not charged independently to every function. The daily
+and seven-day legacy fields remain list-rate measurements.
+
+Every local 30-second tick notifies when projected known period overage exceeds
+`overageAlertUsd`, or projected I/O or egress exceeds its allowance. A coverage alert
+also exposes unknown usage, unwatched deployments and gaps. Keys are acknowledged
+once per billing period after successful delivery/printing, surviving restarts;
+failed hooks retry. Plan alerts replace the old daily/function thresholds while
+preserving the complete function list and all usage measurements. With no `plan`,
+the original $1.50/day and $0.50/function alerts still apply. Nothing blocks usage.
+
+Projection scales each watched deployment's known rate across the **whole** period,
+including earlier unwatched time, and never below already captured usage. It is a
+rate-based estimate, not evidence that earlier usage was captured. A late start
+therefore cannot silently price earlier missing time as zero. Known overage can
+still alert when other fields are unknown; unknown totals stay null, with labelled
+known subtotals. An unwatched deployment has no estimable rate, so it also produces
+a coverage alert rather than a fabricated projection.
+
+Storage gauges are absent from Completion logs. Their allowance rows remain
+unknown unless private config supplies, for example,
+`"storageUsage": {"asOf":"2026-11-10T12:00:00Z","databaseStorage":7.5,"fileStorage":0}`
+inside `plan` (synthetic example, in GB). A snapshot must belong to the active
+period; it is labelled with its timestamp, never treated as cumulative use or a
+measured month-end growth rate. Storage overage prices were not supplied: excess
+storage remains unpriced unless its `overageRates` entries are configured from the
+invoice. The meter makes no storage probe or extra provider call.
+
+Edit the existing private config and restart the existing user job to apply it;
+this script changes neither the config nor launchd itself. Always pass `--config`
+to `--print` for plan accounting; `--state` alone intentionally has no billing plan.
+
+## List-rate and legacy alert semantics
 
 The operating-budget rates are $2 per million calls, $0.20 per decimal GB of
 database I/O, $0.12 per decimal GB of network egress, $0.30 per GB-hour of action
@@ -76,7 +162,7 @@ memory MB divided by 1024, multiplied by execution seconds divided by 3600.
 Queries/mutations have zero action compute. Missing/invalid usage yields a null
 cost class and total, with a separately labelled known-dollar subtotal.
 
-Every 30 seconds the local process checks whether today's projected known cost
+Without a configured plan, every 30 seconds the local process checks whether today's projected known cost
 exceeds **$1.50/day**, or one function's observed known cost exceeds **$0.50 today**.
 Projection divides each deployment's observed known cost by its locally watched
 seconds today and scales to 24 hours, then sums deployments. A partial initial
@@ -107,8 +193,10 @@ heartbeat interval. Silent provider drops cannot be counted or ruled out. No
 traffic is not itself evidence of a gap. Torn bytes are preserved, and resumed
 records start on a new line.
 
-Storage, backup/export traffic absent from function logs, other unlisted projects,
-R2 charges, allowances and invoice adjustments remain outside this model. Compare
+Backup/export traffic absent from function logs, other unlisted projects, R2
+charges and invoice adjustments remain outside this model. Storage requires the
+explicit private snapshot described above, and captured month-to-date use omits
+time before capture and any gaps. Compare
 against the same deployment/window in Usage, and reconcile separately with the
 team invoice; do not treat this estimate as a complete team bill.
 
@@ -122,7 +210,13 @@ and 0.26 seconds to aggregate, with 93 MB heap growth and 307 MB peak RSS; its
 normalized records imply about 54 MB/day on disk for that fixture. This excludes
 the identity Set, journal replay/flushes, and the separate Convex CLI processes; it
 is not a measured live-machine ceiling or billed saving. Growth remains linear.
-The seven-day report processes one day at a time. Keep the machine's configured
+The seven-day report processes one day at a time. Plan reporting also replays at
+most one closed day at a time, and caches compact closed-day summaries pinned to
+their append-only journal's size/mtime. Late journal appends invalidate the cache;
+old or invalid summaries rebuild locally. Subsequent ticks reuse closed summaries,
+so adding month-to-date accounting does not repeatedly replay a month of raw logs.
+The active day retains the existing cache. Billing-period boundaries clip coverage
+and executions, including a partial upgrade day; old journals remain unchanged. Keep the machine's configured
 disk reserve and monitor the local ledger separately. At higher volume, measure
 local memory, startup and reporting time before choosing a different ledger.
 

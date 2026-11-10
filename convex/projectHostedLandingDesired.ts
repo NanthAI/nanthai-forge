@@ -3,6 +3,7 @@ import { landingPriority } from './projectHostedLandingOrder';
 import { scheduleLandingAlarm } from './projectHostedLandingStallWake';
 import { desiredWatchdogMs } from '../src/hosted-landing-stall';
 import { desiredLanding, scheduleDesired as schedule } from './projectHostedLandingDesiredWake';
+import { landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { receiptMutation, internalMutation, internalAction, type MutationCtx } from './cliServer';
@@ -199,7 +200,11 @@ export async function submitDesiredLanding(
       : {}),
     observation: landingObservation('queued'),
     error: null,
-    timing: { submittedAt: at, composeStartedAt: source.operation.firstAttempt.at },
+    timing: {
+      submittedAt: at,
+      composeStartedAt: source.operation.firstAttempt.at,
+      ...landGateTiming(gates?.value),
+    },
     request: {
       ...(command.governanceVersion ? { governanceVersion: command.governanceVersion } : {}),
       operationId: command.operationId,

@@ -24,15 +24,19 @@ export async function requireReuseAudit(
 ) {
   const audit = input.proof.audit;
   const { run } = await loadHostedCheck(ctx, { projectId: input.projectId, runId: audit.runId });
-  await requireHostedCheckEvidence(ctx, {
-    ...input.check,
-    projectId: input.projectId,
-    actor: input.actor,
-    authorityEpoch: input.authorityEpoch,
-    candidateId: run.request.candidateId,
-    head: audit.head,
-    runId: audit.runId,
-  });
+  await requireHostedCheckEvidence(
+    ctx,
+    {
+      ...input.check,
+      projectId: input.projectId,
+      actor: input.actor,
+      authorityEpoch: input.authorityEpoch,
+      candidateId: run.request.candidateId,
+      head: audit.head,
+      runId: audit.runId,
+    },
+    run,
+  );
   invariant(
     run.planDigest === audit.planDigest &&
       run.terminalDigest === audit.terminalDigest &&

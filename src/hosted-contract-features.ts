@@ -105,6 +105,9 @@ export const hostedContractFeatures = [
    * head; a project with preflight require refuses a new agent landing without it. Without the
    * feature the CLI sends nothing (an older server judges nothing). */
   'land-gates',
+  /** Final save submission takes clientMs; its receipt returns durationMs. Land gates carry
+   * saveMs/preflightMs into landing timing, using existing calls only. */
+  'save-preflight-timing',
   /** Unsaved-work snapshots (Issue 7ac4e32f): projectLaneSnapshots:* exist and capabilities carry
    * `laneSnapshots` (policy autoSnapshot). Without it the CLI takes no snapshot and refuses
    * `x snapshots`. */

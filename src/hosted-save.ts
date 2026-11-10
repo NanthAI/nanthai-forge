@@ -124,11 +124,19 @@ export const saveResultSchema = z
     version: number,
     sourceVersion: number,
     unchanged: z.boolean(),
+    durationMs: z.number().int().nonnegative().optional(),
     /** Set when this save replaced a live finish on purpose. */
     supersededFinish: z.uuid().optional(),
     at: z.iso.datetime(),
   })
   .strict();
+/** Optional diagnostics never prevent saving source, including a bad or overflowing clock sample. */
+export function saveDurationMs(value: number | undefined, elapsed = 0): number | undefined {
+  if (value === undefined || !Number.isSafeInteger(value) || value < 0) return undefined;
+  const total = value + elapsed;
+  return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
+}
+
 export function saveBytes(value: unknown) {
   return new TextEncoder().encode(canonicalPayload(value));
 }

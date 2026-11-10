@@ -30,7 +30,7 @@ const union = (text, name) => {
 test('every reuse and proof refusal the code can record has an explicit kind (build-failing guard)', () => {
   const codes = new Set([
     ...union(source('src/hosted-cross-head-analysis.ts'), 'FirstCheckRecheck'),
-    ...union(source('convex/projectHostedReuseStore.ts'), 'ReuseIneligible'),
+    ...union(source('convex/projectHostedReuseDecision.ts'), 'ReuseIneligible'),
     // Literal reasons passed straight to the install, and the receipt's own defaults.
     ...[
       ...source('convex/projectHostedFinishControl.ts').matchAll(/installFinishCompose\([^)]*'([a-z-]+)'\)/g),

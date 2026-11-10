@@ -200,3 +200,66 @@ test('callback finalizer completes without an editing client and reconciles a lo
   assert.equal(await jobApi.complete._handler(ctx, { projectId: s.projectId, jobId: output.jobId }), null);
   assert.equal(gets, 1);
 });
+
+for (const changed of [false, true]) {
+  test(`save duration retains client plus server work on replay with unchanged calls and row writes (${changed ? 'changed' : 'clean'})`, async t => {
+    let now = Date.parse('2026-11-10T12:00:00Z');
+    t.mock.method(Date, 'now', () => now);
+    const run = async measured => {
+      const s = await saveFixture(),
+        x = await s.prepare(changed ? [s.change()] : []);
+      await s.stage(x);
+      let terminal = await s.submit(x, measured ? { clientMs: 12000 } : {});
+      now += 3000;
+      if (changed) terminal = await s.publish(await s.work(x));
+      const counts = s.counts.map(c => ({ name: c.name, documents: c.documents, writes: c.writes }));
+      return { s, x, terminal, counts };
+    };
+    const baseline = await run(false),
+      measured = await run(true);
+    assert.deepEqual(measured.counts, baseline.counts, 'same Convex calls, document reads and row writes');
+    const duration = changed ? 15000 : 12000;
+    assert.equal(measured.terminal.outcome.result.durationMs, duration);
+    const saved = [...measured.s.tables.projectHostedRecordHeads.values()].find(row => row.kind === 'save');
+    assert.equal(
+      JSON.parse(
+        measured.s.tables.projectHostedRecordBodies.get(
+          measured.s.tables.projectHostedRecords.get(saved.recordId).bodyId,
+        ).value,
+      ).durationMs,
+      duration,
+    );
+    now += 90000;
+    assert.deepEqual(
+      await measured.s.submit(measured.x, { clientMs: 99999 }),
+      measured.terminal,
+      'retry retains original timing',
+    );
+    assert.equal(
+      baseline.terminal.outcome.result.durationMs,
+      undefined,
+      'older clients retain their reply shape',
+    );
+    const added =
+      Buffer.byteLength(JSON.stringify(measured.terminal.outcome.result)) -
+      Buffer.byteLength(JSON.stringify(baseline.terminal.outcome.result));
+    assert(added <= 100, 'duration adds at most 100 bytes to a save row or reply');
+    const sum = (s, key) => s.counts.reduce((total, count) => total + count[key], 0);
+    t.diagnostic(
+      `save duration metadata: reply +${added} B; DB writes +${sum(measured.s, 'writeBytes') - sum(baseline.s, 'writeBytes')} B before replay`,
+    );
+  });
+}
+
+test('bad optional save timing never prevents saving source, and unsafe totals remain unknown', async () => {
+  const { saveDurationMs } = await import('../dist/hosted-save.js');
+  assert.equal(saveDurationMs(Number.MAX_SAFE_INTEGER, 1), undefined, 'overflow cannot fail publication');
+  assert.equal(saveDurationMs(12000, 3000), 15000);
+  for (const clientMs of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const s = await saveFixture(),
+      x = await s.prepare([]);
+    const result = await s.submit(x, { clientMs });
+    assert.equal(result.outcome.status, 'completed');
+    assert.equal(result.outcome.result.durationMs, undefined);
+  }
+});

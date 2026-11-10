@@ -249,8 +249,9 @@ export async function finishFixture(
       },
       ...overrides,
     });
-  const enqueue = r =>
+  const enqueue = (r, metadata = {}) =>
     tx('finishEnqueue', landingApi.enqueue, {
+      ...metadata,
       projectId: f.projectId,
       request: JSON.stringify(r),
     }).then(JSON.parse);

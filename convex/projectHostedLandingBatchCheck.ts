@@ -85,14 +85,18 @@ async function prepareLandingCheckOnce(
           await retryLandingBatchCheck(ctx, key, batch, attempt, run);
         } else if (outcome === 'passed') {
           await recordCohortOutcome(ctx, key, batch, true);
-          await requireHostedCheckEvidence(ctx, {
-            projectId: claim.projectId,
-            actor: attempt.actor.id,
-            candidateId: attempt.candidate.id,
-            head: attempt.candidate.head!,
-            authorityEpoch: attempt.authorityEpoch,
-            ...attempt.check!,
-          });
+          await requireHostedCheckEvidence(
+            ctx,
+            {
+              projectId: claim.projectId,
+              actor: attempt.actor.id,
+              candidateId: attempt.candidate.id,
+              head: attempt.candidate.head!,
+              authorityEpoch: attempt.authorityEpoch,
+              ...attempt.check!,
+            },
+            run,
+          );
           for (const member of batch.members.filter(
             member => !batch.included || batch.included.includes(member.submissionId),
           )) {

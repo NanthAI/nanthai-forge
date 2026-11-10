@@ -143,6 +143,7 @@ export function daySummary(day, rows, now = Date.now()) {
     return {
       deployment: dep.deployment,
       usage: dep.usage,
+      knownUsage: dep.knownUsage,
       ...cost,
       coveredMs,
       missingFields: [...dep.missingFields],
@@ -151,6 +152,7 @@ export function daySummary(day, rows, now = Date.now()) {
   return {
     day,
     usage,
+    knownUsage,
     ...costOf(usage, knownUsage),
     projectedKnownUsd: detail.length && detail.every(dep => dep.coveredMs > 0) ? projectedKnownUsd : null,
     deployments: detail,
@@ -160,6 +162,7 @@ export function daySummary(day, rows, now = Date.now()) {
       .map(fn => ({
         identifier: fn.identifier,
         usage: fn.usage,
+        knownUsage: fn.knownUsage,
         missingFields: [...fn.missingFields],
         ...costOf(fn.usage, fn.knownUsage),
       }))

@@ -18,6 +18,7 @@ import { reuseHostedLanding } from './projectHostedLandingIdentity';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
 import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
 import { preQueueCheck } from '../src/hosted-landing-admission';
+import { landGateTiming } from '../src/hosted-land-gates';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
@@ -369,7 +370,12 @@ export async function enqueueHostedLanding(
           retryReason: reserved?.retryReason ?? reused.retryReason,
         }
       : {}),
-    timing: { submittedAt: first.at, ...reserved?.timing, composedAt: new Date().toISOString() },
+    timing: {
+      submittedAt: first.at,
+      ...reserved?.timing,
+      ...landGateTiming(input.gates?.value),
+      composedAt: new Date().toISOString(),
+    },
     observation: landingObservation(admission ? 'checking' : 'queued'),
     error: null,
   });

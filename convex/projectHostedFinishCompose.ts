@@ -36,6 +36,7 @@ import { carriedCostCounts } from '../src/landing-speed-alerts';
 import { invalidatePipeline } from './projectHostedLandingPipeline';
 import { scopedRecheckBasis, scopedRecheckFallback } from './projectHostedScopedRecheck';
 import { requireHostedCheckEvidence } from './projectHostedCheckRead';
+import type { HostedCheckRun } from '../src/hosted-check';
 async function wakeAfterPrecompose(
   ctx: MutationCtx,
   projectId: Doc<'projectHostedFinishes'>['projectId'],
@@ -255,6 +256,7 @@ export async function installFinishCompose(
   proof?: CrossHeadProof,
   preparedSource?: Awaited<ReturnType<typeof loadCompose>>,
   recheckReason?: string,
+  checkedRun?: HostedCheckRun,
 ) {
   const input = { projectId: row.projectId, submissionId: row.submissionId };
   const { row: landing, state } = await loadLanding(ctx, input),
@@ -417,14 +419,18 @@ export async function installFinishCompose(
       'EVIDENCE_CHANGED',
       'Reuse only the exact verified recomposition proof.',
     );
-    const run = await requireHostedCheckEvidence(ctx, {
-      projectId: row.projectId,
-      actor: previous.actor.id,
-      candidateId: checked.id,
-      head: checked.head!,
-      authorityEpoch: previous.authorityEpoch,
-      ...previous.check,
-    });
+    const run = await requireHostedCheckEvidence(
+      ctx,
+      {
+        projectId: row.projectId,
+        actor: previous.actor.id,
+        candidateId: checked.id,
+        head: checked.head!,
+        authorityEpoch: previous.authorityEpoch,
+        ...previous.check,
+      },
+      checkedRun,
+    );
     invariant(
       run.terminalDigest === proof.terminalDigest &&
         run.planDigest === proof.planDigest &&
@@ -447,7 +453,7 @@ export async function installFinishCompose(
   // A main race without a transferable proof may recheck only the shared impact.
   const recheck =
     !proof && previous && candidate.result.status === 'clean'
-      ? await scopedRecheckBasis(ctx, previous)
+      ? await scopedRecheckBasis(ctx, previous, checkedRun)
       : undefined;
   const scopedFallback =
     !proof && previous && candidate.result.status === 'clean'
@@ -496,6 +502,7 @@ export async function installFinishCompose(
       phase: 'queued',
       timing: {
         submittedAt: state.at,
+        ...(state.timing?.ms ? { ms: state.timing.ms } : {}),
         composeStartedAt: pending.at,
         composedAt: new Date().toISOString(),
       },
@@ -504,6 +511,7 @@ export async function installFinishCompose(
       error: null,
     },
     true,
+    checkedRun?.status !== 'passed' || landing.runId !== checkedRun.id,
   );
   await wakeLandingQueue(ctx, { projectId: row.projectId, channel: 'main' });
 }

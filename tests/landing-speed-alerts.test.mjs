@@ -211,6 +211,8 @@ test('samples come from the landed state only; missing stamps leave a metric unk
     toMain: 12,
     check: 3.5,
     settle: 210,
+    saveMs: null,
+    preflightMs: null,
     attempts: null,
     writes: null,
     // Nothing reported a count: unknown, except the audit slot, which starts at 0 and only grows.
@@ -639,3 +641,68 @@ test('the operator drill breaks one budget through the real path, then recovers 
   assert.equal(await run('restore'), 'restored');
   assert.equal([...f.tables.projectLandingSpeed.values()].length, 0, 'the synthetic window is gone');
 });
+
+for (const id of ['save', 'preflight']) {
+  test(`${id} duration breaks once, recovers once and reopens the same P0 Issue after another break`, () => {
+    const budget = byId(id);
+    let state = null,
+      tick = 0;
+    const feed = (value, count = WINDOW) => {
+      const events = [];
+      for (let i = 0; i < count; i++) {
+        const out = observeLandingSpeed(
+          state,
+          {
+            at: noon + tick++ * minute,
+            id: `duration-${tick}`,
+            toMain: 10,
+            check: 5,
+            settle: 1,
+            [budget.metric]: value,
+            stages: { queue: 4, check: 5, settle: 1 },
+          },
+          budgets,
+        );
+        state = out.state;
+        events.push(...out.events);
+      }
+      return events;
+    };
+    assert.deepEqual(feed(null), [], 'unknown durations do not train a window');
+    assert.deepEqual(feed(budget.max / 2), []);
+    assert.deepEqual(feed(budget.max * 2, 2), [], 'two outliers do not break p90');
+    const [broken] = feed(budget.max * 2, 1);
+    assert.equal(broken.budget.id, id);
+    assert.equal(broken.kind, 'broken');
+    assert.deepEqual(feed(budget.max * 2), [], 'no repeated alert while broken');
+    const [recovered] = feed(budget.max / 2);
+    assert.equal(recovered.kind, 'recovered');
+    assert.deepEqual(feed(budget.max / 2), [], 'no repeated recovery');
+    const [again] = feed(budget.max * 2);
+    const issue = event => speedBudgetIssue(event, 'synthetic-project', budgets);
+    assert.equal(issue(broken).itemId, issue(recovered).itemId);
+    assert.equal(issue(broken).itemId, issue(again).itemId);
+    assert.match(speedBudgetMessage(broken, 'synthetic', budgets).text, /Next: compare/);
+    assert.equal(
+      windowValue(addAuditSeconds(state, 60).samples, budget.metric, 'p90', WINDOW),
+      budget.max * 2,
+      'audit updates retain duration stamps',
+    );
+    const records = {
+      finishTimings: state.samples.map(row => ({
+        id: row[3],
+        at: new Date(row[0]).toISOString(),
+        minutes: row[1],
+        [budget.metric]: row[id === 'save' ? 8 : 9],
+      })),
+      runs: [],
+    };
+    const rows = speedBudgetRows(
+      records,
+      { from: new Date(noon).toISOString(), to: new Date(noon + tick * minute).toISOString() },
+      budgets,
+    );
+    assert.equal(rows.find(row => row.id === id).status, 'fail');
+    assert.match(speedBudgetWarning(rows), new RegExp(id));
+  });
+}

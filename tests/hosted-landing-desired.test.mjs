@@ -371,7 +371,12 @@ test('Issue 029138ef: the server refuses a direct desired landing that skips the
   );
   await assert.rejects(submitWith(command, '{"lanes":[{"laneId":"x"}]}'), code('BAD_ARGUMENT'));
   // The CLI's result for this head: the landing proceeds and lands exactly as before.
-  const state = await submitWith(command, JSON.stringify({ lanes: [{ ...lane, preflight: 'passed' }] }));
+  const state = await submitWith(
+    command,
+    JSON.stringify({ lanes: [{ ...lane, preflight: 'passed', saveMs: 15000, preflightMs: 49779 }] }),
+  );
+  assert.equal(state.timing.ms[0], 15000);
+  assert.equal(state.timing.ms[1], 49779);
   assert.equal(state.phase, 'composing');
   // A replay of the same operation returns its landing unjudged (no gates needed).
   assert.equal((await submitWith(command)).id, state.id);
@@ -379,6 +384,17 @@ test('Issue 029138ef: the server refuses a direct desired landing that skips the
   await f.passChecks();
   await f.drain();
   assert.equal((await read(f, command.operationId)).submission.phase, 'landed');
+  const canonical = JSON.parse(
+    [...f.tables.projectHostedLandingRequests.values()].find(row => row.operationId === command.operationId)
+      .value,
+  );
+  assert.equal(canonical.timing.ms[0], 15000);
+  assert.equal(canonical.timing.ms[1], 49779);
+  assert.equal(
+    (await read(f, command.operationId)).submission.timing.ms,
+    undefined,
+    'released strict read DTO retains its shape',
+  );
   // Budget: a gated landing reads one indexed range more than an ungated one.
   const plain = await finishFixture(t);
   const ungatedFrom = plain.counts.length;
@@ -441,3 +457,25 @@ test('Issue 029138ef: a direct agent enqueue is judged like a desired one; namin
   const state = await enqueue(agent, gates);
   assert.equal(state.request.operationId, agent.operationId);
 });
+
+for (const preflight of ['off', 'advise']) {
+  test(`optional timing metadata cannot add a landing refusal with preflight ${preflight}`, async t => {
+    const f = await finishFixture(t);
+    const project = f.tables.hostedProjects.get(f.projectId);
+    f.patch('hostedProjects', f.projectId, {
+      autonomyPolicy: {
+        ...project.autonomyPolicy,
+        agentDefaults: { ...project.autonomyPolicy.agentDefaults, preflight },
+      },
+    });
+    const state = JSON.parse(
+      await f.tx('desiredSubmit', desired.submit, {
+        projectId: f.projectId,
+        request: JSON.stringify(request(f)),
+        gates: 'not valid optional metadata',
+      }),
+    );
+    assert.equal(state.phase, 'composing');
+    assert.equal(state.timing.ms, undefined, 'unknown timing stays unknown; policy is unchanged');
+  });
+}

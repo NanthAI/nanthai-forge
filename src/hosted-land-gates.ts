@@ -29,7 +29,13 @@ export const preflightResult = (advisory: unknown): PreflightResult => {
   return PREFLIGHT_RESULTS.includes(status as PreflightResult) ? (status as PreflightResult) : 'none';
 };
 export const landGateEntrySchema = z
-  .object({ laneId: z.uuid(), head: hash, preflight: z.enum(PREFLIGHT_RESULTS) })
+  .object({
+    laneId: z.uuid(),
+    head: hash,
+    preflight: z.enum(PREFLIGHT_RESULTS),
+    saveMs: z.number().int().nonnegative().optional(),
+    preflightMs: z.number().int().nonnegative().optional(),
+  })
   .strict();
 /** Landings of more Lanes than this are judged on their first 20 (an Intent rarely has more). */
 export const GATED_LANES = 20;
@@ -45,6 +51,27 @@ export const parseLandGates = (text: string | undefined): LandGates | null => {
     throw new ForgeError('BAD_ARGUMENT', 'gates: send the land gate result the CLI computed.');
   }
 };
+
+/** Timing on the existing gate argument, independent of whether preflight is required. A multi-Lane
+ * landing records the longest known save/preflight; absent stamps stay unknown. No I/O. */
+export function landGateTiming(text: string | undefined) {
+  let gates: LandGates | null;
+  try {
+    gates = parseLandGates(text);
+  } catch {
+    // Only enforceLandGates judges policy. Optional metrics never add a refusal.
+    return {};
+  }
+  const lanes = gates?.lanes ?? [];
+  const timing: { saveMs?: number; preflightMs?: number } = {};
+  for (const key of ['saveMs', 'preflightMs'] as const) {
+    const values = lanes.flatMap(lane => (lane[key] === undefined ? [] : [lane[key]!]));
+    if (values.length) timing[key] = Math.max(...values);
+  }
+  return Object.keys(timing).length
+    ? { ms: [timing.saveMs ?? null, timing.preflightMs ?? null] as [number | null, number | null] }
+    : {};
+}
 
 /** The refusal finishGates would give, for the Lanes and heads the landing composed (none: the
  * landing named no composition of the caller's). Same code and next step as the CLI. */

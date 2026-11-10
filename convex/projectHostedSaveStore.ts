@@ -28,6 +28,7 @@ export const saveStateSchema = z
     status: z.enum(hostedSaveStatuses),
     /** Server clock at submit and the execution's step split at publication (friction f15db544). */
     submittedAt: z.number().optional(),
+    clientMs: z.number().int().nonnegative().optional(),
     serverTiming: sourceServerTimingSchema.optional(),
     /** The save-then-resolve chain stopped before its submit (its error code). */
     chainFailure: z.string().optional(),

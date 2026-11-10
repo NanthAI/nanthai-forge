@@ -11,6 +11,18 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 /** Local pending-save files only (no network, no checkout code): every agent command reads them
  * before its first call, so they stay out of the save client's module graph. */
 
+/** Last completed save of this exact Lane head: local receipt cache, no network. */
+export function savedDuration(root: string, laneId: string, head: string): number | undefined {
+  try {
+    const value = z
+      .object({ laneId: z.string(), head: z.string(), saveMs: z.number().int().nonnegative() })
+      .parse(JSON.parse(readFileSync(join(clientCacheRoot(root), 'save-timing.json'), 'utf8')));
+    return value.laneId === laneId && value.head === head ? value.saveMs : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** One retained save per checkout baseline; its reply may be lost while it publishes. */
 export const pendingSavePath = (root: string, marker: unknown) =>
   join(clientCacheRoot(root), `save-baseline-${digest(canonicalPayload(marker))}.json`);
