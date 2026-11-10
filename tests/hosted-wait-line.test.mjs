@@ -117,3 +117,13 @@ test('wait line: a parked READY entry names the older submission it waits for', 
   assert.equal(line.phase, 'ready');
   assert.equal('waitingFor' in waitEventLine(event()).line, false, 'no wait, no field');
 });
+
+// Issue 7cb61db1: a scoped-mode plan that ran the whole command says why on the landing's wait line.
+test('wait line: a check that ran in full names its reason; a scoped one adds nothing', () => {
+  const reason = 'Command scope: package graph: gradle: …; declare packages.commands in forge.json; full run';
+  const full = event();
+  full.submission.ranInFull = reason;
+  assert.equal(waitEventLine(full).line.ranInFull, reason);
+  assert.notEqual(waitEventLine(full).key, waitEventLine(event()).key, 'the reason prints once');
+  assert.equal('ranInFull' in waitEventLine(event()).line, false);
+});

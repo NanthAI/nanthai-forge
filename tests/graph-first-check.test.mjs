@@ -30,7 +30,7 @@ import {
 } from '../dist/graph-first-check.js';
 import { gateFor } from '../dist/contract-gate-policy.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
-import { selectionFallback } from '../dist/fallback-reasons.js';
+import { runFallback, selectionFallback } from '../dist/fallback-reasons.js';
 import { packagesModes, writeCheckPackages } from '../dist/package-graph-checkout.js';
 import { commandCheckInputs } from '../scripts/check-command-env.mjs';
 import { noTestsCollected, packageRunCommands, runPackageCommands } from '../scripts/check-packages-run.mjs';
@@ -165,6 +165,44 @@ for (const [ecosystem, files] of Object.entries(repos))
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+// Issue 7cb61db1: the planner reads the project's test flags as the runner does, so a Gradle task Forge
+// cannot scope plans full with the reason that names the fix, and that reason rides the run record.
+test('a check text running a Gradle task Forge cannot scope plans full; the run reason names packages.commands', () => {
+  const files = new Map([...repos.gradle, ['ci/check.sh', './gradlew testDebugUnitTest\n']]);
+  const selected = actionsGateSelection(run(ci(), gate), [leaf.gradle[0]], files, false);
+  assert.equal(selected.scope, 'full', selected.reason);
+  assert.equal(selected.fallback, 'graph-full');
+  const fields = runFallback(selected);
+  assert.equal(fields.fallback, 'graph-full');
+  assert.match(fields.fallbackReason, /testDebugUnitTest.*declare packages\.commands in forge\.json/);
+  assert(fields.fallbackReason.length <= 300);
+  // Declaring the template turns the same edit scoped.
+  const template = { packages: { commands: { gradle: ['./gradlew', '{packages}'] } } };
+  const declared = new Map([...files, ['forge.json', JSON.stringify(template)]]);
+  assert.equal(actionsGateSelection(run(ci(), gate), [leaf.gradle[0]], declared, false).scope, 'scoped');
+  assert.deepEqual(runFallback({ fallback: 'not-a-code', reason: 'x' }), {});
+});
+
+// Issue 240ca537: a package of another ecosystem that only widening pulled in is named as widened in,
+// with packages.edges offered before its own command; a change inside it keeps the plain refusal.
+test('a widened-in package that cannot run says widened in and offers packages.edges first', () => {
+  const files = new Map([
+    ...repos.gradle,
+    ...repos.js,
+    ['ci/check.sh', './gradlew testDebugUnitTest\nnpm test\n'],
+  ]);
+  const js = actionsGateSelection(run(ci(), gate), [leaf.js[0]], files, false);
+  assert.equal(js.scope, 'full', js.reason);
+  assert.match(
+    js.reason,
+    /gradle:\S+, gradle:\S+, … widened in, not changed \(no forge\.json packages\.edges\)/,
+  );
+  assert(js.reason.indexOf('packages.edges') < js.reason.indexOf('packages.commands'), js.reason);
+  const own = actionsGateSelection(run(ci(), gate), [leaf.gradle[0]], files, false);
+  assert.doesNotMatch(own.reason, /widened in/);
+  assert.match(own.reason, /declare packages\.commands/);
+});
 
 function checkout(files) {
   const root = mkdtempSync(join(tmpdir(), 'forge-graph-first-'));
@@ -656,7 +694,11 @@ test('server: a majority change plans full evidence under the same gate', async 
   const s = await server(t, { paths: ['crates/core/src/lib.rs'] });
   const full = s.planFor(['crates/core/src/lib.rs']);
   assert.equal(full.scope, 'full');
-  assert.equal((await s.prepare(echo(full, s.queued.gate))).gate.effective, 'full');
+  const prepared = await s.prepare(echo(full, s.queued.gate));
+  assert.equal(prepared.gate.effective, 'full');
+  // The plan write keeps the code and the reason text that explains it (7cb61db1).
+  assert.equal(prepared.fallback, 'graph-full');
+  assert.match(prepared.fallbackReason, /more than 50%/);
 });
 
 test('server: an undeclared command, a red or unaudited main, or unknown paths keep the full first check', async t => {

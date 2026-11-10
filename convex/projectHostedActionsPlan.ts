@@ -15,7 +15,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { secretAllowEvidenceSchema } from '../src/secret-allow';
 import { validCommandPlan } from '../src/check-command-scope';
-import { selectionFallbackSchema } from '../src/fallback-reasons';
+import { runFallback } from '../src/fallback-reasons';
 import { isScopedRecheck } from '../src/scoped-recheck-policy';
 export const prepare = internalMutation({
   args: {
@@ -174,9 +174,8 @@ export const prepare = internalMutation({
       ]);
       run.plan = plan;
       run.planDigest = checkPin(plan);
-      // A runner's fallback code rides this plan write; unknown values are dropped (7c2e69e1).
-      const fallback = selectionFallbackSchema.safeParse(recipe.selection.fallback);
-      if (fallback.success) run.fallback = fallback.data;
+      // A runner's fallback code and its reason ride this plan write; unknown codes are dropped (7c2e69e1, 7cb61db1).
+      Object.assign(run, runFallback(recipe.selection));
       // Recorded for the run's evidence; every pass reads the required jobs' conclusions.
       if (input.packRefresh && run.actions) run.actions.packRefresh = true;
       run.status = 'running';

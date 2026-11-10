@@ -54,6 +54,14 @@ test('check summary: counts, failed and flaky names, timings and scope from the 
   assert.equal(summary.more, undefined);
 });
 
+// Issue 7cb61db1: a run that fell back to the whole command carries the code and the reason text.
+test('check summary: a run that ran in full names the fallback code and its reason', () => {
+  const reason = 'Command scope: package graph: gradle: …; declare packages.commands in forge.json; full run';
+  const full = summarizeCheckRun(run({ fallback: 'graph-full', fallbackReason: reason }));
+  assert.deepEqual(full.selection.ranInFull, { code: 'graph-full', reason });
+  assert.equal(summarizeCheckRun(run()).selection.ranInFull, undefined);
+});
+
 test('check summary: stays under 8 KB with hundreds of failed and flaky files, and says what it left out', () => {
   const many = Object.fromEntries(
     Array.from({ length: 600 }, (_, i) => [

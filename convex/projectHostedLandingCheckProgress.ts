@@ -31,4 +31,5 @@ export function retainCheckProgress(state: HostedLandingState, run: HostedCheckR
       : {}),
   };
   if (run.testFiles) state.testFiles = run.testFiles;
+  if (run.fallbackReason) state.ranInFull = run.fallbackReason;
 }

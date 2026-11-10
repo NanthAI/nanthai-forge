@@ -38,6 +38,8 @@ export function waitEventLine(event: unknown): { line: Json; key: string } | und
       error: error.code,
       // Held for a person or a dependency (5c59940b): the reason (protected paths) and next step.
       hold: landingHold(submission as Parameters<typeof landingHold>[0]) ?? undefined,
+      // The check ran the whole command: why, and what to declare so it narrows (7cb61db1).
+      ranInFull: submission.ranInFull,
       // The shared state name (src/landing-state.ts); the line stays compact, so the word and next
       // step ride on the full reply (and a hold's next step on `hold`).
       landingState: e.submission ? landingStateOf(submission as LandingRecord).state : undefined,

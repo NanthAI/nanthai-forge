@@ -307,6 +307,8 @@ export const hostedCheckRunSchema = z
     planDigest: checkHash.nullable(),
     /** Why the runner could not narrow or skip the command (src/fallback-reasons.ts, 7c2e69e1). */
     fallback: z.string().min(1).max(64).optional(),
+    /** That selection's reason text, bounded: what to declare so it narrows (Issue 7cb61db1). */
+    fallbackReason: z.string().min(1).max(300).optional(),
     status: hostedCheckStatusSchema,
     cancelRequested: z.boolean(),
     counts: z.object({ completed: checkNumber, passed: checkNumber, failed: checkNumber }).strict(),

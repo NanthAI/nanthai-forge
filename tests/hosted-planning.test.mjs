@@ -319,3 +319,80 @@ test('the Work store copy moves every Issue version, comment and note once, and 
   delete s.tables.hostedProjects.get(s.projectId).sourceAuthority;
   await assert.rejects(run('copy-work-store'), error => error.code === 'BAD_ARGUMENT');
 });
+
+test('with dual write on, each planning write stores its Issue version, comment or note in the same mutation; journal-only stores none', async t => {
+  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const s = await setup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  const handlers = {
+    'projectWorkStore:copy': store.copy,
+    'projectWorkStore:compare': store.compare,
+    'projectWorkStore:setMode': store.setMode,
+  };
+  const client = {
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    action: () => assert.fail('no action'),
+  };
+  const run = input => dispatchHostedWork(client, s.projectId, input);
+  const records = () => s.tables.projectHostedRecords.size;
+  const early = s.item({ title: 'Before dual' });
+  await s.send(early);
+  assert.equal(records(), 0, 'journal-only writes store no record');
+  assert.equal((await run({ action: 'copy-work-store' })).collections.planningVersions.copied, 1);
+  assert.deepEqual(await run({ action: 'set-work-store', mode: 'dual' }), { mode: 'dual', changed: true });
+  const initial = await s.read(),
+    intentId = randomUUID();
+  await actions.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: intentId,
+    revision: initial.data.revision,
+    command: JSON.stringify({ action: 'intent', outcome: 'Dual', constraints: '', base: initial.sourceHead }),
+  });
+  const issue = s.item({ title: 'Large', body: 'word '.repeat(12000) });
+  await s.send(issue);
+  await s.send({ ...early, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
+  await s.send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: issue.itemId,
+    text: 'Why',
+    authorLabel: 'Owner',
+  });
+  await s.send({ action: 'note', intentId, text: 'A note', kind: 'comment' });
+  const compared = (await run({ action: 'compare-work-store' })).collections;
+  for (const [name, total] of Object.entries(compared))
+    assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
+  assert.deepEqual(
+    [
+      compared.planningVersions.matched,
+      compared.planningComments.matched,
+      compared.notes.matched,
+      compared.issueHeads.matched,
+    ],
+    [3, 1, 1, 2],
+  );
+  const head = [...s.tables.projectHostedRecordHeads.values()].find(row => row.key === early.itemId);
+  assert.deepEqual([head.version, head.status], [2, 'closed']);
+  // Switching back stops the dual write; the journal keeps every write.
+  assert.deepEqual(await run({ action: 'set-work-store', mode: 'journal' }), {
+    mode: 'journal',
+    changed: true,
+  });
+  const before = records();
+  await s.send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: issue.itemId,
+    text: 'Later',
+    authorLabel: 'Owner',
+  });
+  assert.equal(records(), before);
+  assert.equal((await s.read()).data.planningComments.length, 2);
+  s.caller('stranger');
+  await assert.rejects(
+    run({ action: 'set-work-store', mode: 'dual' }),
+    error => error.code === 'PROJECT_UNAVAILABLE',
+  );
+});

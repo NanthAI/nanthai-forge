@@ -89,7 +89,7 @@ CHECK_NOT_PASSED: acceptance needs a passed check for this exact head; land --sa
   hosted: {
     title: 'Hosted checkouts and actions',
     text: `Hosted actions run from a hosted checkout: a clone root (nforge clone) or a Lane folder that start printed.
-- HOSTED_CHECKOUT_REQUIRED: run the command from the folder the message names (a resolution runs in its resolution Lane folder).
+- HOSTED_CHECKOUT_REQUIRED: run the command from the folder the message names (a resolution runs in its resolution Lane folder). save, sync, preflight, ack and land with a laneId of a Lane open on this machine run in its folder by themselves.
 - HOSTED_ACTION_UNSUPPORTED: this CLI or deployment has no such action. The message names the supported alternative; nforge agent . help (no topic) lists every action with its parameters.
 - An action new on the deployment needs a matching CLI: nforge status shows versions; the CLI updates itself to main.
 - pull {} refreshes a clean clone root to main; a repeat resumes an interruption. Root status {} reports clone freshness.
@@ -205,6 +205,14 @@ Details: docs/data-placement.md.`,
 - CWD_UNAVAILABLE: the folder you ran in was removed; cd to the Lane or clone root and retry.
 - UNSAFE_*: a path, root or Git config would escape the checkout or run repository code; Forge refused it.
 - FILESYSTEM_EVENTS_UNHEALTHY / PROCESS_*: the OS event or process service is degraded; Forge falls back or names the check.`,
+  },
+  install: {
+    title: 'Install scripts and Lane dependencies',
+    text: `A Lane installs dependencies from the lockfile with install scripts off (postinstall, native builds, generated clients). start or open then prints "Skipped install scripts of N packages" with the exact command to run them.
+- Signs: a test or build fails on a missing native binary or generated client, or "Cannot find module" for a package the lockfile has.
+- Reinstalling (npm ci, npm install, deleting node_modules) does not run them: scripts stay off. Do not loop on it.
+- Fix, once: run the printed command in the Lane (usually npm rebuild); or start the next Lane with nforge agent ROOT start '{"installScripts":true}'; or accept the repository's own requests on this machine with nforge settings installScripts true.
+- DEPENDENCIES_MISSING (preflight): a declared package is not installed in this Lane. Install it in the Lane and run preflight again. That is this Lane's setup, not a failed test: the landing check sets up its own dependencies.`,
   },
   limits: {
     title: 'Limits and quotas',

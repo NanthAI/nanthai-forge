@@ -381,7 +381,7 @@ function gateSelection(
       paths,
       files,
       scopedRecheckBase(gate) ? mainPaths : null,
-      changed => graphShareFor(files, changed),
+      changed => graphShareFor(files, changed, run.check),
       members,
     );
   }

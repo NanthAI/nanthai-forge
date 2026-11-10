@@ -8,6 +8,7 @@
 import type { CheckGate } from './bet2-gate.js';
 import { gateFor, type GateInput } from './contract-gate-policy.js';
 import { buildPackageGraph, packageSelection, type PackageGraph } from './package-graph.js';
+import { filesPackageFlags, type PackageFlagSource } from './package-command-flags.js';
 import { isStandardForgeCheck } from './standard-check.js';
 
 /** The graph may select at most this share of the testable packages. */
@@ -45,8 +46,12 @@ export type GraphShare = { scope: 'scoped' | 'full'; selected: number; total: nu
 /** The minority rule over one Candidate's manifests. Scoped only when the graph places every changed
  * path and selects a runnable minority; an unknown graph, unplaced paths, a root package, nothing to
  * run or a majority keep the full check. */
-export function graphShare(graph: PackageGraph, changed: string[]): GraphShare {
-  const selection = packageSelection(graph, changed);
+export function graphShare(
+  graph: PackageGraph,
+  changed: string[],
+  flags?: PackageFlagSource | { refusal: string },
+): GraphShare {
+  const selection = packageSelection(graph, changed, undefined, flags);
   if (graph.status === 'unknown' || selection.scope === 'full')
     return { scope: 'full', selected: 0, total: 0, reason: selection.reason };
   const testable = new Set(
@@ -67,12 +72,15 @@ export function graphShare(graph: PackageGraph, changed: string[]): GraphShare {
   return { scope: 'scoped', selected, total, reason: `package graph selects ${share}` };
 }
 
-/** `graphShare` over a file map (path → text, read on demand); manifests only, no repository code. */
+/** `graphShare` over a file map (path → text, read on demand); manifests, forge.json and the
+ * check's own scripts (its test flags, as the runner reads them), no repository code run. */
 export const graphShareFor = (
   files: { keys(): Iterable<string>; get(path: string): string | undefined },
   changed: string[],
+  check?: { executable: string; args: readonly string[] },
 ) =>
   graphShare(
     buildPackageGraph(files.keys(), path => files.get(path)),
     changed,
+    check ? filesPackageFlags(path => files.get(path), check) : undefined,
   );

@@ -2,6 +2,7 @@
 // Flip 5 S1 and S2 (Issue 0695ab24): copy the journal index's Issues, comments and notes into the hosted
 // record store in pages, and compare the two read-only. Nothing here changes what Work reads or writes:
 // the owner runs these through `hosted-work` and the journal stays the authority until a later slice.
+// S3 adds the dual write: with `workStore: 'dual'` each journal append also stores its records.
 import { v } from 'convex/values';
 import { mutation, query, type MutationCtx, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -95,6 +96,80 @@ const note = (bucket: { count: number; keys: string[] }, key: string) => {
   if (bucket.keys.length < SAMPLE) bucket.keys.push(key);
 };
 
+/** Store one record version unless it is already there. A version stored with other bytes is left
+ * as it is and reported. History can arrive in any order: the head only moves to a newer version. */
+export async function storeVersion(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  { record, ref, value }: ReturnType<typeof hostedRecordValue>,
+): Promise<'copied' | 'same' | 'different'> {
+  const old = await recordVersion(ctx, projectId, record.kind, record.id, record.version);
+  if (old) return old.digest === ref.digest && old.bytes === ref.bytes ? 'same' : 'different';
+  const indexed = { ...hostedRecordIndex(record), version: record.version },
+    identity = { projectId, kind: record.kind, key: record.id };
+  const bodyId = await ctx.db.insert('projectHostedRecordBodies', { projectId, value });
+  const recordId = await ctx.db.insert('projectHostedRecords', {
+    ...identity,
+    ...indexed,
+    bodyId,
+    digest: ref.digest,
+    bytes: ref.bytes,
+  });
+  const head = await recordHead(ctx, projectId, record.kind, record.id);
+  if (!head) await ctx.db.insert('projectHostedRecordHeads', { ...identity, ...indexed, recordId });
+  else if (head.version < record.version)
+    await ctx.db.replace(head._id, { ...identity, ...indexed, recordId });
+  return 'copied';
+}
+
+/** S3 dual write: the Issue versions, comments and notes one journal append projects, stored in the
+ * same mutation. Large values are joined from the payload parts of the same projection. */
+export async function storeProjection(
+  ctx: MutationCtx,
+  projectId: Id<'hostedProjects'>,
+  entries: { collection: string; key: string; parent: string; position: number; value: string }[],
+) {
+  for (const entry of entries) {
+    if (!(workStoreSources as readonly string[]).includes(entry.collection)) continue;
+    const collection = entry.collection as WorkStoreSource,
+      header = JSON.parse(entry.value);
+    const value = header.payloadKey
+      ? assembleIndexValue(
+          collection,
+          header,
+          entries
+            .filter(part => part.collection === `${collection}:payload` && part.parent === header.payloadKey)
+            .sort((a, b) => a.position - b.position),
+        )
+      : header;
+    let encoded;
+    try {
+      encoded = hostedRecordValue(workStoreRecord(collection, value));
+    } catch {
+      // The journal append stands; the compare reports the row as unreadable.
+      continue;
+    }
+    await storeVersion(ctx, projectId, encoded);
+  }
+}
+
+/** Switch a project's Work store mode. Dual write starts only after a clean copy and compare; on the
+ * dogfood project, only after the restore drill (Issue 7e9678c8) has passed. */
+export const setMode = mutation({
+  args: { projectId: v.id('hostedProjects'), mode: v.union(v.literal('journal'), v.literal('dual')) },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    try {
+      const { project } = await ownerStore(ctx, input.projectId);
+      const workStore = input.mode === 'dual' ? ('dual' as const) : undefined;
+      if (project.workStore !== workStore) await ctx.db.patch(project._id, { workStore });
+      return JSON.stringify({ mode: input.mode, changed: project.workStore !== workStore });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
+
 /** S1: copy one page. A version already stored with the same digest is left alone, so a retry or a
  * second full run copies nothing; one stored with different bytes is reported, never overwritten. */
 export const copy = mutation({
@@ -116,32 +191,10 @@ export const copy = mutation({
           note(invalid, row.key);
           continue;
         }
-        const { record, ref, value } = encoded;
-        const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
-        if (old) {
-          if (old.digest === ref.digest && old.bytes === ref.bytes) same++;
-          else note(different, `${record.kind}:${record.id}:${record.version}`);
-          continue;
-        }
-        const indexed = { ...hostedRecordIndex(record), version: record.version },
-          identity = { projectId: input.projectId, kind: record.kind, key: record.id };
-        const bodyId = await ctx.db.insert('projectHostedRecordBodies', {
-          projectId: input.projectId,
-          value,
-        });
-        const recordId = await ctx.db.insert('projectHostedRecords', {
-          ...identity,
-          ...indexed,
-          bodyId,
-          digest: ref.digest,
-          bytes: ref.bytes,
-        });
-        // History arrives in any order: the head only ever moves to a newer version.
-        const head = await recordHead(ctx, input.projectId, record.kind, record.id);
-        if (!head) await ctx.db.insert('projectHostedRecordHeads', { ...identity, ...indexed, recordId });
-        else if (head.version < record.version)
-          await ctx.db.replace(head._id, { ...identity, ...indexed, recordId });
-        copied++;
+        const stored = await storeVersion(ctx, input.projectId, encoded);
+        if (stored === 'copied') copied++;
+        else if (stored === 'same') same++;
+        else note(different, `${encoded.record.kind}:${encoded.record.id}:${encoded.record.version}`);
       }
       return JSON.stringify({ copied, same, different, invalid, cursor: page.cursor });
     } catch (error) {

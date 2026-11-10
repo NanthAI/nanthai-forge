@@ -108,6 +108,25 @@ export function applyPackageFlags(
   }));
 }
 
+/** The runner's flag source (src/package-command-flags-checkout.ts) over a file map, for the planner:
+ * forge.json templates and the check's words plus the repository scripts they name. A run planned
+ * scoped is then never refused by the runner and run whole under a scoped label (Issue 7cb61db1). */
+export function filesPackageFlags(
+  read: (path: string) => string | undefined,
+  check: { executable: string; args: readonly string[] },
+): PackageFlagSource | { refusal: string } {
+  const declared = declaredPackageFlags(read('forge.json'));
+  if ('refusal' in declared) return declared;
+  const words = [check.executable, ...check.args];
+  const scripts = words.flatMap(word => {
+    const path = word.replace(/^(\.\/)+/, '');
+    if (!path || word.startsWith('-') || path.startsWith('/') || path.split('/').includes('..')) return [];
+    const text = read(path);
+    return text !== undefined && text.length <= 256 * 1024 ? [text] : [];
+  });
+  return { ...declared, ciText: [words.join(' '), ...scripts].join('\n') };
+}
+
 /** Flags a caller without a declared check (preflight, the Intent contract) can still apply: forge.json templates. */
 export function declaredPackageFlags(forgeJson: string | undefined): PackageFlagSource | { refusal: string } {
   const declared = declaredPackageTemplates(forgeJson);

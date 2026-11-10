@@ -16,6 +16,7 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
   z.object({ action: z.literal('copy-work-store') }).strict(),
   z.object({ action: z.literal('compare-work-store') }).strict(),
+  z.object({ action: z.literal('set-work-store'), mode: z.enum(['journal', 'dual']) }).strict(),
   z
     .object({
       action: z.literal('records'),
@@ -197,7 +198,7 @@ export async function dispatchHostedWork(
   invariant(
     parsed.success,
     'BAD_ARGUMENT',
-    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store or compare-work-store.',
+    'Use workspace, records, detail, policy, set-policy, rebuild-index, migrate-record-details, copy-work-store, compare-work-store or set-work-store.',
   );
   try {
     const request = parsed.data;
@@ -221,6 +222,15 @@ export async function dispatchHostedWork(
       return result;
     }
 
+    if (request.action === 'set-work-store') {
+      invariant(client.mutation, 'UNSUPPORTED', 'This transport needs hosted mutations for set-work-store.');
+      return JSON.parse(
+        (await client.mutation(makeFunctionReference('projectWorkStore:setMode'), {
+          projectId,
+          mode: request.mode,
+        })) as string,
+      );
+    }
     if (request.action === 'copy-work-store' || request.action === 'compare-work-store')
       return await workStorePass(client, projectId, request.action, progress);
     if (request.action === 'policy')

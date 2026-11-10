@@ -26,6 +26,7 @@ import { record, recordPartition, selectedGeneration } from './projectWorkIndexS
 import { internal } from './_generated/api';
 import { report } from './errors';
 import { emitChange, workChange } from './coordinationWrite';
+import { storeProjection } from './projectWorkStore';
 
 /** The project record every open tab subscribes to (name, owner, selected source). It does not read the
  * Work head row, so a journal write does not re-run it for each tab; `work.revision` here is the seed
@@ -348,6 +349,7 @@ export async function appendWork(
             generationId: recordPartition(generation),
           });
       }
+      if (project.workStore === 'dual') await storeProjection(ctx, project._id, input.projection.entries);
       const metadata = JSON.parse(input.projection.metadata);
       if (parsed.success && (parsed.data.action === 'intent' || parsed.data.action === 'intent-status')) {
         const active = await ctx.db

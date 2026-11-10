@@ -403,9 +403,16 @@ nforge x ROOT define-check '{"name":"ci","executable":"bash","args":["ci/check.s
 declared `changed-paths` command on hosted Actions, the server instead stamps the `graph-first` gate
 when every other contract-gate guard holds (contract gate on, auto-on-pass, an eligible agent,
 unprotected known paths, trust, green debt-free main). The planner then reads the Candidate's
-manifests (never its code) and asks for `mode: "scoped"` only when the graph places every changed path
-and selects at most 50% of the testable packages; a root package, an unplaced path, an unknown graph,
-nothing to run or a majority keep the run full (fallback `graph-full`). The share is recorded on the
+manifests, `forge.json` and the check's own scripts (never runs its code) and asks for `mode: "scoped"`
+only when the graph places every changed path, selects at most 50% of the testable packages and every
+selected ecosystem's test flags can be kept (the same flags the runner applies); a root package, an
+unplaced path, an unknown graph, flags Forge cannot place, nothing to run or a majority keep the run
+full (fallback `graph-full`). The run then carries `fallbackReason`, the selection's reason text (at
+most 300 characters, naming what to declare: `packages.commands`, `packages.edges`), shown by
+`status {runId}` (and as `selection.ranInFull` with `summary:true`) and on the landing's `wait` line as
+`ranInFull`. A package
+only cross-ecosystem widening pulled in (no `packages.edges`) is named as "widened in, not changed",
+with `packages.edges` offered before its own command. The share is recorded on the
 run (`selection.graph: {scope, selected, total, reason}`), and the server refuses a scoped plan
 without a minority share. A scoped pass is scoped evidence: it is accepted on the contract gate's terms
 re-read at acceptance (red main holds it), leaves main-audit debt and is covered by the full

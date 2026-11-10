@@ -21,6 +21,7 @@ import { hostedAgentActions } from '../dist/hosted-agent-contract.js';
 import { hostedAgentRoot } from '../dist/hosted-agent-journal.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import { recordLane } from '../dist/lane-registry.js';
+import { laneCheckoutRoot } from '../dist/hosted-lane-location.js';
 const errorCode = expected => error => error.code === expected;
 
 test('fresh open uses only its two checkout authorization reads and replay rechecks Lane access', async t => {
@@ -448,6 +449,35 @@ test('save from the project folder names the open Lane checkout (friction fa11c1
     assert.equal(error.recovery, undefined);
     return true;
   });
+});
+
+// Issue 681ee3d4 (weaker-model trial: 7 of 20 task runs): a laneId given from the project folder runs in
+// that Lane's own checkout instead of refusing; reads keep ROOT, and an unknown Lane still refuses.
+test('a laneId from the project folder runs in the Lane folder this machine has open', async t => {
+  const s = agentFixture(t),
+    previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = join(s.root, '..', 'registry');
+  t.after(() => {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+  });
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  recordLane({ laneId: s.lane.laneId, root: s.root, ...s.address });
+  const folder = join(s.root, '..', 'project-folder');
+  mkdirSync(folder, { recursive: true });
+  for (const action of ['save', 'sync', 'preflight', 'ack', 'finish'])
+    assert.equal(laneCheckoutRoot(folder, action, s.lane.laneId, s.address), s.root, action);
+  assert.equal(laneCheckoutRoot(folder, 'status', s.lane.laneId, s.address), null, 'reads keep ROOT');
+  assert.equal(laneCheckoutRoot(s.root, 'save', s.lane.laneId, s.address), null, 'already there');
+  assert.equal(laneCheckoutRoot(folder, 'save', randomUUID(), s.address), null, 'not open here');
+  const elsewhere = { ...s.address, projectId: 'other-project' };
+  assert.equal(laneCheckoutRoot(folder, 'save', s.lane.laneId, elsewhere), null, 'another project');
+  // From that folder the Lane check passes (the project folder refuses, as the test above shows).
+  const here = laneCheckoutRoot(folder, 'save', s.lane.laneId, s.address);
+  const outcome = await new HostedAgentTransport(here, s.address, s.exchange)
+    .dispatch('save', { laneId: s.lane.laneId })
+    .catch(error => error);
+  assert.notEqual(outcome?.code, 'HOSTED_CHECKOUT_REQUIRED');
 });
 
 test('sync from the project folder refuses before any server call and names the Lane checkout (friction d467b644)', async t => {

@@ -3107,6 +3107,11 @@
           "minLength": 1,
           "maxLength": 64
         },
+        "fallbackReason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        },
         "status": {
           "type": "string",
           "enum": [
@@ -4251,6 +4256,11 @@
             "flaky"
           ],
           "additionalProperties": false
+        },
+        "ranInFull": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
         },
         "timing": {
           "type": "object",

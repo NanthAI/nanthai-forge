@@ -7,6 +7,7 @@ import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
 import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
+import { laneCheckoutRoot } from './hosted-lane-location.js';
 import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
 import { hostedAgentRoot } from './hosted-agent-journal.js';
 import { LAND_CHILD_ENV } from './hosted-land-child-env.js';
@@ -721,7 +722,13 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       process.stderr.write(`laneId ${String(selected.laneId)} resolved to ${short.resolved}\n`);
       selected = short.selected;
     }
-    const command = canonicalOperationIds(root, landSaveCommand(form!, true, selected));
+    // A laneId given from another folder runs in that Lane's checkout when this machine has it open
+    // (681ee3d4): the folder was the fix, so take it instead of refusing.
+    const laneRoot = laneCheckoutRoot(hostedAgentRoot(root), action, selected.laneId, hosted);
+    if (laneRoot)
+      process.stderr.write(`Running in the Lane folder of ${String(selected.laneId)}: ${laneRoot}\n`);
+    const here = laneRoot ?? root;
+    const command = canonicalOperationIds(here, landSaveCommand(form!, true, selected));
     try {
       // The hosted command modules load while the release check (and, for commands that start with
       // it, capability discovery) is on the network, not before it (fea47345 round 3).
@@ -732,29 +739,29 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       ]);
       modules.catch(() => undefined);
       if (options.beforeDispatch) {
-        validateHostedCliCommand(root, action, command);
-        if (discoversCapabilitiesFirst(hostedAgentRoot(root), action, command))
-          startEarlyCapabilities(hostedAgentRoot(root), hosted);
+        validateHostedCliCommand(here, action, command);
+        if (discoversCapabilitiesFirst(hostedAgentRoot(here), action, command))
+          startEarlyCapabilities(hostedAgentRoot(here), hosted);
         if (!(await options.beforeDispatch(stdin === undefined ? undefined : { stdin }))) return;
       }
       const [{ hostedAgentCli }, { hostedLandCli }, { HostedAgentTransport }] = await modules;
       notice(selected);
       // The installed CLI detaches the submission and waits by default; in-process callers opt in.
       if (action === 'finish' && (options.process || client.wait !== undefined))
-        return await hostedLandCli(root, command, hosted, {
+        return await hostedLandCli(here, command, hosted, {
           wait: client.wait ?? (options.process ? undefined : false),
           detach: Boolean(options.process),
           ...(client.budget !== undefined ? { timeoutSeconds: client.budget } : {}),
         });
       if (action === 'show') {
-        await (await import('./hosted-show-cli.js')).hostedShowCli(root, command, hosted);
+        await (await import('./hosted-show-cli.js')).hostedShowCli(here, command, hosted);
         return undefined;
       }
-      if (action !== 'start' || !options.process) return await hostedAgentCli(root, action, command, hosted);
-      const transport = new HostedAgentTransport(root, hosted);
+      if (action !== 'start' || !options.process) return await hostedAgentCli(here, action, command, hosted);
+      const transport = new HostedAgentTransport(here, hosted);
       // The Lane id and path print before the checkout downloads, so a slow open never hides them.
       transport.onStarted = lane => process.stderr.write(`${JSON.stringify({ started: lane })}\n`);
-      const response = (await hostedAgentCli(root, action, command, hosted, transport)) as {
+      const response = (await hostedAgentCli(here, action, command, hosted, transport)) as {
         localLanes?: {
           idle: IdleLane[];
           otherRuns?: OtherRunLane[];
@@ -765,7 +772,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
       if (transport.abandonedStart) setTimeout(() => process.exit(process.exitCode ?? 0), 2000).unref();
       if (response.localLanes)
         for (const line of housekeepingLines(
-          root,
+          here,
           response.localLanes.idle,
           response.localLanes.pruned,
           true,

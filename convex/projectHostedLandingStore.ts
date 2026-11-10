@@ -134,6 +134,7 @@ export async function writeLanding(
     if (state.checkProgress === previous.checkProgress) delete state.checkProgress;
     if (state.testFiles && canonicalPayload(state.testFiles) === canonicalPayload(previous.testFiles))
       delete state.testFiles;
+    if (state.ranInFull === previous.ranInFull) delete state.ranInFull;
   }
   if (state.phase === 'landed' || state.phase === 'terminal-failed') {
     const at = new Date().toISOString();

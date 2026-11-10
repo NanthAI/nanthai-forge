@@ -70,6 +70,7 @@ export function summarizeCheckRun(run: HostedCheckRun) {
       mode: run.gate?.mode ?? null,
       effective: run.gate?.effective ?? null,
       ...(run.gate?.reason ? { reason: clip(run.gate.reason, 200) } : {}),
+      ...(run.fallback ? { ranInFull: { code: run.fallback, reason: run.fallbackReason ?? null } } : {}),
       requestedTests: run.gate?.tests?.length ?? null,
       reportedFiles: reported.length,
       plannedTests: planned ?? null,

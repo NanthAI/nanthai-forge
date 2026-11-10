@@ -50,6 +50,7 @@ export const teachingByCode: Record<string, Entry> = {
   UNKNOWN_JSON_FIELD: { learn: 'arguments', next: '<command> --help' },
   AMBIGUOUS_ID: { learn: 'arguments' },
   AUTH_REQUIRED: { learn: 'auth', next: 'nforge login' },
+  DEPENDENCIES_MISSING: { learn: 'install' },
   AUTH_EXPIRED: { learn: 'auth', next: 'nforge login' },
   INTENT_CLOSED: { learn: 'planning', next: `nforge agent <root> lanes '{}'` },
   INTENT_OPEN_LANES: { learn: 'planning', next: `nforge agent <root> lanes '{}'` },

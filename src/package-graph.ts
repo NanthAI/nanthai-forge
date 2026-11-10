@@ -347,9 +347,22 @@ export function packageSelection(
         )
       : undefined;
   const narrowed = narrowing?.units ?? new Map<string, string[]>();
+  // A package of an ecosystem the change is not in, there only because no forge.json packages.edges
+  // limits widening, is named as widened in and the edge declaration is offered first (240ca537).
+  const changedEcosystems = new Set([...owners.values()].map(pkg => pkg.ecosystem));
+  const widenedIn = (pkgs: GraphPackage[], why: string) =>
+    graph.crossEcosystem !== 'declared' &&
+    graph.ecosystems.length > 1 &&
+    pkgs.every(pkg => !changedEcosystems.has(pkg.ecosystem))
+      ? full(
+          `${pkgs.slice(0, 2).map(label).join(', ')}${pkgs.length > 2 ? ', …' : ''} widened in, not changed (no forge.json packages.edges); ` +
+            `declare packages.edges, even [], to stop that, or fix: ${why}`,
+        )
+      : full(why);
   const hidden = [...selected.values()].find(pkg => !pkg.testable && pkg.hiddenTests);
   if (hidden)
-    return full(
+    return widenedIn(
+      [hidden],
       `${label(hidden)} has test files (${hidden.hiddenTests}) but no test command of its own, so the repository runs them another way`,
     );
   // A root package the change reaches only as a dependent is one more package where its command
@@ -376,11 +389,11 @@ export function packageSelection(
     );
     if (!mine.length) continue;
     const generated = ecosystem.commands(mine, changed, narrowed);
-    if ('refusal' in generated) return full(`${ecosystem.ecosystem}: ${generated.refusal}`);
+    if ('refusal' in generated) return widenedIn(mine, `${ecosystem.ecosystem}: ${generated.refusal}`);
     // The project's own test flags (forge.json template, else the declared check's), or a refusal.
     const result =
       flags && 'refusal' in flags ? flags : applyPackageFlags(ecosystem.ecosystem, generated, flags);
-    if ('refusal' in result) return full(`${ecosystem.ecosystem}: ${result.refusal}`);
+    if ('refusal' in result) return widenedIn(mine, `${ecosystem.ecosystem}: ${result.refusal}`);
     commands.push(...result);
   }
   const packages = [...selected.values()]

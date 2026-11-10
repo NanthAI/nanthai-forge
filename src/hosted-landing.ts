@@ -169,6 +169,8 @@ export const hostedLandingStateSchema = z
     semanticConflicts: semanticConflictsSchema.optional(),
     checkProgress: hash.optional(),
     testFiles: checkFileSummarySchema.optional(),
+    /** The attempt's check ran the whole command: its run's fallback reason (Issue 7cb61db1). */
+    ranInFull: z.string().min(1).max(300).optional(),
     timing: z
       .object({
         submittedAt: z.iso.datetime(),

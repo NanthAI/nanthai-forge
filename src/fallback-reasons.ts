@@ -82,6 +82,14 @@ export const selectionFallbackSchema = z.enum(
   Object.keys(SELECTION) as [keyof typeof SELECTION, ...(keyof typeof SELECTION)[]],
 );
 export type SelectionFallback = z.infer<typeof selectionFallbackSchema>;
+/** The run fields a runner's selection pins: the code, and the reason text that names the fix
+ * (Issue 7cb61db1), clipped to the run schema's bound. Unknown codes are dropped. */
+export function runFallback(selection: { fallback?: unknown; reason?: unknown }) {
+  const code = selectionFallbackSchema.safeParse(selection.fallback);
+  if (!code.success) return {};
+  const reason = typeof selection.reason === 'string' ? selection.reason.replace(/\s+/g, ' ').trim() : '';
+  return { fallback: code.data, ...(reason ? { fallbackReason: reason.slice(0, 300) } : {}) };
+}
 /** An unknown code is a limitation: Forge fell back without saying why. */
 export const fallbackKind = (stage: FallbackStage, reason: string): FallbackKind =>
   FALLBACK_REASONS[stage][reason] ?? 'limitation';
