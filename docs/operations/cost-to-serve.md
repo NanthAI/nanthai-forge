@@ -48,12 +48,76 @@ action incur Convex egress even though subsequent R2 downloads have free egress.
 
 The [`costs` ledger](../../src/speed-budgets.json) and
 [`landing-cost-guard.test.mjs`](../../tests/landing-cost-guard.test.mjs) measure a
-six-landing fixture: solo, recompose/recheck, and a batch of four. Per landing it
-records 27.5 mutations, 9.83 V8 actions, 0.67 Node actions, 806,895 read bytes,
-248,852 write bytes, 3.17 R2 A and 11.67 R2 B operations. Its 3.26 GB-seconds
-are modeled, using nominal durations. Those core quantities exclude client waits, the GitHub mirror
-and real CI activity. Pricing that fixture gives roughly $0.00058/landing;
-it is a partial fixture, **not** a production cost forecast.
+six-landing fixture: solo, recompose/recheck, and a batch of four. The current
+ledger, after source-step, driver, CI batching and Work-store cuts, budgets per
+landing 27.17 mutations, 9.83 V8 actions, 0.50 Node actions, 795,595 read bytes,
+253,855 write bytes, 3.17 R2 A and 10.67 R2 B operations. Its 2.85 GB-seconds
+are **modeled**, using nominal durations. At brief rates this guarded core is
+$0.541/1,000 landings ($0.593 Starter). It excludes initial save/compose,
+client observers, outbound mirror and real CI; it is a partial fixture, not a
+whole-command or production price.
+
+### Current ledger model per 1,000 landings
+
+These are separate guarded slices, priced by the formula above. They overlap;
+**do not sum the rows**. Driver rows isolate large retained reports; the tiny core
+cannot measure those sizes. CI batch replaces callbacks already represented in
+the core and adds R2 inbox traffic. Work writes are outside the landing denominator. Core/inbound Convex egress includes
+their R2 PUT payload bytes; other unmetered response egress is excluded. CI includes
+its measured result and plan replies; its runner-originated inbox uploads are R2 traffic.
+The historical $5.96 corrected live proxy below remains the forecast calibration:
+there is no comparable post-cut capture from which to replace it with a new live total.
+
+| Guarded slice | Current quantities per landing or operation | Brief-rate $/1,000 | Starter $/1,000 |
+| --- | --- | ---: | ---: |
+| Six-Candidate core, after source continuations cut | 37.50 calls; 1.049 MB DB I/O; 2.85 modeled GB-s; R2 A/B 3.17/10.67 | 0.541 | 0.593 |
+| Dependency-aware wait observer, separate | 8.83 queries; 82,540 read B | 0.034 | 0.038 |
+| GitHub inbound fixture, one new 24 B blob | 52 calls; 0.836 MB DB I/O; 6.1375 modeled GB-s; R2 A/B 5/15 | 0.811 | 0.889 |
+| Real twelve-shard CI batch ingest, excluding compute | 6 calls; 370,145 DB B; 36,440 reply B; R2 A/B 38/25 | 0.270 | 0.279 |
+| Completed dogfood-sized driver tail, reads only | 2,070,233.5 read B; calls unchanged | 0.414 | 0.455 |
+| Flip 5 planning primary write, I/O only, per 1,000 planning writes | 14,934 read B + 12,225 written B; 0 migration writes | 0.005 | 0.006 |
+
+The source-step cut lowered the core's modeled Node executions from 0.67 to 0.50
+and action GB-s from 3.26 to 2.85; the driver and metrics projections remove
+repeated row reads. The CI batch includes its deferred timing aggregation and
+plan-handshake egress. Its R2 requests must remain in the price even when Convex
+calls/compute fit the operator's allowance. Ledger sources name the guarded
+fixtures and their decisions; these are resource models, not billed savings.
+
+### GitHub inbound share
+
+`github-inbound-fixture` in the same landing-cost guard measures a GitHub main
+push through the real webhook queue mutation, Node import action, prepare/PUT/
+HEAD/commit windows, source composition, `submitDesiredLanding`, check, acceptance
+and mirror queue drain. Bootstrap is outside the meter. One new 24-byte blob
+puts 2,188 bytes including metadata, uses ten GitHub requests including token
+setup and the post-acceptance mirror step, and runs one synthetic check. This
+separate denominator preserves the six-Candidate core's zero-query guard.
+It uses an operator-proven synthetic binding; the live product's stored binding
+adds its own proof calls. Real provider delivery, CI ingest, LFS, retries and
+large trees remain outside this fixture.
+
+For an inbound fraction f, the **partial fixture** mixture is
+`(1-f) * 0.541 + f * 0.811` dollars per 1,000 (Starter:
+`(1-f) * 0.593 + f * 0.889`). At 25% inbound that is $0.608 ($0.667 Starter).
+Each inbound replaces a core landing in this calculation; adding its whole cost
+to every ordinary landing would double-count the landing. This is not a new
+whole-serving forecast: initial ordinary save/compose and inbound imports cover
+different starting points, and the historical allocation has no measured inbound share.
+
+One authorized synthetic dev sample changed a 24-byte JavaScript file in a
+two-file scratch mirror. It accepted in 65 seconds (GitHub push to Forge
+acceptance), with one real `node --check` CI run. The project-attributed log
+subtotal, after excluding thirteen observation/verification executions, was
+79 executions, 1,031,992 read B, 343,581 written B, 49,932 egress B and 6.675 GB-s:
+**$0.000995 per inbound landing at brief rates, $0.001095 Starter** (Convex only).
+The full observation window read/wrote 1.466 MB, below its 30 MB cap. The instrument
+reported no missing usage fields or detected stream problem. Attribution cannot
+include the initial push webhook/queue request, which has no project marker;
+silent log loss cannot be excluded. R2 operation billing, storage, runner list
+minutes and invoice discounts were not measured. This N=1 subtotal is not a
+complete bill or evidence of a post-cut dogfood average. The scratch resources
+are removed after the sample; receipts and exact pins are retained on Issue `3e3f9fe6`.
 
 The guard also budgets the finish observer separately: one dependency-aware
 subscription per waiting client in the same six-landing mix. It refreshes only

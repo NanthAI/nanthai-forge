@@ -121,7 +121,12 @@ also exposes unknown usage, unwatched deployments and gaps. Keys are acknowledge
 once per billing period after successful delivery/printing, surviving restarts;
 failed hooks retry. Plan alerts replace the old daily/function thresholds while
 preserving the complete function list and all usage measurements. With no `plan`,
-the original $1.50/day and $0.50/function alerts still apply. Nothing blocks usage.
+the original $1.50/day and $0.50/function alerts still apply. Nothing blocks usage. The meter has no accepted-landing denominator and
+no built-in Forge P0-writing integration. It therefore guards the operator's aggregate spend and coverage,
+not the literal dollar-per-landing drift contract. Forge's existing accept-write cost budgets
+separately alert and create P0 Issues for rolling-20 attempts, writes, composed R2 requests and
+runner minutes; see [cost budgets](../operations.md#cost-budgets). Issue `3e3f9fe6` retains the
+priced per-landing/P0 gap; a spend projection is not a substitute for its missing unit-cost evidence.
 
 Projection scales each watched deployment's known rate across the **whole** period,
 including earlier unwatched time, and never below already captured usage. It is a

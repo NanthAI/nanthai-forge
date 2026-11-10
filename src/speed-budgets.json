@@ -304,7 +304,7 @@
     "failPct": 15,
     "warnPct": 5,
     "ratchetPct": 10,
-    "scenario": "Six accepted-Candidate landings: solo, main moved during the check (source-job recompose and re-check), and a batch of four. Includes dependency-aware client observer reads. Save/initial compose, real CI ingest and GitHub mirror are outside this mix; a separate twelve-shard CI ingest guard covers inline logs, reports, retries and provider conclusion. Action GB-seconds use nominal durations, not live wall time.",
+    "scenario": "Six accepted-Candidate landings: solo, main moved during the check (source-job recompose and re-check), and a batch of four. Includes dependency-aware client observer reads. Save/initial compose, real CI ingest and GitHub mirror are outside this mix; a separate twelve-shard CI ingest guard covers inline logs, reports, retries and provider conclusion. Action GB-seconds use nominal durations, not live wall time. A separate github-inbound-fixture measures one 24-byte GitHub main push through real import, compose, desired landing, acceptance and mirror drain; bootstrap and real CI excluded.",
     "actionModel": {
       "v8": {
         "gb": 0.0625,
@@ -391,6 +391,11 @@
         "family": "work and planning, capture #4",
         "usdPer1000": 0.12,
         "source": "Capture #4, Issue 3e3f9fe6, 2026-11-10 07:30Z to 08:27Z, N=10 landings. A list-price estimate (Convex Pro: calls $2/M, DB $0.20/GB, egress $0.12/GB, $0.30/GB-h), not billed, from a load-inflated window: ten builders saved while 10 landings completed (about 6 saves per landing against 0.9 in #3). Capture #3 was 0.57; the drop is flip 5 (work store, S0 to S3). "
+      },
+      {
+        "family": "GitHub inbound scratch, project-attributed Convex subtotal per 1,000 inbound landings (N=1; list price, not billed)",
+        "usdPer1000": 0.9953858559270834,
+        "source": "Issue 3e3f9fe6 sample 2026-11-10 17:21:49\u201317:24:36Z, one two-file scratch project; accepted receipt 26332140. After 13 observation/pull executions excluded: 79 executions, 1,031,992 DB read B, 343,581 written B, 49,932 egress B, 6.675353 GB-s. Repriced at capture Professional rates, not the instrument mixed-rate default. Initial push webhook/queue lacks project attribution; R2 charges, runner minutes and invoices unmeasured; silent log loss not excluded. Not a dogfood whole-serving forecast."
       }
     ]
   },
@@ -523,7 +528,7 @@
       "unit": "calls",
       "value": 0,
       "floor": 0.5,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "74969509",
       "reason": "Queries the server runs for a landing without a client read. The client wait and the finish observer are live-only (about 31 executions per landing in capture #2); slice 1 cut their bytes. An extra read per landing fails here."
     },
@@ -547,7 +552,7 @@
       "unit": "calls",
       "value": 9.83,
       "floor": 0.25,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "ee7ad4d8",
       "reason": "Landing and finish drivers plus V8 source steps. Slice 3 routed eligible source work here from 512 MiB Node."
     },
@@ -583,7 +588,7 @@
       "unit": "bytes",
       "value": 253855,
       "floor": 2048,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O.",
       "issue": "9db58ca6",
       "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages)."
     },
@@ -607,7 +612,7 @@
       "unit": "ops",
       "value": 3.17,
       "floor": 0.1,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "9db58ca6",
       "reason": "Class A costs ten times class B. Source bytes go to R2 (data placement); a recompose uploads its result once."
     },
@@ -631,7 +636,7 @@
       "unit": "bytes",
       "value": 1881,
       "floor": 1024,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "9db58ca6",
       "reason": "Stored bytes are an always-on cost; a landing writes only new objects."
     },
@@ -643,7 +648,7 @@
       "unit": "runs",
       "value": 0.83,
       "floor": 0.05,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo land --save, one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings.",
       "issue": "51bbbd00",
       "reason": "The queue throughput decision: runs per accepted landing at most 1.2 in the synthetic queue harness; check minutes follow runs. Live: 1.48 distinct runs per landing over 285 landings, 2026-11-08 to 11-10."
     },
@@ -658,6 +663,162 @@
       "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: the acceptance write that moves the row reads it once (5 reads over the 6 fixture landings). Before Issue 750c5929 the landing completion read and rewrote it again to name the landing (7 reads).",
       "issue": "750c5929",
       "reason": "The row is 140 KB on Forge (2,852 paths, cap 128 KB of path entries). Landing names and Lanes behind main (save trial merge, overlap read) use the per-landing log instead; tests/hosted-overlaps.test.mjs fails if a save or overlap read of a Lane within the log window reads the whole row again."
+    },
+    {
+      "id": "github-inbound-queries",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "queries",
+      "unit": "calls",
+      "value": 5,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-mutations",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "mutations",
+      "unit": "calls",
+      "value": 38,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-v8-actions",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "v8Actions",
+      "unit": "calls",
+      "value": 7,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-node-actions",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "nodeActions",
+      "unit": "calls",
+      "value": 2,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-read-bytes",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "readBytes",
+      "unit": "bytes",
+      "value": 590861,
+      "floor": 128,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-write-bytes",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "writeBytes",
+      "unit": "bytes",
+      "value": 245542,
+      "floor": 128,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-action-gb-seconds",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "actionGbSeconds",
+      "unit": "GB-s",
+      "value": 6.1375,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-r2-class-a",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "r2ClassA",
+      "unit": "ops",
+      "value": 5,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-r2-class-b",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "r2ClassB",
+      "unit": "ops",
+      "value": 15,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-r2-bytes-put",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "r2BytesPut",
+      "unit": "bytes",
+      "value": 2188,
+      "floor": 128,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-github-requests",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "githubRequests",
+      "unit": "ops",
+      "value": 10,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-imported-bytes",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "importedBytes",
+      "unit": "bytes",
+      "value": 24,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
+    },
+    {
+      "id": "github-inbound-check-runs",
+      "area": "One small GitHub main push through import, compose, desired landing and mirror settlement",
+      "measuredBy": "github-inbound-fixture",
+      "metric": "checkRuns",
+      "unit": "runs",
+      "value": 1,
+      "floor": 0,
+      "source": "tests/landing-cost-guard.test.mjs with hosted-github-inbound-cost-fixture.mjs: one 24-byte new blob on an already mirrored three-file main. Includes webhook receive, real Node inbound action, R2 prepare/PUT/HEAD/commit, composition, desired landing, one synthetic passed check and post-acceptance mirror drain. Bootstrap, real CI/provider delivery and client observers excluded; nominal action durations from costGuard.actionModel.",
+      "issue": "3e3f9fe6",
+      "reason": "Ratchets the two-way GitHub path separately, preserving the six-Candidate denominator and its zero-query guard. An inbound change pays for object import plus a full Forge landing; dogfood outbound-only traffic cannot measure this share."
     },
     {
       "id": "snapshot-uploads",

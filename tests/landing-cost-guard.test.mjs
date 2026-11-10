@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
+import { inboundCostFixture } from './hosted-github-inbound-cost-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
 import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -50,6 +51,7 @@ function meter(f) {
     r2 = { a: 0, b: 0, bytesPut: 0 },
     inner = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
+    if (new URL(url).hostname === 'api.github.com') return inner(url, init);
     // R2 class A: PUT (and LIST); class B: GET and HEAD.
     if (init?.method === 'PUT') {
       r2.a++;
@@ -562,4 +564,45 @@ test('overlap driver bytes include changed peers, presence, board and public ide
     !JSON.stringify(reader).includes('synthetic-owner'),
     'read-only access does not name another person',
   );
+});
+
+// GitHub pushes pay both the import and the normal landing, independently of the six-Candidate mix.
+test('GitHub inbound cost: one changed blob imports, composes, checks, lands and drains without idle work', async t => {
+  const f = await finishFixture(t);
+  await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  await f.drain();
+  const inbound = await inboundCostFixture(t, f);
+  const m = meter(f);
+  await inbound.receive();
+  for (let steps = 0; f.pending().length; steps++) {
+    assert(steps < 200, 'one push has finite work');
+    await f.passChecks();
+    const task = f.pending()[0];
+    m.tasks.push(task.name);
+    await inbound.execute(task);
+  }
+  const counts = await m.stop();
+  const { v8, node } = costGuard.actionModel;
+  const measured = {
+    ...counts,
+    ...inbound.assertLanded(),
+    actionGbSeconds: counts.v8Actions * v8.gb * v8.seconds + counts.nodeActions * node.gb * node.seconds,
+    checkRuns: runs(f).length - 1,
+  };
+  t.diagnostic(`inbound ${JSON.stringify(measured)}`);
+  const verdicts = judgeCosts(costs, costGuard, 'github-inbound-fixture', measured);
+  for (const line of formatCostVerdicts(verdicts)) t.diagnostic(line);
+  assert.equal(verdicts.length, 13, 'every inbound quantity is ratcheted in the shared ledger');
+  assert.deepEqual(
+    verdicts.filter(v => v.status === 'fail').map(v => v.message),
+    [],
+  );
+  const doubled = judgeCosts(costs, costGuard, 'github-inbound-fixture', {
+    ...measured,
+    readBytes: measured.readBytes * 2,
+  }).find(v => v.metric === 'readBytes');
+  assert.equal(doubled.status, 'fail', 'duplicate inbound I/O cannot hide in the outbound mix');
+  assert.match(doubled.message, /Decision it protects: Issue 3e3f9fe6/);
 });

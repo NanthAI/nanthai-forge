@@ -41,6 +41,7 @@ export const costBudgetSchema = z
     measuredBy: z.enum([
       'proof-fixture',
       'landing-fixture',
+      'github-inbound-fixture',
       'driver-fixture',
       'snapshot-fixture',
       'planning-fixture',

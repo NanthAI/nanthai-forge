@@ -1171,13 +1171,17 @@ value per accepted landing, a `floor` (the change too small to judge), its `sour
 latest live dollars per 1,000 landings by family (`reference`, for reading only).
 
 **Reading the numbers.** Values are per accepted landing of a fixed fixture mix: one solo
-`land --save`, one whose main moves during its check (recompose on a source job, second check) and a
+accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job, second check) and a
 batch of four. They count queries, mutations, V8 and Node action executions, database bytes read and
 written, R2 class A (PUT) and class B (GET, HEAD) requests, R2 bytes put and check runs. Action
 GB-seconds are modeled: executions by runtime times memory times the nominal durations in
 `costGuard.actionModel`. Two snapshot entries count Convex calls and R2 uploads per changed
 snapshot. Three planning entries count agent Convex calls per Issue put and per comment, and the Work
-queries three open tabs re-run per planning write. The fixture has no client waits, CI minutes or GitHub mirror; dollars come from the live
+queries three open tabs re-run per planning write. Dependency-aware client observers are metered separately; real CI minutes and outbound mirror
+are outside the six-Candidate core. A separate `github-inbound-fixture` in the same test covers
+one new 24-byte GitHub blob through import, compose, desired landing, acceptance and mirror drain;
+its bootstrap and real CI ingest are excluded. Its quantities and modeled inbound share are in
+[cost to serve](operations/cost-to-serve.md#github-inbound-share). Whole-serving dollars come from the live
 captures (Issue 9db58ca6 and its successors), never from these counts.
 
 **What the guard checks.** `tests/landing-cost-guard.test.mjs` runs the mix in the landing check
@@ -1252,6 +1256,16 @@ doubles the shard count or the test set shows in `landing-runner-accepted-mean`,
 Billed dollars, Convex per-function costs and the R2 operations of saves and check logs still come from the
 live captures (`costGuard.reference` holds the latest per-family dollars, labelled as list-price
 estimates).
+
+The self-hosted operator's [spend meter](operations/convex-spend.md) complements these
+per-landing alerts: it prices deployment log usage and alerts once per period on projected
+allowance/overage and coverage gaps, with zero Convex function calls. It does not count accepted
+landings or itself create the speed path's P0 Issues. A busier workload can raise aggregate spend with
+unchanged unit cost, and a higher unit cost at lower volume can remain under the spend threshold.
+Consequently the meter does not complete the literal live-dollar-per-landing drift requirement
+on Issue `3e3f9fe6`. The product's rolling-20 count/R2/runner alerts remain active; a comparable
+priced window with an accepted-receipt denominator and a dollar-drift/P0 bridge is still open.
+No new service, scheduled workflow, access grant or idle call is implied by that gap.
 
 ## Local cleanup
 
