@@ -161,6 +161,7 @@ export async function auditEvent(
   runId: string,
   sequence: number,
   drill?: DrillRecord,
+  reverted?: boolean,
 ) {
   await ctx.db.insert('projectHostedMainAuditEvents', {
     projectId: row.projectId,
@@ -170,6 +171,7 @@ export async function auditEvent(
     runId,
     sequence,
     ...(drill ? { drill } : {}),
+    ...(reverted !== undefined ? { reverted } : {}),
   });
 }
 type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;
@@ -205,11 +207,17 @@ export async function closeDrill(
   return record;
 }
 /** The recovery fields of a verdict that ends a red episode, the drill it closes, and its event record. */
-async function recovery(ctx: MutationCtx, row: Doc<'projectHostedMainAudits'>, at: string, sequence: number) {
+async function recovery(
+  ctx: MutationCtx,
+  row: Doc<'projectHostedMainAudits'>,
+  at: string,
+  sequence: number,
+  reverted = Boolean(row.red?.culprit),
+) {
   if (!row.red) return { recovered: undefined, patch: {}, record: undefined };
   const drill = drillOf(row);
   return {
-    recovered: { at, sequence, reverted: Boolean(row.red.culprit), ...(drill ? { drill } : {}) },
+    recovered: { at, sequence, reverted, ...(drill ? { drill } : {}) },
     patch: row.drill ? { drill: undefined } : {},
     record: await closeDrill(ctx, row, at),
   };
@@ -285,7 +293,13 @@ export async function noteMainLanding(
   }
   if (!receipt.crossHeadProof && fullGate(run) && !docsGate(run)) {
     if (row.wake) await ctx.scheduler.cancel(row.wake.taskId);
-    const ended = await recovery(ctx, row, receipt.at, receipt.snapshot.revision);
+    const ended = await recovery(
+      ctx,
+      row,
+      receipt.at,
+      receipt.snapshot.revision,
+      Boolean(run.gate?.reason?.startsWith('culprit-revert:') || row.red?.culprit),
+    );
     await ctx.db.patch(row._id, {
       ...ended.patch,
       lastGreen: { sequence: receipt.snapshot.revision, head: receipt.candidate.head, runId: run.id },
@@ -307,6 +321,7 @@ export async function noteMainLanding(
         run.id,
         receipt.snapshot.revision,
         ended.record,
+        ended.recovered?.reverted,
       );
       await releaseMainHolds(ctx, projectId);
     }

@@ -99,6 +99,8 @@ export const hostedMainAuditTables = {
     runId: v.string(),
     sequence: v.number(),
     culprit: v.optional(v.string()),
+    /** Confirmed compensation on the green verdict; absent on legacy events. */
+    reverted: v.optional(v.boolean()),
     /** On the red an owner's drill claimed, and on the verdict that ended it: its start, red,
      * recovery and end times, and whether it counted (recovered in time) or was a real red. */
     drill: v.optional(drillRecord),

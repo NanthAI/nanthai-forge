@@ -103,6 +103,8 @@ export function earnedAfterUnclear(earned: LandingEarned | undefined, landings: 
 }
 export type EarnLanding = { sequence: number; kind: 'docs' | 'exact' | 'proof' };
 export type EarnEvent = {
+  /** A confirmed compensating green verdict, including an interacting set. */
+  reverted?: boolean;
   kind: 'green' | 'red' | 'stalled' | 'flake' | 'culprit';
   at: string;
   runId: string;
@@ -138,7 +140,7 @@ export function earnedFromHistory(landings: readonly EarnLanding[], events: read
         earned = earnedAfterGreen(earned, 0, {
           at: recoveredAt ?? green?.at ?? event.at,
           sequence: green?.sequence ?? event.sequence,
-          reverted: culprits.has(event.runId),
+          reverted: green?.reverted ?? culprits.has(event.runId),
           ...(drill?.redAt && recoveredAt
             ? { drill: { startedAt: drill.startedAt, redAt: drill.redAt } }
             : {}),

@@ -176,12 +176,13 @@ export const eventPage = internalQuery({
       )
       .order('asc')
       .paginate({ cursor: input.cursor, numItems: 4 * PAGE });
-    const events: EarnEvent[] = page.page.map(({ kind, at, runId, sequence, drill }) => ({
+    const events: EarnEvent[] = page.page.map(({ kind, at, runId, sequence, drill, reverted }) => ({
       kind,
       at,
       runId,
       sequence,
       ...(drill ? { drill } : {}),
+      ...(reverted !== undefined ? { reverted } : {}),
     }));
     return JSON.stringify({ events, next: page.isDone ? null : page.continueCursor });
   },
