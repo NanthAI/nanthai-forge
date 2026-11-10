@@ -56,16 +56,19 @@ export async function requireStoredRepositoryBinding(
   projectId: Id<'hostedProjects'>,
   repo: string,
   options: { runner?: boolean } = {},
-) {
-  if (operatorBinding(projectId, repo)) return;
-  if (options.runner && (await runnerGrant(ctx, projectId, repo))) return;
+): Promise<RunnerScope | null> {
+  if (operatorBinding(projectId, repo)) return null;
+  const grant = options.runner ? await runnerGrant(ctx, projectId, repo) : null;
+  if (grant) return { repoId: grant.repoId, installationId: grant.installationId };
   let cursor: string | null = null;
   do {
     const page = await ctx.db
       .query('projectGithubBindings')
       .withIndex('by_project_and_name', q => q.eq('projectId', projectId).eq('fullName', repo.toLowerCase()))
       .paginate({ cursor, numItems: 100 });
-    for (const row of page.page) if (!(await bindingInstallation(ctx, row.installationId))?.removed) return;
+    for (const row of page.page)
+      if (!(await bindingInstallation(ctx, row.installationId))?.removed)
+        return { repoId: row.repoId, installationId: row.installationId };
     cursor = page.isDone ? null : page.continueCursor;
   } while (cursor !== null);
   invariant(

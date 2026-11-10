@@ -96,6 +96,7 @@ export function githubRequest(token: string, request: typeof fetch = networkFetc
         githubErrorSummary((await response.text().catch(() => '')).slice(0, 64 * 1024), token),
       );
     }
+    if (response.status === 204) return undefined as T;
     return (await response.json()) as T;
   };
 }

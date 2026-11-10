@@ -32,12 +32,13 @@ const payloadSchema = z.object({
 /** Only called by the existing HMAC-verified webhook, never by a public mutation. */
 export const receive = internalMutation({
   args: { payload: v.string() },
-  returns: v.null(),
+  returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
     const raw = JSON.parse(input.payload);
     // A run of the project's own workflow on a Candidate branch (ci-status provider): same event,
     // same single mutation.
-    if (await receiveCiStatus(ctx, raw)) return null;
+    const ci = await receiveCiStatus(ctx, raw);
+    if (ci) return ci === true ? null : JSON.stringify(ci);
     const parsed = payloadSchema.safeParse(raw);
     if (!parsed.success) return null; // Other workflows/events are unrelated.
     const payload = parsed.data,
@@ -49,7 +50,12 @@ export const receive = internalMutation({
       .withIndex('by_run', q => q.eq('runId', match[1]!))
       .unique();
     if (!row) return null;
-    const selected = await writableHostedCheck(ctx, { projectId: row.projectId, runId: row.runId }),
+    const selected = await writableHostedCheck(
+        ctx,
+        { projectId: row.projectId, runId: row.runId },
+        false,
+        row,
+      ),
       { run } = selected;
     invariant(
       directActions(run) &&

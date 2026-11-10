@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalMutation, type MutationCtx } from './server';
-import { completeHostedCheck, writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
+import { writableHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { mirroredBase } from './gitServeLaneStore';
 import { checkPin, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { recordHead } from './projectHostedRecords';
@@ -16,6 +16,7 @@ import {
 } from '../src/ci-status';
 import type { Id } from './_generated/dataModel';
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
+import { roleOf, settleCiStatus, ciBranchCleanup } from './projectCiStatusLifecycle';
 import { invariant } from '../src/errors';
 
 /**
@@ -64,46 +65,6 @@ export async function scheduleCiStatus(ctx: MutationCtx, run: HostedCheckRun) {
     });
 }
 
-/** The project role of one account: anyone who is neither the owner nor a contributor is outside. */
-async function roleOf(ctx: MutationCtx, projectId: Id<'hostedProjects'>, owner: string, actor: string) {
-  if (actor && actor === owner) return 'owner' as const;
-  const contributor = actor
-    ? await ctx.db
-        .query('projectContributors')
-        .withIndex('by_project_and_contributor', q => q.eq('projectId', projectId).eq('contributor', actor))
-        .unique()
-    : null;
-  return contributor ? ('contributor' as const) : ('outside' as const);
-}
-
-/** Settles a ci-status run once: the provider's verdict, or why Forge could not run it. */
-async function settle(
-  ctx: MutationCtx,
-  selected: Awaited<ReturnType<typeof writableHostedCheck>>,
-  status: 'passed' | 'failed' | 'cancelled' | 'runner-unavailable',
-  reason: string,
-  now = Date.now(),
-) {
-  const { row, run } = selected;
-  if (hostedCheckTerminal(run)) return;
-  run.status = status;
-  // One fixed shard: the provider run is the whole check (acceptance evidence counts shards).
-  run.counts =
-    status === 'passed' ? { completed: 1, passed: 1, failed: 0 } : { completed: 0, passed: 0, failed: 0 };
-  run.exitCode = status === 'passed' ? 0 : status === 'failed' ? 1 : null;
-  if (status !== 'passed') run.failureReason = reason.slice(0, 500);
-  run.endedAt = new Date(now).toISOString();
-  run.terminalDigest = checkPin({
-    runId: run.id,
-    fence: run.fence,
-    executionId: run.executionId,
-    status,
-    reason,
-  });
-  await completeHostedCheck(ctx, run);
-  await writeHostedCheck(ctx, row._id, run, status === 'passed');
-}
-
 /** Before any GitHub IO: the mirror seed that publishes this Candidate on top of main's mirrored
  * commit for its base, or null when there is nothing to do. */
 export const prepare = internalMutation({
@@ -132,7 +93,7 @@ export const prepare = internalMutation({
         )
       : [];
     if (!candidatePublishable({ authors, ownerApproved: false })) {
-      await settle(
+      await settleCiStatus(
         ctx,
         selected,
         'runner-unavailable',
@@ -158,7 +119,7 @@ export const prepare = internalMutation({
         : null;
     if (!base && waitingForMirror) return null;
     if (!base) {
-      await settle(
+      await settleCiStatus(
         ctx,
         selected,
         'runner-unavailable',
@@ -235,7 +196,7 @@ export const failed = internalMutation({
   handler: async (ctx, input) => {
     const selected = await writableHostedCheck(ctx, input);
     if (ciRun(selected.run))
-      await settle(
+      await settleCiStatus(
         ctx,
         selected,
         'runner-unavailable',
@@ -265,10 +226,10 @@ export async function receiveCiStatus(
     .withIndex('by_run', q => q.eq('runId', match[0]))
     .unique();
   if (!row) return true;
-  const selected = await writableHostedCheck(ctx, { projectId: row.projectId, runId: row.runId }),
+  const selected = await writableHostedCheck(ctx, { projectId: row.projectId, runId: row.runId }, false, row),
     { run } = selected;
   const ci = ciRun(run);
-  if (!ci || !run.ci?.commit || hostedCheckTerminal(run)) return true;
+  if (!ci || !run.ci?.commit) return true;
   const verdict = ciStatusVerdict(
     ci.ci,
     { runId: run.id, commit: run.ci.commit, executionId: run.executionId },
@@ -279,17 +240,19 @@ export async function receiveCiStatus(
     return true;
   }
   if (verdict.outcome !== 'pending' && verdict.outcome !== 'terminal') return true;
+  if (hostedCheckTerminal(run)) return verdict.outcome === 'terminal' ? ciBranchCleanup(ctx, run) : true;
+  const changed = run.executionId !== verdict.executionId;
   run.executionId = verdict.executionId;
   if (verdict.outcome === 'pending') {
-    await writeHostedCheck(ctx, selected.row._id, run);
+    if (changed) await writeHostedCheck(ctx, selected.row._id, run);
     return true;
   }
   run.ci = { ...run.ci, link: verdict.link };
-  await settle(
+  await settleCiStatus(
     ctx,
     selected,
     verdict.status,
     `${ciStatusEntryPaths(ci.ci)[0]} concluded ${verdict.conclusion}${verdict.link ? ` (${verdict.link})` : ''}.`,
   );
-  return true;
+  return ciBranchCleanup(ctx, run);
 }

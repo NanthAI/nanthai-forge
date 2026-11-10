@@ -299,15 +299,16 @@ export async function actionsToken(
   scope: RunnerScope | null | undefined,
   request: typeof fetch = convexFetch,
   now = Date.now(),
+  permissions: GithubAppPermissions = actionsPermissions,
 ): Promise<string> {
-  if (!scope) return installationToken(ctx, projectId, repo, actionsPermissions, request, now);
+  if (!scope) return installationToken(ctx, projectId, repo, permissions, request, now);
   const { api, installation } = await appInstallation(repo, request, now);
   invariant(
     installation.id === scope.installationId,
     'GITHUB_REPOSITORY_UNBOUND',
     'The GitHub App installation on this runner repository changed. Run configure-runner again.',
   );
-  return mintInstallationToken(api, installation.id, { repository_ids: [scope.repoId] }, actionsPermissions);
+  return mintInstallationToken(api, installation.id, { repository_ids: [scope.repoId] }, permissions);
 }
 /** Stable shared API for mirror, Actions dispatch and cancellation. */
 export async function installationToken(

@@ -67,7 +67,10 @@ author and requester are the owner or a contributor. An outside contributor's Ca
   mirror failure settles the check visibly; a base with no publication still reports unavailable.
 - A Candidate over eight 100-object windows fails visibly. Git LFS paths publish pointers and upload
   missing objects through the mirror's existing LFS transport before creating the Candidate ref.
-- Candidate branches stay on the mirror; delete them on GitHub when you no longer need them.
+- A signed completion removes the matching Candidate branch after the verdict, using the same
+  webhook action and mutation. Cleanup checks the commit first, leaves a changed ref untouched,
+  and records its recreate-ref undo instruction in backend logs. Provider run logs remain available.
+  A missing branch is an idempotent replay; a GitHub failure remains visible in webhook logs.
 
 Code: `src/ci-status.ts` (adapters and verdict), `convex/projectCiStatus.ts` (run, events),
 `convex/projectCiStatusPublish.ts` (branch publish), `tests/ci-status-contract.test.mjs`.

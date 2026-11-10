@@ -13,7 +13,7 @@ import { restoreShardReports } from './projectHostedActionsReports';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './_generated/server';
-import type { Id } from './_generated/dataModel';
+import type { Doc, Id } from './_generated/dataModel';
 import { activeProject } from './projectAuthority';
 import { notifyLandingCheck } from './projectHostedLandingCheckWake';
 import { hostedWriteProject } from './projectHostedRecords';
@@ -97,12 +97,24 @@ export const completeCheckOperation = (ctx: MutationCtx, operation: HostedOperat
       },
     },
   });
-export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckIdentity, withReports = true) {
-  const row = await ctx.db
-    .query('projectHostedCheckRuns')
-    .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
-    .unique();
+export async function loadHostedCheck(
+  ctx: QueryCtx | MutationCtx,
+  input: CheckIdentity,
+  withReports = true,
+  loaded?: Doc<'projectHostedCheckRuns'>,
+) {
+  const row =
+    loaded ??
+    (await ctx.db
+      .query('projectHostedCheckRuns')
+      .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
+      .unique());
   invariant(row, 'NOT_FOUND', 'Hosted check run not found.');
+  invariant(
+    row.projectId === input.projectId && row.runId === input.runId,
+    'EVIDENCE_CHANGED',
+    'Hosted run row identity differs from the requested check.',
+  );
   const run = hostedCheckRunSchema.parse(JSON.parse(row.value));
   invariant(
     run.id === input.runId && run.projectId === input.projectId,
@@ -117,8 +129,13 @@ export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckI
 }
 /** A run row already loaded (and write-authorized) in this transaction. */
 export type LoadedHostedCheck = Awaited<ReturnType<typeof writableHostedCheck>>;
-export async function writableHostedCheck(ctx: MutationCtx, input: CheckIdentity, withReports = false) {
-  const selected = await loadHostedCheck(ctx, input, withReports);
+export async function writableHostedCheck(
+  ctx: MutationCtx,
+  input: CheckIdentity,
+  withReports = false,
+  loaded?: Doc<'projectHostedCheckRuns'>,
+) {
+  const selected = await loadHostedCheck(ctx, input, withReports, loaded);
   const project = await hostedWriteProject(
     ctx,
     input.projectId,

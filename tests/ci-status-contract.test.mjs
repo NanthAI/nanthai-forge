@@ -5,7 +5,7 @@
 // its own check, however it reports, and only the provider's record of the run Forge bound counts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHmac, generateKeyPairSync } from 'node:crypto';
 import {
   candidateBranch,
   candidatePublishable,
@@ -550,4 +550,147 @@ test('ci-status: a terminal mirror failure settles its waiting check and cancell
   await s.transaction('cancelled-waiter', wakes.wake, { jobId });
   assert.equal(s.tables.projectHostedCheckRuns.get(row._id).ciMirrorJob, undefined);
   assert.equal(scheduled.length, before);
+});
+
+test('ci-status: signed completion cleans only its Candidate ref with no extra Convex calls; replay and failure preserve the verdict', async t => {
+  const f = await providerFixture(t);
+  const { s, run, event, receive } = f;
+  // Use the ordinary project mirror binding, not the operator shortcut, for the IO budget.
+  delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+  s.insert('projectGithubBindings', {
+    projectId: s.projectId,
+    fullName: 'acme/app',
+    repoId: 11,
+    installationId: 42,
+    boundBy: 'owner',
+    boundAt: 0,
+  });
+  s.insert('githubBindingInstallations', { installationId: 42, revision: 0, removed: false });
+  const values = {
+    GITHUB_APP_ID: '123',
+    GITHUB_APP_PRIVATE_KEY: generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({
+      type: 'pkcs8',
+      format: 'pem',
+    }),
+    GITHUB_WEBHOOK_SECRET: 'synthetic-hook',
+  };
+  const prior = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+  Object.assign(process.env, values);
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior))
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+  });
+  await receive(event({}, 'in_progress'));
+  const from = s.counts.length;
+  await receive(event({}, 'in_progress'));
+  const unchanged = s.counts.slice(from).find(c => c.name === 'ci-receive');
+  assert.equal(
+    unchanged.readDocumentsByTable.projectHostedCheckRuns,
+    1,
+    'reuse the already authorized run row',
+  );
+  assert.equal(unchanged.writes, 0, 'duplicate progress costs no run rewrite or wake');
+  let removed = false,
+    deleteFails = true,
+    deletes = 0,
+    mutations = 0;
+  t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
+    if (url.endsWith('/installation')) return Response.json({ id: 42 });
+    if (url.includes('/access_tokens')) {
+      const body = JSON.parse(init.body);
+      assert.deepEqual(body.permissions, { contents: 'write' });
+      assert.deepEqual(body.repository_ids, [11]);
+      return Response.json({ token: 'synthetic-cleanup-token' });
+    }
+    if (url.endsWith('/git/ref/heads/' + candidateBranch(run.id)))
+      return removed ? new Response(null, { status: 404 }) : Response.json({ object: { sha: commit } });
+    if (url.endsWith('/git/refs/heads/' + candidateBranch(run.id)) && init.method === 'DELETE') {
+      deletes++;
+      if (deleteFails) return new Response(null, { status: 500 });
+      removed = true;
+      return new Response(null, { status: 204 });
+    }
+    throw Error('Unexpected GitHub path: ' + url);
+  });
+  const { default: http } = await import(moduleUrl('../convex/http.ts'));
+  const route = http.getRoutes().find(([path]) => path === '/github/webhook')[2];
+  const payload = event().payload;
+  const signature =
+    'sha256=' + createHmac('sha256', values.GITHUB_WEBHOOK_SECRET).update(payload).digest('hex');
+  const send = (sig = signature) =>
+    route._handler(
+      {
+        runMutation: (ref, input) => {
+          mutations++;
+          assert.equal(getFunctionName(ref), 'projectHostedActionsWebhook:receive');
+          return receive(input);
+        },
+        runQuery: () => {
+          throw Error('Cleanup must reuse the scope from the existing webhook mutation');
+        },
+      },
+      new Request('https://forge.example/github/webhook', {
+        method: 'POST',
+        body: payload,
+        headers: {
+          'x-github-event': 'workflow_run',
+          'x-github-delivery': 'synthetic-delivery',
+          'x-hub-signature-256': sig,
+        },
+      }),
+    );
+  assert.equal((await send('sha256=invalid')).status, 401);
+  assert.equal(mutations, 0);
+  assert.equal(deletes, 0);
+  await assert.rejects(send(), code('GITHUB_SYNC_API'));
+  const passed = await s.status(run.id);
+  assert.equal(passed.status, 'passed', 'cleanup failure cannot retract the provider verdict');
+  assert.equal(mutations, 1, 'one existing verdict mutation, no cleanup RPC');
+  deleteFails = false;
+  assert.equal((await send()).status, 204);
+  assert.equal(removed, true);
+  assert.equal((await send()).status, 204);
+  assert.equal(deletes, 2, 'a missing branch is a no-op after the successful retry');
+  assert.equal(mutations, 3, 'one mutation per webhook delivery');
+  assert.equal((await s.status(run.id)).terminalDigest, passed.terminalDigest);
+});
+
+test('ci-status: cleanup preserves a Candidate ref moved to another commit and cannot target main', async t => {
+  const { moduleSource } = await import('./convex-module.mjs');
+  const calls = [];
+  const key = '__ciCleanup_' + randomUUID().replaceAll('-', '');
+  globalThis[key] = {
+    actionsToken: async () => 'synthetic-token',
+    githubRequest: () => async (path, method) => {
+      calls.push({ path, method });
+      return { object: { sha: 'd'.repeat(40) } };
+    },
+  };
+  t.after(() => {
+    delete globalThis[key];
+  });
+  const source = moduleSource('../convex/projectCiStatusCleanup.ts')
+    .replace(/import \{ actionsToken \} from [^;]+;/, `const { actionsToken } = globalThis.${key};`)
+    .replace(
+      /import \{ githubRequest, GithubMirrorApiError \} from [^;]+;/,
+      `import { GithubMirrorApiError } from '${new URL('../dist/hosted-github-api.js', import.meta.url).href}'; const { githubRequest } = globalThis.${key};`,
+    );
+  const { cleanupCiBranch } = await import(
+    'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
+  );
+  const input = { projectId: 'synthetic-project', runId, repository: 'acme/app', commit, scope: null };
+  await assert.rejects(cleanupCiBranch({}, input), code('EVIDENCE_CHANGED'));
+  assert.equal(calls.length, 1);
+  assert.notEqual(calls[0].method, 'DELETE');
+  await assert.rejects(cleanupCiBranch({}, { ...input, runId: 'main' }), code('EVIDENCE_CHANGED'));
+  assert.equal(calls.length, 1, 'invalid cleanup identity makes no IO');
+});
+
+test('ci-status: a revoked mirror binding prevents cleanup IO without retracting a signed provider pass', async t => {
+  const { s, run, event, receive } = await providerFixture(t);
+  delete process.env.FORGE_GITHUB_REPO_BINDINGS;
+  const cleanup = await receive(event());
+  assert.equal(cleanup, null, 'no private cleanup instruction without the current mirror binding');
+  assert.equal((await s.status(run.id)).status, 'passed');
 });
