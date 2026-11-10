@@ -161,7 +161,8 @@ export async function runSmallSourceSave(
     );
     return pin;
   };
-  let state = plan.baseline.object;
+  let state = plan.baseline.object,
+    tree: Promise<unknown> | undefined;
   if (changed) {
     const next: NativeState = {
       schema: 1,
@@ -177,9 +178,11 @@ export async function runSmallSourceSave(
       'Source file and directory paths overlap.',
     );
     const manifest = new TextEncoder().encode(JSON.stringify(next));
+    // Dual-write overlaps the State and manifest uploads (it never throws and never changes them);
+    // the transport attaches its pointer to the State's output once both have settled.
     if (io.trees) {
       const sizes = new Map(after.map(ref => [ref.object.sha256, ref.object]));
-      await writeOutputTree(io.trees, manifest, {
+      tree = writeOutputTree(io.trees, manifest, {
         files: id => (id === plan.baseline.object.sha256 ? baseline.files : undefined),
         oids,
         bytes: async files => {
@@ -206,7 +209,7 @@ export async function runSmallSourceSave(
     ),
   );
   // The manifest references the State pin, but their immutable R2 writes are independent.
-  const settled = await Promise.allSettled(uploads);
+  const settled = await Promise.allSettled([...uploads, ...(tree ? [tree] : [])]);
   for (const result of settled) if (result.status === 'rejected') throw result.reason;
   return output;
 }

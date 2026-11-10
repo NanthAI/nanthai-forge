@@ -5,11 +5,15 @@ import { digest } from './portable-hash.js';
 import { dualWriteStateTree, type StateTreeDualResult } from './state-tree-dual.js';
 import type { TreeFile } from './state-tree-format.js';
 import { TreeSession, type SegmentStore, type StateTreePointer } from './state-tree-store.js';
-import { treeFileAt } from './state-tree.js';
+import { stateTreeManifest, treeChanges, treeFileAt } from './state-tree.js';
 
 /** What a source step needs to dual-write the States it produces (projects with tree writes on).
  * The flat State stays the authority: `settled` only learns whether a pointer may be recorded. */
 export type StateTreeIo = {
+  /** Dual-write is on (`stateTrees.write`). */
+  write: boolean;
+  /** The merge reader is switched to trees (`stateTrees.read` has `merge`). */
+  read: boolean;
   store: SegmentStore;
   /** The proven pointer of a State this step knows (from its object row, or written here). */
   pointer(state: string): StateTreePointer | undefined;
@@ -18,6 +22,9 @@ export type StateTreeIo = {
   /** Exact bytes of a raw object this project stores under its own key, read without a
    * descriptor; undefined when it is not stored that way (a pack member, a recipe). */
   direct?(pin: { sha256: string; size: number }): Promise<Uint8Array | undefined>;
+  /** A tree read finished: `ok` false means a pointer exists but its tree did not give the State
+   * (the reader then took the flat manifest). */
+  derived?(state: string, ok: boolean): void;
 };
 export type StateTreeSources = {
   /** A parent's flat file list when the step already holds it; never a new read. */
@@ -52,7 +59,7 @@ export async function writeOutputTree(
   }
   const state = digest(manifest),
     started = performance.now();
-  if (io.pointer(state)) return null;
+  if (!io.write || io.pointer(state)) return null;
   const parent = value.parents.find(id => io.pointer(id) && sources.files(id));
   let result: StateTreeDualResult;
   if (!parent) result = { status: 'skipped', reason: 'BASE_HAS_NO_TREE' };
@@ -128,12 +135,45 @@ export async function writeOutputTree(
   return result;
 }
 
+/** The merge reader: a State's exact flat manifest from its stored tree and the flat list of
+ * another State already in hand, reading only the folders that differ between the two. The
+ * result is returned only when it hashes to the State's own identity, so a tree answer and the
+ * flat manifest cannot differ; null (no pointer, a failed read, any mismatch) means the caller
+ * reads the flat manifest as before. */
+export async function manifestFromTree(
+  io: StateTreeIo,
+  state: string,
+  held: { state: string; files: readonly NativeFile[] },
+): Promise<Uint8Array | null> {
+  const pointer = io.pointer(state),
+    base = io.pointer(held.state);
+  if (!io.read || !pointer || !base || state === held.state) return null;
+  let manifest: Uint8Array | null = null;
+  try {
+    const session = new TreeSession(io.store),
+      [from, to] = await Promise.all([session.open(base), session.open(pointer)]),
+      files = new Map(held.files.map(file => [file.path, file]));
+    if (from.record.state === held.state && to.record.state === state) {
+      for (const change of await treeChanges(session, from.root, to.root))
+        if (change.after)
+          files.set(change.path, { path: change.path, blob: change.after.blob, mode: change.after.mode });
+        else files.delete(change.path);
+      const rebuilt = stateTreeManifest(to.record, [...files.values()]);
+      if (digest(rebuilt) === state) manifest = rebuilt;
+    }
+  } catch {
+    manifest = null;
+  }
+  io.derived?.(state, !!manifest);
+  return manifest;
+}
+
 /** One line per dual-write outcome, on the source-step log channel: identifiers, counts and a
  * code only. A refusal is the alarm line (`console.error`); the flat State was recorded. */
 export function logStateTree(
   identity: { jobId: string; step: number },
   state: string,
-  result: StateTreeDualResult,
+  result: StateTreeDualResult | { status: 'read' },
   /** The step's dual-write wall time and its segment traffic so far (R2 GETs and PUTs). */
   io: { ms: number; gets: number; getBytes: number; puts: number; putBytes: number },
 ) {

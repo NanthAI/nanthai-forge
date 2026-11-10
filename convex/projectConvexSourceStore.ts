@@ -260,6 +260,7 @@ export const begin = sourceMutation({
       locations,
       batchId: active.row.batchId ?? null,
       ...(active.project.stateTrees?.write ? { trees: true } : {}),
+      ...(active.project.stateTrees?.read?.includes('merge') ? { treeRead: true } : {}),
     });
   },
 });

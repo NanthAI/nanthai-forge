@@ -553,6 +553,8 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
     return {
       outcomes,
       trees: {
+        write: true,
+        read: false,
         store,
         pointer: id => pointers.get(id),
         settled: (state, result) => {

@@ -44,10 +44,13 @@ export function convexSourceTransport(
     overlapWrites = false,
     preloaded = [],
     trees = false,
+    treeRead = false,
   }: {
     overlapWrites?: boolean;
     /** The project dual-writes States in tree form (`hostedProjects.stateTrees.write`). */
     trees?: boolean;
+    /** The merge reader is switched to trees (`hostedProjects.stateTrees.read` has `merge`). */
+    treeRead?: boolean;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -66,6 +69,10 @@ export function convexSourceTransport(
     writing: Promise<SourceOutput>[] = [];
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
+    // A dual-write that overlapped its State's upload settled after that output was prepared.
+    for (const output of outputs)
+      if (output.stateParents && !output.stateTree && pointers.has(output.sha256))
+        output.stateTree = pointers.get(output.sha256)!;
     // Each segment this step wrote gets its object row with the same commit.
     if (segments) outputs.push(...segments.written.splice(0));
   };
@@ -75,11 +82,13 @@ export function convexSourceTransport(
     pointers = new Map<string, StateTreePointer>();
   // Dual-write: segments are read by key and written beside the State; the outcome is counted
   // here and a refusal is the step's alarm (the flat State is recorded either way).
-  const segments = trees ? r2SegmentStore(ctx, projectId) : null,
+  const segments = trees || treeRead ? r2SegmentStore(ctx, projectId) : null,
     tree = {
       written: 0,
       skipped: 0,
       refused: null as { state: string; code: string } | null,
+      /** States the merge reader rebuilt from their trees instead of downloading the manifest. */
+      derived: 0,
       bytes: 0,
       ms: 0,
     };
@@ -136,6 +145,24 @@ export function convexSourceTransport(
     ...(segments
       ? {
           trees: {
+            write: trees,
+            read: treeRead,
+            derived: (state, ok) => {
+              if (ok) tree.derived++;
+              else tree.refused ??= { state, code: 'SOURCE_DIGEST_MISMATCH' };
+              logStateTree(
+                { jobId, step },
+                state,
+                ok
+                  ? { status: 'read' }
+                  : {
+                      status: 'refused',
+                      code: 'SOURCE_DIGEST_MISMATCH',
+                      message: 'A stored tree did not give its State.',
+                    },
+                { ms: 0, ...segments.stats },
+              );
+            },
             store: {
               ...segments.store,
               put: bytes => clock.write(() => segments.store.put(bytes)),

@@ -57,6 +57,7 @@ export const step = internalAction({
               overlapWrites: true,
               preloaded: supplied ? state.preloaded : undefined,
               trees: state.trees === true,
+              treeRead: state.treeRead === true,
             },
           ),
           durable = sourceStorage(ctx, input.projectId);

@@ -5,9 +5,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { syncHistory, syncInput, resolveInput } from './measure-sync-ancestry.mjs';
-import { convertStateTree } from '../dist/state-tree-save.js';
+import { convertStateTree, saveStateTree } from '../dist/state-tree-save.js';
 import { TreeSession } from '../dist/state-tree-store.js';
-import { readStateTree, treeFile } from '../dist/state-tree.js';
+import { readStateTree, stateTreeRecord, treeFile } from '../dist/state-tree.js';
 
 async function run({ distance, recordParents, conflict = true }) {
   const s = await scaleFixture();
@@ -134,7 +134,7 @@ test('recorded parents are written once, exact and immutable', async () => {
 
 // Trees in packs, dual-write (Issue 676efbc2): the real Convex step records a State's tree pointer
 // only for a project with tree writes on, in the commit it already makes.
-async function treeSync(write) {
+async function treeSync(write, read = false, corrupt = false) {
   const s = await scaleFixture();
   try {
     const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
@@ -153,20 +153,47 @@ async function treeSync(write) {
       const value = { schema: 1, kind: 'forge-source-state', parents, files, message: 'state', at };
       return s.putSpec(Buffer.from(JSON.stringify(value)), undefined, generation, { parents });
     };
-    const base = await state([], {}, 1),
+    const edits = {
+        main: { 'src/dir1/module-0001.ts': await blob('main\n') },
+        lane: { 'src/dir2/module-0002.ts': await blob('lane\n') },
+      },
+      base = await state([], {}, 1),
       h = {
-        main: await state([base.sha256], { 'src/dir1/module-0001.ts': await blob('main\n') }, 2),
-        lane: await state([base.sha256], { 'src/dir2/module-0002.ts': await blob('lane\n') }, 2),
+        main: await state([base.sha256], edits.main, 2),
+        lane: await state([base.sha256], edits.lane, 2),
       };
-    // Both tips were converted earlier (the one-time conversion), whatever the flag says now.
-    for (const pin of [h.lane, h.main]) {
-      const converted = await convertStateTree(store, await s.bytes(pin), async file =>
-        treeFile(file, await s.bytes({ sha256: file.blob })),
+    // The base was converted and both tips were dual-written as edits on it, whatever the flag
+    // says now: each tip's segment holds only the folders on its changed path.
+    const fileOf = async file => treeFile(file, await s.bytes({ sha256: file.blob })),
+      converted = await convertStateTree(store, await s.bytes(base), fileOf);
+    assert.ok(converted.exact);
+    await s.ctx.db.patch(row(base.sha256)._id, { stateTree: converted.pointer });
+    for (const side of ['lane', 'main']) {
+      const changes = await Promise.all(
+        Object.entries(edits[side]).map(async ([path, id]) => [
+          path,
+          await fileOf({ blob: id, mode: 'file' }),
+        ]),
       );
-      assert.ok(converted.exact);
-      await s.ctx.db.patch(row(pin.sha256)._id, { stateTree: converted.pointer });
+      const saved = await saveStateTree(
+        store,
+        converted.pointer,
+        stateTreeRecord(await s.bytes(h[side])).record,
+        changes,
+      );
+      await s.ctx.db.patch(row(h[side].sha256)._id, { stateTree: saved.pointer });
     }
-    if (write) await s.ctx.db.patch(s.projectId, { stateTrees: { write: true } });
+    if (write)
+      await s.ctx.db.patch(s.projectId, {
+        stateTrees: { write: true, ...(read ? { read: ['merge'] } : {}) },
+      });
+    // A segment the object store no longer holds intact: one byte of main's tree differs.
+    if (corrupt) {
+      const segment = row(h.main.sha256).stateTree.segment,
+        bytes = Buffer.from(await s.bytes({ sha256: segment }));
+      bytes[8] ^= 1;
+      s.objects.set(segment, bytes);
+    }
     const rowsBefore = s.tables.projectObjects.size;
     const id = await s.enqueue(await syncInput(s, h)),
       sync = await s.drain(),
@@ -204,4 +231,28 @@ test('dual-write in the Convex step: a merged State gets a proven tree pointer a
   assert.equal(on.sync.functionCalls, off.sync.functionCalls);
   assert.equal(on.sync.steps, off.sync.steps);
   t.diagnostic(JSON.stringify({ off: off.sync, on: on.sync, segmentBytes: pointer.size }));
+});
+
+test('merge reader on trees: the same merged State with fewer manifest bytes read; a damaged segment falls back to the flat manifest and raises the alarm', async t => {
+  const flat = await treeSync(true),
+    tree = await treeSync(true, true),
+    damaged = await treeSync(true, true, true);
+  // Flat and tree answers agree: byte-identical result, and the merged State's own pointer still
+  // rebuilds its exact bytes.
+  assert.equal(tree.output, flat.output);
+  assert.equal(damaged.output, flat.output, 'a refused tree read changes nothing in the result');
+  assert.deepEqual(
+    Buffer.from(
+      (await readStateTree(new TreeSession(tree.store, { strict: true }), tree.merged.stateTree)).manifest,
+    ),
+    await tree.s.bytes({ sha256: tree.merged.digest }),
+  );
+  // One manifest is read flat; the other two States come from the folders that differ.
+  assert.ok(tree.sync.readBytes < flat.sync.readBytes * 0.6, JSON.stringify([tree.sync, flat.sync]));
+  assert.equal(tree.sync.functionCalls, flat.sync.functionCalls, 'calls do not rise');
+  assert.equal(tree.project.stateTrees.refused, undefined);
+  assert.equal(damaged.project.stateTrees.refused.code, 'SOURCE_DIGEST_MISMATCH');
+  t.diagnostic(
+    JSON.stringify({ flat: flat.sync.readBytes, tree: tree.sync.readBytes, damaged: damaged.sync.readBytes }),
+  );
 });

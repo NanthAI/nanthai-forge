@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { LazyMergeSource, NeededObject } from './hosted-merge-reader.js';
-import { parseNativeState, type NativeState } from './native-state-format.js';
+import { parseNativeState, type NativeFile, type NativeState } from './native-state-format.js';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { readObjectRecipe, objectRecipeSchema } from './object-chunks.js';
 import { digest } from './hash.js';
@@ -9,12 +9,15 @@ import { invariant } from './errors.js';
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
-import { writeOutputTree } from './state-tree-output.js';
+import { manifestFromTree, writeOutputTree } from './state-tree-output.js';
 
 /** Parents are compact, verified metadata. A file tree is loaded only when the
  * native merge actually requests it, rather than for every ancestor visited. */
 export class MemoryMergeSource extends LazyMergeSource {
   readonly objects = new Map<string, Buffer>();
+  /** Merge reader (trees): the first State with a tree pointer this calculation holds; other
+   * States are rebuilt from their trees as differences from it. Parsed on first use. */
+  treeBase?: { state: string; bytes: Buffer; files?: readonly NativeFile[] };
   private readonly parsed = new Map<string, NativeState>();
   private cutList: string[] | undefined;
   private cutIds = new Set<string>();
@@ -130,6 +133,20 @@ export class MemorySourceReader extends SourceWorkerReader {
       this.metrics.cacheHits++;
       return prior;
     }
+    const trees = this.io.trees,
+      base = this.source.treeBase;
+    if (trees?.read && base && !ref.recipe) {
+      base.files ??= parseNativeState(base.bytes).files;
+      const rebuilt = await manifestFromTree(trees, ref.object.sha256, {
+        state: base.state,
+        files: base.files,
+      });
+      if (rebuilt && rebuilt.length === ref.object.size) {
+        const derived = Buffer.from(rebuilt.buffer, rebuilt.byteOffset, rebuilt.length);
+        this.source.objects.set(ref.object.sha256, derived);
+        return derived;
+      }
+    }
     let bytes: Buffer;
     if (ref.recipe) {
       invariant(
@@ -171,6 +188,8 @@ export class MemorySourceReader extends SourceWorkerReader {
       this.metrics.downloadedBytes += length;
     }
     this.source.objects.set(ref.object.sha256, bytes);
+    if (trees?.read && !this.source.treeBase && trees.pointer(ref.object.sha256))
+      this.source.treeBase = { state: ref.object.sha256, bytes };
     return bytes;
   }
   override async file(ref: WorkerObject) {
@@ -181,6 +200,13 @@ export class MemorySourceReader extends SourceWorkerReader {
     for (let offset = 0; offset < refs.length; offset += 100) {
       const window = refs.slice(offset, offset + 100);
       await this.io.prepareRead?.(window.filter(ref => !ref.recipe).map(ref => ref.object));
+      // Merge reader: the first State with a tree pointer is read flat and becomes the base the
+      // others in this window are rebuilt from, so it must be in hand before they start.
+      const trees = this.io.trees;
+      if (trees?.read && !this.source.treeBase) {
+        const first = window.find(ref => !ref.recipe && trees.pointer(ref.object.sha256));
+        if (first) await this.bytes(first);
+      }
       // Every byte of this window is retained either way; only the round trips overlap.
       await mapSourceOrdered(window, ref => this.bytes(ref));
     }
