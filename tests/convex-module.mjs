@@ -126,8 +126,16 @@ function build(file, directory, keys) {
     writeFileSync(temp, code);
     renameSync(temp, output);
   } catch (error) {
+    let published = false;
+    if (['EEXIST', 'EPERM', 'EACCES'].includes(error.code))
+      try {
+        // Windows cannot replace a module another process published or opened. Trust only exact bytes.
+        published = readFileSync(output).equals(Buffer.from(code));
+      } catch {
+        // A missing or unreadable destination does not reconcile the failed write.
+      }
     rmSync(temp, { force: true });
-    throw error;
+    if (!published) throw error;
   }
   return pathToFileURL(output).href;
 }

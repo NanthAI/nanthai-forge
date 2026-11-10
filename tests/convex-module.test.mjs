@@ -25,10 +25,31 @@ function workspace(t) {
   return { cache, src, top: pathToFileURL(join(src, 'top.ts')) };
 }
 
-async function load(cache, top) {
-  const script = `import { moduleUrl } from ${JSON.stringify(loader)};
+async function load(cache, top, windowsRename = false, mismatched = false) {
+  const script = `import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+let collisions = 0;
+if (${windowsRename}) {
+  const exists = fs.existsSync;
+  // Both writers compile even if the other already published: force the race's cold-cache observation.
+  fs.existsSync = path => String(path).endsWith('.mjs') ? false : exists(path);
+  fs.renameSync = (temp, output) => {
+    if (${mismatched}) {
+      fs.writeFileSync(output, 'different output');
+      throw Object.assign(new Error('locked destination'), { code: 'EPERM' });
+    }
+    try { fs.linkSync(temp, output); fs.unlinkSync(temp); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      collisions++;
+      throw Object.assign(new Error('locked destination'), { code: 'EPERM' });
+    }
+  };
+  syncBuiltinESMExports();
+}
+const { moduleUrl } = await import(${JSON.stringify(loader)});
 const url = moduleUrl(new URL(process.argv[1]));
-console.log(JSON.stringify({ url, top: (await import(url)).top }));`;
+console.log(JSON.stringify({ url, top: (await import(url)).top, ...(${windowsRename} ? { collisions } : {}) }));`;
   const { stdout } = await run(process.execPath, ['--input-type=module', '-e', script, top.href], {
     env: { ...process.env, FORGE_TEST_MODULE_DIRECTORY: cache, FORGE_TEST_PRECOMPILED: '0' },
   });
@@ -59,6 +80,33 @@ test('parallel cold processes share one cache without partial or temporary files
   assert.ok(
     names.every(name => /^[a-f0-9]{64}\.mjs$/.test(name)),
     names.join(),
+  );
+});
+
+test('two cache writers survive Windows rename collisions only when the complete output matches', async t => {
+  const { cache, top } = workspace(t);
+  const results = await Promise.all([load(cache, top, true), load(cache, top, true)]);
+  assert(results.every(result => result.top === 2 && result.url === results[0].url));
+  assert.equal(
+    results.reduce((n, result) => n + result.collisions, 0),
+    2,
+    'both cache files had a losing publisher',
+  );
+  const names = readdirSync(cache);
+  assert.equal(names.length, 2);
+  assert(
+    names.every(name => /^[a-f0-9]{64}\.mjs$/.test(name)),
+    'no partial or temporary files remain',
+  );
+});
+
+test('a Windows cache rename error with different destination bytes stays an error and cleans its temp file', async t => {
+  const { cache, top } = workspace(t);
+  await assert.rejects(load(cache, top, true, true), error => /EPERM/.test(error.stderr));
+  assert.equal(readdirSync(cache).length, 1);
+  assert(
+    readdirSync(cache).every(name => name.endsWith('.mjs')),
+    'the failed writer removes its own temp',
   );
 });
 
