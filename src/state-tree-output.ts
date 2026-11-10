@@ -171,6 +171,15 @@ async function writeOnBase(
   return result.status === 'written' && !value.parents.includes(base) ? { ...result, healed: base } : result;
 }
 
+/** Fetch the segments a State's tree lives in, while the step still has other work to do (the
+ * merge step, as soon as it holds a State that has a pointer), so its dual-write later costs
+ * CPU and one PUT instead of sequential GETs. Best effort, as `warmTreePaths`. */
+export function warmTreeState(io: StateTreeIo, state: string) {
+  const pointer = io.pointer(state);
+  if (!io.write || !pointer) return;
+  new TreeSession(io.store).prefetch(pointer).catch(() => {});
+}
+
 /** Read, while a save's baseline manifest downloads, the folders on the paths it changes, so its
  * dual-write finds them in the store's cache. Best effort: a failure here is found again, and
  * reported, by the write itself. */

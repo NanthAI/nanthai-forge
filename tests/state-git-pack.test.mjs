@@ -714,6 +714,32 @@ test('self-heal (dogfood flat chains 2026-11-10): a State whose parent is flat i
   assert.equal(healed.pointer.root, (await convertStateTree(segmentStore(), next, fileOf)).pointer.root);
 });
 
+test('prefetch (merge dual-write +1.5 s on scratch 2026-11-10): after a prefetch of a held State, a save on it reads nothing more from a caching store', async () => {
+  const store = segmentStore(),
+    first = manifest(treeSample, 'first'),
+    converted = await convertStateTree(store, first, fileOf),
+    second = manifest({ ...treeSample, 'a/c/d.ts': 'two\n' }, 'second', [digest(first)]),
+    saved = await saveStateTree(store, converted.pointer, recordOf(second), editsBetween(first, second));
+  // A remote store keeps what it fetched for its action, as the R2 segment store does.
+  const fetched = new Map(),
+    cached = {
+      get: id => {
+        if (!fetched.has(id)) fetched.set(id, store.get(id));
+        return fetched.get(id);
+      },
+      put: bytes => store.put(bytes),
+    };
+  await new TreeSession(cached).prefetch(saved.pointer);
+  const prefetched = store.gets;
+  // The next save edits a folder that only the converted segment holds.
+  const third = manifest({ ...treeSample, 'a/c/d.ts': 'two\n', 'é/ü.txt': 'three' }, 'third', [
+    digest(second),
+  ]);
+  const written = await saveStateTree(cached, saved.pointer, recordOf(third), editsBetween(second, third));
+  assert.equal(store.gets, prefetched, 'every segment the walk needed was already fetched');
+  assert.deepEqual(Buffer.from(await cold(store, written.pointer)), third);
+});
+
 /** A synthetic repository: `count` files, 9 per folder, 3 levels deep (about one folder per 8 files). */
 function largeFiles(count, wide = 0) {
   const list = [];

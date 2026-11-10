@@ -9,7 +9,7 @@ import { invariant } from './errors.js';
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
-import { manifestFromTree, writeOutputTree } from './state-tree-output.js';
+import { manifestFromTree, warmTreeState, writeOutputTree } from './state-tree-output.js';
 
 /** Parents are compact, verified metadata. A file tree is loaded only when the
  * native merge actually requests it, rather than for every ancestor visited. */
@@ -144,6 +144,7 @@ export class MemorySourceReader extends SourceWorkerReader {
       if (rebuilt && rebuilt.length === ref.object.size) {
         const derived = Buffer.from(rebuilt.buffer, rebuilt.byteOffset, rebuilt.length);
         this.source.objects.set(ref.object.sha256, derived);
+        warmTreeState(trees, ref.object.sha256);
         return derived;
       }
     }
@@ -190,6 +191,8 @@ export class MemorySourceReader extends SourceWorkerReader {
     this.source.objects.set(ref.object.sha256, bytes);
     if (trees?.read && !this.source.treeBase && trees.pointer(ref.object.sha256))
       this.source.treeBase = { state: ref.object.sha256, bytes };
+    // Dual-write: a State the merge holds is likely a base of the State it publishes.
+    if (trees) warmTreeState(trees, ref.object.sha256);
     return bytes;
   }
   override async file(ref: WorkerObject) {

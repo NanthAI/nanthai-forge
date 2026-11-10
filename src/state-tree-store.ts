@@ -49,6 +49,11 @@ export const validStateTreePointer = (value: unknown): value is StateTreePointer
 };
 /** Segments up to this size are read whole (one GET, digest checked); larger ones by range. */
 export const WHOLE_SEGMENT_BYTES = 256 * 1024;
+/** A remote store fetches a segment up to this size whole on any read of it: one round trip costs
+ * more than these bytes (a first conversion of a few thousand files is about 370 kB). */
+export const FETCH_WHOLE_BYTES = 1024 * 1024;
+/** `prefetch` fetches at most this many of the segments a State's header names. */
+export const PREFETCH_SEGMENTS = 8;
 /** A wide folder whose chunks sit in more segments than this has its most scattered chunks
  * rewritten together, down to half as many segments. */
 export const WIDE_SEGMENT_SPREAD = 8;
@@ -277,6 +282,19 @@ export class TreeSession {
       record: header.record,
       root: { id, oid, at: { segment: other[0] as string, size: other[1] as number, offset, length } },
     };
+  }
+  /** Fetch, in parallel, the segment a pointer names and up to `PREFETCH_SEGMENTS` of the
+   * segments its header names, each at most `FETCH_WHOLE_BYTES`, so that a later walk from this
+   * State finds them in the store's cache instead of reading them one level at a time. Bytes are
+   * checked when a walk uses them, as on any read. */
+  async prefetch(pointer: StateTreePointer) {
+    const header = await this.header(pointer.segment, pointer.size);
+    await Promise.all(
+      header.segments
+        .filter(([, size]) => size <= FETCH_WHOLE_BYTES)
+        .slice(0, PREFETCH_SEGMENTS)
+        .map(([segment]) => this.store.get(segment)),
+    );
   }
   /** Write this operation's segment and check every record in it. `put` resolves only once the
    * store holds exactly these bytes (R2: a create-only PUT whose SHA-256 checksum R2 confirmed), so
