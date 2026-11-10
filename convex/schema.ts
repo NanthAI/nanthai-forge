@@ -15,7 +15,6 @@ import { sourceStepTables } from './projectSourceStepFields';
 import { workDetailMigration, workDetailTables } from './projectWorkDetailFields';
 import { hostedSeedTables } from './projectHostedSeedFields';
 import { backfillFields } from './r2BackfillFields';
-import { stateTreesFields } from './projectObjectFields';
 import { sourceAuthority, sourceAuthorityTables } from './projectSourceAuthorityFields';
 import { actorTables } from './projectActorFields';
 import { autonomyPolicy, autonomyTables, automaticAction } from './autonomyFields';
@@ -356,10 +355,9 @@ const projectFields = {
     v.object({ generation: v.number(), cursor: v.union(v.string(), v.null()), failures: v.number() }),
   ),
   sourceAuthority: v.optional(sourceAuthority),
-  /** Trees in packs (docs/architecture.md, Storage, "Tree form"): `write` dual-writes each new State's tree
-   * form beside its flat manifest; `read` names the operations that read trees. Off when absent.
-   * `refused` is the alarm: the last State whose tree form failed its read-back check. */
-  stateTrees: v.optional(stateTreesFields),
+  /** Legacy, trees in packs (tried and dropped, docs/decisions.md): never written or read; tolerated so
+   * a project row written before the rollback still validates. */
+  stateTrees: v.optional(v.any()),
   sourceCutover: v.optional(v.object({ minimumCliVersion: v.string(), at: v.string() })),
   visibility: v.optional(v.union(v.literal('private'), v.literal('public'))),
   hostingRequest: v.optional(v.string()),

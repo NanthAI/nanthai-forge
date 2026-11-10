@@ -172,8 +172,6 @@ Hosted self-metrics include **bytes by location**: every Convex file-storage wri
 `nforge maintenance r2-backfill ROOT --dry-run` reports, per project, the legacy rows still only in Convex storage (count, bytes, estimated move cost) and the Convex copies already moved to R2 that cleanup could delete. It reads indexed rows in pages of 100 and moves nothing. The move and the delete are separate, owner-approved steps ([R2 backfill](operations/r2-backfill.md)).
 
 
-A project with tree writes on also records `stateTree` on a State's `projectObjects` row: the digest and size of one R2 tree segment and a root node id (three scalars, written once, only after the stored segment reproduced the flat manifest). The segment itself is an R2 object under the project prefix with its own `projectObjects` row, about 4-140 kB per save. Convex holds no tree bytes ([architecture, Tree form](architecture.md#storage)).
-
 Hosted State topological levels (`stateGeneration`) are optional scalar metadata
 on the State's existing `projectObjects` row, or a sparse indexed scalar in its
 existing `projectObjectCatalog` page. Trusted workers derive them from verified

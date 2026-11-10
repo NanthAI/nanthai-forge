@@ -6,13 +6,11 @@ import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
 import { validStateGeneration, validStateParents } from '../src/state-generation';
 import { findObject, objectRow } from './projectObjectFind';
-import { validStateTreePointer, type StateTreePointer } from '../src/state-tree-store';
 export type SourceOutput = {
   sha256: string;
   size: number;
   stateGeneration?: number;
   stateParents?: string[];
-  stateTree?: StateTreePointer;
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -84,19 +82,11 @@ export async function storeSourceOutputs(
       'SOURCE_HASH_MISMATCH',
       'Immutable State parents changed.',
     );
-    invariant(
-      pin.stateTree === undefined || validStateTreePointer(pin.stateTree),
-      'SOURCE_JOB_INVALID',
-      'A State tree pointer names an exact segment and root.',
-    );
-    // Written once: a State that already has a proven pointer keeps it (the tree is immutable).
-    const tree = old?.stateTree ? undefined : pin.stateTree;
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
     // Written once from the hash-verified manifest, like the generation; never cleared.
     const graph = {
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
-      ...(tree === undefined ? {} : { stateTree: tree }),
     };
     if (!old)
       await ctx.db.insert('projectObjects', {
@@ -124,8 +114,7 @@ export async function storeSourceOutputs(
     else if (
       !old.sourceReferenced ||
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
-      (old.stateParents === undefined && pin.stateParents !== undefined) ||
-      tree !== undefined
+      (old.stateParents === undefined && pin.stateParents !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
     if (!old?.sourceReferenced)

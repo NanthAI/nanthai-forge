@@ -2,7 +2,6 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { sourceExecutionTiming } from './projectSourceStepTiming';
-import { stateTreePointer } from './projectObjectFields';
 import {
   sourceFailureStages,
   sourceFailureClasses,
@@ -12,7 +11,6 @@ import {
 export const sourceOutput = v.object({
   stateGeneration: v.optional(v.number()),
   stateParents: v.optional(v.array(v.string())),
-  stateTree: v.optional(stateTreePointer),
   sha256: v.string(),
   size: v.number(),
   storageId: v.optional(v.id('_storage')),

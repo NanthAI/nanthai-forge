@@ -4,8 +4,6 @@ import type { Id } from './_generated/dataModel';
 import { saveObject, saveStateSchema } from './projectHostedSaveStore';
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
-import { hostedStartMain } from './projectHostedChannels';
-import type { StateTreePointer } from '../src/state-tree-store';
 import { packRange, packHeaders } from '../src/object-pack-range';
 import { invariant } from '../src/errors';
 import { smallSavePageBytes, smallSaveStateBytes } from '../src/hosted-source-small-save';
@@ -29,7 +27,6 @@ export async function sourceObjectLocation(
     descriptor,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
-    ...(object.stateTree === undefined ? {} : { stateTree: object.stateTree }),
     storageId: url ? null : (object.storageId ?? null),
     url,
     ...(object.pack ? { range: packRange(object)! } : {}),
@@ -59,27 +56,4 @@ export async function saveStepReads(ctx: MutationCtx, projectId: Id<'hostedProje
   )
     return [];
   return [state.baseline.object, pages];
-}
-
-/** Self-heal for dual-write (docs/architecture.md, "Tree form"): a save whose baseline has no tree
- * pointer is written as edits on the nearest State that has one, so a flat State does not keep its
- * descendants flat. Walks first parents for at most 8 rows, then tries main's head. Point reads
- * only, and only while the baseline is flat; null leaves the save flat, as before. */
-export async function saveTreeBase(
-  ctx: MutationCtx,
-  projectId: Id<'hostedProjects'>,
-  baseline: string,
-): Promise<{ state: string; pointer: StateTreePointer } | null> {
-  let id: string | undefined = baseline;
-  for (let hop = 0; id && hop < 8; hop++) {
-    const row = await findObject(ctx, projectId, id);
-    if (row?.stateTree && id !== baseline) return { state: id, pointer: row.stateTree };
-    id = row?.stateParents?.[0];
-  }
-  const head = await hostedStartMain(ctx, projectId).then(
-      main => main.head,
-      () => null,
-    ),
-    main = head && head !== baseline ? await findObject(ctx, projectId, head) : null;
-  return head && main?.stateTree ? { state: head, pointer: main.stateTree } : null;
 }

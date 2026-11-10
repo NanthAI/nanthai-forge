@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import { v } from 'convex/values';
-import { recordTreeRefusal } from './projectStateTrees';
 import { internalMutation, type MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { reserveSourceProvider, recordSourceProvider, lookupSourceProvider } from './projectSourceProvider';
@@ -42,7 +41,7 @@ import {
   sourceFailureSchema,
 } from '../src/hosted-source-retry';
 import { recordSourceStep, sourceR2Counts, sourceStepTiming } from './projectSourceStepTiming';
-import { saveStepReads, saveTreeBase, sourceObjectLocation } from './projectSourceBeginReads';
+import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
 import { digest } from '../src/portable-hash';
 import { publishSourceResult } from './projectSourcePublishInline';
@@ -250,12 +249,6 @@ export const begin = sourceMutation({
         for (const pin of await saveStepReads(ctx, args.projectId, args.jobId))
           locations.push(await sourceObjectLocation(ctx, args.projectId, pin));
     }
-    // Self-heal: a save on a flat baseline gets a State with a tree to write its own on.
-    const baseline = active.job.jobKind === 'save' ? locations[1] : undefined,
-      treeBase =
-        active.project.stateTrees?.write && baseline && !baseline.stateTree
-          ? await saveTreeBase(ctx, args.projectId, baseline.descriptor.object.sha256)
-          : null;
     return canonicalPayload({
       generation: active.row.generation ?? 0,
       input: active.job.input,
@@ -265,9 +258,6 @@ export const begin = sourceMutation({
       cursor: active.row.cursor,
       locations,
       batchId: active.row.batchId ?? null,
-      ...(active.project.stateTrees?.write ? { trees: true } : {}),
-      ...(active.project.stateTrees?.read?.includes('merge') ? { treeRead: true } : {}),
-      ...(treeBase ? { treeBase } : {}),
     });
   },
 });
@@ -313,8 +303,6 @@ export const commit = sourceMutation({
     result: v.optional(v.string()),
     /** The committing action runs a published save's resolve chain itself (save-then-resolve). */
     chain: v.optional(v.boolean()),
-    /** Dual-write alarm: a State whose tree form was refused (it was recorded flat only). */
-    treeRefused: v.optional(v.object({ state: v.string(), code: v.string() })),
   },
   /** With a small result, the publication this commit made (`InlinePublication`); otherwise null. */
   returns: v.union(v.string(), v.null()),
@@ -331,7 +319,6 @@ export const commit = sourceMutation({
     }
     invariant(args.objects.length <= 100, 'SOURCE_JOB_INVALID', 'Commit source output in bounded windows.');
     await storeSourceOutputs(ctx, args.projectId, active.row.executionId, args.objects);
-    if (args.treeRefused) await recordTreeRefusal(ctx, args.projectId, args.treeRefused);
     // The submitting action ran this step itself: its delayed fallback is no longer needed. One that
     // already started (it is running this commit, or raced it) is left alone.
     if (active.row.inlineFallback && active.row.scheduledId) {

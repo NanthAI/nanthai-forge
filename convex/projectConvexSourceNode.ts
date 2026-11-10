@@ -47,7 +47,7 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs, settle, clock, smallOutput, tree } = convexSourceTransport(
+        const { io, outputs, settle, clock, smallOutput } = convexSourceTransport(
             ctx,
             input,
             state.locations,
@@ -56,8 +56,6 @@ export const step = internalAction({
             {
               overlapWrites: true,
               preloaded: supplied ? state.preloaded : undefined,
-              trees: state.trees === true,
-              treeRead: state.treeRead === true,
             },
           ),
           durable = sourceStorage(ctx, input.projectId);
@@ -94,8 +92,7 @@ export const step = internalAction({
             result.cursor.phase === 'done'
               ? null
               : saveSourceProgress(result.cursor, progress, durable.store).then(saved => saved.id),
-            // The commit follows: dual-write still running past a short grace leaves States flat.
-            settle({ deadline: true }),
+            settle(),
           ]);
           const outputCount = outputs.length;
           const logStep = () =>
@@ -140,7 +137,6 @@ export const step = internalAction({
               output: result.cursor.output,
               failure: null,
               timing: { ...clock.value(), ...result.metrics.detail },
-              ...(tree.refused ? { treeRefused: tree.refused } : {}),
               ...(resultText === null ? {} : { result: resultText }),
             },
           );

@@ -84,7 +84,6 @@ export const resolve = sourceMutation({
       descriptor: descriptors[i]!,
       ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
       ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
-      ...(row.stateTree === undefined ? {} : { stateTree: row.stateTree }),
       storageId: url ? null : (row.storageId ?? null),
       url,
       ...(row.pack ? { range: packRange(row)! } : {}),

@@ -11,7 +11,6 @@ import { bindPackMembers } from './projectObjectPacks';
 import { readExactObject } from './projectR2ExactRead';
 import { uploadPackMismatch } from '../src/object-pack-upload';
 import { mapExchange } from '../src/exchange-parallel';
-import { gitId } from '../src/state-tree-format';
 
 const member = v.object({ digest: v.string(), size: v.number() });
 const pending = v.object({
@@ -21,8 +20,6 @@ const pending = v.object({
   key: v.string(),
   /** An upload pack's members (feature upload-packs), checked by reading the pack. */
   members: v.optional(v.array(member)),
-  /** The project dual-writes State trees: the pack read also derives each member's Git blob id. */
-  gitIds: v.optional(v.boolean()),
 });
 /** Rows of this caller's R2 uploads that still need a HEAD check. */
 export const pendingRows = internalQuery({
@@ -34,7 +31,7 @@ export const pendingRows = internalQuery({
       for (const id of ids) {
         const row = await ctx.db.get(id);
         invariant(row, 'PROJECT_UNAVAILABLE', 'This original upload is unavailable.');
-        const project = await activeProject(ctx, row.projectId, actor);
+        await activeProject(ctx, row.projectId, actor);
         invariant(
           row.location === 'r2' && row.r2Key,
           'BAD_ARGUMENT',
@@ -52,7 +49,6 @@ export const pendingRows = internalQuery({
             size: row.size,
             key: row.r2Key,
             ...(row.packMembers ? { members: row.packMembers } : {}),
-            ...(row.packMembers && project.stateTrees?.write ? { gitIds: true } : {}),
           });
       }
       return rows;
@@ -140,9 +136,8 @@ export const commitBatch = action({
  * upload of the same digests prepares afresh. */
 async function packMismatch(
   config: ReturnType<typeof r2Config>,
-  row: { key: string; size: number; members: { digest: string; size: number }[]; gitIds?: boolean },
+  row: { key: string; size: number; members: { digest: string; size: number }[] },
   held?: Map<string, Uint8Array>,
-  git?: Map<string, string>,
 ) {
   let bytes: Uint8Array;
   try {
@@ -164,8 +159,6 @@ async function packMismatch(
     const total = [...(held?.values() ?? [])].reduce((sum, value) => sum + value.length, 0);
     if (held && total + member.size <= heldBytes)
       held.set(member.digest, bytes.slice(end - member.size, end));
-    // Dual-write: the checked bytes are in hand here and nowhere later without another read.
-    if (row.gitIds) git?.set(member.digest, gitId('blob', bytes.subarray(end - member.size, end)));
     end -= member.size;
   }
   return null;
@@ -181,7 +174,7 @@ export async function commitObjects(
   actor: string,
   objects: readonly { id: Id<'projectObjects'> }[],
   held?: Map<string, Uint8Array>,
-): Promise<{ sha256: string; size: number; git?: string }[]> {
+): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
   if (!objects.length) return [];
   const rows: {
@@ -190,14 +183,12 @@ export async function commitObjects(
     size: number;
     key: string;
     members?: { digest: string; size: number }[];
-    gitIds?: boolean;
   }[] = await ctx.runQuery(internal.projectObjectCommit.pendingRows, {
     actor,
     ids: objects.map(object => object.id),
   });
   if (!rows.length) return [];
-  const config = r2Config(),
-    git = new Map<string, string>();
+  const config = r2Config();
   // Raw rows HEAD all at once; pack reads hold at most two packs (2 x 8 MiB) in memory.
   const [heads, packs] = await Promise.all([
     Promise.all(
@@ -216,7 +207,7 @@ export async function commitObjects(
       rows.filter(row => row.members),
       2,
       async row => {
-        const failure = await packMismatch(config, { ...row, members: row.members! }, held, git);
+        const failure = await packMismatch(config, { ...row, members: row.members! }, held);
         return { row, checked: !failure, failure };
       },
     ),
@@ -230,11 +221,7 @@ export async function commitObjects(
     checked
       ? [
           { sha256: row.digest, size: row.size },
-          ...(row.members ?? []).map(member => ({
-            sha256: member.digest,
-            size: member.size,
-            ...(git.has(member.digest) ? { git: git.get(member.digest)! } : {}),
-          })),
+          ...(row.members ?? []).map(member => ({ sha256: member.digest, size: member.size })),
         ]
       : [],
   );

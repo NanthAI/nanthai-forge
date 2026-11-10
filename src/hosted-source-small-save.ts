@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { sha1 } from '@noble/hashes/legacy.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { digest } from './portable-hash.js';
 import { saveInputSchema, validateSavePage, savePin } from './hosted-save.js';
 import { parseNativeState, overlappingPaths, type NativeState } from './native-state-format.js';
@@ -11,7 +10,6 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
-import { warmTreePaths, writeOutputTree } from './state-tree-output.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
@@ -46,7 +44,7 @@ export async function runSmallSourceSave(
    * size and sha256 checksum (R2 also enforced that checksum on their create-only PUT). Staging
    * already bound them to this save, and the step does not use their bytes, so it does not
    * download them again only to re-hash them. Every other changed object is read and checked. */
-  verified: readonly (WorkerPin & { git?: string })[] = [],
+  verified: readonly WorkerPin[] = [],
 ): Promise<WorkerPin | null> {
   if (input.size > smallSaveInputBytes) return null;
   const early = new Map(
@@ -94,13 +92,6 @@ export async function runSmallSourceSave(
     'SOURCE_CLOSURE_INVALID',
     'Save counts changed.',
   );
-  // Dual-write: the folders this save edits are read while the baseline downloads.
-  if (io.trees)
-    warmTreePaths(
-      io.trees,
-      plan.baseline.object.sha256,
-      page.changes.map(change => change.path),
-    );
   const after = page.changes.flatMap(change => (change.after ? [change.after.content] : []));
   if (after.some(ref => ref.recipe) || after.reduce((n, ref) => n + ref.object.size, 0) > windowBytes)
     return null;
@@ -123,19 +114,14 @@ export async function runSmallSourceSave(
   ];
   // Descriptors were prepared in one window above; changed bytes are streamed and
   // discarded, several in flight (each read is a round trip, not CPU).
-  // Dual-write (tree form): a changed file's Git id is hashed from the same verified stream.
-  const oids = new Map(verified.flatMap(pin => (pin.git ? [[pin.sha256, pin.git] as const] : [])));
   await mapSourceOrdered(verify, async pin => {
-    const hash = sha256.create(),
-      git = io.trees ? sha1.create().update(utf8ToBytes(`blob ${pin.size}\0`)) : null;
+    const hash = sha256.create();
     let size = 0;
     for await (const part of await io.read(pin)) {
       size += part.length;
       invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
       hash.update(part);
-      git?.update(part);
     }
-    if (git) oids.set(pin.sha256, bytesToHex(git.digest()));
     invariant(
       size === pin.size && bytesToHex(hash.digest()) === pin.sha256,
       'SOURCE_HASH_MISMATCH',
@@ -168,8 +154,7 @@ export async function runSmallSourceSave(
     );
     return pin;
   };
-  let state = plan.baseline.object,
-    tree: Promise<unknown> | undefined;
+  let state = plan.baseline.object;
   if (changed) {
     const next: NativeState = {
       schema: 1,
@@ -186,28 +171,6 @@ export async function runSmallSourceSave(
     );
     const manifest = new TextEncoder().encode(JSON.stringify(next));
     state = publish(manifest);
-    // Dual-write starts after the State upload and overlaps it and the result upload (it never
-    // throws and never changes them); the transport attaches its pointer to the State's output
-    // once both have settled.
-    if (io.trees) {
-      const sizes = new Map(after.map(ref => [ref.object.sha256, ref.object]));
-      tree = writeOutputTree(
-        io.trees,
-        manifest,
-        {
-          files: id => (id === plan.baseline.object.sha256 ? baseline.files : undefined),
-          oids,
-          bytes: async files => {
-            const pins = files.map(file => sizes.get(file.blob)!),
-              direct = await Promise.all(pins.map(pin => io.trees!.direct?.(pin)));
-            const rest = pins.filter((_, i) => !direct[i]);
-            if (rest.length) await io.prepareRead?.(rest);
-            return Promise.all(pins.map((pin, i) => direct[i] ?? readExact(io, pin)));
-          },
-        },
-        { value: next, state: state.sha256 },
-      );
-    }
   }
   const output = publish(
     new TextEncoder().encode(
@@ -222,7 +185,7 @@ export async function runSmallSourceSave(
     ),
   );
   // The manifest references the State pin, but their immutable R2 writes are independent.
-  const settled = await Promise.allSettled([...uploads, ...(tree ? [tree] : [])]);
+  const settled = await Promise.allSettled(uploads);
   for (const result of settled) if (result.status === 'rejected') throw result.reason;
   return output;
 }

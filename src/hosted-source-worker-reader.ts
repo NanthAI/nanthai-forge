@@ -10,7 +10,6 @@ import { ForgeError, invariant } from './errors.js';
 import { objectRecipeSchema, readObjectRecipe } from './object-chunks.js';
 import { jobObject } from './hosted-source-job.js';
 import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-source-worker-format.js';
-import type { StateTreeIo } from './state-tree-output.js';
 
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
@@ -32,8 +31,6 @@ export interface SourceWorkerTransport {
   uploadBatch?(objects: { pin: WorkerPin; bytes: AsyncIterable<Uint8Array> }[]): Promise<void>;
   read(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>>;
   upload(pin: WorkerPin, bytes: AsyncIterable<Uint8Array>): Promise<void>;
-  /** Present when the project dual-writes States in tree form (src/state-tree-output.ts). */
-  trees?: StateTreeIo;
 }
 export class SourceWorkerReader {
   readonly metrics = {

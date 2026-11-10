@@ -19,9 +19,6 @@ import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStepClock } from '../src/source-step-clock';
-import { r2SegmentStore } from './projectStateTreeStore';
-import { validStateTreePointer, type StateTreePointer } from '../src/state-tree-store';
-import { logStateTree, treeLateGraceMs } from '../src/state-tree-output';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
 export const sourceResultInlineBytes = 64 * 1024;
@@ -29,7 +26,6 @@ export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
   stateParents?: string[];
-  stateTree?: StateTreePointer;
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
@@ -44,18 +40,8 @@ export function convexSourceTransport(
   {
     overlapWrites = false,
     preloaded = [],
-    trees = false,
-    treeRead = false,
-    treeBase,
   }: {
     overlapWrites?: boolean;
-    /** The project dual-writes States in tree form (`hostedProjects.stateTrees.write`). */
-    trees?: boolean;
-    /** The merge reader is switched to trees (`hostedProjects.stateTrees.read` has `merge`). */
-    treeRead?: boolean;
-    /** Self-heal: a State with a proven pointer that `begin` found for a save whose baseline is
-     * flat (its nearest such ancestor, else main's head). */
-    treeBase?: { state: string; pointer: StateTreePointer } | undefined;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -72,75 +58,21 @@ export function convexSourceTransport(
     small = new Map<string, string>(),
     // Overlapped writes in upload order, at most sourceIoConcurrency in flight.
     writing: Promise<SourceOutput>[] = [];
-  // Dual-write work handed over by the step (it never rejects): awaited here, beside the writes.
-  let treeWork: Promise<unknown> = Promise.resolve(),
-    /** Set when a deadline settle stopped waiting: later outcomes record no pointer. */
-    treeClosed = false;
-  /** `deadline`: the step is about to commit, so dual-write work still running once the writes
-   * are done gets only a short grace (`treeLateGraceMs`); after it the States commit flat, with no
-   * pointer, and the next State heals on the nearest one that has a tree. Without it the work is
-   * awaited in full. */
-  const settle = async ({ deadline = false }: { deadline?: boolean } = {}) => {
+  const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
-    if (!deadline || treeClosed) await treeWork;
-    else {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const graceMs = treeLateGraceMs(clock.value().runMs, process.env.FORGE_STATE_TREE_GRACE_MS),
-        late = await Promise.race([
-          treeWork.then(() => false),
-          new Promise<boolean>(resolve => (timer = setTimeout(() => resolve(true), graceMs))),
-        ]);
-      clearTimeout(timer);
-      if (late) {
-        treeClosed = true;
-        tree.late++;
-        logStateTree(
-          { jobId, step },
-          null,
-          { status: 'late' },
-          { ms: graceMs, ...(segments?.stats ?? { gets: 0, getBytes: 0, puts: 0, putBytes: 0 }), ...at() },
-        );
-      }
-    }
-    // A dual-write that overlapped its State's upload settled after that output was prepared.
-    for (const output of outputs)
-      if (output.stateParents && !output.stateTree && pointers.has(output.sha256))
-        output.stateTree = pointers.get(output.sha256)!;
-    // Each segment this step wrote gets its object row with the same commit.
-    if (segments) outputs.push(...segments.written.splice(0));
   };
-  /** The step's run time now, for tree log lines (when a write finished against the commit). */
-  const at = () => ({ atMs: Math.round(clock.value().runMs) });
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>(),
-    parents = new Map<string, string[]>(),
-    pointers = new Map<string, StateTreePointer>();
-  // Dual-write: segments are read by key and written beside the State; the outcome is counted
-  // here and a refusal is the step's alarm (the flat State is recorded either way).
-  const segments = trees || treeRead ? r2SegmentStore(ctx, projectId) : null,
-    tree = {
-      written: 0,
-      skipped: 0,
-      refused: null as { state: string; code: string } | null,
-      /** States the merge reader rebuilt from their trees instead of downloading the manifest. */
-      derived: 0,
-      /** Deadline settles that committed while dual-write work was still running. */
-      late: 0,
-      bytes: 0,
-      ms: 0,
-    };
+    parents = new Map<string, string[]>();
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
       locations.set(row.descriptor.object.sha256, row);
       if (validStateGeneration(row.stateGeneration))
         generations.set(row.descriptor.object.sha256, row.stateGeneration);
       if (validStateParents(row.stateParents)) parents.set(row.descriptor.object.sha256, row.stateParents);
-      if (validStateTreePointer(row.stateTree)) pointers.set(row.descriptor.object.sha256, row.stateTree);
     }
   };
   remember(initial);
-  if (treeBase && validStateTreePointer(treeBase.pointer) && !pointers.has(treeBase.state))
-    pointers.set(treeBase.state, treeBase.pointer);
   const held = new Map<string, Uint8Array>();
   for (const value of preloaded) {
     const bytes = new TextEncoder().encode(value.text);
@@ -181,77 +113,6 @@ export function convexSourceTransport(
     return rows.map(row => row.descriptor);
   };
   const io: StepTransport = {
-    ...(segments
-      ? {
-          trees: {
-            write: trees,
-            read: treeRead,
-            defer: work => {
-              treeWork = Promise.all([treeWork, work]);
-            },
-            derived: (state, ok) => {
-              if (ok) tree.derived++;
-              else tree.refused ??= { state, code: 'SOURCE_DIGEST_MISMATCH' };
-              logStateTree(
-                { jobId, step },
-                state,
-                ok
-                  ? { status: 'read' }
-                  : {
-                      status: 'refused',
-                      code: 'SOURCE_DIGEST_MISMATCH',
-                      message: 'A stored tree did not give its State.',
-                    },
-                { ms: 0, ...segments.stats },
-              );
-            },
-            store: {
-              ...segments.store,
-              put: bytes => clock.write(() => segments.store.put(bytes)),
-            },
-            pointer: id => pointers.get(id),
-            nearest: ids => {
-              // Breadth first over the parents this step knows, so the closest pointer wins.
-              const seen = new Set<string>();
-              let level = [...ids];
-              for (let depth = 0; level.length && depth < 64; depth++) {
-                const next: string[] = [];
-                for (const id of level) {
-                  if (seen.has(id)) continue;
-                  seen.add(id);
-                  if (pointers.has(id)) return id;
-                  next.push(...(parents.get(id) ?? []));
-                }
-                level = next;
-              }
-              return treeBase && pointers.has(treeBase.state) ? treeBase.state : undefined;
-            },
-            direct: pin => segments.direct(pin),
-            settled: (state, result, ms) => {
-              // After a deadline settle the step has committed (or is committing) without this
-              // State's pointer; only an alarm is still worth a line.
-              if (treeClosed) {
-                if (result.status !== 'skipped')
-                  logStateTree({ jobId, step }, state, result, {
-                    ms,
-                    ...segments.stats,
-                    ...at(),
-                    late: true,
-                  });
-                return;
-              }
-              tree.ms += ms;
-              if (result.status === 'written') {
-                pointers.set(state, result.pointer);
-                tree.written++;
-                tree.bytes += result.bytes;
-              } else if (result.status === 'skipped') tree.skipped++;
-              else tree.refused ??= { state, code: result.code.slice(0, 64) };
-              logStateTree({ jobId, step }, state, result, { ms, ...segments.stats, ...at() });
-            },
-          },
-        }
-      : {}),
     stateGeneration: id => generations.get(id),
     stateParents: id => parents.get(id),
     rememberStateGenerations: values => {
@@ -447,8 +308,6 @@ export function convexSourceTransport(
       small.set(pin.sha256, new TextDecoder().decode(bytes));
       if (small.size > 8) small.delete(small.keys().next().value!);
     }
-    // Only a State this step proved in tree form carries a pointer (settled before its upload).
-    const stateTree = stateParents === undefined ? undefined : pointers.get(pin.sha256);
     return {
       async store(): Promise<SourceOutput> {
         const ref = await clock.write(() => durable.store(bytes)),
@@ -457,7 +316,6 @@ export function convexSourceTransport(
           ...pin,
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
           ...(stateParents === undefined ? {} : { stateParents }),
-          ...(stateTree === undefined ? {} : { stateTree }),
           ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
         };
       },
@@ -471,9 +329,6 @@ export function convexSourceTransport(
     locations,
     reads,
     clock,
-    /** Dual-write outcomes of this step, and its R2 segment traffic (null when off). */
-    tree,
-    treeIo: segments?.stats ?? null,
     /** This step's own small output with exactly this pin, as text; otherwise null. */
     smallOutput: (pin: { sha256: string; size: number } | null) => {
       const text = pin ? small.get(pin.sha256) : undefined;
