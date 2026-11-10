@@ -356,6 +356,7 @@ test('registered private status/read actions authorize the current importer befo
       if (url.hostname === 'api.clerk.com') return Response.json([{ token: 'ghu_test' }]);
       if (url.pathname.startsWith('/applications/'))
         return Response.json({}, { status: revoked ? 404 : 200 });
+      if (url.pathname === '/user') return Response.json({}, { status: revoked ? 401 : 200 });
       return Response.json(
         { ...repository, private: true },
         { status: init.headers.Authorization ? 200 : 404 },
@@ -606,6 +607,7 @@ test('delivery deduplication, paginated current-ref reconciliation, access revoc
     const url = new URL(input);
     if (url.hostname === 'api.clerk.com') return Response.json([{ token: 'ghu_test' }]);
     if (url.pathname.startsWith('/applications/')) return Response.json({}, { status: revoked ? 404 : 200 });
+    if (url.pathname === '/user') return Response.json({}, { status: revoked ? 401 : 200 });
     if (url.pathname.includes('/commits/')) return Response.json({ sha: head });
     return Response.json(
       { ...repository, private: true },

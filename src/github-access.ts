@@ -76,18 +76,20 @@ async function installationFailure(
     `GitHub did not return ${repository} although the Forge GitHub App is installed for ${owner}. Check the repository name and your access to it; installation settings: ${configure}.`,
   );
 }
-export async function authorizeGithub(
-  repository: string,
+/** Explicit setup diagnostic; checks sign-in independently of repository visibility. */
+export async function checkGithubSignIn(
   userId: string | undefined,
   config: GithubAccessConfig,
   request: GithubFetch = networkFetch,
-): Promise<{ repository: GithubRepository; token: string | undefined }> {
-  try {
-    const repo = await githubRepository(repository, config.publicToken, request);
-    if (!repo.private) return { repository: repo, token: config.publicToken };
-  } catch (error) {
-    if (!(error instanceof ForgeError) || error.code !== 'GITHUB_UNAVAILABLE') throw error;
-  }
+): Promise<void> {
+  await githubUserToken(userId, config, request);
+}
+
+async function githubUserToken(
+  userId: string | undefined,
+  config: GithubAccessConfig,
+  request: GithubFetch,
+): Promise<string> {
   invariant(
     userId,
     'GITHUB_UNAVAILABLE',
@@ -135,11 +137,66 @@ export async function authorizeGithub(
       },
     },
   );
-  invariant(
-    checked.ok,
-    'GITHUB_UNAVAILABLE',
-    'The Forge GitHub authorization has expired or been revoked. Reconnect GitHub.',
-  );
+  if (!checked.ok) {
+    if (checked.status === 401)
+      throw new ForgeError(
+        'GITHUB_SETUP_REQUIRED',
+        'GitHub rejected this deployment’s App client credentials. Set GITHUB_APP_CLIENT_ID and GITHUB_APP_CLIENT_SECRET to the same GitHub App.',
+      );
+    if (checked.status === 404) {
+      // A live user token that this App cannot check belongs to another App.
+      const user = await request('https://api.github.com/user', {
+        redirect: 'error',
+        signal: networkTimeout(30_000),
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'NanthAi-Forge',
+        },
+      });
+      if (user.ok)
+        throw new ForgeError(
+          'GITHUB_SETUP_REQUIRED',
+          'GitHub sign-in uses a different GitHub App than this deployment. Set the sign-in provider’s GitHub client ID and secret to this deployment’s App, then reconnect GitHub. Use a separate sign-in instance when deployments use different Apps.',
+        );
+      if (user.status === 401)
+        throw new ForgeError(
+          'GITHUB_UNAVAILABLE',
+          'The GitHub sign-in token has expired or been revoked. Reconnect GitHub.',
+        );
+    }
+    throw new ForgeError(
+      'GITHUB_UNAVAILABLE',
+      'GitHub could not validate the sign-in token. Retry when GitHub is available; check the deployment’s GitHub App connection if the failure persists.',
+    );
+  }
+  return token;
+}
+
+export async function authorizeGithub(
+  repository: string,
+  userId: string | undefined,
+  config: GithubAccessConfig,
+  request: GithubFetch = networkFetch,
+): Promise<{ repository: GithubRepository; token: string | undefined }> {
+  try {
+    const repo = await githubRepository(repository, config.publicToken, request);
+    if (!repo.private) return { repository: repo, token: config.publicToken };
+  } catch (error) {
+    if (!(error instanceof ForgeError) || error.code !== 'GITHUB_UNAVAILABLE') throw error;
+    if (config.publicToken) {
+      // A deployment credential can be expired or restricted even for public repositories.
+      // Only anonymous metadata can establish this fallback's public authority.
+      try {
+        const repo = await githubRepository(repository, undefined, request);
+        if (!repo.private) return { repository: repo, token: undefined };
+      } catch (anonymousError) {
+        if (!(anonymousError instanceof ForgeError) || anonymousError.code !== 'GITHUB_UNAVAILABLE')
+          throw anonymousError;
+      }
+    }
+  }
+  const token = await githubUserToken(userId, config, request);
   // GitHub App user tokens enforce the intersection of the human's access and the App's selected repositories.
   try {
     return { repository: await githubRepository(repository, token, request), token };

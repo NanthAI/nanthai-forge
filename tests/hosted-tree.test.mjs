@@ -34,7 +34,8 @@ function browserGlobals(search) {
   });
 }
 
-async function render(search, customize = () => {}) {
+async function render(search, customize = () => {}, githubAppSlug = '') {
+  process.env.VITE_GITHUB_APP_SLUG = githubAppSlug;
   process.env.VITE_CONVEX_URL = 'https://test.convex.cloud';
   process.env.VITE_CLERK_PUBLISHABLE_KEY = 'pk_test_tree';
   globalThis.__forgeTree = hostedTree();
@@ -350,4 +351,13 @@ test('hosted shell remains live independently of legacy owner sync metadata', as
   assert.doesNotMatch(html, /fx-tone-stale/);
   assert.match(html, /class="fx-pulse"/);
   assert.match(text, />Live</);
+});
+
+test('the private-repository connection links to this deployment’s configured App', async () => {
+  const html = await render('?surface=explore', () => {}, 'self-hosted-forge');
+  assert.match(html, /href="https:\/\/github.com\/apps\/self-hosted-forge\/installations\/new"/);
+  assert.doesNotMatch(html, /nanthai-forge-dev/);
+  const unconfigured = await render('?surface=explore');
+  assert.doesNotMatch(unconfigured, /github.com\/apps\//);
+  assert.match(unconfigured, /GitHub repository connection is not configured/);
 });

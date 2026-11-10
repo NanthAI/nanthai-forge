@@ -27,6 +27,7 @@ function fixture(
   t,
   {
     privateRepository = false,
+    rejectedPublicCredential = false,
     tooLarge = false,
     submodules = false,
     app = false,
@@ -51,6 +52,7 @@ function fixture(
     'GITHUB_APP_CLIENT_SECRET',
     'GITHUB_APP_ID',
     'GITHUB_APP_PRIVATE_KEY',
+    'GITHUB_PUBLIC_TOKEN',
   ];
   const priorEnv = envKeys.map(key => process.env[key]);
   if (privateRepository) for (const key of envKeys.slice(0, 3)) process.env[key] = 'synthetic-fixture';
@@ -63,6 +65,7 @@ function fixture(
       format: 'pem',
     });
   } else for (const key of envKeys.slice(3)) delete process.env[key];
+  if (rejectedPublicCredential) process.env.GITHUB_PUBLIC_TOKEN = 'synthetic-rejected-public';
   const previous = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = previous;
@@ -100,6 +103,8 @@ function fixture(
     const p = new URL(url).pathname;
     if (new URL(url).hostname === 'api.github.com')
       github.push({ path: p, method: options?.method ?? 'GET', auth: options?.headers?.Authorization });
+    if (rejectedPublicCredential && options?.headers?.Authorization === 'Bearer synthetic-rejected-public')
+      return new Response('{}', { status: 403 });
     if (p.includes('/oauth_access_tokens/oauth_github')) return Response.json([{ token: 'ghu_synthetic' }]);
     if (p.startsWith('/applications/')) return new Response('{}');
     if (app && p === '/repos/example/repo/installation') return Response.json({ id: 7 });
@@ -713,4 +718,25 @@ test('a paged import over the LFS limit fails with GITHUB_LFS_LIMIT and fetches 
   assert.deepEqual(lfs.counts, { batch: 0, download: 0 });
   const { lfsCoverage } = await import(moduleUrl('../convex/projectGithubImportPublish.ts'));
   assert.match(lfsCoverage(kept), /pointers remain/);
+});
+
+test('a rejected public credential still imports and publishes complete hosted main without a user token', async t => {
+  const s = fixture(t, { rejectedPublicCredential: true });
+  const id = await s.start();
+  await s.advance(id);
+  await s.advance(id);
+  await s.advance(id);
+  const job = s.tables.projectGithubImports.get(id);
+  assert.equal(job.phase, 'ready');
+  assert(s.tables.hostedProjects.get(job.projectId).currentBackup);
+  const sourceReads = s.github.filter(call => call.path !== '/repos/example/repo');
+  assert(sourceReads.length > 0);
+  assert(
+    sourceReads.every(call => call.auth === undefined),
+    'ref, tree, blob and publication reads keep anonymous access',
+  );
+  const row = [...s.tables.projectObjects.values()].find(
+    row => row.projectId === job.projectId && row.digest === digest(s.bytes),
+  );
+  assert.deepEqual(await storedBytes(s, row), s.bytes);
 });

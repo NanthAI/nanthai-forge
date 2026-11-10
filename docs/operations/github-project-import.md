@@ -40,7 +40,7 @@ and retry.
 
 | Request | Token |
 | --- | --- |
-| Access check (`GET /repos/OWNER/NAME`), once at start and once per worker run and publication | Public repository: the deployment's `GITHUB_PUBLIC_TOKEN` (or none). Private: the importer's GitHub App user token, which shares their personal hourly limit with `gh` and their other tools |
+| Access check (`GET /repos/OWNER/NAME`), once at start and once per worker run and publication | Public repository: the deployment's `GITHUB_PUBLIC_TOKEN` (or none); a rejected credential falls back to an anonymous visibility check. Private: the importer's GitHub App user token, which shares their personal hourly limit with `gh` and their other tools |
 | Ref resolution, tree listing, tarball, blob fallback, paged discovery | The Forge GitHub App installation token (`contents`/`metadata` read on that one repository; the App's own quota) when the App is installed there; otherwise the credential from the access check |
 | Installation lookup and token mint | The App JWT (App quota) |
 

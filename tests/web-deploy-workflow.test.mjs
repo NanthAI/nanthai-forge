@@ -87,3 +87,9 @@ test('the headless smoke fails on a module-evaluation error or unbaked build con
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('the dev web build receives the GitHub App slug through its public Vite environment variable', () => {
+  const build = workflow.slice(step('Build the web app'), step('Guard the browser bundle'));
+  assert.match(build, /^          VITE_GITHUB_APP_SLUG: \$\{\{ vars\.VITE_GITHUB_APP_SLUG \}\}$/m);
+  assert.doesNotMatch(build, /^\s+GITHUB_APP_SLUG:/m, 'GitHub reserves the GITHUB_ variable prefix');
+});

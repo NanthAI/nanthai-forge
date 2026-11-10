@@ -46,6 +46,7 @@ jobs:
           VITE_CONVEX_URL: ${{ vars.VITE_CONVEX_URL }}
           VITE_CONVEX_SITE_URL: ${{ vars.VITE_CONVEX_SITE_URL }}
           VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_GITHUB_APP_SLUG: ${{ vars.VITE_GITHUB_APP_SLUG }}
           # Same value as netlify.toml [build.environment].
           VITE_FORGE_DEMO_REPOSITORY: thevarsek/nanthai-edge-oss
       - name: Guard the browser bundle against Node-only code

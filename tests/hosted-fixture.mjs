@@ -600,6 +600,13 @@ export function providers(revoked = () => false, privateRepository = true, head 
     }
     if (url.pathname.startsWith('/applications/'))
       return Response.json({}, { status: revoked(JSON.parse(init.body).access_token.slice(4)) ? 404 : 200 });
+    if (url.pathname === '/user')
+      return Response.json(
+        {},
+        {
+          status: revoked(init.headers.Authorization.slice('Bearer ghu_'.length)) ? 401 : 200,
+        },
+      );
     if (url.pathname.includes('/commits/')) return Response.json({ sha: head });
     return Response.json(
       {

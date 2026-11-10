@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { authorizeGithub, assertImporter } from '../dist/github-access.js';
+import { authorizeGithub, assertImporter, checkGithubSignIn } from '../dist/github-access.js';
 
 test('private reads require the importer and a current human token issued by the Forge GitHub App', async () => {
   const repository = {
@@ -17,6 +17,7 @@ test('private reads require the importer and a current human token issued by the
   const request = async (url, options) => {
     if (url.startsWith('https://api.clerk.com/')) return new Response(JSON.stringify([{ token: provider }]));
     if (url.includes('/applications/')) return new Response('{}', { status: revoked ? 404 : 200 });
+    if (url.endsWith('/user')) return new Response('{}', { status: revoked ? 401 : 200 });
     if (!options.headers.Authorization) return new Response('{}', { status: 404 });
     return new Response(JSON.stringify(repository));
   };
@@ -128,4 +129,101 @@ test('a repository outside the App installation names the exact install step', a
   assert.equal(error.code, 'GITHUB_UNAVAILABLE');
   assert.match(error.message, /GitHub could not provide this repository/);
   assert.equal(urls.filter(url => url.includes('/user/installations')).length > 0, true);
+});
+
+test('public imports recover anonymously from a rejected deployment credential without GitHub sign-in', async () => {
+  const repo = {
+    full_name: 'example/public',
+    private: false,
+    default_branch: 'main',
+    html_url: 'https://github.com/example/public',
+    license: null,
+  };
+  for (const status of [401, 403, 404]) {
+    const requests = [];
+    const result = await authorizeGithub(
+      'example/public',
+      'owner',
+      { publicToken: 'rejected-server-token' },
+      async (url, options) => {
+        requests.push(url);
+        assert.equal(url, 'https://api.github.com/repos/example/public');
+        return options.headers.Authorization ? new Response('{}', { status }) : Response.json(repo);
+      },
+    );
+    assert.equal(result.repository.private, false);
+    assert.equal(result.token, undefined, 'subsequent source reads must not reuse the rejected credential');
+    assert.equal(requests.length, 2, 'one failed credential read and one anonymous visibility proof');
+  }
+});
+
+test('public recovery never grants private access or bypasses GitHub rate limits', async () => {
+  await assert.rejects(
+    authorizeGithub('example/private', undefined, { publicToken: 'server-token' }, async (_, options) =>
+      options.headers.Authorization
+        ? new Response('{}', { status: 403 })
+        : new Response('{}', { status: 404 }),
+    ),
+    { code: 'GITHUB_UNAVAILABLE' },
+  );
+  for (const remaining of ['0', '10']) {
+    let calls = 0;
+    await assert.rejects(
+      authorizeGithub('example/public', 'owner', { publicToken: 'server-token' }, async () => {
+        calls++;
+        return new Response('{}', {
+          status: 403,
+          headers: remaining === '0' ? { 'x-ratelimit-remaining': remaining } : { 'retry-after': '60' },
+        });
+      }),
+      { code: 'GITHUB_RATE_LIMIT' },
+    );
+    assert.equal(calls, 1, 'a rate-limit refusal retains its provider retry');
+  }
+});
+
+test('setup detects a live sign-in token from a different App before any repository import', async () => {
+  const config = {
+    clerkSecret: 'synthetic-clerk-secret',
+    appClientId: 'synthetic-app',
+    appClientSecret: 'synthetic-app-secret',
+  };
+  let checkedStatus = 404,
+    userStatus = 200;
+  const request = async url => {
+    if (url.startsWith('https://api.clerk.com/')) return Response.json([{ token: 'ghu_synthetic' }]);
+    if (url.includes('/applications/')) return new Response('{}', { status: checkedStatus });
+    assert.equal(url, 'https://api.github.com/user', 'setup does not read or create a repository');
+    return new Response('{}', { status: userStatus });
+  };
+  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), error => {
+    assert.equal(error.code, 'GITHUB_SETUP_REQUIRED');
+    assert.match(error.message, /different GitHub App/);
+    assert.match(error.message, /sign-in provider.*client ID and secret/);
+    assert.doesNotMatch(error.message, /expired|synthetic/);
+    return true;
+  });
+  userStatus = 401;
+  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
+    code: 'GITHUB_UNAVAILABLE',
+    message: /expired or been revoked/,
+  });
+  checkedStatus = 401;
+  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
+    code: 'GITHUB_SETUP_REQUIRED',
+    message: /App client credentials/,
+  });
+  checkedStatus = 503;
+  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
+    code: 'GITHUB_UNAVAILABLE',
+    message: /could not validate/,
+  });
+  checkedStatus = 404;
+  userStatus = 503;
+  await assert.rejects(checkGithubSignIn('synthetic-user', config, request), {
+    code: 'GITHUB_UNAVAILABLE',
+    message: /could not validate/,
+  });
+  checkedStatus = 200;
+  await checkGithubSignIn('synthetic-user', config, request);
 });

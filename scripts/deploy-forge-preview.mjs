@@ -27,6 +27,12 @@ try {
     }).trim();
   key = backend(['env', 'get', 'FORGE_WORKER_KEY']);
   token = backend(['env', 'get', 'GITHUB_PUBLIC_TOKEN']);
+  let appSlug = '';
+  try {
+    appSlug = backend(['env', 'get', 'GITHUB_APP_SLUG']);
+  } catch {
+    // Public-only deployments need no App; their web page omits the installation link.
+  }
   const cloud = new URL(process.env.VITE_CONVEX_URL);
   if (!siteId || !key || !token || cloud.protocol !== 'https:' || !cloud.hostname.endsWith('.convex.cloud'))
     throw new Error();
@@ -56,6 +62,7 @@ try {
     // Netlify authenticates deployment and Vite reads only public build settings.
     {
       env: childEnv({
+        extra: { VITE_GITHUB_APP_SLUG: appSlug },
         allow: [
           'NETLIFY_AUTH_TOKEN',
           'XDG_CONFIG_HOME',

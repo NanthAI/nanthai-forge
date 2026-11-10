@@ -388,6 +388,7 @@ export function Explorer({
       </HostedFrame>
     );
   const demo = import.meta.env.VITE_FORGE_DEMO_REPOSITORY as string | undefined;
+  const githubAppSlug = import.meta.env.VITE_GITHUB_APP_SLUG as string | undefined;
   return (
     <HostedFrame
       identity={signedIn}
@@ -489,13 +490,17 @@ export function Explorer({
                 </div>
                 {identity && (
                   <ActionPanel title="Connect a private GitHub repository">
-                    <a
-                      href="https://github.com/apps/nanthai-forge-dev/installations/new"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                    >
-                      Connect GitHub repositories
-                    </a>
+                    {githubAppSlug ? (
+                      <a
+                        href={`https://github.com/apps/${encodeURIComponent(githubAppSlug)}/installations/new`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        Connect GitHub repositories
+                      </a>
+                    ) : (
+                      <p>GitHub repository connection is not configured for this deployment.</p>
+                    )}
                     <p>
                       Sign in with GitHub, select repositories for the Forge GitHub App, then enter their URL
                       above.
