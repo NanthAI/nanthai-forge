@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -10,6 +11,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { setup, actions } from './hosted-planning-fixture.mjs';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
 import { indexedRecord } from '../dist/work-hosted-index.js';
+const awaitSchema = (await import(moduleUrl('../convex/schema.ts'))).default;
 const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
 const command = await import(moduleUrl('../convex/projectWorkCommand.ts'));
@@ -22,21 +24,25 @@ const bytes = value => Buffer.byteLength(JSON.stringify(value) ?? 'null');
 // out of the measured operation's memory budget at 84,000 retained rows.
 function indexFixtureRecords(ctx, tables) {
   const buckets = new Map();
-  const add = row => {
-    if (!buckets.has(row.collection)) buckets.set(row.collection, new Map());
-    buckets.get(row.collection).set(row.key, row);
+  const add = (table, row) => {
+    const identity = `${table}:${row.collection}`;
+    if (!buckets.has(identity)) buckets.set(identity, new Map());
+    buckets.get(identity).set(row.key, row);
   };
-  for (const row of tables.projectWorkRecords.values()) add(row);
+  for (const table of ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'])
+    for (const row of tables[table].values()) add(table, row);
   const db = ctx.db,
     query = db.query,
     insert = db.insert;
   db.insert = async (table, row) => {
     const id = await insert(table, row);
-    if (table === 'projectWorkRecords') add(tables.projectWorkRecords.get(id));
+    if (['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table))
+      add(table, tables[table].get(id));
     return id;
   };
   db.query = table => {
-    if (table !== 'projectWorkRecords') return query(table);
+    if (!['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table))
+      return query(table);
     const equals = new Map(),
       tests = [];
     let descending = false;
@@ -64,7 +70,7 @@ function indexFixtureRecords(ctx, tables) {
     };
     const rows = () => {
       assert(equals.has('collection'), 'operations must select a collection');
-      const bucket = buckets.get(equals.get('collection')) ?? new Map();
+      const bucket = buckets.get(`${table}:${equals.get('collection')}`) ?? new Map();
       const candidates = equals.has('key')
         ? [bucket.get(equals.get('key'))].filter(Boolean)
         : [...bucket.values()];
@@ -171,7 +177,7 @@ test('doubled dogfood history retains its index through main moves and increment
   const generation = s.tables.projectWorkGenerations.get(generationId);
   const put = (collection, key, position, value) => {
     const id = `scale-${collection}-${key}`;
-    s.tables.projectWorkRecords.set(id, {
+    setWorkRecord(s.tables, id, {
       _id: id,
       _creationTime: 1,
       projectId: s.projectId,
@@ -198,7 +204,7 @@ test('doubled dogfood history retains its index through main moves and increment
     const id = randomUUID();
     for (const entry of indexedRecord('intents', id, '', i, { ...template, id })) {
       const rowId = `scale-intent-${i}-${entry.collection}`;
-      s.tables.projectWorkRecords.set(rowId, {
+      setWorkRecord(s.tables, rowId, {
         ...entry,
         _id: rowId,
         _creationTime: 1,
@@ -331,4 +337,71 @@ test('browser and briefing entry points contain no implicit full-build path', ()
       file,
     );
   }
+});
+
+test('indexed Work writes ratchet per-kind index copies and the projection bytes of a landing-shaped fixture', () => {
+  const schema = awaitSchema.tables;
+  const copies = table => {
+    const value = schema[table].export();
+    return 3 + value.indexes.length + value.searchIndexes.length;
+  };
+  assert.equal(copies('projectPlanningRecords'), 17);
+  assert.equal(copies('projectWorkDataRecords'), 9);
+  assert.equal(
+    copies('projectWorkRecords'),
+    19,
+    'legacy planning indexes remain only until the bounded migration finishes',
+  );
+  const groups = {
+    core: { table: 'projectWorkRecords', rows: [] },
+    planning: { table: 'projectPlanningRecords', rows: [] },
+    data: { table: 'projectWorkDataRecords', rows: [] },
+  };
+  const fixtures = [
+    ...Array.from({ length: 128 }, (_, position) => ({
+      collection: 'viewFiles',
+      key: `candidate:${position}`,
+      parent: 'candidate',
+      position,
+      value: JSON.stringify({
+        path: `src/file-${position}.ts`,
+        contributors: ['lane-a', 'lane-b'],
+        bytes: 1024,
+      }),
+    })),
+    ...indexedRecord('planningItems', 'issue', '', 0, {
+      id: 'issue',
+      kind: 'issue',
+      title: 'Land one Candidate',
+      body: 'Keep the exact plan',
+      status: 'open',
+      version: 1,
+      intentIds: [],
+      at: '2026-01-01',
+    }),
+    ...indexedRecord('intents', 'intent', '', 0, {
+      id: 'intent',
+      status: 'active',
+      outcome: 'Land one Candidate',
+    }),
+  ];
+  for (const row of fixtures) {
+    const group =
+      row.collection === 'viewFiles' || row.collection.endsWith(':payload')
+        ? 'data'
+        : row.collection.startsWith('planning')
+          ? 'planning'
+          : 'core';
+    groups[group].rows.push(row);
+  }
+  const model = Object.fromEntries(
+    Object.entries(groups).map(([key, group]) => [
+      key,
+      group.rows.reduce((n, row) => n + bytes(row) * copies(group.table), 0),
+    ]),
+  );
+  assert(model.core <= 4000, JSON.stringify(model));
+  assert(model.planning <= 20000, JSON.stringify(model));
+  assert(model.data <= 300000, JSON.stringify(model));
+  assert(model.data < groups.data.rows.reduce((n, row) => n + bytes(row) * 19, 0) / 2);
 });

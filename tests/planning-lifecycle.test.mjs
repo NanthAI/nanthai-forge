@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -48,7 +49,7 @@ test('hosted current Proposed/abandon writes preserve history, lifecycle index, 
     assert.equal(data.planningItems.findLast(item => item.id === command.itemId).reason, abandon.reason);
     if (unified) {
       assert.equal(data.intents.find(item => item.id === command.itemId).status, 'abandoned');
-      const events = [...s.tables.projectWorkRecords.values()]
+      const events = [...workRecordRows(s.tables)]
         .filter(row => row.collection === 'lifecycle' && row.parent === command.itemId)
         .map(row => JSON.parse(row.value));
       assert.deepEqual(

@@ -473,8 +473,8 @@ The `projectWorkHeads` row owns the mutable Work revision and projection metadat
 
 Filtered planning lists use the existing `planningSearch` roots as a selection index,
 then hydrate only matching items from their current reader (record heads in records mode,
-journal rows otherwise). Seven ordinary compound indexes on the existing `projectWorkRecords`
-table cover every kind/status/Initiative combination while retaining append-position order;
+journal rows otherwise). Seven ordinary compound indexes on `projectPlanningRecords`
+(the original table until a legacy generation completes migration) cover every kind/status/Initiative combination while retaining append-position order;
 no row, backfill, write call or text-search query is added. State counts on the existing
 `records` read inspect root metadata in one page (up to 1,000 rows / 1 MB), without bodies,
 actor lookups or reconciliation. Larger ranges return partial page counts and continuation.

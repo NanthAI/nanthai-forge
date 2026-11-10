@@ -69,7 +69,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `projectBoardClaims` | Automatic file claims: one row per Lane and unsaved path written ("touching PATH"), at most 30 live per Lane, 14 days; hidden once the Lane saves the path or closes. | Activity, bounded by retention |
 | `projectBoardMessages`, `projectBoardInboxes`, `projectBoardSenders`, `projectBoardProjects`, `boardAccounts`, `boardSwitches`, `boardAudit`, `boardEvidence` | Agent board notes (at most 240 characters, 14 days, 5,000 per project), per-target inbox and rate-window counters, account day totals, operator switches and audit, and body-free evidence rows. | Activity, bounded by retention |
 | `projectReadBudgets`, `projectStorageUsage`, `accountStorageUsage` | Abuse-limit counters (`convex/abuseLimits.ts`): signed-out read calls per public project in the current window, and reserved stored objects and bytes per project (sharded) and per owning account (added in roll-ups); fixed rows per scope, reset or updated in place. | Activity, bounded by shard count |
-| `projectWorkGenerations`, `projectWorkRecords`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work index generations and entries, Work events, return pages. | Activity |
+| `projectWorkGenerations`, `projectWorkRecords`, `projectPlanningRecords`, `projectWorkDataRecords`, `projectWorkHeads`, `projectWorkEvents`, `projectWorkDetailMigrations`, `projectReturnPages`, `projectReturnSupersessions` | Work index generations and entries, Work events, return pages. | Activity |
 | `projectCoordinationClaims`, `projectCoordinationEvents`, `projectCoordinationReceipts`, `projectCoordinationSessions` | Live coordination (advisory). | Activity |
 | `projectBackups`, `projectProposals`, `projectUploadCleanup`, `projectRecoveryConnections` | Backup and proposal archive rows (R2 key, legacy `storageId`) and upload cleanup. | Activity |
 | `projectPublications`, `projectPublicationAttempts`, `projectPublicationPages`, `projectGithubBindings`, `projectGithubMirrors`, `projectGithubMirrorJobs` | Publication and GitHub mirror state. | Activity |
@@ -102,7 +102,7 @@ or denial. Original-operation retries retain the original candidates. Partial or
 unavailable index coverage is named. Search does not reconcile Intent status.
 
 Search materialization normally adds one derived `planningSearch` row per current item in
-the existing Work index, atomically maintained by planning writes and rebuilds.
+the planning partition of the Work index, atomically maintained by planning writes and rebuilds.
 Search previews bound title/body to 400 characters and report lengths/truncation;
 full source remains unchanged. Rows are measured with Convex's physical-size helper.
 Oversized text uses 16k-character, whole-word fragments plus a compact current root;
@@ -136,11 +136,12 @@ billed DB I/O. At 1,000 and 10,000 items the page budget is the same; total reta
 search text/index storage grows with item bytes. Convex also charges search query-GB
 against the entire search-index size, including retained generations and other
 projects; equality filters do not reduce that charge. See [Convex costs](https://docs.convex.dev/search/text-search#costs).
-`search_planning` sits on `projectWorkRecords`, so every Work row of every generation
-counts, with or without planning text: dogfood measured 7.47 MB per search
-(cost ledger `planning-search-billed-bytes`). At the Starter rate of $0.11 per 1,000
-query-GB that is under $0.000001 per search, so a search-only table is not worth its
-write path and migration until searches or the index grow about 1,000 times.
+`search_planning` sits on `projectPlanningRecords` for split generations. Its seven
+ordinary planning indexes and full-text index cover planning rows and search fragments.
+Legacy generations retain their original table while the explicit bounded migration copies
+rows transactionally; list readers switch after the copy completes. The legacy indexes stay
+in the schema during that rollout. The historical dogfood reading was 7.47 MB billed per
+search before isolation; post-migration query-GB must be measured independently.
 For 1 KiB search documents, 50 returned rows are approximately 50 KiB plus fixed
 metadata at either scale; nominal indexed text is about 1 MiB/10 MiB respectively
 (actual index overhead and provider billing must be measured after deployment).
@@ -189,3 +190,65 @@ and catalog entries have none and are read as before. The explicit dev generatio
 bytes and patches those same metadata records in bounded pages. Ancestry proof
 cuts and operation-local level maps remain in the existing R2 progress cursor,
 not a growing Convex State or job record.
+
+## Work projection index domains
+
+New generations split derived rows without changing logical collection names, record keys,
+positions or values. `projectPlanningRecords` holds `planning*` roots/versions/comments and
+`planningSearch:payload` search fragments. Other `:payload` chunks, `source*`, `viewFiles`
+and `_workStore*` comparison rows live in `projectWorkDataRecords`. Other collections stay
+in `projectWorkRecords`. All remain disposable projections of retained canonical Work/source.
+No collection is dropped: generic record pages, selected lookups and source-return snapshots
+are readers even when no specialised screen names that collection.
+
+The index reader map (repository-relative paths):
+
+| Index | Collections / reader |
+| --- | --- |
+| `by_generation_and_collection_and_activityAt` | `lanes`, `runs`; `convex/coordinationCounts.ts:95` |
+| `by_generation_and_actor` | Any collection with imported `actor` metadata; `convex/projectActorNames.ts:67`; retained on all three tables |
+| `by_generation_and_collection_and_key` | Every collection; `convex/projectWorkRecordTables.ts` selected lookup; planning id resolution in `convex/projectHostedPlanning.ts` |
+| `by_generation_and_collection_and_position` | Every collection, including source/payload/comparison pages; `convex/projectWorkIndex.ts`, `convex/projectWorkIndexBuildStore.ts`, `convex/projectWorkStoreDigests.ts` |
+| `by_generation_and_collection_and_parent_and_position` | Payload chunks, `viewFiles`, `laneViews`, `viewAcceptances`, `runs`, `notes`, planning history and other parent-selected collections; `convex/hostedRecordValue.ts:27`, `convex/projectViewReads.ts`, `convex/projectWorkIndex.ts` |
+| `by_generation_and_collection_and_status_and_position` | `intents`, `landingEntries`, `landingBatches`; `convex/projectWork.ts`, `convex/projectWorkIndexBuildStore.ts`, `convex/projectSourceAuthorityDrain.ts:24` |
+| `by_project` | Every collection; dynamic permanent purge, `convex/projectPurgeRows.ts:26` and `convex/projectPurgeInventory.ts` |
+| `by_generation` | Every collection; generation retirement in `convex/projectWorkIndexStore.ts` and explicit `convex/projectWorkRecordMigration.ts` |
+| Seven `by_planning_*` indexes | `planningSearch` roots only; all filter combinations in `convex/projectPlanningList.ts` |
+| `search_planning` | `planningSearch` roots/fragments only; `convex/projectHostedPlanningSearch.ts` |
+
+All three domains retain the common key/position/parent/project/generation indexes and
+actor visibility. Activity/status indexes belong only to the general Work domain.
+The data domain therefore has six custom B-tree indexes; the planning domain has thirteen
+plus search. Counting a document, two built-ins and one full-copy-equivalent search sensitivity
+gives 9 copies/data write and 17/planning write, against 19 before splitting. The general
+domain retains 19 during rollout; dropping legacy planning indexes later brings it to 11.
+These are an index-count/storage sensitivity, not a claim that Convex copies an entire
+payload into every index.
+
+The frozen 154,496-row dogfood shape and bounded oldest/tail samples model 0.309 GB logical:
+136,243 data rows / 0.287 GB, 46 planning rows / 0.000078 GB, and 18,207 other rows / 0.022 GB.
+The full-copy sensitivity is 5.88 GB before and 2.83 GB after all legacy indexes are removed,
+a modelled 3.05 GB reduction. Frozen counts omit later writes; the deployment-wide mixed
+sample model was 8.41 GB versus the owner's 10.84 GB dashboard. Neither model is measured
+reclaimed disk. `tests/work-index-cost.test.mjs` ratchets table index counts and a landing-shaped
+projection byte model; the landing storage guard separately tracks retained document bytes.
+
+`projectWorkRecordMigration:run` explicitly drives at most 100 transactional pages per call;
+resume its phase/cursor and original operation id. Each copy page reads at most 100 rows with
+a 512 KB target (plus the provider's final-row overshoot) and upserts exact derived bytes.
+While copying, original and shadow writes commit together; point reads prefer the new row
+and fall back to the original. Lists keep their old range until the partition switches.
+At the one-time cutover, a fresh public generation preserves the record partition and Work
+revision. Outstanding list/search cursors receive `WORK_STALE` instructing callers to restart
+the list/search; fresh cursors retain their existing shape and pagination behaviour.
+Copy receipts in existing `projectReturnPages` retain old row ids and sizes, so cleanup deletes
+those exact duplicates without rereading all payloads. Every page has a durable operation
+receipt, including replay after subsequent pages. The original canonical source, Work history,
+planning versions, landing receipts and audit remain untouched. Retirement and project purge
+cover all three tables. There is no scheduler, idle call or recurring migration scan.
+
+The deployment-wide mixed-sample envelope predicts roughly 1.3 GB for old-row reads,
+new-row writes, duplicate deletions and compact receipts, below the approved 1.5 GB migration
+budget. The earlier two-full-scan design would approach 1.7 GB; compact-id cleanup removes
+that second payload scan. Provider-billed I/O, concurrent mirror writes, write I/O per landing
+and the post-cleanup dashboard remain separate live measurements.

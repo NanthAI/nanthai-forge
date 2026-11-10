@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable, planningRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './server';
 import { query } from './cliServer';
@@ -84,8 +85,9 @@ export async function searchPlanning(
     );
     cursor = parsed.cursor;
   }
+  const searchTable = await planningRecordTable(ctx, recordPartition(generation));
   const matching = (itemId?: string, payloadKey?: string) =>
-    ctx.db.query('projectWorkRecords').withSearchIndex('search_planning', q => {
+    ctx.db.query(searchTable).withSearchIndex('search_planning', q => {
       let search = q.search('planning.text', input.text).eq('generationId', recordPartition(generation));
       if (input.status === 'active') search = search.eq('planning.open', true);
       else if (input.status !== 'all') search = search.eq('planning.status', input.status);
@@ -110,7 +112,7 @@ export async function searchPlanning(
   const named = new Set<string>();
   if (idPrefix) {
     const rows = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, recordPartition(generation), 'planningSearch'))
       .withIndex('by_generation_and_collection_and_key', q =>
         q
           .eq('generationId', recordPartition(generation))

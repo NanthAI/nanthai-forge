@@ -43,6 +43,8 @@ export const projectPurgeTables = {
   projectReturnPages: 'by_project',
   projectWorkGenerations: 'by_project',
   projectWorkRecords: 'by_project',
+  projectPlanningRecords: 'by_project',
+  projectWorkDataRecords: 'by_project',
   projectHostedRecordBodies: 'by_project',
   projectHostedRecords: 'by_project',
   projectHostedRecordHeads: 'by_project',

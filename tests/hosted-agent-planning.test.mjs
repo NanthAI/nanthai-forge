@@ -1744,7 +1744,7 @@ test('filtered planning and one-read Initiative counts charge only matching rows
   }));
   const add = async (item, position) => {
     for (const entry of indexedRecord('planningItems', item.id, '', position, item))
-      await s.ctx.db.insert('projectWorkRecords', { ...entry, projectId: s.projectId, generationId });
+      await s.ctx.db.insert('projectPlanningRecords', { ...entry, projectId: s.projectId, generationId });
     await s.ctx.db.insert('projectHostedRecordHeads', {
       projectId: s.projectId,
       kind: 'issue',
@@ -1894,7 +1894,7 @@ test('planning counts sum every page and refuse stale generations, invalid curso
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
   for (let i = 0; i < 1001; i++) {
     const id = randomUUID();
-    await s.ctx.db.insert('projectWorkRecords', {
+    await s.ctx.db.insert('projectPlanningRecords', {
       projectId: s.projectId,
       generationId,
       collection: 'planningSearch',
@@ -1912,7 +1912,7 @@ test('planning counts sum every page and refuse stale generations, invalid curso
     });
   }
   // Search payload fragments repeat metadata; counts include each root once.
-  await s.ctx.db.insert('projectWorkRecords', {
+  await s.ctx.db.insert('projectPlanningRecords', {
     projectId: s.projectId,
     generationId,
     collection: 'planningSearch:payload',
@@ -1956,7 +1956,7 @@ test('planning count page cap labels incomplete totals and continues without los
   const initiativeId = randomUUID();
   const generationId = s.tables.hostedProjects.get(s.projectId).work.generationId;
   for (let i = 0; i < 20001; i++)
-    await s.ctx.db.insert('projectWorkRecords', {
+    await s.ctx.db.insert('projectPlanningRecords', {
       projectId: s.projectId,
       generationId,
       collection: 'planningSearch',

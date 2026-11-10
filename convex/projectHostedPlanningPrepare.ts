@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { internal } from './_generated/api';
 import { internalMutation } from './server';
@@ -72,7 +73,7 @@ export const page = internalMutation({
       );
     }
     const rows = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, partition, 'planningItems'))
       .withIndex('by_generation_and_collection_and_key', q => {
         const range = q.eq('generationId', partition).eq('collection', 'planningItems');
         return !selection
@@ -97,7 +98,7 @@ export const page = internalMutation({
       );
       const parts = header.payloadKey
         ? await ctx.db
-            .query('projectWorkRecords')
+            .query(await workRecordTable(ctx, partition, 'planningItems:payload'))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q
                 .eq('generationId', partition)

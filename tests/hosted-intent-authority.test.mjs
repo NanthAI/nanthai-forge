@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -62,7 +63,7 @@ function setup() {
     key: intentId,
     value: JSON.stringify(intentHeader(intent)),
   };
-  s.tables.projectWorkRecords.set('header', header);
+  setWorkRecord(s.tables, 'header', header);
   const check = actor => intentAuthority(s.ctx, 'project', actor, intentId);
   return { ...s, intent, header, intentId, check };
 }
@@ -144,7 +145,7 @@ test('indexed Intent detail advertises current assignment rights without requiri
 test('a retained issue alias resolves to the current Intent assignment authority', async () => {
   const s = setup(),
     aliasId = randomUUID();
-  s.tables.projectWorkRecords.set('alias', {
+  setWorkRecord(s.tables, 'alias', {
     _id: 'alias',
     generationId: 'generation',
     collection: 'intentAliases',
@@ -166,7 +167,7 @@ test('assigned contributors can append notes and status atomically; revocation a
     base: s.preview.head,
   });
   const selected = s.tables.hostedProjects.get(s.projectId).work.generationId;
-  const row = [...s.tables.projectWorkRecords.values()].find(
+  const row = [...workRecordRows(s.tables)].find(
     r => r.generationId === selected && r.collection === 'intents' && r.key === creation.operationId,
   );
   row.value = JSON.stringify({ ...JSON.parse(row.value), assigneeAccountIds: ['assigned'] });
@@ -215,7 +216,7 @@ test('per-account authority remains usable when an oversized summary omits assig
     payloadKey: 'attributes',
     payloadParts: 2,
   });
-  s.tables.projectWorkRecords.set('authority', {
+  setWorkRecord(s.tables, 'authority', {
     _id: 'authority',
     generationId: 'generation',
     collection: 'intentAuthorities',

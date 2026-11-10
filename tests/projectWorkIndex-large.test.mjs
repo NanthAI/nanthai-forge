@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -179,10 +180,7 @@ test('large record index resumes after a committed step loses its reply without 
   assert.equal(laneDetail.main.included, true);
   assert.equal(detail.provenanceAvailable, true);
   assert.equal(detail.inputs[0].laneId, f.lane.id);
-  assert.equal(
-    [...f.s.tables.projectWorkRecords.values()].filter(r => r.collection.startsWith('_build')).length,
-    0,
-  );
+  assert.equal([...workRecordRows(f.s.tables)].filter(r => r.collection.startsWith('_build')).length, 0);
   assert(maxBytes < 600000, `RPC page was ${maxBytes} bytes`);
   const before = steps;
   assert.equal(await actions.ensure._handler(f.s.ctx, { rebuild: true, projectId: 'project' }), id);

@@ -150,6 +150,7 @@ export const publish = internalMutation({
         });
       }
       const generationId = await ctx.db.insert('projectWorkGenerations', {
+        recordTables: 'split',
         projectId: project._id,
         backupId,
         revision: 0,

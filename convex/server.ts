@@ -4,6 +4,7 @@ import {
   internalMutation as baseInternalMutation,
   type MutationCtx,
 } from './_generated/server';
+import { workRecordWriter } from './projectWorkRecordWriter';
 import { finishReadWriter } from './projectFinishReadWriter';
 import { pausedBuilder } from './legacyStorageServer';
 // Preserve context accessors instead of eagerly spreading the context. Retired
@@ -14,7 +15,8 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
       typeof definition === 'function'
         ? definition
         : (definition as { handler: (ctx: MutationCtx, args: unknown) => unknown }).handler;
-    const wrapped = (ctx: MutationCtx, args: unknown) => handler(finishReadWriter(ctx), args);
+    const wrapped = (ctx: MutationCtx, args: unknown) =>
+      handler(workRecordWriter(finishReadWriter(ctx)), args);
     return (base as typeof baseMutation)(
       (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
     );

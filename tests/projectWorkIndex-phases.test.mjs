@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
@@ -296,7 +297,7 @@ test('lookup byte prefixes retain every payload part and cleanup leaves the defa
   s.tables.projectWorkGenerations.set('generation', generation);
   const keys = Array.from({ length: 100 }, (_, i) => ({ collection: 'intents:payload', key: `part:${i}` }));
   for (const key of keys)
-    s.tables.projectWorkRecords.set(key.key, {
+    setWorkRecord(s.tables, key.key, {
       _id: key.key,
       projectId: 'project',
       generationId: 'generation',
@@ -381,7 +382,7 @@ test('transient storage failures retry three times, retain the summary cursor, a
     return result;
   };
   const rows = f =>
-    [...f.s.tables.projectWorkRecords.values()]
+    [...workRecordRows(f.s.tables)]
       .map(({ _id, _creationTime, generationId, ...row }) => row)
       .sort((a, b) => `${a.collection}:${a.key}`.localeCompare(`${b.collection}:${b.key}`));
   const expectedId = await complete(baseline);

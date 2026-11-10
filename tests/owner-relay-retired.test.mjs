@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
@@ -162,9 +163,9 @@ function githubFixture() {
 test('GitHub status preserves idempotence and refuses non-mirror state or unauthorized publication', async () => {
   const f = githubFixture();
   await github.publish._handler(f.ctx, f.input);
-  const original = structuredClone([...f.tables.projectWorkRecords.values()]);
+  const original = structuredClone([...workRecordRows(f.tables)]);
   await github.publish._handler(f.ctx, f.input);
-  assert.deepEqual([...f.tables.projectWorkRecords.values()], original);
+  assert.deepEqual([...workRecordRows(f.tables)], original);
   assert.ok(original.some(row => row.collection === 'githubSync'));
   await assert.rejects(
     github.publish._handler(f.ctx, {
@@ -181,5 +182,5 @@ test('GitHub status preserves idempotence and refuses non-mirror state or unauth
     github.publish._handler(f.ctx, f.input),
     error => error.data?.code === 'PROJECT_UNAVAILABLE',
   );
-  assert.deepEqual([...f.tables.projectWorkRecords.values()], original);
+  assert.deepEqual([...workRecordRows(f.tables)], original);
 });

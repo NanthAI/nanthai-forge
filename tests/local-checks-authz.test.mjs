@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -36,7 +37,7 @@ async function fixture() {
     ['views', viewId, { id: viewId, intentId: randomUUID(), status: 'clean', head }],
     ['checks', checkId, { id: checkId, name: 'Synthetic check', definition }],
   ])
-    s.tables.projectWorkRecords.set(key, {
+    setWorkRecord(s.tables, key, {
       _id: key,
       generationId: 'generation',
       collection,

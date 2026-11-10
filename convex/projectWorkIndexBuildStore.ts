@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { Doc } from './_generated/dataModel';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
@@ -44,14 +45,16 @@ async function readRows(
 ) {
   const query =
     input.parent === undefined
-      ? ctx.db.query('projectWorkRecords').withIndex('by_generation_and_collection_and_position', q =>
-          q
-            .eq('generationId', input.generationId)
-            .eq('collection', input.collection)
-            .gte('position', input.offset ?? 0),
-        )
+      ? ctx.db
+          .query(await workRecordTable(ctx, input.generationId, input.collection))
+          .withIndex('by_generation_and_collection_and_position', q =>
+            q
+              .eq('generationId', input.generationId)
+              .eq('collection', input.collection)
+              .gte('position', input.offset ?? 0),
+          )
       : ctx.db
-          .query('projectWorkRecords')
+          .query(await workRecordTable(ctx, input.generationId, input.collection))
           .withIndex('by_generation_and_collection_and_parent_and_position', q =>
             q
               .eq('generationId', input.generationId)
@@ -221,7 +224,7 @@ export const step = internalMutation({
               .withIndex('by_partition_and_key_and_position', q => q.eq('partitionId', generation._id))
               .take(100)
           : await ctx.db
-              .query('projectWorkRecords')
+              .query(await workRecordTable(ctx, generation._id, input.cleanup!))
               .withIndex('by_generation_and_collection_and_position', q =>
                 q.eq('generationId', generation._id).eq('collection', input.cleanup!),
               )

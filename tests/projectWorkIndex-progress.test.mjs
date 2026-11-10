@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { progressFixture } from './projectWorkIndex-progress-fixture.mjs';
@@ -19,10 +20,7 @@ test('dogfood-shaped synthetic Work index: measured bounded build', async t => {
   assert.equal(metadata.counts.automaticActions, 2001);
   assert(f.metrics.steps < 7451 / 3, 'at least threefold fewer durable steps than the measured baseline');
   assert(f.metrics.maxRpcBytes < 600000);
-  assert.equal(
-    [...f.s.tables.projectWorkRecords.values()].filter(r => r.collection.startsWith('_build')).length,
-    0,
-  );
+  assert.equal([...workRecordRows(f.s.tables)].filter(r => r.collection.startsWith('_build')).length, 0);
 
   t.diagnostic(
     JSON.stringify({

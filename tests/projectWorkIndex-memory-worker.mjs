@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getWorkRecord } from './hosted-fixture.mjs';
 // Producer and consumer are separate processes. The measured consumer reads
 // immutable object files on demand, matching an action's external object store.
 import { readFileSync, writeFileSync, openSync, writeSync, closeSync, statSync, existsSync } from 'node:fs';
@@ -188,7 +189,7 @@ s.tables.projectBackups.set('backup', backup);
 const insert = s.ctx.db.insert,
   patch = s.ctx.db.patch;
 function externalValue(id) {
-  const row = s.tables.projectWorkRecords.get(id);
+  const row = getWorkRecord(s.tables, id);
   if (!row || Object.getOwnPropertyDescriptor(row, 'value')?.get) return;
   const path = join(directory, `db-value-${id}`);
   writeFileSync(path, row.value);
@@ -201,7 +202,8 @@ function externalValue(id) {
 }
 s.ctx.db.insert = async (table, fields) => {
   const id = await insert(table, fields);
-  if (table === 'projectWorkRecords') externalValue(id);
+  if (['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table))
+    externalValue(id);
   return id;
 };
 s.ctx.db.patch = async (id, fields) => {

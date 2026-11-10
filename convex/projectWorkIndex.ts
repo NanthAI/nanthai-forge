@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { findWorkEvent } from './projectWorkEventStore';
 import { likelyPlanningDuplicates } from './projectHostedPlanningSearch';
 import { needsFix } from '../src/culprit-bisect';
@@ -44,7 +45,7 @@ export const workspace = query({
       for (const collection of ['sourcePins', 'landingEntries', 'landingBatches'])
         if (counts[collection] === undefined) {
           const [first] = await ctx.db
-            .query('projectWorkRecords')
+            .query(await workRecordTable(ctx, recordPartition(generation), collection))
             .withIndex('by_generation_and_collection_and_position', q =>
               q.eq('generationId', recordPartition(generation)).eq('collection', collection),
             )
@@ -126,6 +127,14 @@ export const records = query({
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read your Forge project.');
       const project = await accessibleProject(ctx, input.projectId, user.subject),
         generation = await selectedGeneration(ctx, project);
+      invariant(
+        !input.paginationOpts.cursor ||
+          !input.generationId ||
+          generation?.recordsGenerationId !== input.generationId ||
+          generation._id === input.generationId,
+        'WORK_STALE',
+        'Work generation changed. Restart this list.',
+      );
       if (!generation || (input.generationId && input.generationId !== generation._id))
         return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
       const numItems = Math.min(input.paginationOpts.numItems, 100);
@@ -157,12 +166,12 @@ export const records = query({
       const rows =
         input.parentId === undefined
           ? ctx.db
-              .query('projectWorkRecords')
+              .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
               .withIndex('by_generation_and_collection_and_position', q =>
                 q.eq('generationId', recordPartition(generation)).eq('collection', input.collection),
               )
           : ctx.db
-              .query('projectWorkRecords')
+              .query(await workRecordTable(ctx, recordPartition(generation), input.collection))
               .withIndex('by_generation_and_collection_and_parent_and_position', q =>
                 q
                   .eq('generationId', recordPartition(generation))

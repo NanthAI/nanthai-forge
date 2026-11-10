@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -129,7 +130,7 @@ test('native hosted summaries track actual ancestry when main moves without read
   // publication RPC is retired; these assertions exercise summary reads.
   const generation = [...s.tables.projectWorkGenerations.values()].find(row => row.status === 'ready');
   const select = async move => {
-    const old = [...s.tables.projectWorkRecords.values()].find(
+    const old = [...workRecordRows(s.tables)].find(
       row => row.collection === 'hostedChannels' && row.key === 'main',
     );
     const row = {

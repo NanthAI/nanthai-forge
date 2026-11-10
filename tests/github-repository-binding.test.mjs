@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
@@ -707,7 +708,7 @@ test('dogfood fixture: 600 bindings use six 100-row pages, zero idle work and bo
     });
   // Unrelated rows only prove the binding path never scans them, so they bypass document validation.
   for (let i = 0; i < 32000; i++)
-    f.s.tables.projectWorkRecords.set(`projectWorkRecords-noise-${i}`, {
+    setWorkRecord(f.s.tables, `projectWorkRecords-noise-${i}`, {
       _id: `projectWorkRecords-noise-${i}`,
       _creationTime: i,
       projectId: f.projectId,

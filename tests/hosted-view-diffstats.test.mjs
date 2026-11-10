@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getWorkRecord, setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
@@ -53,7 +54,7 @@ async function setup() {
     nextBatch: 0,
     metadata: '{}',
   });
-  s.tables.projectWorkRecords.set('view', {
+  setWorkRecord(s.tables, 'view', {
     _id: 'view',
     _creationTime: 1,
     projectId: 'project',
@@ -65,7 +66,7 @@ async function setup() {
     value: JSON.stringify({ id: 'view', base: base.sha256, head: head.sha256, status: 'clean' }),
   });
   for (const pin of [base, head, old, next])
-    s.tables.projectWorkRecords.set(pin.sha256, {
+    setWorkRecord(s.tables, pin.sha256, {
       _id: pin.sha256,
       _creationTime: 1,
       projectId: 'project',
@@ -119,17 +120,14 @@ test('opening a missing View diffstat computes once, saves it and makes the seco
   assert.deepEqual(JSON.parse(await compute._handler(s.ctx, input)), stats);
   assert.equal(reads, before);
   assert.deepEqual(calls.slice(prior), ['projectViewDiffstatStore:read']);
-  assert.equal(
-    [...s.tables.projectWorkRecords.values()].filter(row => row.collection === 'diffstats').length,
-    1,
-  );
+  assert.equal([...workRecordRows(s.tables)].filter(row => row.collection === 'diffstats').length, 1);
   assert.equal(s.scheduled.length, 0, 'idle schedules nothing');
 });
 
 test('owner counts retain their label until an explicit server comparison replaces them', async () => {
   const { s, input, base, head } = await setup();
   const value = { files: 1, add: 99, del: 99, exact: true, provenance: 'owner-reported' };
-  s.tables.projectWorkRecords.set('stats', {
+  setWorkRecord(s.tables, 'stats', {
     _id: 'stats',
     _creationTime: 1,
     projectId: 'project',
@@ -145,7 +143,7 @@ test('owner counts retain their label until an explicit server comparison replac
   assert.deepEqual(JSON.parse(await compute._handler(s.ctx, input)), value);
   s.ctx.storage.get = get;
   assert.equal(JSON.parse(await compute._handler(s.ctx, { ...input, recomputeOwner: true })).add, 2);
-  assert.equal(JSON.parse(s.tables.projectWorkRecords.get('stats').value).provenance, 'server-computed');
+  assert.equal(JSON.parse(getWorkRecord(s.tables, 'stats').value).provenance, 'server-computed');
 });
 
 test('lazy reads and saves recheck actor, project and current generation, including revocation during IO', async () => {
@@ -167,7 +165,7 @@ test('lazy reads and saves recheck actor, project and current generation, includ
   };
   await assert.rejects(compute._handler(s.ctx, input), code('PROJECT_UNAVAILABLE'));
   assert.equal(
-    [...s.tables.projectWorkRecords.values()].some(row => row.collection === 'diffstats'),
+    [...workRecordRows(s.tables)].some(row => row.collection === 'diffstats'),
     false,
   );
   delete s.tables.hostedProjects.get('project').removal;

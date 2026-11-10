@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -60,7 +61,7 @@ function setup(t) {
     initialRevision: 1,
     metadata: JSON.stringify({ sourceHead: 'a'.repeat(64), counts: { intents: 1 } }),
   });
-  s.tables.projectWorkRecords.set('intent-row', {
+  setWorkRecord(s.tables, 'intent-row', {
     _id: 'intent-row',
     projectId: 'project',
     generationId: 'generation',

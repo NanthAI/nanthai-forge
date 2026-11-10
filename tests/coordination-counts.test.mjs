@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import { activityFields } from '../dist/work-hosted-index.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -196,7 +197,7 @@ function seedIndex(f) {
     recordsGenerationId: 'partition',
   });
   const add = (collection, key, value) =>
-    f.tables.projectWorkRecords.set(`${collection}:${key}`, {
+    setWorkRecord(f.tables, `${collection}:${key}`, {
       _id: `${collection}:${key}`,
       projectId: 'project',
       generationId: 'partition',

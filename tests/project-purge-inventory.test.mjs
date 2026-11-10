@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -31,7 +32,9 @@ test('orphan inventory covers every indexed root owner without treating nested g
       .map(owner => [owner.table, owner.field])
       .sort(),
     [
+      ['projectPlanningRecords', 'generationId'],
       ['projectReturnPages', 'partitionId'],
+      ['projectWorkDataRecords', 'generationId'],
       ['projectWorkRecords', 'generationId'],
     ],
   );
@@ -43,7 +46,7 @@ test('orphan owner enumeration jumps entire populated owner ranges and resumes w
   for (const owner of ['a', 'b', 'c', 'd', 'e']) {
     if (owner !== 'c') s.tables.hostedProjects.set(owner, { _id: owner, _creationTime: 1 });
     for (let i = 0; i < 1000; i++)
-      s.tables.projectWorkRecords.set(`${owner}-${i}`, {
+      setWorkRecord(s.tables, `${owner}-${i}`, {
         _id: `${owner}-${i}`,
         _creationTime: i,
         projectId: owner,
@@ -102,8 +105,8 @@ test('orphan purge rechecks absent ownership and exact pins, preserves live rows
     position: 0,
     value: '{}',
   };
-  s.tables.projectWorkRecords.set(row._id, row);
-  s.tables.projectWorkRecords.set('foreign', { ...row, _id: 'foreign', projectId: 'live' });
+  setWorkRecord(s.tables, row._id, row);
+  setWorkRecord(s.tables, 'foreign', { ...row, _id: 'foreign', projectId: 'live' });
   s.tables.hostedProjects.set('live', { _id: 'live', _creationTime: 1 });
   const input = {
     table: 'projectWorkRecords',

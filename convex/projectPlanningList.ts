@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { planningRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import type { QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
@@ -24,8 +25,8 @@ type Filter = { kind?: 'issue' | 'initiative'; status?: string; initiativeId?: s
 
 /** Search roots already carry all three filters, including on pre-deploy rows. Ordinary indexes
  * read only matching roots, without text-search billing, fragments, a backfill or extra writes. */
-function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
-  const rows = ctx.db.query('projectWorkRecords');
+async function matching(ctx: QueryCtx, generationId: Id<'projectWorkGenerations'>, filter: Filter) {
+  const rows = ctx.db.query(await planningRecordTable(ctx, generationId));
   if (filter.initiativeId !== undefined && filter.kind !== undefined && filter.status !== undefined)
     return rows.withIndex('by_planning_initiativeId_and_kind_and_status', q =>
       q
@@ -96,7 +97,9 @@ export async function planningPage(
   },
 ) {
   const partition = recordPartition(generation);
-  const page = await matching(ctx, partition, input.planningFilter)
+  const page = await (
+    await matching(ctx, partition, input.planningFilter)
+  )
     .order(input.newestFirst ? 'desc' : 'asc')
     .paginate({
       ...input.paginationOpts,

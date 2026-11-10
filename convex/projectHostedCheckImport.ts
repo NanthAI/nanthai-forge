@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
@@ -75,7 +76,7 @@ export async function importCheckFromWork(
         rows = row ? [row] : [];
       } else {
         rows = await ctx.db
-          .query('projectWorkRecords')
+          .query(await workRecordTable(ctx, partition, 'checks'))
           .withIndex('by_generation_and_collection_and_position', q =>
             q.eq('generationId', partition).eq('collection', 'checks'),
           )
@@ -98,7 +99,7 @@ export async function importCheckFromWork(
           if (header.payloadKey)
             for (let offset = 0; offset < header.payloadParts!; offset += 100) {
               const page = await ctx.db
-                .query('projectWorkRecords')
+                .query(await workRecordTable(ctx, partition, 'checks:payload'))
                 .withIndex('by_generation_and_collection_and_parent_and_position', q =>
                   q
                     .eq('generationId', partition)

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import type { Id } from './_generated/dataModel';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
@@ -75,7 +76,7 @@ export const page = internalQuery({
           'Generation partition belongs to another project.',
         );
         const scan = await ctx.db
-          .query('projectWorkRecords')
+          .query(await workRecordTable(ctx, partition, 'sourceStateParents'))
           .withIndex('by_generation_and_collection_and_key', q =>
             q.eq('generationId', partition).eq('collection', 'sourceStateParents'),
           )

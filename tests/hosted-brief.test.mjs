@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import { validate } from 'convex-helpers/validators';
@@ -69,7 +70,7 @@ async function setup(extraLanes = []) {
         summarize?.(value) ?? value,
       )) {
         const id = `record-${count++}`;
-        s.tables.projectWorkRecords.set(id, {
+        setWorkRecord(s.tables, id, {
           _id: id,
           _creationTime: count,
           projectId,
@@ -451,7 +452,7 @@ test('portable delivery context uses current hosted authority on every read', as
     next: ['Lead reviews'],
   };
   const row = { text: handoff.summary, kind: 'comment', at: handoff.at, handoff };
-  s.tables.projectWorkRecords.set('delivery-note', {
+  setWorkRecord(s.tables, 'delivery-note', {
     _id: 'delivery-note',
     _creationTime: 1000,
     projectId: s.projectId,

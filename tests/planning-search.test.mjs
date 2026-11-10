@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -85,7 +87,7 @@ test('legacy preparation is explicit, bounded, resumable and original-operation 
     await add(s, { title: `legacy sync ${n}`, body: n === 0 ? 'x'.repeat(40000) + ' deepneedle' : '' });
   const generation = [...s.tables.projectWorkGenerations.values()].find(g => g.status === 'ready');
   delete generation.planningSearchVersion;
-  const legacyHeader = [...s.tables.projectWorkRecords.values()].find(
+  const legacyHeader = workRecordRows(s.tables).find(
     row => row.collection === 'planningItems' && JSON.parse(row.value).payloadKey,
   );
   const oldHeader = JSON.parse(legacyHeader.value);
@@ -94,8 +96,8 @@ test('legacy preparation is explicit, bounded, resumable and original-operation 
   legacyHeader.value = JSON.stringify(oldHeader);
   assert.equal(planningSummary(oldHeader).bodyLength, null);
   assert.equal(planningSummary(oldHeader).hasDoneWhen, null);
-  for (const [id, row] of s.tables.projectWorkRecords)
-    if (row.collection === 'planningSearch') s.tables.projectWorkRecords.delete(id);
+  for (const [id, row] of s.tables.projectPlanningRecords)
+    if (row.collection === 'planningSearch') s.tables.projectPlanningRecords.delete(id);
   assert.equal((await run(s, 'sync')).coverage, 'partial-needs-preparation');
   const input = {
     projectId: s.projectId,
@@ -124,7 +126,9 @@ test('legacy preparation is explicit, bounded, resumable and original-operation 
   assert.equal(total, 23);
   assert.equal((await run(s, 'sync')).coverage, 'complete');
   assert.equal((await run(s, 'deepneedle')).items.length, 1);
-  const preparedHeader = planningSummary(JSON.parse(s.tables.projectWorkRecords.get(legacyHeader._id).value));
+  const preparedHeader = planningSummary(
+    JSON.parse(s.tables.projectPlanningRecords.get(legacyHeader._id).value),
+  );
   assert(preparedHeader.bodyLength > 40000);
   assert.equal(preparedHeader.hasDoneWhen, false);
 });
@@ -212,7 +216,7 @@ for (const size of [1000, 10000])
       };
       const entry = planningSearchEntry(item, n);
       const id = `synthetic-${n}`;
-      s.tables.projectWorkRecords.set(id, {
+      s.tables.projectPlanningRecords.set(id, {
         ...entry,
         _id: id,
         _creationTime: n,
@@ -221,7 +225,7 @@ for (const size of [1000, 10000])
       });
     }
     reads.reset();
-    const before = s.tables.projectWorkRecords.size;
+    const before = s.tables.projectPlanningRecords.size;
     const started = performance.now();
     const result = await run(s, 'sync');
     assert.equal(result.items.length, 50);
@@ -231,7 +235,7 @@ for (const size of [1000, 10000])
     assert.equal(result.matchedRecordsRead, 50);
     assert(reads.db.documents <= 54);
     assert(reads.db.bytes < 110000);
-    assert.equal(s.tables.projectWorkRecords.size, before);
+    assert.equal(s.tables.projectPlanningRecords.size, before);
     const idle = reads.length;
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(reads.length, idle);
@@ -272,7 +276,7 @@ test('source snapshot transport preserves indexed search fields and skips compar
   const store = await import(moduleUrl('../convex/projectWorkIndexStore.ts'));
   const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
   const ws = JSON.parse(await index.workspace._handler(s.ctx, { projectId: s.projectId }));
-  const expected = [...s.tables.projectWorkRecords.values()].find(
+  const expected = workRecordRows(s.tables).find(
     row => row.collection === 'planningSearch' && row.key === item.itemId,
   );
   assert.equal(expected.planning.text, 'Roundtrip search\nOriginal searchable body');
@@ -297,7 +301,7 @@ test('source snapshot transport preserves indexed search fields and skips compar
   const meter = meterReads(s.ctx);
   const before = await meter.cost(() => store.snapshotEntries._handler(s.ctx, args));
   for (let i = 0; i < 500; i++)
-    s.tables.projectWorkRecords.set(`digest-${i}`, {
+    setWorkRecord(s.tables, `digest-${i}`, {
       _id: `digest-${i}`,
       _creationTime: i,
       projectId: s.projectId,
@@ -312,4 +316,81 @@ test('source snapshot transport preserves indexed search fields and skips compar
   assert.deepEqual(after, before, 'compare metadata adds no source snapshot documents, bytes or pages');
   assert.deepEqual(await store.snapshotEntries._handler(s.ctx, args), snapshot);
   meter.restore();
+});
+
+test('table cutover rejects outstanding cursors with WORK_STALE and fresh pages retain the same planning items', async t => {
+  const s = await setup(t);
+  installPlanningSearch(s);
+  await add(s, { title: 'cutover first', body: 'unchanged first body' });
+  await add(s, { title: 'cutover second', body: 'unchanged second body' });
+  const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+  const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
+  const project = s.tables.hostedProjects.get(s.projectId);
+  const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
+  // Recreate the pre-rollout physical layout, with exactly the same logical records.
+  delete generation.recordTables;
+  for (const table of ['projectPlanningRecords', 'projectWorkDataRecords'])
+    for (const [id, row] of s.tables[table]) {
+      s.tables.projectWorkRecords.set(id, row);
+      s.tables[table].delete(id);
+    }
+  const before = await run(s, 'cutover');
+  const first = await run(s, 'cutover', { limit: 1 });
+  assert(first.nextCursor);
+  const listInput = {
+    projectId: s.projectId,
+    generationId: generation._id,
+    collection: 'planningItems',
+    planningFilter: { kind: 'issue' },
+    paginationOpts: { cursor: null, numItems: 1 },
+  };
+  const listFirst = await index.records._handler(s.ctx, listInput);
+  assert(!listFirst.isDone);
+  let cursor = null;
+  do {
+    const result = JSON.parse(
+      await migration.page._handler(s.ctx, {
+        generationId: generation._id,
+        operationId: randomUUID(),
+        cursor,
+      }),
+    );
+    cursor = result.nextCursor;
+  } while (cursor);
+  assert.notEqual(project.work.generationId, generation._id);
+  const published = s.tables.projectWorkGenerations.get(project.work.generationId);
+  assert.equal(published.recordsGenerationId, generation._id);
+  assert.equal(published.revision, generation.revision);
+  assert.equal(published.backupId, generation.backupId);
+  await assert.rejects(
+    run(s, 'cutover', { limit: 1, cursor: first.nextCursor }),
+    error => code('WORK_STALE')(error) && /Restart this search/.test(error.message),
+  );
+  await assert.rejects(
+    index.records._handler(s.ctx, {
+      ...listInput,
+      paginationOpts: { cursor: listFirst.continueCursor, numItems: 1 },
+    }),
+    error => code('WORK_STALE')(error) && /Restart this list/.test(error.message),
+  );
+  assert.deepEqual((await run(s, 'cutover')).items, before.items);
+  const fresh = await run(s, 'cutover', { limit: 1 });
+  assert.deepEqual(Object.keys(JSON.parse(fresh.nextCursor)), Object.keys(JSON.parse(first.nextCursor)));
+  const second = await run(s, 'cutover', { limit: 1, cursor: fresh.nextCursor });
+  assert.deepEqual([...fresh.items, ...second.items], before.items);
+  assert.equal(second.nextCursor, null);
+  const listFresh = await index.records._handler(s.ctx, {
+    ...listInput,
+    generationId: published._id,
+  });
+  const listSecond = await index.records._handler(s.ctx, {
+    ...listInput,
+    generationId: published._id,
+    paginationOpts: { cursor: listFresh.continueCursor, numItems: 1 },
+  });
+  assert.equal(listSecond.isDone, true);
+  assert.deepEqual(
+    [...listFresh.page, ...listSecond.page].map(row => row.id).sort(),
+    before.items.map(row => row.id).sort(),
+  );
 });

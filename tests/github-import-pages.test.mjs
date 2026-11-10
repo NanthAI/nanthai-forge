@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -175,7 +176,7 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.ok(source.files.some(file => file.mode === 'symlink'));
   assert.ok(source.files.some(file => file.mode === 'executable'));
   assert.equal(
-    [...s.tables.projectWorkRecords.values()].filter(row => row.collection === 'sourceBlobs').length,
+    [...workRecordRows(s.tables)].filter(row => row.collection === 'sourceBlobs').length,
     files + submodules + 1,
   );
   const count = calls,

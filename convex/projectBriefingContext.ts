@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { hostedBriefDecisions } from './projectHostedDecisionsStore';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { planningBriefIntent } from '../src/work-planning-lifecycle';
@@ -23,12 +24,12 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
     const rows =
       parent === undefined
         ? ctx.db
-            .query('projectWorkRecords')
+            .query(await workRecordTable(ctx, partition, collection))
             .withIndex('by_generation_and_collection_and_position', q =>
               q.eq('generationId', partition).eq('collection', collection),
             )
         : ctx.db
-            .query('projectWorkRecords')
+            .query(await workRecordTable(ctx, partition, collection))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q.eq('generationId', partition).eq('collection', collection).eq('parent', parent),
             );
@@ -44,7 +45,7 @@ export async function hostedBriefRecords(ctx: QueryCtx, project: Doc<'hostedProj
     const header = JSON.parse(row.value);
     if (!header.payloadKey) return header as T;
     const parts = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, partition, `${collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', partition)

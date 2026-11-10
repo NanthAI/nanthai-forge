@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -115,7 +116,7 @@ test('hosted View reads use indexed file/save and Lane/View records, with fresh 
     (await parse(query({ action: 'provenance', viewId: p.view.id }))).files.items[0].why[0].notes.length,
     2,
   );
-  s.tables.projectWorkRecords.set('accepted', {
+  setWorkRecord(s.tables, 'accepted', {
     _id: 'accepted',
     projectId: s.projectId,
     generationId: detail.generationId,

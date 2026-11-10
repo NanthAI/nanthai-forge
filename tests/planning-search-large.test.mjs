@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import { getDocumentSize } from 'convex/values';
 import assert from 'node:assert/strict';
@@ -44,7 +45,7 @@ test('large accepted titles keep source bytes and every search row below the phy
   assert.equal(matches.items[0].title.length, 400);
   const original = (await s.read()).data.planningItems.find(i => i.id === item.itemId);
   assert.equal(original.title, title);
-  for (const row of s.tables.projectWorkRecords.values())
+  for (const row of workRecordRows(s.tables))
     if (row.collection.startsWith('planningSearch')) assert(planningSearchRowBytes(row) <= 1048576);
 });
 
@@ -64,11 +65,18 @@ test('oversized legacy text has unique paged matches, whole-word boundaries and 
   assert(entries.every(row => planningSearchRowBytes(row) <= 1048576));
   const payloadKey = JSON.parse(entries[0].value).payloadKey;
   for (const row of entries)
-    await s.ctx.db.insert('projectWorkRecords', {
-      ...row,
-      projectId: s.projectId,
-      generationId: generation._id,
-    });
+    await s.ctx.db.insert(
+      row.collection.startsWith('planningSearch')
+        ? 'projectPlanningRecords'
+        : row.collection.endsWith(':payload')
+          ? 'projectWorkDataRecords'
+          : 'projectPlanningRecords',
+      {
+        ...row,
+        projectId: s.projectId,
+        generationId: generation._id,
+      },
+    );
   let cursor = null,
     ids = [],
     pages = 0;
@@ -79,9 +87,7 @@ test('oversized legacy text has unique paged matches, whole-word boundaries and 
     assert(++pages < 100);
   } while (cursor);
   assert.deepEqual(ids, [item.id]);
-  const root = [...s.tables.projectWorkRecords.values()].find(
-    r => r.collection === 'planningSearch' && r.key === item.id,
-  );
+  const root = workRecordRows(s.tables).find(r => r.collection === 'planningSearch' && r.key === item.id);
   const newer = planningSearchEntries({ ...item, version: 2, body: 'replacement' }, 0)[0];
   await s.ctx.db.patch(root._id, newer);
   assert.equal((await run(s, 'boundaryword')).items.length, 0);
@@ -93,7 +99,7 @@ test('oversized legacy text has unique paged matches, whole-word boundaries and 
     key: item.id,
     payloadKey,
   });
-  assert(![...s.tables.projectWorkRecords.values()].some(r => r.parent === payloadKey));
+  assert(!workRecordRows(s.tables).some(r => r.parent === payloadKey));
   assert.equal((await run(s, 'replacement')).items[0].id, item.id);
 });
 
@@ -111,11 +117,18 @@ test('legacy Unicode preparation bounds output across pages and replays partial-
   };
   for (const row of indexedRecord('planningItems', item.id, '', 0, item))
     if (row.collection.startsWith('planningItems'))
-      await s.ctx.db.insert('projectWorkRecords', {
-        ...row,
-        projectId: s.projectId,
-        generationId: generation._id,
-      });
+      await s.ctx.db.insert(
+        row.collection.startsWith('planningSearch')
+          ? 'projectPlanningRecords'
+          : row.collection.endsWith(':payload')
+            ? 'projectWorkDataRecords'
+            : 'projectPlanningRecords',
+        {
+          ...row,
+          projectId: s.projectId,
+          generationId: generation._id,
+        },
+      );
   let cursor = null,
     pages = 0,
     processed = 0;
@@ -137,7 +150,7 @@ test('legacy Unicode preparation bounds output across pages and replays partial-
   assert(pages > 1);
   assert.equal(processed, 1);
   assert.equal((await run(s, 'finalneedle')).items[0].id, item.id);
-  for (const row of s.tables.projectWorkRecords.values())
+  for (const row of workRecordRows(s.tables))
     if (row.collection.startsWith('planningSearch')) assert(planningSearchRowBytes(row) <= 1048576);
 });
 

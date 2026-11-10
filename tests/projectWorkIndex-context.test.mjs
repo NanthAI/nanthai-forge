@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
@@ -11,7 +12,7 @@ test('summary context windows retain row order, paging, current authority and ge
   const s = fixture();
   s.tables.projectWorkGenerations.set('generation', { _id: 'generation', projectId: 'project' });
   for (let i = 0; i < 102; i++)
-    s.tables.projectWorkRecords.set(`row-${i}`, {
+    setWorkRecord(s.tables, `row-${i}`, {
       _id: `row-${i}`,
       generationId: 'generation',
       projectId: 'project',
@@ -44,7 +45,7 @@ test('summary context windows retain row order, paging, current authority and ge
 test('large summary context returns a complete prefix so remaining requests can fall back', async () => {
   const s = fixture();
   s.tables.projectWorkGenerations.set('generation', { _id: 'generation', projectId: 'project' });
-  s.tables.projectWorkRecords.set('large', {
+  setWorkRecord(s.tables, 'large', {
     _id: 'large',
     generationId: 'generation',
     projectId: 'project',

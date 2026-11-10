@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -328,7 +329,7 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(catalogRows.length, Math.ceil(catalogued / 256));
   assert.ok(catalogued >= repo.files - 10, `${catalogued} catalogued objects`);
   assert.ok(
-    [...s.tables.projectWorkRecords.values()].filter(r => r.collection === 'sourceBlobs').length <= 1,
+    [...workRecordRows(s.tables)].filter(r => r.collection === 'sourceBlobs').length <= 1,
     'catalog-backed generation keeps no per-blob record (only the State header row)',
   );
   assert.ok(stats.documentsWritten < 1000, `${stats.documentsWritten} documents written`);

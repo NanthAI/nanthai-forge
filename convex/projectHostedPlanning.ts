@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
@@ -60,7 +61,7 @@ export const resolveId = query({
       const generation = await selectedGeneration(ctx, project);
       invariant(generation, 'PROJECT_WORK_INDEX_MISSING', 'The Work index is unavailable.');
       const rows = await ctx.db
-        .query('projectWorkRecords')
+        .query(await workRecordTable(ctx, recordPartition(generation), 'planningItems'))
         .withIndex('by_generation_and_collection_and_key', q =>
           q
             .eq('generationId', recordPartition(generation))

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTables } from './projectWorkRecordTables';
 import { hostedPaths } from '../src/hosted-paths';
 import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
@@ -57,17 +58,21 @@ async function known(
   // Imported actor declarations are data, never fresh identity authority. The
   // account must also be a current participant, and the actor ID already readable.
   const generation = participant ? await selectedGeneration(ctx, project) : null;
-  return !!(
-    generation &&
-    (
-      await ctx.db
-        .query('projectWorkRecords')
-        .withIndex('by_generation_and_actor', q =>
-          q.eq('generationId', recordPartition(generation)).eq('actor', actor),
-        )
-        .take(1)
-    ).length
-  );
+  if (!generation) return false;
+  for (const table of workRecordTables) {
+    if (
+      (
+        await ctx.db
+          .query(table)
+          .withIndex('by_generation_and_actor', q =>
+            q.eq('generationId', recordPartition(generation)).eq('actor', actor),
+          )
+          .take(1)
+      ).length
+    )
+      return true;
+  }
+  return false;
 }
 const args = { projectId: v.id('hostedProjects'), reader: v.string(), actors: v.array(v.string()) };
 export const authorize = internalQuery({

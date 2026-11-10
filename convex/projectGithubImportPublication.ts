@@ -65,6 +65,7 @@ export const begin = internalMutation({
       status: 'stored',
     });
     const generationId = await ctx.db.insert('projectWorkGenerations', {
+      recordTables: 'split',
       projectId: job.projectId,
       backupId,
       revision: 0,

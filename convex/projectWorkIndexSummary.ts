@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { record, recordPartition } from './projectWorkIndexStore';
@@ -38,7 +39,7 @@ export async function cockpitSummary(
   if (collection === 'views') {
     const row = JSON.parse(result);
     const [latest] = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, recordPartition(generation), 'viewAcceptances'))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', recordPartition(generation))

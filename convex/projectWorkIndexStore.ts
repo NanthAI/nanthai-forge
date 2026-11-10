@@ -1,7 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  rememberRecordTables,
+  workRecordLookup,
+  workRecordTable,
+  workRecordTables,
+  recordTablesLayout,
+} from './projectWorkRecordTables';
+import { projectPurgeWriter } from './projectFinishReadWriter';
+import { stream } from 'convex-helpers/server/stream';
+import schema from './schema';
 import { indexActivity } from '../src/work-hosted-index';
 import { workProject, generationHead, setWorkHead } from './projectWorkHead';
-import { v } from 'convex/values';
+import { v, getDocumentSize } from 'convex/values';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
 import { internalMutation, internalQuery, type QueryCtx, type MutationCtx } from './server';
 import { internal } from './_generated/api';
@@ -19,6 +29,7 @@ export const recordPartition = (generation: Doc<'projectWorkGenerations'>) =>
 
 export async function selectedGeneration(ctx: QueryCtx | MutationCtx, project: Doc<'hostedProjects'>) {
   const generation = project.work?.generationId ? await ctx.db.get(project.work.generationId) : null;
+  if (generation) rememberRecordTables(ctx, generation);
   return generation?.format === HOSTED_WORK_INDEX_FORMAT &&
     generation.status === 'ready' &&
     generation.projectId === project._id &&
@@ -33,12 +44,7 @@ export async function record(
   collection: string,
   key: string,
 ) {
-  return await ctx.db
-    .query('projectWorkRecords')
-    .withIndex('by_generation_and_collection_and_key', q =>
-      q.eq('generationId', generationId).eq('collection', collection).eq('key', key),
-    )
-    .unique();
+  return workRecordLookup(ctx, generationId, collection, key);
 }
 type RecordValue = Pick<
   Doc<'projectWorkRecords'>,
@@ -88,18 +94,64 @@ export const snapshotEntries = internalQuery({
     const project = await workProject(ctx, await accessibleProject(ctx, input.projectId, input.owner)),
       generation = await selectedGeneration(ctx, project);
     if (generation?._id !== input.generationId || project.work?.revision !== input.revision) return null;
-    const page = await ctx.db
-      .query('projectWorkRecords')
-      // Fingerprints sort before public Work collection names. Skip their index range rather than
-      // reading and filtering them: adding compare metadata must not add source-return pages.
-      .withIndex('by_generation_and_collection_and_position', q =>
-        q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
-      )
-      .paginate({
-        cursor: input.cursor,
-        numItems: input.returnBatch ? 1000 : 100,
-        maximumBytesRead: input.returnBatch ? 2000000 : 500000,
-      });
+    const split = (await recordTablesLayout(ctx, recordPartition(generation))) === 'split';
+    const bounds = {
+      cursor: input.cursor,
+      numItems: input.returnBatch ? 1000 : 100,
+      maximumBytesRead: input.returnBatch ? 2000000 : 500000,
+    };
+    // A source-return page is a set of keyed entries, not an ordering contract. Drain physical
+    // tables in sequence and fill the same RPC page: no empty boundary RPC or merge lookahead reads.
+    const selection =
+      split && input.cursor
+        ? (JSON.parse(input.cursor) as { table: number; cursor: string | null })
+        : { table: 0, cursor: input.cursor };
+    const page: { page: Doc<(typeof workRecordTables)[number]>[]; isDone: boolean; continueCursor: string } =
+      {
+        page: [],
+        isDone: false,
+        continueCursor: '',
+      };
+    if (!split)
+      Object.assign(
+        page,
+        await ctx.db
+          .query('projectWorkRecords')
+          .withIndex('by_generation_and_collection_and_position', q =>
+            q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
+          )
+          .paginate(bounds),
+      );
+    else {
+      let bytes = 0;
+      while (
+        selection.table < workRecordTables.length &&
+        page.page.length < bounds.numItems &&
+        bytes < bounds.maximumBytesRead
+      ) {
+        const part = await stream(ctx.db, schema)
+          .query(workRecordTables[selection.table]!)
+          .withIndex('by_generation_and_collection_and_position', q =>
+            q.eq('generationId', recordPartition(generation)).gt('collection', '_workStore\uffff'),
+          )
+          .paginate({
+            ...bounds,
+            cursor: selection.cursor,
+            numItems: bounds.numItems - page.page.length,
+            maximumBytesRead: bounds.maximumBytesRead - bytes,
+          });
+        page.page.push(...part.page);
+        bytes += part.page.reduce((n, row) => n + getDocumentSize(row), 0);
+        if (!part.isDone) {
+          selection.cursor = part.continueCursor;
+          break;
+        }
+        selection.table++;
+        selection.cursor = null;
+      }
+      page.isDone = selection.table === workRecordTables.length;
+      page.continueCursor = JSON.stringify(selection);
+    }
     return {
       entries: page.page
         .filter(row => !row.collection.startsWith('_workStore'))
@@ -160,6 +212,7 @@ export const begin = internalMutation({
     const { owner: _owner, cursor, ...fields } = input;
     void _owner;
     const id = await ctx.db.insert('projectWorkGenerations', {
+      recordTables: 'split',
       ...fields,
       format: HOSTED_WORK_INDEX_FORMAT,
       workSchema: JSON.parse(input.metadata).schema,
@@ -303,17 +356,32 @@ export const retire = internalMutation({
       });
       return null;
     }
-    const rows = await ctx.db
-      .query('projectWorkRecords')
-      .withIndex('by_generation', q => q.eq('generationId', generationId))
-      .paginate(retirementPage);
-    for (const row of rows.page) await ctx.db.delete(row._id);
-    if (!rows.isDone)
-      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
-        generationId,
-        projectId: generation.projectId,
-      });
-    else await ctx.db.delete(generationId);
+    const db = projectPurgeWriter(ctx).db;
+    let remainingRows = retirementPage.numItems;
+    let remainingBytes = retirementPage.maximumBytesRead;
+    for (const [tableIndex, table] of workRecordTables.entries()) {
+      const rows = await db
+        .query(table)
+        .withIndex('by_generation', q => q.eq('generationId', generationId))
+        .paginate({
+          ...retirementPage,
+          numItems: remainingRows,
+          maximumRowsRead: remainingRows,
+          maximumBytesRead: remainingBytes,
+        });
+      for (const row of rows.page) await db.delete(row._id);
+      remainingRows -= rows.page.length;
+      remainingBytes -= rows.page.reduce((total, row) => total + getDocumentSize(row), 0);
+      if (rows.isDone && tableIndex === workRecordTables.length - 1) break;
+      if (!rows.isDone || !remainingRows || remainingBytes <= 0) {
+        await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
+          generationId,
+          projectId: generation.projectId,
+        });
+        return null;
+      }
+    }
+    await ctx.db.delete(generationId);
     return null;
   },
 });
@@ -420,7 +488,7 @@ export const retirePayload = internalMutation({
     const header = await record(ctx, input.generationId, input.collection, input.key);
     if (header && JSON.parse(header.value).payloadKey === input.payloadKey) return null;
     const rows = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, input.generationId, `${input.collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', input.generationId)
@@ -452,7 +520,7 @@ export const payload = internalQuery({
       generation = await selectedGeneration(ctx, project);
     invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted source or Work changed.');
     const page = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, recordPartition(generation), `${input.collection}:payload`))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', recordPartition(generation))
@@ -479,7 +547,7 @@ export const viewFiles = internalQuery({
       generation = await selectedGeneration(ctx, project);
     invariant(generation?._id === input.generationId, 'WORK_STALE', 'Hosted source or Work changed.');
     const page = await ctx.db
-      .query('projectWorkRecords')
+      .query(await workRecordTable(ctx, recordPartition(generation), 'viewFiles'))
       .withIndex('by_generation_and_collection_and_parent_and_position', q =>
         q
           .eq('generationId', recordPartition(generation))

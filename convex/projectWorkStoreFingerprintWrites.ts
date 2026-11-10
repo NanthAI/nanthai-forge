@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import type { MutationCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import type { HostedRecordRef } from '../src/hosted-records';
@@ -24,7 +25,7 @@ export async function writeFingerprint(
   value: unknown,
 ) {
   const row = await ctx.db
-    .query('projectWorkRecords')
+    .query(await workRecordTable(ctx, partition, collection))
     .withIndex('by_generation_and_collection_and_key', q =>
       q.eq('generationId', partition).eq('collection', collection).eq('key', key),
     )

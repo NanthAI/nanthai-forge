@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
@@ -48,7 +49,7 @@ test('hosted workspace reads stay constant at twice dogfood size and ignore owne
       const id = `${collection}-${i}`;
       const value = JSON.stringify({ id, retained: 'x'.repeat(8192) });
       bytes += Buffer.byteLength(value);
-      s.tables.projectWorkRecords.set(id, {
+      setWorkRecord(s.tables, id, {
         _id: id,
         generationId: 'generation',
         collection,

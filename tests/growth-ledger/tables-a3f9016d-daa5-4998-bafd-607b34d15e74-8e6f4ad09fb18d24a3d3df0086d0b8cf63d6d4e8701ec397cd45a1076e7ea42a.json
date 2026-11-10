@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 2,
+  "reason": "Issue 8c4f126b splits planning and data index domains: 2 new tables replace blanket planning/activity/status copies; modelled viewFiles alone saves 2.01-3.07 GB after migration; canonical rows/history retained.",
+  "date": "2026-11-10"
+}

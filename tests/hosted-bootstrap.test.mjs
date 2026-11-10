@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import { storedBytes } from './default-r2.mjs';
 import assert from 'node:assert/strict';
@@ -69,7 +70,7 @@ test('browser creation publishes an empty retained State, initialized indexed Wo
   assert.equal(row.stateGeneration, 1);
   const generation = s.tables.projectWorkGenerations.get(project.work.generationId);
   assert.equal(generation.status, 'ready');
-  const tree = [...s.tables.projectWorkRecords.values()].find(row => row.collection === 'sourceTrees');
+  const tree = [...workRecordRows(s.tables)].find(row => row.collection === 'sourceTrees');
   assert.deepEqual(JSON.parse(tree.value), { head: snapshot.manifest.head, files: 0 });
 });
 
@@ -212,7 +213,7 @@ test('fresh hosted main checks out zero file blobs with a valid receipt and repl
     projectId = await s.create(args);
   const project = s.tables.hostedProjects.get(projectId);
   const move = JSON.parse(
-    [...s.tables.projectWorkRecords.values()].find(
+    [...workRecordRows(s.tables)].find(
       row => row.projectId === projectId && row.collection === 'channelMoves',
     ).value,
   );

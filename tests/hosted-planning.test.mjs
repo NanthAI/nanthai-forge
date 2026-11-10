@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -273,7 +274,7 @@ test('the Work store copy moves every Issue version, comment and note once, and 
       authorLabel: 'Owner',
     });
   assert(
-    [...s.tables.projectWorkRecords.values()].some(row => row.collection === 'planningVersions:payload'),
+    workRecordRows(s.tables).some(row => row.collection === 'planningVersions:payload'),
     'the large body is stored in parts',
   );
   const handlers = { 'projectWorkStore:copy': store.copy, 'projectWorkStore:compare': store.compare };
@@ -746,7 +747,7 @@ test('with the store reader on, planning lists, versions, comments and detail re
   const historical = [...s.tables.projectHostedRecords.values()].find(row => row.kind === 'issue');
   const readerHash = historical.workReadDigest;
   delete historical.workReadDigest;
-  const historicalCache = [...s.tables.projectWorkRecords.values()].find(
+  const historicalCache = workRecordRows(s.tables).find(
     row =>
       row.collection === '_workStoreDigests:planningVersions' &&
       JSON.parse(row.value).ref.key === historical.key &&
@@ -778,7 +779,7 @@ test('with the store reader on, planning lists, versions, comments and detail re
     'full verification catches out-of-band immutable header corruption',
   );
   fetchedBodies = 0;
-  const targetCaches = [...s.tables.projectWorkRecords.values()].filter(
+  const targetCaches = workRecordRows(s.tables).filter(
     row =>
       (row.collection === '_workStoreHeads:comment' || row.collection.startsWith('_workStoreDigests:')) &&
       JSON.parse(row.value).ref?.key === corrupt.key,

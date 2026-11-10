@@ -87,7 +87,7 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
       hostedMains.set(row.projectId, selection?.head);
     }
     if (event.table === 'projectWorkGenerations') generations.set(row._id, row);
-    if (event.table === 'projectWorkRecords') {
+    if (['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(event.table)) {
       let partition = partitions.get(row.generationId);
       if (!partition) partitions.set(row.generationId, (partition = { counts: {}, channels: new Map() }));
       partition.counts[row.collection] = (partition.counts[row.collection] ?? 0) + 1;

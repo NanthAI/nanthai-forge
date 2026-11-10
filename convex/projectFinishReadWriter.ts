@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import type { MutationCtx } from './_generated/server';
 import { metricReadWriter } from './projectMetricReadWriter';
 import {
@@ -18,7 +19,7 @@ const wrapped = new WeakMap<object, () => MutationCtx['db']>();
  * every companion itself, including companions erased by an earlier purge page.
  * Keeping ordinary projection upkeep here would double-delete or recreate them. */
 export function projectPurgeWriter(ctx: MutationCtx): MutationCtx {
-  const original = wrapped.get(ctx.db);
+  const original = wrapped.get(workRecordOriginalDb(ctx.db));
   return original
     ? new Proxy(ctx, {
         get(target, key, receiver) {

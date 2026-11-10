@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultR2Config, defaultR2Objects, storedBytes } from './default-r2.mjs';
@@ -584,7 +585,7 @@ test('lost staged-publication reply replays the exact projection page without du
   await s.start(job.operationId);
   await s.advance(id);
   assert.equal(s.tables.projectGithubImports.get(id).phase, 'ready');
-  const records = [...s.tables.projectWorkRecords.values()];
+  const records = [...workRecordRows(s.tables)];
   assert.equal(new Set(records.map(row => `${row.collection}:${row.key}`)).size, records.length);
 });
 

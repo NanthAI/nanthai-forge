@@ -323,7 +323,7 @@ export function state(jobs = [job()], { keysetPaging = false } = {}) {
             low = [...lower],
             high = [...upper],
             keys = [...fields, '_creationTime', ...(table === 'projectCoordinationEvents' ? ['_id'] : [])];
-          return [...tables[table].values()]
+          return [...(tables[table]?.values() ?? [])]
             .filter(
               row =>
                 equal.every(([key, value]) => field(row, key) === value) &&
@@ -628,3 +628,39 @@ export function providers(revoked = () => false, privateRepository = true, head 
     });
   };
 }
+
+/** All logical Work projection rows, independent of physical index partitioning. */
+export function workRecordRows(tables) {
+  return ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].flatMap(table => [
+    ...tables[table].values(),
+  ]);
+}
+
+/** Fixture seeds select physical placement independently of the server writer. Legacy fixtures
+ * remain legacy until they explicitly acquire the split-generation marker. */
+export function setWorkRecord(tables, id, row) {
+  const split = tables.projectWorkGenerations?.get(row.generationId)?.recordTables === 'split';
+  const collection = row.collection ?? '';
+  const target = !split
+    ? 'projectWorkRecords'
+    : collection.startsWith('planningSearch')
+      ? 'projectPlanningRecords'
+      : collection.endsWith(':payload') ||
+          collection.startsWith('source') ||
+          collection === 'viewFiles' ||
+          collection.startsWith('_workStore')
+        ? 'projectWorkDataRecords'
+        : collection.startsWith('planning')
+          ? 'projectPlanningRecords'
+          : 'projectWorkRecords';
+  tables[target] ??= new Map();
+  tables[target].set(id, row);
+}
+export const getWorkRecord = (tables, id) =>
+  ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords']
+    .map(table => tables[table]?.get(id))
+    .find(Boolean);
+export const deleteWorkRecord = (tables, id) =>
+  ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].forEach(table =>
+    tables[table]?.delete(id),
+  );

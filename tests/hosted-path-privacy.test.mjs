@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
@@ -267,7 +268,8 @@ test('legacy indexed payload redaction spans parts without rewriting records or 
   const cut = text.indexOf('/Users') + 3;
   const parts = [text.slice(0, cut), text.slice(cut)];
   parts.forEach((value, position) =>
-    f.tables.projectWorkRecords.set(
+    setWorkRecord(
+      f.tables,
       `part-${position}`,
       row(`part-${position}`, {
         generationId: 'g',
@@ -298,7 +300,8 @@ test('payloads stored in many parts assemble without a nested paginated query', 
   const parts = Array.from({ length: 250 }, (_, position) => `${position},`);
   // Insert out of order: assembly must follow position, not insertion.
   [...parts.keys()].reverse().forEach(position =>
-    f.tables.projectWorkRecords.set(
+    setWorkRecord(
+      f.tables,
       `part-${position}`,
       row(`part-${position}`, {
         generationId: 'g',

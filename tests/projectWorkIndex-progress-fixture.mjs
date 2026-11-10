@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getWorkRecord } from './hosted-fixture.mjs';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { recipeObjects } from './projectObjectRecipe-fixture.mjs';
 import { randomUUID } from 'node:crypto';
@@ -354,12 +355,13 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
   // Index the fake database too: scanning every row would measure the fake, not the build.
   const byCollection = new Map(),
     byKey = new Map();
-  for (const [id, row] of s.tables.projectWorkRecords) {
-    const bucket = byCollection.get(row.collection) ?? new Map();
-    byCollection.set(row.collection, bucket);
-    bucket.set(id, row);
-    byKey.set(JSON.stringify([row.collection, row.key]), id);
-  }
+  for (const table of ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'])
+    for (const [id, row] of s.tables[table]) {
+      const bucket = byCollection.get(`${table}:${row.collection}`) ?? new Map();
+      byCollection.set(`${table}:${row.collection}`, bucket);
+      bucket.set(id, row);
+      byKey.set(JSON.stringify([table, row.collection, row.key]), id);
+    }
   const reserved = new Set(saved?.tables.flatMap(([, rows]) => rows.map(([id]) => id)) ?? []);
   const insert = s.ctx.db.insert,
     patch = s.ctx.db.patch,
@@ -374,19 +376,22 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       else s.tables[table].delete(id);
       id = await insert(table, row);
     }
-    if (table === 'projectWorkRecords') {
-      const bucket = byCollection.get(row.collection) ?? new Map();
-      byCollection.set(row.collection, bucket);
+    if (['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table)) {
+      const bucket = byCollection.get(`${table}:${row.collection}`) ?? new Map();
+      byCollection.set(`${table}:${row.collection}`, bucket);
       bucket.set(id, s.tables[table].get(id));
-      byKey.set(JSON.stringify([row.collection, row.key]), id);
+      byKey.set(JSON.stringify([table, row.collection, row.key]), id);
     }
     return id;
   };
   s.ctx.db.delete = async id => {
-    const row = s.tables.projectWorkRecords.get(id);
+    const table = ['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].find(table =>
+      s.tables[table].has(id),
+    );
+    const row = getWorkRecord(s.tables, id);
     if (row) {
-      byCollection.get(row.collection)?.delete(id);
-      byKey.delete(JSON.stringify([row.collection, row.key]));
+      byCollection.get(`${table}:${row.collection}`)?.delete(id);
+      byKey.delete(JSON.stringify([table, row.collection, row.key]));
     }
     return remove(id);
   };
@@ -424,7 +429,8 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
       };
       return q;
     }
-    if (table !== 'projectWorkRecords') return queryDb(table);
+    if (!['projectWorkRecords', 'projectPlanningRecords', 'projectWorkDataRecords'].includes(table))
+      return queryDb(table);
     let matches = [],
       direction = 1;
     const q = {
@@ -459,12 +465,16 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
     const rows = () => {
       const collection = matches.find(m => m.key === 'collection')?.value;
       const key = matches.find(m => m.key === 'key')?.value;
-      const id = key === undefined ? undefined : byKey.get(JSON.stringify([collection, key]));
+      const id = key === undefined ? undefined : byKey.get(JSON.stringify([table, collection, key]));
       const selected =
         key === undefined
-          ? [...(byCollection.get(collection)?.values() ?? [])]
+          ? [
+              ...(collection === undefined
+                ? s.tables[table].values()
+                : (byCollection.get(`${table}:${collection}`)?.values() ?? [])),
+            ]
           : id
-            ? [s.tables.projectWorkRecords.get(id)]
+            ? [getWorkRecord(s.tables, id)]
             : [];
       return selected
         .filter(row =>
@@ -481,6 +491,9 @@ export function progressFixture(scale = 1, saved, ensure = actions.ensure._handl
           ),
         )
         .sort((a, b) => direction * (a.position - b.position || a._creationTime - b._creationTime));
+    };
+    q[Symbol.asyncIterator] = async function* () {
+      for (const row of rows()) yield structuredClone(row);
     };
     return q;
   };

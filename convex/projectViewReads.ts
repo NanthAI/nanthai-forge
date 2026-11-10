@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { hostedPaths, hostedJson } from '../src/hosted-paths';
 import { actorSummary } from './projectActorNames';
 import { generationHead } from './projectWorkHead';
@@ -25,7 +26,7 @@ async function value(
   const header = JSON.parse(row.value);
   if (!header.payloadKey) return header;
   const parts = await ctx.db
-    .query('projectWorkRecords')
+    .query(await workRecordTable(ctx, partition, `${collection}:payload`))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q
         .eq('generationId', partition)
@@ -40,14 +41,14 @@ async function value(
   );
   return JSON.parse(parts.map(part => part.value).join(''));
 }
-const children = (
+const children = async (
   ctx: QueryCtx,
   partition: Id<'projectWorkGenerations'>,
   collection: string,
   parent: string,
 ) =>
   ctx.db
-    .query('projectWorkRecords')
+    .query(await workRecordTable(ctx, partition, collection))
     .withIndex('by_generation_and_collection_and_parent_and_position', q =>
       q.eq('generationId', partition).eq('collection', collection).eq('parent', parent),
     );
@@ -78,7 +79,11 @@ export const read = query({
       const head = await generationHead(ctx, generation);
       const partition = recordPartition(generation);
       const acceptances = async (model: ViewReadModel) => {
-        const rows = await children(ctx, partition, 'viewAcceptances', model.viewId).order('desc').take(1);
+        const rows = await (
+          await children(ctx, partition, 'viewAcceptances', model.viewId)
+        )
+          .order('desc')
+          .take(1);
         const accepted = await Promise.all(
           rows.map(async row => {
             const move = JSON.parse(await actorSummary(ctx, project._id, row.value));
@@ -95,7 +100,9 @@ export const read = query({
           'NOT_FOUND',
           'Lane not found.',
         );
-        const page = await children(ctx, partition, 'laneViews', input.laneId)
+        const page = await (
+          await children(ctx, partition, 'laneViews', input.laneId)
+        )
           .order('desc')
           .paginate(input.paginationOpts);
         const items = await Promise.all(
@@ -121,7 +128,9 @@ export const read = query({
         plans = plan ? [plan] : [];
         nextCursor = null;
       } else {
-        const page = await children(ctx, partition, 'viewFiles', input.viewId).paginate(input.paginationOpts);
+        const page = await (
+          await children(ctx, partition, 'viewFiles', input.viewId)
+        ).paginate(input.paginationOpts);
         plans = await Promise.all(page.page.map(row => value(ctx, partition, 'viewFiles', row.key)));
         nextCursor = page.isDone ? null : page.continueCursor;
       }
@@ -134,7 +143,7 @@ export const read = query({
         ...plans.flatMap(file => file.contributors.map(c => c.intentId)),
       ])) {
         const intent = await value(ctx, partition, 'intents', intentId);
-        const notes = await children(ctx, partition, 'notes', intentId).take(101);
+        const notes = await (await children(ctx, partition, 'notes', intentId)).take(101);
         why.set(intentId, {
           intentId,
           outcome: intent?.outcome ?? null,
@@ -165,7 +174,7 @@ export const read = query({
       );
       const runs =
         input.action === 'view'
-          ? (await children(ctx, partition, 'runs', input.viewId).order('desc').take(101)).map(row =>
+          ? (await (await children(ctx, partition, 'runs', input.viewId)).order('desc').take(101)).map(row =>
               JSON.parse(row.value),
             )
           : undefined;

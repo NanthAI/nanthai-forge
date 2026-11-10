@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteWorkRecord, setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
@@ -10,7 +11,7 @@ import { stateParentEntries } from '../dist/source-state-parent-index.js';
 const { sourceMembership } = await import(moduleUrl('../convex/projectSourceMembership.ts'));
 function insert(s, entries) {
   for (const entry of entries)
-    s.tables.projectWorkRecords.set(`${entry.collection}:${entry.key}`, {
+    setWorkRecord(s.tables, `${entry.collection}:${entry.key}`, {
       _id: `${entry.collection}:${entry.key}`,
       projectId: 'project',
       generationId: 'generation',
@@ -27,7 +28,7 @@ test('compact immutable ancestry closures remain exact across bounded chunks', a
   insert(s, entries);
   assert.equal(await sourceMembership(s.ctx, 'generation', heads.at(-1), heads[0]), true);
   assert.equal(await sourceMembership(s.ctx, 'generation', heads.at(-1), 'f'.repeat(64)), false);
-  s.tables.projectWorkRecords.delete(`sourceAncestryChunk:${heads.at(-1)}:0`);
+  deleteWorkRecord(s.tables, `sourceAncestryChunk:${heads.at(-1)}:0`);
   assert.equal(
     await sourceMembership({ ...s.ctx }, 'generation', heads.at(-1), heads[0]),
     null,

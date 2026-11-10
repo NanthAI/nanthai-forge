@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
@@ -198,10 +199,10 @@ test('fromWork preserves all command fields across payload chunks and reused rec
 for (const damage of ['missing', 'changed'])
   test(`fromWork refuses ${damage} selected check payload without saving settings`, async () => {
     const { s, projectId, newer } = project();
-    const part = [...s.tables.projectWorkRecords.values()].find(
+    const part = [...workRecordRows(s.tables)].find(
       row => row.collection === 'checks:payload' && row.parent.startsWith(newer.id + ':'),
     );
-    if (damage === 'missing') s.tables.projectWorkRecords.delete(part._id);
+    if (damage === 'missing') deleteWorkRecord(s.tables, part._id);
     else
       s.patch('projectWorkRecords', part._id, {
         value: part.value.replace('"executable":"node"', '"executable":"false"'),

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteWorkRecord, setWorkRecord, workRecordRows } from './hosted-fixture.mjs';
 import { commitValidatedCheckpoint } from './project-exchange-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -164,16 +165,16 @@ test('indexed source reviews read only selected State/file pins, preserving byte
     'only the selected State and file blobs are resolved',
   );
   // A missing disposable row keeps the exact original manifest path available.
-  const row = [...s.tables.projectWorkRecords.values()].find(
+  const row = [...workRecordRows(s.tables)].find(
     r => r.collection === 'sourceBlobs' && r.key === s.input.head,
   );
   assert(row);
-  s.tables.projectWorkRecords.delete(row._id);
+  deleteWorkRecord(s.tables, row._id);
   seen.length = 0;
   const fallback = JSON.parse(await read._handler(s.ctx, { ...s.input, file: 'a.ts' }));
   assert.deepEqual(fallback.comparison, baseline.comparison);
   assert(seen.includes(s.source.input.digest));
-  s.tables.projectWorkRecords.set(row._id, row);
+  setWorkRecord(s.tables, row._id, row);
   const value = row.value;
   const pin = JSON.parse(value);
   row.value = JSON.stringify({ ...pin, size: pin.size + 1 });

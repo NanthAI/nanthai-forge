@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { getWorkRecord, setWorkRecord } from './hosted-fixture.mjs';
 import { dispatchCoordination } from '../dist/coordination-dispatch.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -144,7 +145,7 @@ test('indexed activity excludes 5,000 old runs; migration is bounded and safe to
     status: 'ready',
   });
   const add = (collection, key, value, at) =>
-    f.tables.projectWorkRecords.set(key, {
+    setWorkRecord(f.tables, key, {
       _id: key,
       _creationTime: f.tables.projectWorkRecords.size,
       projectId: 'project',
@@ -172,7 +173,7 @@ test('indexed activity excludes 5,000 old runs; migration is bounded and safe to
     cursor = result.cursor;
   } while (pages < 60);
   assert.ok(pages > 50 && pages < 60);
-  assert.equal(f.tables.projectWorkRecords.get('recent').activityAt, Date.parse(run.startedAt));
+  assert.equal(getWorkRecord(f.tables, 'recent').activityAt, Date.parse(run.startedAt));
   // A count query must use only the timestamp range, never traverse old Lane/run records.
   const original = f.ctx.db.query;
   let runReads = 0;

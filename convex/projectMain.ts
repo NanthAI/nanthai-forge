@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { workRecordTable } from './projectWorkRecordTables';
 import { v } from 'convex/values';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -43,7 +44,7 @@ export const current = query({
         let cursor: string | null = null;
         do {
           const page = await ctx.db
-            .query('projectWorkRecords')
+            .query(await workRecordTable(ctx, partition, 'channelMoves'))
             .withIndex('by_generation_and_collection_and_parent_and_position', q =>
               q.eq('generationId', partition).eq('collection', 'channelMoves').eq('parent', 'main'),
             )

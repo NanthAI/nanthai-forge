@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteWorkRecord, getWorkRecord, setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -198,7 +199,7 @@ function hostedFixture() {
     status: 'ready',
   });
   function row(id, collection, key, value, position = 0) {
-    s.tables.projectWorkRecords.set(id, {
+    setWorkRecord(s.tables, id, {
       _id: id,
       generationId: 'generation',
       collection,
@@ -233,7 +234,7 @@ test('server contract prefers hosted receipt over uploaded native main and check
     main.current._handler(s.ctx, { projectId: 'project', expected: { head, receiptId: 'stale-receipt' } }),
     /CHANNEL_CHANGED/,
   );
-  s.tables.projectWorkRecords.delete('hosted');
+  deleteWorkRecord(s.tables, 'hosted');
   assert.equal(
     JSON.parse(await main.current._handler(s.ctx, { projectId: 'project' })).receipt.id,
     'native-receipt',
@@ -323,7 +324,7 @@ test('server-selected hosted A is materialized while uploaded native main remain
   const client = setup(t),
     { s } = hostedFixture();
   for (const bytes of client.objects.values()) await upload(s, bytes);
-  const row = s.tables.projectWorkRecords.get('hosted');
+  const row = getWorkRecord(s.tables, 'hosted');
   row.value = JSON.stringify({ id: 'hosted-a', head: client.head, previousId: null });
   s.tables.projectBackups.get('backup').preview.head = 'b'.repeat(64);
   const transport = {
@@ -346,7 +347,7 @@ test('server-selected hosted A is materialized while uploaded native main remain
   assert.equal(result.head, client.head);
   assert.equal(result.receipt.id, 'hosted-a');
   assert.equal(readFileSync(join(client.root, 'a.txt'), 'utf8'), 'first\n');
-  assert.equal(JSON.parse(s.tables.projectWorkRecords.get('native').value).head, 'b'.repeat(64));
+  assert.equal(JSON.parse(getWorkRecord(s.tables, 'native').value).head, 'b'.repeat(64));
 });
 
 test('main checkout preserves symlinks as links, including dangling and non-UTF8 targets', async t => {

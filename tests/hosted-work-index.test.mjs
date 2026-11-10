@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -547,7 +548,7 @@ test('summary paging can start newest-first while preserving the default positio
   const generation = s.tables.projectWorkGenerations.get(workspace.generationId);
   const partition = generation.recordsGenerationId ?? generation._id;
   for (let position = 0; position < 5; position++)
-    s.tables.projectWorkRecords.set(`perf-${position}`, {
+    setWorkRecord(s.tables, `perf-${position}`, {
       _id: `perf-${position}`,
       projectId: s.projectId,
       generationId: partition,
@@ -598,7 +599,7 @@ test('summary pages resolve a repeated actor once per request and keep fresh han
   });
   s.tables.forgeAccounts.set('perf-account', { _id: 'perf-account', owner: 'owner', handle: 'first-handle' });
   for (let position = 0; position < 30; position++)
-    s.tables.projectWorkRecords.set(`actor-perf-${position}`, {
+    setWorkRecord(s.tables, `actor-perf-${position}`, {
       _id: `actor-perf-${position}`,
       projectId: s.projectId,
       generationId: partition,
@@ -742,4 +743,115 @@ test('owner decisions project additively into the shared workspace and exact col
   const older = materializeWork({ ...data, decisions: undefined }, manifest, []);
   assert.equal(older.metadata.decisionVersion, undefined);
   assert.equal(older.metadata.counts.decisions, 0);
+});
+
+test('Work table migration mirrors concurrent writes, replays lost pages and retains every logical record through cleanup', async () => {
+  const { state } = await import('./hosted-fixture.mjs');
+  const migration = await import(moduleUrl('../convex/projectWorkRecordMigration.ts'));
+  const { workRecordWriter } = await import(moduleUrl('../convex/projectWorkRecordWriter.ts'));
+  const { workRecordLookup, workRecordTable } = await import(
+    moduleUrl('../convex/projectWorkRecordTables.ts')
+  );
+  const s = state([], { keysetPaging: true });
+  const generationId = await s.ctx.db.insert('projectWorkGenerations', {
+    projectId: 'project',
+    backupId: 'backup',
+    revision: 1,
+    initialRevision: 1,
+    status: 'ready',
+    nextBatch: 1,
+    metadata: '{}',
+  });
+  for (let position = 0; position < 205; position++)
+    await s.ctx.db.insert('projectWorkRecords', {
+      generationId,
+      projectId: 'project',
+      collection: position % 2 ? 'planningItems' : 'viewFiles',
+      key: String(position),
+      parent: '',
+      position,
+      value: JSON.stringify({ position }),
+    });
+  const coreId = await s.ctx.db.insert('projectWorkRecords', {
+    generationId,
+    projectId: 'project',
+    collection: 'intents',
+    key: 'retained',
+    parent: '',
+    position: 0,
+    value: '{"retained":true}',
+  });
+  const page = (cursor, cleanup = false, operationId = randomUUID()) =>
+    migration.page._handler(s.ctx, {
+      generationId,
+      operationId,
+      cursor,
+      ...(cleanup ? { cleanup: true } : {}),
+    });
+  const firstId = randomUUID();
+  const first = JSON.parse(await page(null, false, firstId));
+  assert.equal(first.isDone, false);
+  assert.equal(
+    await page(null, false, firstId),
+    JSON.stringify(first),
+    'lost-reply replay does not repeat a copy',
+  );
+  const writer = workRecordWriter(s.ctx);
+  assert.equal(await workRecordTable(writer, generationId, 'planningItems'), 'projectWorkRecords');
+  const moved = await workRecordLookup(writer, generationId, 'planningItems', '1');
+  assert(s.tables.projectPlanningRecords.has(moved._id), 'copying lookups prefer the new table');
+  await writer.db.patch(moved._id, { value: '{"updated":true}' });
+  const legacy = [...s.tables.projectWorkRecords.values()].find(row => row.key === '1');
+  assert.equal(
+    legacy.value,
+    '{"updated":true}',
+    'a concurrent new-first write reaches the still-live legacy list',
+  );
+  const inserted = await writer.db.insert('projectWorkRecords', {
+    generationId,
+    projectId: 'project',
+    collection: 'planningItems',
+    key: 'new',
+    parent: '',
+    position: 205,
+    value: '{}',
+  });
+  assert(s.tables.projectWorkRecords.has(inserted));
+  assert([...s.tables.projectPlanningRecords.values()].some(row => row.key === 'new'));
+  let cursor = first.nextCursor;
+  do {
+    const result = JSON.parse(await page(cursor));
+    cursor = result.nextCursor;
+  } while (cursor);
+  assert.equal(s.tables.projectWorkGenerations.get(generationId).recordTables, 'split');
+  const current = workRecordWriter(s.ctx);
+  assert.equal(await workRecordTable(current, generationId, 'planningItems'), 'projectPlanningRecords');
+  const after = await workRecordLookup(current, generationId, 'planningItems', '1');
+  assert.equal(after.value, '{"updated":true}');
+  cursor = null;
+  do {
+    const result = JSON.parse(await page(cursor, true));
+    cursor = result.nextCursor;
+  } while (cursor);
+  assert.equal(
+    await page(null, false, firstId),
+    JSON.stringify(first),
+    'an older page replays after later copy and cleanup pages',
+  );
+  assert.equal(s.tables.projectWorkRecords.size, 1);
+  assert.equal(
+    s.tables.projectWorkRecords.get(coreId).value,
+    '{"retained":true}',
+    'general Work retains its original row identity and exact bytes',
+  );
+  assert.equal(s.tables.projectPlanningRecords.size + s.tables.projectWorkDataRecords.size, 206);
+  assert.equal(
+    (await workRecordLookup(workRecordWriter(s.ctx), generationId, 'planningItems', '1')).value,
+    '{"updated":true}',
+  );
+  await assert.rejects(
+    page('changed', false, firstId),
+    error => (error.data?.code ?? error.code) === 'WORK_OPERATION_CHANGED',
+  );
+  await assert.rejects(page('wrong'), error => (error.data?.code ?? error.code) === 'WORK_STALE');
 });

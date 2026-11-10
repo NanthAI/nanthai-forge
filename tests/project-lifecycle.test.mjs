@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { setWorkRecord } from './hosted-fixture.mjs';
 import { historicalArchiveActions } from './historical-archive-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -248,7 +249,7 @@ test('permanent project removal batches journals/grants/archives, resumes failur
     s.tables.projectWorkEvents.set(`event-${i}`, { _id: `event-${i}`, projectId: 'project', revision: i });
   }
   for (let i = 0; i < 121; i++) {
-    s.tables.projectWorkRecords.set(`indexed-${i}`, { _id: `indexed-${i}`, projectId: 'project' });
+    setWorkRecord(s.tables, `indexed-${i}`, { _id: `indexed-${i}`, projectId: 'project' });
     s.tables.projectWorkGenerations.set(`generation-${i}`, { _id: `generation-${i}`, projectId: 'project' });
   }
   for (let i = 0; i < 105; i++) s.put(`unrelated-${i}`, 'application/gzip');
