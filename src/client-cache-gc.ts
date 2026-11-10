@@ -6,6 +6,8 @@ import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { listLanes } from './lane-registry.js';
 import { isNestedLaneCopy, readCacheUse, writeCacheUse, unknownCacheMetadata } from './client-cache-use.js';
+import { processBlocker, workingProcesses } from './clean-processes.js';
+import { logLanePrune } from './lane-prune-log.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const hour = 3_600_000;
@@ -60,6 +62,7 @@ export function gcNestedLanes(input: {
   now?: number;
   budgetMs?: number;
   isDirty?: (root: string) => boolean;
+  processes?: () => ReturnType<typeof workingProcesses>;
 }): CacheGcResult {
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings(),
@@ -114,6 +117,7 @@ export function gcNestedLanes(input: {
     }
   }
   let total = copies.reduce((sum, item) => sum + (item.bytes ?? 0), 0);
+  let processes: ReturnType<typeof workingProcesses> | undefined;
   for (const item of copies) {
     if (Date.now() > deadline) {
       result.finished = false;
@@ -130,15 +134,27 @@ export function gcNestedLanes(input: {
           ? 'in use'
           : linked.has(item.copy)
             ? 'linked from a sibling directory'
-            : unknownCacheMetadata(item.copy)
-              ? 'unknown Forge metadata'
-              : isDirty(item.copy)
-                ? 'unsaved edits'
-                : null;
+            : (processBlocker(item.copy, (processes ??= (input.processes ?? workingProcesses)())) ??
+              (unknownCacheMetadata(item.copy)
+                ? 'unknown Forge metadata'
+                : isDirty(item.copy)
+                  ? 'unsaved edits'
+                  : null));
     if (reason) {
       result.kept.push({ laneId: item.laneId, reason });
       continue;
     }
+    logLanePrune(
+      {
+        laneId: item.laneId,
+        root: item.copy,
+        state: 'cache',
+        reason: tooOld ? 'Unused Lane cache exceeded age limit' : 'Unused Lane cache exceeded size cap',
+        idleHours: (now - item.used) / hour,
+        bytes: item.bytes ?? 0,
+      },
+      now,
+    );
     for (const path of [
       item.copy,
       clientCacheRoot(item.copy),

@@ -13,6 +13,7 @@ import {
   symlinkSync,
   utimesSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -513,4 +514,68 @@ test('the worker wake socket falls back to a short root when TMPDIR is too deep 
   } finally {
     await channel.close();
   }
+});
+
+test('cache eviction retains a long-running process directory and unknown coverage, and logs unused-copy removal', t => {
+  const directory = isolated(t),
+    root = join(directory, 'main');
+  const running = copy(root, 1e9, 50),
+    unused = copy(root, 1e9, 51);
+  const unusedPhysicalPath = realpathSync(unused.path);
+  const result = gcNestedLanes({
+    root,
+    settings: settings(0.5, 0),
+    isDirty: clean,
+    processes: () => ({ paths: [join(realpathSync(running.path), 'nested')], unknown: false }),
+  });
+  assert(existsSync(running.path), 'saved source with ignored run artifacts stays with its process');
+  assert(!existsSync(unused.path));
+  assert.deepEqual(
+    result.evicted.map(x => x.laneId),
+    [unused.laneId],
+  );
+  const log = readFileSync(lanePruneLogFile(), 'utf8').trim().split('\n').map(JSON.parse);
+  assert(log.some(x => x.root === unusedPhysicalPath && x.state === 'cache' && x.bytes === 1e9));
+  const unknown = gcNestedLanes({
+    root,
+    settings: settings(0.5, 0),
+    isDirty: clean,
+    processes: () => ({ paths: [], unknown: true }),
+  });
+  assert.deepEqual(unknown.evicted, []);
+  assert(existsSync(running.path));
+});
+
+test('automatic idle pruning retains a process directory even when no Forge command is registered', async t => {
+  const directory = isolated(t),
+    root = join(directory, 'running');
+  const id = await realCheckout(root),
+    now = Date.now();
+  ageTree(root, 10);
+  ageTree(`${root}.forge-client`, 10);
+  ageTree(`${root}.forge-metrics.jsonl`, 10);
+  recordLane({ laneId: id, root, ...address, lastActionAt: now - 10 * hour }, now);
+  const input = {
+    apply: true,
+    address,
+    now,
+    settings: { autoPruneHours: 3, idleLaneHours: 1, activeLanePruneHours: 3 },
+    readStates: async () => new Map([[id, 'active']]),
+    isDirty: clean,
+  };
+  const running = await laneHousekeeping({
+    ...input,
+    processes: () => ({ paths: [join(realpathSync(root), 'nested')], unknown: false }),
+  });
+  assert.deepEqual(running.pruned, []);
+  assert(existsSync(root));
+  const unknown = await laneHousekeeping({ ...input, processes: () => ({ paths: [], unknown: true }) });
+  assert.deepEqual(unknown.pruned, []);
+  assert(existsSync(root));
+  const unused = await laneHousekeeping({ ...input, processes: () => ({ paths: [], unknown: false }) });
+  assert.deepEqual(
+    unused.pruned.map(x => x.laneId),
+    [id],
+  );
+  assert(!existsSync(root));
 });

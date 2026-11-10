@@ -7,7 +7,7 @@ const LIMIT = 1_000_000;
 export type LanePruneRecord = {
   laneId: string;
   root: string;
-  /** Server state that allowed the removal. */
+  /** Server state that allowed the removal, or `cache` for local unused-copy eviction. */
   state: string;
   reason: string;
   idleHours: number;

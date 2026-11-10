@@ -70,7 +70,11 @@ Read: `nforge settings`; set: `nforge settings KEY VALUE`; reset:
   then least recently used copies until the directory is under the size cap. It reads no server
   and runs no timer. A pass that runs out of its 15-second budget continues on the next start.
 - A copy is kept when it is the caller's own Lane, holds the work lock or was used in the last ten
-  minutes, is the target of a symlink beside ROOT (conflict checkouts), or has unsaved edits.
+  minutes, is the target of a symlink beside ROOT (conflict checkouts), has unsaved edits, or a live
+  local process works in it. Unknown process coverage also keeps it. Cache eviction and idle Lane
+  pruning share explicit cleanup's one batched process-directory observation, only when a copy
+  might be removed. Cache eviction records its path, reason and bytes in the existing local Lane
+  prune log before removal; it adds no server calls or idle activity.
 
 ### Local disk
 

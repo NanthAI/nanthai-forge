@@ -15,6 +15,7 @@ import { logLanePrune } from './lane-prune-log.js';
 import { readClientSettings, type ClientSettings } from './client-settings.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { invariant } from './errors.js';
+import { processBlocker, workingProcesses } from './clean-processes.js';
 
 const hour = 3_600_000;
 /** An open Lane may be waiting on a long landing or review; its root outlives a week by default. */
@@ -151,6 +152,7 @@ export async function laneHousekeeping(input: {
   now?: number;
   /** Replaceable in tests. True when the root has edits that are not saved. */
   isDirty?: (root: string) => boolean;
+  processes?: () => ReturnType<typeof workingProcesses>;
 }): Promise<LaneHousekeeping> {
   const now = input.now ?? Date.now(),
     settings = input.settings ?? readClientSettings();
@@ -167,6 +169,7 @@ export async function laneHousekeeping(input: {
         for (const path of paths) rmSync(path, { force: true });
   const excludedRoots = (input.exclude?.roots ?? []).map(root => canonicalRoot(root));
   const workingRoot = canonicalRoot(process.cwd());
+  let processes: ReturnType<typeof workingProcesses> | undefined;
   const excludedLanes = new Set(input.exclude?.laneIds ?? []);
   const result: LaneHousekeeping = {
     idle: [],
@@ -270,7 +273,7 @@ export async function laneHousekeeping(input: {
             ? 'command running'
             : nestedLanes(root)
               ? 'contains other Lane roots'
-              : null;
+              : (processBlocker(root, (processes ??= (input.processes ?? workingProcesses)())) ?? null);
     if (!reason && activeIdle)
       reason =
         dirtyChecks++ >= DIRTY_CHECKS
