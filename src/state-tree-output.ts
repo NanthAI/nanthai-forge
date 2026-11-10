@@ -5,7 +5,7 @@ import { digest } from './portable-hash.js';
 import { dualWriteStateTree, type StateTreeDualResult } from './state-tree-dual.js';
 import type { TreeFile } from './state-tree-format.js';
 import { TreeSession, type SegmentStore, type StateTreePointer } from './state-tree-store.js';
-import { readStateTree, stateTreeManifest, treeChanges, treeFileAt, treeFiles } from './state-tree.js';
+import { stateTreeManifest, treeChanges, treeFileAt, treeFiles } from './state-tree.js';
 
 /** What a source step needs to dual-write the States it produces (projects with tree writes on).
  * The flat State stays the authority: `settled` only learns whether a pointer may be recorded. */
@@ -14,8 +14,6 @@ export type StateTreeIo = {
   write: boolean;
   /** The merge reader is switched to trees (`stateTrees.read` has `merge`). */
   read: boolean;
-  /** The save-baseline reader is switched to trees (`stateTrees.read` has `baseline`). */
-  baseline?: boolean;
   store: SegmentStore;
   /** The proven pointer of a State this step knows (from its object row, or written here). */
   pointer(state: string): StateTreePointer | undefined;
@@ -119,9 +117,18 @@ async function writeOnBase(
   for (const file of value.files)
     if (!same(before.get(file.path), file)) changes.push({ path: file.path, after: file });
   for (const file of files) if (!after.has(file.path)) changes.push({ path: file.path, after: null });
-  // Where a stored tree already holds a changed blob: its own path in another parent, or any
-  // path of the base (a rename or copy).
-  const others = value.parents.filter(id => id !== base && io.pointer(id)),
+  // Where a stored tree already holds a changed blob: its own path in another parent (for a
+  // parent left flat, as by a late merge, in its nearest State with a tree), or any path of the
+  // base (a rename or copy). Without the nearest, a flat Lane tip made every changed file's bytes
+  // a read, and that read made the next segment late too.
+  const others = [
+      ...new Set(
+        value.parents.flatMap(id => {
+          const at = io.pointer(id) ? id : io.nearest?.([id]);
+          return at && at !== base ? [at] : [];
+        }),
+      ),
+    ],
     wanted = new Map(
       changes.flatMap(change => (change.after ? [[change.after.blob, change.path] as const] : [])),
     ),
@@ -191,12 +198,14 @@ const warmed = new WeakMap<SegmentStore, Set<string>>();
  * later costs CPU and one PUT instead of sequential GETs. Once per State and store. Best effort,
  * as `warmTreePaths`. */
 export function warmTreeState(io: StateTreeIo, state: string) {
-  const pointer = io.pointer(state);
-  if (!io.write || !pointer) return;
+  // A flat State (a late merge) warms its nearest State with a tree: its Git ids come from there.
+  const at = io.pointer(state) ? state : io.write ? io.nearest?.([state]) : undefined,
+    pointer = at && io.pointer(at);
+  if (!io.write || !at || !pointer) return;
   let done = warmed.get(io.store);
   if (!done) warmed.set(io.store, (done = new Set()));
-  if (done.has(state)) return;
-  done.add(state);
+  if (done.has(at)) return;
+  done.add(at);
   new TreeSession(io.store).prefetch(pointer).catch(() => {});
 }
 
@@ -246,27 +255,6 @@ export async function manifestFromTree(
   return manifest;
 }
 
-/** The save-baseline reader: a save's baseline manifest from its stored tree alone (every folder;
- * its segments then also serve the save's own dual-write). Returned only when it hashes to the
- * State id at the pinned size, so it cannot differ from the flat manifest; null (reader off, no
- * pointer, any failure or mismatch) means the caller reads the flat manifest as before. */
-export async function baselineFromTree(
-  io: StateTreeIo,
-  pin: { sha256: string; size: number },
-): Promise<Uint8Array | null> {
-  const pointer = io.pointer(pin.sha256);
-  if (!io.baseline || !pointer) return null;
-  let manifest: Uint8Array | null = null;
-  try {
-    const read = await readStateTree(new TreeSession(io.store), pointer);
-    if (read.record.state === pin.sha256 && read.manifest.length === pin.size) manifest = read.manifest;
-  } catch {
-    manifest = null;
-  }
-  io.derived?.(pin.sha256, !!manifest);
-  return manifest;
-}
-
 /** How long a step that is otherwise ready to commit waits for its dual-write: a small share
  * of the step's run time so far, so a late tree costs the step at most that share; past it the
  * States commit flat (`late`). */
@@ -284,8 +272,19 @@ export function logStateTree(
   identity: { jobId: string; step: number },
   state: string | null,
   result: StateTreeDualResult | { status: 'read' } | { status: 'late' },
-  /** The step's dual-write wall time and its segment traffic so far (R2 GETs and PUTs). */
-  io: { ms: number; gets: number; getBytes: number; puts: number; putBytes: number },
+  /** The step's dual-write wall time and its segment traffic so far (R2 GETs and PUTs, and the
+   * wall time with a GET in flight); `atMs`: the step's run time when the line was written;
+   * `late`: written after a deadline settle, so no pointer was recorded. */
+  io: {
+    ms: number;
+    gets: number;
+    getBytes: number;
+    getMs?: number;
+    puts: number;
+    putBytes: number;
+    atMs?: number;
+    late?: boolean;
+  },
 ) {
   const line = JSON.stringify({
     event: 'forge-state-tree',

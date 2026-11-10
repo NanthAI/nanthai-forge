@@ -267,7 +267,6 @@ export const begin = sourceMutation({
       batchId: active.row.batchId ?? null,
       ...(active.project.stateTrees?.write ? { trees: true } : {}),
       ...(active.project.stateTrees?.read?.includes('merge') ? { treeRead: true } : {}),
-      ...(active.project.stateTrees?.read?.includes('baseline') ? { treeBaseline: true } : {}),
       ...(treeBase ? { treeBase } : {}),
     });
   },

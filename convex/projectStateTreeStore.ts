@@ -20,7 +20,18 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
     ranges = new Map<string, Promise<Uint8Array>>(),
     sizes = new Map<string, number>(),
     written: { sha256: string; size: number; r2Key: string }[] = [],
-    stats = { gets: 0, getBytes: 0, puts: 0, putBytes: 0 };
+    stats = { gets: 0, getBytes: 0, getMs: 0, puts: 0, putBytes: 0 };
+  // Wall time with at least one GET in flight (concurrent GETs count once).
+  let inFlight = 0,
+    since = 0;
+  const timed = async <T>(run: () => Promise<T>) => {
+    if (inFlight++ === 0) since = performance.now();
+    try {
+      return await run();
+    } finally {
+      if (--inFlight === 0) stats.getMs += Math.round(performance.now() - since);
+    }
+  };
   const read = async (id: string, range?: { offset: number; length: number }, lag = true) => {
     invariant(/^[a-f0-9]{64}$/.test(id), 'SOURCE_HASH_MISMATCH', 'A tree segment id is invalid.');
     const headers: Record<string, string> = range
@@ -28,21 +39,24 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
         : {},
       url = await presignGet(config, r2Key(projectId, id), headers);
     // A segment this project just wrote may answer 404 once (read-after-write lag).
-    const response = await retryR2Lag(
-      () =>
-        convexFetch(url, {
-          headers: { 'accept-encoding': 'identity', ...headers },
-          redirect: 'error',
-          signal: networkTimeout(15_000),
-        }),
-      lagged => lag && lagged.status === 404,
-      lagged => lagged.body?.cancel().catch(() => {}),
-    );
-    if (response.status !== (range ? 206 : 200)) {
-      await response.body?.cancel().catch(() => {});
-      return null;
-    }
-    const bytes = new Uint8Array(await response.arrayBuffer());
+    const bytes = await timed(async () => {
+      const response = await retryR2Lag(
+        () =>
+          convexFetch(url, {
+            headers: { 'accept-encoding': 'identity', ...headers },
+            redirect: 'error',
+            signal: networkTimeout(15_000),
+          }),
+        lagged => lag && lagged.status === 404,
+        lagged => lagged.body?.cancel().catch(() => {}),
+      );
+      if (response.status !== (range ? 206 : 200)) {
+        await response.body?.cancel().catch(() => {});
+        return null;
+      }
+      return new Uint8Array(await response.arrayBuffer());
+    });
+    if (!bytes) return null;
     stats.gets++;
     stats.getBytes += bytes.length;
     return bytes;

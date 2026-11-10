@@ -141,6 +141,7 @@ async function treeSync(
   conflict = false,
   flatTips = false,
   late = false,
+  flatLane = false,
 ) {
   const s = await scaleFixture(late ? { treeGraceMs: 0 } : {});
   try {
@@ -176,9 +177,14 @@ async function treeSync(
         lane: { [conflict ? 'src/dir1/module-0001.ts' : 'src/dir2/module-0002.ts']: await blob('lane\n') },
       },
       base = await state([], {}, 1),
+      // Flat Lane: the Lane's edit was saved with a tree (on `before`), then a late merge left
+      // the Lane tip flat on top of it.
+      before = flatLane ? await state([base.sha256], edits.lane, 2) : null,
       h = {
         main: await state([base.sha256], edits.main, 2),
-        lane: await state([base.sha256], edits.lane, 2),
+        lane: before
+          ? await state([before.sha256], edits.lane, 3)
+          : await state([base.sha256], edits.lane, 2),
       };
     // The base was converted and both tips were dual-written as edits on it, whatever the flag
     // says now: each tip's segment holds only the folders on its changed path.
@@ -187,7 +193,21 @@ async function treeSync(
     assert.ok(converted.exact);
     await s.ctx.db.patch(row(base.sha256)._id, { stateTree: converted.pointer });
     // Flat tips: written before tree writes began, so only their common ancestor has a pointer.
-    for (const side of flatTips ? [] : ['lane', 'main']) {
+    if (before) {
+      const saved = await saveStateTree(
+        store,
+        converted.pointer,
+        stateTreeRecord(await s.bytes(before)).record,
+        await Promise.all(
+          Object.entries(edits.lane).map(async ([path, id]) => [
+            path,
+            await fileOf({ blob: id, mode: 'file' }),
+          ]),
+        ),
+      );
+      await s.ctx.db.patch(row(before.sha256)._id, { stateTree: saved.pointer });
+    }
+    for (const side of flatTips ? [] : flatLane ? ['main'] : ['lane', 'main']) {
       const changes = await Promise.all(
         Object.entries(edits[side]).map(async ([path, id]) => [
           path,
@@ -226,7 +246,17 @@ async function treeSync(
       conflict ? [h.lane.sha256] : [h.lane.sha256, h.main.sha256].sort(),
     );
     const project = await s.ctx.db.get(s.projectId);
-    return { s, sync, output, merged, store, rows: s.tables.projectObjects.size - rowsBefore, project, row };
+    return {
+      s,
+      sync,
+      output,
+      merged,
+      store,
+      rows: s.tables.projectObjects.size - rowsBefore,
+      project,
+      row,
+      laneBlobReads: s.readCounts.get(Object.values(edits.lane)[0]) ?? 0,
+    };
   } finally {
     s.restore();
   }
@@ -322,6 +352,25 @@ test(
     assert.equal(late.sync.functionCalls, onTime.sync.functionCalls, 'calls do not rise');
   },
 );
+
+test('a merge after a late one (scratch fallback 2026-11-10): a Lane tip left flat takes its Git ids from its nearest State with a tree, reading no blob and making no extra call', async () => {
+  const off = await treeSync(false, false, false, false, false, false, true),
+    on = await treeSync(true, false, false, false, false, false, true);
+  assert.equal(on.output, off.output, 'the flat result is byte-identical');
+  assert.ok(on.merged.stateTree, 'the merged State has a pointer');
+  assert.deepEqual(
+    Buffer.from(
+      (await readStateTree(new TreeSession(on.store, { strict: true }), on.merged.stateTree)).manifest,
+    ),
+    await on.s.bytes({ sha256: on.merged.digest }),
+  );
+  // Before: the Lane's edited file was unknown to every parent's tree, so its bytes were read (a
+  // descriptor call and a GET when the blob sits in an upload pack), and the segment PUT missed
+  // the step's deadline every time, which kept the next merge flat too.
+  assert.equal(on.laneBlobReads, off.laneBlobReads, 'the Lane blob is not read for its Git id');
+  assert.equal(on.sync.functionCalls, off.sync.functionCalls, 'calls do not rise');
+  assert.equal(on.project.stateTrees.refused, undefined);
+});
 
 test('self-heal for saves: begin hands a flat baseline its nearest first-parent ancestor with a tree, and nothing when no ancestor has one', async () => {
   const { moduleUrl } = await import('./convex-module.mjs');

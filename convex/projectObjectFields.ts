@@ -4,8 +4,10 @@ import { v } from 'convex/values';
 import { backfillFields } from './r2BackfillFields';
 export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
 export const stateTreePointer = v.object({ segment: v.string(), size: v.number(), root: v.string() });
-/** Operations that may read a State through its tree pointer (each switched on its own). */
-export const stateTreeReaders = ['merge', 'diff', 'checkout', 'baseline'] as const;
+/** Operations that may read a State through its tree pointer (each switched on its own). Only the
+ * merge step reads trees: whole-State reads (a save's baseline, client checkout and diff) measured
+ * slower from trees than from the flat manifest at 4k-190k files (Issue 676efbc2). */
+export const stateTreeReaders = ['merge'] as const;
 export const stateTreesFields = v.object({
   write: v.optional(v.boolean()),
   read: v.optional(v.array(v.union(...stateTreeReaders.map(name => v.literal(name))))),

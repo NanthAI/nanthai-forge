@@ -45,7 +45,6 @@ export function convexSourceTransport(
     preloaded = [],
     trees = false,
     treeRead = false,
-    treeBaseline = false,
     treeBase,
   }: {
     overlapWrites?: boolean;
@@ -53,8 +52,6 @@ export function convexSourceTransport(
     trees?: boolean;
     /** The merge reader is switched to trees (`hostedProjects.stateTrees.read` has `merge`). */
     treeRead?: boolean;
-    /** The save-baseline reader is switched to trees (`stateTrees.read` has `baseline`). */
-    treeBaseline?: boolean;
     /** Self-heal: a State with a proven pointer that `begin` found for a save whose baseline is
      * flat (its nearest such ancestor, else main's head). */
     treeBase?: { state: string; pointer: StateTreePointer } | undefined;
@@ -100,7 +97,7 @@ export function convexSourceTransport(
           { jobId, step },
           null,
           { status: 'late' },
-          { ms: graceMs, ...(segments?.stats ?? { gets: 0, getBytes: 0, puts: 0, putBytes: 0 }) },
+          { ms: graceMs, ...(segments?.stats ?? { gets: 0, getBytes: 0, puts: 0, putBytes: 0 }), ...at() },
         );
       }
     }
@@ -111,13 +108,15 @@ export function convexSourceTransport(
     // Each segment this step wrote gets its object row with the same commit.
     if (segments) outputs.push(...segments.written.splice(0));
   };
+  /** The step's run time now, for tree log lines (when a write finished against the commit). */
+  const at = () => ({ atMs: Math.round(clock.value().runMs) });
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>(),
     parents = new Map<string, string[]>(),
     pointers = new Map<string, StateTreePointer>();
   // Dual-write: segments are read by key and written beside the State; the outcome is counted
   // here and a refusal is the step's alarm (the flat State is recorded either way).
-  const segments = trees || treeRead || treeBaseline ? r2SegmentStore(ctx, projectId) : null,
+  const segments = trees || treeRead ? r2SegmentStore(ctx, projectId) : null,
     tree = {
       written: 0,
       skipped: 0,
@@ -186,7 +185,6 @@ export function convexSourceTransport(
           trees: {
             write: trees,
             read: treeRead,
-            baseline: treeBaseline,
             defer: work => {
               treeWork = Promise.all([treeWork, work]);
             },
@@ -232,8 +230,13 @@ export function convexSourceTransport(
               // After a deadline settle the step has committed (or is committing) without this
               // State's pointer; only an alarm is still worth a line.
               if (treeClosed) {
-                if (result.status === 'refused')
-                  logStateTree({ jobId, step }, state, result, { ms, ...segments.stats });
+                if (result.status !== 'skipped')
+                  logStateTree({ jobId, step }, state, result, {
+                    ms,
+                    ...segments.stats,
+                    ...at(),
+                    late: true,
+                  });
                 return;
               }
               tree.ms += ms;
@@ -243,7 +246,7 @@ export function convexSourceTransport(
                 tree.bytes += result.bytes;
               } else if (result.status === 'skipped') tree.skipped++;
               else tree.refused ??= { state, code: result.code.slice(0, 64) };
-              logStateTree({ jobId, step }, state, result, { ms, ...segments.stats });
+              logStateTree({ jobId, step }, state, result, { ms, ...segments.stats, ...at() });
             },
           },
         }
