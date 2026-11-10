@@ -800,6 +800,10 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       .withIndex('by_project_and_run', q => q.eq('projectId', project._id).eq('runId', checkedId))
       .unique();
     const own = ownRow ? hostedCheckRunSchema.parse(JSON.parse(ownRow.value)) : null;
+    if (own && ownRow?.reportParts !== undefined) {
+      detachCheckReports(own, ownRow.reportParts, ownRow.reportDigest ?? '');
+      await hydrateCheckReports(ctx, own);
+    }
     if (
       own &&
       own.check.definition === state.audit.check.definition &&

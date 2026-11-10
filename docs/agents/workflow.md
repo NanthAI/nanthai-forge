@@ -992,6 +992,8 @@ the handoff; reopen it to resume.
 Hosted recovery keeps one operation for the red episode (`red.since`); later failed audits
 append evidence without restarting it. When the failure reproduces but no single landing
 is proven (including a passing first check on the change's own source), recovery selects
+the interacting set using retained check reports, including detached admission-report pages.
+Those pages are restored before judging whether the change passed on its own source. Recovery selects
 the two most recent landings whose changed paths or declared contract tests overlap a failing test or its retained
 error paths. The landing that added a new failing test also counts as overlap. One match
 is paired with the newest other landing; no matches selects the two newest. Exact

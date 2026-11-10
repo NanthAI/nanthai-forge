@@ -989,9 +989,12 @@ test('incident 27865bc4: a new failing test and later failed audits recover in o
 test('incident 438e9ace: two passing landings fail together and a later failed audit preserves one automatic pair recovery', t =>
   replaySystemReverse(t, { drill: true, pair: true }));
 
+test('incident 438e9ace: detached admission reports preserve the passing-own-source proof and automatic pair recovery', t =>
+  replaySystemReverse(t, { drill: true, pair: true, detachedOwn: true }));
+
 async function replaySystemReverse(
   t,
-  { firstCheck = false, conflict = false, held, drill = false, pair = false } = {},
+  { firstCheck = false, conflict = false, held, drill = false, pair = false, detachedOwn = false } = {},
 ) {
   if (drill) t.mock.timers.enable({ apis: ['Date'], now: Date.parse(at) });
   const replayStarted = performance.now();
@@ -1022,7 +1025,7 @@ async function replaySystemReverse(
       status: 'passed',
       contractReports: { 'tests/red.test.mjs': { failed: false } },
     });
-    f.insert('projectHostedCheckRuns', {
+    const ownRow = f.insert('projectHostedCheckRuns', {
       projectId: f.projectId,
       runId: own.id,
       candidateId: own.request.candidateId,
@@ -1030,6 +1033,17 @@ async function replaySystemReverse(
       gate: own.gate,
       value: JSON.stringify(own),
     });
+    if (detachedOwn) {
+      const reports = await import(moduleUrl('../convex/projectHostedCheckReports.ts'));
+      reports.detachCheckReports(own);
+      const metadata = await f.transaction(
+        'detachAdmissionReports',
+        { _handler: ctx => reports.storeCheckReports(ctx, own) },
+        {},
+      );
+      const { contractReports, ...slim } = own;
+      f.patch('projectHostedCheckRuns', ownRow, { ...metadata, value: JSON.stringify(slim) });
+    }
     firstCheckCulprit(f);
     const receiptRow = [...f.tables.projectHostedAcceptances.values()].find(r => r.sequence === 575);
     const receipt = JSON.parse(receiptRow.value);
