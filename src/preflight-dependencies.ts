@@ -132,6 +132,52 @@ function missingPackages(root: string, file: string) {
   return missing;
 }
 
+/** The install command for the package manager a runner program belongs to (`npx` is npm's). */
+const INSTALL: Record<string, string> = {
+  npx: 'npm install --ignore-scripts',
+  npm: 'npm install --ignore-scripts',
+  pnpm: 'pnpm install --ignore-scripts',
+  yarn: 'yarn install --ignore-scripts',
+  bun: 'bun install --ignore-scripts',
+};
+
+/** Packages a project runner could not start because they are not installed, read from the runner's
+ * own error output: `npx --no-install` ("npx canceled due to missing packages"), or pnpm/yarn
+ * ("Command "tsx" not found"). Empty when the output says nothing of the kind. */
+export function runnerPackagesMissing(output: string) {
+  const names: string[] = [];
+  const npx = /npx canceled due to missing packages[^\n[]*\[([^\]]*)\]/.exec(output);
+  for (const entry of npx?.[1]?.match(/[@\w][^"',\s]*/g) ?? [])
+    names.push(entry.replace(/^(@?[^@]+)@.*$/, '$1'));
+  for (const found of output.matchAll(/Command "([^"]+)" not found/g)) names.push(found[1]!);
+  return [...new Set(names)];
+}
+
+/** A project runner that could not start for want of an uninstalled package is the Lane's setup, not a
+ * failed test: the same advisory result as a test file that cannot load one, with the exact install
+ * command as the way forward. A project with no lockfile gets no Lane install (9ab983fd). */
+export function runnerDependenciesMissing(
+  output: string,
+  program: string,
+  units: readonly string[],
+  next: string,
+): DependenciesEnvironment | null {
+  const missing = runnerPackagesMissing(output);
+  if (!missing.length) return null;
+  const install = INSTALL[program] ?? INSTALL.npm!;
+  return {
+    category: 'ENVIRONMENT',
+    code: 'DEPENDENCIES_MISSING',
+    message:
+      `The test runner needs ${missing.join(', ')}, which is not installed in this Lane (${units.length} test file(s) not run). ` +
+      "Forge installs a Lane's dependencies only from a lockfile; that is setup, not a failed test, and the landing check sets up its own and runs them. " +
+      `To run them locally first: run \`${install}\` in the Lane, then preflight again.`,
+    next,
+    missing,
+    units: [...units],
+  };
+}
+
 /** The environment result when EVERY failed file imports a declared package that is not installed
  * (so no failure is left unexplained), else null. */
 export function dependenciesMissing(

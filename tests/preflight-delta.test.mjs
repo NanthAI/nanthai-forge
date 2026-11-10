@@ -176,33 +176,27 @@ test('a sparse selector inventory defers unseen consumers and never reuses parti
   assert.deepEqual(plan.reusedTests, []);
 });
 
-test('environment failure before execution cannot create reusable per-file passes and recovery runs the tests', t => {
+// eb9b94ba: a degraded macOS file-event service used to skip the local tests (static checks only).
+test('degraded file events do not stop the tests: they run and their passes are reusable', t => {
   const f = fixture(t);
-  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
-    ...healthy,
-    ok: false,
-    reason: 'watcher close timed out',
-  }));
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => {
+    throw Error('a passing run must not probe file events');
+  });
   const receipt = f.run(f.plan());
-  assert.equal(receipt.passed, false);
-  assert.equal(receipt.exitCode, null);
-  assert.equal(receipt.environment.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
-  const retry = f.plan();
-  assert.deepEqual(retry.reusedTests, []);
-  assert.deepEqual([...retry.tests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
-  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => healthy);
-  assert.equal(f.run(retry).passed, true);
+  assert.equal(receipt.passed, true);
+  assert.equal(receipt.environment, undefined);
   assert.deepEqual([...f.plan().reusedTests].sort(), ['tests/a.test.mjs', 'tests/b.test.mjs']);
 });
 
 test('environment classification after a failed run preserves only the reporter actual passes', t => {
   const f = fixture(t, true);
   let checks = 0;
-  t.mock.method(preflightRuntime, 'filesystemEventHealth', () =>
-    ++checks === 1 ? healthy : { ...healthy, ok: false, reason: 'watcher process timed out' },
-  );
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => {
+    checks++;
+    return { ...healthy, ok: false, reason: 'watcher process timed out' };
+  });
   const receipt = f.run(f.plan());
-  assert.equal(checks, 2);
+  assert.equal(checks, 1);
   assert.equal(receipt.passed, false);
   assert.equal(receipt.exitCode, 1);
   assert.equal(receipt.environment.category, 'ENVIRONMENT');

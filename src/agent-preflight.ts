@@ -28,7 +28,11 @@ import {
 import { learnFailures, learnedTests, recentFailedTests } from './preflight-learned.js';
 import { commentOnlyPaths } from './preflight-comment-only.js';
 import { spawnCaptured, failureExcerpt } from './agent-preflight-capture.js';
-import { dependenciesEnvironmentSchema, dependenciesMissing } from './preflight-dependencies.js';
+import {
+  dependenciesEnvironmentSchema,
+  dependenciesMissing,
+  runnerDependenciesMissing,
+} from './preflight-dependencies.js';
 import {
   runStaticChecks,
   selectGuards,
@@ -1265,11 +1269,9 @@ export function runPreflight(
         exitCode = build.status;
         buildMs = Date.now() - buildStarted;
       }
+      // Degraded file events do not stop the tests (eb9b94ba): they run from the saved file list, which
+      // needs no events, and are probed only if they fail, to tell a watcher loss from a real failure.
       if (exitCode === 0) {
-        const health = preflightRuntime.filesystemEventHealth(root);
-        if (!health.ok) environment = filesystemEnvironment(health, environmentNext);
-      }
-      if (exitCode === 0 && !environment) {
         // The clean environment also drops a surrounding test runner's protocol variable
         // (NODE_TEST_CONTEXT), which would swallow this run's own exit code.
         const env = { ...cleanEnv() };
@@ -1429,6 +1431,14 @@ export function runPreflight(
   if (!environment && exitCode && !plan.packageCommands) {
     environment =
       dependenciesMissing(root, failedFiles.length ? failedFiles : failingGroup, environmentNext) ??
+      (plan.runner && failureTail !== undefined
+        ? runnerDependenciesMissing(
+            failureTail,
+            plan.runner.command[0] ?? 'npx',
+            failingGroup.length ? failingGroup : failedFiles,
+            environmentNext,
+          )
+        : null) ??
       undefined;
     if (environment) {
       environmentUnits.push(...environment.units);

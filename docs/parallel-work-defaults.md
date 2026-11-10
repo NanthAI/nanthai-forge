@@ -552,8 +552,8 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   Near-full coverage runs on the landing runner.
 - Identical source trees reuse passes. Otherwise `require` demands a pass only when complete
   coverage fits `preflightMaxMinutes`; larger sets or unavailable paths remain advisory.
-- An unhealthy finite probe records `ENVIRONMENT / FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd
-  remedy and next action. This source-bound advisory never claims a local pass; hosted checks
+- Tests always run; if they fail and a finite probe finds file events unhealthy, the receipt records
+  `ENVIRONMENT / FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd remedy and next action. This source-bound advisory never claims a local pass; hosted checks
   remain required. `nforge doctor ROOT` runs the diagnostic.
 - `"run":false` only plans. Save first: receipts name saved source; unsaved edits are refused.
 

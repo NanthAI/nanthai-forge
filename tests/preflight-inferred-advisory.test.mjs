@@ -317,3 +317,37 @@ test('a missing dependency does not hide a second, real failure', t => {
   assert.equal(receipt.passed, false);
   assert.throws(() => finishGates(root, require, lane, advice), code('PREFLIGHT_REQUIRED'));
 });
+
+// 9ab983fd (polyglot run): a project runner (`npx --no-install tsx`) in a package with no lockfile
+// cannot start, so every selected file failed with no cause and no way forward.
+test('a runner that cannot start for a missing package is advisory and names the install command', t => {
+  const { root, dir } = repo(t, {
+    'package.json': JSON.stringify({ type: 'module', scripts: { test: 'tsx --test' } }),
+    'a.test.ts': "import test from 'node:test'; test('a', () => {});",
+    'forge.json': JSON.stringify({
+      preflight: { tests: { glob: '*.test.ts', command: ['npx', '--no-install', 'tsx', '--test'] } },
+    }),
+  });
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(
+    join(bin, 'npx'),
+    '#!/bin/sh\necho \'npm error npx canceled due to missing packages and no YES option: ["tsx@4.19.2"]\' >&2\nexit 1\n',
+  );
+  chmodSync(join(bin, 'npx'), 0o755);
+  const previous = process.env.PATH;
+  process.env.PATH = bin;
+  t.after(() => {
+    process.env.PATH = previous;
+  });
+  const advice = changed(['a.test.ts']);
+  const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice.changedPaths));
+  assert.equal(receipt.passed, false);
+  assert.equal(receipt.environment.code, 'DEPENDENCIES_MISSING');
+  assert.deepEqual(receipt.environment.missing, ['tsx']);
+  assert.deepEqual(receipt.environment.units, ['a.test.ts']);
+  assert.match(receipt.environment.message, /npm install --ignore-scripts/);
+  const gate = finishGates(root, require, lane, advice);
+  assert.equal(gate.preflight.status, 'environment');
+  assert.equal(gate.preflight.code, 'DEPENDENCIES_MISSING');
+});

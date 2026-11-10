@@ -920,12 +920,12 @@ watcher resources and event delivery.
 Ordinary diagnostics create their transient pulses under the target’s existing
 private `.forge` metadata namespace on the same volume, so concurrent source
 capture cannot save a probe signal; no new source exclusion is added.
-Ordinary agent preflight probes before its local test process and again after a
-failed test process. Unhealthy delivery records an `environment` receipt with
+Ordinary agent preflight always runs its local tests (they use the saved file
+list, not file events) and probes only after a failed test process. Unhealthy
+delivery then records an `environment` receipt with
 category `ENVIRONMENT`, code `FILESYSTEM_EVENTS_UNHEALTHY`, the fseventsd remedy
 and a next action: land the same saved source again. `passed` remains false and
-a null `exitCode` records that no local test result is available; a failed run
-retains its exit status. This local
+`exitCode` retains the failed run's exit status. This local
 environment receipt is advisory at landing, bound to the same source tree/head
 as an ordinary preflight receipt. The hosted check still verifies the Candidate;
 no tests, assertions or hosted acceptance checks are disabled. A healthy local
@@ -933,8 +933,10 @@ environment with failing tests still receives `PREFLIGHT_REQUIRED` when the
 project declared its runner; a runner Forge inferred only advises. A program the
 run needs that is not installed here (not on `PATH`, exit 127, `ENOENT`) records
 `ENVIRONMENT / TOOLCHAIN_MISSING` the same advisory way, naming the `missing`
-programs. A failed test file whose declared dependency is not installed in the Lane records
-`ENVIRONMENT / DEPENDENCIES_MISSING` the same way, naming the `missing` packages. No service
+programs. A failed test file whose declared dependency is not installed in the Lane, or a runner that
+cannot start for a missing package (`npx --no-install`: "npx canceled due to missing packages";
+pnpm/yarn "Command not found"), records `ENVIRONMENT / DEPENDENCIES_MISSING` the same way, naming
+the `missing` packages and the install command to run in the Lane. No service
 restart happens automatically.
 
 Measurement-hold waits use the isolated helper and a one-second local removal check only while a hold exists. Degraded hints report `ENVIRONMENT` and `nforge doctor .`; an active hold remains in force. No hold means no watcher, timer or server call.

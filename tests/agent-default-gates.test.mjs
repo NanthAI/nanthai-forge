@@ -419,9 +419,9 @@ for (const reason of [
   'watcher process timed out',
   'watcher close did not acknowledge within 250 ms',
 ])
-  test(`environment receipt keeps landing available for ${reason} and is pinned to source`, t => {
+  test(`a local failure with degraded file events (${reason}) is an advisory pinned to source`, t => {
     const root = repo(t, {
-      'tests/b.test.mjs': "throw Error('local test must not run while environment is unavailable');",
+      'tests/b.test.mjs': "throw Error('synthetic failure while file events are degraded');",
     });
     t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
       ...healthy,
@@ -430,7 +430,7 @@ for (const reason of [
     }));
     const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
     assert.equal(receipt.passed, false);
-    assert.equal(receipt.exitCode, null);
+    assert.equal(receipt.exitCode, 1);
     assert.equal(receipt.environment.category, 'ENVIRONMENT');
     assert.equal(receipt.environment.code, 'FILESYSTEM_EVENTS_UNHEALTHY');
     assert.match(receipt.environment.message, /fseventsd.*sudo killall fseventsd/);
@@ -453,19 +453,17 @@ for (const reason of [
     assert.equal(finishGates(root, defaults({}), lane, advice()).preflight.status, 'passed');
   });
 
-test('event delivery lost during a failed local run is classified separately from healthy-environment test failures', t => {
+// eb9b94ba: degraded file events must not skip the local tests; a pass stands.
+test('a passing local run with degraded file events is a pass (tests ran, no probe)', t => {
   const root = repo(t, {
-    'tests/b.test.mjs': "throw Error('synthetic watcher failure');",
+    'tests/b.test.mjs': "import test from 'node:test'; test('ok', () => {});",
   });
-  let probes = 0;
-  t.mock.method(preflightRuntime, 'filesystemEventHealth', () =>
-    ++probes === 1 ? healthy : { ...healthy, ok: false, reason: 'no events' },
-  );
+  t.mock.method(preflightRuntime, 'filesystemEventHealth', () => {
+    throw Error('a passing run must not probe file events');
+  });
   const receipt = runPreflight(root, lane.laneId, lane.head, preflightPlan(root, advice().changedPaths));
-  assert.equal(receipt.exitCode, 1);
-  assert.equal(receipt.passed, false);
-  assert.equal(receipt.environment.category, 'ENVIRONMENT');
-  assert.equal(probes, 2);
+  assert.equal(receipt.passed, true);
+  assert.equal(receipt.environment, undefined);
 });
 
 test('an unhealthy diagnostic never converts a build failure into an environment advisory', t => {
@@ -486,7 +484,7 @@ test('an unhealthy diagnostic never converts a build failure into an environment
 });
 
 test('environment advisories preserve tree identity and overlap gates', t => {
-  const root = repo(t);
+  const root = repo(t, { 'tests/b.test.mjs': "throw Error('synthetic failure');" });
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
     ...healthy,
     ok: false,
