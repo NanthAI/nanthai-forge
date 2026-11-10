@@ -5,6 +5,8 @@ queue, on whatever runner the project configured. Behaviour lives in
 [landing batches](operations/landing-batches.md#pre-queue-lane-checks); the model
 is [`models/landing-queue`](../models/landing-queue/README.md).
 
+Landing documentation calls the accepted destination Channel `main`; a receipt's target Channel refers to that same destination, including when the project names it differently.
+
 ## Context
 
 With 12 builders in parallel, each change's first full check ran inside the serial

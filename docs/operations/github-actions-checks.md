@@ -542,10 +542,7 @@ Metadata read, and the Workflow run event. Its webhook remains `/github/webhook`
 The checked-in workflow branches on `deployment`. Empty deployment preserves the
 BYOCI `plan` input and export jobs. Convex dispatches on `main` with
 `runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
-A hung shard is bounded by `timeout_minutes` (shard jobs and the single-shard step; the planning
-job's whole budget when set), else by the repository variable `FORGE_CHECK_TIMEOUT_MINUTES`, else the
-unchanged defaults (shards 90, planning job 120). Forge's own repository sets the variable to 30; its
-slowest shard in the last 549 was 13.3 min.
+The `forge-check` timeout uses the explicit `timeout_minutes` input first, then the repository variable `FORGE_CHECK_TIMEOUT_MINUTES`, then defaults of 90 minutes for shards and 120 for planning. An explicit input or repository variable bounds the planning job's whole budget too; it does not add a separate 30-minute allowance. Forge's repository currently sets the variable to 30 minutes; the per-test-file hang guard remains ten minutes by default ([verification](../development.md)).
 The fixed workflow checkout verifies and materializes the pinned Candidate using
 hash/size-checked storage downloads, including recipe-backed content, in windows
 of at most 400 descriptors. Three pages overlap resolution, verified streaming

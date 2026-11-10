@@ -66,6 +66,10 @@ Durable source and mirror reads verify legacy file IDs against live project
 ownership before fetching bytes. Unowned references return `SOURCE_REF_UNOWNED`;
 unregistered old continuations need migration. R2 reads add no ownership RPC.
 
+Per-landing [speed and cost budgets](agents/speed-budgets.md) cover submit-to-main, checks, settlement, save/preflight, attempts, Work writes, R2 compose I/O and runner minutes; rolling-window breaks and recoveries share the existing alert and Issue path. [Flip 5's Work store](architecture.md) supports item versions and independent primary writers, with explicit reader/writer cutover and comparison rather than a claim that every deployment has switched.
+
+The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks; the exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
+
 ## Works
 
 Managed CLI work checks accepted Forge main once per process. When main moved,

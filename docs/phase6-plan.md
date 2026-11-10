@@ -32,6 +32,10 @@ Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.m
 - **6.5 Engineering health**: a codebase health pass, mechanical guards for repeat bug classes, a TLA+ model of the landing queue and a real-user scenario matrix.
 - **In parallel, no product changes**: art direction, the design system and mockups for the Phase 7 design pass.
 
+## Close growth counts
+
+The P6 growth guard (ed28fc6b) compares the phase start with the current close snapshot from `node scripts/check-growth.mjs --print --machines`: Convex tables **181 → 179**, public error codes **501 → 485**, agent actions **88 → 62**, CLI commands **53 → 40**, and glossary terms **34 → 27**. The additional measures report machine dependencies **0 → 0** (six hosted paths guarded) and unreferenced exports **22 → 2**; counts equal the ratchet baseline. Per-change reason fragments in `tests/growth-ledger/` keep independent updates off the shared phase-start header, and unclaimed reductions fail the check until `--update` records them.
+
 ## Agreed start order
 
 Only **6.1 is ordered**. Cluster triage sets the later sequence, not a fixed order for all remaining Issues. Bench-harness fixes d8cf81b4, 02ee5788, 108a4883 and 97c7a123 land before the exit-bench plan (8c9b84fc) is frozen.

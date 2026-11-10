@@ -7,6 +7,8 @@ self-contained `skills/forge-agent/SKILL.md` for recorded Work or graph context;
 install it in your agent's skill directory. Ordinary file questions need no
 workflow guidance.
 
+Landing documentation calls the accepted destination Channel `main`; a receipt's target Channel refers to that same destination, including when the project names it differently.
+
 A hosted finish replays the outcome for the same `operationId`. After a terminal
 failure on unchanged saved source, use a new explicit ID or `retry:true` with
 `reason:"flake"`, `"main-moved"`, `"infra"` or `"other"`. The new attempt

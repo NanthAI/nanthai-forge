@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Growth ratchet (Issue ed28fc6b): Forge grew by patching, and friction -> slice -> guard never removed
-// anything. This counts the surfaces that pile up and fails when a count rises above the committed
-// baseline (tests/growth-baseline.json) without a recorded reason. Static: it reads source text, runs no
+// anything. This counts the surfaces that pile up and fails when a count differs from the committed
+// baseline (tests/growth-baseline.json) without a recorded rise or reduction. Static: it reads source text, runs no
 // project code and makes no Convex call.
 //
 //   node scripts/check-growth.mjs                      check; prints the counts
@@ -309,7 +309,7 @@ export function readBaseline(root = '.') {
   return { ...baseline, counts, reasons };
 }
 
-/** Findings: counts above the ratchet, invalid reasons, and derived counts changed by hand. */
+/** Findings: unrecorded rises or falls, invalid reasons, and derived counts changed by hand. */
 export function growthFindings(current, baseline) {
   const findings = [];
   for (const kind of KINDS) {
@@ -321,6 +321,10 @@ export function growthFindings(current, baseline) {
     if (current[kind] > allowed)
       findings.push(
         `${LABEL[kind]}: ${current[kind]} now, baseline ${allowed}. Remove or merge one, or record why nothing can go: node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`,
+      );
+    if (current[kind] < allowed)
+      findings.push(
+        `${LABEL[kind]}: ${current[kind]} now, baseline ${allowed}. Claim the reduction before landing: node scripts/check-growth.mjs --update`,
       );
     const entries = baseline.reasons.filter(entry => entry.kind === kind);
     for (const entry of entries)
@@ -429,11 +433,6 @@ function main(argv) {
   console.log(
     `Growth guard: ${KINDS.map(kind => `${kind} ${current[kind]}/${baseline.counts[kind]}`).join(', ')}`,
   );
-  const slack = KINDS.filter(kind => current[kind] < baseline.counts[kind]);
-  if (slack.length && !findings.length)
-    console.log(
-      `Below baseline (${slack.join(', ')}): run node scripts/check-growth.mjs --update to lower it.`,
-    );
   return findings.length ? 1 : 0;
 }
 

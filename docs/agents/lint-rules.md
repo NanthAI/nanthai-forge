@@ -88,11 +88,11 @@ under 3 s) and counts:
 | `machineDependencies` | entries in [`tests/machine-dependencies.json`](../../tests/machine-dependencies.json) `machineDependencies`: product paths (service, landing, checks, storage, mirror, deploys, release, backup) that need one specific machine. The target and today's count is 0. Where the lead session, builder sessions, the exit bench, the optional local check runner (`nforge worker`) and operator maintenance run is the user's own choice of machine; they are not counted. `hostedPaths` is the guarded list of the six paths that run hosted; one that moves back onto a machine is a rise: move its id to `machineDependencies` and run `--update --reason`. Each entry names an Issue that removes it (8-hex id) or a `staysBecause` reason. Public repo: no private paths or machine names |
 | `unreferencedExports` | exported names (function, const, class, enum, type, interface) in `src/`, `web/src/`, `convex/` and `netlify/` that no other file mentions as a word (`src`, `web/src`, `convex`, `netlify`, `tests`, `scripts`, `evals`; a comment or string counts as a mention, so it undercounts). Public entry points are excluded: Convex `query`/`mutation`/`action`/`httpAction` functions and `src/index.ts`, `src/query.ts`, `src/cli-entry.ts`. Unused `internal*` Convex functions count |
 
-The check fails when a count is above its baseline: phase `start` in
+The check fails when a count differs from its baseline: phase `start` in
 [`tests/growth-baseline.json`](../../tests/growth-baseline.json) plus the sum of deltas in
 `tests/growth-ledger/`. The header holds only version, phase and start. Each ledger file records
 `kind`, `delta`, `reason` and `date`; its filename includes a unique update id and its content hash, so even equal deltas stay separate. Hand-edited counts,
-invalid entries and mismatched hashes fail. The baseline moves through the update command:
+invalid entries and mismatched hashes fail. A lower count also fails until `--update` claims the reduction, so removals cannot leave slack for a later unrecorded rise. The baseline moves through the update command:
 
 - `node scripts/check-growth.mjs --update` lowers the baseline to the current counts. Run it after a change
   that removes something. It never raises a count.

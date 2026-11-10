@@ -154,11 +154,25 @@ const start = {
 test('a count above the baseline with no recorded reason fails and names the update command', () => {
   const baseline = initialBaseline(start, '2026-11-09');
   assert.deepEqual(growthFindings(start, baseline), [], 'equal counts pass');
-  assert.deepEqual(growthFindings({ ...start, tables: 9 }, baseline), [], 'a lower count passes');
   for (const kind of KINDS) {
     const findings = growthFindings({ ...start, [kind]: start[kind] + 1 }, baseline);
     assert.equal(findings.length, 1, kind);
     assert.match(findings[0], /--update --reason/);
+  }
+});
+
+test('unclaimed reductions fail for every growth kind; --update claims slack and a rebound needs a reason (ed28fc6b)', () => {
+  const baseline = initialBaseline(start);
+  for (const kind of KINDS) {
+    const reduced = { ...start, [kind]: start[kind] - 1 };
+    const findings = growthFindings(reduced, baseline);
+    assert.equal(findings.length, 1, kind);
+    assert.match(findings[0], /Claim the reduction before landing:.*--update$/);
+    const claimed = updateBaseline(reduced, baseline, undefined, '2026-11-10');
+    assert.deepEqual(claimed.refused, []);
+    assert.deepEqual(growthFindings(reduced, claimed.baseline), []);
+    assert.match(growthFindings(start, claimed.baseline).join('\n'), /--update --reason/);
+    assert.equal(claimed.baseline.start[kind], start[kind], 'phase start stays fixed');
   }
 });
 
