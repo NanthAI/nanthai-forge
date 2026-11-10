@@ -60,6 +60,7 @@ export function pickProbeFiles(files) {
   const editable = f =>
     !f.symlink &&
     COMMENT[ext(f.path)] &&
+    !f.path.includes('\ufffd') && // a name that is not valid UTF-8 cannot be addressed on both sides
     !f.path.startsWith('.') &&
     !f.path.includes('/.') &&
     (f.size ?? 0) > 0 &&
@@ -281,22 +282,4 @@ export function githubEquivalent({ fullRunSeconds, prPushes, merges }) {
   if (!Number.isFinite(fullRunSeconds)) return null;
   const runs = prPushes + merges;
   return { runs, minutes: Math.round(((runs * fullRunSeconds) / 60) * 10) / 10 };
-}
-
-const fmt = v =>
-  v === null || v === undefined ? '–' : typeof v === 'number' ? String(Math.round(v * 10) / 10) : String(v);
-
-/** One Markdown table row per repository and operation: Forge seconds next to plain git. */
-export function summaryTable(results) {
-  const ops = ['import', 'clone', 'save', 'sync', 'conflict', 'resolve', 'land', 'landReuse'];
-  const rows = ['| Repo | Operation | Forge s | git s | Forge result |', '| --- | --- | --- | --- | --- |'];
-  for (const r of results)
-    for (const op of ops) {
-      const s = r.steps?.[op];
-      if (!s) continue;
-      rows.push(
-        `| ${r.id} | ${op} | ${fmt(s.forge?.seconds)} | ${fmt(s.git?.seconds)} | ${s.forge?.ok ? 'ok' : (s.forge?.refusal ?? s.forge?.error ?? 'not run')} |`,
-      );
-    }
-  return rows.join('\n');
 }

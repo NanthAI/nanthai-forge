@@ -15,12 +15,11 @@ import {
   probeLine,
   resolveKeepBoth,
   submodulePaths,
-  summaryTable,
   tagLastLine,
 } from '../scripts/bench-zoo/lib.mjs';
 import { lastJson } from '../scripts/bench-zoo/exec.mjs';
 import { resolutionFolder } from '../scripts/bench-zoo/run.mjs';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -68,6 +67,7 @@ test('probe files skip symlinks, empty and huge files, and return null without s
     f('c/z.kt', 10 << 20),
     f('d/w.kt'),
     f('e/v.kt'),
+    f('a/caf\ufffd.kt'), // not valid UTF-8: never addressable on both sides
   ]);
   assert.deepEqual(picked, { ext: '.kt', first: 'd/w.kt', second: 'e/v.kt' });
 });
@@ -146,20 +146,6 @@ test('lastJson takes the last JSON line; resolutionFolder finds the folder holdi
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('summary table lists Forge next to git and the refusal when Forge did not run', () => {
-  const md = summaryTable([
-    {
-      id: 'go',
-      steps: {
-        clone: { forge: { ok: true, seconds: 9.96 }, git: { seconds: 1.2 } },
-        land: { forge: { ok: false, refusal: 'skipped: no runner' } },
-      },
-    },
-  ]);
-  assert.match(md, /\| go \| clone \| 10 \| 1\.2 \| ok \|/);
-  assert.match(md, /\| go \| land \| – \| – \| skipped: no runner \|/);
 });
 
 test('cliHead reads the installed CLI build id and ignores anything else', () => {
@@ -290,4 +276,287 @@ test('tagLastLine skips a last line too long to take a trailing comment inside a
   const text = `x = 1\n${long}\n`;
   assert.equal(tagLastLine(text, 'x.py', 'a').split('\n')[0].endsWith('forge-zoo a'), true);
   assert.equal(tagLastLine(long, 'x.kt', 'b'), `${long} // forge-zoo b`);
+});
+
+// Issue 70a9bd2f: the conformance suite's generic rules. Synthetic data only.
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { compareTrees, platformLimits, walkTree } from '../scripts/bench-zoo/fidelity.mjs';
+import { buildRepository, recipes } from '../scripts/bench-zoo/shapes.mjs';
+import { latestResults } from '../scripts/bench-zoo/suite.mjs';
+import {
+  PATHS,
+  baselineOf,
+  ciScript,
+  commitGaps,
+  compareToBaseline,
+  pathVerdicts,
+  runEntry,
+  suiteMarkdown,
+  summarize,
+  validateCatalog,
+  workspacePrep,
+  zooWorkflow,
+} from '../scripts/bench-zoo/suite-lib.mjs';
+
+const catalog = JSON.parse(
+  readFileSync(new URL('../scripts/bench-zoo/catalog.json', import.meta.url), 'utf8'),
+);
+
+test('the catalog holds 20-30 repositories and covers every required shape', () => {
+  assert.deepEqual(validateCatalog(catalog), []);
+  const dropped = { ...catalog, repos: catalog.repos.filter(r => r.id !== 'shapes-nonutf8') };
+  assert.match(validateCatalog(dropped).join(';'), /non-utf-8 paths/);
+  assert.match(
+    validateCatalog({ ...catalog, repos: catalog.repos.slice(0, 5) }).join(';'),
+    /20-30 repositories/,
+  );
+});
+
+test('every catalog entry yields a check script and a run entry; toolchains only when declared', () => {
+  const shapes = recipes();
+  for (const entry of catalog.repos) {
+    assert.match(ciScript(entry, shapes), /^#!\/usr\/bin\/env bash\n.*\nset -euo pipefail\n.+/s);
+    assert.equal(runEntry(entry).fork, `NanthAI/bench-zoo-${entry.id}`);
+  }
+  const dart = catalog.repos.find(r => r.id === 'dart');
+  assert.deepEqual(runEntry(dart).check.actionsToolchains, [{ tool: 'dart', version: 'stable' }]);
+  assert.equal(runEntry(catalog.repos.find(r => r.id === 'go')).check, undefined);
+  assert.match(zooWorkflow('      - uses: x\n'), /- uses: x\n      - run: bash \.forge-zoo\/ci\.sh/);
+});
+
+test('the synthetic recipes write modes, symlinks, CRLF and a raw Latin-1 path that a file system could not hold', () => {
+  const shapes = recipes();
+  const git = (dir, ...args) => execFileSync('git', args, { cwd: dir, maxBuffer: 1 << 26 });
+  const posix = buildRepository(shapes.posix, []);
+  const nonutf8 = buildRepository(shapes.nonutf8, []);
+  const bigbin = buildRepository({ ...shapes.bigbin, commits: [shapes.bigbin.commits[0].slice(0, 2)] }, []);
+  try {
+    const tree = git(posix.dir, 'ls-tree', '-r', 'main').toString();
+    assert.match(tree, /^100755 blob \w+\tbin\/run\.sh$/m);
+    assert.match(tree, /^120000 blob \w+\tlink-dangling$/m);
+    assert.match(git(posix.dir, 'show', 'main:src/beta/util.py').toString(), /\r\n/);
+    assert.equal(git(posix.dir, 'log', '--format=%s', 'main').toString().trim().split('\n').length, 4);
+    const raw = git(nonutf8.dir, 'ls-tree', '-r', '-z', '--name-only', 'main');
+    assert.ok(
+      raw.includes(Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x2e, 0x70, 0x79])),
+      'raw 0xE9 byte in the path',
+    );
+    assert.equal(git(bigbin.dir, 'ls-tree', '-r', 'main').toString().split('\n').filter(Boolean).length, 2);
+  } finally {
+    for (const r of [posix, nonutf8, bigbin]) rmSync(r.dir, { recursive: true, force: true });
+  }
+});
+
+test('tree fidelity: Forge clone against git checkout flags a missing file, a lost mode, a CRLF size change and a changed link', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zoo-fidelity-'));
+  try {
+    const make = (name, edit) => {
+      const root = join(dir, name);
+      mkdirSync(join(root, 'src'), { recursive: true });
+      mkdirSync(join(root, '.forge'));
+      writeFileSync(join(root, 'src/a.txt'), 'one\r\ntwo\r\n');
+      writeFileSync(join(root, 'run.sh'), '#!/bin/sh\n', { mode: 0o755 });
+      writeFileSync(join(root, 'keep.txt'), 'k');
+      symlinkSync('src/a.txt', join(root, 'link'));
+      // A name that is not valid UTF-8 (git can write one on some volumes) is read as bytes, not lost.
+      try {
+        writeFileSync(
+          Buffer.concat([Buffer.from(`${root}/src/caf`), Buffer.from([0xe9]), Buffer.from('.py')]),
+          'x',
+        );
+      } catch {
+        /* this volume refuses such names (EILSEQ); the tree simply lacks the file */
+      }
+      edit?.(root);
+      return walkTree(root);
+    };
+    const git = make('git');
+    assert.equal(git.has('.forge'), false);
+    assert.deepEqual(compareTrees(git, make('same')).counts, {
+      missing: 0,
+      extra: 0,
+      kind: 0,
+      size: 0,
+      target: 0,
+    });
+    const bad = compareTrees(
+      git,
+      make('bad', root => {
+        rmSync(join(root, 'keep.txt'));
+        chmodSync(join(root, 'run.sh'), 0o644);
+        writeFileSync(join(root, 'src/a.txt'), 'one\ntwo\n');
+        rmSync(join(root, 'link'));
+        symlinkSync('keep.txt', join(root, 'link'));
+        writeFileSync(join(root, 'stray.txt'), 'x');
+      }),
+    );
+    assert.equal(bad.ok, false);
+    assert.deepEqual(bad.counts, { missing: 1, extra: 1, kind: 1, size: 1, target: 1 });
+    assert.deepEqual(bad.examples.kind, ['run.sh (exec -> file)']);
+    // A path git itself could not write here is a platform limit, never a Forge fault.
+    assert.deepEqual(
+      platformLimits(
+        '100644 blob abc\tsrc/a.txt\u0000100644 blob abc\tcaf\ufffd.py\u0000160000 commit abc\tmod\u0000',
+        git,
+      ),
+      ['caf\ufffd.py'],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+const step = (forge, git) => ({
+  forge: { ok: true, ...forge },
+  ...(git ? { git: { ok: true, ...git } } : {}),
+});
+const passing = () => ({
+  id: 'x',
+  fidelity: { ok: true },
+  steps: {
+    import: step({ seconds: 20 }, { seconds: 1 }),
+    clone: step({ seconds: 3 }, { seconds: 1 }),
+    start: step({ seconds: 4 }),
+    save: step({ seconds: 5 }, { seconds: 1 }),
+    sync: step({ seconds: 6 }, { seconds: 1 }),
+    land: step({ seconds: 90 }, { seconds: 2 }),
+    landReuse: step({ seconds: 70 }, { seconds: 2 }),
+    conflict: step({ seconds: 12 }, { seconds: 1 }),
+    resolve: step({ seconds: 80 }, { seconds: 2 }),
+  },
+  runs: [{ runId: 'r1', endedAt: '2026-11-10T10:01:00Z', executionSeconds: 30 }],
+  landings: [{ lane: 'a', checkRunIds: ['r1'], committedAt: '2026-11-10T10:01:09Z' }],
+  forgeChecks: { jobs: 1, jobSeconds: 50 },
+});
+
+test('a land that exits 0 with a terminal CHECK_FAILED is a failed path, and later paths are not reached', () => {
+  const ok = summarize(passing());
+  assert.equal(ok.pass, true);
+  const failed = passing();
+  failed.steps.land.forge.error = 'CHECK_FAILED';
+  delete failed.steps.resolve;
+  const v = pathVerdicts(failed);
+  assert.deepEqual([v.land.v, v.land.why, v.resolve.v], ['fail', 'CHECK_FAILED', 'skip']);
+  assert.equal(summarize(failed).pass, false);
+  assert.equal(pathVerdicts({ id: 'y', steps: {}, crash: 'Error: boom\n at x' }).crash.why, 'Error: boom');
+  // An import refusal is an object ({code, message}); the report names its code.
+  const refused = pathVerdicts({
+    id: 'z',
+    steps: { import: { forge: { ok: false, error: { code: 'GITHUB_LFS_OBJECT_MISSING' } } } },
+  });
+  assert.deepEqual(refused.import, { v: 'fail', why: 'GITHUB_LFS_OBJECT_MISSING' });
+});
+
+test('a hazard repository passes by a named clone refusal; a plain repository that is refused fails', () => {
+  const refused = {
+    id: 'shapes-collide',
+    steps: { import: step({ seconds: 14 }) },
+    refusals: [{ where: 'clone', code: 'INVALID_NATIVE_SOURCE' }],
+  };
+  const hazard = summarize(refused, { hazard: true });
+  assert.equal(hazard.paths.clone.v, 'refused');
+  assert.equal(hazard.pass, true);
+  assert.equal(summarize(refused, {}).pass, false);
+  const baseline = baselineOf([hazard]);
+  assert.deepEqual(compareToBaseline([hazard], baseline), []);
+  const broke = summarize({ ...refused, refusals: [] }, { hazard: true });
+  assert.deepEqual(
+    compareToBaseline([broke], baseline).map(x => `${x.op}:${x.was}->${x.now}`),
+    ['clone:refused->skip'],
+  );
+});
+
+test('the result-to-commit gap is the time from the last check run end to the commit; prep reads start, clone and job overhead', () => {
+  assert.deepEqual(commitGaps(passing()), [{ lane: 'a', seconds: 9 }]);
+  assert.deepEqual(workspacePrep(passing()), { startSeconds: 4, cloneSeconds: 3, jobOverheadSeconds: 20 });
+  assert.deepEqual(workspacePrep({ id: 'z', steps: {} }), {
+    startSeconds: null,
+    cloneSeconds: null,
+    jobOverheadSeconds: null,
+  });
+});
+
+test('baseline comparison reports a path that stopped passing and a much slower operation, not noise', () => {
+  const rows = [summarize(passing())];
+  const baseline = baselineOf(rows, { stamp: 's' });
+  assert.deepEqual(compareToBaseline(rows, baseline), []);
+  const worse = passing();
+  worse.steps.sync.forge.seconds = 40;
+  worse.steps.save.forge.seconds = 8;
+  worse.steps.conflict.forge.ok = false;
+  const regressions = compareToBaseline([summarize(worse)], baseline);
+  assert.deepEqual(regressions.map(r => `${r.kind}:${r.op}`).sort(), ['path:conflict', 'seconds:sync']);
+  assert.deepEqual(compareToBaseline([{ ...summarize(worse), id: 'new-repo' }], baseline), []);
+  const md = suiteMarkdown(rows, { stamp: 's' });
+  assert.match(md, /1 of 1 repositories pass every path/);
+  assert.match(md, new RegExp(`\\| x \\| ${PATHS.map(() => '✓').join(' \\| ')} \\|`));
+  assert.match(md, /\| land \| 90 \| 2 \| 45 \| 1 \|/);
+});
+
+test('the report takes the newest result per repository across run folders', () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-root-'));
+  try {
+    for (const [stamp, ids] of [
+      ['20261110T010000', ['a', 'b']],
+      ['20261110T020000', ['b']],
+    ]) {
+      mkdirSync(join(root, 'runs', stamp), { recursive: true });
+      writeFileSync(
+        join(root, 'runs', stamp, 'RESULT.json'),
+        JSON.stringify({ cliCommits: [stamp], results: ids.map(id => ({ id })) }),
+      );
+    }
+    assert.deepEqual(
+      latestResults(root).map(r => `${r.id}@${r.stamp}`),
+      ['a@20261110T010000', 'b@20261110T020000'],
+    );
+    assert.deepEqual(
+      latestResults(root, '20261110T010000').map(r => r.id),
+      ['a', 'b'],
+    );
+    // A full run on a project a --prepare-only pass imported keeps that pass's import timing.
+    mkdirSync(join(root, 'runs', '20261110T030000'), { recursive: true });
+    writeFileSync(
+      join(root, 'runs', '20261110T010000', 'RESULT.json'),
+      JSON.stringify({
+        results: [{ id: 'a', projectId: 'p', steps: { import: { forge: { seconds: 20 } } } }],
+      }),
+    );
+    writeFileSync(
+      join(root, 'runs', '20261110T030000', 'RESULT.json'),
+      JSON.stringify({ results: [{ id: 'a', projectId: 'p', steps: { clone: { forge: { seconds: 2 } } } }] }),
+    );
+    assert.deepEqual(Object.keys(latestResults(root).find(r => r.id === 'a').steps).sort(), [
+      'clone',
+      'import',
+    ]);
+    // ...even when an earlier full run of the same project crashed before it recorded any step.
+    mkdirSync(join(root, 'runs', '20261110T025000'), { recursive: true });
+    writeFileSync(
+      join(root, 'runs', '20261110T025000', 'RESULT.json'),
+      JSON.stringify({ results: [{ id: 'a', projectId: 'p', crash: 'boom' }] }),
+    );
+    assert.equal(latestResults(root).find(r => r.id === 'a').steps.import.forge.seconds, 20);
+    // An interrupted run keeps the repositories that ended, one file each.
+    rmSync(join(root, 'runs', '20261110T030000', 'RESULT.json'));
+    writeFileSync(join(root, 'runs', '20261110T030000', 'c.result.json'), JSON.stringify({ id: 'c' }));
+    assert.deepEqual(
+      latestResults(root).map(r => r.id),
+      ['a', 'b', 'c'],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Issue 70a9bd2f: the machine is shared; no repository of the suite starts under the disk reserve.
+import { waitForDisk } from '../scripts/bench-zoo/exec.mjs';
+
+test('a repository waits for the disk reserve and the run stops when it never returns', async () => {
+  const readings = [16, 19, 23];
+  let reads = 0;
+  await waitForDisk(22, { pollMs: 0, free: () => readings[Math.min(reads++, readings.length - 1)] });
+  assert.equal(reads, 3, 'polled until 23 GiB were free, no longer');
+  await assert.rejects(waitForDisk(22, { pollMs: 0, timeoutMs: -1, free: () => 10 }), /ZOO_DISK_RESERVE/);
 });

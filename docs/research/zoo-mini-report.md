@@ -379,20 +379,65 @@ with `'Hello' == 'Hello from the Lane'`. The `.bin` limit was not exercised.
 - The probe edits are comments; they show landing, conflict and check behavior, not correctness of a code change.
 - Teardown status is in the Issue 8c867d0d comments.
 
-## Re-running
+## The conformance suite (Issue 70a9bd2f)
+
+[`scripts/bench-zoo/catalog.json`](../../scripts/bench-zoo/catalog.json) is the list: 25 public repositories, each with its
+upstream CI command (or, for the synthetic fixtures, a shape check), declared toolchains and cache, and the shapes it
+stands for. Twenty are real repositories forked into the NanthAI org (the five and twelve ecosystems above, plus Git LFS
+`learningequality/morango`, a 2,900-commit history `jashkenas/underscore`, and vendored multi-MiB binaries `kripken/ammo.js`).
+Five are synthetic fixtures built by [`shapes.mjs`](../../scripts/bench-zoo/shapes.mjs) with git plumbing and created as
+public NanthAI repositories: CRLF sources, file modes, live and dangling symlinks, empty and unterminated files, an LFS
+pointer and a mode change in history (`shapes-posix`); 54 MiB of binary blobs, one replaced in history (`shapes-bigbin`);
+case-only renames of a file and a directory (`shapes-case`); and two hazards a case-insensitive or UTF-8-only file system
+cannot hold, case-colliding paths (`shapes-collide`) and a raw Latin-1 path plus a composed/decomposed Unicode pair
+(`shapes-nonutf8`). Each fixture's check runs on the Candidate checkout and asserts the shape survived (modes, CRLF bytes,
+symlink targets, blob hashes, the raw path).
+
+One command per step; all take `ZOO_ROOT` (a folder whose `zoo.json` holds the machine-local `deployment`,
+`deploymentName`, `forgeCheckout` and `meterCwd`):
 
 ```sh
-cp scripts/bench-zoo/zoo.example.json ZOO_ROOT/zoo.json   # fill in deployment, forks, runner
-node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--no-github-run] [--keep-checkouts]
+node scripts/bench-zoo/suite.mjs provision ZOO_ROOT   # fork or create the NanthAI repos, push .forge-zoo/ci.sh + zoo-ci.yml, write zoo.json
+node scripts/bench-zoo/suite.mjs verify ZOO_ROOT      # each check once on plain GitHub, no Forge (catches a wrong ci.sh)
+node scripts/bench-zoo/suite.mjs run ZOO_ROOT --concurrency 3 [--repos a,b] [--baseline FILE] [--save-baseline FILE]
+node scripts/bench-zoo/suite.mjs report ZOO_ROOT [--stamp S] [--baseline FILE]
+node scripts/bench-zoo/suite.mjs teardown ZOO_ROOT    # delete the Forge projects, then the NanthAI repos
 ```
 
-The runner needs:
-- a Forge login for the deployment;
-- `gh` authenticated for the forks;
-- each fork's `zoo-ci.yml` (workflow_dispatch running its CI script);
-- a runner binding for each project.
+`run` is [`run.mjs`](../../scripts/bench-zoo/run.mjs) (the scenario above: import, clone, four Lanes, save, sync, overtaken
+landing, forced conflict, keep-both resolution, plain git beside it) followed by `report`, which writes `SUITE.md` and
+`SUITE.json`. It judges nine paths per repository (import, clone, **fidelity**, save, sync, land, landReuse, conflict,
+resolve), each pass, fail or not reached. A land passes only when its check passed and the change reached main. **Fidelity** compares the
+Forge clone with a plain `git clone --recurse-submodules` of the same fork on the same machine: path, kind (file,
+executable, symlink), size and symlink target; a path git itself could not write there is listed as a platform limit, not
+a Forge fault. The report also gives Forge seconds next to git's, the result-to-commit gap (end of a landing's last check
+run to its commit on main), workspace prep (Lane start, clone, hosted job overhead beyond the check command) and the
+metered dev Convex cost.
 
-It writes per-step receipts and a `RESULT.json` per run.
+The saved baseline ([`baseline.json`](../../scripts/bench-zoo/baseline.json)) is the regression guard: `--baseline` exits 1
+when a path that passed there fails now, or a Forge operation takes more than 1.5 times its baseline plus 5 s. A failure of
+a repository in the suite is filed as a root-cause Issue, never worked around for that repository.
 
-A repository may carry its own `check` (toolchains, cache) and `runner` in `zoo.json`; `--prepare-only` imports and
-configures without landing. The original five were re-imported as new projects in wave 2.
+### The pre-flip baseline (`baseline.json`)
+
+One run of the 26 repositories on the dev deployment, free runners, N = 1 per repository (an observation, not a claim; see
+[perf-claims](../agents/perf-claims.md)); it straddled seven CLI builds (named in the file) and the landing of Flip 4, which removed
+`overlapAnswer` (the harness no longer sends it). **24 of 26 pass every path** (import, clone, fidelity, save, sync, overtaken
+landing, forced conflict, resolution): 22 pass all nine, and `shapes-collide` and `shapes-unicode` pass by the named clone
+refusal `INVALID_NATIVE_SOURCE` (the paths cannot exist on this volume). The two failures are filed:
+
+| Repo | Failing path | Issue |
+| --- | --- | --- |
+| jvm | fidelity: `gradlew.bat` is LF in the Forge clone and CRLF in git's (`.gitattributes` `*.bat text eol=crlf`) | 44ef42b9 |
+| shapes-nonutf8 | land, landReuse, conflict: the import turns the path `caf<0xE9>.py` into a U+FFFD name, so the Candidate check sees another file | 6a0dd2e8 |
+
+Medians over the repositories that ran both sides: clone 1.4 s (git 1.5 s), save 3.5 s (git 1.9 s), sync 6.4 s (git 0.8 s), conflict
+reported in 16.6 s (git 0.7 s), import 17.4 s (git `clone --bare` 1.0 s). A landing's check ends a median 3.1 s before its commit on main (worst 27 s over 69
+landings). Landing and resolution seconds include the hosted check, git's do not. Dev Convex for the metered part of the run
+was $0.133 over 26 repositories (import and the smoke, partial and replayed runs are outside the meter). Three of the 26 first runs
+failed for causes outside Forge and were fixed in the harness (a fixture with a fake LFS pointer, an `lfs` check that wanted the pointer
+when Forge stores LFS content, and kotlinpoet's Kotlin/JS `npm install` timing out against a third-party registry, which passed on replay).
+
+Needs a Forge login for the deployment, `gh` authenticated with `repo`, `workflow` and `delete_repo`, and a built Forge
+checkout. Runs use free GitHub-hosted runners only; at most three repositories at a time; keep disk reserve (one checkout
+per repository, removed after its run).

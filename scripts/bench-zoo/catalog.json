@@ -1,0 +1,511 @@
+{
+ "version": 1,
+ "check": {
+  "name": "verify",
+  "executable": "bash",
+  "args": [
+   ".forge-zoo/ci.sh"
+  ],
+  "environmentLabel": "bench-zoo upstream CI"
+ },
+ "runner": {
+  "repository": "NanthAI/nanthai-forge",
+  "runsOn": "ubuntu-latest"
+ },
+ "githubWorkflow": "zoo-ci.yml",
+ "repos": [
+  {
+   "id": "go",
+   "ecosystem": "Go",
+   "upstream": "prometheus/client_golang",
+   "ref": "main",
+   "shapes": [
+    "go modules",
+    "long Makefile"
+   ],
+   "ci": [
+    "make test"
+   ],
+   "fork": "NanthAI/bench-zoo-go"
+  },
+  {
+   "id": "python",
+   "ecosystem": "Python + C extension",
+   "upstream": "tree-sitter/py-tree-sitter",
+   "ref": "master",
+   "shapes": [
+    "git submodule",
+    "C extension"
+   ],
+   "ci": [
+    "python3 -m venv \"${RUNNER_TEMP:-${TMPDIR:-/tmp}}/zoo-venv\"",
+    ". \"${RUNNER_TEMP:-${TMPDIR:-/tmp}}/zoo-venv/bin/activate\"",
+    "pip install -q -e '.[tests]'",
+    "python -m unittest -v"
+   ],
+   "fork": "NanthAI/bench-zoo-python"
+  },
+  {
+   "id": "rust",
+   "ecosystem": "Rust",
+   "upstream": "BurntSushi/ripgrep",
+   "ref": "master",
+   "shapes": [
+    "cargo workspace"
+   ],
+   "ci": [
+    "cargo build --verbose --workspace",
+    "cargo test --verbose --workspace"
+   ],
+   "fork": "NanthAI/bench-zoo-rust"
+  },
+  {
+   "id": "jvm",
+   "ecosystem": "Kotlin / Gradle",
+   "upstream": "square/kotlinpoet",
+   "ref": "main",
+   "shapes": [
+    "gradle multi-module"
+   ],
+   "ci": [
+    "export GRADLE_OPTS=\"-Dorg.gradle.jvmargs=-Xmx4g -Dorg.gradle.daemon=false -Dkotlin.incremental=false\"",
+    "./gradlew build"
+   ],
+   "fork": "NanthAI/bench-zoo-jvm"
+  },
+  {
+   "id": "mixed",
+   "ecosystem": "Rust + Python",
+   "upstream": "pydantic/jiter",
+   "ref": "main",
+   "shapes": [
+    "cargo + uv monorepo"
+   ],
+   "ci": [
+    "command -v uv >/dev/null || pipx install uv >/dev/null || python3 -m pip install -q --user --break-system-packages uv",
+    "export PATH=\"$HOME/.local/bin:$PATH\"",
+    "JSON_CASES_REF=12caaa624f399d603db09dd634ae866425f737f0",
+    "work=\"${RUNNER_TEMP:-${TMPDIR:-/tmp}}/zoo-json-cases\"",
+    "if [ ! -f \"$work/cases.json\" ]; then",
+    "  rm -rf \"$work\" && git init -q \"$work\"",
+    "  git -C \"$work\" fetch -q --depth 1 https://github.com/samuelcolvin/json-cases \"$JSON_CASES_REF\"",
+    "  git -C \"$work\" checkout -q FETCH_HEAD",
+    "  RUSTUP_TOOLCHAIN=stable make -C \"$work\" build",
+    "fi",
+    "export JSON_CASES=\"$work\"",
+    "cargo test --workspace",
+    "uv sync --group dev --all-packages",
+    "uv run pytest crates/jiter-python/tests"
+   ],
+   "fork": "NanthAI/bench-zoo-mixed"
+  },
+  {
+   "id": "csharp",
+   "ecosystem": ".NET",
+   "upstream": "ardalis/GuardClauses",
+   "ref": "main",
+   "shapes": [
+    "dotnet solution"
+   ],
+   "ci": [
+    "dotnet test --nologo"
+   ],
+   "toolchains": [
+    {
+     "tool": "dotnet",
+     "version": "8.0.x"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "nuget"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-csharp"
+  },
+  {
+   "id": "electron",
+   "ecosystem": "Electron",
+   "upstream": "sindresorhus/electron-store",
+   "ref": "main",
+   "shapes": [
+    "single source file",
+    "no lockfile",
+    "test-file-only change"
+   ],
+   "ci": [
+    "export ELECTRON_DISABLE_SANDBOX=1",
+    "npm install --no-audit --no-fund",
+    "xvfb-run -a node --test"
+   ],
+   "fork": "NanthAI/bench-zoo-electron"
+  },
+  {
+   "id": "elixir",
+   "ecosystem": "Elixir",
+   "upstream": "elixir-plug/plug",
+   "ref": "main",
+   "shapes": [
+    "mix project"
+   ],
+   "ci": [
+    "mix local.hex --force",
+    "mix local.rebar --force",
+    "mix deps.get",
+    "mix test"
+   ],
+   "toolchains": [
+    {
+     "tool": "elixir",
+     "version": "1.18",
+     "otpVersion": "27"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "hex"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-elixir"
+  },
+  {
+   "id": "ruby",
+   "ecosystem": "Ruby",
+   "upstream": "sinatra/sinatra",
+   "ref": "main",
+   "shapes": [
+    "bundler"
+   ],
+   "ci": [
+    "bundle install --jobs 4",
+    "bundle exec rake test:core"
+   ],
+   "toolchains": [
+    {
+     "tool": "ruby",
+     "version": "3.4"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "bundler"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-ruby"
+  },
+  {
+   "id": "php",
+   "ecosystem": "PHP",
+   "upstream": "guzzle/psr7",
+   "ref": "3.2",
+   "shapes": [
+    "composer"
+   ],
+   "ci": [
+    "composer install --no-interaction --prefer-dist",
+    "vendor/bin/phpunit"
+   ],
+   "toolchains": [
+    {
+     "tool": "php",
+     "version": "8.4"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "composer"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-php"
+  },
+  {
+   "id": "swift",
+   "ecosystem": "Swift",
+   "upstream": "apple/swift-argument-parser",
+   "ref": "main",
+   "shapes": [
+    "swiftpm"
+   ],
+   "ci": [
+    "swift test"
+   ],
+   "cache": {
+    "presets": [
+     "swiftpm"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-swift"
+  },
+  {
+   "id": "android",
+   "ecosystem": "Kotlin / Android",
+   "upstream": "JakeWharton/timber",
+   "ref": "trunk",
+   "shapes": [
+    "gradle android library"
+   ],
+   "ci": [
+    "./gradlew test --no-daemon"
+   ],
+   "toolchains": [
+    {
+     "tool": "java",
+     "version": "26",
+     "distribution": "zulu"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "gradle"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-android"
+  },
+  {
+   "id": "dart",
+   "ecosystem": "Dart",
+   "upstream": "felangel/equatable",
+   "ref": "master",
+   "shapes": [
+    "pub package"
+   ],
+   "ci": [
+    "dart pub get",
+    "dart test"
+   ],
+   "toolchains": [
+    {
+     "tool": "dart",
+     "version": "stable"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "pub"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-dart"
+  },
+  {
+   "id": "flutter",
+   "ecosystem": "Flutter",
+   "upstream": "rrousselGit/flutter_hooks",
+   "ref": "master",
+   "shapes": [
+    "flutter monorepo (3 packages)"
+   ],
+   "ci": [
+    "for dir in packages/flutter_hooks packages/cupertino_hooks packages/material_hooks; do (cd \"$dir\" && flutter pub get && flutter test); done"
+   ],
+   "toolchains": [
+    {
+     "tool": "flutter",
+     "version": "stable"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "pub"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-flutter"
+  },
+  {
+   "id": "cpp",
+   "ecosystem": "C/C++",
+   "upstream": "fmtlib/fmt",
+   "ref": "main",
+   "shapes": [
+    "cmake + ninja",
+    "large source tree"
+   ],
+   "ci": [
+    "cmake -S . -B build -G Ninja",
+    "cmake --build build --parallel",
+    "ctest --test-dir build --output-on-failure"
+   ],
+   "toolchains": [
+    {
+     "tool": "cmake",
+     "version": "3.31.6"
+    }
+   ],
+   "fork": "NanthAI/bench-zoo-cpp"
+  },
+  {
+   "id": "zig",
+   "ecosystem": "Zig",
+   "upstream": "Hejsil/zig-clap",
+   "ref": "master",
+   "shapes": [
+    "zig build"
+   ],
+   "ci": [
+    "zig test clap.zig",
+    "zig build examples"
+   ],
+   "toolchains": [
+    {
+     "tool": "zig",
+     "version": "0.17.1"
+    }
+   ],
+   "cache": {
+    "presets": [
+     "zig"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-zig"
+  },
+  {
+   "id": "npmws",
+   "ecosystem": "npm workspaces",
+   "upstream": "Quramy/npm-ts-workspaces-example",
+   "ref": "main",
+   "shapes": [
+    "npm workspaces",
+    "cross-package import"
+   ],
+   "ci": [
+    "npm ci",
+    "npm run compile",
+    "npm test"
+   ],
+   "cache": {
+    "presets": [
+     "npm"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-npmws"
+  },
+  {
+   "id": "lfs",
+   "ecosystem": "Python + Git LFS",
+   "upstream": "learningequality/morango",
+   "ref": "release-v0.9.x",
+   "shapes": [
+    "Git LFS pointer file",
+    "long history"
+   ],
+   "ci": [
+    "python3 -m py_compile morango/__init__.py",
+    "f=tests/SQLite-89e099fb.tar.gz",
+    "# Forge resolves LFS objects into content; a plain checkout keeps the pointer. Either is whole, a truncated file is neither.",
+    "if head -c 7 \"$f\" | grep -q '^version'; then grep -q '^oid sha256:' \"$f\"; else gzip -t \"$f\"; fi"
+   ],
+   "fork": "NanthAI/bench-zoo-lfs"
+  },
+  {
+   "id": "history",
+   "ecosystem": "JavaScript, long history",
+   "upstream": "jashkenas/underscore",
+   "ref": "master",
+   "shapes": [
+    "about 2,900 commits"
+   ],
+   "ci": [
+    "npm ci --ignore-scripts",
+    "npm run prepare-tests",
+    "npm run test-node"
+   ],
+   "cache": {
+    "presets": [
+     "npm"
+    ]
+   },
+   "fork": "NanthAI/bench-zoo-history"
+  },
+  {
+   "id": "binaries",
+   "ecosystem": "C++ / JavaScript, vendored binaries",
+   "upstream": "kripken/ammo.js",
+   "ref": "main",
+   "shapes": [
+    "about 440 commits",
+    "multi-MiB binaries",
+    "vendored C++ tree"
+   ],
+   "ci": [
+    "test -s builds/ammo.js",
+    "node --check builds/ammo.js",
+    "test \"$(find bullet -type f | wc -l)\" -gt 100"
+   ],
+   "fork": "NanthAI/bench-zoo-binaries"
+  },
+  {
+   "id": "shapes-posix",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "CRLF",
+    "file modes",
+    "symlinks",
+    "empty and unterminated files",
+    "non-ASCII names",
+    "mode change in history"
+   ],
+   "ci": [],
+   "synthetic": "posix",
+   "fork": "NanthAI/bench-zoo-shapes-posix"
+  },
+  {
+   "id": "shapes-bigbin",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "large binaries (54 MiB of blobs)",
+    "blob replaced in history"
+   ],
+   "ci": [],
+   "synthetic": "bigbin",
+   "fork": "NanthAI/bench-zoo-shapes-bigbin"
+  },
+  {
+   "id": "shapes-case",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "case-only renames (file and directory)"
+   ],
+   "ci": [],
+   "synthetic": "case",
+   "fork": "NanthAI/bench-zoo-shapes-case"
+  },
+  {
+   "id": "shapes-collide",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "case-colliding paths"
+   ],
+   "ci": [],
+   "synthetic": "collide",
+   "hazard": true,
+   "fork": "NanthAI/bench-zoo-shapes-collide"
+  },
+  {
+   "id": "shapes-nonutf8",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "non-UTF-8 path"
+   ],
+   "ci": [],
+   "synthetic": "nonutf8",
+   "hazard": true,
+   "fork": "NanthAI/bench-zoo-shapes-nonutf8"
+  },
+  {
+   "id": "shapes-unicode",
+   "ecosystem": "synthetic",
+   "ref": "main",
+   "shapes": [
+    "composed and decomposed Unicode names"
+   ],
+   "ci": [],
+   "synthetic": "unicode",
+   "hazard": true,
+   "fork": "NanthAI/bench-zoo-shapes-unicode"
+  }
+ ]
+}

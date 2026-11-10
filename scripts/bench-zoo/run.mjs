@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Cross-ecosystem zoo run (Issue 85d26a8b): for every repository in ZOO_ROOT/zoo.json, the same
 // generic scenario on Forge and on plain git + GitHub, with timings side by side.
-//   node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--reimport] [--no-github-run] [--prepare-only]
+//   node scripts/bench-zoo/run.mjs ZOO_ROOT [--repos go,rust] [--concurrency N] [--reimport] [--no-github-run] [--prepare-only]
 // Forge: GitHub import, clone, three Lanes (two agents on one file, one disjoint), save, check-only,
 // land, clean sync after an overtake, land again (check reuse expected), forced conflict, keep-both
 // resolution, land. Plain git: the same edits on clones of the public fork (scratch branch).
@@ -22,7 +22,8 @@ import {
 } from 'node:fs';
 import { join, relative, basename, dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { exec } from './exec.mjs';
+import { exec, waitForDisk } from './exec.mjs';
+import { compareTrees, platformLimits, walkTree } from './fidelity.mjs';
 import {
   appendLine,
   checkFacts,
@@ -46,7 +47,12 @@ function listFiles(root) {
     for (const name of readdirSync(join(root, d))) {
       if (!d && (name === '.forge' || name === '.git')) continue;
       const rel = d ? `${d}/${name}` : name;
-      const st = lstatSync(join(root, rel));
+      let st;
+      try {
+        st = lstatSync(join(root, rel));
+      } catch {
+        continue; // a name that is not valid UTF-8 cannot be addressed here and is never a probe
+      }
       if (st.isSymbolicLink()) out.push({ path: rel, symlink: true, size: 0 });
       else if (st.isDirectory()) walk(rel);
       else out.push({ path: rel, size: st.size });
@@ -69,8 +75,8 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   const refuse = (where, code, detail) =>
     r.refusals.push({ where, code, detail: detail?.slice?.(0, 300) ?? null });
   const nf = async (root, verb, body, flags = [], afterPreflight = false) => {
-    // An agent answers the blocking overlap notice the two same-file Lanes raise by landing in order.
-    if (verb === 'land') body = { operationId: randomUUID(), overlapAnswer: 'accept-order', ...body };
+    // (Hosted overlap notices and their `overlapAnswer` are gone, Issue 853fcde3: nothing to answer.)
+    if (verb === 'land') body = { operationId: randomUUID(), ...body };
     let res = await io.cli(['agent', root, verb, ...flags, JSON.stringify(body)]);
     io.receipt(repo.id, { verb, flags, body, code: res.code, seconds: res.seconds, receipt: res.json });
     // The named recovery of a PREFLIGHT_REQUIRED refusal (a change to test files must run them
@@ -156,6 +162,24 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     gA,
   ]);
   step('clone', 'git', { ok: gc.code === 0, seconds: gc.seconds });
+
+  // 2b. Tree fidelity: the Forge clone against plain git's checkout of the same fork on this machine
+  // (path, kind, size, symlink target). What git itself cannot hold here is a platform limit, listed apart.
+  if (gc.code === 0) {
+    const tree = compareTrees(walkTree(gA), walkTree(clone));
+    const ls = await io.git(['-C', join(base, 'git-bare'), 'ls-tree', '-r', '-z', 'HEAD']);
+    const limits = platformLimits(ls.stdout, walkTree(gA));
+    const bad = Object.entries(tree.counts).filter(([, n]) => n);
+    r.fidelity = {
+      ...tree,
+      platformLimits: limits.slice(0, 5),
+      platformLimitCount: limits.length,
+      summary:
+        bad
+          .map(([k, n]) => `${k} ${n}${tree.examples[k][0] ? ` (${tree.examples[k][0]})` : ''}`)
+          .join(', ') || null,
+    };
+  }
 
   // 3. Project setup: the repository's own CI command, trusted agent policy, the runner.
   const settings = (await nf(clone, 'check-settings', {})).json?.result ?? {};
@@ -522,10 +546,26 @@ export function resolutionFolder(res, lanePath, file) {
   return null;
 }
 
+/** Runs `fn` over `items` with at most `size` in flight; results keep the order of `items`. */
+export async function pool(items, size, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(size || 1, items.length)) }, worker));
+  return out;
+}
+
 async function main(argv) {
   const root = argv[0];
   if (!root || root.startsWith('--')) {
-    console.error('usage: run.mjs ZOO_ROOT [--repos a,b] [--reimport] [--no-github-run] [--prepare-only]');
+    console.error(
+      'usage: run.mjs ZOO_ROOT [--repos a,b] [--concurrency N] [--reimport] [--no-github-run] [--prepare-only]',
+    );
     return 2;
   }
   const flag = f => argv.includes(f);
@@ -535,6 +575,7 @@ async function main(argv) {
     reimport: flag('--reimport'),
     noGithubRun: flag('--no-github-run'),
     prepareOnly: flag('--prepare-only'),
+    concurrency: Number(argv.includes('--concurrency') ? argv[argv.indexOf('--concurrency') + 1] : 2),
   };
   const statePath = join(root, 'state.json');
   const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { repos: {} };
@@ -553,20 +594,25 @@ async function main(argv) {
     }
   };
   const cliBefore = readCli();
-  const results = await Promise.all(
-    repos.map(repo =>
-      io.metered(repo, () =>
-        runRepo(cfg, repo, state, runDir, io).catch(error => ({ id: repo.id, crash: error.stack })),
-      ),
-    ),
-  );
+  const results = await pool(repos, cfg.concurrency, async repo => {
+    // No repository starts below the disk reserve (the machine is shared); it waits for space.
+    await waitForDisk(cfg.minFreeGiB ?? 22).catch(error => {
+      throw Object.assign(error, { repo: repo.id });
+    });
+    const result = await io.metered(repo, () =>
+      runRepo(cfg, repo, state, runDir, io).catch(error => ({ id: repo.id, crash: error.stack })),
+    );
+    // Kept per repository as soon as it ends (an interrupted run loses only the repositories still
+    // running), and its checkouts removed at once so a 25-repository run never holds them all.
+    writeFileSync(join(runDir, `${repo.id}.result.json`), JSON.stringify(result, null, 1) + '\n');
+    if (!flag('--keep-checkouts')) rmSync(join(runDir, repo.id), { recursive: true, force: true });
+    return result;
+  });
   // The CLI follows main, so a run can straddle a release: name the CLI build before and after.
   const cliCommits = [...new Set([cliBefore, readCli()].filter(Boolean))];
   const controlCode = await io.controlCode(cfg.runner.repository).catch(error => ({ error: error.message }));
   const out = { stamp, cliCommits, deployment: cfg.deployment, controlCode, results };
   writeFileSync(join(runDir, 'RESULT.json'), JSON.stringify(out, null, 1) + '\n');
-  if (!flag('--keep-checkouts'))
-    for (const repo of repos) rmSync(join(runDir, repo.id), { recursive: true, force: true });
   console.log(
     JSON.stringify({
       runDir,
