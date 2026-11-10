@@ -12,7 +12,6 @@ import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
 import { seedHostedProject } from '../dist/hosted-seed.js';
 import { continueLongAction } from '../dist/long-action.js';
-import { workCliSummary } from '../dist/work-cli-summary.js';
 for (const name of ['projectHostedSeed', 'projectHostedSeedActions'])
   modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const actions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
@@ -204,32 +203,6 @@ test('large record index resumes after a committed step loses its reply without 
       maxRssKiB: process.resourceUsage().maxRSS,
     }),
   );
-});
-
-test('plain Work summary reads counts without hydrating histories or review projections', async t => {
-  const f = await setup(t, 64 * 1024);
-  const load = WorkStore.prototype.load;
-  WorkStore.prototype.load = () => assert.fail('record summary must not hydrate Work');
-  try {
-    const summary = workCliSummary(f.root);
-    assert.equal(summary.revision, f.data.revision);
-    assert.equal(summary.head, f.data.nativeHead);
-    assert.equal(summary.counts.intents, f.data.intents.length);
-    assert(Buffer.byteLength(JSON.stringify(summary)) < 4096);
-    const pointer = WorkStore.prototype.pointer;
-    WorkStore.prototype.pointer = function () {
-      const raw = JSON.parse(pointer.call(this));
-      raw.fields.nativeHead = { unexpected: 'x'.repeat(100000) };
-      return Buffer.from(JSON.stringify(raw));
-    };
-    try {
-      assert.throws(() => workCliSummary(f.root), { code: 'INVALID_WORK_STORE' });
-    } finally {
-      WorkStore.prototype.pointer = pointer;
-    }
-  } finally {
-    WorkStore.prototype.load = load;
-  }
 });
 
 test('record rebuild replays journal events with original identities and timestamps after a cold index invalidation', async t => {

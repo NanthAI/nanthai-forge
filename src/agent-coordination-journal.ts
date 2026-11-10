@@ -5,7 +5,6 @@ import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
 import { previewAdviceCurrent } from './integration-preview-inputs.js';
 import { latestHandoff } from './agent-handoff-types.js';
-import { publishedOverlap } from './agent-coordination-events.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { lstatSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -107,7 +106,6 @@ export class CoordinationJournal {
       { operation: 'local overlap notices' },
     );
     retainEditNotices(this.store.directory, notices);
-    publishedOverlap(this.store);
   }
   overlaps(laneId?: string): OverlapAlert[] {
     try {

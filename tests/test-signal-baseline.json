@@ -46,12 +46,6 @@
     "tests/agent-turn-end-hook.test.mjs": {
       "elapsed": 2
     },
-    "tests/agent-wait-submission.test.mjs": {
-      "sleep": 2
-    },
-    "tests/agent-wait.test.mjs": {
-      "sleep": 2
-    },
     "tests/agent-workflow.test.mjs": {
       "sleep": 1
     },
@@ -330,9 +324,6 @@
     },
     "tests/lint-rules.test.mjs": {
       "docs": 1
-    },
-    "tests/local-checks.test.mjs": {
-      "sleep": 1
     },
     "tests/local-process-snapshot.test.mjs": {
       "sleep": 5

@@ -12,8 +12,6 @@ import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { updateHostState } from '../dist/host-binding.js';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
-import { overlapNotifications } from '../dist/mcp-overlap-notifications.js';
-import { agentWait } from '../dist/agent-wait.js';
 import { integrationPreview, previewPinned } from '../dist/integration-preview.js';
 import {
   scheduleIntegrationPreview,
@@ -565,69 +563,6 @@ test('committed main changes wake a preview without a Lane save, reads and unrel
     JSON.parse(readFileSync(join(f.store.directory, 'integration-preview-status.json'), 'utf8')).result.main,
     f.b.head,
   );
-});
-
-test('integration delivery uses the bilateral inbox, MCP next-call context and wait cursor without sessions', async t => {
-  const f = await fixture(t);
-  updateHostState(f.store, state => {
-    state.presence = {};
-    state.selfReports = {};
-  });
-  const sent = [];
-  const notifications = overlapNotifications(
-    {
-      server: { registerCapabilities() {} },
-      sendLoggingMessage: async row => {
-        sent.push(row);
-      },
-    },
-    f.store,
-  );
-  t.after(() => notifications.close());
-  notifications.select(f.a.laneId);
-  const result = integrationPreview(f.store, {}).result;
-  assert.equal(result.notices.length, 1);
-  assert.ok(result.notices[0].participants.every(p => p.sessions.length === 0));
-  assert.equal(sent.length, 1);
-  assert.equal(sent[0].data.kind, 'integration-notice');
-  assert.equal(sent[0].data.noticeId, result.notices[0].noticeId);
-  assert.deepEqual(sent[0].data.inputs, result.inputs);
-  notifications.select(f.a.laneId);
-  assert.equal(sent.length, 1);
-  // The second Lane was absent at publication; its next call receives the same notice.
-  notifications.select(f.b.laneId);
-  assert.equal(sent.length, 2);
-  assert.equal(sent[1].data.noticeId, sent[0].data.noticeId);
-  for (const lane of [f.a, f.b]) {
-    const context = new CoordinationJournal(f.store).context(lane.laneId);
-    assert.equal(context.messages.filter(row => row.actor === 'Integration preview').length, 1);
-    assert.ok(
-      agentPeers(f.store, { laneId: lane.laneId, detail: true }).notices.some(row =>
-        row.text.includes('synthetic pair clash'),
-      ),
-    );
-  }
-  const firstEvents = [];
-  const first = await agentWait(f.store, { laneIds: [f.a.laneId], timeoutSeconds: 0 }, row =>
-    firstEvents.push(row),
-  );
-  const notice = firstEvents.find(row => row.type === 'notice' && row.status === 'integration');
-  assert.equal(notice.id, result.notices[0].noticeId);
-  assert.equal(notice.historical, false);
-  const replayEvents = [];
-  const replay = await agentWait(
-    f.store,
-    { laneIds: [f.a.laneId], timeoutSeconds: 0, cursor: first.cursor },
-    row => replayEvents.push(row),
-  );
-  assert.ok(!replayEvents.some(row => row.type === 'notice'));
-  await f.save(f.b, 'b.txt', '0');
-  const changedEvents = [];
-  await agentWait(f.store, { laneIds: [f.a.laneId], timeoutSeconds: 0, cursor: replay.cursor }, row =>
-    changedEvents.push(row),
-  );
-  assert.equal(changedEvents.find(row => row.type === 'notice' && row.id === notice.id).historical, true);
-  assert.equal(sent.length, 2, 'obsolete observations do not redeliver current advice');
 });
 
 test('opt-out main and saved changes create no request, process, notice or idle timer', async t => {

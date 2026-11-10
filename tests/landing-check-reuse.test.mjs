@@ -23,7 +23,6 @@ import { NativeSource } from '../dist/native-source.js';
 import { digest } from '../dist/hash.js';
 import { partitionTests } from '../scripts/test-shards.mjs';
 import { runReceipt } from '../dist/agent-receipts.js';
-import { waitRun } from '../dist/agent-wait-run.js';
 import { trainAccounting } from '../dist/train-accounting.js';
 
 // Fixture mutations deliberately address historical rows. Production callers
@@ -131,13 +130,6 @@ for (const remote of [true, false])
       assert.equal(receipt.reuse, 'reused');
       assert.equal(receipt.reusedFrom.runId, f.original.id);
       assert.equal(receipt.diagnostic, `reused check ${f.original.id} from ${f.original.endedAt}`);
-      const waited = waitRun(f.store, reused).event;
-      assert.equal(waited.reusedFrom.runId, f.original.id);
-      assert.equal(
-        waited.logPath,
-        remote ? null : join(f.store.directory, `check-${f.original.id}`, 'stdout.log'),
-      );
-      if (remote) assert.equal(waited.providerUrl, 'https://github.com/actions');
       validatePassingPrefix(f.work, f.batch, f.prefix);
       const observation = queueObservation(f.store.select('landingEntries', f.entryId), reused);
       assert.equal(observation.checkReuse.runId, f.original.id);

@@ -7,8 +7,6 @@ import { fixture } from './landing-batch-fixture.mjs';
 import { planLandingTrain } from '../dist/landing-train-plan.js';
 import { savedOverlapPlan } from '../dist/agent-overlap-plan.js';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
-import { waitObservation } from '../dist/agent-wait-observation.js';
-import { agentWait } from '../dist/agent-wait.js';
 import { batchEdit, selectBatch, composeBatch, enqueueLanding } from '../dist/landing-batch-store.js';
 import { drainLandingBatches } from '../dist/landing-batch.js';
 import { randomUUID } from 'node:crypto';
@@ -37,8 +35,6 @@ const setup = async t => {
   return f;
 };
 const plan = f => planLandingTrain(f.store, f.store.load(), 'main');
-const trainEvent = (f, laneId) =>
-  waitObservation(f.store, 'lane', laneId).events.find(e => e.type === 'train');
 const runs = f => f.store.load().runs.filter(run => !run.mainCheck && !f.soloRuns.has(run.id));
 
 test('four overlapping docs submissions use the shared plan, sync before checks and batch independent code', async t => {
@@ -59,17 +55,6 @@ test('four overlapping docs submissions use the shared plan, sync before checks 
     initial.waits.map(w => w.entryId),
     docs.slice(1).map(d => d.command.operationId),
   );
-  const revision = f.store.revision();
-  const journalFiles = readdirSync(join(f.store.directory, 'coordination')).sort();
-  const event = trainEvent(f, docs[0].lane.laneId);
-  assert.deepEqual(event.groups, initial.plan.groups);
-  assert.deepEqual(event.waits, initial.waits);
-  assert.deepEqual(
-    event.order,
-    initial.ordered.map(e => e.id),
-  );
-  assert.equal(f.store.revision(), revision);
-  assert.deepEqual(readdirSync(join(f.store.directory, 'coordination')).sort(), journalFiles);
   // Dirty work is never rewritten to sync a submitted Candidate.
   writeFileSync(join(docs[3].lane.path, 'shared.md'), 'unsaved work\n');
   const dispatch = f.work.dispatch.bind(f.work);
@@ -100,7 +85,6 @@ test('four overlapping docs submissions use the shared plan, sync before checks 
     (await import('node:fs')).readFileSync(join(docs[3].lane.path, 'shared.md'), 'utf8'),
     'unsaved work\n',
   );
-  assert.equal(trainEvent(f, docs[0].lane.laneId).status, 'idle');
 });
 
 test('one genuine rewrite remains a named conflict without an acknowledgement gate', async t => {
@@ -124,7 +108,7 @@ test('one genuine rewrite remains a named conflict without an acknowledgement ga
   assert.ok(readdirSync(join(f.store.directory, 'coordination')).every(name => !name.startsWith('ack-')));
 });
 
-test('new saves supersede live predictions and notice applicability without changing the original submitted pins', async t => {
+test('new saves supersede live predictions without changing the original submitted pins', async t => {
   const f = await setup(t);
   const a = await f.candidate('shared.md', text(0)),
     b = await f.candidate('shared.md', text(1));
@@ -142,15 +126,6 @@ test('new saves supersede live predictions and notice applicability without chan
   ).result;
   assert.equal(savedOverlapPlan(f.store, f.store.load().lanes).groups.length, 0);
   assert.deepEqual(plan(f).plan.groups, original.plan.groups);
-  const events = waitObservation(f.store, 'operation', b.command.operationId).events;
-  const alerts = events.filter(e => e.type === 'notice' && noticeIds.includes(e.id));
-  assert.equal(alerts.length, noticeIds.length);
-  assert.ok(alerts.every(e => e.historical));
-  const event = events.find(e => e.type === 'train');
-  assert.equal(
-    event.entries.find(e => e.entryId === b.command.operationId).inputs[0].head,
-    b.checkpoint.head,
-  );
   const first = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
   assert.deepEqual(first.entryIds, [a.command.operationId]);
   await composeBatch(f.work, first);
@@ -170,7 +145,7 @@ test('new saves supersede live predictions and notice applicability without chan
   assert.equal(f.content('new-code.ts'), undefined);
 });
 
-test('a replacement submission derives a fresh disjoint plan and wait cursors deduplicate notices and train snapshots', async t => {
+test('a replacement submission derives a fresh disjoint plan', async t => {
   const f = await setup(t);
   const a = await f.candidate('shared.md', text(0)),
     b = await f.candidate('shared.md', text(1), false);
@@ -194,20 +169,6 @@ test('a replacement submission derives a fresh disjoint plan and wait cursors de
     f.store.select('views', composed.viewId),
   );
   assert.equal(plan(f).plan.groups.length, 0);
-  const events = [];
-  const first = await agentWait(f.store, { laneIds: [a.lane.laneId], timeoutSeconds: 0 }, e =>
-    events.push(e),
-  );
-  assert.ok(events.some(e => e.type === 'notice'));
-  assert.ok(events.some(e => e.type === 'train'));
-  const resumed = [];
-  await agentWait(f.store, { laneIds: [a.lane.laneId], timeoutSeconds: 0, cursor: first.cursor }, e =>
-    resumed.push(e),
-  );
-  assert.deepEqual(
-    resumed.map(e => e.type),
-    ['summary'],
-  );
   await f.checkCandidates();
   const batch = await batchEdit(f.work, 'select', data => selectBatch(f.work, data, 'main'));
   assert.deepEqual(batch.entryIds, [a.command.operationId, replacement.id]);

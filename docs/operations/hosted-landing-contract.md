@@ -316,8 +316,7 @@ deduplication, resnapshot after cutover and cleanup on disconnect. Test a missed
 wake, pending source attempt, superseding save and observer timeout without
 starting or cancelling work.
 
-Pointers: `src/agent-wait.ts`, `src/agent-wait-cursor.ts`,
-`src/agent-wait-submission.ts`, `convex/projectHostedFinish.ts` (`status`),
+Pointers: `src/agent-wait-cursor.ts`, `convex/projectHostedFinish.ts` (`status`),
 `src/hosted-agent-contract.ts`, `src/hosted-agent-transport.ts` (`observe`),
 `src/hosted-agent-observe.ts` and `src/mcp-hosted-agent.ts`.
 

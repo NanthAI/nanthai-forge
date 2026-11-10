@@ -20,7 +20,6 @@ import { savedOverlapPlan } from '../dist/agent-overlap-plan.js';
 import { landingOverlap } from '../dist/landing-overlap.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
-import { overlapNotifications } from '../dist/mcp-overlap-notifications.js';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
@@ -200,57 +199,6 @@ test('overlap notices and pending groups retain the latest handoff context toget
   const pristine = (await f.agent.dispatch({ action: 'peers', laneId: a.laneId, detail: true })).result;
   assert.equal(pristine.handoff.operationId, peers.handoff.operationId);
   assert.deepEqual(pristine.inbox, peers.inbox);
-});
-
-test('event-driven MCP notifications target selected Lanes, deduplicate and stop on close', async t => {
-  const f = await fixture(t),
-    a = await f.start('Alpha'),
-    b = await f.start('Beta');
-  const sent = [];
-  let capabilities;
-  const notifications = overlapNotifications(
-    {
-      server: {
-        registerCapabilities: value => {
-          capabilities = value;
-        },
-      },
-      sendLoggingMessage: async value => {
-        sent.push(value);
-      },
-    },
-    f.store,
-  );
-  t.after(() => notifications.close());
-  notifications.select(a.laneId);
-  assert.deepEqual(capabilities, { logging: {} });
-  edit(a, 'alpha');
-  edit(b, 'beta');
-  await f.save(a);
-  await f.save(b);
-  for (let i = 0; i < 30 && sent.length < 2; i++) await pause(10);
-  assert.equal(sent.length, 2);
-  assert.ok(sent.every(value => value.data.laneId === a.laneId));
-  assert.ok(sent.every(value => value.data.regions === undefined && value.data.heads === undefined));
-  await f.save(b);
-  await pause(30);
-  assert.equal(sent.length, 2);
-  const idle = sent.length;
-  await pause(50);
-  assert.equal(sent.length, idle, 'idle creates no calls');
-  notifications.close();
-  notifications.select(b.laneId); // Closed transports ignore later selections.
-  const closed = sent.length;
-  for (const path of docs)
-    writeFileSync(
-      join(b.path, path),
-      base
-        .replace('Shared paragraph.', 'grow')
-        .replace('Another paragraph.', 'beta addition.\nAnother paragraph.'),
-    );
-  await f.save(b);
-  await pause(30);
-  assert.equal(sent.length, closed);
 });
 
 test('pending groups and scheduler agree on ready/smaller ordering with stable ties', async t => {

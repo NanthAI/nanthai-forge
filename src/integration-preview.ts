@@ -3,7 +3,6 @@ import { landingPreviewRecords, hasPreviewSave } from './landing-preview-records
 import { randomUUID } from 'node:crypto';
 import { localCost } from './check-cost.js';
 import { retainPreviewMeasurement } from './preview-accounting.js';
-import { publishedOverlap } from './agent-coordination-events.js';
 import { z } from 'zod';
 import { join } from 'node:path';
 import { CoordinationJournal } from './agent-coordination-journal.js';
@@ -128,10 +127,7 @@ export function previewPinned(
       // Retained verdicts are historical unless there were no external commands.
       if (cached && !checks.length && cached.status !== 'inconclusive') {
         const current = previewCurrent(store, cached);
-        if (current) {
-          journal.record(cached.notices);
-          if (cached.notices.length) publishedOverlap(store);
-        }
+        if (current) journal.record(cached.notices);
         return {
           revision: store.revision(),
           result: {
@@ -249,10 +245,7 @@ export function previewPinned(
       cache.write(`integration:${key}`, result);
       // Publish after the exact observation is readable: inbox applicability uses
       // that observation, including a later clean result for the same tuple.
-      if (result.applicability === 'current') {
-        journal.record(result.notices);
-        if (result.notices.length) publishedOverlap(store);
-      }
+      if (result.applicability === 'current') journal.record(result.notices);
       return { revision: store.revision(), result: { ...result, cached: false } };
     },
     { operation: 'local integration preview' },

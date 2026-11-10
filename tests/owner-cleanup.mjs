@@ -178,10 +178,12 @@ export async function waitForOwnerChildren(
   workerDirectory = resolve('dist'),
   { stopChecks = false } = {},
 ) {
-  // Package smoke builds dist itself; importing the helper must work before that build.
-  const { drainAgentAdvisories } = await import('../dist/agent-advisory-worker.js');
-  if (existsSync(join(root, '.forge', 'native.json')) || existsSync(join(root, '.git')))
+  // Only a native-owner fixture has advisories to drain; hosted roots (package smoke) never load
+  // the native advisory worker. Package smoke builds dist itself, so this import stays lazy.
+  if (existsSync(join(root, '.forge', 'native.json')) || existsSync(join(root, '.git'))) {
+    const { drainAgentAdvisories } = await import('../dist/agent-advisory-worker.js');
     await drainAgentAdvisories(root);
+  }
   const processes = await import('../dist/local-process.js');
   const { WorkStore } = await import('../dist/work-store.js');
   const roots = [...new Set([resolve(root), realpathSync(root)])];
