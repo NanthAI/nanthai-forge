@@ -36,7 +36,12 @@ export type FirstCheckRecheck =
   | 'audit-not-full'
   | 'source-unavailable';
 export type FirstCheckDecision =
-  | { proof: CleanDisjointProof | FastFirstCheckProof }
+  | {
+      proof:
+        | CleanDisjointProof
+        | FastFirstCheckProof
+        | Extract<CrossHeadProof, { algorithm: 'exact-tree-v1' }>;
+    }
   | { reason: FirstCheckRecheck };
 const entries = (state: NativeState) => new Map(state.files.map(file => [file.path, file]));
 // Entries are strict {path, blob, mode} records, so equal blob and mode is the whole equality; comparing
@@ -72,6 +77,7 @@ export async function analyzeCrossHeadReuse(
   read: Reader,
   checkEntries: readonly string[] = [],
   fast = false,
+  exactTreeOnly = false,
 ): Promise<FirstCheckDecision> {
   const heads = [basis.checkedBase.head, basis.checked.head, basis.main.head, basis.head];
   const manifestBytes = await read(heads);
@@ -80,6 +86,28 @@ export async function analyzeCrossHeadReuse(
   const [base, checked, main, merged] = manifestBytes.map(parseNativeState);
   const candidatePaths = changed(base!, checked!),
     mainPaths = changed(base!, main!);
+  if (exactTreeOnly) {
+    if (changed(checked!, merged!).length) return { reason: 'composition-not-exact' };
+    const [selectionBytes, auditBytes] = await read([selectionPin, basis.audit.selection]);
+    const selection = json(selectionBytes, selectionPin),
+      audit = json(auditBytes, basis.audit.selection);
+    if (!selection || !audit) return { reason: 'source-unavailable' };
+    if (selection.scope !== 'full') return { reason: 'checked-not-full' };
+    if (audit.scope !== 'full') return { reason: 'audit-not-full' };
+    const proof = crossHeadProofSchema.parse({
+      ...basis,
+      algorithm: 'exact-tree-v1',
+      candidatePaths,
+      mainPaths,
+      checkedScope: 'full',
+      checkEntries: [...checkEntries],
+      checkedSelection: selectionPin,
+      cleanComposition: true,
+    }) as Extract<CrossHeadProof, { algorithm: 'exact-tree-v1' }>;
+    return Buffer.byteLength(canonicalPayload(proof)) <= 128 * 1024
+      ? { proof }
+      : { reason: 'source-unavailable' };
+  }
   if (!candidatePaths.length || !mainPaths.length) return { reason: 'composition-not-exact' };
   // Exact paths both sides changed; a directory/file prefix collision is never a docs overlap.
   const mainSet = new Set(mainPaths),

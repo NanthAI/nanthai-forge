@@ -171,11 +171,15 @@ export async function writeLanding(
   );
   // Solo checking/ready tails can own speculative descendants too. Retire the
   // old generation in the mutation that changes its pins or stops its proof.
+  const entersReview =
+    state.observation.pendingReason === 'waiting-for-review' &&
+    previous.observation.pendingReason !== 'waiting-for-review';
   const retiresSolo =
     !previous.batchId &&
     (previous.phase === 'checking' || previous.phase === 'ready') &&
     state.phase !== 'landed' &&
-    (state.phase === 'terminal-failed' ||
+    (entersReview ||
+      state.phase === 'terminal-failed' ||
       (row.pipelineRetiredAttemptId !== previous.attemptId &&
         (state.phase === 'queued' || previous.attemptId !== state.attemptId)));
   if (retiresSolo)
@@ -184,12 +188,13 @@ export async function writeLanding(
       { projectId: row.projectId, batchId: state.id },
       { members: [{ submissionId: state.id }] },
       { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding },
-      state.phase === 'terminal-failed',
+      entersReview || state.phase === 'terminal-failed',
       // A new attempt that still proves the same head under the same receipt
       // (a platform retry) keeps dependents pinned to that pair (ea86f3fb).
-      (state.phase === 'checking' || state.phase === 'ready') && attempt.candidate.head
+      !entersReview && (state.phase === 'checking' || state.phase === 'ready') && attempt.candidate.head
         ? { head: attempt.candidate.head, receiptId: attempt.operations.accept }
         : undefined,
+      entersReview,
     );
   if (previous.attemptId !== state.attemptId) await retainLandingProgress(ctx, previous, true, attempt.main);
   if (
@@ -224,7 +229,10 @@ export async function writeLanding(
   // A landing reservation (10d253c6) lasts until this landing lands or fails; while it lasts its
   // waiters stay parked on it even during the pre-queue check, and its exit wakes them once.
   const reserving =
-    row.reservedUntil !== undefined && state.phase !== 'landed' && state.phase !== 'terminal-failed';
+    row.reservedUntil !== undefined &&
+    state.phase !== 'landed' &&
+    state.phase !== 'terminal-failed' &&
+    state.observation.pendingReason !== 'waiting-for-review';
   // Graph-sealed order (c6b81429): a main-race attempt whose pass cannot be carried across a moved
   // main (a scoped re-check, or a proof no dependent change refused) stops independent entries
   // overtaking this one for free. Set once, from the attempt already loaded, in this one write.

@@ -4,6 +4,11 @@ import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { hostedBatching, hostedPipelineWidth } from '../dist/hosted-landing-batch.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
+import { landingObservation } from '../dist/hosted-landing.js';
+import { randomUUID } from 'node:crypto';
+import { moduleUrl } from './convex-module.mjs';
+const approvals = await import(moduleUrl('../convex/projectHostedApprovals.ts'));
+const acceptance = await import(moduleUrl('../convex/projectHostedAcceptance.ts'));
 const prior = Object.fromEntries(Object.keys(synthetic).map(key => [key, process.env[key]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -24,6 +29,125 @@ async function drainActive(f) {
     await f.execute(task);
   }
 }
+
+for (const identical of [true, false])
+  for (const followerFirst of [true, false, 'failed', 'legacy'])
+    test(`incident 62033ba2: owner-held predecessor releases its follower (${identical ? 'same' : 'changed'} tree, follower ${String(followerFirst)})`, async t => {
+      const f = await batchesFixture(t, {
+        count: 0,
+        batching: 'default',
+        batchMaxSize: 1,
+        ...(identical ? { memberPaths: ['shared.txt', 'shared.txt'], memberContents: ['same', 'same'] } : {}),
+      });
+      const full = JSON.stringify({ scope: 'full', tests: [] });
+      f.rawChecks.setPlanSelection(full);
+      await f.add(2);
+      await drainActive(f);
+      await f.passChecks();
+      await drainActive(f);
+      await f.add(0);
+      await f.add(1);
+      f.insert('cliCredentials', {
+        credentialId: 'held-replay',
+        owner: 'owner',
+        name: 'Synthetic device',
+        tokenHash: 'synthetic',
+        issuedAt: Date.now(),
+        scope: 'cli',
+        expiresAt: Date.now() + 3600000,
+        revoked: false,
+      });
+      await f.tx(
+        'requestOwnerHold',
+        approvals.request,
+        {
+          projectId: f.projectId,
+          operationId: randomUUID(),
+          laneId: f.entries[1].lane.laneId,
+          reason: 'Synthetic owner decision',
+        },
+        { subject: 'owner', forgeCredential: 'held-replay' },
+      );
+      await drainActive(f);
+      const original = f.runs().filter(run => run.status === 'queued');
+      assert.equal(original.length, 2);
+      const head = await f.rawChecks.activate(original[0].id);
+      const follower = await f.rawChecks.activate(original[1].id);
+      const rootRow = () =>
+        [...f.tables.projectHostedLandingRequests.values()].find(
+          row => row.submissionId === f.entries[1].state.id,
+        );
+      f.patch('projectHostedLandingRequests', rootRow()._id, { reservedUntil: Date.now() + 600000 });
+      if (followerFirst === true || followerFirst === 'legacy') {
+        await f.rawChecks.pass(follower);
+        await drainActive(f);
+      }
+      await f.rawChecks.pass(head);
+      if (followerFirst === 'legacy') {
+        // A pre-upgrade hold retained the train and reservation. Its next queue
+        // event must repair it without approval, a migration or a background sweep.
+        for (let step = 0; states(f)[1].phase !== 'ready'; step++) {
+          assert(step < 100);
+          await f.execute(f.pending().find(task => !task.name.startsWith('projectHostedLandingStall:')));
+        }
+        const row = rootRow(),
+          state = JSON.parse(row.value);
+        f.patch('projectHostedLandingRequests', row._id, {
+          orderLive: undefined,
+          runnable: false,
+          value: JSON.stringify({
+            ...state,
+            observation: landingObservation('waiting-for-review'),
+            error: { code: 'REVIEW_REQUIRED', message: 'Synthetic retained hold' },
+          }),
+        });
+      }
+      await drainActive(f);
+      const held = states(f)[1];
+      assert.equal(held.observation.pendingReason, 'waiting-for-review');
+      assert(![...f.tables.projectHostedLandingQueues.values()].some(row => row.train?.includes(held.id)));
+      assert.notEqual((await f.current(f.entries[2].state.id)).orderWait?.submissionId, held.id);
+      assert(!f.runs().find(run => run.id === follower.id).cancelRequested, 'keep the follower proof');
+      if (followerFirst !== true && followerFirst !== 'legacy') {
+        if (followerFirst === 'failed') await f.rawChecks.callback(f.rawChecks.complete(follower, 'failed'));
+        else await f.rawChecks.pass(follower);
+        await drainActive(f);
+      }
+      const afterCompose = f.runs().length;
+      assert.equal(
+        afterCompose,
+        3 + Number(!identical || followerFirst === 'failed'),
+        'baseline, predecessor, follower; only a changed tree rechecks',
+      );
+      for (const run of f.runs().filter(run => run.status === 'queued'))
+        await f.rawChecks.pass(await f.rawChecks.activate(run.id));
+      await drainActive(f);
+      const landed = states(f)[2];
+      assert.equal(landed.phase, 'landed', JSON.stringify(landed));
+      assert.equal(states(f)[1].observation.pendingReason, 'waiting-for-review');
+      const receipt = [...f.tables.projectHostedAcceptances.values()]
+        .map(row => JSON.parse(row.value))
+        .find(receipt => receipt.submissionId === landed.id);
+      assert.equal(receipt.check.runId === follower.id, identical && followerFirst !== 'failed');
+      assert.equal(
+        receipt.crossHeadProof?.algorithm,
+        identical && followerFirst !== 'failed' ? 'exact-tree-v1' : undefined,
+      );
+      assert.equal(f.pending().length, 0, 'owner hold costs zero while idle');
+      const approved = JSON.parse(
+        await f.tx('laterOwnerApproval', acceptance.approve, {
+          projectId: f.projectId,
+          submissionId: held.id,
+          attemptId: held.attemptId,
+        }),
+      );
+      assert.equal(approved.status, 'pending');
+      await drainActive(f);
+      await f.passChecks();
+      await drainActive(f);
+      assert(states(f).every(state => state.phase === 'landed'));
+      assert.equal(f.pending().length, 0);
+    });
 
 test('existing auto policies group by default; serial opts out and runner width is six', () => {
   const policy = policyPreset('trusted');

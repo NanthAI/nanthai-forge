@@ -34,7 +34,10 @@ export async function pipelinePredecessor(ctx: MutationCtx, input: LandingChanne
   // A suspect (51bbbd00) still checks, but nothing stacks on its unproven head.
   // Its descendants retired when it became suspect, so the rest of the train
   // never contains its changes. It still occupies an execution slot below.
-  const rows = live.filter((_, index) => !landingSuspect(states[index]!));
+  const rows = live.filter(
+    (_, index) =>
+      !landingSuspect(states[index]!) && states[index]!.observation.pendingReason !== 'waiting-for-review',
+  );
   if (!rows.length || rows.some(row => row.hold || (row.phase !== 'checking' && row.phase !== 'ready')))
     return undefined;
   const tail = rows.at(-1)!;
@@ -63,6 +66,7 @@ export async function predecessorStatus(ctx: MutationCtx, input: BatchIdentity, 
     projectId: input.projectId,
     submissionId: batch.predecessor.submissionId,
   });
+  if (state.observation.pendingReason === 'waiting-for-review') return 'invalid' as const;
   if (row.pipelineRetiredAttemptId === state.attemptId) return 'invalid' as const;
   if (state.phase === 'landed')
     return state.acceptance?.head === batch.predecessor.head &&
@@ -84,6 +88,7 @@ export function invalidatePipeline(
   input: BatchIdentity,
   batch: { members: { submissionId: string }[] },
   retireMembers = false,
+  ownerHold = false,
 ) {
   return retirePipeline(
     ctx,
@@ -96,5 +101,7 @@ export function invalidatePipeline(
       writeLanding,
     },
     retireMembers,
+    undefined,
+    ownerHold,
   );
 }

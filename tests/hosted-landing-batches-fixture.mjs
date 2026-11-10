@@ -151,6 +151,8 @@ export async function batchesFixture(
     }
     const lane = await f.c.lane(pin, { intentId, ...member.lane }),
       selection = f.c.selection([lane]);
+    const main = f.currentMain();
+    selection.request.expectedMain = { head: main.head, receiptId: main.receipt.id };
     selection.request.intentId = intentId;
     if (memberMessages?.[i] !== undefined) selection.request.message = memberMessages[i];
     // Seed the trusted owner provenance normally produced by start/save. The
@@ -160,6 +162,7 @@ export async function batchesFixture(
         if (row.kind === 'lane' && row.key === lane.laneId) f.patch(table, row._id, { ownerOnly: true });
     const candidate = await compose(f.c, selection);
     const request = f.request({
+      expectedMain: selection.request.expectedMain,
       ...(governanceVersion ? { governanceVersion } : {}),
       candidateId: candidate.id,
       expectedHead: candidate.result.head,

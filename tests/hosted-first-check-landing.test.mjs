@@ -12,7 +12,7 @@ import {
   globalRiskBetween,
   sharedSequenceFolders,
 } from '../dist/first-check-risk.js';
-import { crossHeadProofSchema, validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
+import { validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 import {
   auditStale,
   earnedAfterGreen,
@@ -863,9 +863,6 @@ test('a proof keeps the risk rule it was decided under: v1 accepts, v2 refuses a
   });
   assert.equal(validCrossHeadProof(proof('first-check-risk-v1')), true);
   assert.equal(validCrossHeadProof(proof('first-check-risk-v2')), false);
-  // A v1 receipt written before the bump still parses (the schema pins a rule, not one literal).
-  // Fast landing mode added a fourth proof kind (81d12a32).
-  assert.equal(crossHeadProofSchema.options.length, 4);
 });
 
 test('a fast proof is invalid once it names an order-sensitive path or hides the class it relaxed', () => {

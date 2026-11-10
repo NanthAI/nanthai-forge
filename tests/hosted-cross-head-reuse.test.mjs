@@ -197,6 +197,32 @@ function fixture({
   return { basis, selection, read, blobs, pin, metrics: () => ({ calls, maxWindow }) };
 }
 
+test('owner-hold reuse requires identical paths, hashes and modes, a full check and verified bytes', async () => {
+  const f = fixture({ risk: '.github/workflows/check.yml' });
+  const checked = JSON.parse(f.blobs.get(f.basis.checked.head));
+  const basis = { ...f.basis, head: f.pin({ ...checked, parents: [f.basis.main.head] }) };
+  const prove = (head = basis.head, selection = f.selection, read = f.read) =>
+    analyzeCrossHeadReuse({ ...basis, head }, selection, read, [], false, true);
+  const decision = await prove();
+  assert.equal(decision.proof.algorithm, 'exact-tree-v1');
+  assert(validCrossHeadProof(decision.proof));
+  assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 }, 'only four manifests and two selections');
+  for (const change of [
+    files => files.slice(1),
+    files => [{ ...files[0], path: 'renamed' }, ...files.slice(1)],
+    files => [{ ...files[0], blob: 'f'.repeat(64) }, ...files.slice(1)],
+    files => [{ ...files[0], mode: 'executable' }, ...files.slice(1)],
+  ])
+    assert.deepEqual(await prove(f.pin({ ...checked, files: change(checked.files) })), {
+      reason: 'composition-not-exact',
+    });
+  assert.deepEqual(await prove(basis.head, f.pin({ scope: 'docs' })), { reason: 'checked-not-full' });
+  assert.deepEqual(
+    await prove(basis.head, f.selection, async hashes => (await f.read(hashes)).map(() => Buffer.from('{}'))),
+    { reason: 'source-unavailable' },
+  );
+});
+
 test('clean path-disjoint composition lands on its first check from six small reads, no source text', async () => {
   const f = fixture(),
     { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['scripts/forge-check.mjs']);

@@ -262,6 +262,15 @@ the original member selections return to the queue and check again on surviving
 main. Other groups retain their evidence. Source and check completion events
 advance the pipeline; an idle queue schedules nothing.
 
+An owner-review hold releases the predicted predecessor and any file reservation at once.
+Dependent members retain their exact check bindings until those runs settle, then
+recompose their original selections on current main. A full passing check is reused
+only for an identical file tree (paths, blob hashes and modes), with the existing
+reuse policy, authority, runner and main-audit checks. Changed trees get fresh checks.
+A failed speculative run cannot fail the fresh composition. The owner-held submission
+keeps its review pins and returns on approval against main as it is then. Existing
+held trains are repaired on the next queue event, with no scan or idle timer.
+
 A composition conflict on an unaccepted predecessor is advisory. The existing
 `wouldConflict` notice names that predecessor group and the conflicting files;
 the rejected entry stays queued, with no agent action required. Only rejected members

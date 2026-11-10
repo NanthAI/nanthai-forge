@@ -46,6 +46,20 @@ export async function nextTrainLandingRow(
     const values = rows
       .filter(row => row !== null)
       .map(row => hostedLandingStateSchema.parse(JSON.parse(row.value)));
+    // Event repair for a train retained before owner holds released their stack.
+    // Uses the rows already read, with no sweep, idle timer or no-hold I/O.
+    const reviews = values.filter(state => state.observation.pendingReason === 'waiting-for-review');
+    if (reviews.length) {
+      for (const state of reviews)
+        await invalidatePipeline(
+          ctx,
+          { projectId: queue.projectId, batchId: state.id },
+          { members: [{ submissionId: state.id }] },
+          true,
+          true,
+        );
+      return nextTrainLandingRow(ctx, (await landingQueue(ctx, queue))!, now, held);
+    }
     const failed = new Set(
       values
         .filter(state => state.phase === 'terminal-failed')

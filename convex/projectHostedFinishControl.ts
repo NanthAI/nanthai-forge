@@ -165,6 +165,14 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
       return { kind: 'plan', value: plan, pin };
     }
     if (state.phase !== 'ready') return null; // H13's run/queue events resume it
+    if (
+      state.batchNeedsSoloCompose &&
+      !state.batchOriginId &&
+      landing.pipelineRetiredAttemptId === state.attemptId
+    ) {
+      await reserveFinishRetry(ctx, row, value, 'BATCH_FALLBACK');
+      return null;
+    }
     const selection = { ...input, attemptId: state.attemptId };
     const plan = await prepareAcceptance(ctx, selection);
     const kind = plan.inputsNext ? 'inputs' : 'dependencies';

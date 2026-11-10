@@ -97,6 +97,7 @@ export async function reservationAhead(
   let mine: string[] | null | undefined;
   for (const holder of holders) {
     const value = hostedLandingStateSchema.parse(JSON.parse(holder.value));
+    if (value.observation.pendingReason === 'waiting-for-review') continue;
     const grantedAt = holder._creationTime,
       reservedAt = row.reservedUntil !== undefined ? row._creationTime : undefined;
     // Cheap rules first: a later grant, an expired one or the same group never holds.

@@ -157,6 +157,12 @@
       "what": "Two first-check landings pass alone but fail together; recovery must revert the pair within one red episode without a manual fix.",
       "file": "tests/hosted-culprit.test.mjs",
       "test": "incident 438e9ace: two passing landings fail together and a later failed audit preserves one automatic pair recovery"
+    },
+    {
+      "incident": "62033ba2",
+      "what": "An owner-held predicted predecessor stranded a READY follower until someone approved the unrelated landing.",
+      "file": "tests/hosted-landing-pipeline.test.mjs",
+      "test": "incident 62033ba2: owner-held predecessor releases its follower (${identical ? 'same' : 'changed'} tree, follower ${String(followerFirst)})"
     }
   ]
 }

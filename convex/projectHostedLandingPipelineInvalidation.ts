@@ -27,6 +27,7 @@ async function invalidatePipelineOnce(
   store: PipelineStore,
   retireMembers = false,
   keep?: { head: string; receiptId: string },
+  ownerHold = false,
 ) {
   const { loadLanding, loadLandingAttempt, insertLandingAttempt, writeLanding } = store;
   const queue = await landingQueue(ctx, { projectId: input.projectId, channel: 'main' });
@@ -77,6 +78,28 @@ async function invalidatePipelineOnce(
         projectId: input.projectId,
         attemptId: state.attemptId,
       });
+      // An owner hold is not a failed check. Keep the old exact binding until
+      // it settles, then recompose this member's original selection on main.
+      // Only a byte-identical tree may carry this proof to that new Candidate.
+      if (ownerHold && parent.check) {
+        const { batchId: _batch, ...rest } = state;
+        void _batch;
+        await writeLanding(
+          ctx,
+          { ...row, pipelineRetiredAttemptId: state.attemptId },
+          {
+            ...rest,
+            batchSolo: true,
+            batchNeedsSoloCompose: true,
+            version: state.version + 1,
+            observation: landingObservation(state.phase === 'ready' ? 'queued' : 'checking'),
+            error: null,
+          },
+          state.phase !== 'ready',
+          false,
+        );
+        continue;
+      }
       const attempt = {
         ...original,
         id: crypto.randomUUID(),

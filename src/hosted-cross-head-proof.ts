@@ -94,12 +94,23 @@ const fastFirstCheckProof = z
     riskPaths: z.array(z.string().min(1)).max(32),
   })
   .strict();
+/** Recomposition changed ancestry only: the complete checked file tree, including
+ * paths, blob hashes and modes, is unchanged. Still requires the current audit. */
+const exactTreeProof = z
+  .object({
+    algorithm: z.literal('exact-tree-v1'),
+    ...basis,
+    checkedScope: z.literal('full'),
+    checkEntries: z.array(z.string()),
+  })
+  .strict();
 /** Server analysis of verified immutable bytes, never a client assertion. */
 export const crossHeadProofSchema = z.discriminatedUnion('algorithm', [
   conservativeImpactProof,
   cleanDisjointProofV1,
   cleanDisjointProof,
   fastFirstCheckProof,
+  exactTreeProof,
 ]);
 export type FastFirstCheckProof = z.infer<typeof fastFirstCheckProof>;
 /** A proof that needs the project's earned fast mode and a fresh audit when it is published. */
@@ -125,6 +136,7 @@ export function pathsOverlap(a: string[], b: string[]) {
   return a.some(x => inB.has(x) || underAny(x, inB)) || b.some(y => underAny(y, inA));
 }
 export function validCrossHeadProof(proof: CrossHeadProof) {
+  if (proof.algorithm === 'exact-tree-v1') return proof.checkedScope === 'full';
   const docs =
     proof.algorithm === 'clean-disjoint-v2' || proof.algorithm === 'fast-first-check-v1'
       ? proof.docsOverlap

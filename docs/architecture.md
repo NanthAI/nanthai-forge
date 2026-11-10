@@ -1592,7 +1592,11 @@ without a wake or poller. Eligible hosted automatic-accept projects group by
 default (`acceptance.landing: "serial"` opts out). Up to six groups check at once
 (`checks.concurrency` overrides), each on its predecessor's pinned head and final
 receipt. Publication retains exact-source evidence and queue order; a failed or
-changed predecessor invalidates only its dependent stack. Unstarted batches yield
+changed predecessor invalidates only its dependent stack. An owner-held submission leaves
+the predicted chain immediately and releases its reservation. Its followers recompose on
+current main; a full passed check carries only when every file path, blob and mode
+is identical, under the existing reuse policy and main-audit gates. Approval later
+recomposes the held submission on then-current main. Unstarted batches yield
 to urgent work before reserving
 a check; reserved checks continue. Admission runs (`acceptance.admissionCheck`; the default `"full"` is the
 [pre-queue Lane check](pre-queue-checks.md) on any runner, `false` opts out) hold no

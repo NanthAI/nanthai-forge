@@ -235,7 +235,17 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
         head: attempt.candidate.head,
         runId: run.id,
       });
-      if (hostedCheckTerminal(run) && semantic.overBudget) {
+      if (
+        hostedCheckTerminal(run) &&
+        state.batchNeedsSoloCompose &&
+        !state.batchOriginId &&
+        row.pipelineRetiredAttemptId === state.attemptId
+      ) {
+        // This speculative tree lost its owner-held predecessor. A failure on
+        // that tree cannot settle the member's fresh composition on main.
+        phase = 'ready';
+        observation = landingObservation('queued');
+      } else if (hostedCheckTerminal(run) && semantic.overBudget) {
         phase = 'terminal-failed';
         observation = landingObservation('failed', 'CONTRACT_OVER_BUDGET');
         error = {

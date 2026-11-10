@@ -43,7 +43,7 @@ export async function reuseContext(ctx: QueryCtx | MutationCtx, input: LandingId
 }
 export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingIdentity) {
   const { value } = await loadFinish(ctx, input);
-  const { state } = await loadLanding(ctx, input);
+  const { row: landing, state } = await loadLanding(ctx, input);
   // A batch publishes multiple same-head snapshots. The existing audit culprit
   // range does not prove a single-member reverse across those snapshots; retain
   // its one shared exact recheck rather than inventing recovery evidence.
@@ -188,6 +188,11 @@ export async function reuseDecision(ctx: QueryCtx | MutationCtx, input: LandingI
     actor: previous.actor.id,
     pendingId: value.pending.id,
     selection: run.plan.selection.sha256,
+    ...(state.batchNeedsSoloCompose &&
+    !state.batchOriginId &&
+    landing.pipelineRetiredAttemptId === state.attemptId
+      ? { exactTreeOnly: true }
+      : {}),
     // The project's own check and setup-action entry files are global-risk (any runner).
     checkEntries: checkRunEntryPaths(run.check),
     // Fast landing mode: the policy asks for it, the project has earned it, the audit is fresh.
