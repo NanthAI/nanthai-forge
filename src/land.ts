@@ -378,8 +378,6 @@ async function landOnce(
   );
 }
 
-export const driveLand = landOnce;
-
 /** Controllers alone execute the retained state machine. A waiting client only
  * reads the same durable handle and may disappear without changing its outcome. */
 export async function land(...args: Parameters<typeof landOnce>) {

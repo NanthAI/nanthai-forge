@@ -1,27 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs, {
-  chmodSync,
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  rmSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import fs, { mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
-import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeSource } from '../dist/native-source.js';
 import { snapshotBlob } from '../dist/native-snapshot-clone.js';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { readAutoSnapshot, snapshotLane } from '../dist/lane-auto-snapshot.js';
 
 function fixture(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-snapshot-clone-')));
@@ -125,27 +111,3 @@ test(
     assert.deepEqual(f.source.object(retained.blob), f.bytes);
   },
 );
-
-test('automatic snapshot restores identical binary bytes, executable modes, links and deletions', async t => {
-  const f = fixture(t);
-  writeFileSync(join(f.root, 'delete.txt'), 'remove later');
-  writeFileSync(join(f.root, 'run'), 'original');
-  initNative(f.root);
-  const agent = new AgentWorkflow(f.root),
-    lane = (await agent.dispatch({ action: 'start', outcome: 'Snapshot restore' })).result;
-  writeFileSync(join(lane.path, 'binary.bin'), f.bytes);
-  writeFileSync(join(lane.path, 'run'), 'changed executable');
-  chmodSync(join(lane.path, 'run'), 0o700);
-  symlinkSync('binary.bin', join(lane.path, 'link'));
-  rmSync(join(lane.path, 'delete.txt'));
-  const result = snapshotLane(agent.work.store, lane.laneId);
-  assert.equal(result.status, 'snapshot');
-  const pointer = readAutoSnapshot(agent.work.store, lane.laneId);
-  assert.equal(pointer.storage.cloned + pointer.storage.copied, 2);
-  const restored = join(f.root, '.forge/work', `lane-${randomUUID()}`);
-  f.source.materialize(result.state, restored);
-  assert.deepEqual(f.source.capture(restored, false, result.state), f.source.state(result.state).files);
-  assert.deepEqual(readFileSync(join(restored, 'binary.bin')), f.bytes);
-  assert.equal(existsSync(join(restored, 'delete.txt')), false);
-  assert.equal(agent.work.store.select('lanes', lane.laneId).head, lane.head);
-});

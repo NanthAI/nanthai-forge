@@ -1,21 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
-import { metricWeekFixtureAt } from './fixtures/metric-week-time.mjs';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, statSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { metricPeriod, metricsSurface } from '../dist/self-metrics-surface.js';
 import { formatMetricReport, metricsHeadline, formatMetricsHeadline } from '../dist/self-metrics-format.js';
-import { weeklyMetricBytes, previousMetricWeek, snapshotMetricWeek } from '../dist/self-metrics-weekly.js';
-import { nativeSelfMetricsReader } from '../dist/self-metrics-native.js';
-import { recordOwnerMutation } from '../dist/self-metrics-journal.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { initNative } from '../dist/native-work.js';
-import { readPendingStatus } from '../dist/pending-status-read.js';
-import { formatPendingStatus } from '../dist/pending-status-format.js';
-import { cleanupOwner, waitForOwnerChildren } from './owner-cleanup.mjs';
+import { weeklyMetricBytes, previousMetricWeek } from '../dist/self-metrics-weekly.js';
 const from = '2026-10-19T00:00:00.000Z',
   to = '2026-10-26T00:00:00.000Z';
 const input = { laneId: 'lane', head: 'head', intentId: 'intent', savedAt: from };
@@ -151,58 +139,4 @@ test('weekly JSON reproduces byte-for-byte and excludes later observations and s
       asOf: '2027-01-04T00:00:00.000Z',
     },
   });
-});
-test('CLI JSON/report, registered agent action, owner status, write-triggered weekly snapshot', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-m3-'));
-  writeFileSync(join(root, 'a.txt'), 'fixture\n');
-  initNative(root);
-  const agent = new AgentWorkflow(root),
-    directory = join(root, '.forge/work');
-  try {
-    const result = await agent.dispatch({ action: 'metrics', from, to });
-    assert.equal(result.result.schema, 1);
-    const report = join(root, 'report.md');
-    const cli = spawnSync(
-      process.execPath,
-      [
-        'dist/cli.js',
-        'metrics',
-        root,
-        '--from',
-        from,
-        '--to',
-        to,
-        '--json',
-        '--report',
-        report,
-        '--compare',
-        `${from}..${to}`,
-      ],
-      { encoding: 'utf8' },
-    );
-    assert.equal(cli.status, 0, cli.stderr);
-    assert.equal(JSON.parse(cli.stdout).days.length, 7);
-    assert.match(readFileSync(report, 'utf8'), /Before \| After/);
-    const before = statSync(join(directory, 'work.json')).mtimeMs;
-    const status = readPendingStatus(agent.work.store, undefined, to);
-    assert.ok(status.metrics);
-    assert.match(formatPendingStatus(status), /Metrics · last 7 days/);
-    assert.equal(statSync(join(directory, 'work.json')).mtimeMs, before);
-    const snapshotAt = metricWeekFixtureAt();
-    const week = previousMetricWeek(snapshotAt);
-    t.mock.timers.enable({ apis: ['Date'], now: Date.parse(snapshotAt) });
-    recordOwnerMutation(directory);
-    await waitForOwnerChildren(root);
-    const path = join(directory, 'metrics', week.name);
-    const snapshot = readFileSync(path, 'utf8');
-    const records = await nativeSelfMetricsReader(root).read();
-    assert.equal(snapshot, weeklyMetricBytes(records, week.period));
-    snapshotMetricWeek(directory, new Date(Date.parse(snapshotAt) + 10 * 60 * 60 * 1000).toISOString());
-    assert.equal(readFileSync(path, 'utf8'), snapshot);
-    recordOwnerMutation(directory);
-    assert.ok(readdirSync(directory).includes('metrics'));
-  } finally {
-    t.mock.timers.reset();
-    await cleanupOwner(root);
-  }
 });

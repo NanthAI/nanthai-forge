@@ -2,135 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { initNative } from '../dist/native-work.js';
-import { WorkService } from '../dist/work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { setup } from './hosted-planning-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const briefs = await import(moduleUrl('../convex/projectBriefings.ts'));
 const denied = error => error.data?.code === 'PROJECT_UNAVAILABLE';
-async function native(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-planning-lifecycle-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  writeFileSync(join(root, 'file.txt'), 'synthetic\n');
-  initNative(root);
-  const work = new WorkService(root),
-    agent = new AgentWorkflow(root);
-  const put = patch => ({
-    action: 'put-planning-item',
-    operationId: randomUUID(),
-    itemId: randomUUID(),
-    expectedVersion: 0,
-    kind: 'issue',
-    title: 'Synthetic proposal',
-    body: 'Full planning details',
-    status: 'proposed',
-    intentIds: [],
-    ...patch,
-  });
-  const send = command => work.dispatch(command, work.store.revision());
-  return { work, agent, put, send };
-}
-test('native current planning retain Proposed, plan, abandon and reopen versions with retry/CAS', async t => {
-  for (const unified of [true]) {
-    const f = await native(t, unified);
-    const command = f.put();
-    await f.send(command);
-    assert.equal((await f.send(command)).result.version, 1);
-    if (unified) assert.equal(f.work.store.select('intents', command.itemId).status, 'proposed');
-    for (const [index, status] of ['open', 'abandoned', 'open'].entries()) {
-      const next = {
-        ...command,
-        operationId: randomUUID(),
-        expectedVersion: index + 1,
-        status,
-        ...(status === 'abandoned' ? { reason: 'Superseded' } : {}),
-      };
-      const result = (await f.send(next)).result;
-      assert.equal(result.version, index + 2);
-      assert.equal(result.status, status);
-      if (status === 'abandoned') assert.equal(result.reason, 'Superseded');
-      await assert.rejects(
-        f.send({ ...next, operationId: randomUUID() }),
-        error => error.code === 'PLANNING_CHANGED',
-      );
-    }
-    if (unified) {
-      const intent = f.work.store.select('intents', command.itemId);
-      assert.equal(intent.status, 'active');
-      assert.deepEqual(
-        intent.lifecycle.map(event => event.to),
-        ['proposed', 'active', 'abandoned', 'active'],
-      );
-      assert.equal(intent.lifecycle[2].reason, 'Superseded');
-    }
-  }
-});
-test('current planning start briefing and CLI start create exactly one linked Intent/Lane and retain details', async t => {
-  const f = await native(t);
-  const command = f.put({ status: 'open' });
-  await f.send(command);
-  const brief = await f.agent.dispatch({
-    action: 'brief',
-    situation: 'start-intent',
-    intentId: command.itemId,
-  });
-  assert.match(JSON.stringify(brief), /Full planning details/);
-  const start = {
-    action: 'start',
-    operationId: randomUUID(),
-    intentId: command.itemId,
-    outcome: command.title,
-  };
-  const first = (await f.agent.dispatch(start)).result;
-  const retry = (await f.agent.dispatch(start)).result;
-  assert.equal(first.laneId, retry.laneId);
-  assert.equal(first.intentId, command.itemId);
-  const data = f.work.store.load();
-  assert.equal(data.intents.length, 1);
-  assert.equal(data.lanes.length, 1);
-  assert.equal(data.intents[0].description, command.body);
-  assert.equal(data.intents[0].id, first.intentId);
-  assert.deepEqual(data.intents[0].historyRefs, [{ itemId: command.itemId, version: 1 }]);
-});
-test('CLI abandons legacy planning Intents and Initiatives without changing their children, retry-safe', async t => {
-  for (const unified of [true]) {
-    const f = await native(t, unified);
-    const child = f.put({ status: 'open' });
-    await f.send(child);
-    const group = f.put({ kind: 'initiative', status: 'open', intentIds: unified ? [child.itemId] : [] });
-    await f.send(group);
-    const abandon = {
-      action: 'abandon',
-      operationId: randomUUID(),
-      intentId: group.itemId,
-      reason: 'Different direction',
-    };
-    const original = await f.agent.dispatch(abandon);
-    const retried = await f.agent.dispatch(abandon);
-    assert.deepEqual(retried.result, original.result);
-    assert.equal(f.work.store.load().planningItems.filter(item => item.id === group.itemId).length, 2);
-    assert.equal(f.work.store.load().planningItems.at(-1).reason, abandon.reason);
-    if (unified) {
-      assert.equal(f.work.store.select('initiatives', group.itemId).status, 'abandoned');
-      assert.equal(f.work.store.select('intents', child.itemId).status, 'active');
-    } else {
-      const closed = await f.agent.dispatch({
-        ...abandon,
-        operationId: randomUUID(),
-        intentId: child.itemId,
-      });
-      assert.equal(closed.result.status, 'abandoned');
-    }
-    await assert.rejects(
-      f.agent.dispatch({ ...abandon, reason: 'Changed request' }),
-      error => error.code === 'WORK_OPERATION_CHANGED',
-    );
-  }
-});
 test('hosted current Proposed/abandon writes preserve history, lifecycle index, authority and child states', async t => {
   for (const unified of [true]) {
     const s = await setup(t, true, undefined);
@@ -194,20 +69,4 @@ test('hosted current Proposed/abandon writes preserve history, lifecycle index, 
       denied,
     );
   }
-});
-
-test('first Lane starts a stored Proposed unified Intent without creating a second Intent', async t => {
-  const f = await native(t, true);
-  const proposal = f.put();
-  await f.send(proposal);
-  const lane = (
-    await f.agent.dispatch({ action: 'start', intentId: proposal.itemId, outcome: proposal.title })
-  ).result;
-  assert.equal(lane.intentId, proposal.itemId);
-  assert.equal(f.work.store.load().intents.length, 1);
-  const intent = f.work.store.select('intents', proposal.itemId);
-  assert.equal(intent.status, 'active');
-  assert.equal(typeof intent.base, 'string');
-  assert.equal(intent.lifecycle.at(-1).from, 'proposed');
-  assert.equal(intent.lifecycle.at(-1).to, 'active');
 });

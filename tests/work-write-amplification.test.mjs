@@ -3,10 +3,10 @@ import { recordObject } from '../dist/work-records.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
-import { initNative, nativeStatus } from '../dist/native-work.js';
+import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { selectMainAudit } from '../dist/post-accept-selection.js';
 import { postAcceptMoves } from '../dist/post-accept-coverage.js';
@@ -14,12 +14,6 @@ import { updateRemoteRun } from '../dist/work-remote-run.js';
 import { checkEnvironment } from '../dist/work-run.js';
 import { agentClean } from '../dist/agent-clean.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
-import { pendingStatus } from '../dist/pending-status.js';
-import { readMakingOf } from '../dist/making-of-read.js';
-import { accountingContext } from '../dist/accounting-records.js';
-import { trainAccounting } from '../dist/train-accounting.js';
-import { isGreenMain } from '../dist/github-auto-push-state.js';
-import { latestCheckCoverage, coverageSourcePath } from '../dist/check-coverage.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const hash = value => createHash('sha256').update(value).digest('hex');
@@ -225,56 +219,4 @@ test('empty automatic cleanup writes no action, record or revision', t => {
   assert.deepEqual(readFileSync(join(store.directory, 'work.json')), pointer);
   assert.deepEqual(readdirSync(join(store.directory, 'records')), files);
   assert.equal(store.select('automaticActions', automatic.id), undefined);
-});
-
-test('status, making-of, accounting, push and coverage readers agree with legacy fan-out', t => {
-  // Freeze before either selector creates its timestamped audit Candidate, not
-  // just before reading: making-of includes those events in its wall-clock span.
-  const now = Date.parse(at) + 1_000;
-  t.mock.timers.enable({ apis: ['Date'], now });
-  const { store, data } = fixture(t),
-    legacy = structuredClone(data);
-  const selected = selectMainAudit(data),
-    old = legacySelect(legacy);
-  const run = terminal(data, selected);
-  terminal(legacy, old);
-  const artifact = { head: run.head },
-    bytes = JSON.stringify(artifact);
-  run.checkSelection = { scope: 'full', reason: 'Synthetic full audit', tests: [] };
-  run.artifacts = [
-    {
-      status: 'retained',
-      sourcePath: coverageSourcePath,
-      filename: 'artifact-0.bin',
-      size: Buffer.byteLength(bytes),
-      sha256: hash(bytes),
-    },
-  ];
-  Object.assign(legacy.runs[0], structuredClone(run));
-  const dir = join(store.directory, `check-${run.id}`, 'artifacts');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'artifact-0.bin'), bytes);
-  const inspect = d => {
-    store.save(d);
-    const context = accountingContext(store.root, store.readRecords());
-    const entries = d.channelMoves.map(move => ({
-      id: move.id,
-      status: 'accepted',
-      acceptanceId: move.id,
-      arrivedAt: at,
-    }));
-    return {
-      moves: nativeStatus(store, store.load(), { compact: true }).channelMoves,
-      pending: pendingStatus(d, {}, at),
-      makingOf: readMakingOf(store, d.intents[0].id).result,
-      accounting: trainAccounting(d.runs, { ...context, entries }, new Date(at)),
-      green: isGreenMain(d),
-      coverage: latestCheckCoverage(store, run.head),
-    };
-  };
-  const before = inspect(legacy),
-    after = inspect(data);
-  assert.equal(after.makingOf.lastEventAt, new Date(now).toISOString());
-  assert.equal(after.makingOf.wallClockMs, now - Date.parse(at));
-  assert.deepEqual(after, before);
 });

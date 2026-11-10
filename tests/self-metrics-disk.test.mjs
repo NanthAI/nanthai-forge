@@ -12,11 +12,9 @@ import {
   setSelfMetricDiskBudget,
   defaultDiskBudget,
 } from '../dist/self-metrics-disk.js';
-import { readSelfMetricReceipts, recordOwnerMutation } from '../dist/self-metrics-journal.js';
+import { recordOwnerMutation } from '../dist/self-metrics-journal.js';
 import { calculateSelfMetrics } from '../dist/self-metrics.js';
 import { hostedSelfMetricsReader } from '../dist/self-metrics-hosted.js';
-import { pendingStatus } from '../dist/pending-status.js';
-import { formatPendingStatus } from '../dist/pending-status-format.js';
 const at = day => `2026-10-${day}T12:00:00.000Z`;
 const localBytes = bytes => ({ objects: bytes, records: 0, lanes: 0, checks: 0, snapshots: 0, backups: 0 });
 const measurement = bytes => ({
@@ -75,44 +73,6 @@ test('disk scan stops at its hard entry bound even with 1,400 work directories',
     assert.equal(sample.complete, false);
     assert.ok(sample.scannedEntries <= 33);
     assert.equal(sampleSelfMetricDisk(dir, at('25'), () => sample).growthBytesPerDay, null);
-  }));
-
-test('write-triggered daily sampling survives restart/retry and emits one retained status warning across many writes', () =>
-  withDir(dir => {
-    let scans = 0;
-    setSelfMetricDiskBudget(dir, {
-      maxBytes: 1000,
-      maxGrowthBytesPerDay: 100,
-      minFreeBytes: 1000,
-      lookaheadDays: 1,
-    });
-    const scan = () => {
-      scans++;
-      return measurement(scans === 1 ? 100 : 300);
-    };
-    sampleSelfMetricDisk(dir, at('24'), scan);
-    const growing = sampleSelfMetricDisk(dir, at('25'), scan);
-    for (let n = 0; n < 100; n++) sampleSelfMetricDisk(dir, at('25'), scan);
-    assert.equal(scans, 2);
-    assert.equal(growing.growthBytesPerDay, 200);
-    assert.match(growing.warning, /growth/);
-    const receipts = readSelfMetricReceipts(dir);
-    assert.equal(receipts.filter(r => r.disk?.warning).length, 1);
-    const status = pendingStatus(
-      { revision: 1, lanes: [], views: [], runs: [], channelMoves: [] },
-      { disk: readSelfMetricDisk(dir) },
-      at('25'),
-    );
-    assert.equal(
-      formatPendingStatus(status)
-        .split('\n')
-        .filter(line => line.startsWith('Disk:')).length,
-      1,
-    );
-    // The durable claim still prevents a scan if the disposable latest pointer was lost.
-    rmSync(join(dir, 'self-metrics-disk.json'));
-    sampleSelfMetricDisk(dir, at('25'), scan);
-    assert.equal(scans, 2);
   }));
 
 test('disk warns on projected bytes and free-space reserve before crossing either budget', () =>

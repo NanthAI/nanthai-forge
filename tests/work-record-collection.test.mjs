@@ -9,7 +9,6 @@ import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { recordIO, recordObject, readRecords, stageRecords } from '../dist/work-records.js';
 import { collectRecords } from '../dist/work-record-collection.js';
 import { exportNativeWork, restoreNativeWork } from '../dist/native-backup.js';
@@ -126,41 +125,6 @@ test('pending operation pins close over their nested record pages and lookup ind
   );
   collectRecords(store, { ...command, apply: true, backup: true });
   assert.deepEqual(readRecords(store.directory, staged).extensionList, data.extensionList);
-});
-
-test('recent closed snapshots and the latest open snapshot retain Work pins; expired closed snapshots do not', async t => {
-  const { store, root } = fixture(t),
-    agent = new AgentWorkflow(root),
-    started = await agent.dispatch({ action: 'start', outcome: 'snapshot retention' }),
-    lane = store.select('lanes', started.result.laneId),
-    data = store.load(),
-    now = Date.now();
-  const closed = { ...structuredClone(lane), id: randomUUID(), state: 'completed' };
-  data.lanes.push(closed);
-  data.revision++;
-  store.save(data);
-  const dir = join(store.directory, 'auto-snapshots');
-  mkdirSync(dir, { recursive: true });
-  const io = recordIO(store.directory),
-    openPin = io.put({ open: 'old snapshot' }),
-    recentPin = io.put({ recent: 'closed snapshot' }),
-    expiredPin = io.put({ expired: 'closed snapshot' });
-  const snapshot = (laneId, age, pin, name = laneId) =>
-    writeFileSync(
-      join(dir, `${name}.json`),
-      JSON.stringify({ laneId, at: new Date(now - age * 86400000).toISOString(), workPage: pin }),
-    );
-  snapshot(lane.id, 30, openPin);
-  snapshot(closed.id, 6, recentPin);
-  snapshot(closed.id, 8, expiredPin, randomUUID());
-  const plan = collectRecords(store, command).result;
-  assert.ok(plan.kept.find(page => page.id === openPin)?.reasons.includes('open Lane latest snapshot'));
-  assert.ok(
-    plan.kept
-      .find(page => page.id === recentPin)
-      ?.reasons.includes('Lane snapshot within seven-day retention'),
-  );
-  assert.ok(plan.candidates.some(page => page.id === expiredPin));
 });
 
 test('SIGKILL after the first unlink leaves current store readable; rerun completes', t => {

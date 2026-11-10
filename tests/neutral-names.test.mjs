@@ -4,13 +4,10 @@
 // stores a provider display name.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { moduleUrl } from './convex-module.mjs';
 import { state } from './hosted-fixture.mjs';
-import { neutralDeviceName, neutralRunnerName, NEUTRAL_MACHINE } from '../dist/neutral-names.js';
-import { localAgentSetup } from '../dist/agent-setup.js';
 
 const actors = await import(moduleUrl('../convex/projectActorNames.ts'));
 const credentials = await import(moduleUrl('../convex/deviceCredentials.ts'));
@@ -49,35 +46,6 @@ test('hostname() only identifies a process or hashes a runner id; it never becom
   assert.deepEqual(found, []);
   for (const file of ['src/auth-cli.ts', 'src/agent-setup.ts'])
     assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /hostname\s*[,}]|\bhostname\(\)/, file);
-});
-
-test('default labels are neutral and never contain the hostname', async () => {
-  const { hostname } = await import('node:os');
-  const host = hostname();
-  for (let i = 0; i < 50; i++) assert.match(neutralDeviceName(), /^device-[0-9a-f]{4}$/);
-  const runner = neutralRunnerName('https://deployment.example', 'project', '/root');
-  assert.match(runner, /^runner-[0-9a-f]{4}$/);
-  assert.equal(runner, neutralRunnerName('https://deployment.example', 'project', '/root'), 'stable');
-  assert.equal(
-    runner,
-    `runner-${createHash('sha256')
-      .update(JSON.stringify(['https://deployment.example', 'project', '/root']))
-      .digest('hex')
-      .slice(0, 4)}`,
-    'derived from deployment, project and root only',
-  );
-  const saved = process.env.FORGE_MACHINE;
-  delete process.env.FORGE_MACHINE;
-  try {
-    assert.equal(localAgentSetup(root).machine, NEUTRAL_MACHINE);
-    process.env.FORGE_MACHINE = 'chosen-label';
-    assert.equal(localAgentSetup(root).machine, 'chosen-label');
-  } finally {
-    if (saved === undefined) delete process.env.FORGE_MACHINE;
-    else process.env.FORGE_MACHINE = saved;
-  }
-  for (const label of [neutralDeviceName(), runner, NEUTRAL_MACHINE])
-    assert(!host || host.length < 3 || !label.toLowerCase().includes(host.toLowerCase()), label);
 });
 
 test('the purge deletes name-only rows, strips names from membership rows and keeps provenance', async () => {

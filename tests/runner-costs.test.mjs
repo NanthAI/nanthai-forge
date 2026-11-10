@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, symlinkSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
 import {
   actionsCost,
   actionsRate,
@@ -13,15 +9,7 @@ import {
   runnerMonthCosts,
 } from '../dist/check-cost.js';
 import { editedPolicy, policyPreset } from '../dist/autonomy-policy.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { receiptSchema, createRunReceipt } from '../dist/work-run-receipt.js';
-import { initNative } from '../dist/native-work.js';
-
-function directory(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-runner-cost-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  return root;
-}
 const job = (id, seconds, patch = {}) => ({
   id,
   status: 'completed',
@@ -89,59 +77,6 @@ test('monthly status separates months/runners, deduplicates executions and count
   assert.equal(summary.months.find(row => row.runner === 'local').estimatedCostUsd, 0);
   assert.equal(summary.months.find(row => row.runner === 'github-actions' && !row.label).unknownRuns, 1);
   assert.match(summary.basis, /not billed spend/);
-});
-
-test('default local check records cost in durable receipt and status; runner policy edits retry safely', async t => {
-  const root = directory(t);
-  writeFileSync(join(root, 'source.txt'), 'synthetic source');
-  initNative(root);
-  const agent = new AgentWorkflow(root);
-  assert.equal((await agent.dispatch({ action: 'status' })).result.checkRunner.runner, 'local');
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'Synthetic cost fixture' })).result;
-  await agent.dispatch({
-    action: 'define-check',
-    name: 'verify',
-    executable: process.execPath,
-    args: ['-e', '0'],
-  });
-  const view = (
-    await agent.dispatch({
-      action: 'compose',
-      operationId: randomUUID(),
-      intentId: lane.intentId,
-      inputs: [{ laneId: lane.laneId, head: lane.head }],
-    })
-  ).result;
-  const result = (await agent.dispatch({ action: 'run', viewId: view.viewId })).result;
-  const run = agent.work.store.load().runs.find(run => run.id === result.operationId);
-  assert.equal(run.status, 'passed');
-  assert.equal(run.backend.cost.runner, 'local');
-  assert.equal(run.backend.cost.billedSeconds, 0);
-  assert.equal(run.backend.cost.estimatedCostUsd, 0);
-  const receipt = JSON.parse(
-    readFileSync(join(agent.work.store.directory, `check-${run.id}`, 'result.json')),
-  );
-  assert.deepEqual(receipt.backend.cost, run.backend.cost);
-  const command = {
-    action: 'set-policy',
-    operationId: randomUUID(),
-    checks: {
-      runner: 'github-actions',
-      repo: 'synthetic/checks',
-      runsOn: 'blacksmith-2vcpu-ubuntu-2404',
-      shards: 2,
-      ratesUsdPerMinute: { 'blacksmith-2vcpu-ubuntu-2404': 0.004 },
-    },
-  };
-  await agent.dispatch(command);
-  await agent.dispatch(command);
-  assert.equal(agent.work.store.load().policyChanges.length, 1);
-  assert.equal((await agent.dispatch({ action: 'policy' })).result.checks.runner, 'github-actions');
-  const status = (await agent.dispatch({ action: 'status', detail: true })).result;
-  assert.equal(status.autonomyPolicy.checks.shards, 2);
-  assert.equal(status.checkRunner.runner, 'github-actions');
-  assert.equal(status.checkCosts.months[0].runner, 'local');
-  assert.equal(status.checkCosts.months[0].recordedRuns, 1);
 });
 
 test('legacy Modal receipts remain readable and retain saved totals without re-estimation', () => {

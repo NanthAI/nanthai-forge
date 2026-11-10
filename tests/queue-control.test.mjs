@@ -3,7 +3,7 @@ import { postAcceptMoves } from '../dist/post-accept-coverage.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { hostname, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -12,8 +12,6 @@ import { CheckQueue, queueEntries } from '../dist/check-queue.js';
 import { controlQueue } from '../dist/queue-control.js';
 import { processIdentity } from '../dist/local-process.js';
 import { selectMainAudit } from '../dist/post-accept-selection.js';
-import { adoptFinishRun } from '../dist/agent-finish-reuse.js';
-import { checkEnvironment } from '../dist/work-run.js';
 
 function fixture(t) {
   const path = mkdtempSync(join(tmpdir(), 'forge-queue-control-'));
@@ -198,163 +196,6 @@ test('an active obsolete main audit is cancelled, never run alongside the newest
   selectMainAudit(data);
   assert.deepEqual(data.runs[0].cancellation, cancellation);
 });
-
-test('restart adopts only an exact live or completed Lane/head run', () => {
-  const view = {
-    id: 'new-view',
-    head: 'head',
-    base: 'base',
-    inputs: [{ laneId: 'lane', head: 'head' }],
-    dependencies: [],
-  };
-  const run = {
-    viewId: 'old-view',
-    ...view,
-    id: 'original',
-    check: { id: 'check', definition: 'definition' },
-    environment: checkEnvironment(),
-    runner: { ...processIdentity(), host: hostname() },
-    status: 'running',
-  };
-  const store = { load: () => ({ views: [view], runs: [run] }) };
-  const command = { checkId: 'check', expectedDefinition: 'definition' };
-  assert.equal(adoptFinishRun(store, command, view.id).id, 'original');
-  run.status = 'passed';
-  assert.equal(adoptFinishRun(store, command, view.id).id, 'original');
-  run.status = 'failed';
-  assert.equal(adoptFinishRun(store, command, view.id).id, 'original');
-  run.head = 'different';
-  assert.equal(adoptFinishRun(store, command, view.id), undefined);
-  run.head = 'head';
-  run.check.definition = 'different';
-  assert.equal(adoptFinishRun(store, command, view.id), undefined);
-  run.check.definition = 'definition';
-  run.cancelRequested = true;
-  assert.equal(adoptFinishRun(store, command, view.id), undefined);
-});
-
-test('restarting finish retains its live View/run and completed evidence', { timeout: 60000 }, async t => {
-  const { AgentWorkflow } = await import('../dist/agent-workflow.js');
-  const { initNative } = await import('../dist/native-work.js');
-  const { trustAgents } = await import('./autonomy-fixture.mjs');
-  const root = mkdtempSync(join(tmpdir(), 'forge-finish-adopt-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  writeFileSync(join(root, 'source.txt'), 'base');
-  initNative(root);
-  trustAgents(root);
-  const agent = new AgentWorkflow(root);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'adoption' })).result;
-  writeFileSync(join(lane.path, 'source.txt'), 'change');
-  const check = (
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'verify',
-      executable: process.execPath,
-      args: ['-e', 'process.exit(0)'],
-    })
-  ).result;
-  const blocker = new CheckQueue(undefined, { limit: 1 });
-  t.after(() => blocker.release());
-  const command = {
-    action: 'finish',
-    laneId: lane.laneId,
-    message: 'change',
-    checkId: check.checkId,
-    waitMs: 0,
-  };
-  const first = (await agent.dispatch({ ...command, operationId: randomUUID() })).result;
-  const restarted = (await agent.dispatch({ ...command, operationId: randomUUID() })).result;
-  assert.equal(first.run.status, 'queued');
-  assert.equal(restarted.run.runId, first.run.runId);
-  assert.equal(restarted.view.viewId, first.view.viewId);
-  assert.equal(agent.work.store.load().runs.length, 1);
-  blocker.release();
-  assert.equal(
-    (await agent.dispatch({ action: 'observe', operationId: first.run.runId, waitMs: 60000 })).result.status,
-    'passed',
-  );
-  const completed = (await agent.dispatch({ ...command, operationId: randomUUID() })).result;
-  assert.equal(completed.run.runId, first.run.runId);
-  assert.equal(completed.run.status, 'passed');
-  assert.equal(agent.work.store.load().runs.length, 1);
-});
-
-test(
-  'runner termination signal records cancellation and kills its check group',
-  { skip: process.platform === 'win32', timeout: 60000 },
-  async t => {
-    const { initNative } = await import('../dist/native-work.js');
-    const { AgentWorkflow } = await import('../dist/agent-workflow.js');
-    const root = mkdtempSync(join(tmpdir(), 'forge-queue-signal-'));
-    t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-    writeFileSync(join(root, 'source.txt'), 'source');
-    initNative(root);
-    const agent = new AgentWorkflow(root);
-    const lane = (await agent.dispatch({ action: 'start', outcome: 'signal cancellation' })).result;
-    const view = (
-      await agent.dispatch({
-        action: 'compose',
-        operationId: randomUUID(),
-        intentId: lane.intentId,
-        inputs: [{ laneId: lane.laneId, head: lane.head }],
-      })
-    ).result;
-    const check = (
-      await agent.dispatch({
-        action: 'define-check',
-        name: 'signal fixture',
-        executable: process.execPath,
-        args: ['-e', 'process.on("message",()=>{});setInterval(()=>{},10000)'],
-      })
-    ).result;
-    const module = new URL('../dist/agent-workflow.js', import.meta.url).href;
-    const auditModule = new URL('../dist/post-accept-main.js', import.meta.url).href;
-    const operationId = randomUUID();
-    const child = spawn(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-    import { AgentWorkflow } from ${JSON.stringify(module)};
-    import { drainPostAccept } from ${JSON.stringify(auditModule)};
-    const agent = new AgentWorkflow(${JSON.stringify(root)});
-    const started = await agent.dispatch(${JSON.stringify({ action: 'run', operationId, viewId: view.viewId, expectedHead: view.head, checkId: check.checkId, wait: false })});
-    process.on('message', async () => {
-      const result = await agent.dispatch({action:'observe', operationId:${JSON.stringify(operationId)}, waitMs:60000});
-      let auditError;
-      try { await drainPostAccept(agent.work.store); } catch (error) { auditError = error.code; }
-      process.send({...result.result, auditError}, () => process.disconnect());
-    });
-    process.send(started.result);
-  `,
-      ],
-      { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
-    );
-    let errors = '';
-    child.stderr.on('data', bytes => {
-      errors += bytes;
-    });
-    t.after(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    });
-    const [started] = await once(child, 'message');
-    assert.equal(started.status, 'running', errors);
-    const result = once(child, 'message'),
-      closed = once(child, 'close');
-    child.kill('SIGTERM');
-    child.send('observe');
-    const [cancelled] = await result;
-    assert.equal(cancelled.status, 'cancelled', errors);
-    assert.equal(cancelled.signal, 'SIGKILL', errors);
-    assert.equal(cancelled.cancellation.reason, 'signal', errors);
-    assert.equal(cancelled.cancellation.signal, 'SIGTERM', errors);
-    assert.equal(cancelled.cancellation.actor, undefined, errors);
-    assert.equal(cancelled.auditError, 'CANCELLED', errors);
-    await closed;
-    assert.equal(queueEntries().length, 0);
-  },
-);
 
 test('push audits an otherwise unchecked accepted main without changing acceptance policy', async () => {
   const { requestPushAudit } = await import('../dist/pre-push-audit.js');

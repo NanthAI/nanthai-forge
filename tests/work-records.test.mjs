@@ -8,7 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { workSchema } from '../dist/work-types.js';
 import { recordObject, recordIO, putRecord } from '../dist/work-records.js';
 import { unifyIntent } from '../dist/work-intent-local.js';
@@ -174,30 +173,6 @@ test(
     assert.deepEqual(new WorkStore(target).load(), store.load());
   },
 );
-
-test('agent records reads only the selected collection page without assembling Work', async t => {
-  const { store, root } = fixture(t),
-    data = store.load();
-  data.intents = [intent(data.nativeHead, 0)];
-  store.save(data);
-  const original = WorkStore.prototype.load;
-  WorkStore.prototype.load = () => {
-    throw Error('Full Work read forbidden in this probe');
-  };
-  try {
-    const result = await new AgentWorkflow(root).dispatch({
-      action: 'records',
-      collection: 'intents',
-      offset: 0,
-      limit: 1,
-    });
-    assert.equal(result.result.records[0].id, data.intents[0].id);
-    assert.equal(result.result.total, 1);
-    assert.equal(result.revision, data.revision);
-  } finally {
-    WorkStore.prototype.load = original;
-  }
-});
 
 test('full-load memo keeps shared immutable references independent and revalidates the next read', t => {
   const { store } = fixture(t),

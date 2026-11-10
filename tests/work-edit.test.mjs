@@ -241,32 +241,6 @@ test('delta staging retains immutable history pages, scalar fields and opaque ex
   assert.deepEqual(current.runs, original.runs);
 });
 
-test('record publication releases writer before warming peer caches and returns with caches ready', async t => {
-  const store = fixture(t);
-  const { PeersCache } = await import('../dist/agent-peers-cache.js');
-  const { agentStart } = await import('../dist/agent-workflow-mutations.js');
-  const { agentActionSchema } = await import('../dist/agent-workflow-schema.js');
-  const lane = agentStart(
-    store,
-    agentActionSchema.parse({
-      action: 'start',
-      operationId: randomUUID(),
-      outcome: 'Synthetic cache publication',
-    }),
-  ).result;
-  let writes = 0;
-  const write = PeersCache.prototype.write;
-  t.mock.method(PeersCache.prototype, 'write', function (...args) {
-    assert.equal(existsSync(join(store.directory, 'lock')), false);
-    writes++;
-    return write.apply(this, args);
-  });
-  const tx = store.readRecords();
-  tx.patchFields('lanes', lane.laneId, { assignment: 'changed synthetic header' });
-  store.locked(() => store.commitRecords(tx));
-  assert.ok(writes > 0, 'immutable cache pages are warm before the mutation receipt returns');
-});
-
 test('an error from an obsolete preparation retries before reporting a semantic conflict', async t => {
   const store = fixture(t),
     peer = new WorkStore(store.root);

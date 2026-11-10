@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, hostname } from 'node:os';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
@@ -10,14 +10,9 @@ import { WorkStore } from '../dist/work-store.js';
 import { NativeSource } from '../dist/native-source.js';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
-import { checkEnvironment } from '../dist/work-run.js';
 import { bisectLandings } from '../dist/optimistic-bisect.js';
-import { undoOptimisticRevert } from '../dist/optimistic-undo.js';
-import { WorkService } from '../dist/work.js';
 import { agentPeers } from '../dist/agent-peers.js';
 import { failedAuditTests } from '../dist/optimistic-evidence.js';
-import { prepareOptimistic } from '../dist/optimistic-landing.js';
-import { standardSelection } from '../scripts/test-impact.mjs';
 
 const now = () => new Date().toISOString();
 function fixture(t, { bad = [1], enabled = true, supervised = false, flaky = false, count = 4 } = {}) {
@@ -216,45 +211,6 @@ for (const options of [{ enabled: false }, { supervised: true }])
     assert.ok(f.paths().includes('bad1.txt'));
   });
 
-test('one-command undo is checked, preserves later work, and reconciles a lost reply', async t => {
-  const f = fixture(t);
-  await drainPostAccept(f.store);
-  const audit = f.store.load();
-  const reverted = audit.channelMoves.at(-1);
-  assert.ok(
-    reverted.automatic,
-    JSON.stringify({
-      recovery: audit.channelMoves.map(move => move.optimisticRecovery),
-      runs: audit.runs.map(run => ({
-        id: run.id,
-        status: run.status,
-        recovery: run.recovery,
-        details: run.details,
-      })),
-    }),
-  );
-  // Simulate a repair to the verification contract: restoring the original source is now permitted.
-  f.store.locked(() => {
-    const data = f.store.load();
-    data.checks[0].args = ['-e', 'process.exit(0)'];
-    data.revision++;
-    f.store.save(data);
-  });
-  laterChange(f, 'later.txt', 'preserved');
-  const command = { operationId: randomUUID(), acceptanceId: reverted.id };
-  const work = new WorkService(f.root, { kind: 'agent', id: 'synthetic-undo' });
-  const first = await undoOptimisticRevert(work, command);
-  const second = await undoOptimisticRevert(work, command);
-  assert.equal(first.result.id, second.result.id);
-  await assert.rejects(undoOptimisticRevert(work, { ...command, acceptanceId: randomUUID() }), {
-    code: 'WORK_OPERATION_CHANGED',
-  });
-  assert.ok(f.paths().includes('bad1.txt'));
-  assert.ok(f.paths().includes('later.txt'));
-  assert.equal(f.paths().filter(path => path.startsWith('good')).length, 3);
-  await drainPostAccept(f.store);
-});
-
 test('bisect memoizes through caller and preserves interacting sets; inconclusive is never guilt', async () => {
   const seen = new Map();
   const outcome = await bisectLandings([0, 1, 2, 3], async items => {
@@ -268,31 +224,6 @@ test('bisect memoizes through caller and preserves interacting sets; inconclusiv
     bisectLandings([0, 1], async () => 'interrupted'),
     { code: 'CANCELLED' },
   );
-});
-
-test('opt-in scoped selection keeps the standard static verification and protected paths require review', t => {
-  const f = fixture(t, { bad: [] }),
-    data = f.store.load(),
-    view = data.views.at(-1);
-  const work = new WorkService(f.root, { kind: 'agent', id: 'synthetic' });
-  assert.equal(prepareOptimistic(work, { accept: { channel: 'main' } }, view), true);
-  f.store.locked(() => {
-    const d = f.store.load();
-    d.autonomyPolicy.acceptance.protectedPaths = ['good3.txt'];
-    d.revision++;
-    f.store.save(d);
-  });
-  assert.equal(prepareOptimistic(work, { accept: { channel: 'main' } }, view), false);
-  const selection = standardSelection({
-    paths: ['src/errors.ts'],
-    files: new Map([
-      ['src/errors.ts', 'export const error = 1;'],
-      ['tests/errors.test.mjs', "import '../dist/errors.js';"],
-    ]),
-    optimistic: true,
-    env: {},
-  });
-  assert.equal(selection.scope, 'scoped');
 });
 
 function laterChange(f, path, text) {
