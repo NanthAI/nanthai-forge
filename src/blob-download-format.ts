@@ -28,6 +28,7 @@ export type DownloadRow = { digest: string; size: number } & (
   // A signed describe may also sign the recipe object itself (url/range); readers may ignore it.
   | {
       location: 'recipe';
+      closure?: SignedDownload[];
       recipe: { digest: string; size: number; url?: string | undefined; range?: PackRange | undefined };
     }
 );

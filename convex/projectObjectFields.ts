@@ -2,6 +2,8 @@
 import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { backfillFields } from './r2BackfillFields';
+// Trusted worker-only flattened raw R2 leaves; legacy recipes omit this projection.
+export const recipeClosure = v.array(v.object({ sha256: v.string(), size: v.number() }));
 export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
 export const objectFields = {
   projectId: v.id('hostedProjects'),
@@ -21,6 +23,7 @@ export const objectFields = {
   ...backfillFields,
   r2SweepKey: v.optional(v.string()),
   r2PreparedAt: v.optional(v.number()),
+  recipeClosure: v.optional(recipeClosure),
   recipe: v.optional(v.object({ digest: v.string(), size: v.number() })),
   pack: v.optional(objectPack),
   /** A pending upload pack (feature upload-packs): its members in byte order. Member rows are

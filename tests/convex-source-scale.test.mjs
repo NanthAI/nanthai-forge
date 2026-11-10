@@ -483,3 +483,82 @@ test('4k-file multi-quantum composition shares one Node action and resolves each
     s.restore();
   }
 });
+
+for (const count of [12000, 29000])
+  test(`cost 298f9675: ${count} files, ten sequential small saves expose source egress and preserve exact file changes`, async t => {
+    const s = await scaleFixture();
+    try {
+      const original = await s.putSpec(Buffer.from('baseline\n'));
+      const files = Array.from({ length: count }, (_, i) => ({
+        path: `src/${String(i).padStart(6, '0')}.txt`,
+        blob: original.sha256,
+        mode: 'file',
+      }));
+      let baseline = await s.json({
+        schema: 1,
+        kind: 'forge-source-state',
+        files,
+        parents: [],
+        message: 'base',
+        at,
+      });
+      const samples = [];
+      for (let landing = 0; landing < 10; landing++) {
+        const changed = await s.putSpec(Buffer.from(`landing-${landing}\n`));
+        const pages = buildSavePages([
+          {
+            path: files[landing].path,
+            before: { blob: files[landing].blob, mode: 'file' },
+            after: { blob: changed.sha256, mode: 'file', content: { object: changed, recipe: null } },
+          },
+        ]);
+        for (const page of pages.pages) await s.json(page.value);
+        const input = await s.json({
+          schema: 1,
+          kind: 'forge-hosted-save-input',
+          baseline: { object: baseline, recipe: null },
+          pages: pages.root,
+          pageCount: pages.pages.length,
+          changeCount: 1,
+          message: `landing-${landing}`,
+          at,
+        });
+        const offset = s.events.length;
+        const id = await s.enqueue(input),
+          report = await s.drain();
+        const job = await s.job(id);
+        assert.equal(job.status, 'completed');
+        const result = JSON.parse(await s.bytes(job.output));
+        const state = JSON.parse(await s.bytes(result.state));
+        files[landing] = { ...files[landing], blob: changed.sha256 };
+        assert.deepEqual(state.files, files);
+        assert.deepEqual(state.parents, [baseline.sha256]);
+        baseline = result.state;
+        samples.push({
+          ...report,
+          egress: s.events.slice(offset).reduce((n, e) => n + (e.put ?? 0), 0),
+          refusedBytes: s.events.slice(offset).reduce((n, e) => n + (e.existed ? e.put : 0), 0),
+        });
+      }
+      assert(
+        samples.every(sample => sample.calls <= 6),
+        'sequential save Convex-call ratchet',
+      );
+      assert(
+        samples.every(sample => sample.egress <= 114 * count + 500),
+        'sequential save body-byte ratchet',
+      );
+      assert(
+        samples.every(sample => sample.cpuMicros > 0 && sample.cpuMicros <= samples[0].cpuMicros * 1.2),
+        'sequential saves do not accumulate CPU work relative to the same-run first save',
+      );
+      assert(
+        samples.every(sample => sample.maxRssBytes <= 300 * 1024 * 1024),
+        'sequential save memory ratchet',
+      );
+      assert.equal(s.ready.length, 0, 'finished sequential saves create no idle work');
+      t.diagnostic(JSON.stringify({ sequentialSourceCost: samples }));
+    } finally {
+      s.restore();
+    }
+  });

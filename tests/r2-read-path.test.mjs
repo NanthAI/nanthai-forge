@@ -432,3 +432,61 @@ test('mixed history: import packs, raw rows and upload packs read back exact in 
   // One run for the import window, one for the upload pack, one GET for each raw row.
   assert.equal(fake.requests.filter(r => r.method === 'GET').length - before, 4);
 });
+
+test('trusted recipe closure stages exact project leaves and signs them in the existing logical read', async t => {
+  const { s } = await setup(t),
+    exchange = client(s);
+  const { storeSourceOutputs } = await import(
+    (await import('./convex-module.mjs')).moduleUrl('../convex/projectConvexSourceOutput.ts')
+  );
+  const leaves = ['first leaf', 'second leaf'];
+  for (const leaf of leaves) await exchange.uploadBatch(content([leaf]));
+  const body = JSON.stringify({ synthetic: 'trusted action verified recipe' });
+  await exchange.uploadBatch(content([body]));
+  const pin = { sha256: digest(leaves.join('')), size: Buffer.byteLength(leaves.join('')) };
+  const closure = pins(leaves);
+  await storeSourceOutputs(s.ctx, 'project', 'trusted-worker', [
+    { ...pin, recipe: pins([body])[0], recipeClosure: closure },
+  ]);
+  const [row] = await downloads.describe._handler(s.ctx, {
+    projectId: 'project',
+    digests: [pin.sha256],
+    signed: true,
+  });
+  assert.equal(row.location, 'recipe');
+  assert.deepEqual(
+    row.closure.map(({ digest, size }) => ({ sha256: digest, size })),
+    closure,
+  );
+  assert(row.closure.every(leaf => new URL(leaf.url).pathname.endsWith(`/p/project/o/${leaf.digest}`)));
+  assert.equal(
+    (await downloads.describe._handler(s.ctx, { projectId: 'project', digests: [pin.sha256] }))[0].closure,
+    undefined,
+  );
+  s.caller('stranger');
+  await assert.rejects(
+    downloads.describe._handler(s.ctx, { projectId: 'project', digests: [pin.sha256], signed: true }),
+    code('PROJECT_UNAVAILABLE'),
+  );
+});
+
+test('trusted closure refuses unstaged, packed, wrong-size and oversized projections before publication', async t => {
+  const { s } = await setup(t),
+    exchange = client(s);
+  const { storeSourceOutputs } = await import(
+    (await import('./convex-module.mjs')).moduleUrl('../convex/projectConvexSourceOutput.ts')
+  );
+  await exchange.uploadBatch(content(['leaf', 'recipe']));
+  const pin = { sha256: digest('logical'), size: 4 },
+    recipe = pins(['recipe'])[0];
+  for (const closure of [
+    [{ sha256: 'a'.repeat(64), size: 4 }],
+    [{ ...pins(['leaf'])[0], size: 3 }],
+    Array.from({ length: 101 }, () => ({ ...pins(['leaf'])[0], size: 0 })),
+  ])
+    await assert.rejects(
+      storeSourceOutputs(s.ctx, 'project', 'trusted-worker', [{ ...pin, recipe, recipeClosure: closure }]),
+      code('SOURCE_HASH_MISMATCH'),
+    );
+  assert(!rows(s).some(row => row.digest === pin.sha256));
+});

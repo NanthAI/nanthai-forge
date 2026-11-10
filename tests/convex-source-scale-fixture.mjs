@@ -263,6 +263,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0];
               assert.equal(digest(a.bytes), id);
               value = objects.has(id);
+              events.push({ put: a.bytes.length, existed: value });
               if (!value) objects.set(id, a.bytes);
             } else if (message.kind === 'r2-head') {
               const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0],
@@ -368,6 +369,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       failedActions: jobMetrics.filter(m => m.failed).length,
       maxFailedRssBytes: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.maxRssBytes)),
       maxFailedStepMs: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.elapsedMs)),
+      cpuMicros: jobMetrics.reduce((n, m) => n + m.cpuMicros, 0),
       actionMs: jobMetrics.reduce((n, m) => n + m.elapsedMs, 0),
       peakActive,
       peakWork,

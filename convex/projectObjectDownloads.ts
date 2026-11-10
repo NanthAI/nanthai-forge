@@ -17,6 +17,7 @@ import { hostedDownloadPageSize, type HostedDownloadDescriptor } from '../src/ho
 import { findObject, findObjects } from './projectObjectFind';
 import { chargeAnonymousRead } from './abuseLimits';
 import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-range';
+import { signRecipeClosure } from './projectRecipeClosure';
 import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
 const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
 export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
@@ -105,6 +106,7 @@ export const describe = mutation({
         digest: v.string(),
         size: v.number(),
         location: v.literal('recipe'),
+        closure: v.optional(v.array(v.object({ digest: v.string(), size: v.number(), url: v.string() }))),
         /** Signed calls also sign the recipe object itself, so reading it needs no second call. */
         recipe: v.object({
           digest: v.string(),
@@ -177,6 +179,7 @@ export const describe = mutation({
           result.push({
             ...pin,
             location: 'recipe',
+            ...(signed && row.recipeClosure ? { closure: await signRecipeClosure(row) } : {}),
             recipe: signable
               ? {
                   ...row.recipe,

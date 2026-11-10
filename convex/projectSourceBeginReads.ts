@@ -2,6 +2,7 @@
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { saveObject, saveStateSchema } from './projectHostedSaveStore';
+import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
@@ -29,6 +30,7 @@ export async function sourceObjectLocation(
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
     storageId: url ? null : (object.storageId ?? null),
     url,
+    ...(object.recipeClosure ? { closure: await signRecipeClosure(object) } : {}),
     ...(object.pack ? { range: packRange(object)! } : {}),
   };
 }

@@ -29,7 +29,8 @@ process.on('message', async message => {
     return;
   }
   if (!message.run) return;
-  const started = performance.now();
+  const started = performance.now(),
+    cpuStarted = process.cpuUsage();
   try {
     globalThis.fetch = async (url, init = {}) => {
       if (init.method === 'PUT') {
@@ -89,13 +90,21 @@ process.on('message', async message => {
     await module[message.method]._handler(ctx, message.args);
     process.send({
       done: true,
-      metrics: { elapsedMs: performance.now() - started, maxRssBytes: process.resourceUsage().maxRSS * 1024 },
+      metrics: {
+        elapsedMs: performance.now() - started,
+        maxRssBytes: process.resourceUsage().maxRSS * 1024,
+        cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),
+      },
     });
   } catch (error) {
     process.send({
       done: true,
       error: { message: error.message, code: error.code, stack: error.stack },
-      metrics: { elapsedMs: performance.now() - started, maxRssBytes: process.resourceUsage().maxRSS * 1024 },
+      metrics: {
+        elapsedMs: performance.now() - started,
+        maxRssBytes: process.resourceUsage().maxRSS * 1024,
+        cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),
+      },
     });
   }
 });

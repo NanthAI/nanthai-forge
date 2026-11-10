@@ -7,6 +7,7 @@ import { isStored } from './projectObjectFields';
 import { invariant } from '../src/errors';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
+import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
 import { findObject, type ObjectView } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
@@ -80,14 +81,17 @@ export const resolve = sourceMutation({
       selected.map(({ row }) => ({ sha256: row.digest })),
       selected.map(({ row }) => row),
     );
-    const result = selected.map(({ row, url }, i) => ({
-      descriptor: descriptors[i]!,
-      ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
-      ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
-      storageId: url ? null : (row.storageId ?? null),
-      url,
-      ...(row.pack ? { range: packRange(row)! } : {}),
-    }));
+    const result = await Promise.all(
+      selected.map(async ({ row, url }, i) => ({
+        descriptor: descriptors[i]!,
+        ...(row.stateGeneration === undefined ? {} : { stateGeneration: row.stateGeneration }),
+        ...(row.stateParents === undefined ? {} : { stateParents: row.stateParents }),
+        storageId: url ? null : (row.storageId ?? null),
+        url,
+        ...(row.recipeClosure ? { closure: await signRecipeClosure(row) } : {}),
+        ...(row.pack ? { range: packRange(row)! } : {}),
+      })),
+    );
     return canonicalPayload(
       args.probe
         ? { rows: result, unavailable }

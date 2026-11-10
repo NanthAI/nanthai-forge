@@ -5,7 +5,8 @@ import { invariant } from '../src/errors';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
 import { validStateGeneration, validStateParents } from '../src/state/generation';
-import { findObject, objectRow } from './projectObjectFind';
+import { validateRecipeClosure } from './projectRecipeClosure';
+import { findObject, findObjects, objectRow } from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;
   size: number;
@@ -14,6 +15,7 @@ export type SourceOutput = {
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
+  recipeClosure?: { sha256: string; size: number }[];
 };
 export async function storeSourceOutputs(
   ctx: MutationCtx,
@@ -52,6 +54,28 @@ export async function storeSourceOutputs(
         'Worker recipe is not staged.',
       );
     }
+    if (pin.recipeClosure) {
+      invariant(pin.recipe, 'SOURCE_JOB_INVALID', 'Only a recipe has a leaf closure.');
+      validateRecipeClosure(pin, pin.recipeClosure);
+      const leaves = await findObjects(
+        ctx,
+        projectId,
+        pin.recipeClosure.map(leaf => leaf.sha256),
+      );
+      invariant(
+        leaves.every(
+          (leaf, i) =>
+            leaf &&
+            !leaf.removed &&
+            isR2Object(leaf) &&
+            !leaf.pack &&
+            leaf.size === pin.recipeClosure![i]!.size &&
+            leaf.r2Key === r2Key(projectId, leaf.digest),
+        ),
+        'SOURCE_HASH_MISMATCH',
+        'Worker closure contains an unstaged leaf.',
+      );
+    }
     const encoding = pin.r2Key
       ? { location: 'r2' as const, r2Key: pin.r2Key, r2Committed: true, recipe: undefined }
       : pin.storageId
@@ -85,6 +109,7 @@ export async function storeSourceOutputs(
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
     // Written once from the hash-verified manifest, like the generation; never cleared.
     const graph = {
+      ...(pin.recipeClosure === undefined ? {} : { recipeClosure: pin.recipeClosure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
     };
@@ -114,7 +139,8 @@ export async function storeSourceOutputs(
     else if (
       !old.sourceReferenced ||
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
-      (old.stateParents === undefined && pin.stateParents !== undefined)
+      (old.stateParents === undefined && pin.stateParents !== undefined) ||
+      (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });
     if (!old?.sourceReferenced)
