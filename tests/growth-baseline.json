@@ -13,12 +13,12 @@
   },
   "counts": {
     "tables": 179,
-    "errorCodes": 488,
+    "errorCodes": 486,
     "agentActions": 62,
     "cliCommands": 40,
     "glossaryTerms": 27,
     "machineDependencies": 0,
-    "unreferencedExports": 68
+    "unreferencedExports": 45
   },
   "reasons": [
     {

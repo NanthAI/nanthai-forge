@@ -1,10 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
-import { setImmediate as yieldTurn } from 'node:timers/promises';
-import { assertLandingWorkerActive } from './landing-worker-context.js';
-import { optimisticLanding } from './autonomy-policy.js';
-import { readPolicy } from './work-autonomy.js';
-import { completeAccepted } from './agent-lifecycle.js';
 import { composeLandingSource, savedStack } from './landing-compose-source.js';
 import type { NativeSource } from './native-source.js';
 import type { WorkService } from './work.js';
@@ -143,41 +137,5 @@ export function settleQueuedNoops(work: WorkService, data: WorkData, channel: st
     };
     entry.reason = entry.error.message;
     delete entry.waitingFor;
-  }
-}
-/** Complete the Lanes of entries that were already on main, as acceptance would.
- * Retry-safe: completion of an already completed Lane is a no-op. */
-export async function completeAlreadyOnMain(work: WorkService, channel: string) {
-  const policy = readPolicy(work.store);
-  if (optimisticLanding(policy) || !policy.lifecycle.completeOnAccept) return;
-  const tx = work.store.readRecords();
-  if (tx) await prepareLandingRecords(work.store, tx);
-  const entries = tx
-    ? landingPositions(work.store, tx, 'landingEntries', [], channel, true)
-    : (work.store.load().landingEntries ?? []).map(entry => entry.id);
-  let turn = performance.now();
-  try {
-    for (const position of entries) {
-      assertLandingWorkerActive();
-      const entry =
-        typeof position === 'number' && tx
-          ? tx.at('landingEntries', position)
-          : work.store.select('landingEntries', String(position));
-      if (!entry || entry.channel !== channel || !entry.alreadyOnMain || entry.keepOpen) continue;
-      const view = tx ? tx.find('views', entry.viewId)?.record : work.store.select('views', entry.viewId);
-      if (
-        view?.inputs.some(pin => {
-          const lane = tx ? tx.fields('lanes', pin.laneId)?.record : work.store.select('lanes', pin.laneId);
-          return lane && lane.head === pin.head && ['active', 'paused', 'ready'].includes(lane.state);
-        })
-      )
-        await completeAccepted(work, entry.viewId);
-      if (performance.now() - turn >= 8) {
-        await yieldTurn();
-        turn = performance.now();
-      }
-    }
-  } finally {
-    tx?.dispose();
   }
 }

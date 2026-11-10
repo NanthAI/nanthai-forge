@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { checkEvidenceLines } from './check-compact-output.js';
 import { runOutputDirectory } from './work-run.js';
-import { runReceipt } from './agent-receipts.js';
 import { runWork } from './work-run.js';
 import type { WorkStore } from './work-store.js';
 import type { CheckRun } from './work-types.js';
@@ -39,11 +38,4 @@ export function failureSummary(store: WorkStore, run: CheckRun): string {
   const text = [...marked, ...last].join('\n');
   const remaining = CAP - names.length;
   return names + (text.length > remaining ? `…${text.slice(-(remaining - 1))}` : text);
-}
-/** Run receipt, with a failure summary when the run failed. */
-export function runReceiptWithFailure(store: WorkStore, run: CheckRun) {
-  const receipt = runReceipt(run);
-  return run.status === 'failed'
-    ? { ...receipt, failureSummary: run.failureSummary ?? failureSummary(store, run) }
-    : receipt;
 }

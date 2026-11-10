@@ -236,11 +236,3 @@ export function frictionReceipt(
       }
     : {};
 }
-
-/** Preserve the existing driver's retry evidence in its receipt, without altering landing behavior. */
-export function landFrictionCounts(
-  entries: { single?: { attempt: number }; result?: Record<string, unknown> }[],
-) {
-  for (const entry of entries)
-    if (entry.result && entry.single?.attempt) entry.result.retries = entry.single.attempt;
-}

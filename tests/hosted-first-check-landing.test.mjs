@@ -983,6 +983,23 @@ test('the owner recount replays history with the live rules: exact, own-check, s
     audited: 1,
     unclear: 0,
   });
+  // 2026-11-10 dogfood drill: a claimed red the live counter never closed (a second failed audit lost the
+  // claim) recovered at its episode's green, in time, so the recount keeps the count.
+  const unclosed = { startedAt: drill.startedAt, redAt: drill.redAt };
+  assert.deepEqual(
+    earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6, { drill: unclosed }), e('green', 7)]),
+    {
+      audited: 4,
+      unclear: 2,
+      drill: {
+        at: e('green', 7).at,
+        sequence: 7,
+        reverted: false,
+        started: drill.startedAt,
+        red: drill.redAt,
+      },
+    },
+  );
   // The same red without the owner's drill is a real red: everything before it is lost.
   const real = earnedFromHistory(landings, [...events.slice(0, 5), e('red', 6), e('green', 7)]);
   assert.deepEqual(

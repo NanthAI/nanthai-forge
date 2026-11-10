@@ -1,16 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { semanticCompositionPlan } from './native-semantic-plan.js';
 import { prepareLandingRecords } from './landing-records-index.js';
 import { editWork } from './work-edit.js';
-import { landingWait, checkingWait } from './landing-waiting.js';
+import { landingWait } from './landing-waiting.js';
 import { recordLandingWaits } from './landing-wait-record.js';
 import { editLandingRecords, type LandingRecordSelection } from './landing-records.js';
-import { previewLanding, previewExclusionMessage } from './integration-preview-landing.js';
 import { assertLandingWorkerActive } from './landing-worker-context.js';
 import { interruptStaleLandingInputs } from './landing-stale.js';
-import { landingConflictPeers } from './landing-conflict-peers.js';
-import { composeLandingSource } from './landing-compose-source.js';
-import { join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { retryWorkPhase } from './work-retry.js';
@@ -31,18 +26,9 @@ import type { WorkService } from './work.js';
 import type { CheckRun, WorkData, WorkView } from './work-types.js';
 import type { FinishAction } from './agent-workflow-schema.js';
 import type { LandingBatch, LandingEntry } from './landing-batch-types.js';
-import {
-  entryPins,
-  markAlreadyOnMain,
-  settleCompletedLanes,
-  settleQueuedNoops,
-  sameLandingTree,
-} from './landing-noop.js';
+import { entryPins, settleCompletedLanes, settleQueuedNoops } from './landing-noop.js';
 import { soloCheckAdmission, soloCheckEnvironment } from './landing-solo-check.js';
 const ACTIVE_LANDING = new Set(['queued', 'checking', 'awaiting-review']);
-
-export const batchDirectory = (work: WorkService, channel: string) =>
-  join(work.store.directory, 'landing-batch-drain', digest(channel));
 export function batchEdit<T>(
   work: WorkService,
   id: string,
@@ -474,153 +460,4 @@ export function selectBatch(
   }
   (data.landingBatches ??= []).push(batch);
   return batch;
-}
-/** Prefix Views carry every pinned Lane and dependency, across Intent boundaries. */
-export async function composeBatch(work: WorkService, batch: LandingBatch, beforePublish?: () => void) {
-  await batchEdit(
-    work,
-    batch.id,
-    data => {
-      const current = data.landingBatches!.find(item => item.id === batch.id)!;
-      if (current.timing) current.timing.composeStartedAt ??= new Date().toISOString();
-    },
-    beforePublish,
-    batch.channel,
-  );
-  const entries = batch.entryIds.map(id => work.store.select('landingEntries', id)!);
-  const preview =
-    batch.channel === 'main'
-      ? previewLanding(
-          work.store,
-          entries.flatMap(entry => work.store.select('views', entry.viewId)!.inputs),
-          {
-            base: batch.base,
-            skip: entries.every(entry => entry.preview === 'skip'),
-            protectedLaneIds: entries
-              .filter(entry => entry.preview === 'skip')
-              .flatMap(entry => work.store.select('views', entry.viewId)!.inputs.map(pin => pin.laneId)),
-          },
-        )
-      : undefined;
-  const rejected = new Map(
-    entries.flatMap(entry => {
-      const diagnostic = preview?.excluded.find(exclusion =>
-        work.store.select('views', entry.viewId)!.inputs.some(pin => pin.laneId === exclusion.laneId),
-      );
-      return diagnostic ? [[entry.id, diagnostic] as const] : [];
-    }),
-  );
-  const source = new NativeSource(work.store.root);
-  let head = batch.base;
-  const prefixes: LandingBatch['prefixes'] = [],
-    conflicts: LandingBatch['conflicts'] = [];
-  const views: WorkView[] = [],
-    contained: string[] = [];
-  for (const entryId of batch.entryIds) {
-    if (rejected.has(entryId)) continue;
-    const entry = work.store.select('landingEntries', entryId)!;
-    const candidate = work.store.select('views', entry.viewId)!;
-    const previous = views.filter(view => view.status === 'clean').at(-1);
-    const inputs = [...(previous?.inputs ?? []), ...candidate.inputs];
-    const dependencies = [...(previous?.dependencies ?? []), ...(candidate.dependencies ?? [])];
-    const result = composeLandingSource(
-      work.store,
-      source,
-      candidate,
-      head,
-      'Landing batch prefix',
-      batch.arrivedAt,
-    );
-    const id = finishChild(batch.id, `prefix:${entryId}`);
-    // Composing onto accepted main changed nothing: the content is already on main.
-    if (
-      result.head &&
-      sameLandingTree(source, result.head, head) &&
-      head === batch.base &&
-      batch.previous === batch.base &&
-      !batch.parentId
-    ) {
-      contained.push(entryId);
-      continue;
-    }
-    if (!result.head) {
-      const peers = landingConflictPeers(work.store, head, candidate.inputs, result.conflicts);
-      views.push({
-        ...candidate,
-        inputs,
-        dependencies,
-        id,
-        base: batch.base,
-        head: undefined,
-        status: 'conflict',
-        at: batch.arrivedAt,
-        details: `Batch composition conflict with accepted peer Lane(s) ${[...new Set(peers)].join(', ') || 'unknown'}; original States retained:\n${result.conflicts.join('\n')}`,
-      });
-      conflicts.push({ entryId, viewId: id });
-      continue;
-    }
-    head = result.head;
-    views.push({
-      id,
-      intentId: candidate.intentId,
-      base: batch.base,
-      composedMain: batch.base,
-      head,
-      status: 'clean',
-      at: batch.arrivedAt,
-      inputs,
-      dependencies,
-      details: 'Cumulative landing prefix; exact-Candidate check required before acceptance.',
-      semanticPlan: semanticCompositionPlan(work.store, { ...candidate, inputs }, batch.base),
-    });
-    prefixes.push({
-      entryIds: [...(prefixes.at(-1)?.entryIds ?? []), entryId],
-      viewId: id,
-      head,
-      runId: finishChild(batch.id, `run:${entryId}`),
-    });
-  }
-  return batchEdit(
-    work,
-    batch.id,
-    data => {
-      // Revalidate retained input availability after unlocked composition.
-      // A newer Lane save alone does not invalidate this pinned Candidate.
-      interruptStaleLandingInputs(data, batch.channel, source);
-      const saved = data.landingBatches!.find(item => item.id === batch.id)!;
-      if (saved.status !== 'composing') return saved;
-      for (const view of views) if (!data.views.some(item => item.id === view.id)) data.views.push(view);
-      saved.prefixes = prefixes;
-      saved.conflicts = conflicts;
-      saved.status = 'checking';
-      if (saved.timing) saved.timing.composedAt ??= new Date().toISOString();
-      for (const [id, diagnostic] of rejected) {
-        const entry = data.landingEntries!.find(entry => entry.id === id)!;
-        entry.status = 'failed';
-        entry.terminalAt = new Date().toISOString();
-        entry.reason = previewExclusionMessage;
-        entry.previewDiagnostic = { ...diagnostic, main: preview!.main, key: preview!.key };
-      }
-      // Main may have moved since composition; a moved main re-queues the entry at settlement.
-      if (acceptedHead(data, batch.channel) === batch.base)
-        for (const entryId of contained) {
-          const entry = data.landingEntries!.find(entry => entry.id === entryId)!;
-          if (entry.status === 'checking') markAlreadyOnMain(entry, batch.base);
-        }
-      for (const conflict of conflicts) {
-        const entry = data.landingEntries!.find(entry => entry.id === conflict.entryId)!;
-        entry.status = 'conflict';
-        entry.terminalAt = new Date().toISOString();
-        entry.conflictViewId = conflict.viewId;
-      }
-      for (const entry of data.landingEntries ?? [])
-        if (entry.batchId === saved.id) {
-          if (entry.status === 'checking') entry.waitingFor = checkingWait(data, entry);
-          else delete entry.waitingFor;
-        }
-      return saved;
-    },
-    beforePublish,
-    batch.channel,
-  );
 }

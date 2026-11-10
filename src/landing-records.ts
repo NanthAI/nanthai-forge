@@ -1,11 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { editRecordProjection } from './work-record-edit.js';
-import type { z } from 'zod';
-import { landingPositions, prepareLandingRecords } from './landing-records-index.js';
+import { landingPositions } from './landing-records-index.js';
 import { finishChild } from './finish-child.js';
 import { invariant } from './errors.js';
 import { readFragment } from './work-records.js';
-import { batchPrefixSchema, landingEntrySchema, landingBatchSchema } from './landing-batch-types.js';
+import { batchPrefixSchema } from './landing-batch-types.js';
 import type { WorkStore } from './work-store.js';
 import type { WorkData } from './work-types.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';
@@ -125,61 +124,6 @@ export function landingRecords(
     }
   data.channelMoves = [...moves].sort(([a], [b]) => a - b).map(([, move]) => move);
   return data;
-}
-
-function selectedObservation<T>(schema: z.ZodType<T>, fields: unknown): T {
-  const parsed = schema.safeParse(fields);
-  invariant(parsed.success, 'INVALID_WORK_STORE', 'Selected landing header is invalid.');
-  return parsed.data;
-}
-const entryObservation = landingEntrySchema.pick({
-  id: true,
-  channel: true,
-  status: true,
-  checkId: true,
-  viewId: true,
-  runId: true,
-  arrivedAt: true,
-  waitingFor: true,
-});
-const batchObservation = landingBatchSchema.pick({ id: true, channel: true, status: true });
-/** Scheduling needs no prefix histories, Lane saves, Views or run evidence.
- * Select scalar headers and validate them afresh on every observation. */
-export async function observeLandingQueue(store: WorkStore, channel?: string) {
-  const tx = store.readRecords?.();
-  if (!tx) return landingRecords(store, channel);
-  try {
-    await prepareLandingRecords(store, tx);
-    const landingEntries = landingPositions(store, tx, 'landingEntries', ['queued', 'checking'], channel).map(
-      position =>
-        selectedObservation(
-          entryObservation,
-          readFragment(store.directory, tx.versionAt('landingEntries', position)).fields,
-        ),
-    );
-    const landingBatches = landingPositions(
-      store,
-      tx,
-      'landingBatches',
-      ['composing', 'checking'],
-      channel,
-    ).map(position =>
-      selectedObservation(
-        batchObservation,
-        readFragment(store.directory, tx.versionAt('landingBatches', position)).fields,
-      ),
-    );
-    const checks = [...new Set(landingEntries.map(entry => entry.checkId))].flatMap(
-      id => tx.find('checks', id)?.record ?? [],
-    );
-    const runs =
-      channel === undefined
-        ? ['queued', 'preparing', 'running'].flatMap(status => tx.all('runs', status, 'status'))
-        : [];
-    return { revision: tx.revision, landingEntries, landingBatches, checks, runs };
-  } finally {
-    tx.dispose();
-  }
 }
 
 /** Prepare only changed queue records outside the writer lock, then publish

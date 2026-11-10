@@ -173,11 +173,11 @@ export async function auditEvent(
   });
 }
 type DrillRecord = NonNullable<Doc<'projectHostedMainAuditEvents'>['drill']>;
-/** The owner's drill that claimed the current red, as the counter rule takes it (fe7d67a8). */
+/** The owner's drill that claimed the current red, as the counter rule takes it (fe7d67a8). A claim is
+ * set only on an episode's first red and cleared whenever the episode ends, so it holds while later failed
+ * audits of the same episode replace `red.runId` (2026-11-10 dogfood drill: matching the run lost it). */
 const drillOf = (row: Doc<'projectHostedMainAudits'>) =>
-  row.red && row.drill?.red?.runId === row.red.runId
-    ? { startedAt: row.drill.startedAt, redAt: row.drill.red.at }
-    : undefined;
+  row.red && row.drill?.red ? { startedAt: row.drill.startedAt, redAt: row.drill.red.at } : undefined;
 /** Ends the drill that claimed the current red: its record goes on the red event (one indexed read)
  * and is returned for the event that ended it. The caller clears `drill` in its own patch. */
 export async function closeDrill(

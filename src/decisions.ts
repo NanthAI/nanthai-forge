@@ -2,13 +2,7 @@
 import type { Conversation } from './agent-edit-context.js';
 import { randomUUID } from 'node:crypto';
 import type { z } from 'zod';
-import {
-  decideInputSchema,
-  decisionRecordSchema,
-  sameDecisionTarget,
-  type DecisionRecord,
-  type decisionsInputSchema,
-} from './decision-types.js';
+import { decideInputSchema, decisionRecordSchema, type DecisionRecord } from './decision-types.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { localActor } from './work-actor.js';
@@ -68,30 +62,4 @@ export function recordDecision(
     },
     { operation: 'record decision' },
   );
-}
-export function readDecisions(store: WorkStore, input: z.infer<typeof decisionsInputSchema>) {
-  return store.observing(() => {
-    const records = decisionRecords(store);
-    if (input.target?.kind === 'intent')
-      invariant(store.select('intents', input.target.intentId), 'NOT_FOUND', 'Intent not found.');
-    const replacements = new Map<string, string[]>();
-    for (const record of records) {
-      if (!record.supersedes) continue;
-      const ids = replacements.get(record.supersedes) ?? [];
-      ids.push(record.id);
-      replacements.set(record.supersedes, ids);
-    }
-    return {
-      revision: store.revision(),
-      result: {
-        decisions: records
-          .filter(record => !input.target || sameDecisionTarget(record.target, input.target))
-          .map(record => ({
-            ...record,
-            status: replacements.has(record.id) ? ('superseded' as const) : ('active' as const),
-            supersededBy: replacements.get(record.id) ?? [],
-          })),
-      },
-    };
-  });
 }

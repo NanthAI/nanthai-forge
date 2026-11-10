@@ -46,9 +46,6 @@ export const agentStateDiffSchema = agentReviewSchema
     from: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
     to: z.string().regex(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/),
   });
-export function readAgentStateDiff(store: WorkStore, input: z.input<typeof agentStateDiffSchema>) {
-  return readReview(store, agentStateDiffSchema.parse(input));
-}
 export type AgentReviewInput = z.input<typeof agentReviewSchema>;
 type File = { hash: string; hashKind: 'sha256' | 'git-object'; mode: string };
 type Change = {

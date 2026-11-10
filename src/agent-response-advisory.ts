@@ -1,9 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { withQueueSlot } from './landing-queue.js';
-import { mkdirBelow } from './mkdir-below.js';
-import { writeRecoveryState } from './recovery-state.js';
 import { indexedReceiptPeers, retainIndexedPeers } from './agent-receipt-peers.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { frictionReceipt } from './friction-auto.js';
@@ -216,54 +211,4 @@ export async function agentResponseAdvisory(
       ...(warnings.length ? { warnings } : {}),
     },
   };
-}
-
-/** Enrichment is retained locally without publishing Work or entering its writer
- * queue. Replays preserve the returned observation even after caches refresh. */
-export async function durableResponseAdvisory(
-  store: WorkStore,
-  command: Extract<AgentAction, { action: 'start' | 'checkpoint' }>,
-  response: { revision: number; result: unknown },
-  resolved?: Record<string, unknown>,
-  warnings: string[] = [],
-  liveMcp = false,
-) {
-  const directory = join(store.directory, 'agent-response-receipts');
-  mkdirBelow(store.directory, directory);
-  const path = join(directory, `${command.operationId}.json`);
-  const retained = await withQueueSlot(
-    join(directory, `${command.operationId}-lock`),
-    async () => {
-      try {
-        return JSON.parse(readFileSync(path, 'utf8')) as typeof response;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      const enriched = await agentResponseAdvisory(
-        store,
-        command,
-        response,
-        resolved,
-        warnings,
-        liveMcp,
-        true,
-        true,
-        true,
-      );
-      writeRecoveryState(path, enriched);
-      return enriched;
-    },
-    { anchor: store.directory, phase: 'agent receipt enrichment' },
-  );
-  if (!('value' in retained)) throw new ForgeError('WORK_BUSY', 'Receipt enrichment is busy.');
-  const receipt = {
-    ...retained.value,
-    // Restore core optional fields which JSON omits (e.g. Git captureCoverage).
-    result: { ...(response.result as object), ...(retained.value.result as object) },
-  };
-  // Stacked start's original head/base are immutable; currentHead is explicitly live.
-  const current = response.result as { currentHead?: string; stack?: unknown };
-  return command.action === 'start' && command.stackOn
-    ? { ...receipt, result: { ...(receipt.result as object), currentHead: current.currentHead } }
-    : receipt;
 }

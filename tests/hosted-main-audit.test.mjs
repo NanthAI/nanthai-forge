@@ -316,6 +316,9 @@ test('an owner drill that recovers in time is the recovered red and keeps the co
   await red(f);
   assert.equal(f.row().drill.red.runId, f.row().red.runId, 'the armed drill claims the next red');
   assert.equal((await readStatus(f)).landing.effective, 'strict', 'a drill red holds landings like any red');
+  // 2026-11-10 dogfood drill: a second failed audit in the same red episode keeps the drill's claim.
+  await red(f);
+  assert.notEqual(f.row().drill.red.runId, f.row().red.runId);
   const fix = await f.land('full');
   const earned = f.row().earned;
   assert.deepEqual([earned.audited, earned.unclear, earned.lost], [13, 0, undefined]);

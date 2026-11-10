@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-import { stackStatus, type StackLane } from './agent-stack.js';
 import { gitIsAncestor } from './work-git.js';
 import { nativeChannels } from './native-work.js';
 import { channelStatus } from './work-channel.js';
 import { NativeSource } from './native-source.js';
 import { ForgeError, invariant } from './errors.js';
-import { laneReceipt } from './agent-receipts.js';
 import { lanePinned } from './lane-registry.js';
 import type { WorkService } from './work.js';
 import type { WorkStore } from './work-store.js';
@@ -44,22 +42,6 @@ export function mergedChecker(store: WorkStore, heads: Head[]) {
     }
     return null;
   };
-}
-export const mergedFields = (channel: string | null) => ({
-  merged: channel !== null,
-  ...(channel === null ? {} : { mergedInto: channel }),
-});
-export function annotateLanes<T extends { head: string; base: string } & StackLane>(
-  store: WorkStore,
-  items: T[],
-  data?: Pick<WorkData, 'channelMoves'>,
-) {
-  const merged = mergedChecker(store, channelHeads(store, data));
-  return items.map(item => ({
-    ...item,
-    ...mergedFields(merged(item)),
-    ...(item.stack ? { stackStatus: stackStatus(store, item) } : {}),
-  }));
 }
 
 async function setState(work: WorkService, command: Record<string, unknown>) {
@@ -165,40 +147,4 @@ export async function completeMerged(work: WorkService, channel = 'main') {
   }
   for (const intentId of candidates) if (await completeIntent(work, intentId)) intents.push(intentId);
   return { channel, head: head.head, lanes, intents, skipped, ...(cleanup.length ? { cleanup } : {}) };
-}
-/** `complete`/`reopen` for one Lane or Intent, without a hand-fetched revision. */
-export async function setLifecycle(
-  work: WorkService,
-  command: { laneId?: string | undefined; intentId?: string | undefined },
-  completed: boolean,
-) {
-  const store = work.store;
-  invariant(!command.laneId !== !command.intentId, 'BAD_ARGUMENT', 'Send either laneId or intentId.');
-  if (command.laneId) {
-    const response = await setState(work, {
-      action: 'lane-status',
-      laneId: command.laneId,
-      state: completed ? 'completed' : 'active',
-    });
-    const lane = store.select('lanes', command.laneId, 'id', true)!;
-    return {
-      revision: response.revision,
-      result: {
-        ...laneReceipt(lane, store.path(lane.id)),
-        ...('cleanup' in (response.result as object)
-          ? { cleanup: (response.result as { cleanup: unknown }).cleanup }
-          : {}),
-      },
-    };
-  }
-  const response = await setState(work, {
-    action: 'intent-status',
-    intentId: command.intentId,
-    status: completed ? 'completed' : 'active',
-  });
-  const intent = store.select('intents', command.intentId!, 'id', true)!;
-  return {
-    revision: response.revision,
-    result: { intentId: intent.id, outcome: intent.outcome, status: intent.status },
-  };
 }

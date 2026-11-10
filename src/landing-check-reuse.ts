@@ -1,9 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { passedReuseCandidates } from './landing-check-reuse-records.js';
 import { checkToolFence } from './check-tool-fence.js';
-import { validatePrefixRun } from './landing-diagnosis.js';
-import { hostname } from 'node:os';
-import { processAlive } from './local-process.js';
 import { finishChild } from './finish-child.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
@@ -53,30 +50,6 @@ function recipe(plan: RemoteCheckPlan) {
 }
 function tree(store: WorkStore, head: string) {
   return new NativeSource(store.root).state(head).files;
-}
-
-export async function reuseLandingCheck(
-  work: WorkService,
-  batch: LandingBatch,
-  prefix: BatchPrefix,
-  driver: LandingDriver,
-) {
-  const existing = work.store.select('runs', prefix.runId);
-  if (existing) validatePrefixRun(work, batch, prefix, existing);
-  if (
-    existing &&
-    (existing.cancelRequested ||
-      !(
-        existing.status === 'interrupted' ||
-        (['queued', 'preparing', 'running'].includes(existing.status) &&
-          existing.runner.host === hostname() &&
-          !processAlive(existing.runner))
-      ))
-  )
-    return;
-  const reused = await reuseCheck(work, batch, prefix, driver, undefined, existing);
-  if (reused && existing && reused.reusedFrom) prefix.runId = reused.id;
-  return reused;
 }
 
 /** Main audits use the same retained full-plan evidence before run registration. */

@@ -107,7 +107,7 @@ export type EarnEvent = {
   at: string;
   runId: string;
   sequence: number;
-  drill?: { startedAt: string; redAt?: string; recoveredAt?: string };
+  drill?: { startedAt: string; redAt?: string; recoveredAt?: string; outcome?: string };
 };
 /** Replays retained history with the live counter's rules (the owner's backfill, fe7d67a8). An exact
  * full check audits its landing; a landing on its own check is audited by the first audit verdict at or
@@ -119,6 +119,7 @@ export function earnedFromHistory(landings: readonly EarnLanding[], events: read
   const culprits = new Set(events.filter(e => e.kind === 'culprit').map(e => e.runId));
   const verdicts = events.filter(e => e.kind !== 'flake' && e.kind !== 'culprit');
   const ended = new Set<string>();
+  const drillGreens = new Set<string>();
   let earned: LandingEarned = none;
   let next = 0;
   for (const landing of landings) {
@@ -131,11 +132,14 @@ export function earnedFromHistory(landings: readonly EarnLanding[], events: read
         ended.add(event.runId);
         const green = verdicts.slice(next).find(e => e.kind === 'green');
         const drill = event.drill;
+        // A claimed drill red that was never closed recovered at the green that ended its episode.
+        const recoveredAt = drill?.recoveredAt ?? (drill?.redAt && !drill.outcome ? green?.at : undefined);
+        if (drill?.redAt && recoveredAt && green) drillGreens.add(green.runId);
         earned = earnedAfterGreen(earned, 0, {
-          at: drill?.recoveredAt ?? green?.at ?? event.at,
+          at: recoveredAt ?? green?.at ?? event.at,
           sequence: green?.sequence ?? event.sequence,
           reverted: culprits.has(event.runId),
-          ...(drill?.redAt && drill.recoveredAt
+          ...(drill?.redAt && recoveredAt
             ? { drill: { startedAt: drill.startedAt, redAt: drill.redAt } }
             : {}),
         });
@@ -143,7 +147,8 @@ export function earnedFromHistory(landings: readonly EarnLanding[], events: read
       continue;
     }
     // The verdict that ended an owner's drill adds nothing, as live; a docs pass never counts.
-    if ((event?.kind === 'green' && event.drill) || landing.kind === 'docs') continue;
+    if ((event?.kind === 'green' && (event.drill || drillGreens.has(event.runId))) || landing.kind === 'docs')
+      continue;
     // An exact full landing audits itself, so a later stalled audit never covered it (as live).
     if (event?.kind === 'stalled' && landing.kind === 'proof') earned = earnedAfterUnclear(earned, 1);
     earned = earnedAfterGreen(earned, 1);
