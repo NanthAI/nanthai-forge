@@ -29,17 +29,20 @@ No scheduler runs after a page or after completion.
 
 Only committed, protected source bindings with canonical R2 keys or immutable
 recipes move. Mutable State generation/parent/protection metadata, unprotected
-objects, flattened recipe-closure projections, pending uploads, legacy storage and rotated cleanup bindings remain rows.
+objects, flattened recipe-closure projections, pending uploads, legacy storage
+and rotated cleanup bindings remain rows.
 Catalog pages preserve logical size, recipe and pack range. Source bytes never
 move or download. Existing catalog ranges are merged without overlaps and the
 request-local lookup cache is invalidated after publication.
 
 `findObject` and `findObjects` continue to resolve object rows first, then catalog
 pages. Writers that need a row id retain `objectRow`. A compact
-`projectObjectReceipts` row keeps the original upload id and digest; `pendingRows`
+`projectObjectReceipts` row keeps the original upload id, digest, size and nonce; `pendingRows`
 rechecks current project access and the committed object before reconciling an old
 upload id. Unknown ids still fail, and revoked access does not regain authority.
-The receipt table replaces seven-index descriptors with two-index retry pins; it
+Legacy late uploads remain attributable through the exact project/nonce/digest
+index and size check during the existing project purge.
+The receipt table replaces seven-index descriptors with three-index retry pins; it
 is included in project purge ownership. Ordinary new worker outputs retain their
 proportional per-object write path: rewriting random catalog pages for a handful
 of new objects would increase write I/O.

@@ -51,7 +51,13 @@ export const step = internalMutation({
     let written = saved.bytes;
     for (const row of rows) {
       // Old id retries must still authorize and reconcile after its descriptor moves.
-      const value = { projectId: input.projectId, key: row._id, value: row.digest };
+      const value = {
+        projectId: input.projectId,
+        key: row._id,
+        value: row.digest,
+        nonce: row.nonce,
+        size: row.size,
+      };
       await ctx.db.insert('projectObjectReceipts', value);
       written += bytes(value);
       await ctx.db.delete(row._id);
@@ -91,8 +97,12 @@ export const verify = internalQuery({
     );
     invariant(
       objects.every(
-        object =>
-          object && !object.removed && object.sourceReferenced && (object.recipe || object.r2Committed),
+        (object, index) =>
+          object &&
+          !object.removed &&
+          object.sourceReferenced &&
+          (receipts[index]!.size === undefined || object.size === receipts[index]!.size) &&
+          (object.recipe || object.r2Committed),
       ),
       'SOURCE_UNAVAILABLE',
       'A migrated object is unreachable.',

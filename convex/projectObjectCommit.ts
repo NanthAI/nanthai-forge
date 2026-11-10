@@ -40,7 +40,10 @@ export const pendingRows = internalQuery({
           await activeProject(ctx, receipt.projectId, actor);
           const stored = await findObject(ctx, receipt.projectId, receipt.value);
           invariant(
-            stored && !stored.removed && (stored.recipe || stored.r2Committed),
+            stored &&
+              !stored.removed &&
+              (receipt.size === undefined || stored.size === receipt.size) &&
+              (stored.recipe || stored.r2Committed),
             'PROJECT_UNAVAILABLE',
             'This original upload is unavailable.',
           );

@@ -100,3 +100,32 @@ test('the purge keeps foreign, differently bound and referenced content', async 
   assert.equal(s.files.has(late), false);
   for (const id of [referenced, changed, foreign]) assert.equal(s.files.has(id), true);
 });
+
+test('compacted object descriptors retain nonce attribution for late legacy uploads without deleting foreign or changed bytes', async () => {
+  const s = await deletingProject();
+  const original = s.tables.projectObjects.get('object');
+  await s.ctx.db.insert('projectObjectReceipts', {
+    projectId: 'project',
+    key: original._id,
+    value: original.digest,
+    nonce: original.nonce,
+    size: original.size,
+  });
+  s.tables.projectObjects.delete('object');
+  const late = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
+  const changed = await s.ctx.storage.store(new Blob(['different bytes'], { type: s.contentType }));
+  const referenced = await s.ctx.storage.store(new Blob([s.bytes], { type: s.contentType }));
+  s.tables.projectBackups.set('foreign-backup', {
+    _id: 'foreign-backup',
+    _creationTime: 1,
+    projectId: 'other',
+    storageId: referenced,
+  });
+  const foreign = await s.ctx.storage.store(
+    new Blob([s.bytes], { type: 'application/x-forge-object-foreign' }),
+  );
+  await purge(s);
+  assert.equal(s.files.has(late), false, 'migration retains ownership of the original issued upload');
+  for (const id of [changed, referenced, foreign]) assert.equal(s.files.has(id), true);
+  assert.equal(s.tables.projectObjectReceipts.size, 0, 'project deletion also purges compact receipts');
+});

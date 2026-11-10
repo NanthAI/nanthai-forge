@@ -56,8 +56,11 @@ export const objectTables = {
     projectId: v.id('hostedProjects'),
     key: v.string(),
     value: v.string(),
+    nonce: v.optional(v.string()),
+    size: v.optional(v.number()),
   })
     .index('by_key', ['key'])
+    .index('by_project_and_nonce_and_value', ['projectId', 'nonce', 'value'])
     .index('by_project', ['projectId']),
   projectObjects: defineTable(objectFields)
     .index('by_project', ['projectId'])

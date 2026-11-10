@@ -463,14 +463,25 @@ test('catalog compaction preserves every reachable binding, original upload retr
     checked += verification.checked;
   } while (!verification.done);
   assert.equal(checked, inputs.length, 'the independent verifier checks every migrated digest');
+  const pinReceipt = [...f.tables.projectObjectReceipts.values()].find(
+    row => !row.key.startsWith('catalog-migration:'),
+  );
+  const originalSize = pinReceipt.size;
+  await f.ctx.db.patch(pinReceipt._id, { size: originalSize + 1 });
+  await assert.rejects(
+    f.call('verify-size-mismatch', compact.verify, { projectId, actor: 'owner', cursor: null }),
+    'reachability also retains the exact original logical size',
+  );
+  await f.ctx.db.patch(pinReceipt._id, { size: originalSize });
+
   const retained = ['projectObjects', 'projectObjectCatalog', 'projectObjectReceipts'].reduce(
     (n, table) =>
       n + [...f.tables[table].values()].reduce((sum, row) => sum + Buffer.byteLength(JSON.stringify(row)), 0),
     0,
   );
   assert(
-    retained < before * 0.78,
-    `${retained}/${before}: compact descriptors plus permanent retry receipts`,
+    retained < before * 0.9,
+    `${retained}/${before}: compact descriptors plus permanent original-id and late-upload nonce receipts`,
   );
   for (const row of pages) assert(row.sizes.length <= 256);
   const sourceWrite = f.counts.find(row => row.name === 'new-source');

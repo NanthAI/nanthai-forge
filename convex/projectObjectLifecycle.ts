@@ -26,6 +26,20 @@ export async function purgeExchangeObjects(ctx: MutationCtx, project: Doc<'hoste
       .query('projectObjects')
       .withIndex('by_nonce', q => q.eq('nonce', file.contentType!.slice(prefix.length)))
       .unique();
+    // A compacted descriptor still owns its original nonce. A late legacy upload
+    // must remain attributable after migration, with exact digest AND size.
+    const compacted = row
+      ? []
+      : await ctx.db
+          .query('projectObjectReceipts')
+          .withIndex('by_project_and_nonce_and_value', q =>
+            q
+              .eq('projectId', project._id)
+              .eq('nonce', file.contentType!.slice(prefix.length))
+              .eq('value', storageDigest(file.sha256)),
+          )
+          .take(1);
+    if (compacted[0]?.size === file.size) await removeExclusive(ctx, file._id);
     if (
       row?.projectId === project._id &&
       row.removed &&
