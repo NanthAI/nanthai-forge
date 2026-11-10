@@ -3,6 +3,7 @@ import { landingModeSchema } from './landing-mode.js';
 import { z } from 'zod';
 import { checkLogsSchema } from './check-log-policy.js';
 import { invariant } from './errors.js';
+import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
 import { legacyCheckCredentialsRefSchema } from './legacy-check-credentials.js';
 import { trustConfigSchema } from './agent-trust-config.js';
 import {
@@ -93,6 +94,19 @@ export const autonomyPolicySchema = z.object({
   ownerRootUpdates: z.boolean().optional(),
   /** Debounced local snapshots of open native Lanes; absent means on. */
   autoSnapshot: z.boolean().optional(),
+  /** Hosted Lane snapshots (Issue 7ac4e32f): minutes between timed snapshots of one Lane during
+   * activity. Absent means the default (10). The turn-end snapshot and the one before a command that
+   * rewrites files are not held back by it. Stored beside `autoSnapshot`, which older clients and
+   * the native debounce already read as a boolean. */
+  autoSnapshotIntervalMinutes: z
+    .number()
+    .int()
+    .min(
+      5,
+      'autoSnapshotIntervalMinutes must be at least 5 minutes (default 10): a shorter interval multiplies snapshot cost.',
+    )
+    .max(1440, 'autoSnapshotIntervalMinutes is at most 1440 (one day).')
+    .optional(),
   laneUpdates: z.enum(['auto', 'ask']),
   lifecycle: z.object({
     completeOnAccept: z.boolean(),
@@ -128,6 +142,9 @@ export function legacyPolicy(): AutonomyPolicy {
   delete policy.acceptance.gate;
   return { ...policy, preset: 'custom' };
 }
+/** Minutes between timed snapshots of one Lane: the project's setting, else the default. */
+export const snapshotIntervalMinutes = (policy: Pick<AutonomyPolicy, 'autoSnapshotIntervalMinutes'>) =>
+  policy.autoSnapshotIntervalMinutes ?? SNAPSHOT_INTERVAL_MINUTES.default;
 export function effectivePolicy(data: { autonomyPolicy?: AutonomyPolicy | undefined }): AutonomyPolicy {
   let policy = data.autonomyPolicy ? autonomyPolicySchema.parse(data.autonomyPolicy) : legacyPolicy();
   policy = {
@@ -179,6 +196,7 @@ export const policyWriteObject = z
     integrationPreview: autonomyPolicySchema.shape.integrationPreview,
     ownerRootUpdates: autonomyPolicySchema.shape.ownerRootUpdates,
     autoSnapshot: autonomyPolicySchema.shape.autoSnapshot,
+    autoSnapshotIntervalMinutes: autonomyPolicySchema.shape.autoSnapshotIntervalMinutes,
     checkLogs: checkLogsSchema.optional(),
     laneUpdates: autonomyPolicySchema.shape.laneUpdates.optional(),
     lifecycle: autonomyPolicySchema.shape.lifecycle.partial().optional(),
@@ -221,6 +239,7 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     command.acceptance ||
     command.ownerRootUpdates !== undefined ||
     command.autoSnapshot !== undefined ||
+    command.autoSnapshotIntervalMinutes !== undefined ||
     command.laneUpdates ||
     command.lifecycle ||
     command.notify ||
@@ -248,6 +267,12 @@ export function editedPolicy(previous: AutonomyPolicy, command: PolicyWrite): Au
     ownerRootUpdates: command.ownerRootUpdates ?? base.ownerRootUpdates,
     ...((command.autoSnapshot ?? previous.autoSnapshot) !== undefined
       ? { autoSnapshot: command.autoSnapshot ?? previous.autoSnapshot }
+      : {}),
+    ...((command.autoSnapshotIntervalMinutes ?? previous.autoSnapshotIntervalMinutes) !== undefined
+      ? {
+          autoSnapshotIntervalMinutes:
+            command.autoSnapshotIntervalMinutes ?? previous.autoSnapshotIntervalMinutes,
+        }
       : {}),
     laneUpdates: command.laneUpdates ?? base.laneUpdates,
     lifecycle: { ...base.lifecycle, ...command.lifecycle },

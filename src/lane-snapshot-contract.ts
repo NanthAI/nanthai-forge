@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { digest } from './portable-hash.js';
+import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
 
 /**
  * Unsaved-work snapshots (Issue 7ac4e32f). A snapshot is a hidden save of a Lane checkout's
@@ -20,8 +21,12 @@ export const LANE_SNAPSHOT = {
   snapshotBytes: 64 * 1024 * 1024,
   /** Snapshot bytes one Lane may hold in R2 until its snapshots expire or are purged. */
   laneBytes: 512 * 1024 * 1024,
-  /** Objects one prepare may sign; a larger change waits for an explicit save. */
+  /** Objects one prepare may sign in the loose (pre-pack) shape; a larger change waits for an explicit save. */
   uploads: 200,
+  /** Timed snapshots: one per Lane per interval during activity (project policy
+   * autoSnapshotIntervalMinutes). The turn-end snapshot and the one before a command that rewrites
+   * files are never held back by it and never count against it. */
+  intervalMinutes: SNAPSHOT_INTERVAL_MINUTES,
   /** Entries `list` returns, newest first. */
   listLimit: 200,
 } as const;
@@ -51,8 +56,13 @@ export const snapshotPrepareSchema = z
     pages: snapshotPinSchema.nullable(),
     pageCount: count,
     changeCount: count,
-    /** Objects this snapshot sends: its pages and changed files the Lane store lacks. */
-    uploads: z.array(snapshotPinSchema).max(LANE_SNAPSHOT.uploads),
+    /** Loose shape (before feature lane-snapshot-packs): its pages and changed files the Lane store
+     * lacks, one object each, made live by `commit`. */
+    uploads: z.array(snapshotPinSchema).max(LANE_SNAPSHOT.uploads).default([]),
+    /** Pack shape: the pages and the changed files the Lane store lacks as ONE content-addressed
+     * object (src/lane-snapshot-pack.ts), live as soon as `prepare` answers. Null when the working
+     * files equal the head. */
+    pack: snapshotPinSchema.nullable().optional(),
     /** Files the capture left out (credentials, ignore rules, size cap); counted, never named. */
     notSaved: count,
     /** The Lane snapshot store the client uploaded to before (from `prepare`), or null. When the
@@ -66,6 +76,11 @@ export const snapshotPrepareSchema = z
       value.tree !== snapshotTree(value.head, value.pages)
     )
       ctx.addIssue({ code: 'custom', message: 'Snapshot tree, pages and change count disagree.' });
+    if (
+      value.pack !== undefined &&
+      (value.uploads.length > 0 || (value.pack === null) !== (value.pages === null))
+    )
+      ctx.addIssue({ code: 'custom', message: 'A packed snapshot names its pack and no loose uploads.' });
   });
 export type SnapshotPrepare = z.infer<typeof snapshotPrepareSchema>;
 
@@ -77,6 +92,8 @@ export const snapshotEntrySchema = z
     head: hash,
     tree: hash,
     pages: snapshotPinSchema.nullable(),
+    /** The one object holding this snapshot's pages and new files (absent on loose snapshots). */
+    pack: snapshotPinSchema.optional(),
     changeCount: count,
     /** The snapshot the working files matched just before this entry (none for the first). */
     parent: count.optional(),

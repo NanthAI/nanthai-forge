@@ -18,7 +18,7 @@ import { loadSave } from './projectHostedSaveStore';
 import type { QueryCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { requireCutoverVersion } from '../src/cutover-version';
-import { effectivePolicy } from '../src/autonomy-policy';
+import { effectivePolicy, snapshotIntervalMinutes } from '../src/autonomy-policy';
 import { effectiveAgentDefaults, wireAgentDefaults } from '../src/agent-parallel-defaults';
 import { advertisedFeatures, MAX_CONTRACT_FEATURES } from '../src/hosted-contract-features';
 /** Discovery is a current-authority read, never a worker wake or an availability promise. */
@@ -99,6 +99,11 @@ export const capabilities = query({
           // Lane snapshots (7ac4e32f): the policy rides on the read every command already makes.
           ...(features?.includes('lane-snapshots')
             ? { laneSnapshots: effectivePolicy(project).autoSnapshot === true }
+            : {}),
+          ...(features?.includes('lane-snapshots') &&
+          features.includes('lane-snapshot-packs') &&
+          effectivePolicy(project).autoSnapshot === true
+            ? { snapshotIntervalMinutes: snapshotIntervalMinutes(effectivePolicy(project)) }
             : {}),
           ...(openLanesVersion === 1 ? { openLanesVersion: 1 } : {}),
           ...(presenceVersion === 1 ? { presenceVersion: 1 } : {}),

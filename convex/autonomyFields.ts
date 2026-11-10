@@ -96,6 +96,7 @@ export const autonomyPolicy = v.object({
   integrationPreview: v.optional(v.object({ auto: v.boolean() })),
   ownerRootUpdates: v.optional(v.boolean()),
   autoSnapshot: v.optional(v.boolean()),
+  autoSnapshotIntervalMinutes: v.optional(v.number()),
   laneUpdates: v.union(v.literal('auto'), v.literal('ask')),
   lifecycle: v.object({
     completeOnAccept: v.boolean(),

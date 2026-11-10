@@ -344,6 +344,11 @@
         "laneSnapshots": {
           "type": "boolean"
         },
+        "snapshotIntervalMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
         "settledSave": {
           "type": "object",
           "properties": {

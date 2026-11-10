@@ -114,6 +114,9 @@ export const hostedAgentCapabilitiesSchema = z
     observation: z.literal('finite'),
     /** Feature lane-snapshots: true while project policy autoSnapshot is on (Issue 7ac4e32f). */
     laneSnapshots: z.boolean().optional(),
+    /** Feature lane-snapshot-packs: minutes between timed snapshots of one Lane (policy
+     * autoSnapshotIntervalMinutes, default 10, at least 5), sent while snapshots are on. */
+    snapshotIntervalMinutes: z.number().int().min(1).optional(),
     /** Split save (save-settle-background, fea47345 C): the outcome of the save the client named in
      * `settling`, read in this same call (`terminal` null while it is still settling). */
     settledSave: z.object({ operationId: z.string(), terminal: z.unknown().nullable() }).strict().optional(),

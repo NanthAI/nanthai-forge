@@ -134,16 +134,29 @@ import { isHostedReplyError, parseHostedResponse, replyIssuePaths } from './host
 import { snapshotLaneCheckout, type SnapshotReceipt } from './hosted-lane-snapshot.js';
 import { rememberSnapshotsKept } from './lane-snapshot-hint.js';
 import { launchSnapshotWorker } from './hosted-snapshot-worker.js';
+import { LANE_SNAPSHOT } from './lane-snapshot-contract.js';
 import { executeSnapshots } from './hosted-lane-snapshot-restore.js';
 import { openLaneRoot } from './hosted-lane-location.js';
 /** Reads and checkout creation: they neither show a Lane as working nor count as its activity. */
 /** A boolean option as given, else unset. */
 const flag = (value: unknown) => (typeof value === 'boolean' ? value : undefined);
-/** Actions that capture or rewrite the working files themselves take no snapshot first. */
-const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'resolve', 'sync', 'compose', 'snapshots']);
-/** Actions that may rewrite or remove working files: their snapshot is taken first, in this process.
- * Every other command hands its snapshot to a short-lived detached process and never waits for it. */
-const snapshotFirst = new Set(['start', 'open', 'reopen', 'pull', 'abandon', 'revert', 'recover-apply']);
+/** Actions that capture the working files themselves (a save) or snapshot them as part of their
+ * own move (`snapshots`) take no snapshot first. */
+const snapshotSkips = new Set(['save', 'checkpoint', 'finish', 'compose', 'snapshots']);
+/** Actions that may rewrite or remove working files: their snapshot is taken first, in this process,
+ * whatever the timed interval says. Every other command hands a timed snapshot to a short-lived
+ * detached process (at most one per interval per Lane) and never waits for it. */
+const snapshotFirst = new Set([
+  'start',
+  'open',
+  'reopen',
+  'pull',
+  'abandon',
+  'revert',
+  'recover-apply',
+  'sync',
+  'resolve',
+]);
 const quietActions = new Set([
   'approve-link',
   'request-approval',
@@ -833,7 +846,10 @@ export class HostedAgentTransport {
       // A project without the policy costs one local file check here; the Lane marker is read only when it is on.
       const keep = capabilities.laneSnapshots ? this.snapshotRoot(command.data) : null;
       if (keep) {
-        rememberSnapshotsKept(keep, true);
+        rememberSnapshotsKept(keep, true, {
+          intervalMinutes: capabilities.snapshotIntervalMinutes ?? LANE_SNAPSHOT.intervalMinutes.default,
+          packs: this.serverFeatures.includes('lane-snapshot-packs'),
+        });
         if (!snapshotSkips.has(action)) {
           if (snapshotFirst.has(action)) {
             const taken = await snapshotLaneCheckout(keep, this.address.projectId, this.exchange.client);

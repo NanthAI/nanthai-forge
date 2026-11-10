@@ -24,6 +24,8 @@ export const laneSnapshotTables = {
     head: v.optional(v.string()),
     tree: v.optional(v.string()),
     pages: v.optional(v.union(pin, v.null())),
+    /** Pack shape (feature lane-snapshot-packs): the one R2 object holding the pages and new files. */
+    pack: v.optional(v.union(pin, v.null())),
     changeCount: v.optional(v.number()),
     uploadBytes: v.optional(v.number()),
     notSaved: v.optional(v.number()),

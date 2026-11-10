@@ -109,6 +109,10 @@ export const hostedContractFeatures = [
    * `laneSnapshots` (policy autoSnapshot). Without it the CLI takes no snapshot and refuses
    * `x snapshots`. */
   'lane-snapshots',
+  /** Snapshot packs (Issue 7ac4e32f): projectLaneSnapshots:prepare takes `pack` (one object for the
+   * pages and changed files, live without `commit`) and capabilities carry `snapshotIntervalMinutes`
+   * (policy autoSnapshotIntervalMinutes). Without it the CLI sends one object per file and commits. */
+  'lane-snapshot-packs',
   /** A check run may use the ci-status provider (flip 3): projectHostedCheckRead:status takes
    * `features` and sends such a run only to a caller naming this feature. Without it the read
    * refuses that one run by name, so an older CLI never receives a configuration it cannot parse. */

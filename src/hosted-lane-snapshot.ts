@@ -11,7 +11,9 @@ import {
   snapshotDirectory,
   snapshotLockHeld,
   snapshotLockPath,
+  snapshotSettings,
 } from './lane-snapshot-hint.js';
+import { encodeSnapshotPack, type SnapshotPackRefs } from './lane-snapshot-pack.js';
 import { saveBytes } from './hosted-save.js';
 import { putR2 } from './exchange-blobs.js';
 import { mapExchange } from './exchange-parallel.js';
@@ -20,12 +22,13 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { neverIndex } from './forge-disk.js';
 import {
+  LANE_SNAPSHOT,
   snapshotPrepareResultSchema,
   snapshotPrepareSchema,
   type SnapshotPrepare,
 } from './lane-snapshot-contract.js';
 import { parseHostedResponse } from './hosted-response.js';
-import { invariant } from './errors.js';
+import { ForgeError, invariant } from './errors.js';
 
 export type SnapshotClient = Pick<ConvexHttpClient, 'mutation' | 'query'>;
 /** What the last snapshot of this checkout recorded: the tree the working files matched and the
@@ -34,12 +37,16 @@ type Ledger = {
   laneId: string;
   tree: string | null;
   seq: number | null;
+  /** Loose objects (one per file or page) of older snapshots, by digest. */
   uploaded: string[];
+  /** Files inside this Lane's packs: file digest to the pack that holds it and the pack's size. */
+  located?: SnapshotPackRefs;
   refused?: string;
   /** The Lane snapshot store `uploaded` refers to (prepare names it). */
   store?: string | null;
 };
 const uploadedLimit = 20_000;
+const locatedLimit = 5_000;
 const ledgerPath = (root: string) => join(snapshotDirectory(root), 'ledger.json');
 const pendingPath = (root: string) => join(snapshotDirectory(root), 'pending.json');
 export function readSnapshotLedger(root: string, laneId: string): Ledger {
@@ -56,7 +63,13 @@ export function writeSnapshotLedger(root: string, ledger: Ledger) {
   neverIndex(snapshotDirectory(root));
   durableReplace(
     ledgerPath(root),
-    JSON.stringify({ ...ledger, uploaded: ledger.uploaded.slice(-uploadedLimit) }),
+    JSON.stringify({
+      ...ledger,
+      uploaded: ledger.uploaded.slice(-uploadedLimit),
+      ...(ledger.located
+        ? { located: Object.fromEntries(Object.entries(ledger.located).slice(-locatedLimit)) }
+        : {}),
+    }),
   );
 }
 /** One snapshot per checkout at a time: a second command skips instead of waiting. */
@@ -107,8 +120,9 @@ export type SnapshotReceipt =
 
 /**
  * Snapshot a hosted Lane checkout's working files (Issue 7ac4e32f). Unchanged since the last
- * snapshot: no call. Changed: `prepare` + create-only R2 PUTs of the pages and the changed files
- * this Lane's store lacks + `commit` (one call when nothing needs uploading). Retry-safe: an
+ * snapshot: no call. Changed: one `prepare` call and one create-only R2 PUT of the snapshot pack
+ * (pages and the changed files this Lane's store lacks, src/lane-snapshot-pack.ts). Against a server
+ * without feature lane-snapshot-packs: `prepare`, one PUT per page and file, and `commit`. Retry-safe: an
  * unfinished snapshot is finished with its original request before a new one is captured.
  * Never moves the Lane head and never throws: failures come back as `skipped`.
  */
@@ -136,30 +150,75 @@ export async function snapshotLaneCheckout(
     } catch {
       retained = undefined;
     }
-    const operationId =
-      retained && retained.laneId === laneId && retained.tree === capture.tree
-        ? retained.operationId
-        : randomUUID();
-    const sizes = new Map<string, number>([
-      ...capture.pages.map(page => [page.pin.sha256, page.pin.size] as const),
-      ...capture.changes.flatMap(change =>
-        change.after ? [[change.after.blob, change.after.content.object.size] as const] : [],
-      ),
-    ]);
-    let current = ledger;
+    const packs = snapshotSettings(root).packs;
+    let current = ledger,
+      operationId: string | undefined;
     // At most two prepares: the second only when the Lane's store was dropped (expiry, purge)
     // since this checkout last uploaded, so every object is sent again.
     for (let attempt = 0; ; attempt++) {
       // Without a named store nothing is vouched for: send every changed file.
-      const known = new Set(current.store ? current.uploaded : []);
+      const loose = new Set(current.store ? current.uploaded : []);
+      const located = current.store ? (current.located ?? {}) : {};
+      const known = (blob: string) => loose.has(blob) || blob in located;
       const objects = new Map<string, () => Buffer>();
-      for (const page of capture.pages)
-        objects.set(page.pin.sha256, () => Buffer.from(saveBytes(page.value)));
-      for (const change of capture.changes)
-        if (change.after && !known.has(change.after.blob) && !objects.has(change.after.blob)) {
-          const blob = change.after.blob;
-          objects.set(blob, () => capture.read(blob));
+      const sizes = new Map<string, number>();
+      let pack: ReturnType<typeof encodeSnapshotPack> | null = null;
+      let packed: string[] = [];
+      if (packs) {
+        // One object holds the pages and every changed file the store lacks (and refs to the rest).
+        const fresh = new Map<string, number>();
+        for (const change of capture.changes)
+          if (change.after && !known(change.after.blob))
+            fresh.set(change.after.blob, change.after.content.object.size);
+        const bytes =
+          capture.pages.reduce((sum, page) => sum + page.pin.size, 0) +
+          [...fresh.values()].reduce((sum, size) => sum + size, 0);
+        if (bytes > LANE_SNAPSHOT.snapshotBytes) {
+          writeSnapshotLedger(root, { ...current, refused: capture.tree });
+          throw new ForgeError(
+            'QUOTA_EXCEEDED',
+            `A snapshot may upload at most ${LANE_SNAPSHOT.snapshotBytes} bytes; this one is ${bytes} bytes. Save explicitly to keep this work. Nothing was stored.`,
+          );
         }
+        if (capture.pages.length) {
+          const refs: SnapshotPackRefs = {};
+          for (const change of capture.changes)
+            if (change.after && !fresh.has(change.after.blob) && located[change.after.blob])
+              refs[change.after.blob] = located[change.after.blob]!;
+          pack = encodeSnapshotPack(
+            [
+              ...capture.pages.map(page => ({
+                sha256: page.pin.sha256,
+                bytes: Buffer.from(saveBytes(page.value)),
+              })),
+              ...[...fresh.keys()].map(blob => ({ sha256: blob, bytes: capture.read(blob) })),
+            ],
+            refs,
+          );
+          packed = [...fresh.keys()];
+          objects.set(pack.pin.sha256, () => pack!.bytes);
+          sizes.set(pack.pin.sha256, pack.pin.size);
+        }
+      } else {
+        for (const page of capture.pages) {
+          objects.set(page.pin.sha256, () => Buffer.from(saveBytes(page.value)));
+          sizes.set(page.pin.sha256, page.pin.size);
+        }
+        for (const change of capture.changes)
+          if (change.after && !loose.has(change.after.blob) && !objects.has(change.after.blob)) {
+            const blob = change.after.blob;
+            objects.set(blob, () => capture.read(blob));
+            sizes.set(blob, change.after.content.object.size);
+          }
+      }
+      // An unfinished snapshot of this same tree (and pack) is finished with its original request.
+      operationId ??=
+        retained &&
+        retained.laneId === laneId &&
+        retained.tree === capture.tree &&
+        (retained.pack?.sha256 ?? null) === (pack?.pin.sha256 ?? null)
+          ? retained.operationId
+          : randomUUID();
       const request: SnapshotPrepare = snapshotPrepareSchema.parse({
         laneId,
         operationId,
@@ -168,7 +227,8 @@ export async function snapshotLaneCheckout(
         pages: capture.root,
         pageCount: capture.pages.length,
         changeCount: capture.changes.length,
-        uploads: [...objects.keys()].map(sha256 => ({ sha256, size: sizes.get(sha256)! })),
+        ...(packs ? { pack: pack?.pin ?? null } : {}),
+        uploads: packs ? [] : [...objects.keys()].map(sha256 => ({ sha256, size: sizes.get(sha256)! })),
         notSaved: capture.notSaved.count,
         store: current.store ?? null,
       });
@@ -215,7 +275,15 @@ export async function snapshotLaneCheckout(
         laneId,
         tree: capture.tree,
         seq: prepared.seq,
-        uploaded: [...current.uploaded, ...objects.keys()],
+        uploaded: packs ? current.uploaded : [...current.uploaded, ...objects.keys()],
+        // Only what this call stored: an `unchanged` answer stored nothing.
+        located:
+          pack && prepared.state !== 'unchanged'
+            ? {
+                ...located,
+                ...Object.fromEntries(packed.map(blob => [blob, [pack.pin.sha256, pack.pin.size]])),
+              }
+            : located,
         store: prepared.store,
       });
       rmSync(pendingPath(root), { force: true });
@@ -225,7 +293,7 @@ export async function snapshotLaneCheckout(
         seq: prepared.seq,
         changes: capture.changes.length,
         uploads: objects.size,
-        bytes: request.uploads.reduce((sum, pin) => sum + pin.size, 0),
+        bytes: pack ? pack.pin.size : request.uploads.reduce((sum, pin) => sum + pin.size, 0),
         calls,
         ...(capture.notSaved.count ? { notSaved: capture.notSaved } : {}),
       };

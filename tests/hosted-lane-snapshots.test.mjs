@@ -13,7 +13,20 @@ import { moduleUrl } from './convex-module.mjs';
 import { snapshotLaneCheckout } from '../dist/hosted-lane-snapshot.js';
 import { launchSnapshotWorker, snapshotWorkerTestHooks } from '../dist/hosted-snapshot-worker.js';
 import { turnEndSnapshot } from '../dist/agent-turn-snapshot.js';
-import { rememberSnapshotsKept, snapshotsKept } from '../dist/lane-snapshot-hint.js';
+import {
+  markTimedSnapshot,
+  rememberSnapshotsKept,
+  snapshotSettings,
+  snapshotsKept,
+  timedSnapshotDue,
+} from '../dist/lane-snapshot-hint.js';
+import { decodeSnapshotPack } from '../dist/lane-snapshot-pack.js';
+import {
+  autonomyPolicySchema,
+  editedPolicy,
+  policyWriteSchema,
+  snapshotIntervalMinutes,
+} from '../dist/autonomy-policy.js';
 import { snapshotDirectory } from '../dist/lane-snapshot-hint.js';
 import { executeSnapshots } from '../dist/hosted-lane-snapshot-restore.js';
 import { LANE_SNAPSHOT, snapshotTarget } from '../dist/lane-snapshot-contract.js';
@@ -36,7 +49,7 @@ const handlers = {
   'projectObjectDownloads:signDownloads': downloads.signDownloads,
 };
 
-async function fixture(t, { policy = true } = {}) {
+async function fixture(t, { policy = true, packs = false } = {}) {
   const r2 = fakeSourceR2(t);
   const f = await lifecycleFixture();
   const jobs = new Map();
@@ -121,7 +134,10 @@ async function fixture(t, { policy = true } = {}) {
         );
       }
   };
-  return { f, r2, jobs, calls, client, root, rows, stored, snap, run, runJobs };
+  /** Packed snapshots are what a CLI takes against a server that advertises lane-snapshot-packs. */
+  const usePacks = on => rememberSnapshotsKept(root, true, { intervalMinutes: 10, packs: on });
+  if (packs) usePacks(true);
+  return { f, r2, jobs, calls, client, root, rows, stored, snap, run, runJobs, usePacks };
 }
 const text = (root, path) => readFileSync(join(root, path), 'utf8');
 
@@ -434,4 +450,254 @@ test('the turn-end snapshot covers edits after the last command, once, with no c
   assert.equal(await turnEndSnapshot({}, factory), null);
   rememberSnapshotsKept(x.root, false);
   assert.equal(snapshotsKept(x.root), false);
+});
+
+test('a packed snapshot is one call and one object; a file is stored once per Lane, never per snapshot', async t => {
+  const x = await fixture(t, { packs: true });
+  const big = 'x'.repeat(5000);
+  writeFileSync(join(x.root, 'a.txt'), `edit one ${big}`);
+  writeFileSync(join(x.root, 'b.txt'), 'second file');
+  const first = await x.snap();
+  assert.equal(first.status, 'saved');
+  assert.equal(first.calls, 1, 'prepare only: the entry is live without a commit call');
+  assert.deepEqual(x.calls, ['projectLaneSnapshots:prepare']);
+  assert.equal(first.uploads, 1, 'pages and both files go up as one object');
+  assert.equal(x.stored().length, 1);
+  assert.equal(x.rows().find(row => row.seq === 1).state, 'live');
+  // Only a digest and size in Convex; the pack holds the bytes.
+  for (const row of x.rows()) assert(!JSON.stringify(row).includes('edit one'));
+  // The second snapshot changes one file: a new pack with that file, a ref for the unchanged b.txt.
+  writeFileSync(join(x.root, 'a.txt'), 'edit two');
+  const second = await x.snap();
+  assert.equal(second.calls, 1);
+  assert.equal(x.stored().length, 2);
+  const packs = [...x.r2.objects.entries()].filter(([key]) => key.includes('/s/'));
+  const decoded = packs.map(([, bytes]) => decodeSnapshotPack(bytes));
+  const newest = decoded.find(pack => [...pack.members.values()].some(m => m.toString() === 'edit two'));
+  assert(newest);
+  assert(![...newest.members.values()].some(m => m.toString() === 'second file'), 'sent once, not again');
+  assert.equal(Object.keys(newest.refs).length, 1, 'b.txt is located in the earlier pack');
+  // A restore reads the newest pack and follows the ref into the earlier one.
+  writeFileSync(join(x.root, 'a.txt'), 'later, unsnapshotted');
+  rmSync(join(x.root, 'b.txt'));
+  // Undo snapshots the current files (3), then moves to 2: b.txt comes through the ref into pack 1.
+  assert.equal((await x.run({ undo: 1 })).target, 2);
+  assert.equal(text(x.root, 'a.txt'), 'edit two');
+  assert.equal(text(x.root, 'b.txt'), 'second file');
+  assert.equal((await x.run({ undo: 1 })).target, 1);
+  assert.equal(text(x.root, 'a.txt'), `edit one ${big}`);
+  assert.equal(text(x.root, 'b.txt'), 'second file');
+  x.calls.length = 0;
+  assert.deepEqual(await x.snap(), { status: 'unchanged', calls: 0 });
+  assert.equal(x.calls.length, 0, 'an unchanged tree still costs no call');
+});
+
+test('old loose snapshots and packed ones live in one log: undo, redo and a new machine cross both', async t => {
+  const x = await fixture(t);
+  writeFileSync(join(x.root, 'a.txt'), 'loose one');
+  writeFileSync(join(x.root, 'old.txt'), 'taken before packs');
+  assert.equal((await x.snap()).calls, 2, 'a CLI without lane-snapshot-packs: prepare and commit');
+  x.usePacks(true);
+  writeFileSync(join(x.root, 'a.txt'), 'packed two');
+  const packed = await x.snap();
+  assert.equal(packed.calls, 1);
+  writeFileSync(join(x.root, 'new.txt'), 'packed three');
+  assert.equal((await x.snap()).calls, 1);
+  const log = await x.run({});
+  assert.deepEqual(
+    log.entries.map(entry => Boolean(entry.pack)),
+    [true, true, false],
+    'the loose entry carries no pack',
+  );
+  // Undo twice: packed 3 -> packed 2 -> the loose snapshot, whose files are loose objects.
+  assert.equal((await x.run({ undo: 1 })).target, 2);
+  assert.equal(text(x.root, 'a.txt'), 'packed two');
+  assert.equal((await x.run({ undo: 1 })).target, 1);
+  assert.equal(text(x.root, 'a.txt'), 'loose one');
+  assert.equal(text(x.root, 'old.txt'), 'taken before packs');
+  assert(!existsSync(join(x.root, 'new.txt')));
+  assert.equal((await x.run({ redo: 2 })).target, 3);
+  assert.equal(text(x.root, 'new.txt'), 'packed three');
+  // The machine dies: a clean checkout with no ledger restores the newest, then the oldest.
+  const marker = readFileSync(join(x.root, '.forge/hosted-lane.json'));
+  rmSync(x.root, { recursive: true, force: true });
+  rmSync(`${x.root}.forge-client`, { recursive: true, force: true });
+  mkdirSync(join(x.root, '.forge'), { recursive: true });
+  writeFileSync(join(x.root, 'a.txt'), 'original');
+  writeFileSync(join(x.root, '.forge/hosted-lane.json'), marker);
+  assert.equal((await x.run({ restore: 'latest' })).phase, 'restore');
+  assert.equal(text(x.root, 'a.txt'), 'packed two');
+  assert.equal(text(x.root, 'old.txt'), 'taken before packs');
+  assert.equal(text(x.root, 'new.txt'), 'packed three');
+  await x.run({ restore: 1 });
+  assert.equal(text(x.root, 'a.txt'), 'loose one');
+});
+
+test('a snapshot whose upload never finished is skipped by restore latest and named by a direct restore', async t => {
+  const x = await fixture(t, { packs: true });
+  writeFileSync(join(x.root, 'a.txt'), 'safe');
+  await x.snap();
+  writeFileSync(join(x.root, 'a.txt'), 'lost mid-upload');
+  await x.snap();
+  const [, newest] = [...x.r2.objects.keys()].filter(key => key.includes('/s/'));
+  x.r2.objects.delete(newest);
+  // A new machine: nothing to snapshot first, so `latest` is the lost snapshot 2.
+  const marker = readFileSync(join(x.root, '.forge/hosted-lane.json'));
+  rmSync(x.root, { recursive: true, force: true });
+  rmSync(`${x.root}.forge-client`, { recursive: true, force: true });
+  mkdirSync(join(x.root, '.forge'), { recursive: true });
+  writeFileSync(join(x.root, 'a.txt'), 'original');
+  writeFileSync(join(x.root, '.forge/hosted-lane.json'), marker);
+  const restored = await x.run({ restore: 'latest' });
+  assert.equal(text(x.root, 'a.txt'), 'safe');
+  assert.deepEqual(restored.skipped, [2]);
+  await assert.rejects(x.run({ restore: 2 }), error => {
+    assert.equal(error.code, 'R2_OBJECT_MISSING');
+    assert.match(error.message, /Snapshot 2 has no stored files/);
+    return true;
+  });
+  assert.equal(text(x.root, 'a.txt'), 'safe', 'a refused restore changes nothing');
+});
+
+test('an oversize packed snapshot is refused on the client before anything is built or sent', async t => {
+  const x = await fixture(t, { packs: true });
+  writeFileSync(join(x.root, 'a.txt'), Buffer.alloc(LANE_SNAPSHOT.snapshotBytes + 1, 1));
+  const refused = await x.snap();
+  assert.equal(refused.code, 'QUOTA_EXCEEDED');
+  assert.equal(x.calls.length, 0);
+  assert.equal((await x.snap()).status, 'unchanged', 'reported once per tree');
+});
+
+test('timed snapshots wait for the project interval; the turn end and pre-rewrite snapshots do not', async t => {
+  const x = await fixture(t, { packs: true });
+  const address = { url: 'https://fixture.invalid', projectId: x.f.projectId };
+  const launches = [];
+  snapshotWorkerTestHooks.launch = (command, args) => {
+    launches.push(args);
+    return { on() {}, unref() {} };
+  };
+  t.after(() => delete snapshotWorkerTestHooks.launch);
+  assert.deepEqual(snapshotSettings(x.root), { intervalMinutes: 10, packs: true });
+  assert.equal(launchSnapshotWorker(x.root, address), true, 'no timed snapshot yet: due');
+  const stamp = join(snapshotDirectory(x.root), 'worker');
+  const long = new Date(Date.now() - 60_000);
+  utimesSync(stamp, long, long);
+  markTimedSnapshot(x.root);
+  assert.equal(launchSnapshotWorker(x.root, address), false, 'inside the interval: no worker');
+  const now = Date.now();
+  assert.equal(timedSnapshotDue(x.root, 10, now + 9 * 60_000), false);
+  assert.equal(timedSnapshotDue(x.root, 10, now + 10 * 60_000), true);
+  rememberSnapshotsKept(x.root, true, { intervalMinutes: 5, packs: true });
+  assert.equal(timedSnapshotDue(x.root, snapshotSettings(x.root).intervalMinutes, now + 5 * 60_000), true);
+  // Turn end and a move that rewrites files snapshot at once, however recently a timed one ran.
+  writeFileSync(join(x.root, 'a.txt'), 'edited inside the interval');
+  rememberSnapshotsKept(x.root, true, { intervalMinutes: 10, packs: true });
+  const sub = join(x.root, 'src');
+  mkdirSync(sub);
+  const taken = await turnEndSnapshot({ cwd: sub }, async () => x.client());
+  assert.equal(taken?.status, 'saved');
+  assert.equal(
+    timedSnapshotDue(x.root, 10, now + 60_000),
+    false,
+    'the turn-end one did not move the interval',
+  );
+  writeFileSync(join(x.root, 'a.txt'), 'edited again');
+  assert.equal((await x.run({ undo: 1 })).phase, 'undo', 'undo snapshots the current files first');
+  assert.equal(x.rows().filter(row => row.kind === 'snapshot').length, 2);
+});
+
+test('the snapshot interval is a project setting: default 10, at least 5, shown to the CLI', async () => {
+  const stored = autonomyPolicySchema.parse(
+    editedPolicy(autonomyPolicySchema.parse(effectivePolicy({})), {
+      action: 'set-policy',
+      operationId: randomUUID(),
+    }),
+  );
+  assert.equal(snapshotIntervalMinutes(stored), LANE_SNAPSHOT.intervalMinutes.default);
+  const set = editedPolicy(stored, {
+    action: 'set-policy',
+    operationId: randomUUID(),
+    autoSnapshotIntervalMinutes: 5,
+  });
+  assert.equal(snapshotIntervalMinutes(set), 5);
+  assert.throws(
+    () =>
+      editedPolicy(stored, {
+        action: 'set-policy',
+        operationId: randomUUID(),
+        autoSnapshotIntervalMinutes: LANE_SNAPSHOT.intervalMinutes.min - 1,
+      }),
+    /at least 5 minutes/,
+  );
+  const write = { action: 'set-policy', operationId: randomUUID() };
+  assert.equal(
+    policyWriteSchema.safeParse({
+      ...write,
+      autoSnapshotIntervalMinutes: LANE_SNAPSHOT.intervalMinutes.min - 2,
+    }).success,
+    false,
+  );
+  assert.equal(
+    policyWriteSchema.safeParse({ ...write, autoSnapshotIntervalMinutes: LANE_SNAPSHOT.intervalMinutes.min })
+      .success,
+    true,
+  );
+});
+
+/** One builder landing as a timeline: 15 commands that follow edits (1 to 3 files of ~20 KB out of
+ * a pool of 8), a sync at minute 30 and the turn end at minute 46. Returns Convex calls and R2 PUTs. */
+async function landingLoop(t, { packed }) {
+  const x = await fixture(t, { packs: packed });
+  const address = { url: 'https://fixture.invalid', projectId: x.f.projectId };
+  snapshotWorkerTestHooks.launch = () => ({ on() {}, unref() {} });
+  t.after(() => delete snapshotWorkerTestHooks.launch);
+  const realNow = Date.now,
+    start = realNow();
+  t.after(() => (Date.now = realNow));
+  const body = seed => `${seed}\n`.repeat(2000);
+  let step = 0;
+  const edit = count => {
+    for (let index = 0; index < count; index++)
+      writeFileSync(join(x.root, `f${(step * 3 + index) % 8}.txt`), body(`v${step}-${index}`));
+    step++;
+  };
+  const at = minute => (Date.now = () => start + minute * 60_000);
+  let snapshots = 0;
+  const snapshot = async () => {
+    const taken = await x.snap();
+    if (taken.status === 'saved') snapshots++;
+    return taken;
+  };
+  for (let command = 1; command <= 15; command++) {
+    at(command * 3);
+    edit(1 + (command % 3));
+    if (packed) {
+      // A command: the timed snapshot runs only when the interval has passed.
+      if (launchSnapshotWorker(x.root, address)) {
+        if ((await snapshot()).status === 'saved') markTimedSnapshot(x.root, new Date(Date.now()));
+      }
+    } else await snapshot();
+  }
+  at(31);
+  edit(2);
+  await snapshot(); // before the sync: never held back
+  at(46);
+  edit(1);
+  await snapshot(); // the turn end: never held back
+  return { calls: x.calls.length, puts: x.stored().length, snapshots };
+}
+
+test('a builder landing costs one call and one object per snapshot, and far fewer snapshots', async t => {
+  const before = await landingLoop(t, { packed: false });
+  const after = await landingLoop(t, { packed: true });
+  // Old: every changed command snapshots; each costs prepare + commit and one object per page and file.
+  assert.equal(before.snapshots, 17);
+  assert.equal(before.calls, 2 * before.snapshots);
+  // New: one call and one pack per snapshot, and timed snapshots wait for the 10-minute interval.
+  assert.equal(after.calls, after.snapshots);
+  assert.equal(after.puts, after.snapshots);
+  assert(after.snapshots <= 7, `${after.snapshots} snapshots in a 46-minute landing`);
+  assert(after.calls * 4 <= before.calls, JSON.stringify({ before, after }));
+  assert(after.puts * 5 <= before.puts, JSON.stringify({ before, after }));
+  console.log('landing loop', JSON.stringify({ before, after }));
 });

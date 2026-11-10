@@ -72,6 +72,7 @@ function entry(row: Row): SnapshotEntry {
     head: row.head!,
     tree: row.tree!,
     pages: row.pages ?? null,
+    ...(row.pack ? { pack: row.pack } : {}),
     changeCount: row.changeCount ?? 0,
     ...(row.parent !== undefined ? { parent: row.parent } : {}),
     ...(row.target !== undefined ? { target: row.target } : {}),
@@ -161,7 +162,10 @@ export const prepare = mutation({
       const retried = await byOperation(ctx, input.projectId, request.operationId);
       if (retried) {
         invariant(
-          retried.laneId === request.laneId && retried.tree === request.tree && retried.actor === actor,
+          retried.laneId === request.laneId &&
+            retried.tree === request.tree &&
+            retried.actor === actor &&
+            (retried.pack?.sha256 ?? null) === (request.pack?.sha256 ?? null),
           'WORK_OPERATION_CHANGED',
           'Retry the original snapshot request.',
         );
@@ -170,8 +174,11 @@ export const prepare = mutation({
           seq: retried.seq,
           state: retried.state === 'pending' ? 'pending' : 'live',
           store: store?._id ?? null,
-          targets:
-            retried.state === 'pending'
+          // A packed snapshot is live from `prepare`: a retry means the client may not have
+          // finished the PUT, so it is signed again (create-only: a finished PUT is a no-op).
+          targets: request.pack
+            ? await targets(input.projectId, request.laneId, [request.pack])
+            : retried.state === 'pending'
               ? await targets(input.projectId, request.laneId, request.uploads)
               : [],
         });
@@ -184,7 +191,9 @@ export const prepare = mutation({
       const newest = row ? await newestEntry(ctx, input.projectId, request.laneId) : null;
       if (newest && newest.state === 'live' && newest.tree === request.tree)
         return canonicalPayload({ seq: resolved(newest), state: 'unchanged', store: row!._id, targets: [] });
-      const bytes = request.uploads.reduce((sum, pin) => sum + pin.size, 0);
+      const bytes = request.pack
+        ? request.pack.size
+        : request.uploads.reduce((sum, pin) => sum + pin.size, 0);
       if (bytes > LANE_SNAPSHOT.snapshotBytes || (row?.laneBytes ?? 0) + bytes > LANE_SNAPSHOT.laneBytes)
         throw new ForgeError(
           'QUOTA_EXCEEDED',
@@ -194,10 +203,12 @@ export const prepare = mutation({
         kind: 'snapshot',
         actor,
         operationId: request.operationId,
+        // Loose uploads wait for `commit`; a pack is the one object, live now.
         state: request.uploads.length ? 'pending' : 'live',
         head: request.head,
         tree: request.tree,
         pages: request.pages,
+        ...(request.pack ? { pack: request.pack } : {}),
         changeCount: request.changeCount,
         uploadBytes: bytes,
         notSaved: request.notSaved,
@@ -207,7 +218,11 @@ export const prepare = mutation({
         seq,
         state: request.uploads.length ? 'pending' : 'live',
         store,
-        targets: await targets(input.projectId, request.laneId, request.uploads),
+        targets: await targets(
+          input.projectId,
+          request.laneId,
+          request.pack ? [request.pack] : request.uploads,
+        ),
       });
     } catch (error) {
       return report(error);

@@ -6,7 +6,13 @@ import { join } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { workerPath } from './worker-install.js';
 import { withExchangeProgress } from './exchange-progress.js';
-import { snapshotDirectory, snapshotLockHeld } from './lane-snapshot-hint.js';
+import {
+  markTimedSnapshot,
+  snapshotDirectory,
+  snapshotLockHeld,
+  snapshotSettings,
+  timedSnapshotDue,
+} from './lane-snapshot-hint.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
 
 /** Unsaved-work snapshots run in a short-lived detached process, so a command never waits for the
@@ -17,10 +23,14 @@ const MIN_GAP_MS = 3_000;
 const WORKER_DEADLINE_MS = 60_000;
 export const snapshotWorkerTestHooks: { launch?: typeof spawn } = {};
 
-/** Start the worker for a Lane checkout. Skips when a snapshot of it is running or one started
- * within the last few seconds (a burst of commands snapshots once). Never throws or waits. */
+/** Start the worker for a Lane checkout: the timed snapshot. Skips while the project's interval
+ * (policy autoSnapshotIntervalMinutes) has not passed since this checkout's last timed snapshot
+ * (the latest state wins: the first command after the interval, or the turn end, takes it), when a
+ * snapshot of it is running, or when one started within the last few seconds (a burst of commands
+ * snapshots once). Never throws or waits. */
 export function launchSnapshotWorker(root: string, address: HostedAgentAddress): boolean {
   try {
+    if (!timedSnapshotDue(root, snapshotSettings(root).intervalMinutes)) return false;
     if (snapshotLockHeld(root)) return false;
     const stamp = join(snapshotDirectory(root), 'worker');
     try {
@@ -53,9 +63,11 @@ if (isMainModule(import.meta.url)) {
       const { ConvexExchange } = await import('./exchange-client.js');
       const { snapshotLaneCheckout } = await import('./hosted-lane-snapshot.js');
       const exchange = new ConvexExchange(url, process.env.FORGE_AUTH_TOKEN, projectId, '', null);
-      await withExchangeProgress({ signal: cancel.signal }, () =>
+      const taken = await withExchangeProgress({ signal: cancel.signal }, () =>
         snapshotLaneCheckout(root, projectId, exchange.client),
       );
+      // Only a snapshot that stored something starts the interval; an unchanged tree costs nothing.
+      if (taken.status === 'saved') markTimedSnapshot(root);
     }
   } catch {
     /* Advisory: the next snapshot retries. */

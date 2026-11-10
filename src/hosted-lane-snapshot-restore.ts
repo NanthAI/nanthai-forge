@@ -29,6 +29,7 @@ import { ForgeError, invariant } from './errors.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { makeFunctionReference } from 'convex/server';
 import { hostedActionError } from './hosted-action-error.js';
+import { decodeSnapshotPack, type SnapshotPackRefs } from './lane-snapshot-pack.js';
 import {
   snapshotListSchema,
   snapshotTarget,
@@ -79,11 +80,71 @@ async function readObjects(
   }
   return found;
 }
-/** A snapshot's delta: its page chain, read one page at a time. */
-async function readDelta(client: SnapshotClient, projectId: string, laneId: string, entry: SnapshotEntry) {
+/**
+ * The objects of one Lane's snapshots, wherever they live: inside a snapshot pack (the entry's own,
+ * or an earlier one its header points to), or loose under their own digest (snapshots taken before
+ * packs). Each pack is downloaded once; every member is digest-checked as it is read.
+ */
+class SnapshotObjects {
+  private cache = new Map<string, Buffer>();
+  private refs: SnapshotPackRefs = {};
+  private packs = new Set<string>();
+  /** File digest to the pack it was read from. */
+  private where = new Map<string, [string, number]>();
+  constructor(
+    private readonly client: SnapshotClient,
+    private readonly projectId: string,
+    private readonly laneId: string,
+  ) {}
+  private async pack(pin: { sha256: string; size: number }) {
+    if (this.packs.has(pin.sha256)) return;
+    const bytes = (await readObjects(this.client, this.projectId, this.laneId, [pin])).get(pin.sha256)!;
+    const decoded = decodeSnapshotPack(bytes);
+    this.packs.add(pin.sha256);
+    for (const [sha256, member] of decoded.members) {
+      this.cache.set(sha256, member);
+      if (!this.where.has(sha256)) this.where.set(sha256, [pin.sha256, pin.size]);
+    }
+    for (const [blob, ref] of Object.entries(decoded.refs)) this.refs[blob] ??= ref;
+  }
+  /** Make an entry's own pack readable (a loose entry has none). */
+  async open(entry: Pick<SnapshotEntry, 'pack'>) {
+    if (entry.pack) await this.pack(entry.pack);
+  }
+  async many(pins: { sha256: string; size: number }[]) {
+    const found = new Map<string, Buffer>(),
+      loose: { sha256: string; size: number }[] = [];
+    for (const pin of new Map(pins.map(pin => [pin.sha256, pin])).values()) {
+      const ref = this.refs[pin.sha256];
+      if (!this.cache.has(pin.sha256) && ref) await this.pack({ sha256: ref[0], size: ref[1] });
+      const known = this.cache.get(pin.sha256);
+      if (known) found.set(pin.sha256, known);
+      else loose.push(pin);
+    }
+    for (const [sha256, bytes] of await readObjects(this.client, this.projectId, this.laneId, loose)) {
+      this.cache.set(sha256, bytes);
+      found.set(sha256, bytes);
+    }
+    return found;
+  }
+  /** Where the next snapshot may find each file: in a pack, or loose. */
+  locate(blobs: string[]) {
+    const located: SnapshotPackRefs = {},
+      loose: string[] = [];
+    for (const blob of blobs) {
+      const at = this.where.get(blob) ?? this.refs[blob];
+      if (at) located[blob] = at;
+      else loose.push(blob);
+    }
+    return { located, loose };
+  }
+}
+/** A snapshot's delta: its page chain, read from its pack or one page at a time. */
+async function readDelta(objects: SnapshotObjects, entry: SnapshotEntry) {
   const changes: SaveChange[] = [];
+  await objects.open(entry);
   for (let pin = entry.pages; pin;) {
-    const bytes = (await readObjects(client, projectId, laneId, [pin])).get(pin.sha256)!;
+    const bytes = (await objects.many([pin])).get(pin.sha256)!;
     const page = savePageSchema.parse(JSON.parse(bytes.toString('utf8')));
     changes.push(...page.changes);
     pin = page.next;
@@ -187,7 +248,7 @@ export async function executeSnapshots(
       `Could not snapshot the current files before moving them (${before.reason}). Nothing was changed.`,
     );
   const log = await listed();
-  const seq = snapshotTarget(log.entries, {
+  let seq = snapshotTarget(log.entries, {
     ...(command.undo ? { undo: command.undo } : {}),
     ...(command.redo ? { redo: command.redo } : {}),
     ...(command.restore !== undefined ? { restore: command.restore } : {}),
@@ -197,8 +258,34 @@ export async function executeSnapshots(
     'NOT_FOUND',
     `Nothing to ${move}: the operation log has no such snapshot. List it with nforge x ROOT snapshots '{}'.`,
   );
-  const target = log.entries.find(entry => entry.seq === seq && entry.kind === 'snapshot')!;
-  const delta = await readDelta(client, projectId, laneId, target);
+  const objects = new SnapshotObjects(client, projectId, laneId);
+  let target = log.entries.find(entry => entry.seq === seq && entry.kind === 'snapshot')!;
+  let delta: SaveChange[];
+  const skipped: number[] = [];
+  for (;;) {
+    try {
+      delta = await readDelta(objects, target);
+      break;
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'R2_OBJECT_MISSING') throw error;
+      // A snapshot is recorded by the call that signs its upload, so one whose machine stopped
+      // mid-upload has a row and no object. `latest` falls back to the newest one that has bytes.
+      const failed = target.seq;
+      const older = log.entries
+        .filter(entry => entry.kind === 'snapshot' && entry.seq < failed)
+        .sort((a, b) => b.seq - a.seq)[0];
+      if (command.restore !== 'latest' || !older)
+        throw new ForgeError(
+          'R2_OBJECT_MISSING',
+          `Snapshot ${failed} has no stored files: the machine stopped before its upload finished. Nothing was changed.${
+            command.restore === 'latest' ? '' : ' Pick an earlier one with x snapshots {"restore":SEQ}.'
+          }`,
+        );
+      skipped.push(failed);
+      target = older;
+      seq = older.seq;
+    }
+  }
   invariant(
     delta.every(change => change.after?.mode !== 'gitlink'),
     'BAD_ARGUMENT',
@@ -220,7 +307,7 @@ export async function executeSnapshots(
     const fromSnapshot = delta.flatMap(change =>
       change.after ? [{ sha256: change.after.blob, size: change.after.content.object.size }] : [],
     );
-    for (const [blob, bytes] of await readObjects(client, projectId, laneId, fromSnapshot))
+    for (const [blob, bytes] of await objects.many(fromSnapshot))
       writeFileSync(join(stage, blob), bytes, { mode: 0o600 });
     const staged = new Set(fromSnapshot.map(pin => pin.sha256));
     await headObjects(
@@ -244,11 +331,17 @@ export async function executeSnapshots(
     });
     const after = captureSnapshot(root, marker);
     const ledger = readSnapshotLedger(root, laneId);
+    const found = objects.locate([...staged]);
     writeSnapshotLedger(root, {
       laneId,
       tree: after.tree === target.tree ? target.tree : null,
       seq,
-      uploaded: [...ledger.uploaded, ...staged, ...(target.pages ? [target.pages.sha256] : [])],
+      uploaded: [
+        ...ledger.uploaded,
+        ...found.loose,
+        ...(target.pages && !target.pack ? [target.pages.sha256] : []),
+      ],
+      located: { ...ledger.located, ...found.located },
       store: ledger.store ?? null,
     });
     const headDiffers = target.head !== marker.selection.head;
@@ -259,6 +352,7 @@ export async function executeSnapshots(
       written: writes.length,
       removed: removals.length,
       headDiffers,
+      ...(skipped.length ? { skipped } : {}),
       next: `${headDiffers ? 'This snapshot was taken on an earlier saved head; its changed files were written over the current head. ' : ''}Your files were snapshotted before the move: x snapshots {"undo":1} goes back. Nothing was saved; save when you want to keep this.`,
     };
   } finally {

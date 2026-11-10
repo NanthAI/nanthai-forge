@@ -37,7 +37,7 @@ import { sep } from 'node:path';
 import { hostedCheckRequestSchema, hostedSelfHostedRunnerSchema } from './hosted-check.js';
 import { hostedMacRuntime } from './hosted-mac-lease.js';
 import { checkEnvironment } from './check-environment.js';
-import { autonomyPolicySchema, reviewReason } from './autonomy-policy.js';
+import { autonomyPolicySchema, reviewReason, snapshotIntervalMinutes } from './autonomy-policy.js';
 import type { HostedAgentCapabilities } from './hosted-agent-contract.js';
 import { hostedLandingCancelSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
@@ -264,7 +264,16 @@ export async function hostedCheckSettings(query: HostedQuery, capabilities: Host
     ...(current.runnerGrant ? { runnerGrant: current.runnerGrant } : {}),
     ...(current.mainAudit === undefined ? {} : { mainAudit: current.mainAudit }),
     checkCallbackConfigured: capabilities.checkCallbackConfigured,
-    policy: { preset: policy.preset, acceptance: policy.acceptance },
+    policy: {
+      preset: policy.preset,
+      acceptance: policy.acceptance,
+      // Unsaved-work snapshots (Issue 7ac4e32f): on or off, and minutes between timed snapshots
+      // of one Lane (the turn-end and pre-rewrite snapshots are not held back by it).
+      snapshots: {
+        enabled: policy.autoSnapshot === true,
+        intervalMinutes: snapshotIntervalMinutes(policy),
+      },
+    },
     agentLandsOnPass: review === null,
     blockers,
     // Advice only: a configured command that declares no scope never runs scoped.
