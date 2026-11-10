@@ -9,6 +9,7 @@ import {
   hostedAgentHelp,
   hostedAgentHelpEntries,
   hostedAgentHelpMarkdown,
+  hostedHelpFor,
 } from '../dist/hosted-agent-help.js';
 import { HELP_TOPIC_MAX, helpTopics, helpTopicText } from '../dist/help-topics.js';
 import { cliTeachContext, teach, teachReceipt } from '../dist/error-teaching.js';
@@ -238,6 +239,13 @@ test('a refusal teaches next and learn with the caller values; code, message and
   assert.equal(operator.message, 'Use agent ROOT ACTION [JSON | --command-file FILE].');
   assert.equal(operator.next, `nforge x . cancel '{"submissionId":"dfcc483d-3972-408d-9251-cc90909247e4"}'`);
   assert.equal(operator.learn, 'nforge agent . help arguments');
+  const friction = describeFailure(
+    new ForgeError('BAD_ARGUMENT', 'operationId must be a UUID.'),
+    cliTeachContext(['agent', '/a lane', 'save', '--friction', '{"operationId":"short"}']),
+  );
+  assert.equal(friction.next, "nforge agent '/a lane' help friction");
+  assert.equal(friction.learn, "nforge agent '/a lane' help arguments");
+  assert.match(hostedHelpFor('friction'), /operationId[\s\S]*uuid/);
   const lane = '7c9295d7-6f84-4ee1-8e5c-aa27e4ccc69c';
   // A server continuation wins over the template; an unknown code teaches nothing and breaks nothing.
   const own = teach('COMPOSITION_CONFLICT', cliTeachContext(['agent', '.', 'land']), {

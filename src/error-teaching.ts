@@ -200,6 +200,9 @@ export function cliTeachContext(argv: readonly string[]): TeachContext {
       : verb
         ? { command: commandLine([argv[0]!, argv[1]!, verb]) }
         : {}),
+    ...(verb === 'save' && argv.slice(3).includes('--friction')
+      ? { corrected: commandLine(['agent', argv[1]!, 'help', 'friction']) }
+      : {}),
     ...(typeof parameters.laneId === 'string' ? { laneId: parameters.laneId } : {}),
     ...(typeof parameters.runId === 'string' ? { runId: parameters.runId } : {}),
     argv,
