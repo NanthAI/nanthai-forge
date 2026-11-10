@@ -84,8 +84,9 @@ only verified frozen-manifest files; the repair records a backfill time and move
 ## Planning search
 
 Before filing an Issue or friction, search for an existing planning item and
-comment on it instead of creating a duplicate. Use `planning {"search":"relevant words"}`
-and follow `nextCursor`; `status:"all"` also finds closed work. Search is read-only,
+comment on it instead of creating a duplicate. One `planning {"search":"relevant words","limit":10}`
+is enough; `status:"all"` also finds closed work. Page `nextCursor` only to browse, never
+for a duplicate check: each search is billed at the whole index size. Search is read-only,
 ranked by Convex full-text relevance, and filters status/kind/initiative inside the
 search index. Omitted status includes proposed/open/in-progress; an explicit status
 is exact. Cursors bind the search, filters, page size and generation. `query` reports
@@ -134,6 +135,11 @@ billed DB I/O. At 1,000 and 10,000 items the page budget is the same; total reta
 search text/index storage grows with item bytes. Convex also charges search query-GB
 against the entire search-index size, including retained generations and other
 projects; equality filters do not reduce that charge. See [Convex costs](https://docs.convex.dev/search/text-search#costs).
+`search_planning` sits on `projectWorkRecords`, so every Work row of every generation
+counts, with or without planning text: dogfood measured 7.47 MB per search
+(cost ledger `planning-search-billed-bytes`). At the Starter rate of $0.11 per 1,000
+query-GB that is under $0.000001 per search, so a search-only table is not worth its
+write path and migration until searches or the index grow about 1,000 times.
 For 1 KiB search documents, 50 returned rows are approximately 50 KiB plus fixed
 metadata at either scale; nominal indexed text is about 1 MiB/10 MiB respectively
 (actual index overhead and provider billing must be measured after deployment).

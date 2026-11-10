@@ -99,8 +99,8 @@ merges (or why nothing can go).
 11. Fix failures in the same Lane and land again; never cancel and recreate.
     Follow exact conflict/stale/stalled continuations; replay unknown outcomes.
     Before filing an Issue or friction, search planning and comment on an existing
-    match instead. Use `planning {"search":"relevant words","limit":50}`
-    through `nextCursor`; add `status:"all"` to include closed work. Log action/code/Lane/cost/workaround, then fix or link a slice.
+    match instead. One `planning {"search":"relevant words","limit":10}` is
+    enough (no `nextCursor` paging); add `status:"all"` to include closed work. Log action/code/Lane/cost/workaround, then fix or link a slice.
 12. Match your receipt to your Lane/operation and verify files on accepted main:
     after landing, `nforge pull` (its own shell call; it resets the working directory)
     and grep for a named symbol or file of your change before reporting LANDED. A

@@ -620,6 +620,30 @@
       "source": "tests/hosted-agent-planning.test.mjs and tests/hosted-contention.test.mjs on the in-process Convex fixture, 2026-11-10: the flip 5 re-run meter (10 subscriptions per tab) gives 2 per tab for a new Issue, a status change, a comment and a note; the worst write times three tabs. Before: 3 per tab (9), the workspace query re-ran on every write.",
       "issue": "0695ab24",
       "reason": "The workspace query is the heaviest read and must not depend on the project-wide Work revision again; one more re-run per tab fails."
+    },
+    {
+      "id": "planning-index-searches",
+      "area": "Search-index queries per planning search and per new-Issue duplicate check",
+      "measuredBy": "planning-fixture",
+      "metric": "planningIndexSearches",
+      "unit": "reads",
+      "value": 1,
+      "floor": 0,
+      "source": "tests/hosted-agent-planning.test.mjs on the in-process Convex fixture, 2026-11-10: one CLI planning search and one new Issue (its likelyDuplicates check) each run one withSearchIndex query; ordinary rows add no per-result search.",
+      "issue": "a02991a7",
+      "reason": "Convex bills every text search at the whole search-index size, whatever the limit or filters (planning-search-billed-bytes); a second search per operation doubles that, so any rise fails."
+    },
+    {
+      "id": "planning-search-billed-bytes",
+      "area": "Billed search bytes (query-GB) per search_planning query on dogfood",
+      "measuredBy": "capture",
+      "metric": "planningSearchBilledBytes",
+      "unit": "bytes",
+      "value": 7470000,
+      "floor": 0,
+      "source": "convex logs --success sample, 2026-11-10 (Issue a02991a7): textIndexQueryBytes 7.47 MB for every projectHostedPlanningSearch:search, projectHostedFriction:capture and projectWorkIndex:workspace search. Convex docs (search/text-search#costs) and convex-backend usage_tracking: each query counts the full on-disk size of the index, once per search.",
+      "issue": "a02991a7",
+      "reason": "Billed as Search queries at $0.11 per 1,000 query-GB (Starter), about $0.0000008 per search and $0.0008 a day at 920 searches; it grows with every projectWorkRecords row of every generation, not with the limit. Judged on change by planning-index-searches."
     }
   ]
 }

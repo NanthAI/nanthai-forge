@@ -45,7 +45,7 @@ const code = expected => error => (error.data?.code ?? error.code) === expected;
  * the Convex lanes fixture). Counts every Convex call the agent makes. The real handlers keep
  * omitted put fields, so the port advertises that by default, as the transport does after discovery. */
 function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures]) {
-  installPlanningSearch(s);
+  const searches = installPlanningSearch(s);
   const calls = [],
     frictions = new Map();
   let intercept;
@@ -85,6 +85,7 @@ function port(s, states = new Map(), serverFeatures = [...hostedContractFeatures
   const reference = ref => getFunctionName(ref);
   const result = {
     calls,
+    searches,
     states,
     frictions,
     root: join(s.directory, 'checkout'),
@@ -1460,11 +1461,14 @@ test('Issue filing returns candidates without another call and retries retain th
     })
   ).result;
   p.calls.length = 0;
+  p.searches.length = 0;
   const input = { kind: 'issue', title: 'Sync failure diagnostics' };
   const filed = await put(p, input);
   assert(filed.result.likelyDuplicates.items.some(item => item.id === prior.itemId));
   // The duplicates read stays for a creation only; the put itself is one mutation (flip 5 S5).
   assert.deepEqual(p.calls, ['projectWorkIndex:workspace', 'projectWorkCommand:command']);
+  // Each index search is billed at the whole search-index size (a02991a7): one per filing.
+  withinLedger({ planningIndexSearches: p.searches.length });
   await s.send(s.item({ title: 'Sync failure diagnostics' }));
   const replay = await run(p, 'put-planning-item', input, filed.operationId);
   assert.deepEqual(replay.result.likelyDuplicates, filed.result.likelyDuplicates);
@@ -1479,11 +1483,14 @@ test('CLI planning search forwards one query and summaries need no per-item deta
     body: 'Done when: verified',
   });
   p.calls.length = 0;
+  p.searches.length = 0;
   const found = await list(p, { search: 'sync' });
   assert.equal(found.items.length, 1);
   assert.equal(found.items[0].initiativeId, null);
   assert.equal(found.items[0].hasDoneWhen, true);
   assert.deepEqual(p.calls, ['projectHostedPlanningSearch:search']);
+  // One billed index search per CLI search; no per-result search (a02991a7).
+  withinLedger({ planningIndexSearches: p.searches.length });
 });
 
 test('released planning servers keep filing available and name missing search coverage', async t => {
