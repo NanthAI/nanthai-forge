@@ -10,11 +10,12 @@ import { objectRecipeSchema, objectChunkPageSchema } from './object-chunks.js';
 import { ForgeError, invariant } from './errors.js';
 import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
 import type { z } from 'zod';
-import type { directCommandSchema } from './hosted-actions-direct.js';
+import { directSourceWindow, directSourceBatch, type directCommandSchema } from './hosted-actions-direct.js';
 import {
   actionsCommandForCapabilities,
   actionsRefusalReasons,
   actionsPreflightCapability,
+  actionsSourceBatchCapability,
 } from './hosted-actions-capabilities.js';
 import {
   retryActionsInfrastructure,
@@ -241,6 +242,9 @@ export class ActionsJobClient {
     invariant(reply.value?.status !== 'cancelled', 'CHECK_CANCELLED', 'The check was cancelled.');
     return run;
   }
+  get sourceWindow() {
+    return this.capabilities.includes(actionsSourceBatchCapability) ? directSourceBatch : directSourceWindow;
+  }
   transport() {
     const rows = new Map<
       string,
@@ -254,21 +258,21 @@ export class ActionsJobClient {
       }
     >();
     const pending = new Map<string, Promise<void>>();
-    const resolve = async (digests: string[]) => {
+    const resolve = async (digests: string[], oneWindow = false): Promise<number> => {
       const unique = [...new Set(digests)],
         waiting = unique.flatMap(id => (pending.has(id) ? [pending.get(id)!] : [])),
         missing = unique.filter(id => !rows.has(id) && !pending.has(id));
       const request = (async () => {
-        for (let start = 0; start < missing.length; start += 400) {
-          const page = missing.slice(start, start + 400);
-          const found = (await this.call({ kind: 'source', digests: page })) as (typeof rows extends Map<
-            string,
-            infer T
-          >
-            ? T
-            : never)[];
+        for (let start = 0; start < missing.length;) {
+          const page = missing.slice(start, start + this.sourceWindow);
+          const batch = this.capabilities.includes(actionsSourceBatchCapability);
+          const found = (await this.call({
+            kind: 'source',
+            digests: page,
+            ...(batch ? { batch: true } : {}),
+          })) as (typeof rows extends Map<string, infer T> ? T : never)[];
           invariant(
-            found.length === page.length,
+            found.length > 0 && (batch ? found.length <= page.length : found.length === page.length),
             'SOURCE_HASH_MISMATCH',
             'Source descriptor window is incomplete.',
           );
@@ -280,6 +284,8 @@ export class ActionsJobClient {
             );
             rows.set(page[index]!, row);
           });
+          start += found.length;
+          if (oneWindow) break;
         }
       })();
       for (const id of missing) pending.set(id, request);
@@ -289,6 +295,11 @@ export class ActionsJobClient {
       } finally {
         for (const id of missing) pending.delete(id);
       }
+      const missingAt = unique.findIndex(id => !rows.has(id));
+      // A concurrent single-window request may have returned only a prefix.
+      // Full readers reconcile the remainder after that shared request settles.
+      if (!oneWindow && missingAt >= 0) return resolve(unique);
+      return missingAt < 0 ? unique.length : missingAt;
     };
     const transport: SourceWorkerTransport = {
       describeBatch: async digests => {
@@ -392,6 +403,11 @@ export class ActionsJobClient {
         }
       }
     };
-    return { transport, resolve, prepareRecipes };
+    return {
+      transport,
+      resolve,
+      resolveWindow: (digests: string[]) => resolve(digests, true),
+      prepareRecipes,
+    };
   }
 }

@@ -544,9 +544,16 @@ BYOCI `plan` input and export jobs. Convex dispatches on `main` with
 `runId`, `projectId`, `deployment`, and JSON-encoded `runs_on`; the run name is `forge-check/<runId>`.
 The `forge-check` timeout uses the explicit `timeout_minutes` input first, then the repository variable `FORGE_CHECK_TIMEOUT_MINUTES`, then defaults of 90 minutes for shards and 120 for planning. An explicit input or repository variable bounds the planning job's whole budget too; it does not add a separate 30-minute allowance. Forge's repository currently sets the variable to 30 minutes; the per-test-file hang guard remains ten minutes by default ([verification](../development.md)).
 The fixed workflow checkout verifies and materializes the pinned Candidate using
-hash/size-checked storage downloads, including recipe-backed content, in windows
-of at most 400 descriptors. Three pages overlap resolution, verified streaming
-downloads and disk copies; symlinks are created only after all pages succeed.
+hash/size-checked storage downloads, including recipe-backed content. With the
+negotiated `source.batch` capability, one metadata read resolves up to 3,200
+object descriptors in digest order; older servers keep 400-descriptor reads.
+The resolver reads locations in 100-object groups and returns a verified prefix
+when transaction index or byte headroom is low. Large files retain 400-object
+lookahead once their descriptors cover 8 MiB, so later five-minute grants are
+signed as downloads advance. The runner continues with the unresolved hashes; an empty or changed descriptor reply fails verification.
+Metadata batches share authorization and catalog reads without hydrating test
+reports. Three 400-object download pages still overlap verified streaming reads
+and disk copies; symlinks are created only after all pages succeed.
 Failures drain in-flight pages before returning without publishing a plan.
 Each completed page logs files, downloaded bytes and elapsed time. Source bytes
 go directly from object storage to the runner. The Candidate is transferred once as an artifact, preserving modes and
@@ -621,14 +628,17 @@ attempts. Exhaustion is infrastructure `CHECK_NOT_PASSED`; genuine failures rema
 12-hour watchdog bounds a missing completion event and is cancelled on terminal
 results. There are no project scans, active-run pollers, or idle scheduled functions.
 
-Success uses `17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,
+For legacy 400-descriptor servers, success uses
+`17 + 2 * ceil(sourceObjects / 400) + 6 * jobs` Convex calls,
 including HTTP/nested calls, enqueue, dispatch, webhook and Candidate/base manifest.
 With inline logs the job term is `4 * jobs`. For 3,000 objects: nine jobs cost
 87 calls, two cost 45, docs-only 39; twelve inline-log jobs cost 81, equal to eight
 without inline logs. The 6,000-object full fixture budgets 101 calls.
 
-Each 400-object descriptor page costs two calls regardless of page concurrency;
-recipes/leaves add their own pages. Grants expire after five minutes. GitHub/R2
+Each descriptor batch costs two Convex calls regardless of download concurrency.
+A 6,000-file full fetch uses three source reads (one manifest read and two file
+batches), down from sixteen; transaction headroom can split sparse or large
+metadata batches further. Recipe metadata and leaves add their own bounded reads. Grants expire after five minutes. GitHub/R2
 requests are separate. Each job has one pre-spawn query with no nested call or
 polling. Timing history adds one indexed planning read and one terminal read/write;
 capability bootstrap adds two calls/check and initially at most two indexed run

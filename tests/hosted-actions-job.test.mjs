@@ -24,6 +24,7 @@ import {
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsJobCalls,
+  actionsSourceBatchCapability,
 } from '../dist/hosted-actions-capabilities.js';
 import { z } from 'zod';
 import { ConvexHttpClient } from 'convex/browser';
@@ -523,10 +524,41 @@ test('the candidate and base State reads overlap: the same GETs, one round trip 
   assert.ok(a.start < b.end && b.start < a.end, 'the two State reads are in flight together');
 });
 
-test('6000-file download measurement keeps source calls within the existing page budget', async t => {
+test('CI source lookup cost guard: 6000 files use three metadata reads without changing download concurrency', async t => {
   // Warm the planner and filesystem path before measuring; no tight timing assertions.
   const warm = fixture(t);
   await prepareActionsJob(warm.client, join(warm.directory, 'candidate'), join(warm.directory, 'cache'));
+  const legacy = fixture(t, {
+    sourceDelay: 10,
+    downloadDelay: 1,
+    capabilities: hostedActionsCapabilities.filter(cap => cap !== actionsSourceBatchCapability),
+  });
+  legacy.run.request.expectedHead = legacy.state(
+    Array.from({ length: 6000 }, (_, i) =>
+      legacy.entry(`source/file-${String(i).padStart(4, '0')}.txt`, `synthetic-${i}`),
+    ),
+  ).sha256;
+  legacy.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const beforeStarted = performance.now();
+  const before = await prepareActionsJob(
+    legacy.client,
+    join(legacy.directory, 'candidate'),
+    join(legacy.directory, 'cache'),
+  );
+  const beforePlan = join(legacy.directory, 'plan.json');
+  writeFileSync(beforePlan, JSON.stringify(before.recipe));
+  assert.equal(
+    await executeActionsJob(
+      legacy.client,
+      join(legacy.directory, 'candidate'),
+      beforePlan,
+      before.singleShard,
+    ),
+    0,
+  );
+  const beforeElapsedMs = performance.now() - beforeStarted;
+  assert.equal(legacy.calls.filter(call => call.kind === 'source').length, 16);
+  assert.equal(legacy.traffic.downloads, 6002);
   const s = fixture(t, { sourceDelay: 10, downloadDelay: 1 });
   const files = Array.from({ length: 6000 }, (_, i) =>
     s.entry(`source/file-${String(i).padStart(4, '0')}.txt`, `synthetic-${i}`),
@@ -549,12 +581,14 @@ test('6000-file download measurement keeps source calls within the existing page
     0,
   );
   // Same metadata budget as a separate execution; placement adds no function calls.
-  assert.equal(s.calls.length, 21);
+  assert.equal(s.calls.length, 8);
   assert.equal(s.calls.filter(call => call.kind === 'preflight').length, 1);
   assert.equal(s.calls.filter(call => call.kind === 'result').length, 1);
   const sourceCalls = s.calls.filter(call => call.kind === 'source');
-  assert.equal(sourceCalls.length, 16); // One manifest window and fifteen file windows.
-  assert(sourceCalls.every(call => call.digests.length <= 400));
+  assert.equal(sourceCalls.length, 3); // One manifest read and two bounded metadata batches.
+  assert(sourceCalls.every(call => call.digests.length <= 3200));
+  assert(sourceCalls.every(call => call.batch === true));
+  assert.equal(sourceCalls.flatMap(call => call.digests).length, 6002);
   assert.equal(s.traffic.downloads, 6002);
   // Three page workers, each with up to 16 concurrent object reads (actionsReadConcurrency).
   assert(s.traffic.peak > 3 && s.traffic.peak <= 3 * 16);
@@ -562,6 +596,7 @@ test('6000-file download measurement keeps source calls within the existing page
   t.diagnostic(
     JSON.stringify({
       files: 6000,
+      beforeElapsedMs,
       elapsedMs: performance.now() - started,
       sourceCalls: sourceCalls.length,
       peakDownloads: s.traffic.peak,
@@ -607,7 +642,9 @@ test('pages may complete out of order, but links are created only after every re
 });
 
 test('a failed page drains in-flight pages and never publishes a plan or creates links', async t => {
-  const s = fixture(t),
+  const s = fixture(t, {
+      capabilities: hostedActionsCapabilities.filter(cap => cap !== actionsSourceBatchCapability),
+    }),
     candidate = join(s.directory, 'candidate');
   const files = [
     s.entry('link', 'source/file-0.txt', 'symlink'),
@@ -786,6 +823,68 @@ test('a hash mismatch in a concurrent page fails before links and plan publicati
     s.calls.some(command => command.kind === 'plan'),
     false,
   );
+});
+
+test('large-file metadata prefixes start downloads before resolving later grants', async t => {
+  const s = fixture(t);
+  const files = Array.from({ length: 1600 }, (_, i) => s.entry(`file-${i}.txt`, `prefix bytes ${i}`));
+  s.run.request.expectedHead = s.state(files).sha256;
+  s.run.check = { executable: 'true', args: [], definition: 'c'.repeat(64) };
+  const call = s.client.call.bind(s.client),
+    request = s.client.request;
+  let release,
+    windows = 0;
+  const firstRead = new Promise(resolve => {
+    release = resolve;
+  });
+  s.client.call = async command => {
+    if (command.kind !== 'source' || command.digests.includes(s.run.request.expectedHead))
+      return call(command);
+    if (++windows === 2) await firstRead;
+    return (await call(command)).slice(0, 400);
+  };
+  s.client.request = async (url, init) => {
+    if (files.some(file => String(url).endsWith('/' + file.blob))) release();
+    return request(url, init);
+  };
+  const source = await prepareActionsJob(
+    s.client,
+    join(s.directory, 'candidate'),
+    join(s.directory, 'cache'),
+  );
+  assert.equal(windows, 4);
+  assert.equal(source.singleShard, 'static');
+  assert.equal(readFileSync(join(s.directory, 'candidate', files.at(-1).path), 'utf8'), 'prefix bytes 1599');
+});
+
+test('batched source metadata continues a bounded prefix and rejects missing or changed descriptors', async t => {
+  const s = fixture(t);
+  await s.client.session();
+  const pins = Array.from({ length: 900 }, (_, i) => s.put(`prefix-${i}`));
+  const call = s.client.call.bind(s.client);
+  const requests = [];
+  s.client.call = async command => {
+    if (command.kind !== 'source') return call(command);
+    requests.push(command);
+    return (await call(command)).slice(0, 128);
+  };
+  const connection = s.client.transport();
+  const hashes = pins.map(pin => pin.sha256);
+  const [prefix] = await Promise.all([connection.resolveWindow(hashes), connection.resolve(hashes)]);
+  assert.equal(prefix, 128);
+  assert.equal(requests.length, 8);
+  assert(requests.every(command => command.batch === true));
+  assert.equal(requests[1].digests[0], pins[128].sha256);
+  for (const value of [
+    [],
+    [{ descriptor: { object: { sha256: 'f'.repeat(64), size: 1 }, recipe: null }, url: null }],
+  ]) {
+    s.client.call = async () => value;
+    await assert.rejects(
+      s.client.transport().resolve([pins[0].sha256]),
+      error => error.code === 'SOURCE_HASH_MISMATCH',
+    );
+  }
 });
 
 test('a shared descriptor failure drains independent requests and permits a clean retry', async t => {

@@ -101,12 +101,17 @@ export const handle = httpAction(async (ctx, request) => {
     verified = input;
     reason = 'authorization';
     let value: unknown;
-    if (command.kind === 'source')
-      value = await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'), {
-        ...input,
-        digests: command.digests,
-      });
-    else if (command.kind === 'results') value = await collectResultBatch(ctx, input);
+    if (command.kind === 'source') {
+      const reply = await ctx.runMutation(
+        makeFunctionReference<'mutation'>('projectHostedActionsSource:resolve'),
+        {
+          ...input,
+          digests: command.digests,
+          ...(command.batch ? { batch: true } : {}),
+        },
+      );
+      value = command.batch ? JSON.parse(reply as string) : reply;
+    } else if (command.kind === 'results') value = await collectResultBatch(ctx, input);
     else if (command.kind === 'output')
       value = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:output'), {

@@ -18,6 +18,8 @@ import { contractTestPath } from './intent-test-contract.js';
 import { checkFileSummarySchema } from './check-file-summary.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
 export const directSourceWindow = 400;
+/** Negotiated metadata batch; download concurrency and buffers remain unchanged. */
+export const directSourceBatch = 3200;
 /** Source windows hold each object once, sorted by digest. The object catalog keeps digests in sorted
  * rows (~48 KB each), so a sorted window reads its few neighbouring rows, where a window in path
  * order reads up to one row per object (686ecdde: up to 400 rows, ~19 MB, per resolve call). */
@@ -95,7 +97,14 @@ export const directPlanSchema = z.object({ recipe: hostedActionsRecipeSchema, lo
 // Command/result metadata may grow. Identity, pins, logs and recipes remain strict.
 export const directCommandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('session'), timings: z.boolean().optional() }).strip(),
-  z.object({ kind: z.literal('source'), digests: z.array(checkHash).min(1).max(directSourceWindow) }).strip(),
+  z
+    .object({
+      kind: z.literal('source'),
+      digests: z.array(checkHash).min(1).max(directSourceBatch),
+      batch: z.literal(true).optional(),
+    })
+    .strip()
+    .refine(command => command.batch || command.digests.length <= directSourceWindow),
   z
     .object({
       kind: z.literal('sourcePack'),

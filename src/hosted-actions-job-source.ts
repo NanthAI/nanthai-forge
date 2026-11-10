@@ -39,7 +39,7 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     }
   };
   const connection = client.transport(),
-    { transport, resolve, prepareRecipes } = connection;
+    { transport, resolve, resolveWindow, prepareRecipes } = connection;
   let reader = new SourceWorkerReader(cache, transport, undefined, actionsReadConcurrency);
   // A scoped recheck also needs the checked base inventory; a cohort recheck each member basis's
   // checked base and head (Issue 28f08555). They share this window: no added Convex call.
@@ -145,6 +145,26 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
     // Each object once, in digest order: a window then reads a few neighbouring object catalog rows
     // instead of up to one per object (686ecdde). Files are written from state.files below.
     const objects = sourceWindowOrder(selected.map(file => file.blob));
+    // Share one metadata lookahead across download workers. A server prefix
+    // advances only this frontier, so large files start downloading before later
+    // grants are signed; callers never resolve the unused remainder eagerly.
+    let prepared = 0,
+      preparing: Promise<void> | null = null;
+    const prepare = async (end: number) => {
+      while (prepared < end) {
+        if (!preparing) {
+          const hashes = objects.slice(prepared, prepared + client.sourceWindow);
+          preparing = (async () => {
+            const count = await resolveWindow(hashes);
+            await prepareRecipes(hashes.slice(0, count));
+            prepared += count;
+          })().finally(() => {
+            preparing = null;
+          });
+        }
+        await preparing;
+      }
+    };
     let next = 0,
       completed = 0,
       failed = false;
@@ -154,8 +174,10 @@ export async function materializeActionsSource(client: ActionsJobClient, directo
           const start = next;
           next += directSourceWindow;
           const hashes = objects.slice(start, start + directSourceWindow);
-          await resolve(hashes);
-          await prepareRecipes(hashes);
+          if (client.sourceWindow === directSourceWindow) {
+            await resolve(hashes);
+            await prepareRecipes(hashes);
+          } else await prepare(start + hashes.length);
           await reader.resolveMany(hashes);
           completed += hashes.length;
           console.log(

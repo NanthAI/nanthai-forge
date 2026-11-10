@@ -3,6 +3,8 @@ import type { z } from 'zod';
 import type { directCommandSchema } from './hosted-actions-direct.js';
 import { invariant } from './errors.js';
 export const actionsPreflightCapability = 'session.preflight';
+/** Larger source descriptor windows, with a transaction-bounded prefix reply. */
+export const actionsSourceBatchCapability = 'source.batch';
 /** The result call carries the log bytes; the server stores them, so a job skips
  * its separate output call and the result's session read. */
 export const actionsInlineLogCapability = 'results.inlineLog';
@@ -26,6 +28,7 @@ export const hostedActionsCapabilities = [
   'results.execution',
   'session.timingHistory',
   'sourcePack',
+  actionsSourceBatchCapability,
   actionsPreflightCapability,
   actionsInlineLogCapability,
   actionsPoolCapability,
@@ -46,6 +49,7 @@ export const actionsJobCalls = (capabilities: readonly string[]) =>
       ? 4
       : 6;
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
+  'source.batch': actionsSourceBatchCapability,
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
   'result.result.testFiles.truncated': 'results.testFiles.truncated',

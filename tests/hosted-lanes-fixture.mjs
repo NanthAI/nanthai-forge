@@ -97,6 +97,12 @@ export function lanesFixture() {
       };
       const locate = id => Object.keys(baseline).find(table => view(table).has(id));
       const ctx = validateContext({
+        meta: {
+          getTransactionMetrics: async () => ({
+            databaseQueries: { used: meter.ranges, remaining: 4096 - meter.ranges },
+            bytesRead: { used: meter.readBytes, remaining: 16 * 1024 * 1024 - meter.readBytes },
+          }),
+        },
         // Scheduled work is recorded, never run (a save's trial merge, flip 4): tests read `scheduled`.
         scheduler: {
           runAfter: async (delay, fn, args) => {

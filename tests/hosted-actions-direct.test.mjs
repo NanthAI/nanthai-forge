@@ -141,7 +141,7 @@ async function fixture(t, shards = 2, runsOn = 'ubuntu-latest', opaque = null, r
   const text = new Set([direct.reserve, plans.prepare, sessions.session, results.result, results.output]);
   const call = async (module, method, args) => {
     const value = await s.transaction(`direct-${method}`, module[method], args);
-    return text.has(module[method]) ? JSON.parse(value) : value;
+    return text.has(module[method]) || (module === source && args.batch) ? JSON.parse(value) : value;
   };
   // Exactly what the Convex function returns, for actions under test that parse it themselves.
   const raw = (module, method, args) => s.transaction(`direct-${method}`, module[method], args);
@@ -936,6 +936,37 @@ test('OIDC/session and webhook retain epoch, actor and dispatch fencing before r
   await assert.rejects(s.call(sessions, 'session', s.input()), code('SOURCE_AUTHORITY_CHANGED'));
   await assert.rejects(s.call(direct, 'expire', { ...s.id, fence: 1 }), code('SOURCE_AUTHORITY_CHANGED'));
 });
+test('source metadata batches yield before read exhaustion and retain session and exact object checks', async t => {
+  const s = await fixture(t);
+  await s.bind();
+  const pins = Array.from({ length: 600 }, (_, i) => s.put(`bounded prefix ${i}`));
+  const metrics = { databaseQueries: { remaining: 4096 }, bytesRead: { remaining: 3 * 1024 * 1024 } };
+  s.decorateContext(ctx => {
+    ctx.meta = { getTransactionMetrics: async () => metrics };
+  });
+  const input = { ...s.input(), batch: true, digests: pins.map(pin => pin.sha256) };
+  const prefix = await s.call(source, 'resolve', input);
+  assert.equal(prefix.length, 100, 'byte headroom returns a prefix instead of failing the job');
+  metrics.bytesRead.remaining = 16 * 1024 * 1024;
+  metrics.databaseQueries.remaining = 511;
+  assert.equal((await s.call(source, 'resolve', input)).length, 100, 'sparse catalogs leave index headroom');
+  metrics.databaseQueries.remaining = 4096;
+  for (const row of s.tables.projectObjects.values()) {
+    if (input.digests.includes(row.digest)) row.size = 32 * 1024;
+  }
+  assert.equal(
+    (await s.call(source, 'resolve', input)).length,
+    400,
+    'large files retain the legacy grant lookahead',
+  );
+  await assert.rejects(s.call(source, 'resolve', { ...input, fence: 99 }), code('WORK_STALE'));
+  await assert.rejects(
+    s.call(source, 'resolve', { ...input, digests: ['f'.repeat(64)] }),
+    code('SOURCE_UNAVAILABLE'),
+  );
+  await assert.rejects(s.call(source, 'resolve', { ...input, digests: ['invalid'] }), code('BAD_ARGUMENT'));
+});
+
 test('bounded source windows at doubled dogfood scale stay O(pages); idle schedules zero', async t => {
   const started = performance.now(),
     s = await fixture(t, 9);
@@ -967,6 +998,44 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
     documents = meters.reduce((n, m) => n + m.documents, 0);
   assert(documents <= 6200);
   assert(meters.every(m => m.writes === 0));
+  const batchBaseline = s.counts.length;
+  let batchCalls = 0,
+    at = 0;
+  while (at < pins.length) {
+    const rows = await s.call(source, 'resolve', {
+      ...s.input(),
+      batch: true,
+      digests: pins.slice(at, at + 3200).map(pin => pin.sha256),
+    });
+    assert(rows.length > 0 && rows.length <= 3200);
+    assert.deepEqual(
+      rows.map(row => row.descriptor.object.sha256),
+      pins.slice(at, at + rows.length).map(pin => pin.sha256),
+    );
+    at += rows.length;
+    batchCalls++;
+  }
+  const batchMeters = s.counts.slice(batchBaseline);
+  const beforeBytes = meters.reduce((n, m) => n + m.readBytes, 0);
+  const afterBytes = batchMeters.reduce((n, m) => n + m.readBytes, 0);
+  // Ratchet the complete job's lookup budget: one manifest window plus two
+  // metadata batches, and no retained report hydration, source bytes or writes.
+  assert.equal(batchCalls, 2);
+  assert(afterBytes < beforeBytes, `${afterBytes} bytes must improve on ${beforeBytes}`);
+  assert(afterBytes <= 2_110_000);
+  assert(batchMeters.every(m => m.ranges <= 4096 && m.writes === 0));
+  assert.equal(s.scheduled.length, scheduled, 'no idle or background work');
+  t.diagnostic(
+    JSON.stringify({
+      sourceLookup: {
+        files: pins.length,
+        beforeCalls: calls + 1,
+        afterCalls: batchCalls + 1,
+        beforeBytes,
+        afterBytes,
+      },
+    }),
+  );
   const preparedRun = await s.status(s.run.id);
   const spawnInput = {
     ...s.id,
@@ -985,7 +1054,9 @@ test('bounded source windows at doubled dogfood scale stay O(pages); idle schedu
     });
   }
   assert.equal((await s.conclude()).status, 'passed');
-  const runMeters = s.counts.filter(m => m.name === 'checkEnqueue' || m.name.startsWith('direct-'));
+  const runMeters = s.counts.filter(
+    m => !batchMeters.includes(m) && (m.name === 'checkEnqueue' || m.name.startsWith('direct-')),
+  );
   const totalReads = runMeters.reduce((n, m) => n + m.documents, 0),
     totalWrites = runMeters.reduce((n, m) => n + m.writes, 0);
   assert(totalReads < 6500);

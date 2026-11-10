@@ -4,7 +4,7 @@ import { stat, lstat, rm, mkdir, copyFile, writeFile, readlink } from 'node:fs/p
 import { join } from 'node:path';
 import { fileDigest, createSourcePack } from './source-pack-archive.js';
 import { refreshSourcePack } from './source-pack.js';
-import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
+import { sourceWindowOrder } from './hosted-actions-direct.js';
 import type { ActionsJobClient } from './hosted-actions-job-client.js';
 import type { materializeActionsSource } from './hosted-actions-job-source.js';
 import type { NativeState } from './state/format.js';
@@ -40,11 +40,13 @@ export async function refreshActionsSourcePack(
       }
     }
     const objects = sourceWindowOrder(missing);
-    for (let start = 0; start < objects.length; start += directSourceWindow) {
-      const hashes = objects.slice(start, start + directSourceWindow);
-      await source.connection.resolve(hashes);
-      await source.connection.prepareRecipes(hashes);
-      await source.reader.resolveMany(hashes);
+    for (let start = 0; start < objects.length;) {
+      const hashes = objects.slice(start, start + client.sourceWindow);
+      const count = await source.connection.resolveWindow(hashes);
+      const selected = hashes.slice(0, count);
+      await source.connection.prepareRecipes(selected);
+      await source.reader.resolveMany(selected);
+      start += count;
     }
     const object = await createSourcePack(client.run!.candidate.base.head, source.base, cache, archive);
     if (!object) return false;
