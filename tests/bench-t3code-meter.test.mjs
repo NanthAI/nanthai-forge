@@ -7,7 +7,8 @@ import { performance } from 'node:perf_hooks';
 import { mkdtempSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { ImportBenchmarkMonitor, failureCode } from '../scripts/benchmark-import-monitor.mjs';
 import { convexMeter, costUsd } from '../scripts/bench-t3code/meter.mjs';
 
@@ -311,4 +312,218 @@ test('summary exposes compute ranges and per-cell compute, excluding legacy fals
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+// The daily operating meter shares the provider adapter, but uses the approved budget rates.
+const { spendEvent, daySummary, pendingAlerts } = await import('../scripts/convex-spend-model.mjs');
+const { SpendJournal, journalLock } = await import('../scripts/convex-spend-journal.mjs');
+const { notifySpend } = await import('../scripts/convex-spend.mjs');
+function dailyEvent(fields = {}) {
+  const log = { ...action(), timestamp: Date.parse('2026-01-02T12:00Z') / 1000, ...fields };
+  log.usageStats = { ...log.usageStats, textIndexQueryBytes: 1e9, textIndexWriteQueryBytes: 2e9 };
+  return log;
+}
+function dailyDirectory(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'forge-daily-spend-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+test('daily spend prices calls, I/O, both search meters, action compute and egress separately', () => {
+  const event = spendEvent(dailyEvent(), 'synthetic');
+  const report = daySummary(event.day, [event]);
+  assert.equal(report.usage.calls, 1);
+  closeTo(report.classes.calls, 0.000002);
+  closeTo(report.classes.io, (3000 / 1e9) * 0.2);
+  closeTo(report.classes.search, (3 * 0.11) / 1000);
+  closeTo(report.classes.compute, 0.0003);
+  closeTo(report.classes.egress, (4000 / 1e9) * 0.12);
+  assert.equal(report.usd, report.perFunction[0].usd);
+  assert.ok(!JSON.stringify(event).includes('FORGE_PROJECT_EXECUTION'));
+  assert.ok(!JSON.stringify(event).includes('logLines'));
+});
+test('daily journals restart without double billing while preserving retries, cached calls and deployments', async t => {
+  const dir = dailyDirectory(t);
+  const event = spendEvent(dailyEvent(), 'first');
+  const first = new SpendJournal(dir);
+  assert.equal(await first.append(event), true);
+  const restarted = new SpendJournal(dir);
+  assert.equal(await restarted.append(event), false);
+  for (const next of [
+    spendEvent(dailyEvent({ occInfo: { retryCount: 1 } }), 'first'),
+    spendEvent(dailyEvent(), 'second'),
+    spendEvent(dailyEvent({ cachedResult: true, executionId: 'cache' }), 'first'),
+  ])
+    await restarted.append(next);
+  assert.equal((await restarted.report(event.day)).usage.calls, 4);
+  assert.equal(
+    readFileSync(join(dir, event.day + '.jsonl'), 'utf8')
+      .trim()
+      .split('\n').length,
+    4,
+  );
+});
+test('daily journal preserves crash-torn bytes, reports the gap and resumes on a new line', async t => {
+  const dir = dailyDirectory(t),
+    event = spendEvent(dailyEvent(), 'synthetic');
+  const path = join(dir, event.day + '.jsonl');
+  const before = JSON.stringify(event) + '\n{"kind":"exec';
+  writeFileSync(path, before);
+  const journal = new SpendJournal(dir);
+  assert.equal((await journal.report(event.day)).gaps.length, 1);
+  assert.equal(readFileSync(path, 'utf8'), before, 'reporting is read only');
+  await journal.append(spendEvent(dailyEvent({ executionId: 'next' }), 'synthetic'));
+  const report = await new SpendJournal(dir).report(event.day);
+  assert.equal(report.usage.calls, 2);
+  assert.equal(report.gaps.length, 1);
+  assert.ok(readFileSync(path, 'utf8').startsWith(before));
+});
+test('daily coverage splits UTC midnight and sums overlapping streams without inventing missing time', async t => {
+  const journal = new SpendJournal(dailyDirectory(t));
+  const start = Date.parse('2026-01-02T23:59:00Z'),
+    end = start + 120_000;
+  await journal.coverage('one', start, end);
+  await journal.coverage('one', start, end);
+  assert.equal((await journal.report('2026-01-02', end)).deployments[0].coveredMs, 60_000);
+  assert.equal((await journal.report('2026-01-03', end)).deployments[0].coveredMs, 60_000);
+  const event = spendEvent(dailyEvent(), 'one');
+  await journal.append(event);
+  await journal.gap('one', 'synthetic-disconnect', start);
+  const report = await journal.report(event.day, end);
+  closeTo(report.projectedKnownUsd, report.knownUsd * 1440);
+  assert.equal(report.gaps.length, 1);
+  assert.match(report.coverage, /partial/);
+});
+test('missing usage stays unknown instead of free and known costs can still trigger daily alerts', () => {
+  const raw = dailyEvent();
+  delete raw.usageStats.networkEgressBytes;
+  const event = spendEvent(raw, 'one');
+  event.usage.io = 1e9;
+  const report = daySummary(
+    event.day,
+    [event, { kind: 'coverage', deployment: 'one', from: event.at, to: event.at + 60_000 }],
+    event.at + 60_000,
+  );
+  assert.equal(report.usd, null);
+  assert.equal(report.classes.egress, null);
+  assert.ok(report.perFunction[0].missingFields.includes('usageStats.networkEgressBytes'));
+  assert.equal(pendingAlerts(report)[0].kind, 'daily');
+  assert.throws(() => spendEvent({ ...raw, timestamp: 'bad' }, 'one'), /SPEND_LOG_SCHEMA/);
+  assert.equal(spendEvent({ kind: 'Progress' }, 'one'), null);
+});
+test('daily and per-function alerts survive restarts and only trigger above their exact thresholds', () => {
+  const event = spendEvent(dailyEvent(), 'one');
+  event.usage = { calls: 0, io: 2.5e9, search: 0, compute: 0, egress: 0 };
+  const coverage = { kind: 'coverage', deployment: 'one', from: event.at, to: event.at + 28_800_000 };
+  let report = daySummary(event.day, [event, coverage], coverage.to);
+  assert.deepEqual(pendingAlerts(report), []);
+  event.usage.io += 100;
+  report = daySummary(event.day, [event, coverage], coverage.to);
+  assert.deepEqual(
+    pendingAlerts(report).map(a => a.kind),
+    ['daily', 'function'],
+  );
+  const markers = pendingAlerts(report).map(a => ({ kind: 'alert', key: a.key }));
+  assert.deepEqual(pendingAlerts(daySummary(event.day, [event, coverage, ...markers], coverage.to)), []);
+});
+test('notifier receives private topic and target through stdin, suppresses output and reports failure', async t => {
+  const dir = dailyDirectory(t),
+    output = join(dir, 'notification.json');
+  await notifySpend(
+    {
+      command: [
+        process.execPath,
+        '-e',
+        "let s='';process.stdin.on('data',d=>s+=d);process.stdin.on('end',()=>require('fs').writeFileSync(process.argv[1],s));",
+        output,
+      ],
+      topic: 'fixture-topic',
+      target: 'fixture-target',
+    },
+    { key: 'stable-id', knownUsd: 2 },
+  );
+  assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), {
+    topic: 'fixture-topic',
+    target: 'fixture-target',
+    key: 'stable-id',
+    knownUsd: 2,
+  });
+  await assert.rejects(
+    notifySpend({ command: [process.execPath, '-e', 'process.exit(1)'], topic: 't', target: 'x' }, {}),
+    /SPEND_HOOK_FAILED/,
+  );
+  await notifySpend(undefined, {});
+});
+test('daily journal rejects a competing writer and releases its local lock', t => {
+  const dir = dailyDirectory(t),
+    release = journalLock(dir);
+  assert.throws(() => journalLock(dir), /SPEND_WRITER_RUNNING/);
+  release();
+  journalLock(dir)();
+});
+
+test('CLI consumes stdin, reports seven days offline and deduplicates the same stream after restart', t => {
+  const dir = dailyDirectory(t);
+  const event = dailyEvent({ timestamp: Date.now() / 1000 });
+  const input = JSON.stringify(event) + '\n';
+  for (let i = 0; i < 2; i++)
+    execFileSync(
+      process.execPath,
+      ['scripts/convex-spend.mjs', '--state', dir, '--stdin', '--deployment', 'synthetic'],
+      { input, stdio: ['pipe', 'pipe', 'pipe'] },
+    );
+  const report = JSON.parse(
+    execFileSync(process.execPath, ['scripts/convex-spend.mjs', '--state', dir, '--print'], {
+      encoding: 'utf8',
+    }),
+  );
+  assert.equal(report.today.usage.calls, 1);
+  const summary = JSON.parse(readFileSync(join(dir, report.today.day + '.summary.json'), 'utf8'));
+  assert.equal(summary.usage.calls, 1);
+  assert.equal(summary.perFunction[0].usd, report.today.usd);
+  assert.equal(report.trend.length, 7);
+  assert.equal(report.top10[0].identifier, 'synthetic:work');
+  assert.equal(report.yesterday.deployments.length, 0);
+});
+
+test('writer crash releases the local lock automatically without deleting any day data', async t => {
+  const dir = dailyDirectory(t);
+  const child = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      "import {journalLock} from './scripts/convex-spend-journal.mjs'; journalLock(process.argv[1]); console.log('ready'); process.stdin.resume();",
+      dir,
+    ],
+    { stdio: ['pipe', 'pipe', 'pipe'] },
+  );
+  await once(child.stdout, 'data');
+  const closed = once(child, 'close');
+  child.kill('SIGKILL');
+  await closed;
+  journalLock(dir)();
+});
+
+test('one incomplete execution cannot erase known costs of other executions or suppress their alerts', () => {
+  const first = spendEvent(dailyEvent(), 'one');
+  first.usage.egress = 10e9;
+  const missing = spendEvent(dailyEvent({ executionId: 'missing' }), 'one');
+  missing.usage.egress = null;
+  const report = daySummary(
+    first.day,
+    [
+      first,
+      missing,
+      { kind: 'gap', deployment: '(journal)', reason: 'synthetic-torn-record' },
+      { kind: 'coverage', deployment: 'one', from: first.at, to: first.at + 60_000 },
+    ],
+    first.at + 60_000,
+  );
+  assert.equal(report.usd, null);
+  assert.ok(report.knownUsd > 1.2);
+  assert.ok(report.perFunction[0].knownUsd > 1.2);
+  assert.deepEqual(
+    pendingAlerts(report).map(a => a.kind),
+    ['daily', 'function'],
+  );
 });

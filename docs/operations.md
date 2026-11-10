@@ -1130,6 +1130,9 @@ schedule no recurring wake. See [agent workflow](agents/workflow.md) for the rec
 For outside-user unit costs, onboarding, storage, CI payer and monthly scenarios, see
 [cost to serve](operations/cost-to-serve.md).
 
+For a local daily Convex spend estimate and notification hook, see the
+[local spend meter](operations/convex-spend.md).
+
 The per-landing cost ledger is the `costs` list in
 [`src/speed-budgets.json`](../src/speed-budgets.json), next to the speed budgets. Each entry has its
 value per accepted landing, a `floor` (the change too small to judge), its `source` and the decision
