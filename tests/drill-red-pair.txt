@@ -1,0 +1,1 @@
+Red-audit drill pair (Issue fe7d67a8). Its presence fails the drill test on main; Forge reverts it.
