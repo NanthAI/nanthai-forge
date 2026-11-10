@@ -133,6 +133,8 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     step('import', 'forge', {
       ok: res.phase === 'ready',
       seconds: res.seconds,
+      wallSeconds: res.wallSeconds,
+      setupVoids: res.setupVoids,
       calls: res.calls,
       files: res.files,
       bytes: res.bytes,

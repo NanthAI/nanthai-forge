@@ -694,3 +694,134 @@ test('zoo teardown starts every purge before waiting for upload leases, avoiding
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+import { importAfterReset, makeIo } from '../scripts/bench-zoo/io.mjs';
+
+test('zoo imports retain provider-reset setup voids and wait locally before resuming the same operation', async () => {
+  let clock = 0;
+  const resumes = [],
+    waits = [],
+    observed = [];
+  const result = await importAfterReset({
+    now: () => clock,
+    sleep: async ms => {
+      waits.push(ms);
+      clock += ms;
+    },
+    observe: event => observed.push(event),
+    attempt: async ({ resume }) => {
+      resumes.push(resume);
+      clock += 10;
+      if (resumes.length === 1)
+        throw Object.assign(Error('provider'), {
+          data: { code: 'GITHUB_RATE_LIMIT', message: 'reset', retryAt: 70_000 },
+        });
+      if (resumes.length === 2)
+        return { phase: 'error', error: { code: 'GITHUB_RATE_LIMIT', retryAt: 80_000 } };
+      return { phase: 'ready', projectId: 'same-project' };
+    },
+  });
+  assert.deepEqual(resumes, [false, true, true]);
+  assert.deepEqual(waits, [60_000, 9_990, 9_990]);
+  assert.equal(result.projectId, 'same-project');
+  assert.equal(result.seconds, 0.01);
+  assert.equal(result.wallSeconds, 80.01);
+  assert.deepEqual(
+    result.setupVoids.map(v => v.waitSeconds),
+    [69.99, 9.99],
+  );
+  assert.equal(observed.length, 2);
+});
+
+test('zoo healthy imports make one attempt, and non-rate refusals and unknown errors are never retried', async () => {
+  let calls = 0;
+  const sleep = async () => {
+    throw Error('unexpected wait');
+  };
+  const result = await importAfterReset({
+    sleep,
+    attempt: async () => {
+      calls++;
+      return { phase: 'ready' };
+    },
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual(result.setupVoids, []);
+  const refusal = {
+    phase: 'error',
+    error: { code: 'GITHUB_SOURCE_UNSUPPORTED', retryAt: Date.now() + 1000 },
+  };
+  assert.equal((await importAfterReset({ sleep, attempt: async () => refusal })).error, refusal.error);
+  await assert.rejects(
+    importAfterReset({
+      sleep,
+      attempt: async () => {
+        throw Error('network');
+      },
+    }),
+    /network/,
+  );
+});
+
+test('zoo stored-job recovery resumes its pinned import and never creates a second project', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-reset-'));
+  try {
+    const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
+    let clock = 0,
+      ready = false;
+    const projects = new Map();
+    const backend = {
+      setAuth() {},
+      async action(name, args) {
+        if (name === 'projectGithubImport:start') {
+          const request = JSON.stringify([args.url, args.ref, args.name]);
+          if (projects.has(args.operationId)) {
+            assert.equal(projects.get(args.operationId), request, 'retry keeps its original source');
+            ready = true;
+          } else projects.set(args.operationId, request);
+          return 'original-job';
+        }
+        assert.equal(args.id, 'original-job');
+        return {
+          phase: ready ? 'ready' : 'error',
+          projectId: 'original-project',
+          error: ready ? null : { code: 'GITHUB_RATE_LIMIT', retryAt: 70_000 },
+        };
+      },
+    };
+    const load = async (checkout, path) => {
+      if (path.includes('forge-import')) return { importProject };
+      if (path.includes('auth-store')) return { resolveAuthToken: () => 'synthetic-token' };
+      if (path.includes('network-convex-client')) return { deadlineConvexClient: () => backend };
+      return { makeFunctionReference: name => name };
+    };
+    const io = makeIo({
+      cfg: { forgeCheckout: 'synthetic', deployment: 'https://example.invalid' },
+      root,
+      runDir: root,
+      state: { repos: {} },
+      statePath: join(root, 'state.json'),
+      load,
+      importClock: () => clock,
+      importSleep: async ms => {
+        clock += ms;
+      },
+    });
+    const result = await io.importProject(
+      { id: 'fixture', fork: 'example/public', ref: 'main' },
+      join(root, 'journal.json'),
+    );
+    assert.equal(result.phase, 'ready');
+    assert.equal(result.projectId, 'original-project');
+    assert.equal(projects.size, 1, 'the failed stored import owns the sole created project');
+    assert.equal(result.setupVoids.length, 1);
+    const raw = passing();
+    Object.assign(raw.steps.import.forge, result);
+    const row = summarize(raw);
+    assert.equal(row.importWallSeconds, 70);
+    assert.equal(row.importSetupVoids[0].waitSeconds, 70);
+    assert.match(suiteMarkdown([row]), /GITHUB_RATE_LIMIT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

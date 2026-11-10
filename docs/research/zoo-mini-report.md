@@ -416,6 +416,10 @@ a Forge fault. The report also gives Forge seconds next to git's, the result-to-
 run to its commit on main), workspace prep (Lane start, clone, hosted job overhead beyond the check command) and the
 metered dev Convex cost.
 
+A named GitHub rate refusal during import setup retains its failed attempt and provider reset. The harness waits locally
+without Convex polling and resumes the same import operation and source. Reports show both successful-attempt import
+seconds and full wall time, including each setup void and wait; unrelated errors are not retried.
+
 The saved baseline ([`baseline.json`](../../scripts/bench-zoo/baseline.json)) is the regression guard: `--baseline` exits 1
 when a path that passed there fails now, or a Forge operation takes more than 1.5 times its baseline plus 5 s. A failure of
 a repository in the suite is filed as a root-cause Issue, never worked around for that repository.

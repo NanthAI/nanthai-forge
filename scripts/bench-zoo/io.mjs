@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Side effects of the zoo run (Issue 85d26a8b): the Forge CLI, git, GitHub reads, the import
 // actions and the Convex meter. run.mjs takes these as one injectable object.
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import { exec } from './exec.mjs';
-import { controlCodeSource } from './lib.mjs';
+import { controlCodeSource, thrownRefusal } from './lib.mjs';
 
 // The import client needs a built Forge checkout (cfg.forgeCheckout: dist/ and node_modules/),
 // so it is loaded from there; the GitHub and meter helpers use Node built-ins only.
@@ -18,7 +18,16 @@ const IMPORT_POLL_MS = 5_000;
 const GITHUB_RUN_DEADLINE_MS = 40 * 60_000;
 const GITHUB_POLL_MS = 20_000;
 
-export function makeIo({ cfg, root, runDir, state, statePath }) {
+export function makeIo({
+  cfg,
+  root,
+  runDir,
+  state,
+  statePath,
+  load = fromCheckout,
+  importClock = Date.now,
+  importSleep = wait,
+}) {
   const nforge = cfg.cli ?? 'nforge';
   const gh = async args => {
     const r = await exec('gh', args);
@@ -51,24 +60,50 @@ export function makeIo({ cfg, root, runDir, state, statePath }) {
       const co = cfg.forgeCheckout;
       const [{ importProject }, { resolveAuthToken }, { deadlineConvexClient }, { makeFunctionReference }] =
         await Promise.all([
-          fromCheckout(co, 'scripts/bench-t3code/forge-import.mjs'),
-          fromCheckout(co, 'dist/auth-store.js'),
-          fromCheckout(co, 'dist/network-convex-client.js'),
-          fromCheckout(co, 'node_modules/convex/dist/esm/server/index.js'),
+          load(co, 'scripts/bench-t3code/forge-import.mjs'),
+          load(co, 'dist/auth-store.js'),
+          load(co, 'dist/network-convex-client.js'),
+          load(co, 'node_modules/convex/dist/esm/server/index.js'),
         ]);
       const token = resolveAuthToken(cfg.deployment);
       if (!token) return { phase: null, error: { code: 'AUTH_REQUIRED' } };
       const client = deadlineConvexClient(cfg.deployment, {});
       client.setAuth(token);
-      const started = performance.now();
-      const res = await importProject({
-        client,
-        ref: makeFunctionReference,
-        journalPath,
-        spec: { url: `https://github.com/${repo.fork}`, ref: repo.ref, name: `bench-zoo-${repo.id}` },
-        sleep: () => wait(IMPORT_POLL_MS),
+      let calls = 0;
+      const tracked = {
+        action: (...args) => {
+          calls++;
+          return client.action(...args);
+        },
+      };
+      const spec = { url: `https://github.com/${repo.fork}`, ref: repo.ref, name: `bench-zoo-${repo.id}` };
+      const res = await importAfterReset({
+        now: importClock,
+        sleep: importSleep,
+        observe: entry =>
+          appendFileSync(
+            join(runDir, `${repo.id}.receipts.jsonl`),
+            JSON.stringify({ verb: 'import-setup-void', at: new Date().toISOString(), ...entry }) + '\n',
+          ),
+        attempt: async ({ resume }) => {
+          const journal = existsSync(journalPath) ? JSON.parse(readFileSync(journalPath, 'utf8')) : {};
+          // A failed stored job resumes through start with its original operation and exact spec.
+          // A refusal before job creation is retried by the existing import client itself.
+          if (resume && journal.jobId)
+            await tracked.action(makeFunctionReference('projectGithubImport:start'), {
+              operationId: journal.operationId,
+              ...spec,
+            });
+          return importProject({
+            client: tracked,
+            ref: makeFunctionReference,
+            journalPath,
+            spec,
+            sleep: () => wait(IMPORT_POLL_MS),
+          });
+        },
       });
-      return { ...res, seconds: (performance.now() - started) / 1000 };
+      return { ...res, calls };
     },
 
     /** This project's forge-check runs on the runner repository in the window, as job minutes. */
@@ -162,4 +197,32 @@ export function makeIo({ cfg, root, runDir, state, statePath }) {
       return { ...result, meter: m.stop() };
     },
   };
+}
+
+/** A provider reset is a setup void, retained separately from the successful import timing.
+ * Waiting is local; the callback resumes the same journal/operation, never a different source. */
+export async function importAfterReset({ attempt, sleep, now = Date.now, observe = () => {} }) {
+  const wallStart = now(),
+    setupVoids = [];
+  for (;;) {
+    const started = now();
+    let result;
+    try {
+      result = await attempt({ resume: setupVoids.length > 0 });
+    } catch (error) {
+      const refusal = thrownRefusal(error);
+      if (!refusal) throw error;
+      result = { phase: 'refused', error: refusal };
+    }
+    const seconds = (now() - started) / 1000;
+    const error = result.error;
+    if (error?.code !== 'GITHUB_RATE_LIMIT' || !Number.isFinite(error.retryAt) || error.retryAt <= now())
+      return { ...result, seconds, wallSeconds: (now() - wallStart) / 1000, setupVoids };
+    const entry = { code: error.code, retryAt: error.retryAt, seconds, waitSeconds: 0 };
+    setupVoids.push(entry);
+    observe(entry);
+    const waitStart = now();
+    while (now() < error.retryAt) await sleep(Math.min(60_000, error.retryAt - now()));
+    entry.waitSeconds = (now() - waitStart) / 1000;
+  }
 }

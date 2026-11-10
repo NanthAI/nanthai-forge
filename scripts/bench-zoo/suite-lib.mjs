@@ -206,6 +206,8 @@ export function summarize(r, entry = {}) {
           : PATHS
       ).every(op => ['pass', 'refused'].includes(paths[op].v)) && !paths.crash,
     seconds: timings(r),
+    importSetupVoids: r.steps?.import?.forge?.setupVoids ?? [],
+    importWallSeconds: r.steps?.import?.forge?.wallSeconds ?? null,
     gapSeconds: median(gaps.map(g => g.seconds)),
     gaps,
     prep: workspacePrep(r),
@@ -267,6 +269,22 @@ export function suiteMarkdown(rows, meta = {}) {
     '',
     `Dev Convex cost of the run: $${cost.reduce((a, b) => a + b, 0).toFixed(3)} over ${cost.length} metered repositories.`,
   );
+  const setupVoids = rows.flatMap(r =>
+    (r.importSetupVoids ?? []).map(v => ({ id: r.id, ...v, wall: r.importWallSeconds })),
+  );
+  if (setupVoids.length)
+    lines.push(
+      '',
+      '## Import setup voids',
+      '',
+      'Import seconds above measure the successful attempt; provider waits and failed setup attempts remain below and in RESULT.json.',
+      '',
+      '| Repo | Refusal | Failed attempt s | Provider wait s | Full import wall s |',
+      '| --- | --- | --- | --- | --- |',
+      ...setupVoids.map(
+        v => `| ${v.id} | ${v.code} | ${f1(v.seconds)} | ${f1(v.waitSeconds)} | ${f1(v.wall)} |`,
+      ),
+    );
   return lines.join('\n') + '\n';
 }
 

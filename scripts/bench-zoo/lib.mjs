@@ -202,7 +202,13 @@ export function thrownRefusal(error) {
   let data = typeof error?.data === 'string' ? parse(error.data) : error?.data;
   if (!data?.code)
     data = parse(/Uncaught ConvexError: (\{.*\})/.exec(String(error?.message ?? ''))?.[1] ?? '');
-  return typeof data?.code === 'string' ? { code: data.code, message: String(data.message ?? '') } : null;
+  return typeof data?.code === 'string'
+    ? {
+        code: data.code,
+        message: String(data.message ?? ''),
+        ...(Number.isFinite(data.retryAt) ? { retryAt: data.retryAt } : {}),
+      }
+    : null;
 }
 
 /** What a land/check receipt says about its check: run ids, plan scope and reason, reuse, and
