@@ -59,10 +59,10 @@ export const begin = internalMutation({
     visibility: v.union(v.literal('public'), v.literal('private')),
     githubRequests: v.optional(githubRequests),
   },
-  returns: v.id('projectGithubImports'),
+  returns: v.object({ id: v.id('projectGithubImports'), projectId: v.id('hostedProjects') }),
   handler: async (ctx, input) => {
     const previous = await find(ctx, input);
-    if (previous) return previous._id;
+    if (previous) return { id: previous._id, projectId: previous.projectId };
     const project = await createProject(ctx, {
       owner: input.actor,
       key: input.operationId,
@@ -112,12 +112,37 @@ export const begin = internalMutation({
         position: 0,
         value: JSON.stringify({ path: '', sha: input.rootTree }),
       });
-    const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
-      id,
-      actor: input.actor,
-    });
-    await ctx.db.patch(id, { task });
-    return id;
+    // An archive import starts once its file table is stored (pinListing), so its first step reads it.
+    if (!input.archive) {
+      const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
+        id,
+        actor: input.actor,
+      });
+      await ctx.db.patch(id, { task });
+    }
+    return { id, projectId: project._id };
+  },
+});
+/** Pins the stored file table to the job. The first pin of an archive import also starts its worker. */
+export const pinListing = internalMutation({
+  args: {
+    id: v.id('projectGithubImports'),
+    actor: v.string(),
+    listing: v.object({ sha256: v.string(), size: v.number() }),
+  },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const row = await readJob(ctx, input);
+    if (row.phase === 'ready') return null;
+    await ctx.db.patch(row._id, { listing: input.listing });
+    if (!row.task) {
+      const task = await ctx.scheduler.runAfter(0, internal.projectGithubImportWorker.run, {
+        id: row._id,
+        actor: row.owner,
+      });
+      await ctx.db.patch(row._id, { task });
+    }
+    return null;
   },
 });
 const identity = { id: v.id('projectGithubImports'), actor: v.string(), step: v.number() };

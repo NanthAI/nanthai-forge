@@ -165,6 +165,11 @@ test('28,905 files / 4,089 directories / two gitlinks use bounded pages within t
   assert.equal(source.files.length, files + submodules);
   assert.equal(source.files.filter(file => file.mode === 'gitlink').length, submodules);
   assert.equal(digest(await logical(backup.preview.head)), backup.preview.head);
+  // Issue 5bc16ea7: a paged import records the import commit and State a mirror bootstrap starts from.
+  assert.deepEqual(
+    { commit: job.commit, state: job.publication.head },
+    { commit: 'a'.repeat(40), state: backup.preview.head },
+  );
   const manifest = JSON.parse(await logical(backup.digest));
   assert.equal(manifest.files.length, files + submodules + 2);
   assert.ok(source.files.some(file => file.mode === 'symlink'));

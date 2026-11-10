@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { scheduleCiStatus } from './projectCiStatus';
 import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { cancelHostedCheck } from './projectHostedCheckCancel';
@@ -305,5 +306,6 @@ export async function insertHostedCheckRun(ctx: MutationCtx, run: HostedCheckRun
   });
   await watchMacLease(ctx, run);
   await scheduleDirectActions(ctx, run);
+  await scheduleCiStatus(ctx, run);
   return run;
 }

@@ -5,6 +5,7 @@ import { checkFileSummarySchema } from './check-file-summary.js';
 import { semanticPlanSchema, semanticReportsSchema } from './intent-semantic-conflict.js';
 import { z } from 'zod';
 import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
+import { ciStatusProviderSchema } from './ci-status.js';
 import { checkLogsSchema } from './check-log-policy.js';
 import { checkSchema } from './work-types.js';
 import { digest } from './portable-hash.js';
@@ -96,8 +97,19 @@ export const hostedSelfHostedRunnerSchema = hostedMacRunnerSchema.extend({
   labels: z.array(text).optional(),
 });
 export const hostedMachineRunnerSchema = z.union([hostedMacRunnerSchema, hostedSelfHostedRunnerSchema]);
+/** A status the project's own CI reports for a Candidate (src/ci-status.ts, flip 3). Forge derives
+ * `runtime` and `environmentFingerprint` from `ci` when the setting is saved. */
+export const hostedCiStatusRunnerSchema = z
+  .object({
+    provider: z.literal('ci-status'),
+    ci: ciStatusProviderSchema,
+    runtime: checkHash,
+    environmentFingerprint: checkHash,
+  })
+  .strict();
 export const hostedCheckRunnerSchema = z.union([
   hostedMachineRunnerSchema,
+  hostedCiStatusRunnerSchema,
   z
     .object({
       provider: z.literal('modal'),
@@ -266,6 +278,18 @@ export const hostedCheckRunSchema = z
         /** Where the shards ran project code: `user` when every reporting shard ran it as its own
          * Candidate user, `shared` when any ran it as the runner user. Absent: no shard said. */
         isolation: candidateIsolationModeSchema.optional(),
+      })
+      .strict()
+      .optional(),
+    /** ci-status runs: the Candidate branch Forge published and the provider run's link. */
+    ci: z
+      .object({
+        branch: text,
+        commit: z
+          .string()
+          .regex(/^[a-f0-9]{40}$/)
+          .nullable(),
+        link: z.string().max(2048).nullable(),
       })
       .strict()
       .optional(),

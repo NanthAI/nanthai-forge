@@ -184,8 +184,10 @@ export async function checksFixture(source = null, { candidateFields = {}, state
       else process.env.FORGE_HOSTED_CHECK_KEY_ID = prior;
     }
   };
-  const status = (id, actor = 'owner') =>
-    call('checkStatus', read.status, { projectId, runId: id }, actor).then(JSON.parse);
+  const status = (id, actor = 'owner', features = ['ci-status-check']) =>
+    call('checkStatus', read.status, { projectId, runId: id, ...(features ? { features } : {}) }, actor).then(
+      JSON.parse,
+    );
   const control = (id, command) =>
     call('checkControl', internalApi.control, {
       projectId,

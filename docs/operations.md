@@ -837,7 +837,9 @@ and Code-tree pages. Removing it requires parity evidence for all of those pages
 ## Native runner selection
 
 Native checks support local and [GitHub Actions](operations/github-actions-checks.md)
-runners (`runsOn` takes any label; the dogfood project uses free GitHub-hosted runners).
+runners, or the project's own CI file through the [CI status provider](operations/ci-status-checks.md)
+(its provider's signed run record decides; the contract test covers a second adapter). Actions
+`runsOn` takes any label; the dogfood project uses free GitHub-hosted runners.
 Blacksmith use ended on 2026-10-25; Blacksmith labels are still priced below so old
 receipts and any label you set stay readable. Existing Modal policies and receipts remain readable; new Modal runner
 selections are refused with instructions to select a supported runner. The

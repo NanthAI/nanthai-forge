@@ -2,6 +2,7 @@
 import { mainAuditStatus } from './projectHostedMainAuditState';
 import { bindingInstallation, requireStoredRepositoryBinding, runnerGrant } from './githubBindingAccess';
 import { refreshCheckEntries } from './projectHostedCheckEntries';
+import { ciStatusRunner } from './projectCiStatus';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { isDeviceIdentity, mutation, query, type MutationCtx } from './cliServer';
@@ -137,7 +138,7 @@ export async function saveCheckSetting(
   await ctx.db.insert('projectHostedCheckSettingVersions', saved);
   if (old) await ctx.db.replace(old._id, saved);
   else await ctx.db.insert('projectHostedCheckSettings', saved);
-  if (kind === 'definition') await refreshCheckEntries(ctx, projectId);
+  await refreshCheckEntries(ctx, projectId);
   const result = { kind, key, version: saved.version, digest, value, rule };
   await completeCheckOperation(ctx, prepared.operation, result);
   return canonicalPayload(result);
@@ -184,12 +185,11 @@ export async function configureCheckSetting(
           await requireStoredRepositoryBinding(ctx, input.projectId, change.configuration.repository, {
             runner: true,
           });
-        return {
-          kind: 'runner',
-          key: 'runner',
-          value: change.configuration,
-          digest: checkPin(change.configuration),
-        };
+        const value =
+          change.configuration.provider === 'ci-status'
+            ? await ciStatusRunner(ctx, input.projectId, change.configuration.ci)
+            : change.configuration;
+        return { kind: 'runner', key: 'runner', value, digest: checkPin(value) };
       }
       const value =
         change.kind === 'import'

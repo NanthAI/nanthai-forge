@@ -48,7 +48,7 @@ test('native upload and an unpublished GitHub import keep native authority; a br
   );
   const { projectId: browserId } = await bootstrap.publish._handler(s.ctx, { ...input, objects });
   const cursor = await s.ctx.storage.store(new Blob(['synthetic']));
-  const importId = await github.begin._handler(s.ctx, {
+  const { id: importId } = await github.begin._handler(s.ctx, {
     actor: 'owner',
     operationId: randomUUID(),
     request: 'synthetic-import',

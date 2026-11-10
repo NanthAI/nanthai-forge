@@ -1,1 +1,15 @@
-{ "format": 1, "migrations": [] }
+{
+  "format": 1,
+  "migrations": [
+    {
+      "path": "hosted-check#hostedCheckRunSchema.configuration.provider",
+      "change": "f012f9bbf449bb92be4e1646de53351d884ff0835c7387ff1f12449f6d6e3098",
+      "reason": "feature-gated: ci-status-check"
+    },
+    {
+      "path": "hosted-check#hostedCheckRunSchema.configuration.machineId",
+      "change": "c898c02f0a73b5aaa2ca4d9f35e1707bcb1b16044601d0017193d184402ce6dc",
+      "reason": "feature-gated: ci-status-check"
+    }
+  ]
+}

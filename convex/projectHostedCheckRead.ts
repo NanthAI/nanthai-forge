@@ -22,12 +22,19 @@ async function reader(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects
   await accessibleProject(ctx, projectId, user.subject);
 }
 export const status = query({
-  args: identity,
+  args: { ...identity, features: v.optional(v.array(v.string())) },
   returns: v.string(),
-  handler: async (ctx, input) => {
+  handler: async (ctx, { features, ...input }) => {
     try {
       await reader(ctx, input.projectId);
-      return canonicalPayload((await loadHostedCheck(ctx, input)).run);
+      const { run } = await loadHostedCheck(ctx, input);
+      // Older CLIs parse runs strictly: a ci-status run goes only to callers that know its shape.
+      invariant(
+        run.configuration.provider !== 'ci-status' || Boolean(features?.includes('ci-status-check')),
+        'BAD_ARGUMENT',
+        `Check run ${run.id} uses the ci-status provider; update the Forge CLI to read it.`,
+      );
+      return canonicalPayload(run);
     } catch (error) {
       return report(error);
     }

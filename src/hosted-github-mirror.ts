@@ -39,6 +39,9 @@ export type MirrorSeed = {
    * only when no mapping exists yet. GitHub main still at that commit is a lagging mirror, not a
    * foreign change: the first job catches it up from that State (its tree is still verified). */
   import?: { commit: string; state: string };
+  /** A Candidate branch (src/ci-status.ts) instead of main: always from a verified binding, created
+   * once and never moved; the same commit already there is a replay. */
+  branch?: string;
 };
 export type MirrorPlan = {
   seed: MirrorSeed;
@@ -178,6 +181,11 @@ async function lfsContent(
 }
 export async function prepareMirror(seed: MirrorSeed, io: MirrorIO): Promise<MirrorPlan> {
   const prefix = `/repos/${seed.repository}/git`;
+  invariant(
+    !seed.branch || (seed.verified && seed.binding),
+    'GITHUB_SYNC_CHANGED',
+    "A Candidate branch is published only on top of main's verified mirror commit.",
+  );
   if (seed.verified && seed.binding) {
     const [baseline, target] = await io.states([seed.binding.state, seed.state]);
     invariant(baseline && target, 'SOURCE_UNAVAILABLE', 'Mirror source States are unavailable.');
@@ -424,13 +432,23 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
       seconds: Math.floor(Date.parse(seed.at) / 1000),
     };
     const commit = tree === plan.baseTree ? plan.parent : githubCommit(entry);
-    const current = await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
+    const branch = seed.branch;
+    const current = branch
+      ? await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/${branch}`).catch(error => {
+          if (error instanceof GithubMirrorApiError && error.status === 404) return null;
+          throw error;
+        })
+      : await io.api<{ object: { sha: string } }>(`${prefix}/ref/heads/main`);
     invariant(
-      [plan.parent, commit].includes(current.object.sha),
+      branch
+        ? !current || current.object.sha === commit
+        : [plan.parent, commit].includes(current!.object.sha),
       'GITHUB_SYNC_CHANGED',
-      'GitHub main moved unexpectedly. Mirror stopped without changing its ref.',
+      branch
+        ? `GitHub branch ${branch} already holds another commit. Forge never moves a Candidate branch.`
+        : 'GitHub main moved unexpectedly. Mirror stopped without changing its ref.',
     );
-    if (current.object.sha !== commit) {
+    if (current?.object.sha !== commit) {
       const date = new Date(entry.seconds * 1000).toISOString();
       const created = await io.api<{ sha: string }>(`${prefix}/commits`, 'POST', {
         tree,
@@ -444,10 +462,12 @@ export async function stepMirror(plan: MirrorPlan, io: MirrorIO, now = Date.now)
         'GITHUB_SYNC_HASH',
         'GitHub commit differs from the deterministic mirror commit.',
       );
-      await io.api(`${prefix}/refs/heads/main`, 'PATCH', {
-        sha: commit,
-        force: false,
-      });
+      if (branch) await io.api(`${prefix}/refs`, 'POST', { ref: `refs/heads/${branch}`, sha: commit });
+      else
+        await io.api(`${prefix}/refs/heads/main`, 'PATCH', {
+          sha: commit,
+          force: false,
+        });
     }
     plan.entry = { ...entry, commit };
     plan.phase = 'done';

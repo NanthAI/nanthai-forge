@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { gitHash, gitTree, githubCommit, gitMode } from '../dist/hosted-github-git.js';
+import { GithubMirrorApiError } from '../dist/hosted-github-api.js';
 export function mirrorFixture({
   before = { 'hello.txt': 'old' },
   after = { 'hello.txt': 'new' },
@@ -76,6 +77,8 @@ export function mirrorFixture({
   commits.set(root.commit, root);
   let remote = root.commit,
     lose;
+  /** Branches other than main (Candidate branches), by name. */
+  const branches = new Map();
   const seed = {
     repository: 'synthetic/mirror',
     state: head,
@@ -95,7 +98,17 @@ export function mirrorFixture({
     const route = path.replace('/repos/synthetic/mirror/git/', '');
     let result;
     if (route === 'ref/heads/main') result = { object: { sha: remote } };
-    else if (route.startsWith('commits/') && method === 'GET') {
+    else if (route.startsWith('ref/heads/')) {
+      const sha = branches.get(route.slice(10));
+      if (!sha) throw new GithubMirrorApiError(404, 'GET ref', 0);
+      result = { object: { sha } };
+    } else if (route === 'refs' && method === 'POST') {
+      const name = body.ref.slice('refs/heads/'.length);
+      assert(!branches.has(name), 'a branch is created once');
+      assert(commits.has(body.sha));
+      branches.set(name, body.sha);
+      result = { object: { sha: body.sha } };
+    } else if (route.startsWith('commits/') && method === 'GET') {
       const entry = commits.get(route.slice(8));
       assert(entry);
       result = { tree: { sha: entry.tree }, message: entry.message };
@@ -182,6 +195,7 @@ export function mirrorFixture({
     root,
     head,
     remote: () => remote,
+    branches,
     move: sha => {
       remote = sha;
     },

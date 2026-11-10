@@ -41,6 +41,27 @@ test('small diff creates only changed blobs, base tree, outcome commit and fast-
   assert.equal(f.calls.length, 6, 'N changed blobs + 4 Git Data calls');
   assert.equal(f.reads.length, 2, 'steady-state never reads unchanged blobs');
 });
+test("a Candidate branch (flip 3) is created once on main's verified commit and never moves main", async () => {
+  const f = mirrorFixture({ before: { a: 'a', b: 'old' }, after: { a: 'a', b: 'new' } });
+  const branch = 'forge/candidates/6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f';
+  f.seed.branch = branch;
+  const plan = await drain(f);
+  assert.equal(f.branches.get(branch), plan.entry.commit);
+  assert.equal(f.commits.get(plan.entry.commit).parent, f.root.commit);
+  assert.equal(plan.entry.tree, f.expected());
+  assert.equal(f.remote(), f.root.commit, 'main is untouched');
+  // A replay after a lost reply finds its own commit there and writes nothing.
+  const writes = f.calls.filter(c => c.method === 'POST').length;
+  const again = await drain(f, await prepareMirror(f.seed, f.io));
+  assert.equal(again.entry.commit, plan.entry.commit);
+  assert.equal(f.calls.filter(c => c.path.endsWith('/refs') && c.method === 'POST').length, 1);
+  assert.ok(f.calls.filter(c => c.method === 'POST').length > writes, 'blobs and commit replay idempotently');
+  // A branch holding another commit is never moved.
+  f.branches.set(branch, f.root.commit);
+  await assert.rejects(drain(f, await prepareMirror(f.seed, f.io)), { code: 'GITHUB_SYNC_CHANGED' });
+  // Only on top of a verified main commit.
+  await assert.rejects(prepareMirror({ ...f.seed, verified: false }, f.io), { code: 'GITHUB_SYNC_CHANGED' });
+});
 test('5,000 changed files use 50 bounded steps and metadata windows rather than per-file RPCs', async t => {
   const before = {},
     after = {};

@@ -65,6 +65,8 @@ function endpointOf(value: string | undefined): R2Endpoint | undefined {
 export const r2Endpoint = (config: R2Config): R2Endpoint =>
   config.endpoint ?? { scheme: 'https', host: `${config.accountId}.r2.cloudflarestorage.com` };
 export const r2Key = (projectId: string, digest: string) => `v1/p/${projectId}/o/${digest}`;
+/** Scratch table of an archive import's file listing; outside `/o/`, so no object sweep sees it. */
+export const r2ImportListingKey = (projectId: string, digest: string) => `v1/p/${projectId}/import/${digest}`;
 const target = (config: R2Config, key: string) => ({
   ...r2Endpoint(config),
   path: `/${config.bucket}/${key}`,

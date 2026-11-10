@@ -2154,6 +2154,115 @@
               "properties": {
                 "provider": {
                   "type": "string",
+                  "const": "ci-status"
+                },
+                "ci": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "adapter": {
+                          "type": "string",
+                          "const": "github-actions"
+                        },
+                        "repository": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$"
+                        },
+                        "workflow": {
+                          "type": "string",
+                          "pattern": "^\\.github\\/workflows\\/[A-Za-z0-9_.-]+\\.ya?ml$"
+                        }
+                      },
+                      "required": [
+                        "adapter",
+                        "repository",
+                        "workflow"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "adapter": {
+                          "type": "string",
+                          "const": "gitlab-ci"
+                        },
+                        "origin": {
+                          "type": "string",
+                          "pattern": "^https:\\/\\/[a-z0-9.-]+(:[0-9]+)?$"
+                        },
+                        "projectPath": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9_.-]+(\\/[A-Za-z0-9_.-]+)+$"
+                        },
+                        "projectId": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "ciFile": {
+                          "default": ".gitlab-ci.yml",
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "credential": {
+                          "type": "object",
+                          "properties": {
+                            "secretId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "version": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "operation": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "secretId",
+                            "version",
+                            "operation"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "adapter",
+                        "origin",
+                        "projectPath",
+                        "projectId",
+                        "credential"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
+                },
+                "runtime": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "environmentFingerprint": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "required": [
+                "provider",
+                "ci",
+                "runtime",
+                "environmentFingerprint"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string",
                   "const": "modal"
                 },
                 "app": {
@@ -2674,6 +2783,43 @@
             "fence",
             "watchdog",
             "outcome"
+          ],
+          "additionalProperties": false
+        },
+        "ci": {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "commit": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[a-f0-9]{40}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "link": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "branch",
+            "commit",
+            "link"
           ],
           "additionalProperties": false
         },

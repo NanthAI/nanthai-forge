@@ -54,7 +54,7 @@ export const manifest = query({
             ? `https://github.com/${run.configuration.repository}/actions/runs/${run.executionId ?? ''}`
             : run.configuration.provider === 'modal'
               ? 'https://modal.com/apps'
-              : null,
+              : (run.ci?.link ?? null),
         complete: head?.final !== null && head?.final !== undefined,
         sealed: head?.sealed ?? 0,
         root: run.executionId ? rootForOutput(input, run.executionId, head) : null,

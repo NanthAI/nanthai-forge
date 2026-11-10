@@ -100,6 +100,7 @@ export async function executeHostedMacCheck(
   key: string,
 ) {
   invariant(isMachineRunner(initial.configuration), 'EVIDENCE_CHANGED', 'Select a machine runner.');
+  const machineProvider = initial.configuration.provider;
   let run = initial;
   const localLogs = localMacLogFiles(initial.projectId, initial.id);
   const root = await mkdtemp(join(tmpdir(), 'forge-machine-check-'));
@@ -381,7 +382,7 @@ export async function executeHostedMacCheck(
               operationId: run.request.operationId,
               authorityEpoch: run.request.authorityEpoch,
               fence: run.fence,
-              provider: initial.configuration.provider,
+              provider: machineProvider,
               executionId,
               head: run.request.expectedHead,
               definition: run.check.definition,

@@ -82,6 +82,13 @@ a single directory is itself above the reply limit or the split would need more 
 1,500 tree reads; the reason is logged as `listing-split-unavailable`. No partial tree
 is published.
 
+The tree is listed once per import job. `start` stores the listing (path, Git object ID,
+size, mode per file; plus totals) as one scratch object under the project's R2 prefix and
+pins it on the job; every archive step reads that object back, verifies its digest and
+tree id, and makes no tree request. A missing or altered object is listed again, never
+trusted. Publication deletes it; project deletion removes it with the rest of the prefix.
+The listing holds no per-file Convex rows.
+
 Committed regular files, executable modes, symlink targets, binaries, empty files
 and committed ignored paths are retained. Source names cannot overlap the
 existing `.git`/`.forge` metadata namespaces. Git history and derived code
@@ -106,7 +113,9 @@ SHA-256 before use, including source workers, checks and GitHub mirrors.
 
 Progress retains one compact receipt per stored window. Continuations read these
 receipts in bounded pages, re-stream the same archive and skip stored logical
-objects. Create-only uploads reconcile existing keys by verifying their physical
+objects. A run stops at its 6-minute budget before the next archive member, never
+after the last one: a run that stored the final file publishes in that run, so no
+continuation re-reads the archive only to rebuild the path-to-blob map. Create-only uploads reconcile existing keys by verifying their physical
 size and checksum. An interrupted action does not publish partial source. The
 worker's finite action scheduling boundaries do not exclude files. A continuation
 that cannot make progress reports a structured failure rather than looping.
@@ -182,9 +191,10 @@ Record the installed CLI `.commit`, repository commit, project ID and timestamps
 for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
 upload waits and attempts, metadata, catalog, projection and ready publication.
 The fixture guard in `tests/github-import-archive.test.mjs` bounds PUT count on a
-28.9k-file import and fixes its GitHub REST total at 9 requests (start: repository,
-commit, tree; run: repository, tree, tarball, two fallback blobs; publication:
-repository). The protocol-2 fixture in `tests/github-import-pages.test.mjs`
+28.9k-file import and fixes its GitHub REST total at 8 requests (start: repository,
+commit, tree; run: repository, tarball, two fallback blobs; publication:
+repository); `tests/github-import-archive.test.mjs` also asserts that a two-step
+import with a split listing makes one listing's tree reads in total. The protocol-2 fixture in `tests/github-import-pages.test.mjs`
 (28,905 files, 4,089 directories) records 33,061 REST requests, one per directory
 and blob, so that path relies on the App installation token; without one, a
 private repository on that path proceeds at about 10 percent of the importer's

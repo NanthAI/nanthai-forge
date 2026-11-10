@@ -106,6 +106,25 @@ async function mirrorParent(
   lane: Doc<'projectHostedOverlapLanes'>,
   mapping: string | null,
 ): Promise<Parent | null> {
+  const value = await mirroredBase(
+    ctx,
+    projectId,
+    { head: lane.baseHead, receiptId: lane.baseReceiptId },
+    mapping,
+  );
+  return value
+    ? { commit: value.commit, tree: value.tree, legacy: value.publication !== 'tracked', listing: null }
+    : null;
+}
+/** Main's GitHub commit for a base State, as the mirror published it (the exact receipt first, else
+ * another publication of that State, else the retained mapping): a Lane's or a Candidate's parent. */
+export async function mirroredBase(
+  ctx: Ctx,
+  projectId: Id<'hostedProjects'>,
+  base: { head: string; receiptId: string },
+  mapping: string | null,
+) {
+  const lane = { baseHead: base.head, baseReceiptId: base.receiptId };
   const parse = (mapping: string | null | undefined) => {
     const value = mapping ? githubSyncCommitSchema.parse(JSON.parse(mapping)) : null;
     return value?.state === lane.baseHead ? value : null;
@@ -125,10 +144,7 @@ async function mirrorParent(
   ];
   let value = null;
   for (const job of jobs) if (!value && job.status === 'done' && !job.inbound) value = parse(job.mapping);
-  value ??= parse(mapping);
-  return value
-    ? { commit: value.commit, tree: value.tree, legacy: value.publication !== 'tracked', listing: null }
-    : null;
+  return value ?? parse(mapping);
 }
 /** Without a mirror, main's Git commits are the imported commit and the commits Forge built for
  * its landings (Issue 3bd4a8e9): the newest Forge pack's tip (with its tree listing) needs no

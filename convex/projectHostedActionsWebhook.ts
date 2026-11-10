@@ -12,6 +12,7 @@ import { actionsToken, githubAppRequest } from './githubAppToken';
 import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { invariant } from '../src/errors';
 import { applyConclusion } from './projectHostedActionsVerdict';
+import { receiveCiStatus } from './projectCiStatus';
 const payloadSchema = z.object({
   action: z.enum(['requested', 'in_progress', 'completed']),
   repository: z.object({ full_name: z.string() }),
@@ -32,7 +33,11 @@ export const receive = internalMutation({
   args: { payload: v.string() },
   returns: v.null(),
   handler: async (ctx, input) => {
-    const parsed = payloadSchema.safeParse(JSON.parse(input.payload));
+    const raw = JSON.parse(input.payload);
+    // A run of the project's own workflow on a Candidate branch (ci-status provider): same event,
+    // same single mutation.
+    if (await receiveCiStatus(ctx, raw)) return null;
+    const parsed = payloadSchema.safeParse(raw);
     if (!parsed.success) return null; // Other workflows/events are unrelated.
     const payload = parsed.data,
       workflow = payload.workflow_run;

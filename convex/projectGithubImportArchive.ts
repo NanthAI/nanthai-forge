@@ -34,6 +34,7 @@ import { invariant } from '../src/errors';
 import { LfsImport } from '../src/github-lfs-import';
 import { ImportUpload, type CatalogEntry } from './projectGithubImportUpload';
 import { resumePublication, storedObjects } from './projectGithubImportResume';
+import { dropListing, jobListing } from './projectGithubImportListing';
 import { publishImport, type ImportRows } from './projectGithubImportPublish';
 import type { GithubHostedFile } from '../src/hosted-github-bootstrap';
 
@@ -72,10 +73,13 @@ export async function runArchiveImport(
       (access.repository as { id?: unknown }).id,
       meter.wrap(convexFetch),
     )) ?? access.token;
-  const listing = await listGithubTree(job.repository, cursor.tree, token, github);
+  // The file table is listed once per job (at start) and read back from R2 by every step.
+  const { listing, pin: listingPin } = await jobListing(ctx, job, input, cursor.tree, () =>
+    listGithubTree(job.repository, cursor.tree, token, github),
+  );
   invariant(listing, 'GITHUB_RESPONSE', 'GitHub no longer lists this commit tree completely.');
   console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.files.length, sourceBytes: listing.totalBytes })}`,
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'listing', at: Date.now(), elapsedMillis: Date.now() - started, files: listing.files.length, sourceBytes: listing.totalBytes, rssBytes: process.memoryUsage().rss })}`,
   );
   const listed = new Map(listing.files.map(file => [file.path, file]));
   // Progress is the stored objects themselves: one receipt per earlier window.
@@ -148,7 +152,14 @@ export async function runArchiveImport(
   console.log(
     `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-open', at: Date.now(), elapsedMillis: Date.now() - started })}`,
   );
+  let seen = 0;
   for await (const file of githubArchiveFiles(archive, listed, objectChunkBytes)) {
+    // Stop before the next member, not after the last: a run that read the whole
+    // archive at the budget still publishes instead of streaming it all again.
+    if (seen++ && over()) {
+      complete = false;
+      break;
+    }
     if (file.bytes) {
       if (gitBlobId(file.entry.sha, file.bytes) === file.entry.sha && !lfs.hold(file.entry, file.bytes)) {
         const pin = upload.put(file.bytes);
@@ -156,10 +167,6 @@ export async function runArchiveImport(
       }
     } else await streamLarge(file.entry, file.read!);
     await drain();
-    if (over()) {
-      complete = false;
-      break;
-    }
   }
   // Members the archive omitted or rewrote, and gitlink pointers, by Git object.
   const missing = complete
@@ -213,9 +220,9 @@ export async function runArchiveImport(
   await drain(true);
   await flush();
   console.log(
-    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes })}`,
+    `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase: 'archive-complete', at: Date.now(), elapsedMillis: Date.now() - started, files: imported.size, lfsObjects: lfs.objects, lfsBytes: lfs.objectBytes, lfsFetched: lfs.fetched, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, peakBufferedBytes: upload.peakBufferedBytes, rssBytes: process.memoryUsage().rss })}`,
   );
-  if (imported.size < listing.files.length || over()) {
+  if (imported.size < listing.files.length || !complete) {
     // Progress is the stored objects themselves; a continuation skips them.
     // A run that stored nothing new cannot converge within an action.
     invariant(
@@ -258,6 +265,7 @@ export async function runArchiveImport(
     },
   };
   await publishImport(ctx, { ...job, ...counters(), totalKnown: true }, rows, catalog, meter);
+  await dropListing(job.projectId, listingPin);
 }
 
 /** Fallback blobs (omitted or rewritten archive members) are fetched in windows

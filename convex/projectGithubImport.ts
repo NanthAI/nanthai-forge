@@ -15,6 +15,7 @@ import { ImportRequestMeter } from '../src/github-import-meter';
 import { authorizeGithub } from '../src/github-access';
 import { githubConfig } from './access';
 import { invariant } from '../src/errors';
+import { storeListing } from './projectGithubImportListing';
 import { report } from './errors';
 import { githubImportError, githubRequests } from './projectGithubImportFields';
 
@@ -96,7 +97,7 @@ export const start = action({
         token,
         meter.wrap(networkFetch),
       );
-      return await ctx.runMutation(internal.projectGithubImportStore.begin, {
+      const begun = await ctx.runMutation(internal.projectGithubImportStore.begin, {
         ...(listing
           ? {
               archive: {
@@ -117,6 +118,14 @@ export const start = action({
         visibility: access.repository.private ? 'private' : 'public',
         githubRequests: meter.counts,
       });
+      // The listing is paid for once: its file table is kept in R2 and every archive step reads it.
+      if (listing)
+        await ctx.runMutation(internal.projectGithubImportStore.pinListing, {
+          id: begun.id,
+          actor: user.subject,
+          listing: await storeListing(begun.projectId, source.pending[0]!.sha, listing),
+        });
+      return begun.id;
     } catch (error) {
       return report(error);
     }

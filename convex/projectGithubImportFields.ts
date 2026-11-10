@@ -28,6 +28,8 @@ export const githubImportFields = {
   /** Archive imports: the portable State object (path -> blob map) once it is stored, so a
    * publication retry rebuilds its rows from stored objects instead of streaming the archive. */
   stateObject: v.optional(v.object({ sha256: v.string(), size: v.number() })),
+  /** Archive imports: the commit tree's file table in R2, listed once per job. */
+  listing: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   visibility: v.union(v.literal('public'), v.literal('private')),
   owner: v.string(),
   operationId: v.string(),

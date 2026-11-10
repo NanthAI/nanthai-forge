@@ -119,7 +119,7 @@ function splitTreeReply(repo, sha, recursive, truncatedChild) {
   return { sha, truncated: false, tree: inside };
 }
 /** Synthetic GitHub plus a strict fake R2 bucket (create-only, checksummed PUTs). */
-async function serve(t, repo, counts) {
+async function serve(t, repo, counts, hooks = {}) {
   const saved = Object.fromEntries(Object.keys(r2Env).map(name => [name, process.env[name]]));
   Object.assign(process.env, r2Env);
   const native = globalThis.fetch,
@@ -140,7 +140,10 @@ async function serve(t, repo, counts) {
     const u = new URL(url),
       path = u.pathname;
     if (u.host === bucket.host) return old(url, options);
-    const count = name => (counts[name] = (counts[name] ?? 0) + 1);
+    const count = name => {
+      counts[name] = (counts[name] ?? 0) + 1;
+      hooks[name]?.(counts[name]);
+    };
     if (u.hostname === 'codeload.github.com') {
       count('archive');
       assert.equal(options.headers?.Authorization, undefined, 'credential never follows the redirect');
@@ -297,11 +300,12 @@ test('a 28,905-file tree imports through one archive stream within an O(pages) b
   assert.equal(job.protocol, 3);
   assert.equal(job.completed, repo.files);
   // Only the archive-omitted and archive-rewritten files cost a blob request.
-  assert.deepEqual(counts, { trees: 2, tarball: 1, archive: 1, blobs: 2 });
-  // Issue 2ccd3bae: the whole archive import is 9 REST requests (start: repository, commit,
-  // tree; run: repository, tree, tarball, 2 blobs; publication: repository). With no App or
-  // deployment token configured here, none of them uses an importer credential.
-  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 9 });
+  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobs: 2 });
+  // Issue 2ccd3bae: the whole archive import is 8 REST requests (start: repository, commit,
+  // tree; run: repository, tarball, 2 blobs; publication: repository). The run reads the tree
+  // listing start stored (Issue e5be6ef3). With no App or deployment token configured here,
+  // none of them uses an importer credential.
+  assert.deepEqual(job.githubRequests, { user: 0, app: 0, server: 0, anonymous: 8 });
   // Issue 7cbb881c line 3: no per-file row survives ready; documents are O(pages).
   const catalogRows = [...s.tables.projectObjectCatalog.values()].filter(r => r.projectId === job.projectId);
   const catalogued = catalogRows.reduce((sum, row) => sum + row.sizes.length, 0);
@@ -435,13 +439,13 @@ test('Issue c6426ee9: a root truncated by count imports through the archive stre
   const job = await importArchive(s);
   assert.equal(job.protocol, 3, 'archive path, not protocol 2');
   assert.equal(job.completed, repo.files);
-  // Per listing: the truncated root, 3 directories recursive, the root and the still-truncated directory flat.
-  // Start lists once and the archive run lists again.
-  assert.deepEqual(counts, { treesRecursive: 8, treesFlat: 4, tarball: 1, archive: 1, blobs: 2 });
+  // One listing: the truncated root, 3 directories recursive, the root and the still-truncated directory
+  // flat. Start lists it; the archive run reads the stored table (Issue e5be6ef3).
+  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 1, archive: 1, blobs: 2 });
   assert.equal(
     job.githubRequests.anonymous,
-    2 + 12 + 4 + 1,
-    'start: repository and commit; 2 listings of 6; run: repository, tarball, 2 blobs; publication: repository',
+    2 + 6 + 4 + 1,
+    'start: repository and commit; 1 listing of 6; run: repository, tarball, 2 blobs; publication: repository',
   );
 });
 
@@ -524,7 +528,7 @@ test('Git LFS paths import as their object bytes, fetched once per oid; other po
   const bucket = await serve(t, repo, counts);
   const job = await importArchive(s);
   // One batch request; one download per unique oid (model.bin and copy.bin share one).
-  assert.deepEqual(counts, { trees: 2, tarball: 1, archive: 1, lfsBatch: 1, lfsDownload: 2 });
+  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, lfsBatch: 1, lfsDownload: 2 });
   const digestOf = bytes => createHash('sha256').update(bytes).digest('hex');
   const { files, bytesOf } = await mainFiles(s, bucket, job.projectId);
   assert.equal(files.get('model.bin').blob, digestOf(repo.model), 'pointer-only import fails here');
@@ -595,7 +599,7 @@ test('a publication failure is coded, not an interrupted worker, and the retry p
   assert.ok(failed.stateObject, 'the stored State is pinned on the job');
   assert.deepEqual(
     { archive: counts.archive, tarball: counts.tarball, trees: counts.trees },
-    { archive: 1, tarball: 1, trees: 2 },
+    { archive: 1, tarball: 1, trees: 1 },
   );
   const before = { ...counts };
   // Original-operation retry: no listing, tarball or archive request, and the same main.
@@ -691,3 +695,85 @@ test('Issue c6426ee9: an archive import hands publication lazily produced rows; 
   assert.ok(!/rows\.(?:imported|blobs)\.push/.test(source), 'build rows while publication pages them');
   assert.match(source, /\*\[Symbol\.iterator\]/);
 });
+
+/** Archive steps stop at a wall-clock budget; this moves the importer's clock instead of waiting.
+ * Presigned URLs carry the real issue time, so the fake bucket's clock follows the same jump. */
+function skewClock(t) {
+  const real = Date.now;
+  let skew = 0;
+  const clock = {
+    bucket: null,
+    jump(minutes) {
+      skew += minutes * 60_000;
+      clock.bucket.clockSkew = -skew;
+    },
+  };
+  Date.now = () => real() + skew;
+  t.after(() => {
+    Date.now = real;
+  });
+  return clock;
+}
+const listingKeys = bucket => [...bucket.objects.keys()].filter(key => key.includes('/import/'));
+const listingGets = bucket =>
+  bucket.requests.filter(request => request.method === 'GET' && request.path.includes('/import/')).length;
+
+test('Issue e5be6ef3: a multi-step archive import lists the tree once; every step reads the stored table', async t => {
+  const repo = {
+      ...repository({ files: 60, directories: 3, submodules: 1 }),
+      split: { truncatedChild: hex(3) },
+    },
+    counts = {},
+    s = pagedFixture(),
+    clock = skewClock(t);
+  // The first archive stream passes its time budget as soon as it opens: one file, then a continuation.
+  const bucket = await serve(t, repo, counts, { archive: n => n === 1 && clock.jump(7) });
+  clock.bucket = bucket;
+  const job = await importArchive(s);
+  assert.equal(job.step, 1, 'two archive runs');
+  assert.equal(job.completed, repo.files);
+  // 4 recursive + 2 flat reads are the one listing (start); both runs streamed the archive.
+  assert.deepEqual(counts, { treesRecursive: 4, treesFlat: 2, tarball: 2, archive: 2, blobs: 2 });
+  assert.equal(
+    job.githubRequests.anonymous,
+    2 + 6 + 2 + 4 + 1,
+    'start: repository, commit, 1 listing of 6; run 1: repository, tarball; run 2: repository, tarball, 2 blobs; publication: repository',
+  );
+  assert.equal(listingGets(bucket), 2, 'each run read the stored table from R2');
+  assert.deepEqual(listingKeys(bucket), [], 'the scratch table is deleted once main is published');
+});
+
+test('Issue e5be6ef3: a run that stored the last file at its time budget publishes in that run, with no second pass over the archive', async t => {
+  const repo = repository({ files: 20, directories: 2, submodules: 1 }),
+    counts = {},
+    s = pagedFixture(),
+    clock = skewClock(t);
+  // The omitted and rewritten files are fetched after the stream ends; the budget passes during them.
+  clock.bucket = await serve(t, repo, counts, { blobs: n => n === 1 && clock.jump(7) });
+  const job = await importArchive(s);
+  assert.equal(job.step, 0, 'no continuation step');
+  assert.equal(job.completed, repo.files);
+  assert.deepEqual(counts, { trees: 1, tarball: 1, archive: 1, blobs: 2 });
+});
+
+for (const damage of ['gone', 'altered'])
+  test(`Issue e5be6ef3: a stored listing that is ${damage} is listed again, never trusted`, async t => {
+    const repo = repository({ files: 12, directories: 2, submodules: 0 }),
+      counts = {},
+      s = pagedFixture();
+    const bucket = await serve(t, repo, counts);
+    const id = await s.modules.projectGithubImport.start._handler(s.ctx, {
+      operationId: randomUUID(),
+      url: 'fixture/arch',
+    });
+    assert.equal(listingKeys(bucket).length, 1, 'start stored the table');
+    for (const key of listingKeys(bucket))
+      if (damage === 'gone') bucket.objects.delete(key);
+      else bucket.objects.set(key, Buffer.from('{"schema":1}'));
+    for (let i = 0; i < 5 && !['ready', 'error'].includes(s.tables.projectGithubImports.get(id).phase); i++)
+      await s.worker(id);
+    const job = s.tables.projectGithubImports.get(id);
+    assert.equal(job.phase, 'ready', JSON.stringify(job.error));
+    assert.equal(counts.trees, 2, 'start listed, the run listed again');
+    assert.equal(job.completed, repo.files);
+  });

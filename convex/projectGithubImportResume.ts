@@ -14,6 +14,7 @@ import type { ImportRequestMeter } from '../src/github-import-meter';
 import { windowEntries } from './projectGithubImportCatalog';
 import type { CatalogEntry } from './projectGithubImportUpload';
 import { publishImport } from './projectGithubImportPublish';
+import { dropListing } from './projectGithubImportListing';
 
 type Identity = { id: Id<'projectGithubImports'>; actor: string };
 
@@ -133,5 +134,6 @@ export async function resumePublication(
     });
   };
   await publishImport(ctx, job, rows, { stored, record }, meter);
+  await dropListing(job.projectId, job.listing);
   return true;
 }

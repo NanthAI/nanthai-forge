@@ -60,7 +60,7 @@ async function publishRows(
   const started = Date.now();
   const metric = (phase: string) =>
     console.log(
-      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis })}`,
+      `FORGE_IMPORT_METRIC ${JSON.stringify({ projectId: job.projectId, phase, at: Date.now(), elapsedMillis: Date.now() - started, putAttempts: upload.putAttempts, putBytes: upload.putBytes, uploadMillis: upload.uploadMillis, rssBytes: process.memoryUsage().rss })}`,
     );
   const identity = { id: job._id, actor: job.owner };
   async function* pages(part: string) {
