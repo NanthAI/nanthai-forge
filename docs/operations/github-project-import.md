@@ -120,6 +120,16 @@ size and checksum. An interrupted action does not publish partial source. The
 worker's finite action scheduling boundaries do not exclude files. A continuation
 that cannot make progress reports a structured failure rather than looping.
 
+Memory grows with file count and is the next limit of this path. A Convex Node action
+has 512 MB. An archive step holds the listing, its path index, the path-to-blob map and
+the stored-object catalog, and publication adds its working set. Measured live on
+150,612 files (1.47 GB; two steps, `rssBytes` in the `FORGE_IMPORT_METRIC` records): a
+near-empty import action sits at about 190 to 200 MB; the second step read the stored
+listing at 292 MB, finished the archive at 448 MB, and publication peaked at 494 MB
+(projection). The ceiling is therefore about 150,000 files per import; a larger
+repository is expected to run out of action memory (`Node.js action execution ran out of
+memory`, no main published) until the per-file structures are made smaller.
+
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
 transaction starts bounded deletion of transient inventory; large legacy
