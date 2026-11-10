@@ -283,6 +283,34 @@ missing usage stays null per function. These are usage-based estimates, not bill
 The extra counters consume local memory only, bounded by the existing retained
 execution capacity; they add no provider pull, Convex call or database work.
 
+## Weaker-model arm (new, 7e2f5efe)
+
+Our evidence comes from frontier models; end users may run weaker ones. This arm asks whether
+cheaper models can use Forge's core loop unaided. It is **reported, not gated**: it adds no
+pass/fail line to the owner exit bar and does not change any cell above.
+
+- **Kit:** the w30 trial kit kept with the bench folder: five scripted tasks on a small
+  synthetic repository (no dependencies, a style check as the landing check) that a model gets
+  with only the `forge-agent` skill and `nforge agent --help`: start a Lane, edit, save and land;
+  resolve a conflict another Lane caused; fix a failing check; submit a landing without blocking
+  and wait for it; answer an overlap notice. Each model run imports a fresh dev project from the
+  repository (no state shared between models), with the check on a GitHub-hosted runner and
+  auto-accept on pass, and the project is deleted afterwards.
+- **Models:** Claude Haiku 5.5 (`claude -p --model claude-haiku-5-5`), one small non-Claude model
+  through Pi on an existing subscription (a small open model installed locally replaces it when
+  one exists), and Claude Sonnet 5.5 once as the control. Run once per exit-bench pass, after the
+  scored batches and with the machine otherwise idle, never during a batch hold.
+- **Recorded per task:** success on accepted main (the function or file is on main and the
+  reported receipt id is real), turns, tool calls, wall time, and every error code the model met.
+  The report lists every message or next step a model misread or ignored, with the text it saw.
+- **Flag, do not gate:** a task a cheaper model fails, or one that takes it three times the
+  control's turns, is filed as an Issue with the transcript. The GitHub arm is not run for these
+  models (the question is whether Forge's own surface is usable, not Forge against GitHub).
+- **Baseline (2026-11-09, before the exit bench):** 20 of 20 task runs landed correctly:
+  Sonnet 5.5 5/5 (56 turns), Haiku 5.5 5/5 twice (94 and 95 turns), Gemini 3.8 Flash through Pi
+  5/5 (185 turns). The dominant cost of a weaker model was detours (project-folder commands,
+  exploring other Lanes), not failures.
+
 ## Cost
 
 The estimate for the owner (GPT tokens and share of the Codex weekly limit, CI minutes, Convex
@@ -334,3 +362,5 @@ existed when it was decided.
   `convex/projectHostedActionsVerdict.ts`) voided both cells. Those two cells are reported as
   "voided, start-gate gap, fixed by" this change's receipt. They do not count toward the 1-in-4
   void line.
+- 2026-11-10, Issue 7e2f5efe: a reported, ungated weaker-model arm (section "Weaker-model arm").
+  No scored cell exists yet; it changes no cell, measure or pass/fail line above.

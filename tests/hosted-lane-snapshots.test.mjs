@@ -210,15 +210,34 @@ test('kill the machine: a new checkout restores the unsaved files byte for byte'
 
 test('secrets and big new files are left out like a save', async t => {
   const x = await fixture(t);
+  // Synthetic credential-shaped value, built at run time (never a real key).
+  const key = `AKIA${'QX7ZB2MNV4KT9WRD'}`;
   writeFileSync(join(x.root, '.env'), 'SYNTHETIC_TOKEN=not-a-real-value\n');
+  writeFileSync(join(x.root, 'config.ini'), `aws_access_key_id = "${key}"\n`);
   writeFileSync(join(x.root, 'big.bin'), Buffer.alloc(LANE_SNAPSHOT.newFileBytes + 1));
   writeFileSync(join(x.root, 'a.txt'), 'edited');
   const saved = await x.snap();
   assert.equal(saved.status, 'saved');
   assert.equal(saved.changes, 1);
-  assert(saved.notSaved.count >= 2);
+  assert(saved.notSaved.count >= 3);
   assert.deepEqual(saved.notSaved.capped, ['big.bin']);
-  for (const bytes of x.r2.objects.values()) assert(!bytes.toString().includes('not-a-real-value'));
+  assert.deepEqual(
+    saved.notSaved.held,
+    ['config.ini'],
+    'content the secret scan flags never reaches storage',
+  );
+  for (const bytes of x.r2.objects.values()) {
+    assert(!bytes.toString().includes('not-a-real-value'));
+    assert(!bytes.toString().includes(key));
+  }
+  // The verdict is kept by digest: an unchanged held file is not read or scanned again.
+  writeFileSync(join(x.root, 'a.txt'), 'edited again');
+  assert.deepEqual((await x.snap()).notSaved.held, ['config.ini']);
+  // Once the credential is removed the file is snapshotted like any other.
+  writeFileSync(join(x.root, 'config.ini'), 'region = "eu"\n');
+  const clean = await x.snap();
+  assert.equal(clean.changes, 2);
+  assert.deepEqual(clean.notSaved?.held ?? [], []);
 });
 
 test('policy off, closed Lanes and other members are refused; nothing is stored', async t => {

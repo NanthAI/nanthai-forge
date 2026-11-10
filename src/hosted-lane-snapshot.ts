@@ -98,7 +98,7 @@ export type SnapshotReceipt =
       uploads: number;
       bytes: number;
       calls: number;
-      notSaved?: { count: number; capped: string[] };
+      notSaved?: { count: number; capped: string[]; held: string[] };
     }
   | { status: 'skipped'; reason: string; calls: number; code?: string };
 

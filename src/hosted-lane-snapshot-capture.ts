@@ -21,28 +21,36 @@ import { buildSavePages, type SaveChange } from './hosted-save.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import type { NativeFile } from './native-state-format.js';
 import { LANE_SNAPSHOT, snapshotTree } from './lane-snapshot-contract.js';
+import { scanSecretText, SECRET_SCAN_MAX_FILE_BYTES } from './secret-scan.js';
 
 /** Private snapshot state of one checkout, beside it in `<root>.forge-client/snapshots`. */
 export const snapshotDirectory = (root: string) => join(clientCacheRoot(root), 'snapshots');
 type Entry = ReturnType<typeof statEntry>;
 const statPath = (root: string) => join(snapshotDirectory(root), 'stat.json');
-function readStat(root: string): CheckoutStatIndex {
+/** Secret-scan verdicts by blob digest: true = holds a credential. Each changed blob is scanned once. */
+type Verdicts = Map<string, boolean>;
+function readStat(root: string): CheckoutStatIndex & { verdicts: Verdicts } {
   try {
     const value = JSON.parse(readFileSync(statPath(root), 'utf8')) as {
       since: number;
       entries: Record<string, Entry>;
+      verdicts?: Record<string, boolean>;
     };
     return {
       since: Math.min(value.since, lstatSync(statPath(root)).mtimeMs),
       entries: new Map(Object.entries(value.entries)),
+      verdicts: new Map(Object.entries(value.verdicts ?? {})),
     };
   } catch {
-    return { since: 0, entries: new Map() };
+    return { since: 0, entries: new Map(), verdicts: new Map() };
   }
 }
-function writeStat(root: string, since: number, entries: Map<string, Entry>) {
+function writeStat(root: string, since: number, entries: Map<string, Entry>, verdicts: Verdicts) {
   try {
-    durableReplace(statPath(root), JSON.stringify({ since, entries: Object.fromEntries(entries) }));
+    durableReplace(
+      statPath(root),
+      JSON.stringify({ since, entries: Object.fromEntries(entries), verdicts: Object.fromEntries(verdicts) }),
+    );
   } catch {
     /* Speed only: the next snapshot hashes more. */
   }
@@ -56,8 +64,9 @@ export type SnapshotCapture = {
   root: { sha256: string; size: number } | null;
   /** Changed file bytes by digest: read during capture, or on demand (digest-checked). */
   read: (sha256: string) => Buffer;
-  /** Files left out: the save's built-in exclusions (credentials, installs) and the new-file cap. */
-  notSaved: { count: number; capped: string[] };
+  /** Files left out: the save's built-in exclusions (credentials, installs), the new-file cap
+   * (`capped`) and changed files whose content the secret scan flags (`held`). */
+  notSaved: { count: number; capped: string[]; held: string[] };
 };
 
 /** Read a changed file, link or submodule pointer, with the save capture's safe readers. */
@@ -78,14 +87,17 @@ function readBytes(root: string, path: string, stat: Stats) {
  * The working files of a hosted Lane checkout as a delta against its saved head, in the save's
  * page format. Same walk as a save (ignore rules, credential and install exclusions); unchanged
  * files are vouched for by the checkout's stat index or this snapshot index and never read. A
- * new file over LANE_SNAPSHOT.newFileBytes is left out and counted. Runs no repository code.
+ * new file over LANE_SNAPSHOT.newFileBytes, and a changed file the landing secret scan flags,
+ * are left out and counted. Runs no repository code.
  */
 export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker): SnapshotCapture {
   root = realpathSync(root);
   const since = Date.now(),
     checkout = readCheckoutStatIndex(root),
     own = readStat(root),
-    observed = new Map<string, Entry>();
+    observed = new Map<string, Entry>(),
+    verdicts: Verdicts = new Map(),
+    held: string[] = [];
   const baseline = new Map<string, NativeFile>(marker.state.files.map(file => [file.path, file])),
     notSaved = notSavedCollector(),
     capped: string[] = [];
@@ -119,6 +131,27 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
     }
     if (!submodule) observed.set(path, statEntry(stat, blob));
     if (old && old.blob === blob && old.mode === mode) continue;
+    // Content the landing secret scan calls a credential stays out: a snapshot never lands, so
+    // nothing would scan it later. One scan per changed blob; the verdict is kept by digest.
+    if (mode !== 'symlink' && mode !== 'gitlink') {
+      let secret = own.verdicts.get(blob);
+      if (secret === undefined) {
+        if (!read && stat.size <= SECRET_SCAN_MAX_FILE_BYTES) {
+          const value = readBytes(root, path, stat);
+          if (digest(value) === blob) read = value;
+        }
+        secret =
+          !!read &&
+          read.length <= SECRET_SCAN_MAX_FILE_BYTES &&
+          !read.subarray(0, 8192).includes(0) &&
+          scanSecretText(path, read.toString('utf8')).length > 0;
+        if (read || stat.size > SECRET_SCAN_MAX_FILE_BYTES) verdicts.set(blob, secret);
+      } else verdicts.set(blob, secret);
+      if (secret) {
+        held.push(path);
+        continue;
+      }
+    }
     if (read) bytes.set(blob, read);
     else sources.set(blob, path);
     changes.push({
@@ -137,7 +170,7 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
       const old = baseline.get(path)!;
       changes.push({ path, before: { blob: old.blob, mode: old.mode }, after: null });
     }
-  writeStat(root, since, observed);
+  writeStat(root, since, observed, verdicts);
   const built = changes.length ? buildSavePages(changes) : { pages: [], root: null };
   const head = marker.selection.head;
   return {
@@ -158,6 +191,10 @@ export function captureSnapshot(root: string, marker: HostedLaneCheckoutMarker):
       );
       return value;
     },
-    notSaved: { count: (notSaved.value()?.count ?? 0) + capped.length, capped: capped.slice(0, 20) },
+    notSaved: {
+      count: (notSaved.value()?.count ?? 0) + capped.length + held.length,
+      capped: capped.slice(0, 20),
+      held: held.slice(0, 20),
+    },
   };
 }

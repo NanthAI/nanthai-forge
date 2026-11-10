@@ -165,6 +165,7 @@ const quietActions = new Set([
 // These messages carry their own next command; a generic replay hint would contradict it.
 const gateCodes = new Set([
   'BAD_ARGUMENT',
+  'NOT_FOUND', // a missing record: replaying the same request cannot change it (w30)
   'OVERLAP_UNANSWERED',
   'PREFLIGHT_REQUIRED',
   'SAVE_PENDING',
@@ -1620,7 +1621,7 @@ export class HostedAgentTransport {
     invariant(
       marker?.selection.laneId === laneId,
       'HOSTED_CHECKOUT_REQUIRED',
-      'Run preflight in the Lane checkout; it tests the saved files here.',
+      'Run preflight with the Lane folder printed by start as ROOT (not the project folder): it tests the saved files there.',
     );
     const stopped = command.retry ? readPreflightReceipt(root, laneId)?.stopped : undefined;
     invariant(

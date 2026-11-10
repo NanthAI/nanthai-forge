@@ -1571,6 +1571,9 @@ function runSummary(receipt: PreflightReceipt, plan: PreflightPlan & { status: '
     stopped +
     failedFirst +
     slow +
+    (receipt.environment
+      ? ` ${receipt.environment.code}: this machine, not your change. No fix is needed to continue: the landing check runs the tests; next: ${receipt.environment.next}`
+      : '') +
     ` Rule: ${receipt.rule ?? plan.scope}.` +
     (receipt.trimmedTiers?.length ? ` Trimmed tier(s): ${receipt.trimmedTiers.join(', ')}.` : '') +
     (receipt.skipped?.length

@@ -150,6 +150,8 @@ function parseFailedStep(row: string) {
   return { name, command, text: text.join(' :: ') };
 }
 const stepLine = /budget|error|failed|fail\b|exceed|cannot|not found|ERR!/i;
+/** A runner's all-clear count (`ℹ fail 0`, `0 failed`, `errors: 0`) is not a cause (w30: a weak model read it as the failure). */
+const zeroCount = /\b(?:fail(?:ed|ures?)?|errors?)\s*[:=]?\s*0\b|\b0\s+(?:fail(?:ed|ures?)?|errors?)\b/i;
 const npmTrailer = /^npm (?:ERR!|error)/i;
 const thrownLine = /^(?:Uncaught )?[A-Z]\w*Error(?: \[[A-Z_]+\])?: \S/;
 /** The failing step of a run whose failure names no test file, from the bounded
@@ -191,12 +193,13 @@ export function failingStep(
       };
     }
     // npm's own trailer (`npm ERR! code 1`) names no cause; prefer the step's line.
-    const matches = [...lines].reverse().filter(text => stepLine.test(text));
+    const matches = [...lines].reverse().filter(text => stepLine.test(text) && !zeroCount.test(text));
     // A thrown error's own line (`AssertionError [ERR_ASSERTION]: Unlisted packaged
     // document: ...`) names the cause better than a runner's later `failed` line.
     const line =
       matches.find(text => thrownLine.test(text)) ??
       matches.find(text => !npmTrailer.test(text)) ??
+      [...lines].reverse().find(text => !npmTrailer.test(text) && !zeroCount.test(text)) ??
       matches[0] ??
       lines.at(-1)!;
     return { job: jobLabel(shard, shardCount), excerpt: line.slice(0, 240) };

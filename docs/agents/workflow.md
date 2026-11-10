@@ -971,7 +971,7 @@ After an agent dies, `status {"laneId":…}` returns `lane.autoSnapshot` (`state
 - **What triggers a snapshot:** each Forge command run in a Lane checkout first snapshots the checkout's working files, if they changed since the last snapshot.
 - **What it costs:** unchanged files cost no call. A changed snapshot costs `prepare`, `commit` and create-only R2 uploads of only the changed files. File bytes never go into Convex.
 - **What it is not:** a snapshot is not a save. The Lane head never moves. Nothing lands, runs checks or raises notices.
-- **What is left out:** the walk is the save's. Ignored files, credential names and secret content are left out and counted as `notSaved`. New files over 1 MiB are left out and named in `snapshot.notSaved.capped`.
+- **What is left out:** the walk is the save's. Ignored files and credential names are left out and counted as `notSaved`. New files over 1 MiB are left out and named in `snapshot.notSaved.capped`. Changed files the landing secret scan flags are left out and named in `snapshot.notSaved.held`: a snapshot never lands, so nothing would scan it later. A restore leaves held files at their saved-head version.
 - **Browsing and moving:** `x snapshots {}` lists the Lane's operation log. With the Lane checkout as ROOT, `{"undo":N}`, `{"redo":N}` and `{"restore":SEQ|"latest"}` write a snapshot's files back. Each move first snapshots the current files, so the move can be undone. Nothing is deleted or saved.
 - **Recovering on a new machine:** run `start --open {laneId}`, then `{"restore":"latest"}`.
 - **Expiry and purge:** a Lane's snapshots expire 14 days after its latest one. `{"purge":true}` deletes them from storage for real; it needs the Lane author or the project owner.

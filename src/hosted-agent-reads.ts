@@ -22,6 +22,7 @@ import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
 import { hostedOverlapAnswersSchema } from './hosted-agent-overlap-answers.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
+import { SELECT_LANE } from './hosted-lane-location.js';
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const hostedPeersSchema = z
   .object({
@@ -54,7 +55,7 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid hosted peers parameters. Use peers --help.');
   const command = parsed.data;
   const laneId = command.laneId ?? readHostedLaneCheckout(transport.root)?.selection.laneId;
-  invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
+  invariant(laneId, 'BAD_ARGUMENT', SELECT_LANE);
   // Deliberately no capability or select probe: the server authorizes and pins the entire observation.
   const result = await transport.query<Record<string, unknown>>('projectHostedOverlaps:read', {
     ...command,

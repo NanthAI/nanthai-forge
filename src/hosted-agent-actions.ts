@@ -19,7 +19,7 @@ import { hostedAgentCommandSchemas, type HostedAgentAction } from './hosted-agen
 import { hostedStartSchema, hostedStartResultSchema } from './hosted-lane.js';
 import { checkoutHostedLane } from './hosted-lane-checkout.js';
 import { adoptNestedLaneCopy } from './hosted-lane-adopt.js';
-import { checkoutRequired, openLaneRoot } from './hosted-lane-location.js';
+import { checkoutRequired, openLaneRoot, SELECT_LANE } from './hosted-lane-location.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import {
   applyObservedSaveOutcome,
@@ -420,7 +420,7 @@ function checkLocalLane(session: HostedAgentSession, laneId?: string) {
   throw checkoutRequired(
     session,
     laneId,
-    'Open this Lane into ROOT before saving local files or changing its local lifecycle.',
+    'Saving or changing this Lane needs its own folder as ROOT, not the project folder: use the Lane folder printed by start.',
   );
 }
 const CANCEL_COST =
@@ -736,7 +736,7 @@ export async function executeHostedAgent(
   if (action === 'pin') {
     const command = hostedAgentCommandSchemas.pin.parse(input);
     const laneId = command.laneId ?? session.marker()?.selection.laneId;
-    invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
+    invariant(laneId, 'BAD_ARGUMENT', SELECT_LANE);
     const result = parseHostedResponse(
       pinResultSchema,
       await session.mutation('projectHostedLanePin:setPin', {

@@ -20,13 +20,14 @@ import { hostedAgentCommandSchemas } from './hosted-agent-contract.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { advanceMarkerMetadata } from './hosted-marker-advance.js';
 import { MainPinRefused, mainPinRefusal, sendMainPinned } from './hosted-main-pin.js';
+import { SELECT_LANE } from './hosted-lane-location.js';
 export type SourceProgress = {
   terminal?: { outcome: { status: string; result?: unknown } } | null;
   input?: unknown;
 };
 export async function selectAgentLane(session: HostedAgentSession, laneId?: string) {
   laneId ??= session.marker()?.selection.laneId;
-  invariant(laneId, 'BAD_ARGUMENT', 'Select laneId or open a hosted Lane.');
+  invariant(laneId, 'BAD_ARGUMENT', SELECT_LANE);
   const lane = parseHostedResponse(
     hostedLaneSelectionSchema,
     await session.query('projectHostedLanes:select', { laneId }),

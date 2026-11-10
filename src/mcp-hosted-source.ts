@@ -130,7 +130,7 @@ export async function selectExactHostedSource(
   invariant(
     [input.laneId, input.state, input.candidateId, input.channel].filter(Boolean).length <= 1,
     'BAD_ARGUMENT',
-    'Select one Lane, main, Candidate or State.',
+    'Select exactly one source: laneId, candidateId, state, or channel "main" (several were given).',
   );
   invariant(
     !input.expected || (!input.state && !input.candidateId && !input.channel),

@@ -630,6 +630,8 @@ or production historical replay is implied.
 | `fast-decision` | 12,923 | 6,372 | 2.882 | Expected FastSound |
 | `fast-break` | 71,012 | 23,933 | 763.711 | Passed; relaxed-class break, FastSound, LostOnRed, NoLostWork, MainRecovers |
 | `fast-earn` | 15,532 | 7,062 | 32.577 | Expected NeverFast (witness: the drill, then a fast carry) |
+| `fast-strict` | 152,165 | 50,065 | 1,108.529 | Passed; policy strict, NeverFast holds; same states as `prequeue-early` |
+| `fast-unearned` | 152,165 | 50,065 | 346.861 | Passed; policy fast, not earned, NeverFast holds |
 
 All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move. The two `supervisor` rows were added with Issue 19328518 (2026-11-05, Lane d3a3c850); every Incidents configuration was re-run with them and matched, with existing counts unchanged.
 
@@ -637,7 +639,7 @@ The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6
 
 All 48 configurations, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, 2026-11-06, Lane a3fed1a0) and matched; every row above is from that run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the main model with identical counts, so rows that changed here had predated earlier spec changes. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexample; their partial counts vary between runs (the unmodified copy stopped `prequeue-suffix` at 162,842 / 74,207).
 
-The five `fast` rows are from the landing-mode change (Issue 81d12a32, 2026-11-09, Lane 6ca68b15), run on a machine at load 30 to 45, so their wall times are not comparable with the rows above.
+The seven `fast` rows are from the landing-mode change (Issue 81d12a32, 2026-11-09, Lane 6ca68b15), run on a machine at load 30 to 45, so their wall times are not comparable with the rows above.
 
 With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 

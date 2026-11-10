@@ -134,6 +134,23 @@ test('combination-only failure: the failing step is attributed from sealed summa
   assert.equal(failingStep([{ descriptor: 'not json', seal: null }], 4), null);
 });
 
+test('w30 incident: a runner all-clear count (`ℹ fail 0`) is never named as the failing step', () => {
+  // Tests passed, then the style step failed; node's summary line says `fail 0`.
+  const step = failingStep(
+    [
+      {
+        descriptor: JSON.stringify({ shard: 3 }),
+        seal: JSON.stringify({
+          failureSummary:
+            'ℹ pass 8\nℹ fail 0\nsrc/discount.js:1 first line must start with "// tiny-shop:"\nsrc/discount.js:2 longer than 80 characters\nnpm error code 1',
+        }),
+      },
+    ],
+    4,
+  );
+  assert.equal(step.excerpt, 'src/discount.js:2 longer than 80 characters');
+});
+
 test('a member that passes alone after a shared failure is reported as combination-only, once', () => {
   const diagnostic = {
     sharedRunId: 'run-1',

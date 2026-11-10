@@ -20,6 +20,10 @@ export function openLaneRoot(
     : null;
 }
 
+/** One wording for "this command needs a Lane" (w30: weaker models passed the project folder and an empty body). */
+export const SELECT_LANE =
+  'This command needs a Lane: pass {"laneId":"LANE_ID"}, or use the Lane folder printed by start as ROOT.';
+
 /** HOSTED_CHECKOUT_REQUIRED that names the Lane's own checkout when it is open elsewhere, so a
  * caller who passed the project folder as ROOT re-runs with that path instead of hunting for it. */
 export function checkoutRequired(
