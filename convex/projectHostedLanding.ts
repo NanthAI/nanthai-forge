@@ -19,7 +19,7 @@ import { preQueueCheck } from '../src/hosted-landing-admission';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
 import { acceptanceActor } from './projectAutonomy';
-import { landingAgentRun } from '../src/agent-slug';
+import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { beginHostedOperation } from './projectHostedOperations';
 import {
@@ -77,6 +77,8 @@ export const enqueue = receiptMutation({
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
     agent: v.optional(v.string()),
+    /** The agent client: harness and declared model (feature landing-agent-client, 81d12a32). */
+    agentClient: v.optional(v.string()),
     /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
     gates: v.optional(v.string()),
   },
@@ -88,7 +90,12 @@ export const enqueue = receiptMutation({
       return canonicalPayload(
         await enqueueHostedLanding(
           ctx,
-          { projectId: input.projectId, ...landingAgentRun(input.agent), gates: { value: input.gates } },
+          {
+            projectId: input.projectId,
+            ...landingAgentRun(input.agent),
+            ...landingAgentClient(input.agentClient),
+            gates: { value: input.gates },
+          },
           request,
           actor,
         ),
@@ -237,6 +244,7 @@ export async function enqueueHostedLanding(
   input: {
     projectId: import('./_generated/dataModel').Id<'hostedProjects'>;
     agentRun?: string | undefined;
+    agentClient?: string | undefined;
     /** Public entry point only: judge the project land gates (internal re-landings are not). */
     gates?: { value: string | undefined };
   },
@@ -360,6 +368,7 @@ export async function enqueueHostedLanding(
     operationId: request.operationId,
     candidateId: request.candidateId,
     ...(input.agentRun ? { agentRun: input.agentRun } : {}),
+    ...(input.agentClient ? { agentClient: input.agentClient } : {}),
     ...(attempt.deferredCheck ? { batchSelection: canonicalPayload(attempt), batchable: !admission } : {}),
     ...(admission
       ? {

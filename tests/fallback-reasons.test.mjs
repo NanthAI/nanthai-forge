@@ -16,7 +16,8 @@ import { metricsSurface } from '../dist/self-metrics-surface.js';
 import { formatMetrics, metricsHeadline, formatMetricsHeadline } from '../dist/self-metrics-format.js';
 import { scopedRecheckSelection } from '../dist/scoped-recheck.js';
 import { cellFallbacks } from '../scripts/bench-t3code/fallbacks.mjs';
-import { fixture, period, at } from './self-metrics-hosted-fixture.mjs';
+import { fixture, period, at, empty } from './self-metrics-hosted-fixture.mjs';
+import { secondCheckMetric } from '../dist/self-metrics-second-checks.js';
 
 const source = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 /** String literals of one exported union type. */
@@ -288,4 +289,155 @@ test('an older deployment without the projection reports fallbacks as partial, n
   const value = metricsSurface(records, period).totals.fallbacks;
   assert.equal(value.partial, true);
   assert.match(value.gaps[0], /predate the fallback-reason projection/);
+});
+
+test("second checks are counted by reason class with what became of each; a failed check joins the Lane's next landing (81d12a32)", () => {
+  const row = (entryId, minute, entryStatus, extra = {}) => ({
+    id: entryId,
+    entryId,
+    entryAt: at(minute),
+    at: at(minute),
+    entryStatus,
+    status: entryStatus,
+    inputs: [],
+    progressAt: [],
+    runIds: [],
+    ...extra,
+  });
+  const lane = (laneId, head) => [{ laneId, head, intentId: laneId }];
+  const failed = { errorCode: 'CHECK_FAILED' };
+  const shared = (individualPassed, likelyCulprit) => ({
+    runId: 'shared-run',
+    individualPassed,
+    likelyCulprit,
+  });
+  const records = {
+    ...empty(),
+    submissions: [
+      row('a', 1, 'landed', {
+        firstCheckRecheck: 'global-risk',
+        inputs: lane('L1', 'h1'),
+        agentClient: 'claude-code:model-a',
+      }),
+      // Failed; the same Lane head landed later: the failure was flaky.
+      row('b', 2, 'terminal-failed', {
+        ...failed,
+        firstCheckRecheck: 'path-overlap',
+        inputs: lane('L2', 'h2'),
+      }),
+      row('b2', 20, 'landed', { inputs: lane('L2', 'h2') }),
+      // Failed on a main-race recheck; the Lane landed later with another head: real, then fixed.
+      row('c', 3, 'terminal-failed', {
+        ...failed,
+        recheck: true,
+        recheckReason: 'path-overlap',
+        inputs: lane('L3', 'h3'),
+        agentClient: 'codex',
+      }),
+      row('c2', 25, 'landed', { inputs: lane('L3', 'h3-fixed') }),
+      // Failed and never retried.
+      row('d', 4, 'terminal-failed', {
+        ...failed,
+        firstCheckRecheck: 'order-sensitive',
+        inputs: lane('L4', 'h4'),
+      }),
+      // A conflict is not a check failure.
+      row('e', 5, 'terminal-failed', {
+        errorCode: 'COMPOSITION_CONFLICT',
+        firstCheckRecheck: 'cohort',
+        inputs: lane('L5', 'h5'),
+      }),
+      // One shared cohort check failed: one member then passed alone, one failed alone.
+      row('f', 6, 'landed', {
+        firstCheckRecheck: 'cohort',
+        sharedBatch: shared(true, false),
+        inputs: lane('L6', 'h6'),
+      }),
+      row('g', 6, 'terminal-failed', {
+        ...failed,
+        firstCheckRecheck: 'cohort',
+        sharedBatch: shared(false, true),
+        inputs: lane('L7', 'h7'),
+      }),
+      // Landed on its own check: not a second check.
+      row('h', 7, 'landed', { inputs: lane('L8', 'h8') }),
+    ],
+  };
+  const value = secondCheckMetric(records, period);
+  assert.equal(value.total, 7);
+  const by = Object.fromEntries(value.byReason.map(({ reason, kind: _kind, ...counts }) => [reason, counts]));
+  assert.deepEqual(by, {
+    'global-risk': { landed: 1, flaky: 0, real: 0, unknown: 0, other: 0 },
+    'path-overlap': { landed: 0, flaky: 1, real: 1, unknown: 0, other: 0 },
+    'order-sensitive': { landed: 0, flaky: 0, real: 0, unknown: 1, other: 0 },
+    cohort: { landed: 1, flaky: 0, real: 0, unknown: 1, other: 1 },
+  });
+  assert.deepEqual(value.sharedBatch, { members: 2, runs: 1, passedAlone: 1 });
+  assert.deepEqual(value.byModel, [
+    { model: 'not recorded', secondChecks: 5, failed: 3 },
+    { model: 'claude-code:model-a', secondChecks: 1, failed: 0 },
+    { model: 'codex', secondChecks: 1, failed: 1 },
+  ]);
+  assert.equal(value.partial, false);
+});
+
+test('request pages carry second-check evidence for failed entries too; an older deployment is partial, not zero', async () => {
+  const f = seeded();
+  f.put(
+    'projectHostedLandingRequests',
+    {
+      projectId: 'project',
+      channel: 'main',
+      submissionId: 'x',
+      operationId: 'x',
+      actor: 'owner',
+      sequence: 9,
+      runnable: false,
+      phase: 'terminal-failed',
+      runId: null,
+      attemptId: 'x',
+      agentClient: 'codex:gpt-test',
+      admission: { runId: 'x-admission', status: 'passed', full: true, recheck: 'path-overlap' },
+      value: JSON.stringify({
+        id: 'x',
+        at: at(3),
+        phase: 'terminal-failed',
+        timing: { submittedAt: at(3) },
+        error: { code: 'CHECK_FAILED', message: 'The check failed.' },
+        batchDiagnostic: { sharedRunId: 'shared-1', individualPassed: false, likelyCulprit: true },
+      }),
+    },
+    at(3),
+  );
+  const { records } = await readHostedMetricPages(f.query, period);
+  const callsBefore = f.meter.calls;
+  const surface = metricsSurface(records, period);
+  const value = surface.totals.secondChecks;
+  // The landed main-race recheck of the seed, and the failed entry with its first-check reason.
+  assert.deepEqual(
+    value.byReason.map(row => [row.reason, row.landed, row.unknown]),
+    [['path-overlap', 1, 1]],
+  );
+  assert.deepEqual(value.sharedBatch, { members: 1, runs: 1, passedAlone: 0 });
+  assert.deepEqual(
+    value.byModel.find(row => row.model === 'codex:gpt-test'),
+    { model: 'codex:gpt-test', secondChecks: 1, failed: 1 },
+  );
+  assert.match(
+    formatMetrics(surface),
+    /Second checks: 2\n  path-overlap: 1 landed · failed 0 real, 0 flaky, 1 not retried/,
+  );
+  assert.equal(f.meter.writes, 0);
+  assert.equal(f.meter.calls, callsBefore, 'counting adds no read');
+  const older = async (name, args) => {
+    const raw = await f.query(name, args);
+    if (name !== 'projectSelfMetrics:page' || args.stream !== 'requests') return raw;
+    const page = JSON.parse(raw);
+    page.page = page.page.map(({ firstCheckRecheck: _r, sharedBatch: _s, agentClient: _c, ...row }) => row);
+    return JSON.stringify(page);
+  };
+  const stale = metricsSurface((await readHostedMetricPages(older, period)).records, period).totals
+    .secondChecks;
+  assert.equal(stale.partial, true);
+  assert.match(stale.gaps[0], /predate the second-check projection/);
 });

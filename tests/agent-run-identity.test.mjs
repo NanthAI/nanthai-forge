@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import { readLaneEntry, recordLane } from '../dist/lane-registry.js';
 import { housekeepingLines, laneHousekeeping } from '../dist/lane-prune.js';
 import { agentSlug } from '../dist/agent-slug-session.js';
-import { landingAgentRun } from '../dist/agent-slug.js';
+import { landingAgentClient, landingAgentRun } from '../dist/agent-slug.js';
+import { agentClient } from '../dist/agent-turn-work.js';
 import { presenceNotice, rankPresence } from '../dist/hosted-presence.js';
 import { hostedOverlapAdvice } from '../dist/hosted-overlap.js';
 import { hostedOverlapNotice, overlapBanner } from '../dist/hosted-overlap-notice.js';
@@ -330,7 +331,7 @@ test('overlap notice for a peer Lane names the peer run and its paths, never "(u
 test('receipts carry the agent run that landed them; old receipts without it still read', async () => {
   assert.deepEqual(landingAgentRun('quiet-otter'), { agentRun: 'quiet-otter' });
   assert.deepEqual(landingAgentRun('dino-macbook'), {}, 'a value outside the word lists is dropped');
-  const land = async agent => {
+  const land = async (agent, agentClient) => {
     // One fixture per landing: each lands on the fixture's own main.
     const f = await acceptanceFixture();
     const item = await f.makeCandidate();
@@ -344,6 +345,7 @@ test('receipts carry the agent run that landed them; old receipts without it sti
         projectId: f.projectId,
         request: JSON.stringify(request),
         ...(agent ? { agent } : {}),
+        ...(agentClient ? { agentClient } : {}),
       }),
     );
     await f.drain();
@@ -356,13 +358,33 @@ test('receipts carry the agent run that landed them; old receipts without it sti
     assert.deepEqual(JSON.parse(stored.value), result.receipt, 'the stored receipt is the one returned');
     return result.receipt;
   };
-  const withRun = await land('quiet-otter');
+  const withRun = await land('quiet-otter', 'claude-code:claude-opus-5-5');
   assert.equal(hostedAcceptanceSchema.parse(withRun).agentRun, 'quiet-otter');
+  // The client the run declared (harness and model, 81d12a32) rides the same row to the receipt.
+  assert.equal(hostedAcceptanceSchema.parse(withRun).agentClient, 'claude-code:claude-opus-5-5');
+  assert.deepEqual(landingAgentClient('codex'), { agentClient: 'codex' });
+  for (const junk of ['Claude Code', 'claude-code:', ':model', 'claude-code:a b', 'x'.repeat(40), 7, null])
+    assert.deepEqual(landingAgentClient(junk), {}, String(junk));
+  assert.equal('agentClient' in (await land('quiet-otter', 'not a client')), false, 'a bad shape is dropped');
   // Old receipts (and person or older-CLI landings) have no run and still parse.
   const without = await land(undefined);
   assert.equal('agentRun' in without, false);
+  assert.equal('agentClient' in without, false);
   const { agentRun: _drop, ...old } = withRun;
   assert.equal(hostedAcceptanceSchema.parse(old).agentRun, undefined);
+});
+
+test('the agent client is the harness and, only when the launcher declared it, the model', () => {
+  assert.equal(agentClient({ CLAUDE_CODE_SESSION_ID: 's' }), 'claude-code');
+  assert.equal(agentClient({ CODEX_THREAD_ID: 't', FORGE_AGENT_MODEL: 'gpt-test-1' }), 'codex:gpt-test-1');
+  assert.equal(agentClient({ FORGE_AGENT_MODEL: ' pi/model.x ' }), 'agent:pi/model.x');
+  assert.equal(
+    agentClient({ CLAUDE_CODE_SESSION_ID: 's', FORGE_AGENT_MODEL: 'not a model!' }),
+    'claude-code',
+  );
+  assert.equal(agentClient({}), undefined);
+  for (const value of ['claude-code', 'codex:gpt-test-1', 'agent:pi/model.x'])
+    assert.deepEqual(landingAgentClient(value), { agentClient: value });
 });
 
 test('the CLI sends the run with a landing only to a server that advertises landing-agent-run', async t => {
@@ -383,6 +405,22 @@ test('the CLI sends the run with a landing only to a server that advertises land
   s.caps.features = ['agent-slug', 'landing-agent-run'];
   assert.equal((await finish()).agent, agentSlug('session-alpha'));
   assert.equal(perFinish[0], perFinish[1], 'the run rides the existing landing call: no added call');
+  // The client rides the same call, and only to a server that advertises landing-agent-client.
+  const declared = Object.fromEntries(
+    ['CLAUDE_CODE_SESSION_ID', 'CODEX_THREAD_ID', 'FORGE_AGENT_MODEL'].map(name => [name, process.env[name]]),
+  );
+  t.after(() => {
+    for (const [name, value] of Object.entries(declared))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  delete process.env.CLAUDE_CODE_SESSION_ID;
+  delete process.env.CODEX_THREAD_ID;
+  process.env.FORGE_AGENT_MODEL = 'model-test-1';
+  assert.equal('agentClient' in (await finish()), false, 'a server without the feature gets no new argument');
+  s.caps.features = ['agent-slug', 'landing-agent-run', 'landing-agent-client'];
+  assert.equal((await finish()).agentClient, 'agent:model-test-1');
+  assert.equal(perFinish.at(-1), perFinish[1], 'no added call');
   assert.equal(
     'agent' in
       (await (async () => {

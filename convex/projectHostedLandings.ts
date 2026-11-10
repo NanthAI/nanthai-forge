@@ -162,6 +162,17 @@ async function evidence(
         : receipt.actor
           ? receiptAcceptedBy(receipt)
           : null,
+      // The agent run and its declared client (harness, model) that submitted it (81d12a32).
+      agentRun: receipt.agentRun ?? null,
+      agentClient: receipt.agentClient ?? null,
+      // A shared cohort check that failed before this member landed: counted, never hidden by the fallback.
+      sharedBatch: state?.batchDiagnostic?.sharedRunId
+        ? {
+            runId: state.batchDiagnostic.sharedRunId,
+            individualPassed: state.batchDiagnostic.individualPassed,
+            likelyCulprit: state.batchDiagnostic.likelyCulprit,
+          }
+        : null,
       // Text-conflict paths of an earlier generation live in retained compose results (R2), not in rows.
       conflictPaths: null,
     },

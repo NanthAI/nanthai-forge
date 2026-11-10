@@ -4,6 +4,7 @@ import { calculateWaste } from './self-metrics-waste.js';
 import { observations, during, percentile } from './self-metrics-joins.js';
 import { flakeList } from './self-metrics-flakes.js';
 import { fallbackMetric } from './self-metrics-fallbacks.js';
+import { secondCheckMetric } from './self-metrics-second-checks.js';
 import { z } from 'zod';
 import { invariant } from './errors.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';
@@ -182,6 +183,11 @@ export function metricTotals(
     // Fast-path fallbacks by stage and reason; limitations are flagged (7c2e69e1).
     fallbacks: (() => {
       const value = fallbackMetric(records, period);
+      return wrap(value, value.total);
+    })(),
+    // Second checks by reason class and what became of each; shared-batch failures; agent clients (81d12a32).
+    secondChecks: (() => {
+      const value = secondCheckMetric(records, period);
       return wrap(value, value.total);
     })(),
     placement: wrap(result.placement, records.placement ? 1 : 0),

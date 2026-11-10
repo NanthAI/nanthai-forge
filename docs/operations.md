@@ -310,6 +310,16 @@ polled. Each main-race row in `totals.waste.rows` carries the `recheckReason` of
 that replaced it. The exit bench copies the counts into each Forge cell's `result.json`
 (`forgeFallbacks`).
 
+`totals.secondChecks` counts every entry that did not land on its own first check, by reason
+class and by what became of it, failed entries included (the request page carries each entry's
+`firstCheckRecheck`). A failed check is joined to the next landing of the same Lane from rows the
+metric pages already return: the same head landed later is `flaky` (a later pass vouches for it),
+a different head is `real`, no later landing is `unknown` (not retried). `sharedBatch` counts the
+members of cohorts whose shared check failed and how many then passed alone; before, a cohort
+failure that every member survived left no failed entry. `byModel` splits second checks and
+failures by the agent client each landing declared (`not recorded` when none). The
+[landing mode](pre-queue-checks.md#landing-modes) advice rests on these numbers.
+
 `landings {from,to,limit?,cursor?}` (`nforge agent ROOT landings`) is the cheap read for
 replays and cost capture: accepted landings in the UTC window [from,to) by commit time,
 oldest first, at most 30 per page (default 20) and under 64 KB, read in one query per page
@@ -327,7 +337,11 @@ the landing: `passed`, `failed` or `stalled`; null when none is stored yet),
 recompose), `firstComposeStartedAt` (the first attempt's compose start; the submission's own
 `timing.composeStartedAt` is the latest attempt's), `heldAfterCheck` (each attempt whose passed
 check waited at least a minute before it settled: `attempt`, `from`, `to`, `seconds`,
-`outcome` and the stored `reason`, such as an older submission taking main first) and
+`outcome` and the stored `reason`, such as an older submission taking main first),
+`agentRun` and `agentClient` (the submitting agent run and the client it declared: the harness
+and, when its launcher set `FORGE_AGENT_MODEL`, the model; null for people and older receipts),
+`sharedBatch` (`{runId,individualPassed,likelyCulprit}` when a shared cohort check failed before
+this member landed on its own check; else null) and
 `conflictPaths`. Text-conflict paths of an earlier generation live only
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.

@@ -355,6 +355,13 @@ export function splitAgentActor(value: string): { actor: string; agent: string }
 export const actorLabel = (actor: string | undefined, fallback = 'a member') =>
   !actor ? fallback : splitAgentActor(actor) ? actor : `@${actor}`;
 
+/** The receipt's agent client (81d12a32): the harness the agent session ran in and, when its
+ * launcher declared one, the model, as `tool` or `tool:model` (`claude-code:claude-opus-5-5`).
+ * Client-declared, never verified; any other shape is dropped. */
+export const AGENT_CLIENT = /^[a-z][a-z0-9-]{0,31}(?::[A-Za-z0-9][A-Za-z0-9._/-]{0,63})?$/;
+export const landingAgentClient = (client: unknown): { agentClient?: string } =>
+  typeof client === 'string' && AGENT_CLIENT.test(client) ? { agentClient: client } : {};
+
 /** The receipt's agent run (d730121f) from a client-sent slug: anything not from the fixed lists is dropped. */
 export const landingAgentRun = (agent: unknown): { agentRun?: string } =>
   isAgentSlug(agent) ? { agentRun: agent } : {};

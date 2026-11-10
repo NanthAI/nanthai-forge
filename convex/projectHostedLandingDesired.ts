@@ -9,7 +9,7 @@ import { receiptMutation, internalMutation, internalAction, type MutationCtx } f
 import type { Id } from './_generated/dataModel';
 import type { z } from 'zod';
 import { acceptanceActor } from './projectAutonomy';
-import { landingAgentRun } from '../src/agent-slug';
+import { landingAgentClient, landingAgentRun } from '../src/agent-slug';
 import { activeProject } from './projectAuthority';
 import { hostedWriteProject } from './projectHostedRecords';
 import { loadCompose } from './projectHostedComposeStore';
@@ -35,6 +35,8 @@ export const submit = receiptMutation({
     request: v.string(),
     /** The calling agent run's slug (feature landing-agent-run, d730121f); not part of the request. */
     agent: v.optional(v.string()),
+    /** The agent client: harness and declared model (feature landing-agent-client, 81d12a32). */
+    agentClient: v.optional(v.string()),
     /** The CLI's land gate result (feature land-gates, Issue 029138ef); not part of the request. */
     gates: v.optional(v.string()),
   },
@@ -43,9 +45,15 @@ export const submit = receiptMutation({
     try {
       const command = hostedLandingDesiredSchema.parse(JSON.parse(input.request));
       const actor = await acceptanceActor(ctx, true);
-      return await submitDesiredLanding(ctx, input.projectId, command, actor, input.agent, {
-        value: input.gates,
-      });
+      return await submitDesiredLanding(
+        ctx,
+        input.projectId,
+        command,
+        actor,
+        input.agent,
+        input.agentClient,
+        { value: input.gates },
+      );
     } catch (error) {
       return report(error);
     }
@@ -59,10 +67,11 @@ export async function submitDesiredLanding(
   command: z.infer<typeof hostedLandingDesiredSchema>,
   actor: { id: string; kind: 'agent' | 'person' },
   agent?: string,
+  agentClient?: string,
   /** Public submit only: judge the project land gates (two-way GitHub sync is not an agent landing). */
   gates?: { value: string | undefined },
 ): Promise<string> {
-  const input = { projectId, agent };
+  const input = { projectId, agent, agentClient };
   const project = await hostedWriteProject(ctx, input.projectId, actor.id, command.authorityEpoch);
   const request = canonicalPayload(command);
   const old = await ctx.db
@@ -221,6 +230,7 @@ export async function submitDesiredLanding(
     value: canonicalPayload(state),
     // The enqueue below receives this row as its input and copies the run to the landing row.
     ...landingAgentRun(input.agent),
+    ...landingAgentClient(input.agentClient),
     wake: null,
   });
   // A source job still running cannot finish this goal: its completion wakes

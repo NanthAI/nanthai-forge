@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { agentClient } from './agent-turn-work.js';
 import { landingMessage } from './landing-message.js';
 import { keptApplyEnvelope } from './hosted-apply-kept.js';
 import { cliBuildCommit } from './cli-installation.js';
@@ -974,6 +975,9 @@ export class HostedAgentTransport {
         ...(this.serverFeatures?.includes('landing-agent-run') && this.agentSlug()
           ? { landingAgent: this.agentSlug()! }
           : {}),
+        ...(this.serverFeatures?.includes('landing-agent-client') && this.agentSlug() && agentClient()
+          ? { landingClient: agentClient()! }
+          : {}),
         query: this.query.bind(this),
         mutation: this.mutation.bind(this),
         action: this.action.bind(this),
@@ -1792,6 +1796,9 @@ export type HostedAgentSession = {
   /** The same slug for landing submissions, when the server records it on receipts (feature
    * landing-agent-run, d730121f); absent for a person or an older server. */
   landingAgent?: string;
+  /** The agent client (harness and declared model) for landing receipts, when the server records
+   * it (feature landing-agent-client, 81d12a32). */
+  landingClient?: string;
   waitSource: (
     operationId: string,
     initial: unknown,

@@ -245,6 +245,8 @@ export const page = query({
                   : null,
               // Whether an admitted landing took its first check as acceptance evidence (M5); null: not admitted.
               landedOnAdmissionRun: move.firstCheck ? move.firstCheck.landedOn === 'admission-run' : null,
+              // The submitting agent run's declared client: harness and model (81d12a32).
+              agentClient: move.agentClient ?? null,
             };
           }
           if (input.stream === 'runs') {
@@ -290,6 +292,17 @@ export const page = query({
               progressAt: Object.values(request.timing ?? {}),
               errorCode: request.error?.code ?? null,
               compensating: 'revertOf' in row && !!row.revertOf,
+              // Second-check evidence for every entry, failed ones included (81d12a32): why its own
+              // check did not carry it, a shared cohort check that failed, and the agent client.
+              firstCheckRecheck: ('admission' in row ? row.admission?.recheck : undefined) ?? null,
+              sharedBatch: request.batchDiagnostic?.sharedRunId
+                ? {
+                    runId: request.batchDiagnostic.sharedRunId,
+                    individualPassed: request.batchDiagnostic.individualPassed,
+                    likelyCulprit: request.batchDiagnostic.likelyCulprit,
+                  }
+                : null,
+              agentClient: ('agentClient' in row ? row.agentClient : undefined) ?? null,
               noOwnerCause: request.observation?.stall?.missingOwner
                 ? `${request.observation.stall.missingOwner} at ${request.observation.stall.step}`
                 : null,

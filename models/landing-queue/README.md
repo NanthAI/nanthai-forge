@@ -76,7 +76,7 @@ npm run model:landing-queue -- fast-decision          # expected: freshness chec
 npm run model:landing-queue -- fast-break             # a relaxed-class break: audit, revert or fix, fast lost, no lost work
 npm run model:landing-queue -- fast-strict            # policy strict: a relaxed class is never carried
 npm run model:landing-queue -- fast-unearned          # policy fast, not earned: nothing is carried
-npm run model:landing-queue -- fast-earn              # expected: drill, audited landing, then a fast carry (witness)
+npm run model:landing-queue -- fast-earn              # expected: only after the drill is a relaxed class carried (witness)
 ```
 
 An installed JDK is a **development-only** prerequisite. On the development Mac, `java`
@@ -316,6 +316,14 @@ a fast landing publish on a stale audit (`FastSound` violated). Fix: the publica
 transaction checks earned and fresh again (`convex/projectHostedAcceptancePublish.ts`,
 `fastLanding`); replayed in `tests/hosted-first-check-landing.test.mjs` ("refused at
 publication once the audit has stalled").
+
+Finding 11. **A fast publication that is refused must give the claim back.** The first
+`fast-break` run deadlocked: the group held the claim, `Publish` refused it (main had gone red
+after the claim), and `Revert`, `FixForward` and `LaneRefused` all need the claim free, so
+main stayed red and L1, L2 and `MainRecovers` failed. `StaleClaim` now also releases a claim
+whose fast carry lapsed, and `Claim` never takes one again. The code already does this in one
+transaction: the refused publication throws `CHECK_EVIDENCE_REFRESH`, which releases the queue
+and reserves a fresh decision (`convex/projectHostedFinishControl.ts`).
 
 With `Fast = FALSE` the new state never changes: `fast-strict` explores exactly the states of
 `prequeue-early` (152,165 generated, 50,065 distinct).
@@ -617,12 +625,19 @@ or production historical replay is implied.
 | `firstcheck-two` | 97 | 70 | 0.969 | Passed; two suspects, NeverReverted holds |
 | `firstcheck-two-fix` | 90 | 67 | 0.760 | Expected NeverFixed (witness) |
 | `firstcheck-mixed` | 19,103 | 7,447 | 29.493 | Passed; two breaks among three |
+| `fast` | 43,266 | 16,169 | 612.835 | Passed; earned and fresh, one audit stall, FastSound, L1, L2 |
+| `fast-witness` | 335 | 224 | 2.521 | Expected NeverFast (witness) |
+| `fast-decision` | 12,923 | 6,372 | 2.882 | Expected FastSound |
+| `fast-break` | 71,012 | 23,933 | 763.711 | Passed; relaxed-class break, FastSound, LostOnRed, NoLostWork, MainRecovers |
+| `fast-earn` | 15,532 | 7,062 | 32.577 | Expected NeverFast (witness: the drill, then a fast carry) |
 
 All 18 configurations matched their expected outcomes on the registered Java 25.0.3 JDK (2026-11-05, Lane fefd80ee). The seven `prequeue` rows and every `LandingQueue` configuration were then re-run on the spec composed with that change (2026-11-05, Issue e7d27937): all matched, and the non-`prequeue` state counts were unchanged. The `prequeue` rows are from that run. The six positive queue configurations fully exhausted their state graphs; the negative cases stopped at the named counterexample. The default remained below five minutes (94.046 s); `isolation` took 290.953 s. The six cohort-hold rows were added with Issue 10b0a94b (2026-11-05, Lane 2881e6cc). With `Hold = "none"` the `prequeue` and `small` counts were re-run and unchanged. `prequeue-cohort` and `prequeue-cohort-mixed` use `MoveBound = 0`: queue publications move main, which is what refuses the Lane proofs. With one extra external move, `prequeue-cohort` had not finished after 18 minutes and is not counted. `prequeue-hold-order` keeps that move. The two `supervisor` rows were added with Issue 19328518 (2026-11-05, Lane d3a3c850); every Incidents configuration was re-run with them and matched, with existing counts unchanged.
 
 The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6d62d7fe); all 41 configurations, Incidents included, were re-run with them and matched. `prequeue-cohort` and `prequeue-cohort-mixed` are from that run (the earlier counts predated later spec changes); `prequeue-early` explores a superset of `prequeue-cohort`'s states, as `"early"` only adds refusals.
 
 All 48 configurations, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, 2026-11-06, Lane a3fed1a0) and matched; every row above is from that run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the main model with identical counts, so rows that changed here had predated earlier spec changes. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexample; their partial counts vary between runs (the unmodified copy stopped `prequeue-suffix` at 162,842 / 74,207).
+
+The five `fast` rows are from the landing-mode change (Issue 81d12a32, 2026-11-09, Lane 6ca68b15), run on a machine at load 30 to 45, so their wall times are not comparable with the rows above.
 
 With ea86f3fb (2026-11-05, Lane c1759651) `small`, `strict`, `races`, `six-slots` and `isolation` were re-run with `StackPinned`; their rows are from that run. A platform retry no longer branches into invalidation, so `small`, `strict`, `races` and `isolation` explore fewer states. `six-slots` has no platform outcome and kept its count; its wall time on current main is ~17 min (an unmodified copy of the main model ran at the same rate, friction filed). The other rows predate this change.
 

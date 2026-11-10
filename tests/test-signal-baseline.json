@@ -466,9 +466,6 @@
       "sleep": 2,
       "elapsed": 1
     },
-    "tests/state-git-pack.test.mjs": {
-      "elapsed": 1
-    },
     "tests/state-git.test.mjs": {
       "elapsed": 1
     },

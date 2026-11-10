@@ -61,6 +61,7 @@ export function formatMetricReport(current: MetricsSurface, before?: MetricsSurf
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner minutes; ${recheckShare(current)}. ${cell(current.totals.waste.gaps.join(' '))}`,
     '',
     ...formatFallbacks(current),
+    ...formatSecondChecks(current),
     `Finish-to-main (trusted actors): ${finishToMain(current)}. ${cell(current.totals.finishToMain.gaps.join(' '))}`,
     '',
     ...formatFlakes(current).map(line => (line.startsWith('  ') ? `- ${line.trim()}` : line)),
@@ -84,6 +85,26 @@ export function formatFallbacks(current: MetricsSurface) {
       row =>
         `  ${row.kind === 'limitation' ? '⚑ limitation' : 'genuine'} · ${row.stage} ${row.reason} ×${row.count}`,
     ),
+    ...value.gaps.map(gap => `  ${gap}`),
+  ];
+}
+/** Second checks by reason class with their outcome, shared-batch failures and agent clients (81d12a32). */
+export function formatSecondChecks(current: MetricsSurface) {
+  const value = current.totals.secondChecks;
+  if (!value.total && !value.sharedBatch.members)
+    return [`Second checks: none in window${value.partial ? ' · partial' : ''}`];
+  return [
+    `Second checks: ${value.total}${value.partial ? ' · partial' : ''}`,
+    ...value.byReason.map(
+      row =>
+        `  ${row.reason}: ${row.landed} landed · failed ${row.real} real, ${row.flaky} flaky, ${row.unknown} not retried${row.other ? ` · ${row.other} ended otherwise` : ''}`,
+    ),
+    ...(value.sharedBatch.members
+      ? [
+          `  shared-batch failures: ${value.sharedBatch.runs} runs, ${value.sharedBatch.members} members, ${value.sharedBatch.passedAlone} passed alone`,
+        ]
+      : []),
+    ...value.byModel.map(row => `  ${row.model}: ${row.secondChecks} second checks, ${row.failed} failed`),
     ...value.gaps.map(gap => `  ${gap}`),
   ];
 }
@@ -136,6 +157,7 @@ export function formatMetrics(current: MetricsSurface) {
       ),
     `Main-race re-checks: ${current.totals.waste.mainRaceRecheckRuns} runs / ${number(current.totals.waste.mainRaceRecheckRunnerMinutes)} runner min; ${recheckShare(current)}`,
     ...formatFallbacks(current),
+    ...formatSecondChecks(current),
     ...formatFlakes(current),
     'Daily values and named gaps: --json; report: --report FILE.md',
   ].join('\n');

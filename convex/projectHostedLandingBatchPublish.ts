@@ -347,6 +347,7 @@ export async function publishLandingBatch(ctx: MutationCtx, claim: LandingClaim,
       ...orderWaitsField(member.row.orderWaits),
       actor: member.attempt.actor,
       ...(member.row.agentRun ? { agentRun: member.row.agentRun } : {}),
+      ...(member.row.agentClient ? { agentClient: member.row.agentClient } : {}),
       policyDigest: member.attempt.policyDigest,
       check,
       snapshot: {

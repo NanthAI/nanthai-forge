@@ -259,7 +259,11 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   Lane a resolution Lane resolves, as another agent. `start` offers to abandon only idle Lanes
   this run started ([defaults](../parallel-work-defaults.md#autoprunehours-and-idlelanehours)).
   A landing sends the slug (contract feature `landing-agent-run`) and its receipt records it as
-  `agentRun`; older receipts and person landings have none.
+  `agentRun`; older receipts and person landings have none. It also sends the agent client
+  (contract feature `landing-agent-client`): the harness (`claude-code`, `codex`) and, when the
+  launcher set `FORGE_AGENT_MODEL` (for example `claude-opus-5-5`), the model, recorded as
+  `agentClient` (`claude-code:claude-opus-5-5`). No harness exposes its model to shell commands,
+  so set the variable where you start a builder; the value is declared, never verified.
 - Read state stays on your machine (`ROOT.forge-client/board/LANE_ID.json`, one file
   per Lane whether the action ran at the project root or inside the Lane checkout);
   Forge never records who read what, so a second machine on the same Lane sees the

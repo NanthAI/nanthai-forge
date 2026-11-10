@@ -331,6 +331,7 @@ export async function publishAcceptance(
     ...orderWaitsField(row.orderWaits),
     actor,
     ...(row.agentRun ? { agentRun: row.agentRun } : {}),
+    ...(row.agentClient ? { agentClient: row.agentClient } : {}),
     policyDigest: attempt.policyDigest,
     check,
     ...(reuse ? { crossHeadProof: reuse } : {}),

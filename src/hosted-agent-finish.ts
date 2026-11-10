@@ -66,6 +66,7 @@ async function enqueueLanding(session: HostedAgentSession, request: unknown, pin
     return await session.mutation<HostedLandingState>('projectHostedLanding:enqueue', {
       request: canonicalPayload({ ...(request as object), governanceVersion: 1 }),
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+      ...(session.landingClient ? { agentClient: session.landingClient } : {}),
       ...landGatesArg(session),
     });
   } catch (error) {
@@ -91,6 +92,7 @@ async function replayFinish(session: HostedAgentSession, pinnedCandidate: boolea
     const submission = await session.mutation<HostedLandingState>('projectHostedLandingDesired:submit', {
       request: canonicalPayload(desired),
       ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+      ...(session.landingClient ? { agentClient: session.landingClient } : {}),
       ...landGatesArg(session),
     });
     // Only a still-preparing submission needs source recovery. Terminal replay
@@ -498,6 +500,7 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
         request: canonicalPayload({ ...desired, governanceVersion: 1 }),
         // The receipt records the agent run that landed it (d730121f); outside the replayed request.
         ...(session.landingAgent ? { agent: session.landingAgent } : {}),
+        ...(session.landingClient ? { agentClient: session.landingClient } : {}),
         ...landGatesArg(session),
       });
       markLandStep('submitted');

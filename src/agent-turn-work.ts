@@ -40,6 +40,16 @@ export function turnSessionKey(env: NodeJS.ProcessEnv = process.env): string | u
   const value = env.CLAUDE_CODE_SESSION_ID || env.CODEX_THREAD_ID;
   return value && value.length <= 200 ? value : undefined;
 }
+/** The agent client for landing receipts (81d12a32): the harness, from the same variables that
+ * identify its session, and the model when the launcher declared it in `FORGE_AGENT_MODEL` (no
+ * harness exposes its model to shell commands). Undefined outside an agent session. */
+export function agentClient(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const tool = env.CLAUDE_CODE_SESSION_ID ? 'claude-code' : env.CODEX_THREAD_ID ? 'codex' : undefined;
+  const declared = env.FORGE_AGENT_MODEL?.trim();
+  const model = declared && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(declared) ? declared : undefined;
+  if (!tool && !model) return undefined;
+  return `${tool ?? 'agent'}${model ? `:${model}` : ''}`;
+}
 export function turnLedgerDirectory() {
   return join(process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'forge', 'turns');
 }

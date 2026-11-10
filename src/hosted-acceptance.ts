@@ -75,6 +75,9 @@ export const hostedAcceptanceSchema = z
     /** The agent run that submitted the landing (session slug, d730121f); shown as `handle/slug`.
      * Absent on older receipts, on person landings and from CLIs that predate it. */
     agentRun: z.string().min(1).max(64).optional(),
+    /** That run's client as it declared it: harness, and model when its launcher set one
+     * (`claude-code:claude-opus-5-5`; 81d12a32). Not verified. Absent on older receipts. */
+    agentClient: z.string().min(1).max(100).optional(),
     policyDigest: hash,
     check: z
       .object({

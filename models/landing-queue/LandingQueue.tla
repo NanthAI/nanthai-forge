@@ -345,6 +345,8 @@ Rebase(g) ==
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Claim(g) == /\ running /\ claim = 0 /\ q.batches[g].phase = "ready"
             /\ q.batches[g].rejected = {} /\ PredOK(g) /\ Exact(g)
+            \* A lapsed fast carry is never claimed again: it is refused to the second check.
+            /\ ~(q.batches[g].fast /\ ~FastOK)
             /\ ~\E e \in QueueLive \ (q.batches[g].members \cup Suspects \cup Behind(g)) :
                  q.rank[e] < q.rank[Earliest(q.batches[g].included)]
             /\ claim' = g
@@ -432,7 +434,11 @@ AuditStall == /\ Fast /\ running /\ ~q.stalled /\ q.stalls < Stalls /\ q.unaudit
 AuditRetry == /\ running /\ q.stalled /\ q' = [q EXCEPT !.stalled = FALSE]
               /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Recover == AuditRed \/ (\E e \in Entries : Revert(e)) \/ FixForward \/ AuditGreen \/ AuditRetry
-StaleClaim(g) == /\ running /\ claim = g /\ (~Exact(g) \/ q.batches[g].phase # "ready") /\ claim' = 0
+\* A fast carry refused at publication (earned or fresh lapsed after the claim) releases the claim
+\* in the same transaction, so recovery and the refusal can run (code: CHECK_EVIDENCE_REFRESH).
+StaleClaim(g) == /\ running /\ claim = g
+                 /\ (~Exact(g) \/ q.batches[g].phase # "ready" \/ (q.batches[g].fast /\ ~FastOK))
+                 /\ claim' = 0
                  /\ UNCHANGED <<q, main, stamp, moves, counts, audit, running, crashes, fence>>
 \* The hold's one-shot wake at its bound (HOSTED_TRAIN_HOLD_MS). Not fair here, so
 \* liveness never relies on it; any expiry interleaving is explored.

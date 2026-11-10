@@ -49,6 +49,9 @@ export const hostedContractFeatures = [
    * projectHostedLandingDesired:submit take `agent` (the session slug), kept outside the request, and
    * the acceptance receipt records it as `agentRun`. Without it the CLI sends no `agent`. */
   'landing-agent-run',
+  /** Agent client on receipts (81d12a32): the same two mutations take `agentClient` (the harness
+   * and, when declared, the model), recorded on the receipt. Without it the CLI sends none. */
+  'landing-agent-client',
   /** projectHostedLandingWithdraw:withdraw exists (78a97771): `land --withdraw` cancels a Lane's
    * live landing by Lane. Without it the CLI refuses and names `x cancel {submissionId}`. */
   'landing-withdraw',

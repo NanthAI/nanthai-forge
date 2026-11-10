@@ -61,6 +61,12 @@ export type MetricSubmission = {
   recheckReason?: string | undefined;
   /** Why that recheck ran in full instead of scoped. */
   scopedFallback?: string | undefined;
+  /** Why the entry's own first check did not carry it (`firstCheck` stage), failed entries included (81d12a32). */
+  firstCheckRecheck?: string | null | undefined;
+  /** The shared cohort check that failed before this member fell back to its own check. */
+  sharedBatch?: { runId: string; individualPassed: boolean; likelyCulprit: boolean } | null | undefined;
+  /** The submitting agent's declared client: harness, and model when declared. */
+  agentClient?: string | null | undefined;
   /** On a raced attempt: the recheck reason of the attempt that replaced it. */
   raceRecheckReason?: string | undefined;
   /** On a raced attempt: the attempt that replaced it, set only when that replacement adopted this attempt's own check run (a reuse, not a new check). */
@@ -136,6 +142,8 @@ export type MetricRecords = {
   reuseUnprojected?: boolean;
   /** A hosted page predates the fallback-reason projection (7c2e69e1). */
   fallbacksUnprojected?: boolean;
+  /** Request pages predate the second-check projection (81d12a32). */
+  secondChecksUnprojected?: boolean;
   gaps: string[];
   landingKindsComplete?: boolean;
   lifecycleCoverageGaps?: string[];
