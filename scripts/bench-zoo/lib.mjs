@@ -188,6 +188,23 @@ export const errorCode = receipt =>
   findAll(receipt, 'error').find(e => e && typeof e === 'object' && e.code)?.code ??
   null;
 
+/** The structured `{code, message}` of a Forge refusal thrown by a Convex call (a ConvexError whose
+ * data, or whose `Uncaught ConvexError: {...}` message, carries the code), or null for any other
+ * error. A refused import arrives this way, not as a returned receipt (Issue 6a0dd2e8). */
+export function thrownRefusal(error) {
+  const parse = text => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return null;
+    }
+  };
+  let data = typeof error?.data === 'string' ? parse(error.data) : error?.data;
+  if (!data?.code)
+    data = parse(/Uncaught ConvexError: (\{.*\})/.exec(String(error?.message ?? ''))?.[1] ?? '');
+  return typeof data?.code === 'string' ? { code: data.code, message: String(data.message ?? '') } : null;
+}
+
 /** What a land/check receipt says about its check: run ids, plan scope and reason, reuse, and
  * check timing. Tolerant of receipt shape: it reads named fields wherever they sit. */
 /** A land that has not settled: IN PROGRESS (exit 3), or the asynchronous SUBMITTED receipt (exit 0,

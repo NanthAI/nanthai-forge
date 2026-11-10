@@ -39,6 +39,7 @@ import {
   probeLine,
   resolveKeepBoth,
   submodulePaths,
+  thrownRefusal,
 } from './lib.mjs';
 
 function listFiles(root) {
@@ -123,7 +124,12 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   // 1. Import (born hosted). Plain git's nearest operation: a full bare clone of the fork.
   let s = state.repos[repo.id] ?? {};
   if (!s.projectId || cfg.reimport) {
-    const res = await io.importProject(repo, join(base, 'import-journal.json'));
+    // A refused import throws its named code; record it as the import's refusal, not a crash.
+    const res = await io.importProject(repo, join(base, 'import-journal.json')).catch(error => {
+      const refusal = thrownRefusal(error);
+      if (!refusal) throw error;
+      return { phase: 'refused', error: refusal };
+    });
     step('import', 'forge', {
       ok: res.phase === 'ready',
       seconds: res.seconds,

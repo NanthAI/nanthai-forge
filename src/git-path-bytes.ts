@@ -33,7 +33,7 @@ export function shownGitPath(bytes: Uint8Array): string {
 const refusal = (shown: readonly string[], source: string) =>
   new ForgeError(
     'GITHUB_SOURCE_UNSUPPORTED',
-    `${source} has ${shown.length} path${shown.length === 1 ? '' : 's'} that ${shown.length === 1 ? 'is' : 'are'} not valid UTF-8: ${shown.slice(0, 20).join(', ')}${shown.length > 20 ? `, … (${shown.length - 20} more)` : ''}. Forge stores UTF-8 paths only and never renames a path silently. Rename ${shown.length === 1 ? 'it' : 'them'} in Git to UTF-8 names (git mv), push, then retry. Main was not changed.`,
+    `${source} has ${shown.length} path${shown.length === 1 ? '' : 's'} that ${shown.length === 1 ? 'is' : 'are'} not valid UTF-8: ${shown.slice(0, 20).join(', ')}${shown.length > 20 ? `, … (${shown.length - 20} more)` : ''}. Forge stores UTF-8 paths only and never renames a path silently. Rename ${shown.length === 1 ? 'it in Git to a UTF-8 name' : 'them in Git to UTF-8 names'} (git mv), push, then retry. Main was not changed.`,
   );
 
 /** A Git path's bytes as text, or a named refusal when they are not UTF-8. */

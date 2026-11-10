@@ -16,6 +16,7 @@ import {
   resolveKeepBoth,
   submodulePaths,
   tagLastLine,
+  thrownRefusal,
 } from '../scripts/bench-zoo/lib.mjs';
 import { lastJson } from '../scripts/bench-zoo/exec.mjs';
 import { resolutionFolder } from '../scripts/bench-zoo/run.mjs';
@@ -477,6 +478,21 @@ test('a hazard repository passes by a named clone refusal; a plain repository th
   assert.equal(summarize(atImport, {}).pass, false);
   const unnamed = { ...atImport, refusals: [{ where: 'import', code: 'IMPORT_FAILED' }] };
   assert.equal(summarize(unnamed, { hazard: true }).pass, false);
+  // The refusal reaches the harness as a thrown ConvexError: its code is read, other errors are not.
+  const refusal = { code: 'GITHUB_SOURCE_UNSUPPORTED', message: 'names src/caf\\uFFFD.py' };
+  assert.deepEqual(
+    thrownRefusal(Object.assign(new Error('Server Error'), { data: JSON.stringify(refusal) })),
+    refusal,
+  );
+  assert.deepEqual(
+    thrownRefusal(
+      new Error(
+        `[Request ID: x] Server Error\nUncaught ConvexError: ${JSON.stringify(refusal)}\n    at handler`,
+      ),
+    ),
+    refusal,
+  );
+  assert.equal(thrownRefusal(new Error('fetch failed')), null);
 });
 
 test('the result-to-commit gap is the time from the last check run end to the commit; prep reads start, clone and job overhead', () => {
