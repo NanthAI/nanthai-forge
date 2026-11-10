@@ -664,3 +664,33 @@ test('zoo teardown reconciles pending purges with the same slug and keeps state 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('zoo teardown starts every purge before waiting for upload leases, avoiding serial lease waits', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-teardown-'));
+  try {
+    writeFileSync(join(root, 'zoo.json'), JSON.stringify({ deployment: 'https://example.invalid' }));
+    const started = new Set();
+    const result = await teardown(root, [{ id: 'go' }, { id: 'python' }], {
+      projectsOnly: true,
+      list: async () =>
+        ['go', 'python'].map(id => ({ id, name: `bench-zoo-${id}`, slug: `bench-zoo-${id}-2` })),
+      sleep: async () => {
+        assert.deepEqual([...started], ['go', 'python']);
+      },
+      run: async (cmd, args) => {
+        const id = args[args.indexOf('--delete-project') + 1];
+        if (!started.has(id)) {
+          started.add(id);
+          return { code: 1, stdout: '', stderr: 'HOST_DELETE_PENDING' };
+        }
+        return { code: 0, json: { purgeComplete: true }, stdout: '', stderr: '' };
+      },
+    });
+    assert.equal(
+      result.every(r => r.project === 'deleted'),
+      true,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

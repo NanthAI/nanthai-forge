@@ -43,6 +43,30 @@ export async function teardown(
   const journalPath = join(root, 'teardown.json');
   const journal = existsSync(journalPath) ? JSON.parse(readFileSync(journalPath, 'utf8')) : {};
   const out = [];
+  const pending = [];
+  const save = () => {
+    writeFileSync(statePath, JSON.stringify(state, null, 1) + '\n');
+    writeFileSync(journalPath, JSON.stringify(journal, null, 1) + '\n');
+  };
+  const attempt = async item => {
+    const { target, slug, row } = item;
+    const r = await run('nforge', [
+      'host',
+      root,
+      '--delete-project',
+      target.id,
+      '--confirm',
+      slug,
+      '--deployment',
+      zoo.deployment,
+      '--json',
+    ]);
+    const confirmed = !r.code && r.json?.purgeComplete === true;
+    journal[target.id] = { slug, receipt: r.json, confirmed };
+    row.project = confirmed ? 'deleted' : `NOT DELETED (${(r.stderr || r.stdout).slice(-120).trim()})`;
+    save();
+    return Boolean(r.code && /HOST_DELETE_PENDING/.test(r.stderr + r.stdout));
+  };
   for (const entry of repos) {
     const name = `bench-zoo-${entry.id}`;
     const saved = state.repos[entry.id];
@@ -57,55 +81,36 @@ export async function teardown(
     for (const target of targets) {
       const prior = journal[target.id];
       const slug = target.slug ?? prior?.slug ?? saved?.slug;
+      const row = { id: entry.id, projectId: target.id, project: 'deleted', repo: 'kept' };
+      out.push(row);
       // A tombstone is already the server's purge confirmation; its slug may have been cleared.
       if (target.removal === 'deleted') {
-        out.push({ id: entry.id, projectId: target.id, project: 'deleted', repo: 'kept' });
+        journal[target.id] = { ...prior, confirmed: true, tombstone: target };
+        save();
         continue;
       }
       if (!slug) {
-        out.push({
-          id: entry.id,
-          projectId: target.id,
-          project: 'NOT DELETED (slug unavailable)',
-          repo: 'kept',
-        });
+        row.project = 'NOT DELETED (slug unavailable)';
         continue;
       }
       journal[target.id] = { ...prior, slug };
-      writeFileSync(journalPath, JSON.stringify(journal, null, 1) + '\n');
-      const del = () =>
-        run('nforge', [
-          'host',
-          root,
-          '--delete-project',
-          target.id,
-          '--confirm',
-          slug,
-          '--deployment',
-          zoo.deployment,
-          '--json',
-        ]);
-      let r = await del();
-      for (let i = 0; i < 20 && r.code && /HOST_DELETE_PENDING/.test(r.stderr + r.stdout); i++) {
-        await sleep(15_000);
-        r = await del(); // Same ROOT, project and confirmed slug reconcile the original operation.
-      }
-      const confirmed = !r.code && r.json?.purgeComplete === true;
-      journal[target.id] = { slug, receipt: r.json, confirmed };
-      writeFileSync(journalPath, JSON.stringify(journal, null, 1) + '\n');
-      out.push({
-        id: entry.id,
-        projectId: target.id,
-        project: confirmed ? 'deleted' : `NOT DELETED (${(r.stderr || r.stdout).slice(-120).trim()})`,
-        repo: 'kept',
-      });
+      save();
+      const item = { target, slug, row };
+      if (await attempt(item)) pending.push(item);
     }
-    if (
-      targets.some(p => p.id === saved?.projectId) &&
-      !out.some(r => r.id === entry.id && /NOT/.test(r.project))
-    )
+  }
+  // Start every purge before waiting on any pending one. Upload leases can delay each purge;
+  // waiting per project serializes those leases and repeatedly scans metadata for one project.
+  for (let i = 0; i < 20 && pending.length; i++) {
+    await sleep(15_000);
+    const round = pending.splice(0);
+    for (const item of round) if (await attempt(item)) pending.push(item);
+  }
+  for (const entry of repos) {
+    const saved = state.repos[entry.id];
+    if (saved?.projectId && out.some(r => r.projectId === saved.projectId && r.project === 'deleted'))
       delete state.repos[entry.id];
-    writeFileSync(statePath, JSON.stringify(state, null, 1) + '\n');
+    save();
     if (projectsOnly) continue;
     const gone = await run('gh', ['repo', 'delete', entry.fork, '--yes']);
     out.push({
