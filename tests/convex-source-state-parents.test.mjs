@@ -134,7 +134,7 @@ test('recorded parents are written once, exact and immutable', async () => {
 
 // Trees in packs, dual-write (Issue 676efbc2): the real Convex step records a State's tree pointer
 // only for a project with tree writes on, in the commit it already makes.
-async function treeSync(write, read = false, corrupt = false) {
+async function treeSync(write, read = false, corrupt = false, conflict = false) {
   const s = await scaleFixture();
   try {
     const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
@@ -155,7 +155,7 @@ async function treeSync(write, read = false, corrupt = false) {
     };
     const edits = {
         main: { 'src/dir1/module-0001.ts': await blob('main\n') },
-        lane: { 'src/dir2/module-0002.ts': await blob('lane\n') },
+        lane: { [conflict ? 'src/dir1/module-0001.ts' : 'src/dir2/module-0002.ts']: await blob('lane\n') },
       },
       base = await state([], {}, 1),
       h = {
@@ -201,7 +201,11 @@ async function treeSync(write, read = false, corrupt = false) {
     assert.equal(job.status, 'completed');
     const output = (await s.bytes(job.output)).toString(),
       merged = row(JSON.parse(output).result.state.sha256);
-    assert.deepEqual([...merged.stateParents].sort(), [h.lane.sha256, h.main.sha256].sort());
+    // A conflict draft has the Lane as its one parent; a clean merge records both tips.
+    assert.deepEqual(
+      [...merged.stateParents].sort(),
+      conflict ? [h.lane.sha256] : [h.lane.sha256, h.main.sha256].sort(),
+    );
     const project = await s.ctx.db.get(s.projectId);
     return { s, sync, output, merged, store, rows: s.tables.projectObjects.size - rowsBefore, project, row };
   } finally {
@@ -254,5 +258,18 @@ test('merge reader on trees: the same merged State with fewer manifest bytes rea
   assert.equal(damaged.project.stateTrees.refused.code, 'SOURCE_DIGEST_MISMATCH');
   t.diagnostic(
     JSON.stringify({ flat: flat.sync.readBytes, tree: tree.sync.readBytes, damaged: damaged.sync.readBytes }),
+  );
+});
+
+test('dual-write of a conflict draft: the draft State gets a proven pointer and raises no alarm (dogfood refusal 2026-11-10)', async () => {
+  const draft = await treeSync(true, false, false, true);
+  assert.equal(JSON.parse(draft.output).result.status, 'conflict');
+  assert.equal(draft.project.stateTrees.refused, undefined, 'a conflict draft is no refusal');
+  assert.ok(draft.merged.stateTree, 'the draft has a pointer');
+  assert.deepEqual(
+    Buffer.from(
+      (await readStateTree(new TreeSession(draft.store, { strict: true }), draft.merged.stateTree)).manifest,
+    ),
+    await draft.s.bytes({ sha256: draft.merged.digest }),
   );
 });

@@ -21,7 +21,7 @@ export type StateTreeIo = {
   settled(state: string, result: StateTreeDualResult, ms: number): void;
   /** Exact bytes of a raw object this project stores under its own key, read without a
    * descriptor; undefined when it is not stored that way (a pack member, a recipe). */
-  direct?(pin: { sha256: string; size: number }): Promise<Uint8Array | undefined>;
+  direct?(pin: { sha256: string; size?: number }): Promise<Uint8Array | undefined>;
   /** A tree read finished: `ok` false means a pointer exists but its tree did not give the State
    * (the reader then took the flat manifest). */
   derived?(state: string, ok: boolean): void;
@@ -113,15 +113,21 @@ export async function writeOutputTree(
       const unknown = added.filter(file => !known.has(key(file)));
       if (unknown.length > TREE_UNKNOWN_FILES) result = { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
       else {
-        const bytes = unknown.length ? await sources.bytes(unknown) : [];
-        unknown.forEach((file, i) => known.set(key(file), bytes[i]!));
-        result = await dualWriteStateTree({
-          store: io.store,
-          base: { pointer, state: parent, files },
-          next: { value, manifest },
-          changes,
-          gitFile: async file => known.get(key(file))!,
-        });
+        // Bytes this step cannot reach (a blob another step of the same job wrote and no row names
+        // yet, as in a conflict draft) leave the State flat. That is not a refusal: nothing was
+        // written and nothing disagrees.
+        const bytes = unknown.length ? await sources.bytes(unknown).catch(() => null) : [];
+        if (!bytes || bytes.some(value => !value)) result = { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
+        else {
+          unknown.forEach((file, i) => known.set(key(file), bytes[i]!));
+          result = await dualWriteStateTree({
+            store: io.store,
+            base: { pointer, state: parent, files },
+            next: { value, manifest },
+            changes,
+            gitFile: async file => known.get(key(file))!,
+          });
+        }
       }
     } catch (error) {
       result = {

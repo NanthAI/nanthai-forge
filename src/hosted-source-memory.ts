@@ -240,8 +240,16 @@ export class MemorySourceReader extends SourceWorkerReader {
         await writeOutputTree(trees, value, {
           files: id => this.source.heldFiles(id),
           bytes: async files => {
-            await this.resolveMany(files.map(file => file.blob));
-            return files.map(file => this.source.objects.get(file.blob)!);
+            // Held bytes first, then the project's own key for a raw object (no descriptor call;
+            // it also reaches a blob this job wrote that no row names yet), then descriptors.
+            const direct = await mapSourceOrdered(
+              files,
+              async file =>
+                this.source.objects.get(file.blob) ?? (await trees.direct?.({ sha256: file.blob })),
+            );
+            const rest = files.filter((_, i) => !direct[i]);
+            if (rest.length) await this.resolveMany(rest.map(file => file.blob));
+            return files.map((file, i) => direct[i] ?? this.source.objects.get(file.blob)!);
           },
         });
       }

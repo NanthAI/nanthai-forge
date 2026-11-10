@@ -22,7 +22,7 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
     sizes = new Map<string, number>(),
     written: { sha256: string; size: number; r2Key: string }[] = [],
     stats = { gets: 0, getBytes: 0, puts: 0, putBytes: 0 };
-  const read = async (id: string, range?: { offset: number; length: number }) => {
+  const read = async (id: string, range?: { offset: number; length: number }, lag = true) => {
     invariant(/^[a-f0-9]{64}$/.test(id), 'SOURCE_HASH_MISMATCH', 'A tree segment id is invalid.');
     const headers: Record<string, string> = range
         ? { Range: `bytes=${range.offset}-${range.offset + range.length - 1}` }
@@ -36,7 +36,7 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
           redirect: 'error',
           signal: networkTimeout(15_000),
         }),
-      lagged => lagged.status === 404,
+      lagged => lag && lagged.status === 404,
       lagged => lagged.body?.cancel().catch(() => {}),
     );
     if (response.status !== (range ? 206 : 200)) {
@@ -102,9 +102,12 @@ export function r2SegmentStore(ctx: Pick<ActionCtx, 'storage'>, projectId: Id<'h
     stats,
     /** A raw object under the project's own key, digest-checked; undefined when it is not stored
      * that way (an upload-pack member or a recipe has no key of its own). */
-    async direct(pin: { sha256: string; size: number }): Promise<Uint8Array | undefined> {
-      const bytes = await read(pin.sha256).catch(() => null);
-      return bytes && bytes.length === pin.size && digest(bytes) === pin.sha256 ? bytes : undefined;
+    async direct(pin: { sha256: string; size?: number }): Promise<Uint8Array | undefined> {
+      // A miss is the common answer here (pack members), so a 404 is not waited on.
+      const bytes = await read(pin.sha256, undefined, false).catch(() => null);
+      return bytes && (pin.size === undefined || bytes.length === pin.size) && digest(bytes) === pin.sha256
+        ? bytes
+        : undefined;
     },
   };
 }
