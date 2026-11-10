@@ -83,6 +83,13 @@ configured check (no `configure-check`) skips it and queues as before.
      clean text merge of Markdown that no test or script reads: the runner pins
      those files in its selection (`testedDocs`, any Markdown whose file name a code,
      JSON, HTML or YAML file mentions); a missing list means every Markdown is tested.
+     Paths whose blob and mode (or deletion) are identical in the checked, current
+     main and recomposed trees are recorded as `identicalPaths`: both checks already
+     saw that change, so it contributes no overlap or global risk. The complete
+     changed-path lists stay in the proof. Differing entries keep the usual rules.
+     If the entire recomposed file tree equals the checked tree, the existing
+     `exact-tree-v1` proof carries the full pass, including for ancestry-only main
+     moves outside the pipeline path. All current policy, check and audit gates remain.
    - Otherwise (any doubt: overlap, global-risk file, text conflict, a scoped
      first run, red main or audit debt, unreadable evidence) the proof is refused,
      the change re-enters the queue as a new entry and joins a cohort for one

@@ -237,6 +237,61 @@ test('clean path-disjoint composition lands on its first check from six small re
   // Four manifests, then the two selection pins: no import graph, no blobs.
   assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
 });
+
+// Both sides can contain an earlier sync or the same independently applied change. Only matching
+// blobs, modes and absence in the recomposed tree count; a clean merge alone is insufficient.
+for (const [path, mode, deleted] of [
+  ['src/shared.ts', 'file', false],
+  ['docs/contract.md', 'file', false],
+  ['package.json', 'file', false],
+  ['bin/shared', 'executable', false],
+  ['src/removed.ts', 'file', true],
+])
+  test(`Issue 1018d0f8: identical ${deleted ? 'deletion' : mode} at ${path} carries the pass with six pins`, async () => {
+    const f = fixture();
+    const heads = [f.basis.checkedBase.head, f.basis.checked.head, f.basis.main.head, f.basis.head];
+    const states = heads.map(head => JSON.parse(f.blobs.get(head)));
+    for (const [i, state] of states.entries()) {
+      state.files = state.files.filter(file => file.path !== path);
+      if (!deleted || i === 0) state.files.push({ path, blob: f.pin(i === 0 ? 'before' : 'shared'), mode });
+    }
+    const pins = states.map(state => f.pin(state));
+    const basis = {
+      ...f.basis,
+      checkedBase: { ...f.basis.checkedBase, head: pins[0] },
+      checked: { ...f.basis.checked, head: pins[1] },
+      main: { ...f.basis.main, head: pins[2] },
+      head: pins[3],
+    };
+    const { proof } = await analyzeCrossHeadReuse(basis, f.selection, f.read);
+    assert(proof);
+    assert.deepEqual(proof.identicalPaths, [path]);
+    assert(validCrossHeadProof(proof));
+    assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
+    assert.equal(validCrossHeadProof({ ...proof, identicalPaths: ['not-a-shared-path'] }), false);
+    // An unaccounted composition edit or mode change is never inherited from the shared path.
+    for (const field of ['blob', 'mode']) {
+      const merged = structuredClone(states[3]);
+      merged.files = merged.files.filter(file => file.path !== path);
+      merged.files.push({
+        path,
+        blob: f.pin(field === 'blob' ? 'unexpected' : 'shared'),
+        mode: field === 'mode' ? (mode === 'file' ? 'executable' : 'file') : mode,
+      });
+      const decision = await analyzeCrossHeadReuse({ ...basis, head: f.pin(merged) }, f.selection, f.read);
+      assert(!decision.proof, `${field} changed`);
+    }
+  });
+
+test('an ancestry-only main race reuses the existing exact-tree proof without a pipeline flag', async () => {
+  const f = fixture({ risk: '.github/workflows/check.yml' });
+  const checked = JSON.parse(f.blobs.get(f.basis.checked.head));
+  const basis = { ...f.basis, head: f.pin({ ...checked, parents: [f.basis.main.head] }) };
+  const { proof } = await analyzeCrossHeadReuse(basis, f.selection, f.read);
+  assert.equal(proof.algorithm, 'exact-tree-v1');
+  assert(validCrossHeadProof(proof));
+  assert.deepEqual(f.metrics(), { calls: 2, maxWindow: 4 });
+});
 test('untouched symlinks and submodules anywhere in the tree do not block a first-check landing', async () => {
   const f = fixture({ links: true }),
     { proof } = await analyzeCrossHeadReuse(f.basis, f.selection, f.read, ['.bench/ci.sh']);
@@ -492,20 +547,21 @@ test('a text conflict with main never lands on the first check', async t => {
   assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'no check runs for a conflicting composition');
   assert.deepEqual(f.reuseDecisions, []);
 });
-test('a path the change and main both touch rechecks and records path-overlap', async t => {
-  // Main made the same edit: the composition is clean, but the path overlaps.
+test('a change already contained in main keeps its passing run across an independent main edit', async t => {
+  // Main made the same edit plus an independent one; no new combination on the shared path.
   const { f, state } = await readyRace(t, {
     mainFiles: [
       ['convex/projectConvexSourceOutput.ts', 'export const cost = 2;'],
       ['src/native-projection.ts', 'export const old = 2;'],
     ],
   });
-  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'checking'; n++)
-    await f.execute();
-  assert.equal((await f.current(state.id)).submission.phase, 'checking');
-  assert.equal(f.tables.projectHostedCheckRuns.size, 3, 'main pass, Candidate check and its recheck');
-  assert.equal((await f.status(state.id)).attempt.crossHeadProof, undefined);
-  assert.deepEqual(f.reuseDecisions, ['path-overlap']);
+  for (let n = 0; n < 80 && (await f.current(state.id)).submission.phase !== 'landed'; n++) await f.execute();
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  assert.equal(f.tables.projectHostedCheckRuns.size, 2, 'main pass and original Candidate check only');
+  assert.deepEqual((await f.status(state.id)).attempt.crossHeadProof.identicalPaths, [
+    'convex/projectConvexSourceOutput.ts',
+  ]);
+  assert.deepEqual(f.reuseDecisions, ['proof']);
 });
 test('explicit hostedCrossHeadReuse:false retains the exact recheck', async t => {
   const { f, state } = await readyRace(t, { disabled: true });

@@ -69,6 +69,20 @@ function noOwnerApproval(f) {
 async function wave(t, options = {}) {
   const f = await batchesFixture(t, { batchMaxSize: null, admissionCheck: 'default', ...options, count: 0 });
   f.rawChecks.setPlanSelection(options.selection ?? full);
+  if (options.runnerSeconds !== undefined)
+    f.rawChecks.pass = async run => {
+      for (let i = 0; i < run.plan.shardCount; i++)
+        await f.rawChecks.callback(
+          f.rawChecks.shard(run, i, 'passed', {
+            execution: {
+              startedAt: '2026-01-01T00:00:00.000Z',
+              endedAt: '2026-01-01T00:50:00.000Z',
+              seconds: options.runnerSeconds / run.plan.shardCount,
+            },
+          }),
+        );
+      return f.rawChecks.callback(f.rawChecks.complete(run));
+    };
   if (options.crossHeadReuse === false) {
     const project = f.tables.hostedProjects.get(f.projectId);
     const policy = project.autonomyPolicy;
@@ -102,6 +116,16 @@ const budget = f => ({
   writes: f.counts.reduce((n, c) => n + c.writes, 0),
 });
 const disjoint = { memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 2 };
+// Different, line-clean code edits on the shared path, rather than an identical fixture file.
+const codeOverlap = {
+  baselineFiles: [['src/shared.ts', 'a\nb\nc\n']],
+  memberPaths: [
+    ['src/a.ts', 'src/shared.ts'],
+    ['src/b.ts', 'src/shared.ts'],
+  ],
+  memberContents: ['A\nb\nc\n', 'a\nb\nC\n'],
+  fileCount: 2,
+};
 
 test('a change whose composition is clean and path-disjoint from what main gained lands on its admission run', async t => {
   const f = await wave(t, disjoint);
@@ -145,17 +169,54 @@ test('first-check landing costs no more Convex calls or DB IO than the recheck i
   for (const key of Object.keys(a)) assert(a[key] <= b[key], `${key}: ${a[key]} <= ${b[key]}`);
 });
 
-test('a path the change and main both touch rechecks and records path-overlap', async t => {
-  // fixture/0 is in both changes (same bytes): byte-clean, not path-disjoint.
-  const f = await wave(t, { memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3 });
+test('Issue 1018d0f8: identical shared changes reuse the passed run instead of discarding runner minutes', async t => {
+  // fixture/0 is in both changes with identical bytes; each side already checked that version.
+  const options = { memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3, runnerSeconds: 3000 };
+  const f = await wave(t, options);
   assert.deepEqual(
     states(f).map(s => s.phase),
     ['landed', 'landed'],
   );
-  assert.deepEqual(f.reuseDecisions, ['path-overlap']);
-  assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'path-overlap' });
-  assert.equal(receipts(f)[1].crossHeadProof, undefined);
-  assert.equal(runCount(f), 3);
+  assert.deepEqual(f.reuseDecisions, ['proof']);
+  assert.equal(receipts(f)[1].firstCheck.landedOn, 'admission-run');
+  assert.deepEqual(receipts(f)[1].crossHeadProof.identicalPaths, ['fixture/0']);
+  assert(validCrossHeadProof(receipts(f)[1].crossHeadProof));
+  assert.equal(runCount(f), 2);
+  const discardedMinutes = fixture =>
+    fixture
+      .runs()
+      .filter(run => run.status === 'passed' && !receipts(fixture).some(r => r.check.runId === run.id))
+      .reduce(
+        (sum, run) =>
+          sum +
+          [...fixture.tables.projectHostedCheckShards.values()]
+            .filter(row => row.runId === run.id)
+            .reduce((seconds, row) => seconds + JSON.parse(row.value).execution.seconds, 0) /
+            60,
+        0,
+      ) / receipts(fixture).length;
+  const exactRecheck = await wave(t, { ...options, crossHeadReuse: false });
+  assert.equal(discardedMinutes(exactRecheck), 25, 'the extra full pass costs 50 runner min / 2 landings');
+  assert.equal(discardedMinutes(f), 0, 'ratchet: zero discarded passed runner minutes per landing');
+  for (const key of Object.keys(budget(f))) assert(budget(f)[key] <= budget(exactRecheck)[key], key);
+  t.diagnostic('identical-overlap: 25 -> 0 discarded passed runner min/landing (50 min synthetic runs)');
+});
+
+test('an identical complete tree carries the full admission pass outside pipeline recovery', async t => {
+  const f = await wave(t, {
+    memberPaths: ['src/same.ts', 'src/same.ts'],
+    memberContents: ['same', 'same'],
+    fileCount: 2,
+  });
+  assert.deepEqual(
+    states(f).map(s => s.phase),
+    ['landed', 'landed'],
+  );
+  const second = receipts(f)[1];
+  assert.equal(second.crossHeadProof.algorithm, 'exact-tree-v1');
+  assert(validCrossHeadProof(second.crossHeadProof));
+  assert.equal(second.check.runId, second.crossHeadProof.runId);
+  assert.equal(runCount(f), 2);
 });
 
 // The reason class says which kind of risk it was (81d12a32): `order-sensitive` is never relaxed,
@@ -354,8 +415,8 @@ test('a fast proof decided on a fresh audit is refused at publication once the a
   assert.equal(runCount(f), 4);
 });
 
-test('fast mode never relaxes a path both changes touch', async t => {
-  const f = await wave(t, { memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3, landing: fastMode() });
+test('fast mode never relaxes different code edits on a path both changes touch', async t => {
+  const f = await wave(t, { ...codeOverlap, landing: fastMode() });
   assert.deepEqual(f.reuseDecisions, ['path-overlap']);
   assert.equal(runCount(f), 3);
 });
@@ -523,8 +584,8 @@ test('own check command: the file its Actions setup command names is global-risk
   assert.deepEqual(receipts(clean)[1].crossHeadProof.checkEntries, ['ci/check.sh', 'ci/setup.sh']);
 });
 
-test('own check command: a path both changes touch still rechecks', async t => {
-  const f = await wave(t, { ...ownCheck, memberPaths: ['src/a.ts', 'src/b.ts'], fileCount: 3 });
+test('own check command: different code edits on a shared path still recheck', async t => {
+  const f = await wave(t, { ...ownCheck, ...codeOverlap });
   assert.deepEqual(
     states(f).map(s => s.phase),
     ['landed', 'landed'],
@@ -533,7 +594,7 @@ test('own check command: a path both changes touch still rechecks', async t => {
   assert.deepEqual(receipts(f)[1].firstCheck, { landedOn: 'recheck', reason: 'path-overlap' });
   assert.equal(receipts(f)[1].crossHeadProof, undefined);
   assert.equal(runCount(f), 3);
-  for (const path of ['src/a.ts', 'src/b.ts', 'fixture/0'])
+  for (const path of ['src/a.ts', 'src/b.ts', 'src/shared.ts'])
     assert(mainFiles(f, receipts(f)[1]).includes(path), path);
 });
 
@@ -643,8 +704,18 @@ test('Markdown first-check landing costs no more Convex calls or DB IO than its 
 for (const [name, options, reason] of [
   ['a tested Markdown file (AGENTS.md)', markdown('AGENTS.md', ['AGENTS.md']), 'tested-doc'],
   ['a run that pinned no tested-docs list', markdown('docs/notes.md', undefined), 'tested-doc'],
-  // fixture/0 is in both changes too: a code overlap beside the Markdown merge.
-  ['Markdown plus a code overlap', { ...markdown('docs/notes.md', []), fileCount: 3 }, 'path-overlap'],
+  [
+    'Markdown plus a code overlap',
+    {
+      ...markdown('docs/notes.md', []),
+      baselineFiles: [['docs/notes.md', 'a\nb\nc\n'], ...codeOverlap.baselineFiles],
+      memberPaths: [
+        ['docs/notes.md', 'src/shared.ts'],
+        ['docs/notes.md', 'src/shared.ts'],
+      ],
+    },
+    'path-overlap',
+  ],
 ])
   test(`a clean Markdown merge rechecks for ${name}: ${reason}`, async t => {
     const f = await wave(t, options);

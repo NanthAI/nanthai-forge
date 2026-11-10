@@ -71,6 +71,8 @@ const cleanDisjointProof = z
     algorithm: z.literal('clean-disjoint-v2'),
     ...cleanDisjointV1,
     docsOverlap: z.array(z.string()),
+    /** Entries (including absence) verified identical on checked, main and recomposed trees. */
+    identicalPaths: z.array(z.string()).min(1).optional(),
     testedDocsRule: z.literal(TESTED_DOCS_RULE),
     /** Rule v3 and later (Issue 5cfcca4b): manifests and lockfiles placed inside a package, with
      * the package keys each can affect; the other side changed nothing those packages hold. */
@@ -88,6 +90,7 @@ const fastFirstCheckProof = z
     algorithm: z.literal('fast-first-check-v1'),
     ...cleanDisjointV1,
     docsOverlap: z.array(z.string()),
+    identicalPaths: z.array(z.string()).min(1).optional(),
     testedDocsRule: z.literal(TESTED_DOCS_RULE),
     relaxed: z.array(z.enum(FAST_RELAXED)).min(1).max(FAST_RELAXED.length),
     /** The global-risk paths that were relaxed (first 32). */
@@ -137,40 +140,48 @@ export function pathsOverlap(a: string[], b: string[]) {
 }
 export function validCrossHeadProof(proof: CrossHeadProof) {
   if (proof.algorithm === 'exact-tree-v1') return proof.checkedScope === 'full';
+  const identical =
+    proof.algorithm === 'clean-disjoint-v2' || proof.algorithm === 'fast-first-check-v1'
+      ? (proof.identicalPaths ?? [])
+      : [];
+  const candidateSet = new Set(proof.candidatePaths),
+    mainSet = new Set(proof.mainPaths);
+  if (identical.some(path => !candidateSet.has(path) || !mainSet.has(path))) return false;
+  const shared = new Set(identical);
+  const candidatePaths = proof.candidatePaths.filter(path => !shared.has(path)),
+    mainPaths = proof.mainPaths.filter(path => !shared.has(path));
   const docs =
     proof.algorithm === 'clean-disjoint-v2' || proof.algorithm === 'fast-first-check-v1'
       ? proof.docsOverlap
       : [];
-  const rest = (paths: string[]) => paths.filter(path => !docs.includes(path));
+  const docSet = new Set(docs);
+  const rest = (paths: string[]) => paths.filter(path => !docSet.has(path));
   if (
-    pathsOverlap(rest(proof.candidatePaths), proof.mainPaths) ||
-    pathsOverlap(proof.candidatePaths, rest(proof.mainPaths))
+    docs.some(path => shared.has(path)) ||
+    pathsOverlap(rest(candidatePaths), mainPaths) ||
+    pathsOverlap(candidatePaths, rest(mainPaths))
   )
     return false;
   if (proof.algorithm === 'fast-first-check-v1')
     return (
       proof.candidatePaths.length > 0 &&
       proof.mainPaths.length > 0 &&
-      docs.every(
-        path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
-      ) &&
+      docs.every(path => markdownPath(path) && candidateSet.has(path) && mainSet.has(path)) &&
       // A relaxed class is named for what it relaxed, and nothing order-sensitive is ever relaxed.
       (!proof.relaxed.includes('tested-doc') || docs.length > 0) &&
       proof.relaxed.includes('global-risk') ===
-        globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule) &&
-      orderSensitiveRisk(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule).length ===
-        0
+        globalRiskBetween(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule) &&
+      orderSensitiveRisk(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule).length === 0
     );
   if (proof.algorithm !== 'conservative-impact-v1')
     return (
       proof.candidatePaths.length > 0 &&
       proof.mainPaths.length > 0 &&
-      docs.every(
-        path => markdownPath(path) && proof.candidatePaths.includes(path) && proof.mainPaths.includes(path),
-      ) &&
+      docs.every(path => markdownPath(path) && candidateSet.has(path) && mainSet.has(path)) &&
       (proof.algorithm === 'clean-disjoint-v2' && proof.placedRisk
-        ? riskRuleSince(proof.riskRule, 'first-check-risk-v3') && validPlacedRisk(proof)
-        : !globalRiskBetween(proof.candidatePaths, proof.mainPaths, proof.checkEntries, proof.riskRule))
+        ? riskRuleSince(proof.riskRule, 'first-check-risk-v3') &&
+          validPlacedRisk({ ...proof, candidatePaths, mainPaths })
+        : !globalRiskBetween(candidatePaths, mainPaths, proof.checkEntries, proof.riskRule))
     );
   const heads = [proof.checkedBase.head, proof.checked.head, proof.main.head, proof.head];
   const union = (selections: typeof proof.candidateSelections) =>

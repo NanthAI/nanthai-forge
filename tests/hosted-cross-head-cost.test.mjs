@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { analyzeCrossHeadReuse } from '../dist/hosted-cross-head-analysis.js';
-import { pathsOverlap } from '../dist/hosted-cross-head-proof.js';
+import { pathsOverlap, validCrossHeadProof } from '../dist/hosted-cross-head-proof.js';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 const naive = (a, b) => a.some(x => b.some(y => x === y || x.startsWith(`${y}/`) || y.startsWith(`${x}/`)));
@@ -27,7 +27,7 @@ test('pathsOverlap answers exactly as the all-pairs definition did', () => {
   assert.equal(pathsOverlap([], ['src']), false);
 });
 
-function manifests(files, candidate, main) {
+function manifests(files, candidate, main, common = 0) {
   const entry = (path, blob, mode = 'file') => ({ path, blob: sha(blob), mode });
   const state = changes => {
     const map = new Map();
@@ -48,13 +48,14 @@ function manifests(files, candidate, main) {
       }),
     );
   };
-  const mine = Array.from({ length: candidate }, (_, i) => [`mine/f${i}.ts`, `c${i}`]),
-    theirs = Array.from({ length: main }, (_, i) => [`theirs/f${i}.ts`, `m${i}`]);
+  const shared = Array.from({ length: common }, (_, i) => [`shared/f${i}.ts`, `s${i}`]);
+  const mine = [...shared, ...Array.from({ length: candidate }, (_, i) => [`mine/f${i}.ts`, `c${i}`])],
+    theirs = [...shared, ...Array.from({ length: main }, (_, i) => [`theirs/f${i}.ts`, `m${i}`])];
   return [state([]), state(mine), state(theirs), state([...mine, ...theirs])];
 }
-function scenario(files, candidate, main, tamper) {
-  const bytes = manifests(files, candidate, main);
-  if (tamper) bytes[3] = manifests(files, candidate, main + 1)[3];
+function scenario(files, candidate, main, tamper, common = 0) {
+  const bytes = manifests(files, candidate, main, common);
+  if (tamper) bytes[3] = manifests(files, candidate, main + 1, common)[3];
   const heads = bytes.map(b => sha(b));
   const selection = new TextEncoder().encode(JSON.stringify({ scope: 'full', tests: [] }));
   const pins = new Map([...heads.map((h, i) => [h, bytes[i]]), [sha(selection), selection]]);
@@ -95,6 +96,12 @@ test('the first-check proof reads the same six pins and decides as before on lar
   assert.equal(decision.proof.candidatePaths.length, 40);
   assert.equal(decision.proof.mainPaths.length, 40);
   assert.deepEqual(decision.proof.docsOverlap, []);
+  // Issue 1018d0f8: hundreds of identical shared changes need no extra object/graph reads.
+  const shared = scenario(4000, 40, 40, false, 400);
+  const identical = await shared.run();
+  assert.equal(shared.reads(), 2);
+  assert.equal(identical.proof.identicalPaths.length, 400);
+  assert(validCrossHeadProof(identical.proof));
   // A recomposition that differs from the union of both deltas never produces a proof.
   assert.deepEqual(await scenario(4000, 40, 40, true).run(), { reason: 'composition-not-exact' });
 });

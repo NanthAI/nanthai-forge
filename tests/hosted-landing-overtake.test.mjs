@@ -15,6 +15,11 @@ const env = {
   FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-overtake',
 };
 const prior = Object.fromEntries(Object.keys(env).map(k => [k, process.env[k]]));
+const overlapBase = 'export const a = 0;\n// gap\nexport const b = 0;\n';
+const overlapEdits = [
+  'export const a = 1;\n// gap\nexport const b = 0;\n',
+  'export const a = 0;\n// gap\nexport const b = 1;\n',
+];
 test.before(() => Object.assign(process.env, env));
 test.after(() => {
   for (const [k, v] of Object.entries(prior)) {
@@ -68,8 +73,8 @@ test('incident replay 7d98c7da: N parallel non-overlapping landings do not wait 
   const N = 8,
     LANE = 150,
     SLOW = 1000;
-  // The first two add the same file with the same bytes: a clean composition, but not
-  // path-disjoint, so whichever main moved under re-checks. The N newer touch other files.
+  // Distinct, line-clean edits on a shared code path require a real recheck (identical bytes
+  // carry the pass, Issue 1018d0f8). The N newer changes touch independent files.
   const memberPaths = [
     'src/shared.ts',
     'src/shared.ts',
@@ -79,7 +84,8 @@ test('incident replay 7d98c7da: N parallel non-overlapping landings do not wait 
     batchMaxSize: null,
     admissionCheck: 'default',
     memberPaths,
-    memberContents: ['shared', 'shared'],
+    baselineFiles: [['src/shared.ts', overlapBase]],
+    memberContents: overlapEdits,
     fileCount: 2,
     count: N + 2,
   });
@@ -204,12 +210,16 @@ const receipts = f =>
 /** Drive a wave of pre-queue-checked landings to the end. `duration(index, nth)` is the ticks the
  * nth check of entry `index` takes; `pick` chooses which due task runs next (scheduling order is not
  * fixed in a real deployment). Returns landing ticks, run counts and receipts by entry. */
-async function drive(t, { memberPaths, memberContents, duration, pick = tasks => tasks[0] }) {
+async function drive(
+  t,
+  { memberPaths, memberContents, baselineFiles = [], duration, pick = tasks => tasks[0] },
+) {
   const f = await batchesFixture(t, {
     batchMaxSize: null,
     admissionCheck: 'default',
     memberPaths,
     memberContents,
+    baselineFiles,
     fileCount: 2,
     count: memberPaths.length,
   });
@@ -284,7 +294,11 @@ async function sealedReplay(t, { R_LANE, pick }) {
       'src/o.ts',
       ...Array.from({ length: N }, (_, i) => `src/p${i}.ts`),
     ],
-    memberContents: ['shared', 'shared', 'shared'],
+    baselineFiles: [
+      ['src/shared.ts', overlapBase],
+      ['src/o.ts', overlapBase],
+    ],
+    memberContents: [overlapEdits[0], overlapEdits[1], overlapEdits[0]],
     duration: (i, nth) => (i === 0 ? 0 : nth > 1 ? SLOW : i === 1 ? O_LANE : i === 2 ? R_LANE : LANE),
     ...(pick ? { pick } : {}),
   });
@@ -329,7 +343,8 @@ test('incident replay c6b81429: same-tick passes, newest submission first', t =>
 test('c6b81429: an accepting wait ends when that entry re-checks instead', async t => {
   const r = await drive(t, {
     memberPaths: ['src/shared.ts', 'src/shared.ts', ...Array.from({ length: 3 }, (_, i) => `src/p${i}.ts`)],
-    memberContents: ['shared', 'shared'],
+    baselineFiles: [['src/shared.ts', overlapBase]],
+    memberContents: overlapEdits,
     duration: (i, nth) => (i === 0 ? 0 : nth > 1 ? SLOW : i === 1 ? 150 : 152),
   });
   assert.equal(r.runs[1], 2, 'R re-checked for the change that moved main');

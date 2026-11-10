@@ -32,6 +32,7 @@ const tree = [
   ['pnpm-lock.yaml', "lockfileVersion: '9.0'\n"],
   ['packages/a/src/a.ts', 'export const a = 1;\n'],
   ['packages/b/src/b.ts', 'export const b = 1;\n'],
+  ['packages/shared/src/shared.ts', 'export const a = 1;\n// gap\nexport const b = 1;\n'],
   ['docs/notes.md', 'a\nb\nc\n'],
   ['ci/check.sh', 'pnpm -r test\n'],
   ['ci/setup.sh', 'pnpm install --frozen-lockfile\n'],
@@ -108,8 +109,23 @@ const scenarios = [
     }),
   ],
   [
-    'a path both changes touch rechecks',
+    'different code edits on a shared path recheck',
     ['path-overlap'],
+    () => ({
+      memberPaths: [
+        ['packages/a/src/a.ts', 'packages/shared/src/shared.ts'],
+        ['packages/b/src/b.ts', 'packages/shared/src/shared.ts'],
+      ],
+      memberContents: [
+        'export const a = 2;\n// gap\nexport const b = 1;\n',
+        'export const a = 1;\n// gap\nexport const b = 2;\n',
+      ],
+      fileCount: 2,
+    }),
+  ],
+  [
+    'identical shared entries keep the passed check (Issue 1018d0f8)',
+    ['proof'],
     () => ({
       memberPaths: ['packages/a/src/a.ts', 'packages/b/src/b.ts'],
       fileCount: 3,

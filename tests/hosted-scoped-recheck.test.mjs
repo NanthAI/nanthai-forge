@@ -252,18 +252,18 @@ test('dogfood-size selection uses one graph within runner memory and time budget
 const baselineFiles = [
   ['package.json', '{"scripts":{}}'],
   ['package-lock.json', '{"lockfileVersion":3,"packages":{}}'],
-  ['convex/projectConvexSourceOutput.ts', 'export const cost = 1;'],
+  ['convex/projectConvexSourceOutput.ts', 'export const cost = 1;\n// gap\nexport const note = 1;\n'],
   ['convex/projectFreshness.ts', "import './projectConvexSourceOutput.ts'; export const freshness = 1;"],
   ['src/native-projection.ts', 'export const old = 1;'],
   ['tests/convex-source-r2.test.mjs', "import '../convex/projectConvexSourceOutput.ts';"],
   ['tests/project-freshness.test.mjs', "import '../convex/projectFreshness.ts';"],
   ['tests/native-projection.test.mjs', "import '../dist/native-projection.js';"],
 ];
-// Main gains the Lane's own path (the same bytes, so the composition is clean) and
+// Main gains a distinct, line-clean edit on the Lane's own path (identical bytes reuse the pass) and
 // a module importing it. A path-disjoint import overlap alone now lands on the
 // first check under the main audit (Issue 7fe54c7c): see the disjoint replay below.
 const overlapping = [
-  ['convex/projectConvexSourceOutput.ts', 'export const cost = 2;'],
+  ['convex/projectConvexSourceOutput.ts', 'export const cost = 1;\n// gap\nexport const note = 2;\n'],
   ['convex/projectFreshness.ts', "import './projectConvexSourceOutput.ts'; export const freshness = 2;"],
 ];
 const effective = (f, runId, value) => {
@@ -277,7 +277,9 @@ const effective = (f, runId, value) => {
 async function race(t, { mainFiles = overlapping, policy = {} } = {}) {
   const f = await finishFixture(t, {
     baselineFiles,
-    selectedFiles: [['convex/projectConvexSourceOutput.ts', 'export const cost = 2;']],
+    selectedFiles: [
+      ['convex/projectConvexSourceOutput.ts', 'export const cost = 2;\n// gap\nexport const note = 1;\n'],
+    ],
     mainFiles,
   });
   f.patch('hostedProjects', f.projectId, {
