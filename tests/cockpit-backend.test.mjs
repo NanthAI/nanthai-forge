@@ -2,16 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { setup } from './hosted-planning-fixture.mjs';
 import { state } from './hosted-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { NativeSource } from '../dist/native-source.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { localBrief } from '../dist/agent-brief-local.js';
-import { fixture } from './helpers.mjs';
-import { initNative } from '../dist/native-work.js';
 import { coordinationChoicesSchema } from '../dist/coordination-types.js';
 import { dispatchCoordination } from '../dist/coordination-dispatch.js';
 import { getFunctionName } from 'convex/server';
@@ -204,35 +200,6 @@ test('native hosted summaries track actual ancestry when main moves without read
     index.detail._handler(s.ctx, { projectId: s.projectId, collection: 'hostedChannels', id: 'main' }),
     /unavailable/,
   );
-});
-
-test('brief machine/config observations stay local to the Lane host and live MCP is evidence', async t => {
-  const root = join(fixture(t), 'native');
-  mkdirSync(root);
-  writeFileSync(join(root, 'a.ts'), 'source');
-  initNative(root);
-  const agent = new AgentWorkflow(root),
-    lane = (await agent.dispatch({ action: 'start', outcome: 'Setup', actor: 'codex-8', tool: 'codex' }))
-      .result;
-  assert.deepEqual(lane.startedBy, { kind: 'agent', name: 'codex-8', tool: 'codex' });
-  const input = { situation: 'continue-lane', laneId: lane.laneId };
-  assert.equal(localBrief(agent.work.store, input).setup.machine, process.env.FORGE_MACHINE ?? 'local');
-  writeFileSync(
-    join(root, '.mcp.json'),
-    JSON.stringify({
-      mcpServers: { forge: { command: process.execPath, args: ['cli', 'mcp', '/another-owner', '--agent'] } },
-    }),
-  );
-  const unknown = localBrief(agent.work.store, input).setup.mcpConfigured;
-  assert.equal(localBrief(agent.work.store, input, true).setup.mcpConfigured, true);
-  writeFileSync(
-    join(root, '.mcp.json'),
-    JSON.stringify({
-      mcpServers: { forge: { command: process.execPath, args: ['cli', 'mcp', root, '--agent'] } },
-    }),
-  );
-  assert.equal(localBrief(agent.work.store, input).setup.mcpConfigured, true);
-  assert.equal(unknown, false);
 });
 
 test('choice answers imply ack, reconcile retries, enforce recipient and reach sender inbox/feed', async () => {

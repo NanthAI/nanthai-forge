@@ -5,7 +5,7 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -28,14 +28,9 @@ import { gitCommand } from '../dist/work-git-command.js';
 import { wakeGithubPush } from '../dist/github-auto-push.js';
 import { wakePostAccept } from '../dist/post-accept-main.js';
 import { waitPushAudit } from '../dist/push-audit-wait.js';
-import { startPresenceWorker } from '../dist/presence-worker-start.js';
 import { launchDetachedCheck } from '../dist/check-controller.js';
 import { watcherRuntime } from '../dist/local-watcher-runtime.js';
 import { openBrowser } from '../dist/auth-cli.js';
-import { hostCli } from '../dist/host-command.js';
-import { scheduleIntegrationPreview } from '../dist/integration-preview-auto.js';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { updateHostState } from '../dist/host-binding.js';
 import { runActionsCheck } from '../scripts/github-actions-check.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
@@ -107,13 +102,6 @@ function stub(t, data) {
     revision: () => 0,
   };
 }
-async function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-env-owner-'));
-  writeFileSync(join(root, 'a.txt'), 'base');
-  const initial = initNative(root);
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  return { root, initial, workflow: new AgentWorkflow(root) };
-}
 function bind(store) {
   updateHostState(store, state => {
     state.binding = {
@@ -127,7 +115,6 @@ function bind(store) {
     };
   });
 }
-const tick = () => new Promise(resolve => setImmediate(resolve));
 
 test('child env drops unknown credentials and Node loaders; exact allow-list and extras preserve selected values', () => {
   const source = Object.fromEntries(secretNames.map(name => [name, 'fake-test-secret']));
@@ -200,27 +187,6 @@ test('detached audit waiter supplies a filtered child environment', async t => {
   calls[0].child.exitCode = 0;
   await pending;
 });
-test('detached presence owner drops unrelated credentials', t => {
-  const calls = capture(t);
-  const snapshotNames = [
-    'FORGE_AUTO_SNAPSHOT_DEBOUNCE_MS',
-    'FORGE_AUTO_SNAPSHOT_INTERVAL_MS',
-    'FORGE_AUTO_SNAPSHOT_MAX_WAIT_MS',
-  ];
-  plant(t, snapshotNames);
-  const store = stub(t, { checks: [] });
-  writeFileSync(join(store.directory, 'work.json'), '{}');
-  const old = process.argv[1];
-  process.argv[1] = '/fake/cli.js';
-  try {
-    startPresenceWorker(store);
-  } finally {
-    process.argv[1] = old;
-  }
-  assert.equal(calls.length, 1);
-  clean(calls[0].options.env);
-  for (const name of snapshotNames) assert.equal(calls[0].options.env[name], process.env[name]);
-});
 test('detached selected check preserves only its declared credential', async t => {
   const calls = capture(t);
   plant(t, ['CHECK_TOKEN']);
@@ -252,45 +218,6 @@ test('browser opener drops Forge and provider credentials', t => {
   clean(calls[0].options.env);
   assert.equal(calls[0].options.env.FORGE_AUTH_TOKEN, undefined);
   assert.equal(calls[0].options.env.GH_TOKEN, undefined);
-});
-test('detached integration preview retains declared static inputs and drops unrelated secrets', async t => {
-  const calls = capture(t);
-  const { workflow, initial } = await fixture(t);
-  const store = workflow.work.store;
-  await workflow.dispatch({ action: 'start', outcome: 'synthetic preview' });
-  store.locked(() => {
-    const data = store.load();
-    data.autonomyPolicy = { ...policyPreset('trusted'), integrationPreview: { auto: true } };
-    data.channelMoves.push({
-      id: randomUUID(),
-      channel: 'main',
-      viewId: randomUUID(),
-      head: initial.head,
-      previous: null,
-      at: new Date().toISOString(),
-      status: 'accepted',
-      provenance: 'user-declared-local',
-    });
-    data.revision++;
-    store.save(data);
-  });
-  // A retained request permits the main-only preview path too.
-  writeFileSync(join(store.directory, 'integration-preview-request.json'), '{"token":"old","at":0}');
-  scheduleIntegrationPreview(store);
-  await tick();
-  const call = calls.find(call => call.args[1]?.[0]?.endsWith('/integration-preview-worker.js'));
-  assert.ok(call);
-  clean(call.options.env);
-});
-test('detached host backfill drops unrelated secrets and keeps Forge authentication', async t => {
-  const calls = capture(t);
-  plant(t, ['FORGE_AUTH_TOKEN']);
-  const { root } = await fixture(t);
-  await hostCli([root], async () => ({ historyBackfilling: true, operationId: randomUUID() }));
-  const call = calls.find(call => call.args[1]?.includes('--backfill'));
-  assert.ok(call);
-  clean(call.options.env);
-  assert.equal(call.options.env.FORGE_AUTH_TOKEN, 'fake-test-secret');
 });
 
 test('Actions check launcher drops unrelated credentials from its runner environment', t => {

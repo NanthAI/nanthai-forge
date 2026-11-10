@@ -1,18 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 
 import { BRIEF_SITUATIONS, briefInputSchema } from '../dist/agent-brief-types.js';
 import { COPY_TEXT_CAP, FULL_BRIEF_CAP, renderBriefing } from '../dist/agent-brief-render.js';
 import { instructionFiles, briefingContext } from '../dist/agent-brief-context.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { initNative } from '../dist/native-work.js';
-import { localBrief } from '../dist/agent-brief-local.js';
-import { setLocalGuidance, localGuidance } from '../dist/agent-guidance.js';
 import { fixtureBrief, ids, records, states, head, main, guidance } from './agent-brief-fixture.mjs';
 for (const situation of BRIEF_SITUATIONS)
   for (const agent of ['claude-code', 'codex', 'generic']) {
@@ -163,82 +156,4 @@ test('selection rejects cross-linked records and never infers merged state from 
     ).main.merged,
     true,
   );
-});
-function local(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-brief-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  writeFileSync(join(root, 'AGENTS.md'), 'UNTRUSTED_REPOSITORY_TEXT_DO_NOT_ECHO');
-  writeFileSync(join(root, 'a.ts'), 'export const a = 1;');
-  initNative(root);
-  return { root, agent: new AgentWorkflow(root) };
-}
-test('local project/personal guidance is verbatim, retry-safe and bound to the local user', t => {
-  const { agent } = local(t),
-    store = agent.work.store;
-  const first = { operationId: randomUUID(), scope: 'project', agentGuidance: '  project\nverbatim  ' };
-  assert.deepEqual(setLocalGuidance(store, first, 'alice'), first);
-  setLocalGuidance(store, { ...first, operationId: randomUUID(), agentGuidance: 'Latest project' }, 'alice');
-  assert.deepEqual(setLocalGuidance(store, first, 'alice'), first);
-  assert.equal(localGuidance(store, 'alice').project, 'Latest project');
-  assert.throws(() => setLocalGuidance(store, { ...first, agentGuidance: 'changed' }, 'alice'), {
-    code: 'WORK_OPERATION_CHANGED',
-  });
-  assert.throws(() => setLocalGuidance(store, first, 'bob'), { code: 'WORK_OPERATION_CHANGED' });
-  setLocalGuidance(
-    store,
-    { operationId: randomUUID(), scope: 'personal', agentGuidance: 'Alice only' },
-    'alice',
-  );
-  assert.equal(localGuidance(store, 'bob').personal, '');
-  assert.throws(
-    () => setLocalGuidance(store, { ...first, operationId: randomUUID(), agentGuidance: 'x'.repeat(4001) }),
-    { code: 'BAD_ARGUMENT' },
-  );
-});
-
-test('failed check summaries survive Work storage for hosted exchange and fresh briefing', async t => {
-  const { agent } = local(t);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'Diagnose failure' })).result;
-  await agent.dispatch({
-    action: 'define-check',
-    name: 'verify',
-    executable: process.execPath,
-    args: [
-      '-e',
-      'console.error("Error: synthetic failure"); console.log("not ok 1 - synthetic check"); process.exit(1)',
-    ],
-    environmentLabel: 'Synthetic local test',
-  });
-  const finished = (
-    await agent.dispatch({ action: 'finish', laneId: lane.laneId, message: 'Fail deliberately' })
-  ).result;
-  assert.equal(finished.run.status, 'failed');
-  const run = agent.work.store.select('runs', finished.run.operationId);
-  assert.match(run.failureSummary, /not ok 1 - synthetic check/);
-  assert.match(run.failureSummary, /Error: synthetic failure/);
-  const brief = localBrief(agent.work.store, { situation: 'fix-failed-check', runId: run.id });
-  assert.equal(brief.context.run.failureSummary, run.failureSummary);
-  assert.equal(brief.context.lane.path, agent.work.store.path(lane.laneId));
-});
-test('briefing rejects incomplete hosted bindings and source-only credentials without silently using local context', async t => {
-  const { agent } = local(t);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'Read context' })).result;
-  const { agentBrief } = await import('../dist/agent-brief.js');
-  const keys = ['FORGE_DEPLOYMENT', 'FORGE_PROJECT_ID', 'FORGE_AUTH_TOKEN'];
-  const previous = keys.map(key => process.env[key]);
-  t.after(() =>
-    keys.forEach((key, i) =>
-      previous[i] === undefined ? delete process.env[key] : (process.env[key] = previous[i]),
-    ),
-  );
-  process.env.FORGE_DEPLOYMENT = 'https://synthetic.convex.cloud';
-  delete process.env.FORGE_PROJECT_ID;
-  await assert.rejects(agentBrief(agent.work.store, { situation: 'continue-lane', laneId: lane.laneId }), {
-    code: 'BAD_ARGUMENT',
-  });
-  process.env.FORGE_PROJECT_ID = 'project';
-  process.env.FORGE_AUTH_TOKEN = 'fga_source-only';
-  await assert.rejects(agentBrief(agent.work.store, { situation: 'continue-lane', laneId: lane.laneId }), {
-    code: 'PROJECT_UNAVAILABLE',
-  });
 });

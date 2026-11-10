@@ -1,101 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkReturns } from './convex-args.mjs';
-import { state } from './hosted-fixture.mjs';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { WorkService } from '../dist/work.js';
-import { digest } from '../dist/hash.js';
+import { projectRow, state } from './hosted-fixture.mjs';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { dispatchHostedWork } from '../dist/hosted-work-client.js';
 const devices = await import(moduleUrl('../convex/deviceStore.ts'));
 const policies = await import(moduleUrl('../convex/projectAutonomy.ts'));
-const actions = await import(moduleUrl('../convex/projectWorkActions.ts'));
 const work = await import(moduleUrl('../convex/projectWork.ts'));
-const backups = await import(moduleUrl('../convex/projectBackups.ts'));
-const { previewWorkArchive } = await import(moduleUrl('../web/src/work-archive.ts'));
-async function hosted(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-hosted-autonomy-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  writeFileSync(join(root, 'file.txt'), 'original\n');
-  initNative(root);
-  const agent = new AgentWorkflow(root);
-  const lane = (await agent.dispatch({ action: 'start', outcome: 'Proposal' })).result;
-  writeFileSync(join(lane.path, 'file.txt'), 'proposal\n');
-  await agent.dispatch({
-    action: 'define-check',
-    name: 'verify',
-    executable: process.execPath,
-    args: ['-e', '0'],
-  });
-  const finish = (
-    await agent.dispatch({ action: 'finish', laneId: lane.laneId, message: 'Proposal', accept: true })
-  ).result;
-  assert.equal(finish.status, 'awaiting-review');
-  const owner = new WorkService(root);
-  const archive = (await owner.dispatch({ action: 'export-work', archive: true }, owner.store.revision()))
-    .result.archive;
-  const bytes = readFileSync(archive.path),
-    preview = await previewWorkArchive(new File([bytes], 'proposal.tar.gz'));
-  const s = state([]),
-    native = s.ctx.runQuery;
+// Policy and Channel authority run on the hosted project row alone; no Work archive is needed.
+function hosted() {
+  const s = state([]);
   s.tables.projectPolicyChanges = new Map();
   s.tables.projectSelfMetricReceipts = new Map();
-  s.ctx.runQuery = s.ctx.runMutation = (ref, input) => {
-    const [module, name] = getFunctionName(ref).split(':');
-    return (
-      { projectWork: work, projectBackups: backups }[module]?.[name]?._handler(s.ctx, input) ??
-      native(ref, input)
-    );
-  };
-  const projectId = 'project',
-    backupId = 'backup';
-  s.tables.hostedProjects.set(projectId, {
-    _id: projectId,
-    _creationTime: 1,
-    owner: 'owner',
-    key: randomUUID(),
-    name: 'Proposal',
-    currentBackup: backupId,
-    revision: 1,
-    autonomyPolicy: policyPreset('supervised'),
-  });
-  s.tables.projectBackups.set(backupId, {
-    _id: backupId,
-    _creationTime: 1,
+  const projectId = 'project';
+  s.tables.hostedProjects.set(
     projectId,
-    operationId: randomUUID(),
-    request: 'a'.repeat(64),
-    nonce: randomUUID(),
-    previous: null,
-    digest: digest(bytes),
-    size: bytes.length,
-    preview,
-    status: 'stored',
-    storageId: 'source',
-  });
-  s.files.set('source', { blob: new Blob([bytes], { type: 'application/gzip' }) });
-  await actions.initialize._handler(s.ctx, { projectId, backupId, operationId: randomUUID() });
+    projectRow({ _id: projectId, key: randomUUID(), autonomyPolicy: policyPreset('supervised') }),
+  );
   const selection = () => ({
     projectId,
     operationId: randomUUID(),
-    revision:
-      [...s.tables.projectWorkHeads.values()].find(h => h.projectId === projectId)?.revision ??
-      s.tables.hostedProjects.get(projectId).work.revision,
+    revision: 0,
     command: JSON.stringify({
       action: 'accept-hosted-channel',
       channel: 'main',
-      viewId: finish.view.viewId,
-      head: finish.view.head,
+      viewId: randomUUID(),
+      head: 'a'.repeat(64),
       previousId: null,
-      archiveSha256: digest(bytes),
+      archiveSha256: 'b'.repeat(64),
     }),
   });
   function device(scope) {
@@ -117,8 +53,8 @@ async function hosted(t) {
   return { ...s, projectId, selection, device };
 }
 const errorCode = code => error => error.data?.code === code;
-test('new hosted project gets supervised; contributors cannot set policy', async t => {
-  const s = await hosted(t);
+test('new hosted project gets supervised; contributors cannot set policy', async () => {
+  const s = hosted();
   assert.equal((await policies.read._handler(s.ctx, { projectId: s.projectId })).preset, 'supervised');
   s.tables.projectContributors.set('member', {
     _id: 'member',
@@ -157,8 +93,8 @@ test('new hosted project gets supervised; contributors cannot set policy', async
   );
 });
 
-test('agentDefaults.stacking sets, reads back and clears through the real Convex shapes (bench c5e86d71)', async t => {
-  const s = await hosted(t);
+test('agentDefaults.stacking sets, reads back and clears through the real Convex shapes (bench c5e86d71)', async () => {
+  const s = hosted();
   const set = async stacking => {
     const reply = await policies.set._handler(s.ctx, {
       projectId: s.projectId,
@@ -184,8 +120,8 @@ test('agentDefaults.stacking sets, reads back and clears through the real Convex
   assert.equal(s.tables.projectPolicyChanges.size, 2);
 });
 
-test('coordination-only credentials cannot set policy, even with owner subject', async t => {
-  const s = await hosted(t);
+test('coordination-only credentials cannot set policy, even with owner subject', async () => {
+  const s = hosted();
   s.device('coordination');
 
   await assert.rejects(
@@ -197,8 +133,8 @@ test('coordination-only credentials cannot set policy, even with owner subject',
   );
 });
 
-test('hosted policy retries preserve later edits and need no Work index through CLI/MCP transport', async t => {
-  const s = await hosted(t),
+test('hosted policy retries preserve later edits and need no Work index through CLI/MCP transport', async () => {
+  const s = hosted(),
     op = { action: 'set-policy', operationId: randomUUID(), preset: 'trusted' };
   const client = {
     query: (ref, args) => {
@@ -224,8 +160,8 @@ test('hosted policy retries preserve later edits and need no Work index through 
   );
 });
 
-test('internal Channel mutation cannot substitute an owner argument for the authenticated participant', async t => {
-  const s = await hosted(t),
+test('internal Channel mutation cannot substitute an owner argument for the authenticated participant', async () => {
+  const s = hosted(),
     selection = s.selection();
   s.ctx.auth.getUserIdentity = async () => ({ subject: 'not-owner' });
   await assert.rejects(

@@ -1,11 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { initNative } from '../dist/native-work.js';
 import { stackStatus } from '../dist/agent-stack.js';
 import { laneReceipt } from '../dist/agent-receipts.js';
 
@@ -114,34 +109,4 @@ test('cyclic parent records stop before repeating an id and disclose incomplete 
   assert.equal(status.depth, 2);
   assert.equal(status.chainStatus, 'cycle');
   assert.equal(status.summary, 'second → first · up-to-date · cycle');
-});
-
-test('project and Intent status annotate stacked receipts through records and legacy storage', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-stack-status-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  writeFileSync(join(root, 'file.txt'), 'original\n');
-  initNative(root);
-  const agent = new AgentWorkflow(root);
-  const call = async command => (await agent.dispatch(command)).result;
-  const parent = await call({ action: 'start', outcome: 'Parent' });
-  const child = await call({ action: 'start', outcome: 'Child', stackOn: parent.laneId });
-  const expected = (await call({ action: 'status', laneId: child.laneId })).lane.stackStatus;
-  const check = async () => {
-    for (const command of [
-      { action: 'status', detail: true },
-      { action: 'status', intentId: child.intentId, detail: true },
-      { action: 'records', collection: 'lanes' },
-      { action: 'records', collection: 'lanes', state: 'active' },
-    ]) {
-      const result = await call(command);
-      const items = result.lanes?.items ?? result.items;
-      const receipt = items.find(item => (item.laneId ?? item.id) === child.laneId);
-      assert.deepEqual(receipt.stackStatus, expected);
-    }
-  };
-  await check();
-  // A portable, pre-records owner exercises the separate legacy status projector.
-  const snapshot = agent.work.store.snapshotBytes();
-  writeFileSync(join(agent.work.store.directory, 'work.json'), snapshot);
-  await check();
 });

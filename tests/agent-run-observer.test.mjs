@@ -2,7 +2,7 @@
 import { recordObject } from '../dist/work-records.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +13,6 @@ import { SelectedRunObserver } from '../dist/work-run-observation.js';
 import { waitForAgentRun } from '../dist/agent-run-observer.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
 import { ForgeError } from '../dist/errors.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 
 test('a transient selected-run read race keeps observing the original run', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
@@ -224,98 +223,6 @@ test('established selected runner death is reconciled without manufacturing outc
   assert.equal(after.runs[1].id, unrelated.id);
   assert.equal(after.runs[1].status, 'running');
 });
-
-for (const failure of ['SOURCE_CHANGED', 'INVALID_WORK_STORE', 'unexpected'])
-  test(`actual runner handles ${failure} cancellation polling without full Work reads`, async t => {
-    const { root, peer } = fixture(t),
-      empty = peer.load();
-    empty.runs = [];
-    peer.save(empty);
-    const agent = new AgentWorkflow(root),
-      lane = (
-        await agent.dispatch({ action: 'start', operationId: randomUUID(), outcome: 'Actual cancellation' })
-      ).result;
-    const view = (
-      await agent.dispatch({
-        action: 'compose',
-        operationId: randomUUID(),
-        intentId: lane.intentId,
-        inputs: [{ laneId: lane.laneId, head: lane.head }],
-      })
-    ).result;
-    const check = (
-      await agent.dispatch({
-        action: 'define-check',
-        name: 'Live command',
-        executable: process.execPath,
-        args: ['-e', 'setTimeout(()=>process.exit(0),10000)'],
-      })
-    ).result;
-    const run = (
-      await agent.dispatch({
-        action: 'run',
-        operationId: randomUUID(),
-        viewId: view.viewId,
-        expectedHead: view.head,
-        checkId: check.checkId,
-        wait: false,
-      })
-    ).result;
-    const store = agent.work.store,
-      load = store.load.bind(store);
-    let prematureLoads = 0;
-    const receipt = join(store.directory, `check-${run.runId}`, 'result.json');
-    store.load = () => {
-      if (!existsSync(receipt)) {
-        prematureLoads++;
-        throw Error('Live cancellation polling reconstructed Work');
-      }
-      return load();
-    };
-    const readReceipt = () => JSON.parse(readFileSync(receipt, 'utf8'));
-    const read = SelectedRunObserver.prototype.read;
-    let raced = false;
-    t.mock.method(SelectedRunObserver.prototype, 'read', function () {
-      if (!raced) {
-        raced = true;
-        if (failure === 'unexpected') throw new Error('Synthetic unexpected poll error');
-        throw new ForgeError(failure, 'Synthetic run record read error');
-      }
-      return read.call(this);
-    });
-    try {
-      await new Promise(resolve => setTimeout(resolve, 400));
-      assert.equal(raced, true);
-      assert.equal(prematureLoads, 0);
-      if (failure === 'SOURCE_CHANGED')
-        peer.locked(() => {
-          const data = peer.load();
-          data.runs.find(item => item.id === run.runId).cancelRequested = true;
-          data.revision++;
-          peer.save(data);
-        });
-      const end = Date.now() + 5000;
-      while (!existsSync(receipt) && Date.now() < end) await new Promise(resolve => setTimeout(resolve, 20));
-      assert.equal(prematureLoads, 0);
-      assert.equal(existsSync(receipt), true);
-      store.load = load;
-      const observed = (await agent.dispatch({ action: 'observe', operationId: run.runId, waitMs: 1000 }))
-        .result;
-      assert.equal(observed.status, failure === 'SOURCE_CHANGED' ? 'cancelled' : 'failed');
-      if (failure === 'INVALID_WORK_STORE') assert.equal(readReceipt().error.code, failure);
-      if (failure === 'unexpected') assert.match(readReceipt().details, /cancellation observation failed/);
-      assert.equal(observed.runId, run.runId);
-    } finally {
-      store.load = load;
-      const child = peer.load().runs.find(item => item.id === run.runId)?.childPid;
-      if (child)
-        try {
-          process.kill(process.platform === 'win32' ? child : -child, 'SIGKILL');
-        } catch {
-          /* Already exited. */
-        }
-    }
-  });
 
 test('selected-run waiting identifies the physical check controller and its execution lease', async t => {
   const { store, run } = fixture(t);

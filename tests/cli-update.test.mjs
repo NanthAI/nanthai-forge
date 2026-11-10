@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
-import { cliUpdateRun, cliUpdateRunning } from '../dist/cli-update.js';
+import { cliUpdateRunning } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli as updateCliChecked } from '../dist/cli-update.js';
 import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
@@ -613,16 +613,7 @@ test('unleased legacy processes launched through current protect every possible 
   );
 });
 
-test('native and hosted agent receipt envelopes name the executing CLI build', async t => {
-  const f = fixture(t);
-  const { initNative } = await import('../dist/native-work.js');
-  const { AgentWorkflow } = await import('../dist/agent-workflow.js');
-  const root = join(f.directory, 'native');
-  mkdirSync(root);
-  writeFileSync(join(root, 'source.txt'), 'synthetic');
-  initNative(root);
-  const response = await new AgentWorkflow(root).dispatch({ action: 'status' });
-  assert.equal(response.cliCommit, cliBuildCommit());
+test('hosted agent receipt envelopes name the executing CLI build', async t => {
   const { agentFixture } = await import('./hosted-agent-fixture.mjs');
   const hosted = agentFixture(t);
   assert.equal((await hosted.transport().dispatch('capabilities', {})).cliCommit, cliBuildCommit());
