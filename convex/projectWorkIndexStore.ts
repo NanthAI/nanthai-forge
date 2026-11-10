@@ -277,6 +277,7 @@ export const publish = internalMutation({
     return true;
   },
 });
+const retirementPage = { cursor: null, numItems: 100, maximumBytesRead: 1024 * 1024, maximumRowsRead: 100 };
 /** Only derived rows can retire; original backup, source and event history are never touched. */
 export const retire = internalMutation({
   args: { generationId: v.id('projectWorkGenerations'), projectId: v.optional(v.id('hostedProjects')) },
@@ -290,16 +291,24 @@ export const retire = internalMutation({
     if (project?.work?.generationId === generationId) return null;
     const current = project?.work?.generationId ? await ctx.db.get(project.work.generationId) : null;
     if (current?.recordsGenerationId === generationId) return null;
-    if (generation.recordsGenerationId) {
-      await ctx.db.delete(generationId);
+    const pages = await ctx.db
+      .query('projectReturnPages')
+      .withIndex('by_partition_and_key_and_position', q => q.eq('partitionId', generationId))
+      .paginate(retirementPage);
+    for (const page of pages.page) await ctx.db.delete(page._id);
+    if (pages.page.length) {
+      await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
+        generationId,
+        projectId: generation.projectId,
+      });
       return null;
     }
     const rows = await ctx.db
       .query('projectWorkRecords')
       .withIndex('by_generation', q => q.eq('generationId', generationId))
-      .take(100);
-    for (const row of rows) await ctx.db.delete(row._id);
-    if (rows.length === 100)
+      .paginate(retirementPage);
+    for (const row of rows.page) await ctx.db.delete(row._id);
+    if (!rows.isDone)
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retire, {
         generationId,
         projectId: generation.projectId,
@@ -378,7 +387,8 @@ export const sweep = internalMutation({
     for (const generation of page.page)
       if (
         project.work?.generationId !== generation._id &&
-        (generation.format !== HOSTED_WORK_INDEX_FORMAT ||
+        (generation.status === 'failed' ||
+          generation.format !== HOSTED_WORK_INDEX_FORMAT ||
           project.work?.backupId !== generation.backupId ||
           project.work.revision !== generation.revision)
       ) {
@@ -417,9 +427,9 @@ export const retirePayload = internalMutation({
           .eq('collection', `${input.collection}:payload`)
           .eq('parent', input.payloadKey),
       )
-      .take(100);
-    for (const row of rows) await ctx.db.delete(row._id);
-    if (rows.length === 100)
+      .paginate(retirementPage);
+    for (const row of rows.page) await ctx.db.delete(row._id);
+    if (!rows.isDone)
       await ctx.scheduler.runAfter(0, internal.projectWorkIndexStore.retirePayload, {
         ...input,
         ...(projectId ? { projectId } : {}),

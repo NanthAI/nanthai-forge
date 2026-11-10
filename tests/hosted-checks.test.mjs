@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import {
   checksFixture,
   internalApi,
@@ -12,7 +13,7 @@ import {
   maxima,
 } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { hostedCheckCallbackSchema } from '../dist/hosted-check-evidence.js';
+import { hostedVerdictKey, hostedCheckCallbackSchema } from '../dist/hosted-check-evidence.js';
 
 test('configuration retries retain original versions without rewinding later settings', async () => {
   const s = await checksFixture(),
@@ -470,4 +471,177 @@ test('same-transaction run reuse still rejects mismatched identity, changed defi
     s.definition.digest,
   );
   await assert.rejects(evidence(), code('EVIDENCE_CHANGED'));
+});
+
+test('operational expiry keeps active checks and all verdict/source/receipt evidence while reclaiming only aged raw detail', async t => {
+  const s = await checksFixture();
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const r = await s.activate((await s.enqueue(s.selection())).id);
+  const input = {
+    projectId: s.projectId,
+    runId: r.id,
+    phase: 'callbacks',
+    dueAt: 0,
+    continue: false,
+    operationId: 'exhaust-check',
+  };
+  // Bypass checksFixture's small control-write ceiling: this test deliberately seeds detail pages.
+  const expire = args =>
+    s.store?.call('exhaustExpiry', expiry.check, args) ?? s.call('exhaustExpiry', expiry.check, args);
+  const active = await expire(input);
+  assert.equal(active.kept, true);
+  const shardCallbacks = [];
+  for (let i = 0; i < r.plan.shardCount; i++) {
+    const shard = s.shard(r, i);
+    shardCallbacks.push(shard);
+    await s.callback(shard);
+  }
+  const terminalCallback = s.complete(r);
+  const complete = await s.callback(terminalCallback);
+  const terminal = [...s.tables.projectHostedCheckRuns.values()][0];
+  const report = { 'tests/kept.test.mjs': { durationMs: 1, failed: false, attempts: [] } };
+  s.patch('projectHostedCheckRuns', terminal._id, {
+    value: JSON.stringify({ ...complete, contractReports: report }),
+    proof: 'immutable-receipt-proof',
+    verdictKey: hostedVerdictKey(complete),
+    reportParts: 1,
+    reportDigest: 'synthetic-report-digest',
+  });
+  s.insert('projectHostedActionsResults', {
+    projectId: s.projectId,
+    runId: r.id,
+    index: -1000,
+    digest: 'synthetic-report-digest',
+    reports: JSON.stringify(report),
+  });
+  const reusedCandidateId = randomUUID();
+  const reuseAlias = s.insert('projectHostedCheckCallbacks', {
+    projectId: s.projectId,
+    runId: r.id,
+    eventId: `reuse:${reusedCandidateId}`,
+    digest: hostedVerdictKey(complete),
+    value: JSON.stringify({ candidateId: reusedCandidateId, actor: 'owner' }),
+  });
+  const aliasBefore = structuredClone(s.tables.projectHostedCheckCallbacks.get(reuseAlias));
+  for (let i = 0; i < 17; i++)
+    s.insert('projectHostedCheckCallbacks', {
+      projectId: s.projectId,
+      runId: r.id,
+      eventId: `legacy-event-${i}`,
+      digest: `legacy-digest-${i}`,
+      value: JSON.stringify({ raw: 'legacy'.repeat(100) }),
+    });
+  const callbackReceipts = [...s.tables.projectHostedCheckCallbacks.values()].map(
+    ({ value: _value, ...receipt }) => receipt,
+  );
+  const immutableTables = [
+    'projectHostedAcceptances',
+    'projectHostedRecords',
+    'projectWorkEvents',
+    'projectObjects',
+  ];
+  const immutable = immutableTables.map(name => [...s.tables[name]]);
+  assert.equal((await expire(input)).kept, true, 'newly terminal raw callbacks stay seven days');
+  const ended = Date.parse(complete.endedAt);
+  const wakes = s.scheduled.filter(task => getFunctionName(task.fn).startsWith('projectOperationalExpiry:'));
+  assert.equal(wakes.length, 2, 'one terminal transition arms exactly two maintenance phases');
+  assert.deepEqual(
+    wakes.map(task => [task.args.phase, task.args.dueAt - ended]),
+    [
+      ['callbacks', 7 * 86_400_000],
+      ['detail', 30 * 86_400_000],
+    ],
+  );
+  t.mock.method(Date, 'now', () => ended + 8 * 86_400_000);
+  const first = await expire(input);
+  assert.deepEqual(await expire(input), first, 'a lost page reply replays without another deletion');
+  assert(first.rows > 0 && first.rows <= 8);
+  assert(first.bytes > 0 && first.nextCursor);
+  let callbackPage = first;
+  for (let part = 1; callbackPage.more && part < 10; part++)
+    callbackPage = await expire({ ...input, part, cursor: callbackPage.nextCursor });
+  assert.equal(callbackPage.more, false, 'raw callback pages resume without dropping receipt rows');
+  assert.equal(s.tables.projectHostedCheckCallbacks.size, callbackReceipts.length);
+  assert.deepEqual(
+    [...s.tables.projectHostedCheckCallbacks.values()].map(({ value: _value, ...receipt }) => receipt),
+    callbackReceipts,
+  );
+  assert.deepEqual(
+    s.tables.projectHostedCheckCallbacks.get(reuseAlias),
+    aliasBefore,
+    'same-tree reuse provenance remains readable',
+  );
+  assert(
+    [...s.tables.projectHostedCheckCallbacks.values()]
+      .filter(row => !row.eventId.startsWith('reuse:'))
+      .every(row => row.value === '{}'),
+  );
+  assert.equal(
+    (await s.callback(shardCallbacks[0])).id,
+    complete.id,
+    'old shard event still reconciles after raw expiry',
+  );
+  await assert.rejects(
+    s.callback({ ...terminalCallback, result: { ...terminalCallback.result, exitCode: 123 } }),
+    code('WORK_OPERATION_CHANGED'),
+  );
+  assert.equal(
+    (await s.callback(terminalCallback)).id,
+    complete.id,
+    'original terminal callback retry still reconciles after raw expiry',
+  );
+  assert(s.tables.projectHostedCheckShards.size > 0, 'shard detail keeps its thirty-day window');
+  assert.equal((await expire({ ...input, phase: 'detail' })).kept, true);
+  t.mock.method(Date, 'now', () => ended + 31 * 86_400_000);
+  let result;
+  for (let i = 0; i < 10; i++) {
+    result = await expire({ ...input, phase: 'detail', part: i });
+    if (!result.more) break;
+  }
+  assert.equal(result.more, false, 'bounded pages finish');
+  const after = s.tables.projectHostedCheckRuns.get(terminal._id);
+  assert.deepEqual(
+    JSON.parse(after.value),
+    Object.fromEntries(Object.entries({ ...complete }).filter(([key]) => key !== 'contractReports')),
+  );
+  assert.equal(after.proof, 'immutable-receipt-proof');
+  assert.equal(after.reportParts, undefined);
+  assert.equal(after.reportDigest, undefined);
+  assert.equal(s.tables.projectHostedActionsResults.size, 0);
+  assert.equal(s.tables.projectHostedCheckShards.size, 0);
+  assert.deepEqual(
+    immutableTables.map(name => [...s.tables[name]]),
+    immutable,
+  );
+  assert.deepEqual(await expire({ ...input, phase: 'detail', part: 10 }), {
+    rows: 0,
+    bytes: 0,
+    more: false,
+    kept: false,
+  });
+  assert.equal((await s.evidence(complete)).id, complete.id, 'exact passing evidence remains usable');
+  const reusedEvidence = candidateId =>
+    s.run(
+      'expiredReuseEvidence',
+      ctx =>
+        read.requireHostedCheckEvidence(ctx, {
+          projectId: s.projectId,
+          runId: complete.id,
+          actor: 'owner',
+          candidateId,
+          head: complete.request.expectedHead,
+          checkId: complete.check.id,
+          definition: complete.check.definition,
+          configuration: complete.request.expectedConfiguration,
+          environment: complete.request.expectedEnvironment,
+          authorityEpoch: 1,
+        }),
+      {},
+    );
+  assert.equal(
+    (await reusedEvidence(reusedCandidateId)).id,
+    complete.id,
+    'same-tree alias remains valid after both expiry windows',
+  );
+  await assert.rejects(reusedEvidence(randomUUID()), code('EVIDENCE_CHANGED'));
 });

@@ -82,7 +82,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       const id = `scheduled-${++serial}`,
         item = { id, name: getFunctionName(ref), args, delayMs, state: { kind: 'pending' } };
       scheduled.set(id, item);
-      ready.push(item);
+      // Expiry is due a week after this execution, outside a source-job measurement.
+      if (!item.name.startsWith('projectOperationalExpiry:')) ready.push(item);
       return id;
     },
     cancel: async id => {

@@ -28,6 +28,7 @@ import {
 import { hostedCheckRunSchema, hostedCheckTerminal, type HostedCheckRun } from '../src/hosted-check';
 import { invariant } from '../src/errors';
 import { notifyPullCheck } from './projectGithubPullQueue';
+import { scheduleCheckExpiry } from './projectOperationalExpirySchedule';
 
 export type CheckIdentity = { projectId: Id<'hostedProjects'>; runId: string };
 export const checkSetting = (
@@ -171,6 +172,8 @@ export async function writeHostedCheck(
   });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  if (run.configuration.provider !== 'ci-status')
+    await scheduleCheckExpiry(ctx, run.projectId as Id<'hostedProjects'>, run.id, Date.parse(run.endedAt!));
   // Existing terminal events also clear an interrupted batch inbox; no sweep or idle timer.
   if (reportsDetached(run) && run.plan && run.executionId && !['passed', 'failed'].includes(run.status))
     await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedActionsBatch:collect'), {

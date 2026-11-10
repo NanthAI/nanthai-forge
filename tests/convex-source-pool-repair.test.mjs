@@ -111,3 +111,73 @@ test('lease repair retains completed siblings and old in-progress slots across p
   assert.equal(f.tables.projectSourceTasks.get(fenced._id).status, 'queued');
   assert.equal(serial, 2, 'all four slots remain owned by current computations');
 });
+
+test('source exhaust expiry waits for whole-job completion and physical tasks, pages finished tasks, and keeps source and audit records', async t => {
+  const { scaleFixture } = await import('./convex-source-scale-fixture.mjs');
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const jobs = await import(moduleUrl('../convex/projectSourceJobs.ts'));
+  const f = await scaleFixture();
+  t.after(() => f.restore());
+  const input = await f.json({ synthetic: 'input' });
+  const jobId = await f.enqueue(input);
+  const batchId = await f.ctx.db.insert('projectSourceBatches', {
+    projectId: f.projectId,
+    jobId,
+    step: 1,
+    kind: 'states',
+    end: 17,
+    total: 17,
+    next: 17,
+    completed: 17,
+    status: 'done',
+    failure: null,
+  });
+  const tasks = [];
+  for (let index = 0; index < 17; index++)
+    tasks.push(
+      await f.ctx.db.insert('projectSourceTasks', {
+        projectId: f.projectId,
+        jobId,
+        step: 1,
+        batchId,
+        index,
+        input: 'x'.repeat(100_000),
+        status: 'done',
+        generation: 1,
+        progress: null,
+        output: { id: 'output', sha256: 'a'.repeat(64) },
+        failure: null,
+      }),
+    );
+  const args = { projectId: f.projectId, jobId, dueAt: 0, continue: false, operationId: 'exhaust-source' };
+  let part = 0;
+  const expire = () => f.call('sourceExpiry', expiry.source, { ...args, part: part++ });
+  assert.equal((await expire()).kept, true, 'finished siblings remain joinable while parent is active');
+  const job = await f.job(jobId),
+    ended = Date.now();
+  await f.run('terminalSource', () =>
+    jobs.saveSourceJob(f.ctx, f.projectId, job, { ...job, status: 'completed' }, ended),
+  );
+  assert.equal((await expire()).kept, true, 'retention starts at whole-job completion');
+  const receipts = [...f.tables.projectHostedRecords];
+  const objects = [...f.tables.projectObjects];
+  const sourceTimer = [...f.scheduled.values()].find(row => row.name === 'projectOperationalExpiry:source');
+  assert(sourceTimer && sourceTimer.delayMs <= 7 * 86_400_000);
+  t.mock.method(Date, 'now', () => ended + 8 * 86_400_000);
+  f.scheduled.set('physical', { state: { kind: 'inProgress' } });
+  await f.ctx.db.patch(tasks[0], { scheduledId: 'physical' });
+  assert.equal((await expire()).kept, true);
+  assert.equal(f.tables.projectSourceTasks.size, 17);
+  f.scheduled.get('physical').state.kind = 'success';
+  const first = await expire();
+  assert.equal(first.rows, 8);
+  assert(first.bytes > 800_000 && first.bytes < 810_000);
+  assert(f.counts.at(-1).readBytes < 1_000_000, 'one page, not the full job');
+  await expire();
+  await expire();
+  assert.equal(f.tables.projectSourceTasks.size, 0);
+  assert.equal(f.tables.projectSourceBatches.size, 0);
+  assert.deepEqual(await expire(), { rows: 0, bytes: 0, more: false, kept: false });
+  assert.deepEqual([...f.tables.projectHostedRecords], receipts);
+  assert.deepEqual([...f.tables.projectObjects], objects);
+});

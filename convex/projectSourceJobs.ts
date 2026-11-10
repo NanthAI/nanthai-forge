@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { scheduleSourceExpiry } from './projectOperationalExpirySchedule';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { z } from 'zod';
@@ -56,6 +57,8 @@ export async function saveSourceJob(
     expectedVersion: old.version,
     record: { ...next, version: old.version + 1, at: new Date(now).toISOString() },
   });
+  if (!sourceJobTerminal(old) && sourceJobTerminal(next) && next.control?.provider === 'convex')
+    await scheduleSourceExpiry(ctx, projectId, next.id, now);
   return { ...next, version: old.version + 1, at: new Date(now).toISOString() };
 }
 

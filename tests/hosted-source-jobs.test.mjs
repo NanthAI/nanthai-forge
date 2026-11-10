@@ -41,6 +41,7 @@ after(() => {
 async function fixture(actor = 'owner', providerId = 'convex') {
   const f = recordsFixture(),
     identity = await f.setup();
+  const expiryWakes = f.expiryWakes;
   invocationCounts.push(f.counts);
   let now = Date.parse(at);
   if (actor !== 'owner')
@@ -166,6 +167,7 @@ async function fixture(actor = 'owner', providerId = 'convex') {
   };
   return {
     f,
+    expiryWakes,
     identity,
     jobId,
     enqueue,
@@ -446,6 +448,8 @@ test('verified callback can precede the dispatch reply; duplicate terminal resul
     errorCode('SOURCE_JOB_TERMINAL'),
   );
   assert.equal((await x.load()).version, terminal.version);
+  assert.equal(x.expiryWakes.length, 1, 'terminal replay never schedules a second expiry');
+  assert.equal(x.expiryWakes[0].args.jobId, x.jobId);
   x.check(t);
 });
 

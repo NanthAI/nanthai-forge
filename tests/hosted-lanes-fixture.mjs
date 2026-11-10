@@ -92,6 +92,12 @@ export function lanesFixture() {
         meter.written.push(table);
         meter.writes++;
         meter.writeBytes += bytes(row);
+        // Keep real totals intact; controller-only guards account for delayed retention
+        // allocations separately. The landing cost guard still prices all of these bytes.
+        if (table === '_scheduled_functions' && row.name?.startsWith('projectOperationalExpiry:')) {
+          meter.maintenanceWrites = (meter.maintenanceWrites ?? 0) + 1;
+          meter.maintenanceWriteBytes = (meter.maintenanceWriteBytes ?? 0) + bytes(row);
+        }
         meter.writeBytesByTable[table] = (meter.writeBytesByTable[table] ?? 0) + bytes(row);
         assert(meter.writes <= 8192 && meter.writeBytes < 16 * 1024 * 1024, `${name}: Convex writes`);
       };

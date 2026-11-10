@@ -606,3 +606,136 @@ test('GitHub inbound cost: one changed blob imports, composes, checks, lands and
   assert.equal(doubled.status, 'fail', 'duplicate inbound I/O cannot hide in the outbound mix');
   assert.match(doubled.message, /Decision it protects: Issue 3e3f9fe6/);
 });
+
+// Net retained JSON document bytes, rather than cumulative write traffic. Identities retain their
+// lengths; normalize only the synthetic creation clock. Index/system/R2 bytes are separate costs.
+function storedBytes(f) {
+  return Object.fromEntries(
+    Object.entries(f.tables)
+      .filter(([name]) => !name.startsWith('_'))
+      .map(([name, rows]) => [
+        name,
+        [...rows.values()].reduce(
+          (n, row) => n + Buffer.byteLength(JSON.stringify({ ...row, _creationTime: 0 })),
+          0,
+        ),
+      ]),
+  );
+}
+async function landingStorage(t, dogfood) {
+  const f = await finishFixture(
+    t,
+    dogfood
+      ? {
+          fileCount: 4096,
+          selectedFileCount: 128,
+          beforeSourceMutation: (_name, args) => {
+            // A synthetic input, like the fixture's fixed clock: real RPC timing digits must not
+            // make byte storage depend on the host OS. New fields and step counts still ratchet.
+            if (args.timing)
+              for (const key of ['runMs', 'readMs', 'writeMs', 'callMs', 'bootMs']) {
+                if (key in args.timing) args.timing[key] = 0;
+              }
+          },
+        }
+      : {},
+  );
+  const before = storedBytes(f);
+  const state = await f.enqueue(f.request());
+  await f.drain();
+  await f.passChecks();
+  if (dogfood) {
+    inflateDogfoodChecks(f);
+    f.moveMain();
+  }
+  await f.drain();
+  if (dogfood) {
+    await f.passChecks();
+    inflateDogfoodChecks(f);
+    await f.drain();
+  }
+  assert.equal((await f.current(state.id)).submission.phase, 'landed');
+  const delta = () =>
+    Object.fromEntries(
+      Object.entries(storedBytes(f)).map(([table, size]) => [table, Math.max(0, size - before[table])]),
+    );
+  const immediate = delta();
+  const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
+  const checks = [...f.tables.projectHostedCheckRuns.values()];
+  // Controlled clock, no sleeps: maintenance is due after the landing has completed.
+  const realNow = Date.now;
+  Date.now = () => realNow() + 31 * 86_400_000;
+  try {
+    for (const row of checks)
+      for (const phase of ['callbacks', 'detail']) {
+        let more = true;
+        for (let i = 0; more && i < 100; i++)
+          more = (
+            await f.c.transaction('storageExpiry', expiry.check, {
+              projectId: f.projectId,
+              runId: row.runId,
+              phase,
+              operationId: `exhaust:${row.runId}:${phase}`,
+              part: i,
+              dueAt: 0,
+              continue: false,
+            })
+          ).more;
+        assert.equal(more, false);
+      }
+    for (const row of f.tables.projectSourceSteps.values()) {
+      let more = true;
+      for (let part = 0; more && part < 100; part++)
+        more = (
+          await f.c.transaction('storageSourceExpiry', expiry.source, {
+            projectId: f.projectId,
+            jobId: row.jobId,
+            dueAt: 0,
+            continue: false,
+            operationId: `exhaust:${row.jobId}:source`,
+            part,
+          })
+        ).more;
+      assert.equal(more, false);
+    }
+  } finally {
+    Date.now = realNow;
+  }
+  const retained = delta();
+  return { immediate, retained };
+}
+
+test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
+  const OriginalDate = Date;
+  class StorageDate extends OriginalDate {
+    constructor(...args) {
+      if (args.length) super(...args);
+      else super(StorageDate.now());
+    }
+    static now() {
+      return OriginalDate.UTC(2026, 10, 10, 12);
+    }
+  }
+  globalThis.Date = StorageDate;
+  t.after(() => {
+    globalThis.Date = OriginalDate;
+  });
+  const scenarios = { fresh: await landingStorage(t, false), dogfood: await landingStorage(t, true) };
+  t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
+  const budgets = JSON.parse(
+    readFileSync(new URL('./fixtures/landing-storage-budget.json', import.meta.url), 'utf8'),
+  );
+  for (const [name, scenario] of Object.entries(scenarios))
+    for (const [phase, tables] of Object.entries(scenario)) {
+      for (const [table, stored] of Object.entries(tables)) {
+        assert(
+          table in budgets[name][phase],
+          `${name}/${phase}/${table}: record the new table's storage decision`,
+        );
+        assert(
+          stored <= budgets[name][phase][table],
+          `${name}/${phase}/${table}: ${stored} > ${budgets[name][phase][table]} bytes per landing; fix growth or record the Issue's reason and ratchet`,
+        );
+      }
+    }
+});

@@ -474,3 +474,101 @@ this analysis reuses the ledger, guard, capture #4, Issue `686ecdde`'s ranked ta
 a02991a7's billing finding, source code and public provider documentation. Nothing
 runtime is added or removed; this document consolidates the existing evidence
 into one serving model rather than creating a second cost ledger or alert path.
+
+
+## Operational expiry and storage per landing
+
+Operational data has two finite windows, measured from a terminal transition,
+not creation time. These windows are the selected diagnostic/retry grace periods;
+the readers below need the data while execution is active, not forever afterwards.
+
+| Table / data | Window and reader | What remains |
+| --- | --- | --- |
+| `projectHostedCheckCallbacks` raw `value` | Seven days after the run ends. `receiveHostedCheckCallback` in `convex/projectHostedCheckCallbacks.ts` reads retained event IDs/digests for deduplication; the raw payload has no later execution reader, and terminal results are immutable. | Event IDs/digests/timestamps for original retries; full same-tree reuse aliases/provenance; the check run’s verdict and exact source/provider pins. `projectHostedCheckRead` and `projectHostedCheckVerdictReuse` require aliases indefinitely. |
+| `projectSourceTasks`, `projectSourceBatches` | Seven days after the **whole job** ends. `projectConvexSourceFanout.results` joins completed siblings while the parent is active; `sourceStep` refuses terminal jobs. Physical scheduled executions are checked before deletion. | Original job/operation records, output references, source objects and step timing. |
+| `projectHostedCheckRuns` detailed `contractReports`; `projectHostedCheckShards`; `projectHostedActionsResults` | Thirty days after the run ends. `hydrateCheckReports`, `restoreShardReports` and `projectHostedCheckRead` read execution/detail copies. This keeps a longer diagnostic window than the raw callback inbox. | The run row, verdict and digest, summary counts/test files, flakes, proof, source/check/configuration pins, provider/receipt links, output/cost references and all immutable acceptance evidence. Full report detail is no longer available after the window. |
+| Superseded/failed `projectWorkGenerations`, `projectWorkRecords`, `projectReturnPages` and replaced payload parts | No age window: retire only when the existing publication/sweep proves the binding is superseded, or the build failed. `selectedGeneration` and `recordPartition` select the current projection. | Current generation, its shared record partition, migration-pinned generations, original backups, Git/source history, Work events, audit trail and planning. |
+
+`projectOperationalExpirySchedule.ts` schedules two one-shot Forge-runner check wakes and one
+Convex-source-job wake in their existing terminal mutations; replay of a terminal source
+job schedules nothing. There is no periodic project scan, new index backfill or
+idle cron. Summary-only ci-status checks and non-Convex source providers arm no
+cleanup. Each cleanup mutation reads/compacts or deletes at most eight detail/task rows;
+continuations drain only that run or job, then stop. Callback pages keep receipt
+rows and advance an indexed cursor, bounded to the run’s original seven-day
+window; they clear raw values and retain digest receipts and reuse aliases. Source cleanup also reads
+one batch, the job and a bounded pool, and checks the physical scheduled-task
+identities. A still-running physical task gets a targeted one-hour continuation,
+not permission to delete its input. A first/manual page can pass `continue:false`
+to return its progress without scheduling the rest. An operation id and page number reuse the existing maintenance receipt store:
+a lost reply returns the original numeric result, without deleting a second page.
+Each continuation advances the page number; no per-row receipt is added. Logs report numeric removed
+rows and JSON bytes only, without repository contents.
+
+The existing `projectWorkIndexStore.publish` retires its previous generation and
+schedules its bounded generation sweep. Retirement now also drains return pages
+and interrupted alias-owned records before deleting their generation; failed
+builds are included even when their source binding matches. Both retirement and
+replaced-payload cleanup use up to 100 rows with a 1 MiB read target (plus at
+most one document of overshoot), keeping small-row cleanup cheap. No original State, Git object,
+landing receipt, audit or planning record is eligible. Old unarmed operational
+rows need an explicitly bounded initial run; new terminal transitions arm their
+own expiry. No blanket legacy scan is automatic.
+
+`tests/landing-cost-guard.test.mjs` measures **net stored JSON document bytes**
+per table around one complete check/acceptance with a controlled clock and fixed synthetic source-timing input on a fresh synthetic project and
+a dogfood-shaped 4,096-file project with 128 changed files, a main-race
+recomposition and two checks with 1,000 reports/ten completed shards each. It compares
+immediate storage with the same landing after both retention windows. Its
+`tests/fixtures/landing-storage-budget.json` records every application table,
+including zero-growth tables; new tables and a per-table rise fail the check.
+This is a fixture measurement, not billed physical storage: indexes, Convex
+system-job retention and R2 objects are excluded. Source bytes remain in R2.
+The fixtures do not model every save, large source fan-out or a whole user month.
+
+| Fixture (one landing) | Immediate JSON bytes | After expiry, including page receipts |
+| --- | ---: | ---: |
+| Fresh project, two test shards | 53,279 | 50,417 |
+| Dogfood-shaped, main race / two large checks | 931,822 | 360,486 |
+
+The retained totals include 1,368 / 3,176 bytes of maintenance audit receipts in
+`legacyStorageCleanupPages`; these remain durable. The dominant reclaimed table
+is `projectHostedCheckRuns` (dogfood 573,484 → 7,440 bytes). Callback rows retain 822 / 1,656 bytes of digest receipts after raw-payload compaction; shards fall from
+720 / 1,448 to zero. The larger
+retained dogfood footprint includes its changed-path index, canonical Work and
+operation records; expiry does not cut that source/audit history. Every other table's
+budget, including zero-growth tables, is recorded in the JSON guard. These are
+before/after **expiry** measurements of the same synthetic landing, not a claim
+about a measured dashboard reduction or a live pre-change deployment.
+
+Controller-only test budgets report delayed retention allocations separately,
+keeping their original source/controller ceilings. The raw fixture counters and
+cumulative landing cost guard still include **all** system-job writes and bytes.
+Execution fixtures keep seven/thirty-day work outside their immediate controller
+queues; retention tests execute it under a controlled aged clock and assert the
+two check phases/one source-job wake. No cost or wake ceiling is raised.
+
+The per-table measurement and the retained/source-task byte tests complement the
+existing cumulative-I/O landing guard; write traffic is not stored footprint.
+Budget changes need the owning Issue's explanation, and savings lower the
+recorded budgets. The guard removes no product capability and sets no user quota.
+
+At 1,000 Forge-runner check runs, the two due phases create 2,000 initial maintenance calls
+plus eight-row continuations. A terminal source job with T tasks and B batches
+uses bounded task pages plus a final empty-batch probe; calls scale with pages,
+not source files. At most eight maximum-size task rows plus a job/batch/pool and
+physical execution records are live in one transaction (roughly 12 MiB of row
+payload, before runtime/JSON overhead). A check page holds a run plus eight rows
+(roughly 9 MiB before overhead). These are conservative payload bounds, not
+measured heap ceilings. Mutation CPU/wall time and billed index/delete bytes still
+need the dev run's provider usage; JSON bytes do not establish billed savings.
+No new vendor, worker or paid service is introduced.
+
+## Backup export cadence
+
+`hosted-backup.yml` stays weekly (Monday 03:00 UTC). Manual dispatches require
+the lead's OK: each snapshot export reads the whole database. Three manual
+exports on 10 November consumed **3.94 GB of database I/O**, according to the
+owner's Usage evidence on Issue `8c4f126b`. Cleanup/measurement must not dispatch
+another export as an inventory shortcut. This changes no workflow or backup
+contents; the existing weekly recovery path remains in place.

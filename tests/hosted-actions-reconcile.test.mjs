@@ -3,6 +3,7 @@ import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { actionsFixture } from './hosted-actions-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { code } from './hosted-checks-fixture.mjs';
@@ -543,6 +544,7 @@ test('eight-minute callback-driven check uses at most fifteen wake calls and zer
   const drain = async () => {
     for (let i = 0; i < s.scheduled.length; i++) {
       const task = s.scheduled[i];
+      if (getFunctionName(task.reference).startsWith('projectOperationalExpiry:')) continue;
       if (delivered.has(i)) continue;
       // Fixtures retain relative delays; mapping wakeAt is the current deadline.
       if (task.args.generation === s.mapping().wakeGeneration && s.mapping().wakeAt > s.now()) continue;

@@ -101,9 +101,18 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
     assert.equal(f.pending().length, 0);
   }
   assert.equal(audits, 3);
+  assert.equal(
+    [...f.tables._scheduled_functions.values()].filter(
+      row => row.state.kind === 'pending' && row.name.startsWith('projectOperationalExpiry:'),
+    ).length,
+    audits * 2,
+    'each completed audit arms two bounded retention phases, no idle poller',
+  );
   assert(runCalls.every(count => count <= 80));
   assert.equal(
-    [...f.tables._scheduled_functions.values()].filter(row => row.state.kind === 'pending').length,
+    [...f.tables._scheduled_functions.values()].filter(
+      row => row.state.kind === 'pending' && !row.name.startsWith('projectOperationalExpiry:'),
+    ).length,
     0,
   );
   const measured = f.counts.slice(start);
@@ -164,7 +173,9 @@ test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounde
   await f.start();
   assert.equal(f.tables.projectHostedMainAuditEvents.size, events);
   assert.equal(
-    [...f.tables._scheduled_functions.values()].filter(row => row.state.kind === 'pending').length,
+    [...f.tables._scheduled_functions.values()].filter(
+      row => row.state.kind === 'pending' && !row.name.startsWith('projectOperationalExpiry:'),
+    ).length,
     0,
   );
   t.diagnostic(

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
@@ -13,6 +14,7 @@ const size = value => (value === null ? 0 : Buffer.byteLength(JSON.stringify(val
  * No OCC simulation: race tests interleave transactions at their CAS boundary. */
 export function recordsFixture() {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
+  const expiryWakes = [];
   const locations = new Map(),
     indexes = new Map(),
     counts = [];
@@ -78,6 +80,17 @@ export function recordsFixture() {
     updateIndexes(table, old, tables[table].get(id));
   };
   const ctx = validateContext({
+    scheduler: {
+      runAfter: async (delay, ref, args) => {
+        const name = getFunctionName(ref);
+        assert(
+          name.startsWith('projectOperationalExpiry:'),
+          'execution work needs its explicit scheduler fixture',
+        );
+        expiryWakes.push({ delay, name, args });
+        return `expiry-${expiryWakes.length}`;
+      },
+    },
     db: {
       normalizeId: (table, id) => (locations.get(id) === table ? id : null),
       get: async id => {
@@ -243,6 +256,7 @@ export function recordsFixture() {
     });
   return {
     ctx,
+    expiryWakes,
     tables,
     counts,
     run,

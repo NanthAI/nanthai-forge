@@ -326,3 +326,41 @@ launchctl bootout "gui/$(id -u)" "$HOME/Library/LaunchAgents/dev.forge.convex-sp
 
 Review the private logs and `--print` output after installation. Restart warnings
 and gaps are evidence to inspect, never a reason to silently replace a deployment.
+
+
+## Retained storage and expiry in the spend model
+
+The [storage-per-landing guard](cost-to-serve.md#operational-expiry-and-storage-per-landing)
+measures application-document footprint separately from Completion write traffic.
+For L landings/month and the guard's retained bytes per landing R, first-month
+average added storage is `L * R / 2 / 1e9` GB. Add the starting stored gauge, each
+previous month's retained Work/source/history, and finite-window operational
+bytes. For callback raw payloads/tasks arriving at rates C/T bytes per day use seven days;
+for check-detail bytes D/day use thirty days. These windows start only after the
+run/whole job is terminal; active data and physical executions are kept. A steady
+uniform flow therefore adds approximately `7*(C+T) + 30*D` transient bytes, plus
+active work. This is a workload model, not a storage gauge or a quota.
+
+Use the operator's configured `databaseStorage` rate/allowance for document and
+index storage, and the appropriate search-storage rate for indexes. The fixture
+has no measurement of physical index amplification: do not add its JSON totals
+to the dashboard gauge, or treat JSON/delete bytes as billed I/O. R2 source and
+log storage is billed separately and must be added from its retained-byte meter.
+The existing private `storageUsage` snapshot remains the only storage input to
+plan billing; this documentation adds no provider probe or extra meter call.
+
+Expiry calls and read/**delete-write** I/O appear in the same Completion ledger
+under `projectOperationalExpiry:check` and `:source`; generation retirement uses
+`projectWorkIndexStore:retire`/`:retirePayload`. Include that maintenance in the
+landing denominator over a window long enough to include the seven/thirty-day
+wakes. A short post-deploy trace sees the new scheduled records but no due expiry,
+so it cannot prove lifetime savings or an idle-call ceiling. Once finite due work
+drains, there is no maintenance polling. Initial legacy cleanup must carry its
+own predicted read/write budget and measured usage rather than being attributed
+to one outside-user landing.
+
+The weekly hosted backup stays weekly; every manual dispatch needs the lead's
+OK. Export reads the whole database (the owner's three manual exports on
+10 November consumed 3.94 GB I/O). Snapshot-export traffic is absent from these
+function Completion logs and must be reconciled separately with provider Usage;
+no export is needed to measure or validate this model.

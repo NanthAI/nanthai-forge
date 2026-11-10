@@ -627,6 +627,75 @@ test('summary pages resolve a repeated actor once per request and keep fresh han
   assert.equal(accounts, 2);
 });
 
+test('generation retirement drains return pages and interrupted alias rows while preserving current/shared/migration partitions and original history', async t => {
+  const s = await setup(t);
+  const current = await indexActions.ensure._handler(s.ctx, { rebuild: true, projectId: s.projectId });
+  const { _id, _creationTime, ...fields } = s.tables.projectWorkGenerations.get(current);
+  void _id;
+  void _creationTime;
+  const retired = await s.ctx.db.insert('projectWorkGenerations', {
+    ...fields,
+    recordsGenerationId: current,
+  });
+  const migration = await s.ctx.db.insert('projectWorkGenerations', {
+    ...fields,
+    retainedForIntentMigration: 'migration',
+  });
+  for (let position = 0; position < 17; position++) {
+    await s.ctx.db.insert('projectReturnPages', {
+      projectId: s.projectId,
+      partitionId: retired,
+      key: 'cursor',
+      position,
+      body: 'derived',
+    });
+    await s.ctx.db.insert('projectWorkRecords', {
+      projectId: s.projectId,
+      generationId: retired,
+      collection: 'notes',
+      key: String(position),
+      parent: '',
+      position,
+      value: '{}',
+    });
+  }
+  const kept = ['projectBackups', 'projectWorkEvents', 'projectObjects'].map(name => [...s.tables[name]]);
+  const currentRows = [...s.tables.projectWorkRecords.values()].filter(row => row.generationId === current);
+  for (let i = 0; i < 10 && s.tables.projectWorkGenerations.has(retired); i++)
+    await store.retire._handler(s.ctx, { generationId: retired });
+  assert.equal(s.tables.projectWorkGenerations.has(retired), false);
+  assert.equal(s.tables.projectReturnPages.size, 0);
+  assert.deepEqual(
+    [...s.tables.projectWorkRecords.values()].filter(row => row.generationId === current),
+    currentRows,
+  );
+  await store.retire._handler(s.ctx, { generationId: current });
+  await store.retire._handler(s.ctx, { generationId: migration });
+  assert(s.tables.projectWorkGenerations.has(current));
+  assert(s.tables.projectWorkGenerations.has(migration));
+  assert.deepEqual(
+    ['projectBackups', 'projectWorkEvents', 'projectObjects'].map(name => [...s.tables[name]]),
+    kept,
+  );
+  await store.retire._handler(s.ctx, { generationId: retired });
+  const alias = await s.ctx.db.insert('projectWorkGenerations', { ...fields, recordsGenerationId: current });
+  const project = s.tables.hostedProjects.get(s.projectId);
+  project.work = { ...project.work, generationId: alias };
+  await store.retire._handler(s.ctx, { generationId: current });
+  assert(s.tables.projectWorkGenerations.has(current), 'current aliases keep their shared record partition');
+  const failed = await s.ctx.db.insert('projectWorkGenerations', { ...fields, status: 'failed' });
+  const scheduled = [];
+  s.ctx.scheduler.runAfter = async (_delay, ref, args) => {
+    scheduled.push({ name: getFunctionName(ref), args });
+    return 'scheduled';
+  };
+  await store.sweep._handler(s.ctx, { projectId: s.projectId, cursor: null });
+  assert(
+    scheduled.some(task => task.name === 'projectWorkIndexStore:retire' && task.args.generationId === failed),
+    'failed builds are swept even when their binding still matches',
+  );
+});
+
 test('owner decisions project additively into the shared workspace and exact collection without a format bump', async () => {
   const { readFileSync } = await import('node:fs');
   const { parseWork } = await import('../dist/work-unified-types.js');

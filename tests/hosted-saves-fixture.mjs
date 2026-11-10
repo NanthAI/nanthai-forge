@@ -16,7 +16,8 @@ export const maxima = {};
 export async function saveFixture(originalText = 'original', originalPath = 'a.txt') {
   const s = lanesFixture(),
     objects = new Map(),
-    scheduled = [];
+    scheduled = [],
+    expiryWakes = [];
   const projectId = s.insert('hostedProjects', {
     key: 'synthetic',
     name: 'Synthetic',
@@ -34,8 +35,13 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
           exportArgs: fn.exportArgs,
           _handler: async (ctx, input) => {
             ctx.scheduler = {
-              runAfter: async (_delay, ref, args) => {
-                scheduled.push({ name: getFunctionName(ref), args });
+              runAfter: async (delay, ref, args) => {
+                const name = getFunctionName(ref);
+                (name.startsWith('projectOperationalExpiry:') ? expiryWakes : scheduled).push({
+                  name,
+                  args,
+                  delay,
+                });
                 return 'task';
               },
             };
@@ -271,5 +277,6 @@ export async function saveFixture(originalText = 'original', originalPath = 'a.t
     publish,
     change,
     scheduled,
+    expiryWakes,
   };
 }

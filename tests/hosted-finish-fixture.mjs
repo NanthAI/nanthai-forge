@@ -264,7 +264,8 @@ export async function finishFixture(
   const row = id => [...f.tables.projectHostedFinishes.values()].find(x => x.submissionId === id);
   const pending = () =>
     [...f.tables._scheduled_functions.values()]
-      .filter(x => x.state.kind === 'pending')
+      // Retention runs weeks after this landing; expiry has its own time-controlled tests.
+      .filter(x => x.state.kind === 'pending' && !x.name.startsWith('projectOperationalExpiry:'))
       .sort((a, b) => a.scheduledTime - b.scheduledTime);
   const reuseDecisions = [];
   const runReuseAction = async (ref, args) => {

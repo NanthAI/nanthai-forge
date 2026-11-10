@@ -64,6 +64,7 @@ async function wave(t, { count = 5, batchMaxSize = null, stop = () => false } = 
     transactions: spent.length,
     documentsRead: spent.reduce((n, c) => n + c.documents, 0),
     documentsWritten: spent.reduce((n, c) => n + c.writes, 0),
+    maintenanceWrites: spent.reduce((n, c) => n + (c.maintenanceWrites ?? 0), 0),
     readBytes: spent.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: spent.reduce((n, c) => n + c.writeBytes, 0),
   };
@@ -90,7 +91,10 @@ test('stale Lane proofs behind a refusal recompose together into one cohort', as
   assert.equal(Date.parse(cohort.at) - t0, Math.max(...times), 'cohort formed as soon as all were refused');
   // No more Convex work than the serial path (BASELINE): not one more call.
   assert(budget.transactions <= BASELINE.transactions, JSON.stringify(budget));
-  assert(budget.documentsWritten <= BASELINE.documentsWritten, JSON.stringify(budget));
+  assert(
+    budget.documentsWritten - budget.maintenanceWrites <= BASELINE.documentsWritten,
+    JSON.stringify(budget),
+  );
   assert(budget.documentsRead <= BASELINE.documentsRead, JSON.stringify(budget));
   assert(
     rows(f).every(r => r.deciding === undefined && !r.orderWait),

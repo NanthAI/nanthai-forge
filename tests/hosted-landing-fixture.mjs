@@ -165,7 +165,9 @@ export async function landingFixture(source = null) {
   const queue = () =>
     [...f.tables.projectHostedLandingQueues.values()].find(r => r.projectId === f.projectId);
   const pendingTasks = () =>
-    [...f.tables._scheduled_functions.values()].filter(t => t.state.kind === 'pending');
+    [...f.tables._scheduled_functions.values()].filter(
+      t => t.state.kind === 'pending' && !t.name.startsWith('projectOperationalExpiry:'),
+    );
   const nextTask = () => pendingTasks().sort((a, b) => a.scheduledTime - b.scheduledTime)[0];
   const claim = (task = nextTask()) =>
     run('landingClaim', (ctx, args) => control.claimLandingQueue(ctx, args, now), task.args[0]);
