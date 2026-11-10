@@ -61,13 +61,12 @@ merges (or why nothing can go).
 6. Save after each meaningful step (at least every ~30 minutes): each save runs the exact conflict check; read the head and capture coverage. Use `mktemp`
    logs, never shared fixed paths. Keep a private handoff with observation time,
    saved head, operation id and next action for interruption recovery.
-7. Read hosted start/save/status overlap advice and `presence` notices before editing
-   and coordinate shared scope; `peers {laneId}` reads the same evidence. Read
-   `unacknowledgedOverlaps` and `behindMain` from `start`, and list your owned files
-   in your first save message. Saved-path windows exclude unsaved peer
-   edits; missing notices never prove independence. Answer blocking notices
-   before landing; advisory notices need no answer. Record order/split, notice
-   counts and conflicts. Missing alerts mean friction, not independence.
+7. Read hosted `behindMain` and `presence` notices before editing and coordinate
+   shared scope; native owners can use `peers`. List your owned files in your first
+   save message. Each save trial-merges your saved files with peers; a real conflict
+   comes back as `conflictNotice` (nothing to answer: coordinate, stack or split).
+   Saved-path windows exclude unsaved peer edits; no notice never proves
+   independence. Record conflicts. Missing alerts mean friction, not independence.
 8. Add a test only for a behaviour, contract or incident you can name, and put that name in the test (a brief
    asks for the guarded behaviour, not for "tests"; [test signal](lint-rules.md#test-signal)).
    Save then `preflight {laneId}`. Run all affected tests: tests you add, direct and

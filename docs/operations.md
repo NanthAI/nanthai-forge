@@ -336,7 +336,7 @@ this member landed on its own check; else null) and
 in retained compose results (R2), so `conflictPaths` is null today. Follow `nextCursor`
 until it is null. Nothing in it depends on GitHub.
 
-Paging rule for time-window reads (`landings`, `overlap-answers`): a page returns every row up to its limit or byte budget, or a `nextCursor` naming the next row; it is never silently short. The cursor is `TIME` or `TIME:SKIP`, so rows sharing one stored instant (a batch) neither repeat nor stall a page, and a window of any length pages to every row once. `metrics` pages follow the platform `isDone`/`continueCursor` pair instead.
+Paging rule for time-window reads (`landings`): a page returns every row up to its limit or byte budget, or a `nextCursor` naming the next row; it is never silently short. The cursor is `TIME` or `TIME:SKIP`, so rows sharing one stored instant (a batch) neither repeat nor stall a page, and a window of any length pages to every row once. `metrics` pages follow the platform `isDone`/`continueCursor` pair instead.
 
 `status {runId,summary:true}` (`projectHostedCheckRead:summary`) is the bounded read of one
 check run: the same single run-row read as `status`, but the reply is counts, failed and
@@ -355,15 +355,7 @@ no blob reads. A friction id given to `comment-planning-item` fails with a point
 records take no comments, so comment on the Issue the record was triaged to (one indexed read,
 only on that failure).
 
-`overlap-answers {laneId?,from?,to?,limit?,cursor?}` reads stored overlap answers by Lane or
-by the window [from,to) of the time they were stored: one query per page from creation-time
-indexes, at most 50 rows (default 20), 56 KB of reply and 800 KB read a page, no writes. They are
-kept 90 days (owner decision 2026-11-06; the named value `OVERLAP_ANSWER_RETENTION_MS` beside the
-other overlap limits in `src/hosted-overlap.ts`). Cleanup rides on the existing answer write: after
-it stores a new answer it deletes up to 10 older-than-90-days answers and 10 answer batch records
-through the creation-time index (two small indexed reads, no cron, nothing on idle or on the landing
-path). The read never returns expired rows, so the bound holds before cleanup reaches them. A
-notice whose answer expired on a Lane still open after 90 days is shown again.
+Overlap answers (`overlap-answers`, `ack`, `peer-ack`, `overlap-acks`) were removed with path overlap notices (Issue 853fcde3); their tables were exported to the private backup before they left the schema, and old CLIs that call them get `CLI_UPGRADE_REQUIRED`.
 
 Quarantined tests continue to run. A check passes with quarantine only when all
 remaining failures are named, quarantined and unrelated, and every non-test step

@@ -58,17 +58,7 @@ export async function boundAgentRecords(
 ): Promise<Response> {
   if (!input || typeof input !== 'object') return native(input);
   const { action, ...command } = input as Command;
-  if (
-    ![
-      'friction',
-      'friction-list',
-      'friction-triage',
-      'decide',
-      'decisions',
-      'peer-ack',
-      'overlap-acks',
-    ].includes(String(action))
-  )
+  if (!['friction', 'friction-list', 'friction-triage', 'decide', 'decisions'].includes(String(action)))
     return native(input);
   const binding = readHostState(store).binding;
   if (!binding || sourceAuthority(binding).mode !== 'server') return native(input);
@@ -76,20 +66,6 @@ export async function boundAgentRecords(
     supplied ??
     new HostedAgentTransport(store.root, { url: binding.deployment, projectId: binding.projectId });
   const response = await transport.dispatch(String(action), command);
-  if (action === 'peer-ack' || action === 'overlap-acks') {
-    const answers = z
-      .object({
-        answers: z.array(
-          z.object({ laneId: z.uuid(), noticeId: z.string().regex(/^[a-f0-9]{64}$/) }).passthrough(),
-        ),
-      })
-      .parse(response.result).answers;
-    for (const answer of answers) {
-      const directory = join(store.directory, 'hosted-overlap-answers', answer.laneId);
-      mkdirSync(directory, { recursive: true, mode: 0o700 });
-      durableReplace(join(directory, `${answer.noticeId}.json`), canonicalPayload(answer));
-    }
-  }
   return { revision: store.revision(), result: response.result };
 }
 

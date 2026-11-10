@@ -3,15 +3,9 @@ import { attributionEdits as edits, attributionLines as lines } from './native-t
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
 import { nativeMergeMessage, type NativeMergeResolution } from './native-merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
-import { markdownDoc } from './docs-resolution.js';
-import { globPattern } from './autonomy-policy.js';
-import {
-  declaredMergePaths,
-  FORGE_CONFIG_FILE,
-  type DeclaredMergePaths,
-  type ListMergeRule,
-} from './project-config.js';
-export { DOCS_RULE, markdownDoc } from './docs-resolution.js';
+import { conflictRule, markdownDoc, type ConflictRule } from './docs-resolution.js';
+import { declaredMergePaths, FORGE_CONFIG_FILE, type DeclaredMergePaths } from './project-config.js';
+export { DOCS_RULE, markdownDoc, conflictRule, type ConflictRule } from './docs-resolution.js';
 
 type Edit = { start: number; end: number; lines: string[]; side: 0 | 1 };
 const LIST = /^\s*(?:[-*+]\s|\d+[.)]\s|\|)|^\s*$/;
@@ -26,31 +20,18 @@ const overlaps = (a: Edit, b: Edit) => {
         ? b.start >= a.start && b.start <= a.end
         : a.start < b.end && b.start < a.end;
 };
-/** Which rule merges a conflict at `path`: a forge.json `merge` declaration first (fragments, then
- * union), else the Markdown docs rule; undefined keeps the conflict. */
-export type ConflictRule = 'docs' | ListMergeRule;
-export function conflictRule(path: string, declared: DeclaredMergePaths): ConflictRule | undefined {
-  const matches = (globs: string[]) =>
-    globs.some(glob => {
-      try {
-        return globPattern(glob).test(path);
-      } catch {
-        return false;
-      }
-    });
-  if (matches(declared.fragments)) return 'fragments';
-  if (matches(declared.union)) return 'union';
-  return markdownDoc(path) ? 'docs' : undefined;
-}
 /** forge.json files above this size declare no merge paths (the file is settings, not data). */
 const CONFIG_MAX_BYTES = 128 * 1024;
 /** The merge paths accepted `main` declares. Read from main only: the Lane being merged cannot
  * widen the rule for its own landing. One small object read, only on a conflicted composition. */
 function mainMergePaths(source: NativeSource, main: string): DeclaredMergePaths {
   const file = source.state(main).files.find(item => item.path === FORGE_CONFIG_FILE);
-  if (!file || file.mode !== 'file') return { union: [], fragments: [] };
-  const bytes = source.object(file.blob);
-  return bytes.length > CONFIG_MAX_BYTES
+  return mergePathsOf(file?.mode === 'file' ? source.object(file.blob) : undefined);
+}
+/** The merge paths main's forge.json bytes declare (none when absent or over CONFIG_MAX_BYTES).
+ * Shared with the save's trial merge, so a notice never names what compose would merge. */
+export function mergePathsOf(bytes: Buffer | undefined): DeclaredMergePaths {
+  return !bytes || bytes.length > CONFIG_MAX_BYTES
     ? { union: [], fragments: [] }
     : declaredMergePaths(bytes.toString('utf8'));
 }

@@ -41,7 +41,6 @@ const READ_ACTIONS = new Set([
   'queue',
   'landings',
   'lane-history',
-  'overlap-answers',
   'doctor',
   'candidate',
   'candidates',

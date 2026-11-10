@@ -3,7 +3,6 @@
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import type { ExactConflictNotice } from './hosted-conflict-notice.js';
-import type { overlapBannerOnce } from './hosted-overlap-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
@@ -389,11 +388,13 @@ try {
     process.stdout.write(
       `${JSON.stringify(printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
-    // The JSON receipt on stdout carries overlapNotice too; the banner keeps it from being missed in a log.
-    const notice = (output as { overlapNotice?: Parameters<typeof overlapBannerOnce>[0] } | null)
-      ?.overlapNotice;
-    if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && notice)
-      process.stderr.write((await import('./hosted-overlap-notice.js')).overlapBannerOnce(notice));
+    // The JSON receipt on stdout carries stackOffer too; the line keeps it from being missed in a log.
+    const offer = (output as { stackOffer?: { mode: string; text: string; command: string } } | null)
+      ?.stackOffer;
+    if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && offer)
+      process.stderr.write(
+        `Stack (${offer.mode}): ${offer.text}\n${offer.mode === 'offer' ? `  ${offer.command}\n` : ''}`,
+      );
     const exact = (output as { conflictNotice?: ExactConflictNotice } | null)?.conflictNotice;
     if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && exact)
       process.stderr.write((await import('./hosted-conflict-notice.js')).exactConflictBannerOnce(exact));
@@ -420,11 +421,6 @@ try {
     process.stderr.write(
       `${JSON.stringify(await withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
     );
-    // A gate refusal names the blocking notices it judged and their exact answer (c8b842a9).
-    if (process.argv[2] === 'agent' || process.argv[2] === 'x')
-      process.stderr.write(
-        (await import('./hosted-overlap-notice.js')).refusalOverlapBanner(failure.recovery),
-      );
   }
   process.exitCode = 1;
 }

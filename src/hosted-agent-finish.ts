@@ -432,13 +432,12 @@ async function executeFinishWork(session: HostedAgentSession, input: unknown) {
     )
       throw nothingToLandError(selection.laneId);
     await session.journal.retain(finishChangedPathsKey, () => changed);
-    // Agent defaults (overlap gate, preflight) judge the saved head this finish will land.
+    // Agent defaults (preflight) judge the saved head this finish will land.
     if (session.finishGates) {
       const advice = await session.finishGates(
         selection.laneId,
         selection.head,
         savedMarker?.selection.head === selection.head ? savedMarker.tree : undefined,
-        command.overlapAnswer,
       );
       if (Object.keys(advice).length) await session.journal.retain('finish-defaults', () => advice);
     }

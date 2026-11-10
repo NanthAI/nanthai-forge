@@ -5,8 +5,6 @@ import { canonicalEditPath, editTarget } from './agent-edit-target.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData } from 'node:worker_threads';
 import { recordEditDelivery } from './agent-edit-metrics.js';
-import { metricOutboxDirectory, writeCallerReceipts } from './hosted-metric-outbox-write.js';
-import type { CallerReceipt } from './self-metric-receipts.js';
 import type { MetricObservation } from './self-metrics-observations.js';
 import { childEnv } from '../scripts/child-env.mjs';
 import { spawnSync } from 'node:child_process';
@@ -112,12 +110,8 @@ const hookDeliveries: {
   directory: string;
   event: Extract<MetricObservation, { type: 'overlap-delivery' }>;
 }[] = [];
-/** Hosted first-write deliveries (metric 5.4), written by the supervisor after it answers and carried
- * to the server by the next Lane mutation that sends caller receipts: no call of their own. */
-const hookReceipts: { directory: string; receipt: Extract<CallerReceipt, { kind: 'first-write' }> }[] = [];
-function recordHookOutput(message: { deliveries?: typeof hookDeliveries; receipts?: typeof hookReceipts }) {
+function recordHookOutput(message: { deliveries?: typeof hookDeliveries }) {
   for (const delivery of message.deliveries ?? []) recordEditDelivery(delivery.directory, delivery.event);
-  for (const item of message.receipts ?? []) writeCallerReceipts(item.directory, [item.receipt]);
 }
 async function worker(owner: string, laneId: string, input: Record<string, unknown>) {
   if (owner === '--auto') return autoWorker(input);
@@ -224,22 +218,6 @@ async function autoWorker(input: Record<string, unknown>) {
       if (input.hook_event_name === 'UserPromptSubmit') continue;
       const session = String(input.session_id ?? input.tool_use_id ?? randomUUID());
       const result = await preEditHosted(target, session);
-      if (result.status === 'overlap')
-        hookReceipts.push({
-          directory: metricOutboxDirectory({ url: target.url, projectId: target.project }),
-          receipt: {
-            kind: 'first-write',
-            actor: null,
-            at: new Date().toISOString(),
-            laneId: target.laneId,
-            // Opaque: one first write per session, Lane and path (the hook's own cache key).
-            writeId: createHash('sha256')
-              .update(JSON.stringify([target.url, target.project, target.laneId, session, target.path]))
-              .digest('hex'),
-            count: Math.max(1, Math.min(10_000, result.count ?? result.overlaps.length)),
-            paths: [target.path.slice(0, 1024)],
-          },
-        });
       const context = hostedEditContext(result);
       if (context) contexts.push(context);
     } else {
@@ -264,7 +242,6 @@ if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
       kind: 'forge-edit-hook-result',
       output,
       deliveries: hookDeliveries,
-      receipts: hookReceipts,
     });
   } catch {
     workerData.port.postMessage({ failed: true });
@@ -287,7 +264,6 @@ if (!isMainThread && workerData?.kind === 'forge-edit-hook') {
               kind: 'forge-edit-hook-result',
               output: result,
               deliveries: hookDeliveries,
-              receipts: hookReceipts,
             }
           : result,
       ) + '\n',

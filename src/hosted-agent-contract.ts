@@ -64,8 +64,6 @@ export const hostedAgentRecordActions = [
   'friction-triage',
   'decide',
   'decisions',
-  'peer-ack',
-  'overlap-acks',
 ] as const;
 /** Project policy: one Convex call each, served before capability discovery. Not advertised;
  * the server enforces owner authority on set-policy. */
@@ -78,7 +76,6 @@ export const hostedAgentReviewActions = ['approve-link', 'request-approval'] as 
 export const hostedAgentLandingActions = ['withdraw'] as const;
 /** Composed by the client from existing reads and mutations; never advertised in capabilities. */
 export const hostedAgentClientActions = [
-  'ack',
   'preflight',
   'source-pack',
   'recover-apply',
@@ -234,7 +231,6 @@ export const hostedAgentCommandSchemas = {
       keepOpen: z.boolean().optional(),
       closes: z.boolean().optional(),
       priority: z.enum(['urgent', 'normal']).optional(),
-      overlapAnswer: z.literal('accept-order').optional(),
       /** Land a Lane whose saved head changes nothing against its base (otherwise refused). */
       allowEmpty: z.boolean().optional(),
       retry: z.boolean().optional(),
@@ -248,14 +244,6 @@ export const hostedAgentCommandSchemas = {
       submissionId: uuid,
       priority: z.enum(['urgent', 'normal']),
       asOwner: z.literal(true).optional(),
-    })
-    .strict(),
-  /** Client-composed: answer every pending overlap notice on the Lane in one batch. */
-  ack: z
-    .object({
-      ...lane,
-      choice: z.enum(['accept-order', 'swap', 'split']).default('accept-order'),
-      text: z.string().min(1).max(2000).optional(),
     })
     .strict(),
   /** Client-composed: select the saved head's affected tests, run them here and record the result. */

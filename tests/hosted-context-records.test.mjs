@@ -23,7 +23,11 @@ const decision = (extra = {}) => ({
   why: 'Retain context',
   ...extra,
 });
-const list = s => s.invoke('projectHostedDecisions:list', { projectId: 'project', cursor: null });
+const list = s =>
+  s.invoke('projectHostedDecisions:list', {
+    projectId: 'project',
+    cursor: null,
+  });
 
 test('friction and decisions replay exactly; changed requests fail without appending', async () => {
   const s = recordsFixture();
@@ -39,7 +43,10 @@ test('friction and decisions replay exactly; changed requests fail without appen
     assert.deepEqual(await s.request(name, command), first);
     assert.equal(s.counts().writes, writes);
     await assert.rejects(
-      s.request(name, { ...command, ...(command.title ? { title: 'Changed' } : { why: 'Changed' }) }),
+      s.request(name, {
+        ...command,
+        ...(command.title ? { title: 'Changed' } : { why: 'Changed' }),
+      }),
       code('WORK_OPERATION_CHANGED'),
     );
     assert.equal(s.counts().writes, writes);
@@ -79,11 +86,19 @@ test('current stranger/contributor/maintainer authority is checked on writes and
     code('PROJECT_UNAVAILABLE'),
   );
   s.caller('owner');
-  const grant = { projectId: 'project', operationId: randomUUID(), actor: 'contributor', enabled: true };
+  const grant = {
+    projectId: 'project',
+    operationId: randomUUID(),
+    actor: 'contributor',
+    enabled: true,
+  };
   await s.invoke('projectHostedDecisions:setMaintainer', grant);
   await s.invoke('projectHostedDecisions:setMaintainer', grant);
   await assert.rejects(
-    s.invoke('projectHostedDecisions:setMaintainer', { ...grant, enabled: false }),
+    s.invoke('projectHostedDecisions:setMaintainer', {
+      ...grant,
+      enabled: false,
+    }),
     code('WORK_OPERATION_CHANGED'),
   );
   s.caller('contributor');
@@ -102,15 +117,6 @@ test('current stranger/contributor/maintainer authority is checked on writes and
     for (const [name, command] of [
       ['projectHostedFriction:capture', friction()],
       ['projectHostedDecisions:decide', decision()],
-      [
-        'projectHostedOverlapAcks:append',
-        {
-          operationId: randomUUID(),
-          answers: [
-            { operationId: randomUUID(), laneId: randomUUID(), noticeId: 'a'.repeat(64), choice: 'split' },
-          ],
-        },
-      ],
     ])
       await assert.rejects(s.request(name, command), code('PROJECT_UNAVAILABLE'));
   }
@@ -141,53 +147,21 @@ test('append-only supersession retains chains and forks; pages and briefs derive
   assert.equal((await list(s)).page.length, 4);
 });
 
-test('ack batch records 100 metric-compatible answers in one call, with stable replay and no scheduler', async t => {
+test('retired overlap answer endpoints refuse old CLIs with the upgrade step and write nothing', async () => {
   const s = recordsFixture();
-  s.tables.projectContributors.set('c', { _id: 'c', projectId: 'project', contributor: 'contributor' });
   s.caller('contributor');
-  const batch = {
-    operationId: randomUUID(),
-    answers: Array.from({ length: 100 }, (_, i) => ({
-      operationId: randomUUID(),
-      laneId: randomUUID(),
-      noticeId: String(i).padStart(64, '0'),
-      choice: i % 2 ? 'split' : 'accept-order',
-    })),
-  };
-  const before = s.counts(),
-    started = performance.now();
-  const result = await s.request('projectHostedOverlapAcks:append', batch);
-  const cost = {
-    calls: s.counts().calls - before.calls,
-    reads: s.counts().reads - before.reads,
-    writes: s.counts().writes - before.writes,
-    durationMs: Math.round(performance.now() - started),
-  };
-  t.diagnostic(JSON.stringify({ ackBatch100: cost }));
-  assert.equal(cost.calls, 1);
-  assert.equal(cost.writes, 101);
-  assert.ok(cost.reads <= 3);
-  assert.equal(result.answers.length, 100);
-  assert.equal(result.answers[0].disposition, 'acknowledged');
-  assert.equal(result.answers[1].disposition, 'routed-around');
-  assert.match(result.answers[0].deliveryId, /^hook:[a-f0-9]{64}$/);
-  assert.deepEqual(await s.request('projectHostedOverlapAcks:append', batch), result);
+  const before = s.counts();
+  const upgrade = error =>
+    error.data?.code === 'CLI_UPGRADE_REQUIRED' && /Upgrade nforge/.test(error.data.message);
+  await assert.rejects(s.request('projectHostedOverlapAcks:append', { operationId: randomUUID() }), upgrade);
   await assert.rejects(
-    s.request('projectHostedOverlapAcks:append', { ...batch, answers: batch.answers.slice(1) }),
-    code('WORK_OPERATION_CHANGED'),
-  );
-  await assert.rejects(
-    s.request('projectHostedOverlapAcks:append', {
-      operationId: randomUUID(),
-      answers: [{ ...batch.answers[0], choice: 'swap' }],
+    s.invoke('projectHostedOverlapAcks:list', {
+      projectId: 'project',
+      cursor: null,
     }),
-    code('WORK_OPERATION_CHANGED'),
+    upgrade,
   );
-  assert.equal(s.scheduled.length, 0);
-  assert.equal(
-    (await s.invoke('projectHostedOverlapAcks:list', { projectId: 'project', cursor: null })).page.length,
-    100,
-  );
+  assert.equal(s.counts().writes, before.writes);
 });
 
 test('real Convex argument validators reject extra/wrong arguments and native authority refuses hosted writes', async () => {
@@ -237,8 +211,12 @@ test('decision lists retain opaque page cursors and bounded brief coverage beyon
       requester: { kind: 'agent', name: 'fixture' },
     };
   });
-  await s.request('projectHostedFrictionImport:apply', { decisions: records.slice(0, 100) });
-  await s.request('projectHostedFrictionImport:apply', { decisions: records.slice(100) });
+  await s.request('projectHostedFrictionImport:apply', {
+    decisions: records.slice(0, 100),
+  });
+  await s.request('projectHostedFrictionImport:apply', {
+    decisions: records.slice(100),
+  });
   const before = s.counts().calls,
     first = await list(s);
   assert.equal(s.counts().calls - before, 1);

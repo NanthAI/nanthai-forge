@@ -60,17 +60,13 @@ export async function executeHostedRecords(
       operationId as string | undefined,
     );
     const command = { ...parsed.data, operationId: journal.operationId };
-    const request =
-      action === 'peer-ack' ? { operationId: journal.operationId, answers: [command] } : command;
     const endpoint =
       action === 'friction'
         ? 'projectHostedFriction:capture'
         : action === 'friction-triage'
           ? 'projectHostedFriction:triage'
-          : action === 'decide'
-            ? 'projectHostedDecisions:decide'
-            : 'projectHostedOverlapAcks:append';
-    const result = await transport.mutation(endpoint, { request: canonicalPayload(request) });
+          : 'projectHostedDecisions:decide';
+    const result = await transport.mutation(endpoint, { request: canonicalPayload(command) });
     return {
       schema: 1,
       transport: 'hosted',

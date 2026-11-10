@@ -23,8 +23,7 @@ const lane = (id, change, extra = {}) => ({
   ...extra,
 });
 const advice = (mine, peers) =>
-  hostedOverlapAdvice(mine, peers, null, { head: 'base', sourceRevision: 0 }, new Set())
-    .unacknowledgedOverlaps;
+  hostedOverlapAdvice(mine, peers, null, { head: 'base', sourceRevision: 0 }).overlaps;
 
 test('B1.5d retains 66 notices and 22 missed pairs; unknown peer remains unrun', t => {
   assert.equal(corpus.cases.filter(c => c.kind === 'notice').length, 66);
@@ -87,7 +86,10 @@ test('B1.5d retains 66 notices and 22 missed pairs; unknown peer remains unrun',
 test('resolve origin and siblings are excluded by exact provenance, not merely same Intent', () => {
   const a = corpus.cases.find(c => c.kind === 'missed').changes[0];
   const b = corpus.cases.find(c => c.kind === 'missed').changes[1];
-  const mine = lane('resolve', a, { intentId: 'intent', resolutionLeft: 'origin-head' });
+  const mine = lane('resolve', a, {
+    intentId: 'intent',
+    resolutionLeft: 'origin-head',
+  });
   const peer = lane('origin', b, { intentId: 'intent', head: 'origin-head' });
   assert.equal(advice(mine, [peer]).count, 0);
   assert.equal(
@@ -119,7 +121,10 @@ test('large early-file evidence cannot push later test paths out of the projecti
   }
   assert.equal(bounded.complete, false, 'omitted evidence remains incomplete');
   assert.equal(
-    preflightPlan('.', { paths: changes.map(c => c.path), complete: bounded.complete }).status,
+    preflightPlan('.', {
+      paths: changes.map(c => c.path),
+      complete: bounded.complete,
+    }).status,
     'unavailable',
     'better path visibility never expands mandatory preflight coverage',
   );

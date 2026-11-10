@@ -3,54 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { slimReceipt, printedReceipt } from '../dist/receipt-slim.js';
-import { markOverlapShown, overlapBannerOnce } from '../dist/hosted-overlap-notice.js';
 
 // Issue 47558a99: receipts leave the process without facts the agent already holds. Budgets are
 // characters of the printed JSON (tokens are about chars / 4); raise one only with numbers on the Issue.
-const SAVE_WITH_ADVISORY_OVERLAPS = 400; // 2026-11-06: a live save with 3 advisory overlaps was 6,180, then 1,744, now 281
 const MEDIAN_RECEIPT = 300; // chars, healthy start/save/sync/land receipts (Issue 47558a99 target)
 const MAX_HEALTHY_RECEIPT = 450; // the terminal wait and landing carry a receipt id and a State (64 hex)
 const sha = 'a'.repeat(64);
 const laneId = randomUUID();
-const peer = n => ({ lane: randomUUID(), actor: 'someone', intent: `Peer change ${n}` });
-const notice = (required, count = 3) => {
-  const items = Array.from({ length: count }, (_, i) => ({
-    noticeId: sha.replace(/a/g, String(i)),
-    class: required ? 'blocking' : 'advisory',
-    reason: 'unavailable',
-    file: 'src/a.ts',
-    participants: [{ lane: laneId, actor: 'me', intent: 'Mine' }, peer(i)],
-    text: `advisory overlap: src/a.ts; Lane ${randomUUID()} (Peer change ${i}); unavailable.`,
-    lanes: [laneId, randomUUID()],
-  }));
-  return {
-    unacknowledgedOverlaps: {
-      laneId,
-      head: sha,
-      count,
-      blockingCount: required ? count : 0,
-      advisoryCount: required ? 0 : count,
-      coverage: 'hosted-incomplete',
-      items,
-    },
-    overlapNotice: {
-      required,
-      summary: `${count} file overlap(s) between this Lane and other open Lanes.`,
-      count,
-      coverage: 'hosted-incomplete',
-      items: items.map(item => ({
-        ...item,
-        with: item.participants.slice(1),
-        participants: undefined,
-        text: undefined,
-        lanes: undefined,
-      })),
-      choices: { 'accept-order': 'Keep your change.', swap: 'Ask first.', split: 'Route around.' },
-      acknowledge: `nforge agent '/root' overlap-acks '${JSON.stringify({ answers: items.map(i => ({ operationId: randomUUID(), laneId, noticeId: i.noticeId, choice: 'accept-order' })) })}'`,
-      routeAround: `nforge agent '/root' overlap-acks '${JSON.stringify({ answers: items.map(i => ({ operationId: randomUUID(), laneId, noticeId: i.noticeId, choice: 'split' })) })}'`,
-    },
-  };
-};
 const save = extra => ({
   schema: 1,
   cliCommit: sha,
@@ -89,35 +48,15 @@ const save = extra => ({
 });
 const chars = value => JSON.stringify(value).length;
 
-test('a save with advisory overlaps keeps every decision fact once', t => {
-  const full = save(notice(false)),
-    slim = slimReceipt(full);
-  t.diagnostic(`save with 3 advisory overlaps: ${chars(full)} -> ${chars(slim)} chars`);
-  assert(chars(slim) <= SAVE_WITH_ADVISORY_OVERLAPS, `${chars(slim)} chars`);
-  // The count, the files, who they are with (d730121f) and the saved head survive; the rest of the
-  // per-peer detail is one `peers` read away.
-  assert.deepEqual(slim.overlapNotice, {
-    required: false,
-    count: 3,
-    files: ['src/a.ts'],
-    with: full.overlapNotice.items.map(item => `${item.with[0].lane.slice(0, 8)} someone: src/a.ts`),
-  });
-  assert(!('unacknowledgedOverlaps' in slim), 'the notice carries the count');
+test('a save drops the retired overlap list an older server still sends (Issue 853fcde3)', () => {
+  const slim = slimReceipt(
+    save({ unacknowledgedOverlaps: { count: 0, items: [], coverage: 'unavailable' } }),
+  );
+  assert(!('unacknowledgedOverlaps' in slim));
   assert.equal(slim.result.outcome.result.head, sha);
   assert.equal(slim.result.outcome.status, 'completed');
-  // An advisory notice needs no answer, so it carries no answer commands.
-  assert(!('acknowledge' in slim.overlapNotice) && !('routeAround' in slim.overlapNotice));
   assert(!('behindMain' in slim), 'not behind main: nothing to say');
   assert(!('cliCommit' in slim) && !('schema' in slim) && !('transport' in slim) && !('resolved' in slim));
-});
-
-test('a blocking notice keeps its ready-to-run answers', () => {
-  const full = save(notice(true)),
-    slim = slimReceipt(full);
-  assert.equal(slim.overlapNotice.required, true);
-  assert.equal(slim.overlapNotice.acknowledge, full.overlapNotice.acknowledge);
-  assert.equal(slim.overlapNotice.routeAround, full.overlapNotice.routeAround);
-  assert(!('choices' in slim.overlapNotice));
 });
 
 test('behind main, a checkout and a healthy mirror report only what differs', () => {
@@ -181,7 +120,7 @@ test('peers keeps the evidence once', () => {
       peerEvidence: { count: 1, items },
     },
   });
-  assert.deepEqual(slim.result.unacknowledgedOverlaps, { count: 1 });
+  assert(!('unacknowledgedOverlaps' in slim.result), 'retired list dropped');
   assert.deepEqual(slim.result.peerEvidence.items, items);
 });
 
@@ -518,17 +457,13 @@ test('--detail data is only dropped from the printed copy', () => {
 });
 
 test('the land submitter prints the full receipt its parent process parses', () => {
-  // Regression: the brief advisory notice has no `items`, and the land parent iterates them. The child's
-  // stdout is machine input, so only a process that a person or agent reads is shortened.
-  const full = save(notice(false));
+  // The child's stdout is machine input, so only a process that a person or agent reads is shortened.
+  const full = save({});
   assert.equal(printedReceipt(full, { agent: true, detail: false, landChild: true }), full);
   assert.equal(printedReceipt(full, { agent: true, detail: true, landChild: false }), full);
   assert.equal(printedReceipt(full, { agent: false, detail: false, landChild: false }), full);
   const printed = printedReceipt(full, { agent: true, detail: false, landChild: false });
   assert.notEqual(printed, full);
-  // Even a brief notice cannot crash the banner or the shown-notice bookkeeping.
-  assert.equal(overlapBannerOnce(printed.overlapNotice), '');
-  markOverlapShown(printed.overlapNotice);
 });
 
 test('a timed save keeps its total and drops the split, as sync does (friction f15db544)', () => {

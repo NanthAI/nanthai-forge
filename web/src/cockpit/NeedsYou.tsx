@@ -15,7 +15,6 @@ const kinds: Record<DecisionItem['kind'], { label: string; glyph: GlyphName }> =
   handoff: { label: 'Handoff to you', glyph: 'handoff' },
   message: { label: 'Message', glyph: 'message' },
   failed: { label: 'Check failed', glyph: 'failed' },
-  overlap: { label: 'Overlap unanswered', glyph: 'overlap' },
   revert: { label: 'Reverted from main', glyph: 'failed' },
   'needs-fix': { label: 'Fix needed', glyph: 'wrench' },
   approval: { label: 'Approval request', glyph: 'review' },

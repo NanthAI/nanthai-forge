@@ -9,9 +9,7 @@ import { randomUUID } from 'node:crypto';
 import { moduleUrl } from './convex-module.mjs';
 const view = await import(moduleUrl('../src/now-overlap-view.ts'));
 const { nowOverlapSignals } = await import(moduleUrl('../src/now-overlap-signals.ts'));
-const { overlapRows, overlapFileCount, unansweredOverlaps } = await import(
-  moduleUrl('../web/src/cockpit/overlap-model.ts')
-);
+const { overlapRows, overlapFileCount } = await import(moduleUrl('../web/src/cockpit/overlap-model.ts'));
 
 const hex = (seed, length = 64) => seed.toString(16).repeat(length).slice(0, length);
 const bytes = value => Buffer.byteLength(typeof value === 'string' ? value : JSON.stringify(value));
@@ -77,15 +75,8 @@ function busyWave(answers = 127) {
 }
 const legacyReply = ({ records, signals }) =>
   JSON.stringify({ page: records.slice(0, 100), isDone: false, continueCursor: 'x', signals });
-const nowReply = ({ records, signals }) =>
-  JSON.stringify(
-    view.nowOverlapView(
-      signals,
-      records.map(({ laneId, noticeId, actor, at }) => ({ laneId, noticeId, actor, at })),
-      'viewer-subject',
-      true,
-    ),
-  );
+// Answers are gone (Issue 853fcde3): the Now read carries the bounded signals only.
+const nowReply = ({ signals }) => JSON.stringify({ signals: view.viewSignals(signals) });
 
 test('incident replay: both measured shapes fail the 20 KB budget on the old reply and pass on the Now read', t => {
   for (const [name, fixture] of [
@@ -99,17 +90,11 @@ test('incident replay: both measured shapes fail the 20 KB budget on the old rep
     assert.ok(before > view.NOW_OVERLAP_VIEW_BUDGET, `${name} replays the incident (${before} bytes)`);
     assert.ok(after < view.NOW_OVERLAP_VIEW_BUDGET, `${name}: Now overlap read is ${after} bytes`);
   }
-  assert.ok(busyWave().signals.notices.length > 100, 'the busy wave has over 100 detections');
-  // Worst grouping: 100 answers on 100 different Lanes still fits.
-  const spread = broadLane(100);
-  spread.records.forEach(record => (record.laneId = randomUUID()));
-  assert.ok(bytes(nowReply(spread)) < view.NOW_OVERLAP_VIEW_BUDGET);
 });
 
-test('the client reads back every rendered overlap: same edit rows and detections, main rows summarise their count', () => {
+test('the client reads back every rendered overlap: same edit rows, main rows summarise their count', () => {
   for (const { lanes, signals } of [broadLane(), busyWave()]) {
     const read = view.readViewSignals(JSON.parse(JSON.stringify(view.viewSignals(signals))));
-    assert.deepEqual(read.notices, signals.notices, 'detections and their ids read back exactly');
     assert.deepEqual(
       read.edits.map(edit => [edit.laneId, edit.head]),
       signals.edits.map(edit => [edit.laneId, edit.head]),
@@ -159,38 +144,4 @@ test('the client reads back every rendered overlap: same edit rows and detection
   assert.equal(summary.files, 157);
   assert.equal(summary.action.laneId, lanes[12], 'the count row opens the Lane that lists them all');
   assert.equal(overlapFileCount(rows), 177);
-  // A detection the per-Lane cap gave to one side only reads back to that side only.
-  const [one] = signals.notices;
-  assert.deepEqual(view.readViewSignals(view.viewSignals({ ...signals, notices: [one] })).notices, [one]);
-});
-
-test('answered keys and full notice ids match each other; the caller sees only their own answer times', () => {
-  const fixture = broadLane(30);
-  const reply = JSON.parse(nowReply(fixture));
-  const mine = fixture.records.filter(record => record.actor === 'viewer-subject');
-  assert.deepEqual(
-    reply.mine,
-    mine
-      .map(record => record.at)
-      .sort()
-      .reverse(),
-  );
-  assert.ok(!JSON.stringify(reply).includes('agent-subject'), 'other actors are not sent');
-  assert.ok(!JSON.stringify(reply).includes('Agreed order'), 'answer text is not sent');
-  const [record] = fixture.records;
-  const answers = Object.entries(reply.answered).flatMap(([laneId, keys]) =>
-    keys.map(noticeId => ({ laneId, noticeId })),
-  );
-  const openLane = {
-    id: record.laneId,
-    open: true,
-    overlaps: [{ noticeId: record.noticeId, file: 'a.ts', lanes: [] }],
-  };
-  assert.equal(unansweredOverlaps([openLane], answers).size, 0, 'a key answers its full notice id');
-  assert.equal(
-    unansweredOverlaps([openLane], [{ laneId: record.laneId, noticeId: record.noticeId }]).size,
-    0,
-    'a native full-id answer still matches',
-  );
-  assert.equal(unansweredOverlaps([openLane], []).size, 1);
 });

@@ -5,6 +5,12 @@ import { channelRow } from './projectHostedChannels';
 import { dormantCutoff, rowActivity } from './projectHostedDormancy';
 import { dormantHostedPresence } from './projectHostedPresence';
 import { nowOverlapSignals } from '../src/now-overlap-signals';
+import { viewSignals } from '../src/now-overlap-view';
+import { v } from 'convex/values';
+import { query } from './cliServer';
+import { recordCaller } from './projectHostedFrictionStore';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { report } from './errors';
 
 const OPEN_LANE_ROWS = 100;
 const OPEN_LANE_BYTES = 1024 * 1024;
@@ -50,18 +56,26 @@ async function openLanePage(ctx: QueryCtx, projectId: Id<'hostedProjects'>, cuto
   return { page, isDone };
 }
 
-/** Shared by the existing ack subscription. No per-Lane function calls or background work. */
-export async function readNowOverlaps(
-  ctx: QueryCtx,
-  projectId: Id<'hostedProjects'>,
-  /** The project row the caller already read for its access check. */
-  project: { autonomyPolicy?: unknown },
-) {
-  return (await readNowOverlapWindow(ctx, projectId, project)).signals;
-}
+/**
+ * The Now page's one reactive overlap read (Issue 1b66b35a): open Lanes' shared saved paths and the
+ * paths main changed under them, cut to rendered paths. One function call per view, no writes.
+ */
+export const now = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.string(),
+  handler: async (ctx, { projectId }) => {
+    try {
+      const { project } = await recordCaller(ctx, projectId);
+      const signals = await readNowOverlapSignals(ctx, projectId, project);
+      return canonicalPayload({ signals: viewSignals(signals) });
+    } catch (error) {
+      return report(error);
+    }
+  },
+});
 
-/** The signals plus the open Lane ids they were judged against (at most 101 per open status). */
-export async function readNowOverlapWindow(
+/** The signals for at most 101 open Lanes per open status. */
+export async function readNowOverlapSignals(
   ctx: QueryCtx,
   projectId: Id<'hostedProjects'>,
   project: { autonomyPolicy?: unknown },
@@ -102,9 +116,5 @@ export async function readNowOverlapWindow(
   const dormantLanes =
     cutoff !== null && unmatched.length ? await dormantHostedPresence(ctx, projectId, cutoff) : null;
   const complete = page.isDone && headers.length <= 100 && unmatched.every(row => dormantLanes?.has(row.key));
-  return {
-    signals: nowOverlapSignals(lanes, latest, channel ? JSON.parse(channel.selection) : null, complete),
-    openLaneIds: [...new Set(headers.map(row => row.key))],
-    openLanesComplete: headers.length <= 100,
-  };
+  return nowOverlapSignals(lanes, latest, channel ? JSON.parse(channel.selection) : null, complete);
 }

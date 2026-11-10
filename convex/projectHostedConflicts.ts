@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
-import { internalMutation, type MutationCtx, type QueryCtx } from './server';
+import { internalMutation, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import { findObject } from './projectObjectFind';
 import { query } from './cliServer';
 import { accessibleProject } from './projectAuthority';
@@ -179,27 +179,19 @@ export async function planTrialMerge(
       });
   }
   const onMain = await mainChanged(ctx, projectId, row, new Set(mine.keys()));
+  const mainState = onMain.size ? await mainStateObject(ctx, projectId) : undefined;
   let main: TrialPlan['main'];
-  if (onMain.size) {
-    const channel = await channelRow(ctx, projectId);
-    const selected = channel ? hostedMainV2Schema.safeParse(JSON.parse(channel.selection)) : null;
-    const state = selected?.success ? await findObject(ctx, projectId, selected.data.head) : null;
-    if (selected?.success && state && state.size <= TRIAL_MAIN_STATE_BYTES && !state.recipe) {
-      main = {
-        head: selected.data.head,
-        state: trialObject(state),
-        paths: [...onMain].slice(0, TRIAL_PATHS),
-      };
-      for (const path of main.paths)
-        if (!tasks.has(path)) {
-          const own = mine.get(path)!;
-          tasks.set(path, {
-            path,
-            mine: { before: fileOf(own.before), after: fileOf(own.after) },
-            peers: [],
-          });
-        }
-    }
+  if (onMain.size && mainState) {
+    main = { ...mainState, paths: [...onMain].slice(0, TRIAL_PATHS) };
+    for (const path of main.paths)
+      if (!tasks.has(path)) {
+        const own = mine.get(path)!;
+        tasks.set(path, {
+          path,
+          mine: { before: fileOf(own.before), after: fileOf(own.after) },
+          peers: [],
+        });
+      }
   }
   // Pairs no longer sharing a file (and main when it no longer changes one) close now.
   if (row.conflicted)
@@ -232,6 +224,26 @@ export async function planTrialMerge(
     projectId,
     plan: JSON.stringify(plan),
   });
+}
+
+/** Main's head State object, where an action reads main's files (two point reads), or undefined
+ * when it is too large or only a recipe. Read off the save and landing writes (it is the row every
+ * landing changes): by the trial merge's and the would-conflict pass's action, only when a conflict
+ * needs main's forge.json merge lists. */
+export const mainState = internalQuery({
+  args: { projectId: v.id('hostedProjects') },
+  handler: (ctx, { projectId }) => mainStateObject(ctx, projectId).then(found => found ?? null),
+});
+export async function mainStateObject(
+  ctx: QueryCtx,
+  projectId: Id<'hostedProjects'>,
+): Promise<{ head: string; state: TrialObject } | undefined> {
+  const channel = await channelRow(ctx, projectId);
+  const selected = channel ? hostedMainV2Schema.safeParse(JSON.parse(channel.selection)) : null;
+  const state = selected?.success ? await findObject(ctx, projectId, selected.data.head) : null;
+  return selected?.success && state && state.size <= TRIAL_MAIN_STATE_BYTES && !state.recipe
+    ? { head: selected.data.head, state: trialObject(state) }
+    : undefined;
 }
 
 function trialObject(row: {

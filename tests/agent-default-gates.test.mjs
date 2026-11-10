@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sourceTree } from '../dist/source-tree.js';
 import { effectiveAgentDefaults } from '../dist/agent-parallel-defaults.js';
-import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
+import { checkpointNudge, finishGates, unsavedMinutes } from '../dist/agent-default-gates.js';
 import { liveLanding, ownsLiveLanding } from '../dist/landing-freeze.js';
 import { digest } from '../dist/hash.js';
 import { recordTurnWork, settleTurnWork } from '../dist/agent-turn-work.js';
@@ -37,6 +37,7 @@ const notice = (file, noticeId = `n-${file}`) => ({
   file,
   class: 'blocking',
 });
+// An older server still sends notices; land ignores them (Issue 853fcde3).
 const advice = ({ notices = [], paths = ['tests/b.test.mjs'], complete = true } = {}) => ({
   unacknowledgedOverlaps: { items: notices },
   changedPaths: { paths, complete },
@@ -59,30 +60,6 @@ function repo(t, files = {}) {
   return root;
 }
 const code = value => error => error.code === value || error.data?.code === value;
-
-test('overlapGate: block refuses with the exact answer command, warn advises, off ignores; nothing without notices', t => {
-  const root = repo(t);
-  const pending = advice({ notices: [notice('src/x.ts')] });
-  const off = { preflight: 'off' };
-  // c8b842a9: the refusal answers exactly the notices it judged (overlap-acks by noticeId), not
-  // whatever `ack` would read later, and carries them structured for the banner and MCP.
-  assert.throws(
-    () => finishGates(root, defaults({ ...off }), lane, pending),
-    error =>
-      code('OVERLAP_UNANSWERED')(error) &&
-      error.message.includes('src/x.ts') &&
-      error.message.includes(' overlap-acks ') &&
-      error.message.includes('"noticeId":"n-src/x.ts"') &&
-      error.recovery.overlapNotice.items[0].noticeId === 'n-src/x.ts' &&
-      error.recovery.command === error.recovery.overlapNotice.acknowledge,
-  );
-  const warned = finishGates(root, defaults({ ...off, overlapGate: 'warn' }), lane, pending);
-  assert.equal(warned.overlap.status, 'unanswered');
-  assert.deepEqual(warned.overlap.files, ['src/x.ts']);
-  assert.deepEqual(finishGates(root, defaults({ ...off, overlapGate: 'off' }), lane, pending), {});
-  assert.deepEqual(finishGates(root, defaults(off), lane, advice()), {});
-  assert.deepEqual(finishGates(root, undefined, lane, pending), {}, 'older server: no defaults, no gate');
-});
 
 test('preflight: require refuses with the set and estimate; a passing run for this head lets finish through', t => {
   const root = repo(t);
@@ -156,26 +133,6 @@ test('preflight: must-run files the budget stopped make the run NOT COMPLETE, sh
   assert.equal(gate.mustRunNotRun, 1);
   assert.equal(gate.finish, receipt.incomplete.finish);
   assert.match(gate.reason, /^NOT COMPLETE: 1 must-run test file/);
-});
-
-test('ack answers every pending notice with ids that replay exactly', () => {
-  const pending = advice({
-    notices: [notice('a.ts', 'n1'), notice('b.ts', 'n2')],
-  });
-  const first = ackAnswers(lane.laneId, pending, 'accept-order');
-  assert.deepEqual(
-    first.map(answer => [answer.noticeId, answer.choice]),
-    [
-      ['n1', 'accept-order'],
-      ['n2', 'accept-order'],
-    ],
-  );
-  assert.deepEqual(ackAnswers(lane.laneId, pending, 'accept-order'), first, 'stable operation ids');
-  assert.notEqual(first[0].operationId, first[1].operationId);
-  assert.equal(
-    ackAnswers(lane.laneId, pending, 'split', 'moved to its own Lane')[0].text,
-    'moved to its own Lane',
-  );
 });
 
 test('checkpoint nudge: unsavedFor from local file times, nudge past the threshold, none when off', t => {
@@ -285,17 +242,6 @@ test('failed preflight still refuses after a same-content save', t => {
     () => finishGates(root, defaults({}), { ...lane, head: 'b'.repeat(64), tree }, advice()),
     error => code('PREFLIGHT_REQUIRED')(error) && error.message.includes('Its last run failed.'),
   );
-});
-
-test('land accepts the overlap answer in the same call and retains observed notices', t => {
-  const root = repo(t);
-  const pending = advice({
-    notices: [{ noticeId: 'f'.repeat(64), file: 'src/a.ts', class: 'blocking' }],
-  });
-  const result = finishGates(root, defaults({ preflight: 'off' }), lane, pending, 'accept-order');
-  assert.equal(result.overlap.status, 'answered');
-  assert.equal(result.overlap.choice, 'accept-order');
-  assert.deepEqual(result.overlap.notices, ['f'.repeat(64)]);
 });
 
 test('faster learned estimates never turn an advisory test set into a new mandatory run', t => {
@@ -483,7 +429,7 @@ test('an unhealthy diagnostic never converts a build failure into an environment
   assert.throws(() => finishGates(root, defaults({}), lane, advice()), code('PREFLIGHT_REQUIRED'));
 });
 
-test('environment advisories preserve tree identity and overlap gates', t => {
+test('environment advisories preserve tree identity; overlap notices never gate land (Issue 853fcde3)', t => {
   const root = repo(t, { 'tests/b.test.mjs': "throw Error('synthetic failure');" });
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({
     ...healthy,
@@ -498,9 +444,9 @@ test('environment advisories preserve tree identity and overlap gates', t => {
     () => finishGates(root, defaults({}), { ...saved, tree: 'c'.repeat(64) }, advice()),
     code('PREFLIGHT_REQUIRED'),
   );
-  assert.throws(
-    () => finishGates(root, defaults({}), saved, advice({ notices: [notice('src/x.ts')] })),
-    code('OVERLAP_UNANSWERED'),
+  assert.equal(
+    finishGates(root, defaults({}), saved, advice({ notices: [notice('src/x.ts')] })).preflight.status,
+    'environment',
   );
 });
 

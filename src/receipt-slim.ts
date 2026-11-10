@@ -7,8 +7,7 @@ const obj = (value: unknown): Json | undefined =>
 
 /**
  * The receipt an agent reads, without the parts it already holds (Issue 47558a99). Every field removed
- * here is derivable from a kept field or one follow-up read: overlap participants live once in
- * `overlapNotice`, an advisory notice needs no answer commands, a checkout repeats its Lane, a clean
+ * here is derivable from a kept field or one follow-up read: a checkout repeats its Lane, a clean
  * main-distance repeats heads and a healthy mirror reports only its status. Applied where a receipt leaves
  * the process (CLI stdout, MCP reply), never to the in-process response or the hosted wire contract, so
  * older and newer CLIs and servers still agree. `--detail` on the CLI prints the full receipt.
@@ -17,22 +16,6 @@ export function slimReceipt<T>(receipt: T): T {
   const top = obj(receipt);
   if (!top || top.transport !== 'hosted') return receipt;
   const out: Json = { ...top };
-  const notice = obj(top.overlapNotice);
-  const overlaps = obj(top.unacknowledgedOverlaps);
-  if (notice && overlaps && Array.isArray(overlaps.items)) {
-    // The notice lists each notice id, file and other Lane once; keep the counts and coverage here.
-    out.unacknowledgedOverlaps = omit(overlaps, 'items', 'laneId', 'head');
-  }
-  if (notice) {
-    const { acknowledge, routeAround } = notice;
-    const rest = omit(notice, 'choices', 'acknowledge', 'routeAround', 'summary');
-    out.overlapNotice = notice.required
-      ? { ...rest, acknowledge, routeAround }
-      : {
-          ...rest,
-          note: 'Advisory: no answer needed. Blocking notices carry acknowledge/routeAround commands.',
-        };
-  }
   const behind = obj(top.behindMain);
   if (behind && behind.commits === 0 && !behind.more && !(behind.conflictingPaths as unknown[])?.length)
     out.behindMain = { commits: 0, coverage: behind.coverage };
@@ -60,11 +43,8 @@ export function slimReceipt<T>(receipt: T): T {
       const { deferredTests, ...rest } = plan;
       slim.plan = { ...rest, deferredTestCount: deferredTests.length };
     }
-    // peers repeats its overlap list inside peerEvidence; keep the evidence and the counts.
-    const peerOverlaps = obj(result.unacknowledgedOverlaps);
-    if (peerOverlaps && obj(result.peerEvidence)) {
-      slim.unacknowledgedOverlaps = omit(peerOverlaps, 'items', 'laneId', 'head');
-    }
+    // Retired overlap answers (Issue 853fcde3): the server still sends an empty list for installed CLIs.
+    delete slim.unacknowledgedOverlaps;
     // A save repeats its Lane, operation and time inside the outcome the receipt already names.
     const outcome = obj(result.outcome),
       saved = obj(outcome?.result);
@@ -79,7 +59,7 @@ export function slimReceipt<T>(receipt: T): T {
 
 /**
  * The receipt a process prints. The land submitter prints its receipt for its parent process to parse
- * (the parent needs the full overlap notice), so only a process a human or agent reads is shortened.
+ * (the parent needs the full receipt), so only a process a human or agent reads is shortened.
  */
 export function printedReceipt<T>(
   receipt: T,
@@ -90,28 +70,6 @@ export function printedReceipt<T>(
 
 /** Budget (Issue 47558a99): a healthy receipt is about 300 characters. The facts below are dropped because
  * the agent holds them, they are constant, or one named read returns them; `--detail` prints everything. */
-const fileList = (items: Json[]): string[] => [...new Set(items.map(item => String(item.file)))].slice(0, 5);
-/** Who an advisory notice is with (d730121f): up to 3 peer Lanes as `LANE8 handle/slug: file, file`,
- * so a peer agent run and its files are named without a follow-up read. */
-const peerList = (items: Json[]): string[] => {
-  const peers = new Map<string, { actor: string; files: string[]; phase?: string }>();
-  for (const item of items)
-    for (const peer of Array.isArray(item.with) ? (item.with as Json[]) : []) {
-      if (typeof peer.lane !== 'string') continue;
-      const entry = peers.get(peer.lane) ?? { actor: String(peer.actor ?? ''), files: [] };
-      const file = String(item.file);
-      if (!entry.files.includes(file)) entry.files.push(file);
-      // D2: where the peer's landing is (phase, ETA), once per peer.
-      if (typeof item.peer === 'string') entry.phase ??= item.peer;
-      peers.set(peer.lane, entry);
-    }
-  return [...peers]
-    .slice(0, 3)
-    .map(
-      ([lane, peer]) =>
-        `${lane.slice(0, 8)} ${peer.actor}: ${peer.files.slice(0, 3).join(', ')}${peer.files.length > 3 ? ', ...' : ''}${peer.phase ? ` (${peer.phase})` : ''}`,
-    );
-};
 const sameOperation = (resolved: unknown, operationId: unknown) => {
   const keys = Object.keys(obj(resolved) ?? { x: 1 });
   return (
@@ -121,23 +79,7 @@ const sameOperation = (resolved: unknown, operationId: unknown) => {
 };
 
 function briefOverlaps(out: Json) {
-  const notice = obj(out.overlapNotice);
-  const overlaps = obj(out.unacknowledgedOverlaps);
-  if (notice) {
-    const items = Array.isArray(notice.items) ? (notice.items as Json[]) : [];
-    const peers = notice.required ? [] : peerList(items);
-    out.overlapNotice = notice.required
-      ? omit(notice, 'coverage')
-      : {
-          required: false,
-          count: notice.count,
-          files: fileList(items),
-          ...(peers.length ? { with: peers } : {}),
-          // D2: the one stack command is the actionable part of an advisory notice.
-          ...(notice.stack ? { stack: notice.stack } : {}),
-        };
-    delete out.unacknowledgedOverlaps;
-  } else if (overlaps && !overlaps.count && !overlaps.blockingCount) delete out.unacknowledgedOverlaps;
+  delete out.unacknowledgedOverlaps;
   const behind = obj(out.behindMain);
   if (behind)
     if (behind.commits === 0 && !behind.more) delete out.behindMain;

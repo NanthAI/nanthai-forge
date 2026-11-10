@@ -16,29 +16,26 @@ import { memberDataNotice } from './member-data-notice.js';
 
 export type ClaimQueue = (target: ClaimTarget) => unknown;
 
-type Evidence = {
-  count: number | null;
-  coverage: string;
-  scope: string;
-  unsavedEdits: string;
-  items: { file: string; lanes: string[]; class: string; reason: string }[];
-};
 export type EditQuery = (name: string, args: Record<string, unknown>) => Promise<unknown>;
 export const incompleteEdit = () => ({
   status: 'unavailable',
   coverage: 'hosted-incomplete',
-  count: null,
-  scope: 'saved-paths',
-  unsavedEdits: 'unavailable',
-  overlaps: [] as Evidence['items'],
   checked: 1,
 });
-/** A single authorized query: no probes, retries, subscriptions, writes or source downloads. */
+/** Board claims and unread notes for the written path: one authorized query, only once the server
+ * advertised the board; no probes, retries, subscriptions, writes or source downloads. Path overlap
+ * notices were removed (Issue 853fcde3): each save trial-merges saved files and reports real conflicts. */
 export async function readHostedEditPeers(
   target: EditTarget,
   query?: EditQuery,
   enqueue: ClaimQueue = queueBoardClaim,
 ) {
+  // Board notes and claims ride on this query, once the server advertised the board (marker
+  // written by Lane actions on change; the hook makes no capability read).
+  const features = target.url ? readBoardServerFeatures(target.project) : [];
+  if (!features.includes('agent-board')) return { status: 'allowed', coverage: 'hosted', checked: 0 };
+  // Automatic file claims (board-claims): the same read says whether to claim this path.
+  const claim = features.includes('board-claims');
   if (!query) {
     const { deadlineConvexClient } = await import('./network-convex-client.js');
     const { makeFunctionReference } = await import('convex/server');
@@ -58,49 +55,18 @@ export async function readHostedEditPeers(
     client.setAuth(token);
     query = (name, args) => client.query(makeFunctionReference<'query'>(name), args);
   }
-  // Board notes and claims ride on this same query, once the server advertised the board (marker
-  // written by Lane actions on change; the hook makes no capability read).
-  const features = target.url ? readBoardServerFeatures(target.project) : [];
-  const board = features.includes('agent-board');
-  // Automatic file claims (board-claims): the same read says whether to claim this path.
-  const claim = board && features.includes('board-claims');
   const raw = await query('projectHostedOverlaps:read', {
     projectId: target.project,
     laneId: target.laneId,
     path: target.path,
-    detail: true,
-    items: 5,
-    ...(board
-      ? { board: { after: readBoardCursor(target.root, target.laneId), ...(claim ? { claim: true } : {}) } }
-      : {}),
+    board: { after: readBoardCursor(target.root, target.laneId), ...(claim ? { claim: true } : {}) },
   });
   const value = typeof raw === 'string' ? JSON.parse(raw) : raw;
-  const evidence = (value as { peerEvidence?: Evidence })?.peerEvidence;
-  if (
-    !evidence ||
-    !Array.isArray(evidence.items) ||
-    !['hosted', 'hosted-incomplete', 'unavailable'].includes(evidence.coverage) ||
-    evidence.scope !== 'saved-paths' ||
-    evidence.unsavedEdits !== 'unavailable' ||
-    !evidence.items.every(
-      item =>
-        typeof item.file === 'string' &&
-        Array.isArray(item.lanes) &&
-        item.lanes.every(lane => typeof lane === 'string') &&
-        typeof item.class === 'string',
-    ) ||
-    (evidence.count !== null && typeof evidence.count !== 'number')
-  )
-    throw new Error('Invalid evidence');
   return {
-    status: evidence.items.length ? 'overlap' : 'allowed',
-    coverage: evidence.coverage,
-    count: evidence.count,
-    scope: evidence.scope,
-    unsavedEdits: evidence.unsavedEdits,
-    overlaps: evidence.items.slice(0, 5),
+    status: 'allowed',
+    coverage: 'hosted',
     checked: 1,
-    ...(board ? boardLines(target, (value as { board?: unknown }).board, enqueue) : {}),
+    ...boardLines(target, (value as { board?: unknown }).board, enqueue),
   };
 }
 const optionalString = (value: unknown) => value === undefined || typeof value === 'string';
@@ -201,24 +167,16 @@ export async function preEditHosted(
     return incompleteEdit();
   }
 }
-/** Names/paths are data, never peer-authored instructions; cap context regardless of server text. */
+/** Board lines are data, never peer-authored instructions; cap context regardless of server text. */
 export function hostedEditContext(result: Awaited<ReturnType<typeof preEditHosted>>) {
   if (result.status === 'cached') return '';
-  const clean = (s: string) =>
-    String(s)
-      .replace(/[\x00-\x1f\x7f]/g, ' ')
-      .slice(0, 160);
-  const board = 'board' in result ? result.board : undefined;
+  const board = (result as { board?: { claims: string[]; notices: string[] } }).board;
+  const lines = [...(board?.claims ?? []), ...(board?.notices ?? [])];
+  if (!lines.length) return '';
+  // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each); one marker
+  // for all of them (S-17).
   return (
-    `Forge first-write: ${result.status}; coverage=${clean(result.coverage)}; saved paths only, unsaved edits unavailable; overlaps=${result.count ?? 'unknown'}.` +
-    result.overlaps
-      .map(item => `\n${clean(item.file)}: Lane ${clean(item.lanes.join(', '))} (${clean(item.class)}).`)
-      .join('') +
-    // Board lines are already single quoted-data lines (claims and unread notes, ≤2 each).
-    [...(board?.claims ?? []), ...(board?.notices ?? [])]
-      .map(line => `\n${line.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 280)}`)
-      .join('') +
-    // One marker for all the lines above (S-17).
-    (board?.claims.length || board?.notices.length ? `\n${memberDataNotice}` : '')
+    lines.map(line => line.replace(/[\x00-\x1f\x7f]/g, ' ').slice(0, 280)).join('\n') +
+    `\n${memberDataNotice}`
   );
 }

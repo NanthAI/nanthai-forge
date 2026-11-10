@@ -134,7 +134,8 @@ async function project() {
     s.transaction(
       'projectHostedOverlaps:read',
       overlaps.read,
-      { projectId: s.projectId, laneId: mine.id, ...args },
+      // Path notices are gone (Issue 853fcde3): peers are read on the detail read.
+      { projectId: s.projectId, laneId: mine.id, detail: true, ...args },
       actor,
     );
   const setDormantDays = days =>
@@ -145,8 +146,7 @@ async function project() {
     [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
   return { s, mine: mineSaved, lane, save, read, write, readLane, setDormantDays, overlapRow };
 }
-const noticeLanes = reply =>
-  new Set(JSON.parse(reply).unacknowledgedOverlaps.items.flatMap(item => item.lanes));
+const noticeLanes = reply => new Set(JSON.parse(reply).peerEvidence.items.flatMap(item => item.lanes));
 
 test('a dormant Lane leaves overlap notices, and any save revives it (policy default 2 days)', async () => {
   const { read, lane, save, setDormantDays } = await project();
@@ -157,11 +157,7 @@ test('a dormant Lane leaves overlap notices, and any save revives it (policy def
   assert(lanes.has(fresh.id) && lanes.has(nearly.id), 'live peers still notify');
   assert(!lanes.has(stale.id), 'the dormant peer is left out');
   const reply = JSON.parse(await read());
-  assert.equal(
-    reply.unacknowledgedOverlaps.coverage,
-    'hosted',
-    'dormant Lanes do not make coverage incomplete',
-  );
+  assert.equal(reply.peerEvidence.coverage, 'hosted', 'dormant Lanes do not make coverage incomplete');
   // A save revives it.
   await save(stale);
   assert(noticeLanes(await read()).has(stale.id), 'a save revives a dormant Lane');
@@ -297,14 +293,14 @@ test('notices per save before and after, on a dogfood-shaped project (60 open La
   const after = JSON.parse(await read());
   const afterCount = s.counts.at(-1);
   console.log(
-    `dormant fixture: notices per save before ${before.unacknowledgedOverlaps.count} -> after ${after.unacknowledgedOverlaps.count}; ` +
+    `dormant fixture: notices per save before ${before.peerEvidence.count} -> after ${after.peerEvidence.count}; ` +
       `overlap rows read ${beforeCount.readDocumentsByTable.projectHostedOverlapLanes} -> ${afterCount.readDocumentsByTable.projectHostedOverlapLanes}; ` +
       `overlap-table bytes ${beforeCount.readBytesByTable.projectHostedOverlapLanes} -> ${afterCount.readBytesByTable.projectHostedOverlapLanes}; total bytes ${beforeCount.readBytes} -> ${afterCount.readBytes}; ranges ${beforeCount.ranges} -> ${afterCount.ranges}`,
   );
-  assert(before.unacknowledgedOverlaps.count >= 50, 'the idle Lanes made the noise');
+  assert(before.peerEvidence.count >= 50, 'the idle Lanes made the noise');
   // Eight live pair notices, plus one hot-file note: nine live Lanes share the file (D2, 1eb42254).
-  assert.equal(after.unacknowledgedOverlaps.count, 9, 'only the live peers notify');
-  const hot = after.unacknowledgedOverlaps.items.filter(item => item.reason === 'hot-file');
+  assert.equal(after.peerEvidence.count, 9, 'only the live peers notify');
+  const hot = after.peerEvidence.items.filter(item => item.reason === 'hot-file');
   assert(hot.length <= 1 && hot.every(item => item.lanes.length <= 5), 'one hot-file note, live Lanes only');
   assert(
     afterCount.readDocumentsByTable.projectHostedOverlapLanes <= 12,
@@ -324,7 +320,10 @@ test('board signals skip dormant Lanes', async () => {
   const stale = await lane('Stale peer', { idleMs: 6 * DAY });
   const result = await s.transaction(
     'nowOverlaps',
-    { _handler: async ctx => nowOverlaps.readNowOverlaps(ctx, s.projectId, await ctx.db.get(s.projectId)) },
+    {
+      _handler: async ctx =>
+        nowOverlaps.readNowOverlapSignals(ctx, s.projectId, await ctx.db.get(s.projectId)),
+    },
     {},
   );
   const text = JSON.stringify(result);
@@ -574,16 +573,25 @@ test('abandon-dormant: the list carries the changed paths for the CLI main compa
 });
 
 const HOUR = 3_600_000;
-const advice = reply => JSON.parse(reply).unacknowledgedOverlaps;
+// The idle summary still shapes the default read's stack offer; the advice is read directly.
+const idleAdvice = async (s, mine) => {
+  const { hostedOverlapAdvice, IDLE_NOTICE_MS } = await import('../dist/hosted-overlap.js');
+  const rows = [...s.tables.projectHostedOverlapLanes.values()];
+  const own = rows.find(row => row.laneId === mine.id);
+  const main = { head: own.baseHead, sourceRevision: 0 };
+  const peers = rows.filter(row => row.laneId !== mine.id);
+  return hostedOverlapAdvice(own, peers, null, main, true, 5, undefined, Date.now() - IDLE_NOTICE_MS)
+    .overlaps;
+};
 
 test('advisory notices from Lanes idle over 6 hours collapse into one summary line; blocking ones stay', async () => {
-  const { read, lane } = await project();
+  const { read, lane, s, mine } = await project();
   const fresh = await lane('Fresh advisory peer', { advisory: true, idleMs: 60_000 });
   const idle = [];
   for (let i = 0; i < 4; i++)
     idle.push(await lane(`Idle advisory peer ${i}`, { advisory: true, idleMs: 8 * HOUR + i * HOUR }));
   const idleBlocking = await lane('Idle but its additions block', { idleMs: 9 * HOUR });
-  const summary = advice(await read());
+  const summary = await idleAdvice(s, mine);
   const reasons = summary.items.map(item => item.reason);
   assert.equal(reasons.filter(reason => reason === 'idle-lanes').length, 1, 'one summary line');
   const line = summary.items.find(item => item.reason === 'idle-lanes');
@@ -596,34 +604,10 @@ test('advisory notices from Lanes idle over 6 hours collapse into one summary li
   assert.equal(summary.blockingCount, 1);
   assert.equal(summary.advisoryCount, 2, 'the fresh Lane plus the one summary');
   assert.equal(summary.count, 3);
-  // detail and path reads list every Lane.
-  const detail = advice(await read({ detail: true }));
+  // The detail read lists every Lane.
+  const detail = JSON.parse(await read()).peerEvidence;
   assert(!detail.items.some(item => item.reason === 'idle-lanes'));
   for (const peer of idle) assert(detail.items.some(item => item.lanes.includes(peer.id)));
-});
-
-test('start/peers bytes with 15 idle advisory Lanes are not up', async () => {
-  const { read, lane, s, mine } = await project();
-  for (let i = 0; i < 15; i++)
-    await lane(`Idle advisory peer ${i} with a plain sentence of intent`, {
-      advisory: true,
-      idleMs: (7 + i) * HOUR,
-    });
-  const after = await read();
-  const { hostedOverlapAdvice } = await import('../dist/hosted-overlap.js');
-  const rows = [...s.tables.projectHostedOverlapLanes.values()];
-  const own = rows.find(row => row.laneId === mine.id);
-  const peers = rows.filter(row => row.laneId !== mine.id);
-  const main = { head: own.baseHead, sourceRevision: 0 };
-  const before = JSON.stringify(
-    hostedOverlapAdvice(own, peers, null, main, new Set(), true, 5, undefined, undefined),
-  );
-  console.log(
-    `15 idle Lanes: unacknowledgedOverlaps items ${JSON.parse(before).unacknowledgedOverlaps.items.length} -> ${advice(after).items.length}; ` +
-      `response bytes ${before.length} -> ${after.length}`,
-  );
-  assert(after.length < before.length, 'the summary is smaller than the listed notices');
-  assert.equal(advice(after).items.length, 1);
 });
 
 test('a landed Lane supersedes its quiet same-Intent siblings: no presence, no advisory notice, blocking stays', async () => {

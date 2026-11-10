@@ -19,11 +19,13 @@ const pin = row => ({
   bytes: Buffer.byteLength(JSON.stringify(row)),
   sha256: hash(row),
 });
-test('approved 58-table schema has exactly one required project owner, and parsed indexes match deployed descriptions', async () => {
-  assert.equal(scope.benchTables.length, 58);
+test('approved 55-table schema has exactly one required project owner, and parsed indexes match deployed descriptions', async () => {
+  // 58 approved tables less the three overlap-answer tables dropped with their exported rows
+  // (Issue 853fcde3: 219 acks, 163 deliveries, 139 ack batches).
+  assert.equal(scope.benchTables.length, 55);
   assert.equal(
     Object.values(scope.approvedBenchCounts).reduce((a, b) => a + b, 0),
-    155012,
+    155012 - 219 - 163 - 139,
   );
   const indexes = await benchIndexes(new URL('..', import.meta.url).pathname, scope.benchTables);
   const described = await backend.describe._handler({}, {});

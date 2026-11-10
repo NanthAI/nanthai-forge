@@ -213,15 +213,10 @@ test('first-write read (server): other Lanes claims as touching, hidden once sav
 
 test('policy: agentDefaults.autoClaim is stored-only; the wire key set stays frozen for older CLIs', () => {
   // Older CLIs parse capabilities agentDefaults and the policy read strictly: this set must not grow.
-  const frozen = [
-    'checkpointNudgeMinutes',
-    'overlapGate',
-    'preflight',
-    'preflightMaxMinutes',
-    'stallAlerts',
-    'urgentRoles',
-  ];
+  // overlapGate is retired (Issue 853fcde3): no longer a key, but still sent as "off" (RETIRED_WIRE).
+  const frozen = ['checkpointNudgeMinutes', 'preflight', 'preflightMaxMinutes', 'stallAlerts', 'urgentRoles'];
   assert.deepEqual([...WIRE_AGENT_DEFAULT_KEYS].sort(), frozen);
+  const sent = [...frozen, 'overlapGate'].sort();
   const policy = editedPolicy(policyPreset('trusted'), {
     action: 'set-policy',
     operationId: randomUUID(),
@@ -232,16 +227,16 @@ test('policy: agentDefaults.autoClaim is stored-only; the wire key set stays fro
   assert.equal('autoClaim' in effective, false, 'never in effective defaults');
   assert.deepEqual(
     Object.keys(wireAgentDefaults(effective, false)).sort(),
-    frozen,
+    sent,
     'capabilities for older CLIs',
   );
   assert.deepEqual(
     wireAgentDefaults(effective, true),
-    effective,
+    { ...effective, overlapGate: 'off' },
     'capabilities with agent-defaults-extended',
   );
   // The policy read shows later keys only when stored.
-  assert.deepEqual(Object.keys(policyReadView(policyPreset('trusted')).agentDefaults).sort(), frozen);
+  assert.deepEqual(Object.keys(policyReadView(policyPreset('trusted')).agentDefaults).sort(), sent);
   assert.equal(policyReadView(policy).agentDefaults.autoClaim, false);
   // The server reads the stored value: absent is on.
   assert.equal(claims.autoClaimOn({ autonomyPolicy: policy }), false);
@@ -259,7 +254,10 @@ test('capabilities contract: this CLI parses replies from older and newer server
   };
   assert.deepEqual(effectiveAgentDefaultsWireSchema.parse(newer), effective);
   // An older server sends only the frozen keys: later keys take their documented defaults.
-  assert.deepEqual(effectiveAgentDefaultsWireSchema.parse(wireAgentDefaults(effective, false)), effective);
+  assert.deepEqual(effectiveAgentDefaultsWireSchema.parse(wireAgentDefaults(effective, false)), {
+    ...effective,
+    overlapGate: 'off',
+  });
   assert.throws(() => effectiveAgentDefaultsWireSchema.parse({ ...effective, preflight: 'maybe' }));
 });
 
@@ -333,7 +331,7 @@ test('first-write hook: one query asks to claim; claim queued off the hook path;
     assert.match(
       context,
       new RegExp(
-        `\\nClaim on tests/x\\.test\\.mjs: @peer-h \\(Lane ${peerLane.slice(0, 8)}\\) is editing it, unsaved, first write 6m ago\\.`,
+        `^Claim on tests/x\\.test\\.mjs: @peer-h \\(Lane ${peerLane.slice(0, 8)}\\) is editing it, unsaved, first write 6m ago\\.`,
       ),
     );
     assert(!context.includes(peerLane), 'Lane prefix only');

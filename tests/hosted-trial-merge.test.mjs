@@ -96,6 +96,115 @@ test('main changing the same lines after the base is a main conflict; a deleted 
   assert.equal(deleted.conflicts[0].reason, 'deleted on one side, changed on the other');
 });
 
+test('conflicts compose merges on its own raise no notice: a declared forge.json list and Markdown docs', async () => {
+  // Two Lanes append to a list main declares in forge.json `merge.union`; one also edits the last entry.
+  const base = text(['alpha', 'beta']);
+  const mine = text(['alpha', 'beta2', 'gamma']);
+  const theirs = text(['alpha', 'beta', 'delta']);
+  const list = (path, main) => ({
+    path,
+    mine: { before: file(base), after: file(mine) },
+    ...(main ? { main: file(main) } : {}),
+    peers: main ? [] : [{ laneId: 'peer', before: file(base), after: file(theirs) }],
+  });
+  const read = store(base, mine, theirs);
+  let reads = 0;
+  const declared = async () => (reads++, { union: ['lists/*.txt'], fragments: [] });
+  const merged = await trialMerge([list('lists/owners.txt'), list('lists/team.txt', theirs)], read, declared);
+  assert.deepEqual(merged.conflicts, [], 'the union rule merges both, against a peer and against main');
+  assert.equal(reads, 1, "main's forge.json is read once per trial merge, only on a text conflict");
+  const undeclared = await trialMerge([list('src/owners.txt')], read, declared);
+  assert.equal(undeclared.conflicts.length, 1, 'outside the declared globs it stays a conflict');
+  assert.equal(
+    (await trialMerge([list('lists/owners.txt')], read)).conflicts.length,
+    1,
+    'no forge.json, no rule',
+  );
+  // Markdown docs need no declaration: two Lanes add list items at one spot.
+  const doc = text(['# Notes', '- a', '- c']);
+  const one = text(['# Notes', '- a', '- b', '- c']);
+  const two = text(['# Notes', '- a', '- bb', '- c']);
+  const docs = await trialMerge(
+    [
+      {
+        path: 'docs/notes.md',
+        mine: { before: file(doc), after: file(one) },
+        peers: [{ laneId: 'peer', before: file(doc), after: file(two) }],
+      },
+    ],
+    store(doc, one, two),
+  );
+  assert.deepEqual(docs.conflicts, []);
+  // Added on both sides with one mode: merged against an empty base, as compose does.
+  const added = await trialMerge(
+    [
+      {
+        path: 'lists/new.txt',
+        mine: { before: null, after: file(mine) },
+        peers: [{ laneId: 'peer', before: null, after: file(theirs) }],
+      },
+    ],
+    read,
+    declared,
+  );
+  assert.deepEqual(added.conflicts, []);
+});
+
+test("a peer on an older base whose edit conflicts with main's rewrite is the peer's main conflict, not this pair's", async () => {
+  // Main rewrote the file after the old Lane's base; the new Lane started from the rewrite.
+  const OLD = text(['one', 'two', 'three', 'four', 'five', 'six']);
+  const REWRITE = text(['1', '2', '3', '4', '5', '6', '7']);
+  const oldLane = text(['one', 'TWO', 'three', 'four', 'five', 'six']);
+  const newLane = text(['1', '2', '3', '4', '5', '6', '7', '8']);
+  const read = store(OLD, REWRITE, oldLane, newLane);
+  const fresh = await trialMerge(
+    [
+      {
+        path: 'src/x.ts',
+        mine: { before: file(REWRITE), after: file(newLane) },
+        peers: [{ laneId: 'old', before: file(OLD), after: file(oldLane) }],
+      },
+    ],
+    read,
+  );
+  assert.deepEqual(fresh.conflicts, [], 'the newer Lane gets no notice it cannot act on');
+  // The old Lane's own save names main as the other side.
+  const stale = await trialMerge(
+    [
+      {
+        path: 'src/x.ts',
+        mine: { before: file(OLD), after: file(oldLane) },
+        main: file(REWRITE),
+        peers: [{ laneId: 'new', before: file(REWRITE), after: file(newLane) }],
+      },
+    ],
+    read,
+  );
+  assert.deepEqual(
+    stale.conflicts.map(item => item.peer),
+    ['main'],
+  );
+  // Across bases, a real pair conflict still counts: main changed only another region.
+  const moved = text(['one', 'two', 'three', 'four', 'five', 'SIX']);
+  const mine = text(['one', 'two', 'three', 'four', 'five', 'SIX', 'tail']);
+  const theirs = text(['one', 'two', 'three', 'four', 'FIVE', 'six']);
+  const mineEdit = text(['one', 'two', 'three', 'four', 'Five!', 'SIX']);
+  const pair = await trialMerge(
+    [
+      {
+        path: 'src/x.ts',
+        mine: { before: file(moved), after: file(mineEdit) },
+        peers: [{ laneId: 'old', before: file(OLD), after: file(theirs) }],
+      },
+    ],
+    store(OLD, moved, mine, theirs, mineEdit),
+  );
+  assert.deepEqual(
+    pair.conflicts.map(item => [item.peer, item.reason]),
+    [['old', 'both changed the same lines']],
+  );
+});
+
 test('bytes that cannot be read leave the file out (no notice), never a guessed conflict', async () => {
   const mine = text(['a', 'B', 'c']);
   const theirs = text(['a', 'X', 'c']);

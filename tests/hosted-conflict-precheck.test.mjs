@@ -33,7 +33,6 @@ for (const asynchronous of [false, true])
       message: 'Check the combined resolution',
       keepOpen: true,
       priority: 'normal',
-      overlapAnswer: 'accept-order',
     };
     const first = await s.transport().dispatch('finish', command);
     let recovery = first.result.recovery;
@@ -49,7 +48,7 @@ for (const asynchronous of [false, true])
     const { action, ...resolve } = conflict.next;
     const fixed = await s.transport(conflict.root).dispatch(action, resolve);
     const { action: finishAction, ...finish } = fixed.result.next;
-    for (const key of ['accept', 'message', 'check', 'keepOpen', 'priority', 'overlapAnswer'])
+    for (const key of ['accept', 'message', 'check', 'keepOpen', 'priority'])
       assert.deepEqual(finish[key], command[key], key);
     assert.notEqual(finish.operationId, first.operationId);
     const before = s.calls.length;

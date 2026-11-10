@@ -62,7 +62,10 @@ test('incident replay: a strict CLI rejects an added agentDefaults field; the re
   const reply = await candidateCapabilities();
   // e293c4e7 parsed agentDefaults with this strict six-key schema; 8d28c25f's server added autoClaim
   // (fe3b6292 then froze the wire keys: WIRE_AGENT_DEFAULT_KEYS).
-  const e293 = effectiveAgentDefaultsSchema.strict();
+  // e293c4e7 still had overlapGate (retired in Issue 853fcde3; the server keeps sending it).
+  const e293 = effectiveAgentDefaultsSchema
+    .extend({ overlapGate: z.enum(['off', 'warn', 'block']) })
+    .strict();
   const sent8d28 = { ...reply.agentDefaults, autoClaim: true };
   const strict = e293.safeParse(sent8d28);
   assert.equal(strict.success, false);

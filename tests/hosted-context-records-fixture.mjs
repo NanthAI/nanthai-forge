@@ -18,8 +18,6 @@ export function recordsFixture() {
   for (const name of [
     'projectHostedFriction',
     'projectHostedDecisions',
-    'projectHostedOverlapAcks',
-    'projectHostedAckBatches',
     'projectHostedDecisionMaintainers',
     'projectHostedRecordHeads',
   ])

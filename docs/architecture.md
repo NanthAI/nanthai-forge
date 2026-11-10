@@ -836,7 +836,7 @@ project read/contributor authority applies. New writes also check the explicit
 server/shadow authority epoch; an authorized immutable retry can still reconcile
 an original record after the epoch changes. `projectHostedOperations` persists
 H01 envelopes before external work and retains original terminal outcomes for 90 days
-(`HOSTED_OPERATION_RETENTION_MS`, the overlap-answer value): each new operation deletes up to four of its
+(`HOSTED_OPERATION_RETENTION_MS`): each new operation deletes up to four of its
 project's older receipts through the creation-time index (one extra indexed range, zero bytes when none
 expired), skipping legacy cancel receipts that metrics read. No timer exists and an idle project does nothing; a
 retry of an operation id older than that starts a new operation.

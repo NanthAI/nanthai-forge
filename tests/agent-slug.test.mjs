@@ -22,13 +22,6 @@ import {
   rememberBoardServerFeatures,
 } from '../dist/board-local.js';
 import { hostedOverlapAdvice } from '../dist/hosted-overlap.js';
-import {
-  hostedOverlapNotice,
-  markOverlapShown,
-  overlapBanner,
-  overlapBannerOnce,
-} from '../dist/hosted-overlap-notice.js';
-import { slimReceipt } from '../dist/receipt-slim.js';
 import { presenceNotice } from '../dist/hosted-presence.js';
 import { touchingLine } from '../dist/agent-edit-hosted.js';
 import { hostedStartSchema } from '../dist/hosted-lane.js';
@@ -291,7 +284,7 @@ test('start (server) cost: a slug adds no read and no row to a start', async () 
   assert.equal(counts[0].ranges, counts[1].ranges);
 });
 
-test('overlap notices: participants and the banner name each agent session', () => {
+test('peer evidence participants and claim lines name each agent session', () => {
   const lane = (laneId, actor, agent, path) => ({
     laneId,
     intentId: randomUUID(),
@@ -313,50 +306,18 @@ test('overlap notices: participants and the banner name each agent session', () 
     [peer, person],
     null,
     { head: 'b', sourceRevision: 0 },
-    new Set(),
     true,
     5,
     'a.txt',
   );
-  const actors = advice.unacknowledgedOverlaps.items.flatMap(item => item.participants.map(p => p.actor));
+  const actors = advice.overlaps.items.flatMap(item => item.participants.map(p => p.actor));
   assert(
     actors.includes('acct/brave-falcon') && actors.includes('acct') && actors.includes('acct/quiet-otter'),
   );
-  // After the public identity mapping the account reads as its handle.
-  const shown = {
-    unacknowledgedOverlaps: {
-      ...advice.unacknowledgedOverlaps,
-      items: advice.unacknowledgedOverlaps.items.map(item => ({
-        ...item,
-        participants: item.participants.map(p => ({ ...p, actor: p.actor.replace(/^acct/, 'owner-h') })),
-      })),
-    },
-  };
-  const banner = overlapBanner(hostedOverlapNotice('/root', mine.laneId, shown));
-  assert.match(banner, new RegExp(`Lane ${peer.laneId} by owner-h/brave-falcon:`));
-  assert.match(banner, new RegExp(`Lane ${person.laneId} by @owner-h:`));
   assert.match(
     touchingLine('a.txt', { author: 'owner-h/brave-falcon', fromLaneId: peer.laneId, at: Date.now() }),
     /^Claim on a\.txt: owner-h\/brave-falcon \(Lane/,
   );
-});
-
-test('incident replay 2026-11-06 (land --save INTERNAL_ERROR): a printed receipt with an advisory notice reads back safely', () => {
-  // The land parent parses its detached child's printed (slim) receipt and marks its notice shown.
-  const notice = hostedOverlapNotice('/root', 'lane-a', {
-    unacknowledgedOverlaps: {
-      count: 1,
-      coverage: 'hosted',
-      items: [
-        { noticeId: 'n1', file: 'docs/a.md', class: 'advisory', reason: 'unavailable', participants: [] },
-      ],
-    },
-  });
-  const printed = slimReceipt({ transport: 'hosted', action: 'finish', overlapNotice: notice, result: {} });
-  const readBack = JSON.parse(JSON.stringify(printed)).overlapNotice;
-  assert.equal(readBack.required, false);
-  assert.doesNotThrow(() => markOverlapShown(readBack));
-  assert.equal(overlapBannerOnce(readBack), '');
 });
 
 test('CLI start: sends the session slug only to a server that takes it; the receipt names the session', async t => {

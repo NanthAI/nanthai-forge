@@ -60,11 +60,7 @@ Hosted `land --save` uses `--no-wait` to return after submission. Replay every o
 
 A hosted `save` returns as soon as its upload is in and the server has it (`status:"settling"`). The server finishes the save in the background, and peers see its changed paths for overlap at once. Your next command in that checkout, whatever it is, first reads the outcome on the capability call it makes anyway, so this adds no call. A completed save moves the checkout to its new head. A save the server could not finish, for example because the Lane moved first, is reported once as `SAVE_SETTLE_FAILED` and that command does nothing. Your edits are still in the checkout, so run the command again and the next save captures them. `land --save`, `finish` and lifecycle saves still wait for their save, because they need its head.
 
-Include `overlapAnswer:"accept-order"` in `land --save` to answer the pending notices seen by that landing without a separate `ack`. The answers are recorded exactly as `ack` records them, so peers and the inbox see them, and the defaults receipt lists them. The answer does not resolve source conflicts or change project policy.
-
 Run `land --save` from the Lane's own folder: it saves the folder, then lands. `land --save` with a `laneId` from another folder lands only the last saved head, so it refuses (`UNSAVED_LANE_EDITS`, with the count and the exact `cd FOLDER && nforge agent . land --save`) when that Lane's registered checkout holds unsaved edits. It also refuses a Lane that changes nothing against its base (`NOTHING_TO_LAND`) unless `allowEmpty:true`. The land reply and the LANDED line state `changedPaths`, the number of changed paths accepted (also printed by `wait`); `null` when the base manifest is not cached. All local, no added call.
-
-`save --overlap-answers` takes `answers:[{operationId,laneId,noticeId,choice,text?}]`: every answer needs its own UUID `operationId` (a replay reuses it), beside the optional top-level one.
 
 When you change a hosted reply in Forge itself: add fields freely, but never remove, retype, make optional or add enum values to one without a contract feature, because released CLIs lag the server. The CLI parses replies with `parseHostedResponse` (unknown keys dropped, all else checked), and `tests/hosted-response-contract.test.mjs` fails the landing on a breaking reply change. Rule: [server replies](../operations/cli-update.md#server-replies-cli-behind-the-deploy).
 
@@ -77,8 +73,6 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `x friction-triage` | `frictionIds, status, reason?, laneId?, planningItemId?, operationId?` |
 | `save --decision` | `conversation?, target, decidedBy, what, why, decidedAt?, overrides?, supersedes?, delegation?, actor?, tool?, operationId?` |
 | `decisions` | `target?, cursor?, operationId?` |
-| `save --overlap-answer` | `laneId, noticeId, choice, text?, conversation?, operationId?` |
-| `save --overlap-answers` | `answers, operationId?` |
 | `tests` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `save --contract` | `candidateId, runId?, timingBasis?, tests?, expectedHead?, expectedVersion?, operationId?` |
 | `start` | `outcome?, constraints?, intentId?, initialHead?, stackOn?, stackEntry?, planningItemId?, scope?, path?, open?, installScripts?, operationId?` |
@@ -89,9 +83,8 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `recover-apply` | `applyOperationId, operationId?` |
 | `resolve` | `laneId?, message?, keep?, operationId?` |
 | `save --check` | `checkId, expectedDefinition?, expectedConfiguration?, expectedEnvironment?, candidateId, expectedHead?, operationId?` |
-| `land --save` | `laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, overlapAnswer?, allowEmpty?, retry?, reason?, operationId?` |
+| `land --save` | `laneId?, message?, intentId?, inputs?, dependencies?, check?, candidateId?, composeOperationId?, after?, accept?, keepOpen?, closes?, priority?, allowEmpty?, retry?, reason?, operationId?` |
 | `x prioritize` | `submissionId, priority, asOwner?, operationId?` |
-| `ack` | `laneId?, choice?, text?, operationId?` |
 | `preflight` | `laneId?, run?, budgetSeconds?, trim?, retry?, operationId?` |
 | `x source-pack` | `operationId?` |
 | `x snapshots` | `laneId?, undo?, redo?, restore?, purge?, operationId?` |
@@ -124,7 +117,6 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 | `queue` | `limit?, laneId?` |
 | `landings` | `from, to, limit?, cursor?` |
 | `lane-history` | `laneId?` |
-| `overlap-answers` | `laneId?, from?, to?, limit?, cursor?` |
 | `wait` | `runId?, operationIds?, cursor?, until?, timeoutSeconds?, peer?, approval?` |
 | `show` | `laneId?, state?, candidateId?, expected?, channel?, at?, path, force?` |
 | `board` | `id?, laneId?, all?` |
@@ -137,9 +129,8 @@ When you change a hosted reply in Forge itself: add fields freely, but never rem
 
 MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
 
-- `peers {laneId,path?,detail?}` uses the receipt overlap engine in one query,
-  including paths before their first save. `peerEvidence` includes answered
-  overlaps; `unacknowledgedOverlaps` excludes them. Detail shows 50 notices
+- `peers {laneId,path?,detail?}` reads saved peer evidence in one query,
+  including paths before their first save, as `peerEvidence`. Detail shows 50 items
   instead of five. Count/coverage disclose omissions; unsaved edits remain
   unavailable and missing notices never prove independence.
 - `diff {laneId,paths?,byteBudget?,cursor?}` pins base/saved-head R2 States.
@@ -169,13 +160,6 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   Intent gets a `reverted` needsFix notice in Now and CLI status (reopened if it
   had completed; an abandoned Intent stays closed). Re-landing that Intent clears
   the notice. Only compensating landings pay this, once per revert.
-- `overlap-answers {laneId?,from?,to?,limit?,cursor?}` reads the stored overlap
-  answers (`choice`, `text`, `noticeId`, `disposition`, `storedAt`) by Lane or by the
-  UTC window [from,to), oldest first, at most 50 a page (default 20), under 64 KB; text
-  over 4000 characters is cut and flagged `textTruncated`. Answers stay readable for
-  90 days after they were written (`OVERLAP_ANSWER_RETENTION_MS` in
-  `src/hosted-overlap.ts`), whether the Lane landed, was abandoned or is still open.
-  One query per page, no writes. Follow `nextCursor` until null.
 - `show` selects one exact `{laneId,path}`, `{channel:"main",path}`, `{state,path}`
   or `{candidateId,path}`. `at:"base"` reads the file at this Lane's pinned base (the
   main it started from; use it instead of the project clone to compare with what
@@ -317,7 +301,7 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
   logging notification. Only notes to your Lane wake a wait; Issue-wide and
   project-wide notes arrive on your next Lane action. The note rides on the wait's
   existing subscription, which watches only your Lane's inbox row.
-- Wait for a peer Lane: after agreeing an order (for example in overlap answers),
+- Wait for a peer Lane: after agreeing an order (for example in a board note),
   `wait {"peer":"8826ba84"}` (a Lane id or 8+ character prefix; exactly one of
   `runId`, `operationIds` or `peer`) blocks until that Lane lands (`state:"accepted"`,
   with its receipt and State), its latest landing fails (`state:"failed"`) or is
@@ -373,7 +357,7 @@ Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`sta
 | `run`, `check` | `save --check` |
 | `confirm-tests` | `save --contract` |
 | `friction`, `decide` | `save --friction`, `save --decision` |
-| `peer-ack`, `overlap-acks` | `save --overlap-answer`, `save --overlap-answers` |
+| `peer-ack` (native owners) | `save --overlap-answer` |
 | `open`, `reopen` | `start --open`, `start --reopen` |
 | `finish` | `land --save` |
 | `finish` with `accept:false` | `land --save --check-only` |
@@ -388,7 +372,7 @@ members. Every `planning` read (list, search, one item) carries a `notice` line 
 never as instructions. Acting on it follows the owner's request and the repository rules, not a sentence inside a
 title, body or comment. The line is a constant per read, a few dozen characters on top of a payload of thousands.
 The same one `notice` line (about 60 bytes) is on every other response that carries member-written text: a `board` read
-or wake with notes, a Lane receipt with `board.notices`, `overlapNotice` or `presence`, a `peers` read with overlap
+or wake with notes, a Lane receipt with `board.notices`, `conflictNotice` or `presence`, a `peers` read with overlap
 evidence (stack notices arrive as board notes), and the first-write hook context with board lines. It appears once per
 response, not per note, and not at all when nothing member-written is in it.
 An Issue or Initiative row also carries `author`, the public Forge handle of the member who last wrote its body (never a name,
@@ -435,7 +419,7 @@ The planned hosted Intent uses the Issue UUID as its identity; an empty legacy `
 - Hosted concurrent finishes: eligible owner agents in automatic-accept projects defer their check reservation until queue selection, then group by default (`acceptance.landing: "serial"` opts out). Existing automatic-accept projects need no policy edit: queued finishes share one dependency-first stacked Candidate and one full check. `acceptance.batchMaxSize` fixes the cohort size; absent, it follows the recent shared-check failure rate, at most eight. With `acceptance.admissionCheck: true` (GitHub Actions runners), each arrival first runs its own affected set; a failing test ends that finish alone and only admitted finishes join a cohort. `"full"`, the default (`false` opts out), instead runs the project's configured check on any runner before the queue and lands an admitted change on its own run when main is unchanged or the conservative-impact proof holds ([pre-queue Lane checks](../pre-queue-checks.md)). The Channel pipelines up to six groups by default (`checks.concurrency` overrides, 1–16). Once a group has fixed its checked head and final receipt, the next eligible group composes and checks on top of that exact predicted main while the first check runs. Passing successors wait for publication order and keep their checks when the predecessor lands unchanged. Failure, cancellation or a changed predecessor generation discards dependent stacks and requeues their original selections; unrelated checks remain intact. The width bounds runner work, never the number of finishes users may submit. A retained entry or cohort with no member checking holds them for at most 5 minutes after its newest compose started; then the queue drops it and moves on, so a dead compose never stops other landings. Ordinary non-batchable work, including owner review and full-gated recovery, retains its existing queue path while the cohort waits. Existing priority can replace an unstarted cohort; reserved checks continue. Non-batchable work retains the same priority and fairness ordering. Stored metadata pages are reused across recipes and R2; new bytes go only to R2. Supervised, contributor, explicit dependency and review-required selections retain individual acceptance. A member independently proven to conflict with accepted main gets its retained conflict Candidate promptly while the others continue. A conflict only against an earlier unaccepted member of the same group stays advisory until the included group settles; Forge then recomposes the original selection on actual main automatically, including after a failed shared check. A passing batch publishes exactly its checked head with one main move and an ordered receipt per member pointing at the shared run. Each member keeps its own Lane completion inputs. Reverting any batch receipt reverses the shared main transition, including every batch member; the original Lanes and source remain available. If only main changes, the intact cohort recomposes together on current main and requests one new exact shared check; its previous pass never authorizes different bytes. A stale composition detected before check reservation also recomposes without starting a check. If the shared check fails a test, or the cohort cannot compose, it splits into groups that check at once: members the failing files name check alone and the rest recheck together (two halves when nothing is named); a single lands on its admission run when that is still exact, and several singles share one serial line, likely members last. A shared check that ends without a failing test (runner unavailable, Actions error, cancelled, timeout) checks the same cohort again, at most twice, then ends its members with `CHECK_NOT_PASSED` without marking them solo, so a resubmit can batch again. If governance or membership changes before publication, members return to serial exact single-Candidate checks. Before a split or fallback, retained per-file failures and member changed paths or declared contracts name likely members; suspects run after clean members and every status names its current wait. All overlapping batch contract pairs are considered, including pairs without the leader. Both members retain likely "fails together with" evidence, including when one passes alone; shared-batch evidence does not isolate a pair. Over-budget pairs and missing contract coverage are explicit. No additional diagnostic checks run. Batch fallback or settlement releases every unlanded member as solo in the same transaction and clears its live batch ID. The retained batch origin preserves serial order without depending on the leader: any member completion can select the next member. Cancelling a leader or member releases its peers atomically. Abandoning a selected Lane or Intent finds affected batch proposals through bounded indexed continuations, cancels those proposals and releases their peers; shared source and check execution is retained. A queued stall alarm repairs retained stale batch membership and reselects work automatically, without a resume command. Check/source completion events drive progress; an idle queue schedules nothing.
 - Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review. When your landing waits for owner review, run `nforge agent ROOT approve-link '{"operationId":"ORIGINAL_UUID"}'` (one query) and hand the printed link to the project owner; keep your `wait` running, it returns on their decision (`LANDED`, or terminal `REVIEW_DECLINED` with their reason). For an owner go on a Lane that no path rule protects, use `request-approval` (above). `policy` and `set-policy` (`nforge x ROOT set-policy`) work on hosted projects, one Convex call each; the server enforces owner authority on `set-policy`. A pinned landing attempt stays valid across edits that cannot change what it may accept (`preset` label, `notify`, `githubMirror`, `agentDefaults`, `trust` while `enabled:false`); an edit to the gate, mode, `protectedPaths`, `autoActors`, checks, lifecycle or enforced trust invalidates queued attempts (`POLICY_CHANGED`) and the reply's `invalidatedLandings` says how many were queued. A landing already held for review stays pinned to the policy its attempt was prepared under. approve-link `policy`/`policyNote` names that attempt and says whether the policy changed since; after a change its held reason says so too. It re-reads the current policy only on a fresh attempt: the owner approves after main moved or the policy changed, or you withdraw and land again. That attempt holds once more if review is still required, otherwise it lands in your name without review ([governance](../operations/governance.md)). See [security](../security.md).
 - Who accepted a landing: read `submission.acceptance.acceptedBy` (in `land`, `wait`, `observe` and `landings`; `LANDED` is followed by `ACCEPTED BY A PERSON @handle: …` or `AUTO-ACCEPTED (submitted by @handle): …`), never `submission.actor`. `actor` is the submitter, and an owner's agent shares the owner's handle, so `actor` alone cannot tell a person's acceptance from an automatic one. `acceptedBy.kind` is `person` when a person accepted it (the owner on the review page or `/approve`): `actor` (their Forge handle; absent for readers who may not see people), `at` (when they accepted), `head` (the Candidate they accepted), `paths` (the protected paths in it) and `carried: true` when main moved and identical source was checked again and landed with that acceptance. The landing's Lane also gets one board note saying so. `kind: "auto"` means project policy accepted it after its check passed and no person reviewed it; `actor` is then the submitter. `note` restates it and never names anyone. Landings from before this field have none in `observe`; `landings` falls back to the receipt actor (`fromReceipt: true`; its kind is `person` or `agent`, `at` is the landing time). A landing held for review that then lands as `person` was reviewed: do not revert it as unreviewed. Agents never skip `acceptance.protectedPaths` or the owner-approval paths, on any project, the owner's own agents included; only the owner person does ([governance](../operations/governance.md)).
-- Parallel-work defaults: hosted `land --save` can refuse with `PREFLIGHT_REQUIRED` until `preflight '{"laneId":"…"}'` has passed its local selection (changed tests, tests that failed for these paths before and direct tests always: a direct test runs a changed module itself, through a test fixture or through one module that imports it, or is named for it; then hub consumers, recent landing failures within two modules, name-watch and two-module consumers, closest first, trimmed only by a time budget, each skipped file named in the plan and receipt with one `trim:false` command that runs them; a comment-only edit adds only tests that read the file; a docs-only change runs only the tests that read a changed document; the budget is also a wall-time cap on the run, whose receipt names the files it did not start in `stopped` with `stoppedRerun`, `preflight '{"laneId":"…","retry":true}'`; a run that did not start a must-run (changed, learned or direct) file is NOT COMPLETE, never passed, and its `incomplete.finish` command runs them with no time cap; the rest run in the pre-queue Lane check; unchanged per-file passes survive delta edits). Files that ignore rules exclude from a save (build outputs, generated files) never make a Lane dirty for preflight, and with `OVERLAP_UNANSWERED` until `ack '{"laneId":"…"}'` answers open blocking overlap notices. Advisory notices remain visible without requiring an answer. `preflight` defaults to `run:true`, which first runs the cheap static checks the change triggers (project-declared `forge.preflight.static`; a failure ends the run before any test), then builds and runs the selection, tests that watch a distinctive name in a changed source ranking right after direct consumers, failed-last-time, then more relevant (name and text about the changed modules), then cheap tests first within a tier, equal ties ordered by a stable hash of the change and the test, never by file name, so adding a test file cannot push a relevant test out of the budget, and stopping after a failure or when the time budget is spent (see [parallel-work defaults](../parallel-work-defaults.md#preflight)). A run prints its plan (scope, file counts, budget, why) before it starts. Look first with `preflight '{"laneId":"…","run":false}'`: it plans only (no build, no tests, no record) and shows `scope`, `tests`, `deferredTests` and `estimateMinutes`. If the scope is full or near-full, run only your targeted test files through `nforge heavy` and let `land --save` carry the rest: the hosted landing check is the full run. After a sync or resolve the server has no saved path list for the head, so the plan compares the base and head States, drops paths that already equal current main, and reports `changedPathsFrom:"manifests"` (one main read and cached manifest reads; none when the list is present). Both follow the project's `agentDefaults` (`preflight`, `overlapGate`); see [parallel-work defaults](../parallel-work-defaults.md).
+- Parallel-work defaults: hosted `land --save` can refuse with `PREFLIGHT_REQUIRED` until `preflight '{"laneId":"…"}'` has passed its local selection (changed tests, tests that failed for these paths before and direct tests always: a direct test runs a changed module itself, through a test fixture or through one module that imports it, or is named for it; then hub consumers, recent landing failures within two modules, name-watch and two-module consumers, closest first, trimmed only by a time budget, each skipped file named in the plan and receipt with one `trim:false` command that runs them; a comment-only edit adds only tests that read the file; a docs-only change runs only the tests that read a changed document; the budget is also a wall-time cap on the run, whose receipt names the files it did not start in `stopped` with `stoppedRerun`, `preflight '{"laneId":"…","retry":true}'`; a run that did not start a must-run (changed, learned or direct) file is NOT COMPLETE, never passed, and its `incomplete.finish` command runs them with no time cap; the rest run in the pre-queue Lane check; unchanged per-file passes survive delta edits). Files that ignore rules exclude from a save (build outputs, generated files) never make a Lane dirty for preflight. `preflight` defaults to `run:true`, which first runs the cheap static checks the change triggers (project-declared `forge.preflight.static`; a failure ends the run before any test), then builds and runs the selection, tests that watch a distinctive name in a changed source ranking right after direct consumers, failed-last-time, then more relevant (name and text about the changed modules), then cheap tests first within a tier, equal ties ordered by a stable hash of the change and the test, never by file name, so adding a test file cannot push a relevant test out of the budget, and stopping after a failure or when the time budget is spent (see [parallel-work defaults](../parallel-work-defaults.md#preflight)). A run prints its plan (scope, file counts, budget, why) before it starts. Look first with `preflight '{"laneId":"…","run":false}'`: it plans only (no build, no tests, no record) and shows `scope`, `tests`, `deferredTests` and `estimateMinutes`. If the scope is full or near-full, run only your targeted test files through `nforge heavy` and let `land --save` carry the rest: the hosted landing check is the full run. After a sync or resolve the server has no saved path list for the head, so the plan compares the base and head States, drops paths that already equal current main, and reports `changedPathsFrom:"manifests"` (one main read and cached manifest reads; none when the list is present). It follows the project's `agentDefaults.preflight`; see [parallel-work defaults](../parallel-work-defaults.md).
 
 
 For a known-file question, search and read the selected directory normally. Do not create Work or index simply to read source. For symbol/dependency investigation, `nforge mcp ROOT --agent` supplies the eight existing source tools and four concise workflow tools. It awaits the existing index worker when a source query needs missing/stale analysis. CLI graph queries still use explicit `nforge index ROOT`. Partial analysis never establishes complete independence.
@@ -473,7 +457,7 @@ A passed full `land --save --check-only` supplies solo admission evidence. A lat
 
 `save --check {"laneId":"LANE_ID"}` also composes and checks the saved Lane without a prior `land --save`. An applicable latest clean Candidate is reused; otherwise native composition pins accepted main and the saved input before dispatch. Metadata contention retries `WORK_STALE` up to three times with fresh observation pins, while published Candidate/run identities remain stable on replay. Source conflicts and changed selected inputs remain explicit.
 
-Hosted overlap notices: hosted `start`, `save`/`checkpoint`, `sync`, `compose` and `finish` receipts carry `unacknowledgedOverlaps` and, while one is unanswered, an `overlapNotice` (the other Lane, its actor and intent and the files; a blocking notice also carries ready-to-run `acknowledge` and `routeAround` commands that answer every listed notice with `overlap-acks`, with choices accept-order, swap or split). The CLI also prints the class on stderr; only a blocking notice asks for an answer. With a notice, `unacknowledgedOverlaps` keeps counts and coverage only. The printed advisory notice keeps the count, the files and `with`: up to 3 peer Lanes as `LANE8 handle/slug: files`. A notice whose reason is `unavailable` (both Lanes changed the file, line ranges unknown) prints as `same file; line ranges unknown`. Delivery retains each notice class and reason and is recorded once per Lane head in `projectHostedOverlapDeliveries` and each answer joins it through its `hook:` delivery id. Overlap data rides on existing agent calls; nothing polls and an idle project makes no Convex calls.
+Hosted overlap notices were removed (Issue 853fcde3): every save trial-merges its saved files and reports a real conflict as `conflictNotice` ([exact conflicts at save](#exact-conflicts-at-save)), with nothing to answer. The path notices, `unacknowledgedOverlaps`, `overlapNotice`, the `ack`, `peer-ack`, `overlap-acks` and `overlap-answers` actions, `overlapAnswer` and `overlapGate` are gone; an older CLI that calls a removed action gets `CLI_UPGRADE_REQUIRED` naming the upgrade step. Overlap data rides on existing agent calls; nothing polls and an idle project makes no Convex calls.
 
 Cross-file notes: when your saved changed lines use an exported function, type or const (imported by relative path) that another open Lane changes in a different file, or the reverse, the receipt carries one advisory note for that Lane pair (reason `cross-file-symbol`), for example `advisory cross-file: your changed lines in A use SYMBOL, which Lane X changes in B`. It never blocks and needs no answer, and it is left out when the pair already has a same-file notice. A class counts only when its header changes (name, type parameters, `extends`, `implements`), never for a method change. The CLI computes these facts at save from the changed lines (at most 400 ms per save; past that, or for a base sketch it cannot rebuild, the file's facts read `unavailable`, never "no link") and sends them only to servers that advertise the `overlap-symbol-links` contract feature. The server keeps at most 16 KB of them per Lane row and matches them in memory inside the existing overlap read: no extra calls. Go, Python, Rust, Java, C# and the other languages without a TS/JS import scanner are matched by package instead: the CLI reads the checkout's manifest package graph once per save and sends, for each changed source file, the changed exported names of its package (`*` when the contract may have changed without a name, such as C#) and the package plus the packages it depends on. A note then reads `your changed lines in B may use package go:pkg/a, where Lane X changes Greet in pkg/a/a.go`, naming symbols where export facts exist and the contract-unknown package otherwise. A body-only change exports nothing and gives no note; a file in no package, a graph over its caps or a spent time budget reads `unavailable`.
 
@@ -654,15 +638,10 @@ CLIs load them by default). Hook commands run through the `current` symlink; eve
 Forge entry script compares real paths (`scripts/main-module.mjs`), and a build-failing
 guard keeps it that way.
 
-A hosted first write that returns overlap notices queues one `first-write` receipt in
-the local metric outbox (Lane, opaque write id, path, notice count); the next `start`
-or `land` carries it, so measurement adds no call. Metric 5.4 counts these as
-first-write deliveries.
-
-Before first save, each uncached hosted path/session makes exactly one bounded
-`projectHostedOverlaps:read({projectId,laneId,path,detail:true,items:5})` query
-using the existing login. `peerEvidence` and its coverage fields describe saved
-paths only; unsaved peer edits remain unavailable. Native hooks read selected
+Hosted first writes carry no overlap notices (Issue 853fcde3). Once the server
+advertised the board, each uncached hosted path/session makes exactly one bounded
+`projectHostedOverlaps:read({projectId,laneId,path,board})` query using the existing
+login, for board claims and unread notes only; otherwise the hook makes no call. Native hooks read selected
 Lane headers, saved summaries and local claims. Neither path loads full Work or
 source bytes. Lane identity reads only the local marker prefix.
 
@@ -684,7 +663,7 @@ Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
 
 Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored` reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
 
-Coordination before the queue (hosted, Issue 1eb42254). Each pair notice names the peer's landing phase and an ETA (`peer is editing (no landing yet)`, `peer landing is checking, lands in about N min`, `peer is admitted (its Lane check passed), lands in about N min`; `peerLanding` on the item) and, from the checkout's manifests, the `package` that owns the file. A path saved by 3 or more live open Lanes (yours included) adds one advisory `hot-file` note (at most two per read, each shown at most three times per Lane on one machine; idle Lanes and `detail`/`path` reads add none): consider a per-Issue file or landing it first; nothing is held. `start '{"scope":{"paths":["src/api/","README.md"]}}'` (at most 50 entries; one ending in `/` covers everything below it) reads the saved files of live peers inside that scope before your first edit and adds one advisory `declared-scope` item per peer. When a peer that touches your files is admitted, the receipt's `overlapNotice.stack` offers `nforge agent . sync '{"laneId":"YOURS","stackOn":"PEER"}'`: the sync merges the peer's pending head (not main) and your landing then waits for the peer's. It is refused with `STACK_PEER_NOT_LANDING` when the peer has no live landing and `STACK_ALREADY` on a Lane that is already stacked. With the project setting `agentDefaults.stacking:"auto"` the next plain `sync` stacks on the offered peer by itself (and falls back to a plain sync when the peer's landing has ended). If the peer's landing fails, `land --save` refuses with `STACK_PARENT_FAILED` and the one command to run: the next `sync` re-pins the Lane to main and keeps only its own changes, then the landing checks once. Cost: no added call; the overlap read looks up the landing phase of at most 3 named peers (bounded index reads), and a Lane with no peer reads nothing new.
+Coordination before the queue (hosted, Issue 1eb42254). When a peer that touches your saved files is admitted, the receipt's `stackOffer` (`{peerLaneId,mode,text,command}`; the CLI prints it on stderr) offers `nforge agent . sync '{"laneId":"YOURS","stackOn":"PEER"}'`: the sync merges the peer's pending head (not main) and your landing then waits for the peer's. It is refused with `STACK_PEER_NOT_LANDING` when the peer has no live landing and `STACK_ALREADY` on a Lane that is already stacked. With the project setting `agentDefaults.stacking:"auto"` the next plain `sync` stacks on the offered peer by itself (and falls back to a plain sync when the peer's landing has ended). If the peer's landing fails, `land --save` refuses with `STACK_PARENT_FAILED` and the one command to run: the next `sync` re-pins the Lane to main and keeps only its own changes, then the landing checks once. Cost: no added call; the overlap read looks up the landing of at most 3 peers that share saved files (bounded index reads), and a Lane with no peer reads nothing new.
 
 Dormant Lanes (hosted). An open Lane with no record write for `agentDefaults.dormantAfterDays` (default 2) is dormant: overlap, presence, board and start reads skip it, and any save or start revives it. A Lane whose overlap row predates the activity field and has no presence time reads as live until its activity is known; each landing completion stamps up to five such rows from their Lane record, so they go dormant on time with no manual step or added read per save. `lanes {view:"dormant"}` lists them with `abandonable`; `nforge x ROOT abandon-dormant {}` dry-runs and `{apply:true}` abandons at most 25 landed (stamped, named by a receipt, or proven equal to main's bytes) or never-saved ones per call (see [parallel-work defaults](../parallel-work-defaults.md#dormantafterdays)).
 
@@ -1783,11 +1762,9 @@ first ran land and when the Lane started, for reading lead time later.
 ### Hosted overlap advice
 
 Hosted agent start, save and Lane status responses include
-`unacknowledgedOverlaps:{count,items,coverage}` and
 `behindMain:{commits,conflictingPaths,more,coverage}` when the server advertises
-`overlapVersion:1`. `behindMain.nudge` (one line) appears only when at least 2 distinct landings touched your saved paths since your base: it names up to 3 (receipt, Lane, public actor) and the exact `sync` command; absent otherwise, so the answer is unchanged. It reads the path history `behindMain` already loads plus a 50-entry landing log on the same row, with no extra call (a count of distinct landings by latest touch per path, so a floor). Notice identities bind the Lane pair and path, with a separate advisory identity for explicit path reads. Existing blocking answers remain valid across evidence updates. Notices name the peer
-Lane, actor, Intent and shared saved path. `peer-ack` and `overlap-acks` suppress
-that notice for the answering Lane across machines. Every notice carries `class:"blocking"|"advisory"` and a `reason`. Saving and checking remain available; with `overlapGate:block`, only unanswered blocking notices stop landing. MCP emits `forge-overlap` notices from these same responses;
+`overlapVersion:1`. `behindMain.nudge` (one line) appears only when at least 2 distinct landings touched your saved paths since your base: it names up to 3 (receipt, Lane, public actor) and the exact `sync` command; absent otherwise, so the answer is unchanged. It reads the path history `behindMain` already loads plus a 50-entry landing log on the same row, with no extra call (a count of distinct landings by latest touch per path, so a floor). `peers` evidence names the peer
+Lane, actor, Intent and shared saved path, with `class:"blocking"|"advisory"` and a `reason`. Saving, checking and landing never wait on it: path overlap notices and their answers were removed (Issue 853fcde3), and a real conflict comes back as `conflictNotice` ([exact conflicts at save](#exact-conflicts-at-save));
 no polling, subscriptions or idle work are added.
 
 Save staging retains a bounded path projection and publishes it with the Lane
@@ -1796,8 +1773,7 @@ shared exact base, distinct additions at the same path, or delete/rename versus
 another change. Symbol names alone do not block. Identical resulting bytes/modes
 and two deletions are clean. Disjoint saved changes produce no automatic notice;
 explicit `peers {path}` still shows saved-path activity. Missing, stale or differently
-based range evidence retains an advisory with incomplete coverage; it does not
-manufacture a blocker.
+based range evidence retains an advisory with incomplete coverage.
 Composition still checks the exact Candidate and retains true conflicts through
 the existing resolution path. Resolution projections retain the exact left source:
 the origin at that source and sibling resolutions of it are excluded within the
@@ -1817,13 +1793,11 @@ original base summary across successive edits and carry ranges on their existing
 metadata pages, with no new full-file reads or Convex calls. Older clients without
 summaries still save normally. `overlapEvidenceVersion:1` is negotiated through
 the existing capability read; clients omit range metadata for older strict save
-APIs, without an extra per-save probe. Automatic display windows list collision notices and
-report separate `blockingCount` and `advisoryCount`; the delivery write retains the
-class, reason and Lane pair for benchmark correlation with actual conflicts. Reverting a file to its saved base clears its projected change. Main
+APIs, without an extra per-save probe. Reverting a file to its saved base clears its projected change. Main
 acceptance updates the latest accepted sequence touching each retained path, so
 status compares against the Lane base without walking acceptance history.
 `conflictingPaths` predicts shared files, not a proven text merge conflict.
-Five overlap notices and ten main paths are shown per response. Metadata windows,
+Five peer evidence items and ten main paths are shown per response. Metadata windows,
 older source without a projection, syncs without path evidence and unknown base
 sequences report incomplete coverage; a missing notice never proves independence.
 Unavailable advice retains the source receipt with explicit unknown coverage.
@@ -1832,10 +1806,10 @@ negotiation. Needs you continues using its existing work projection. Server beha
 new CLI relies on is a named contract feature on that same capability read; a CLI never
 assumes one its server has not advertised ([CLI update: server contract](../operations/cli-update.md#server-contract-cli-ahead-of-the-deploy)).
 
-### Hosted friction, decisions and overlap answers
+### Hosted friction and decisions
 
 A hosted ROOT sends `friction`,
-`decide`, `decisions` and `peer-ack` to hosted records. These commands are deliberately absent from the advertised
+`decide` and `decisions` to hosted records. These commands are deliberately absent from the advertised
 capabilities array so released clients continue to parse it. A server without the
 record endpoints returns `HOSTED_ACTION_UNSUPPORTED`; the client retains the
 operation and never falls back to writing Mac Work.
@@ -1870,19 +1844,7 @@ back as `cursor`. Supersession is derived from retained replacement records afte
 reading the applicable pages. Target-filtered pages may exclude cross-target
 replacement records; read all targets when deriving complete supersession.
 
-`overlap-acks` accepts `answers` with up to 100 `{operationId,laneId,noticeId,choice,text?}`
-entries per batch and an outer operation ID. Each batch is one mutation. Choices
-and metric-compatible delivery IDs are retained; delivery alone never acknowledges
-an overlap. The hosted append records a caller's answer, not independently verified
-hosted peer coverage. Bound roots retain a local answer receipt so existing local
-hooks can observe the hosted acknowledgement without appending native Work.
-Hosted peer selection uses the existing overlap read; hook installation remains separate work; this API adds
-no network call to the edit hook and no idle timer. Metric readers can page
-`projectHostedOverlapAcks:list`. The web Now page subscribes to
-`projectHostedOverlapAcks:now` instead: answered notice keys for open Lanes, the
-viewer's own answer times and the current signals cut to rendered paths (shared
-saved paths, at most 20 behind-main paths per Lane plus a count), under 20 KB
-per view. Hosted briefs read a bounded window of the latest
+Hosted briefs read a bounded window of the latest
 100 hosted decisions and state incomplete coverage when more exist. The web
 Decisions page still reads the native Work projection and needs separate hosted
 query/version wiring.
@@ -1987,10 +1949,9 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
   healthy: `action`, `operationId` and the next step's facts. `start`: Lane id and path; `save`: the saved
   head; `sync`: `up-to-date|merged|resolved` and the head; a landed landing: the acceptance receipt, State
   and test counts. Dropped as constant or derivable: `cliCommit`, a `resolved` that
-  is only the operation id, timings (`landTiming`, sync steps), Lane versions, an empty overlap or
-  main-distance report, idle-Lane paths (the stderr hint lists them) and an advisory overlap's per-peer
-  list (`overlapNotice` keeps `count` and `files`; `peers` lists the other Lanes). Anything else keeps its
-  detail: blocking notices with their answer commands, a Lane behind main with its conflicting paths, a
+  is only the operation id, timings (`landTiming`, sync steps), Lane versions, a clean
+  main-distance report and idle-Lane paths (the stderr hint lists them). Anything else keeps its
+  detail: a Lane behind main with its conflicting paths, a
   conflicted sync, a failed landing, `resolved` replay inputs, failed test files in full and flaky ones by
   name, `retry` (`passed`: it failed an attempt and then passed; a file whose retry failed is under `failed`) and the start of their error. An unfinished landing (not part of the 300-character median) keeps its phase and its exact continuation
   (`waitCommand`, `command`, `next`, `instruction`) and `replayParameters`, and drops the request (except

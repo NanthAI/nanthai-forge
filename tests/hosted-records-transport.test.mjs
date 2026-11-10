@@ -18,7 +18,6 @@ import { boundAgentRecords } from '../dist/hosted-agent-bound.js';
 import { updateHostState } from '../dist/host-binding.js';
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { unacknowledgedOverlaps } from '../dist/agent-edit-notices.js';
 import { recordsFixture } from './hosted-context-records-fixture.mjs';
 const code = expected => error => error.code === expected;
 function fixture(t) {
@@ -115,7 +114,7 @@ test('old hosted server returns HOSTED_ACTION_UNSUPPORTED without native fallbac
   assert(!existsSync(join(s.root, '.forge', 'work')));
 });
 
-test('server-bound workflow routes records and acknowledgements to hosted without changing native Work', async t => {
+test('server-bound workflow routes records to hosted without changing native Work', async t => {
   const previousToken = process.env.FORGE_AUTH_TOKEN;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
   t.after(() => {
@@ -163,22 +162,9 @@ test('server-bound workflow routes records and acknowledgements to hosted withou
     why: 'Context',
   });
   assert.equal((await agent.dispatch({ action: 'decisions' })).result.page.length, 1);
-  const noticeId = 'b'.repeat(64),
-    directory = join(store.directory, 'overlap-inbox', lane.laneId);
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(
-    join(directory, `${noticeId}.json`),
-    JSON.stringify({ noticeId, lanes: [lane.laneId], file: 'synthetic.txt', text: 'Synthetic overlap' }),
-  );
-  assert.equal(unacknowledgedOverlaps(store.directory, lane.laneId).count, 1);
-  const calls = s.counts().calls;
-  await agent.dispatch({ action: 'peer-ack', laneId: lane.laneId, noticeId, choice: 'split' });
-  assert.equal(s.counts().calls - calls, 1);
-  assert.equal(unacknowledgedOverlaps(store.directory, lane.laneId).count, 0);
   assert.equal(store.revision(), revision);
   assert.equal(store.readRecords().manifest.collections.decisions?.count ?? 0, 0);
   assert.equal(store.readRecords().manifest.collections.frictionEvents?.count ?? 0, 0);
-  assert.equal(s.tables.projectHostedOverlapAcks.size, 1);
   updateHostState(store, state => {
     state.binding.sourceAuthority = { mode: 'native-owner', epoch: 0 };
   });
@@ -216,7 +202,6 @@ test('hosted MCP exposes record writes and paged decision reads through the shar
       what: 'MCP decision',
       why: 'Context',
     },
-    { action: 'peer-ack', laneId: randomUUID(), noticeId: 'c'.repeat(64), choice: 'accept-order' },
     { action: 'decisions', cursor: null },
   ]) {
     const tool = tools.get(command.action === 'decisions' ? 'forge_work_overview' : 'forge_task');

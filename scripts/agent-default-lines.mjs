@@ -5,7 +5,6 @@ export const AGENT_DEFAULTS = Object.freeze({
   preflight: 'require',
   preflightMaxMinutes: 10,
   urgentRoles: ['owner'],
-  overlapGate: 'block',
   checkpointNudgeMinutes: 30,
   stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
 });
@@ -19,13 +18,6 @@ export function agentDefaultLines(defaults, root = 'ROOT') {
         (defaults.preflight === 'require'
           ? ` (land refuses without a pass for the saved head; sets over ${defaults.preflightMaxMinutes} min are advisory).`
           : ' (advisory).'),
-    );
-  if (defaults.overlapGate !== 'off')
-    lines.push(
-      `Answer blocking overlap notices before land: nforge agent ${root} ack '{"laneId":"…"}'` +
-        (defaults.overlapGate === 'block'
-          ? ' (this CLI refuses land while a blocking notice is open; advisory, client-side only).'
-          : '.'),
     );
   if (defaults.checkpointNudgeMinutes > 0)
     lines.push(

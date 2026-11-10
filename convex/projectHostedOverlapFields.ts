@@ -86,17 +86,6 @@ export const hostedOverlapTables = {
   })
     .index('by_project_and_parent', ['projectId', 'parentLaneId'])
     .index('by_project_and_lane', ['projectId', 'laneId']),
-  // One row per Lane head whose agent response carried at least one overlap notice (metric 5.4 delivered).
-  projectHostedOverlapDeliveries: defineTable({
-    projectId: v.id('hostedProjects'),
-    id: v.string(),
-    actor: v.string(),
-    laneId: v.string(),
-    request: v.string(),
-    value: v.string(),
-  })
-    .index('by_project_and_id', ['projectId', 'id'])
-    .index('by_project_and_lane', ['projectId', 'laneId']),
   /** Presence (Issue 9c8490a4): one slim row per open Lane, so a start reads ~0.5 KB per peer instead
    * of the full overlap row (measured 2026-11-05: 41 open rows, ~330 KB). Deleted when the Lane closes. */
   projectHostedPresence: defineTable({

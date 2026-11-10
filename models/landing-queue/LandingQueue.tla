@@ -225,8 +225,9 @@ LaneRefused(g) ==
                      ELSE invalid.phase[x]],
            !.train = Keep(@, Range(@) \ {g})]
   /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
+\* Review or an unresolved dependency stops an entry (overlap answers were removed, Issue 853fcde3).
 Gate(e) == /\ Arrives(e)
-           /\ q' = [q EXCEPT !.phase[e] = "needs-action", !.reason[e] = "OVERLAP_OR_REVIEW"]
+           /\ q' = [q EXCEPT !.phase[e] = "needs-action", !.reason[e] = "REVIEW_NEEDED"]
            /\ UNCHANGED <<main, stamp, moves, counts, audit, running, crashes, claim, fence>>
 Precompose(e) == /\ AllowAdvice /\ e \in Free /\ e \notin q.advice
                 /\ q' = [q EXCEPT !.advice = @ \cup {e}]

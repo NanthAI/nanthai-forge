@@ -131,8 +131,6 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   'friction-triage': server,
   decide: server,
   decisions: read,
-  'peer-ack': server,
-  'overlap-acks': server,
   tests: server,
   'confirm-tests': server,
   compose: server,
@@ -142,7 +140,6 @@ export const replayBindings: Record<keyof typeof hostedAgentCommandSchemas, Bind
   // Finish selects its own operation (selectHostedFinish) against the Lane's current saved head.
   finish: { kind: 'transport' },
   prioritize: server,
-  ack: server,
   preflight: read,
   'source-pack': read,
   snapshots: read,

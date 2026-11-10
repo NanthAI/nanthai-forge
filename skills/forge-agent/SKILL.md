@@ -21,12 +21,12 @@ For work on Forge itself, read [AGENTS.md](../../AGENTS.md), the [lead playbook]
 
 ## Hosted checkouts
 
-- Use start/save/status `unacknowledgedOverlaps` and `behindMain` to coordinate.
-  Their saved-path windows show five notices and ten behind-main paths; coverage
-  and `more` report omissions. Unsaved peer edits are excluded. Missing notices
-  never establish independence. `peers {laneId,path?,detail?}` reads the same
-  server evidence, including a requested path before its first save. `peerEvidence`
-  includes answered overlaps; `unacknowledgedOverlaps` keeps unanswered notices.
+- Use start/save/status `behindMain` and a save's `conflictNotice` to coordinate.
+  Each save trial-merges your saved files with peers' saved files; a real conflict
+  comes back as `conflictNotice`, with nothing to answer. `behindMain` shows ten
+  paths; coverage and `more` report omissions. Unsaved peer edits are excluded.
+  `peers {laneId,path?,detail?}` reads saved peer evidence, including a requested
+  path before its first save.
 - `diff {laneId,paths?,byteBudget?,cursor?}` compares pinned base to saved head;
   `show {laneId?,channel?:"main",state?,candidateId?,path}` reads exact bytes
   (unsaved edits excluded). Paging and limits: `help review`.
@@ -52,7 +52,6 @@ Defaults; a project can change them. `nforge agent ROOT capabilities` returns yo
 
 <!-- agent-defaults:start (generated from scripts/agent-default-lines.mjs) -->
 - Before land, run your affected tests: nforge agent ROOT preflight '{"laneId":"…"}' (land refuses without a pass for the saved head; sets over 10 min are advisory).
-- Answer blocking overlap notices before land: nforge agent ROOT ack '{"laneId":"…"}' (this CLI refuses land while a blocking notice is open; advisory, client-side only).
 - Save after each meaningful step, at least every 30 minutes of edits: each save checks your saved files for exact conflicts with main and other open Lanes.
 - Never request urgent priority; it is owner-only.
 - After land is submitted, do not save, sync or edit that Lane until it lands or fails.

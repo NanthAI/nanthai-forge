@@ -37,12 +37,9 @@ function backend(failing = []) {
       if (args.paginationOpts) return { page: [], isDone: true, continueCursor: '' };
       if (name.endsWith(':unacked')) return { items: [], complete: true };
       if (name.endsWith(':claims')) return { claims: [], complete: true };
-      if (name.endsWith('OverlapAcks:now'))
+      if (name.endsWith('NowOverlaps:now'))
         return JSON.stringify({
-          answered: {},
-          mine: [],
-          complete: true,
-          signals: { edits: [], notices: [], behindMain: [], complete: true },
+          signals: { lanes: [], paths: [], edits: [], behindMain: [], complete: true },
         });
       return null;
     },
@@ -84,7 +81,7 @@ test('a reader opens the page with every read answering: nothing unavailable, co
 });
 
 for (const [panel, suffix] of [
-  ['overlaps', 'OverlapAcks:now'],
+  ['overlaps', 'NowOverlaps:now'],
   ['unacked', ':unacked'],
   ['claims', ':claims'],
   ['counts', ':counts'],
@@ -103,7 +100,7 @@ for (const [panel, suffix] of [
     assert.equal(seen.live.initialLoading, false, 'a failed read is settled, not an endless spinner');
     if (panel === 'overlaps') {
       assert.equal(seen.live.overlapsComplete, false);
-      assert.deepEqual(seen.live.overlapAnswers, []);
+      assert.equal(seen.live.overlapSignals, undefined);
     }
     if (panel === 'unacked') assert.equal(seen.live.unackedComplete, false);
     if (panel === 'sessions') {

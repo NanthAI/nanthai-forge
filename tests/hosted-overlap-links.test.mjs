@@ -10,21 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { policyPreset } from '../dist/autonomy-policy.js';
 import { hostedOverlapAdvice } from '../dist/hosted-overlap.js';
-import {
-  HOT_FILE_ITEMS,
-  HOT_FILE_SHOWS,
-  inScope,
-  peerPhaseText,
-  stackOffer,
-} from '../dist/hosted-overlap-coordination.js';
-import {
-  autoStackPeer,
-  limitHotFiles,
-  owningPackage,
-  rememberStackOffer,
-} from '../dist/hosted-coordination-client.js';
-import { hostedOverlapNotice, overlapBanner } from '../dist/hosted-overlap-notice.js';
-import { slimReceipt } from '../dist/receipt-slim.js';
+import { HOT_FILE_ITEMS, inScope, stackOffer } from '../dist/hosted-overlap-coordination.js';
+import { autoStackPeer, rememberStackOffer } from '../dist/hosted-coordination-client.js';
 import { mergeAgentDefaults, stackingMode } from '../dist/agent-parallel-defaults.js';
 
 const overlaps = await import(moduleUrl('../convex/projectHostedOverlaps.ts'));
@@ -105,8 +92,9 @@ async function project() {
         'owner',
       )
       .then(JSON.parse);
+  // Path notices are retired (Issue 853fcde3); the same exclusions shape the peers evidence.
   const noticed = async laneId =>
-    new Set((await read(laneId)).unacknowledgedOverlaps.items.flatMap(item => item.lanes));
+    new Set((await read(laneId, { detail: true })).peerEvidence.items.flatMap(item => item.lanes));
   const overlapRow = laneId =>
     [...s.tables.projectHostedOverlapLanes.values()].find(row => row.laneId === laneId);
   return { s, lane, read, noticed, overlapRow };
@@ -214,18 +202,8 @@ test('a stack member whose row predates the link fields still excludes its stack
   });
   const main = { head: 'd'.repeat(64), sourceRevision: 0 };
   const advise = (mine, peers, extra = {}) =>
-    hostedOverlapAdvice(
-      mine,
-      peers,
-      null,
-      main,
-      extra.answered ?? new Set(),
-      true,
-      extra.items ?? 5,
-      extra.path,
-      undefined,
-      extra.scope,
-    ).unacknowledgedOverlaps;
+    hostedOverlapAdvice(mine, peers, null, main, true, extra.items ?? 5, extra.path, undefined, extra.scope)
+      .overlaps;
 
   test('hot file: one advisory notice once three open Lanes saved a path, none at two; capped per read', () => {
     const mine = laneRow('aaaaaaaa-0000-4000-8000-000000000001', [
@@ -245,13 +223,6 @@ test('a stack member whose row predates the link fields still excludes its stack
     assert.match(hot[0].text, /docs\/x\.md is in 3 open Lanes/);
     assert.match(hot[0].text, /per-Issue file or landing it first/);
     assert.equal(three.blockingCount, 0, 'hot-file advice never blocks');
-    // An answered hot-file notice stays quiet.
-    const quiet = advise(
-      mine,
-      [peer('bbbbbbbb-0000-4000-8000-000000000002'), peer('cccccccc-0000-4000-8000-000000000003')],
-      { answered: new Set([hot[0].noticeId]) },
-    );
-    assert.equal(quiet.items.filter(item => item.reason === 'hot-file').length, 0);
     // Many hot paths: at most HOT_FILE_ITEMS listed, all counted.
     const paths = ['a.ts', 'b.ts', 'c.ts', 'd.ts'];
     const many = advise(
@@ -287,16 +258,7 @@ test('a stack member whose row predates the link fields still excludes its stack
     assert(inScope(['README.md'], 'README.md') && !inScope(['src/'], 'srcx/a.ts'));
   });
 
-  test('peer phase and ETA text, and the stack offer only for an admitted peer of an unstacked Lane', () => {
-    assert.equal(peerPhaseText(null), 'peer is editing (no landing yet)');
-    assert.equal(
-      peerPhaseText({ submissionId: randomUUID(), phase: 'checking', etaMinutes: 6 }),
-      'peer landing is checking, lands in about 6 min',
-    );
-    assert.match(
-      peerPhaseText({ submissionId: randomUUID(), phase: 'ready', etaMinutes: 1 }),
-      /admitted \(its Lane check passed\), lands in about 1 min/,
-    );
+  test('the stack offer only for an admitted peer of an unstacked Lane', () => {
     const laneId = randomUUID(),
       peer = randomUUID(),
       submissionId = randomUUID();
@@ -343,7 +305,7 @@ test('a stack member whose row predates the link fields still excludes its stack
     assert.throws(() => mergeAgentDefaults(undefined, { stacking: 'always' }));
   });
 
-  test('client: hot-file notices are capped per path per Lane; the last offer drives stacking:auto', t => {
+  test('client: the last offer drives stacking:auto', t => {
     const state = mkdtempSync(join(tmpdir(), 'forge-coordination-'));
     const prior = process.env.XDG_STATE_HOME;
     process.env.XDG_STATE_HOME = state;
@@ -353,24 +315,6 @@ test('a stack member whose row predates the link fields still excludes its stack
       rmSync(state, { recursive: true, force: true });
     });
     const laneId = randomUUID();
-    const advice = {
-      unacknowledgedOverlaps: {
-        count: 2,
-        coverage: 'hosted',
-        items: [
-          { noticeId: 'n1', reason: 'hot-file', file: 'docs/x.md', lanes: [], text: 'hot' },
-          { noticeId: 'n2', reason: 'unavailable', file: 'a.ts', lanes: [], text: 'pair' },
-        ],
-      },
-    };
-    for (let shown = 0; shown < HOT_FILE_SHOWS; shown++)
-      assert.equal(limitHotFiles(laneId, advice).unacknowledgedOverlaps.items.length, 2);
-    const capped = limitHotFiles(laneId, advice).unacknowledgedOverlaps.items;
-    assert.deepEqual(
-      capped.map(item => item.noticeId),
-      ['n2'],
-      'the hot-file notice leaves after its cap; the pair notice stays',
-    );
     const peer = randomUUID();
     rememberStackOffer(laneId, { peerLaneId: peer, mode: 'offer' });
     assert.equal(autoStackPeer(laneId), undefined, 'offer mode never stacks by itself');
@@ -378,57 +322,6 @@ test('a stack member whose row predates the link fields still excludes its stack
     assert.equal(autoStackPeer(laneId), peer);
     rememberStackOffer(laneId, undefined);
     assert.equal(autoStackPeer(laneId), undefined, 'a receipt without an offer clears it');
-  });
-
-  test('client: notices name the owning package, the peer phase and the one stack command', () => {
-    const paths = ['package.json', 'packages/api/package.json', 'packages/api/src/a.ts', 'docs/x.md'];
-    assert.equal(owningPackage(paths, 'packages/api/src/a.ts'), 'packages/api');
-    assert.equal(owningPackage(paths, 'docs/x.md'), '.');
-    assert.equal(owningPackage(['go.mod'].slice(1), 'a.go'), null);
-    const laneId = randomUUID(),
-      peer = randomUUID();
-    const offer = {
-      peerLaneId: peer,
-      submissionId: randomUUID(),
-      mode: 'offer',
-      command: `nforge agent . sync '${JSON.stringify({ laneId, stackOn: peer })}'`,
-      text: 'Lane x touches your files and is admitted: build on its pending head now.',
-    };
-    const notice = hostedOverlapNotice('/nowhere', laneId, {
-      unacknowledgedOverlaps: {
-        count: 1,
-        coverage: 'hosted',
-        items: [
-          {
-            noticeId: 'n1',
-            class: 'advisory',
-            reason: 'unavailable',
-            file: 'src/a.ts',
-            lanes: [laneId, peer],
-            participants: [{ lane: peer, actor: 'owner', intent: 'Peer work' }],
-            peerLanding: { submissionId: offer.submissionId, phase: 'ready', etaMinutes: 1 },
-            text: 'pair',
-          },
-        ],
-      },
-      stackOffer: offer,
-    });
-    assert.match(notice.items[0].peer, /admitted/);
-    assert.deepEqual(notice.stack, { mode: 'offer', text: offer.text, command: offer.command });
-    const banner = overlapBanner(notice);
-    assert.match(banner, /Peer work \(peer is admitted/);
-    assert.match(banner, /Stack \(offer\)/);
-    assert(banner.includes(offer.command));
-    // The agent receipt keeps the stack command and the peer phase on an advisory notice.
-    const slim = slimReceipt({
-      transport: 'hosted',
-      schema: 1,
-      action: 'save',
-      result: {},
-      overlapNotice: notice,
-    });
-    assert.deepEqual(slim.overlapNotice.stack, notice.stack);
-    assert.match(slim.overlapNotice.with[0], /peer is admitted/);
   });
 
   async function readFixture(t, policy = {}) {
@@ -510,19 +403,15 @@ test('a stack member whose row predates the link fields still excludes its stack
     return { s, lane, peers, write, read };
   }
 
-  test('overlap read: declared scope at start, hot file at three Lanes, peer phase on every pair item', async t => {
+  test('overlap read: declared scope at start and hot file at three Lanes in peers evidence', async t => {
     const { s, lane, write, read } = await readFixture(t);
     // A fresh Lane: without scope nothing is read; with scope both peers are named, one item each.
     const before = s.counts.length;
-    const fresh = await read('fresh');
-    assert.equal(fresh.unacknowledgedOverlaps.count, 0);
-    const scoped = await read('scoped', { scope: ['src/api/'] });
-    const items = scoped.unacknowledgedOverlaps.items.filter(item => item.reason === 'declared-scope');
+    const fresh = await read('fresh', { detail: true });
+    assert.equal(fresh.peerEvidence.count, 0);
+    const scoped = await read('scoped', { scope: ['src/api/'], detail: true });
+    const items = scoped.peerEvidence.items.filter(item => item.reason === 'declared-scope');
     assert.equal(items.length, 2);
-    for (const item of items) {
-      assert.equal(item.peerLanding, null, 'peers with no landing are editing');
-      assert.match(item.text, /peer is editing \(no landing yet\)/);
-    }
     assert.equal(scoped.stackOffer, undefined, 'no admitted peer, no stack offer');
     const calls = s.counts.slice(before).filter(count => ['fresh', 'scoped'].includes(count.name));
     assert.equal(calls.length, 2, 'one query per read, no added call');
@@ -537,11 +426,11 @@ test('a stack member whose row predates the link fields still excludes its stack
     );
     // Saving the shared doc makes it a hot file (three open Lanes), still advice only.
     await write(lane, [change('docs/shared.md', [{ start: 0, end: 1 }])], 'My change');
-    const saved = await read('saved');
-    const hot = saved.unacknowledgedOverlaps.items.find(item => item.reason === 'hot-file');
-    assert(hot, 'hot-file notice');
+    const saved = await read('saved', { detail: true });
+    const hot = saved.peerEvidence.items.find(item => item.reason === 'hot-file');
+    assert(hot, 'hot-file evidence');
     assert.equal(hot.file, 'docs/shared.md');
-    assert.equal(saved.unacknowledgedOverlaps.blockingCount, 0);
+    assert.equal(saved.peerEvidence.blockingCount, 0);
   });
 
   test('a project without peers pays nothing new: an idle Lane read stays under its budget', async t => {

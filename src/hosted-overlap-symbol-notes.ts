@@ -114,13 +114,13 @@ export function symbolNoteText(note: SymbolNote, peerLane: string, peerIntent: s
         : 'a contract (the changed names are not known)';
     return (
       note.direction === 'uses'
-        ? `advisory cross-file: your changed lines in ${note.file} may use package ${note.package}, where ${peer} changes ${what} in ${note.peerFile}. No answer needed.`
-        : `advisory cross-file: ${peer} has changed lines in ${note.peerFile} that may use package ${note.package}, where you change ${what} in ${note.file}. No answer needed.`
+        ? `advisory cross-file: your changed lines in ${note.file} may use package ${note.package}, where ${peer} changes ${what} in ${note.peerFile}.`
+        : `advisory cross-file: ${peer} has changed lines in ${note.peerFile} that may use package ${note.package}, where you change ${what} in ${note.file}.`
     ).slice(0, 400);
   }
   return (
     note.direction === 'uses'
-      ? `advisory cross-file: your changed lines in ${note.file} use ${note.symbol}, which ${peer} changes in ${note.peerFile}. No answer needed.`
-      : `advisory cross-file: ${peer} has changed lines in ${note.peerFile} that use ${note.symbol}, which you change in ${note.file}. No answer needed.`
+      ? `advisory cross-file: your changed lines in ${note.file} use ${note.symbol}, which ${peer} changes in ${note.peerFile}.`
+      : `advisory cross-file: ${peer} has changed lines in ${note.peerFile} that use ${note.symbol}, which you change in ${note.file}.`
   ).slice(0, 400);
 }

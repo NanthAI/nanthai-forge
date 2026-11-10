@@ -33,13 +33,17 @@ test('every default is on; absent stored fields read as the documented defaults'
     preflight: 'require',
     preflightMaxMinutes: 10,
     urgentRoles: ['owner'],
-    overlapGate: 'block',
     checkpointNudgeMinutes: 30,
     stallAlerts: { enabled: true, notifyAfterMinutes: 15, repeatAfterMinutes: 30, email: [], webhook: 'off' },
   });
   const view = policyReadView(effectivePolicy({}));
   // Older CLIs parse the read strictly: the frozen keys, later keys only when stored.
-  assert.deepEqual(view.agentDefaults, AGENT_DEFAULTS, 'policy read shows effective values');
+  // overlapGate is retired (Issue 853fcde3) but stays in the frozen read as "off" for those CLIs.
+  assert.deepEqual(
+    view.agentDefaults,
+    { ...AGENT_DEFAULTS, overlapGate: 'off' },
+    'policy read shows effective values',
+  );
 });
 
 test('set-policy edits one field at a time, stores in the Convex validator and keeps the rest', () => {
@@ -54,7 +58,7 @@ test('set-policy edits one field at a time, stores in the Convex validator and k
   assert.equal(validate(autonomyPolicy, policy), true);
   assert.equal(validate(autonomyPolicy, policyReadView(policy)), true);
   const effective = effectiveAgentDefaults(policy.agentDefaults);
-  assert.equal(effective.overlapGate, 'block');
+  assert.equal('overlapGate' in effective, false, 'retired (Issue 853fcde3)');
   assert.equal(effective.stallAlerts.repeatAfterMinutes, 30);
   assert.throws(() => edit(policy, { stallAlerts: { notifyAfterMinutes: 40, repeatAfterMinutes: 30 } }));
   assert.throws(() => edit(policy, { stallAlerts: { email: ['not-an-address'] } }));
@@ -129,7 +133,7 @@ test('urgent roles: owner in person or asOwner; agents only when allowed; never 
 test('agent text: one line per active rule, nothing for rules that are off', () => {
   const all = agentDefaultLines(AGENT_DEFAULTS);
   assert(all.some(line => line.includes('preflight') && line.includes('refuses')));
-  assert(all.some(line => line.includes(' ack ')));
+  assert(!all.some(line => line.includes(' ack ')), 'overlap answers are retired (Issue 853fcde3)');
   assert(all.some(line => line.includes('30 minutes')));
   assert(all.some(line => /urgent/.test(line)));
   assert(
@@ -139,7 +143,6 @@ test('agent text: one line per active rule, nothing for rules that are off', () 
   const off = agentDefaultLines(
     effectiveAgentDefaults({
       preflight: 'off',
-      overlapGate: 'off',
       checkpointNudgeMinutes: 0,
       urgentRoles: ['owner', 'agents'],
       stallAlerts: { enabled: false },

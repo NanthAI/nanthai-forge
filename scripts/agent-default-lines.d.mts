@@ -3,7 +3,6 @@ export type AgentDefaultValues = {
   preflight: 'off' | 'advise' | 'require';
   preflightMaxMinutes: number;
   urgentRoles: ('owner' | 'agents')[];
-  overlapGate: 'off' | 'warn' | 'block';
   checkpointNudgeMinutes: number;
   stallAlerts: {
     enabled: boolean;

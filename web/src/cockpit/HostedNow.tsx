@@ -32,7 +32,6 @@ import { useAttention } from '../shell/attention-context';
 import { hostedAttention } from '../shell/Attention';
 import { AwayStrip, AWAY_AFTER_MS, useLastVisit } from './AwayStrip';
 import { FirstRun } from './FirstRun';
-import type { OverlapActions } from './OverlapAnswers';
 import { useFixAnswers } from './fix-answers';
 import type { FixNoticeActions } from './FixNoticeAnswers';
 import { HostedAnswers } from './HostedAnswers';
@@ -75,16 +74,13 @@ type Live = {
   unackedComplete: boolean;
   claims: { actor: string; sessionId?: string; paths: string[]; laneId?: string }[];
   sessionsLoading: boolean;
-  /** The inbox, claims and overlap answers have not all answered yet. */
+  /** The inbox, claims and overlap signals have not all answered yet. */
   initialLoading?: boolean;
   sessionsComplete?: boolean;
   eventsComplete?: boolean;
   eventsLoading?: boolean;
   loadMoreEvents?: () => void;
   counts?: ActivityCounts;
-  overlapAnswers?: import('./overlap-model').OverlapAnswer[];
-  /** The viewer's own overlap answer times, newest first (the server matches the caller). */
-  myOverlapAnswerTimes?: string[];
   overlapSignals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
   overlapsComplete?: boolean;
 };
@@ -123,8 +119,7 @@ export function HostedNowView({
   failed?: boolean;
   ack: Pick<Answers, 'acknowledge' | 'reply' | 'busy' | 'error' | 'retrying'> &
     Partial<Pick<Answers, 'tell' | 'publish'>> &
-    FixNoticeActions &
-    OverlapActions;
+    FixNoticeActions;
   newIntent: () => void;
   laneHref?: (laneId: string) => string;
   /** The signed-in viewer's Forge handle, to say "you" and count the viewer's answers. */
@@ -136,7 +131,7 @@ export function HostedNowView({
     () => shared ?? hostedAttention(records, live, now),
     [shared, records, live, now],
   );
-  const { lanes, overlaps, decisions, unanswered, unansweredBySession } = attention;
+  const { lanes, overlaps, decisions } = attention;
   const open = lanes.filter(lane => lane.open);
   const { shown } = useVisibleDecisions(decisions);
   const accepted = (since: number) =>
@@ -218,7 +213,6 @@ export function HostedNowView({
                   ).length,
                   acceptedToday: today.length,
                   overlaps: overlapFileCount(overlaps),
-                  unanswered: [...unanswered.values()].reduce((sum, notices) => sum + notices.length, 0),
                   working,
                 }}
               />
@@ -256,13 +250,7 @@ export function HostedNowView({
                 complete={
                   live.unackedComplete && live.overlapsComplete !== false && attention.overlapsComplete
                 }
-                answered={answeredToday(
-                  live.events,
-                  viewer,
-                  startOfDay(now),
-                  (live.myOverlapAnswerTimes ?? []).map(at => ({ actor: viewer ?? '', at })),
-                  live.eventsComplete === true && live.overlapsComplete !== false,
-                )}
+                answered={answeredToday(live.events, viewer, startOfDay(now), live.eventsComplete === true)}
                 {...(working.total ? { quiet: `${working.total} working.` } : {})}
                 href={item =>
                   item.laneId
@@ -318,7 +306,6 @@ export function HostedNowView({
               <Sessions
                 {...(ack.publish ? { send: ack.publish } : {})}
                 sessions={live.sessions}
-                unanswered={unansweredBySession}
                 endedLaneIds={lanes.filter(lane => !lane.open).map(lane => lane.id)}
                 now={now}
                 loading={live.sessionsLoading}
@@ -377,7 +364,7 @@ function LiveNow({
     inbox: !live.initialLoading,
   });
   const viewer = useViewerHandle();
-  const ack = useAnswers(projectId, viewer ?? 'you');
+  const ack = useAnswers(projectId);
   const fix = useFixAnswers(projectId);
   const resumeMirror = useResumeMirror(projectId);
   const records = useMemo(

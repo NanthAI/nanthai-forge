@@ -20,7 +20,7 @@ import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 type Command = Record<string, unknown>;
 type Dispatch = (action: string, command: Command) => Promise<{ result?: unknown } | undefined>;
 /** Fields of the agent's land that ride on the resolution's landing; identity fields never do. */
-const CARRIED = ['message', 'overlapAnswer', 'priority', 'check', 'accept'] as const;
+const CARRIED = ['message', 'priority', 'check', 'accept'] as const;
 
 function resolutionHere(root: string, named: string | undefined) {
   const marker = readHostedLaneCheckout(root);

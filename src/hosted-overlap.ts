@@ -10,20 +10,6 @@ export const OVERLAP_METADATA_BYTES = 128 * 1024;
 export const IDLE_NOTICE_MS = 6 * 3_600_000;
 /** Cross-file symbol facts per Lane row, inside the row budget (replay max 9.5 KB). */
 export const SYMBOL_LINK_BYTES = 16 * 1024;
-/** Overlap answers (what one builder answered on an overlap notice) stay readable this long after
- * they were written, whether their Lanes landed, were abandoned or are still open. Owner decision
- * 2026-11-06 (Issue b78ca196): 90 days, the same as the board evidence value. Older rows are deleted
- * in small batches by the next answer write; no cron, no polling. */
-export const OVERLAP_ANSWER_RETENTION_MS = 90 * 24 * 3_600_000;
-/** Expired answer rows (and answer batch records) deleted per answer write. */
-export const OVERLAP_ANSWER_CLEANUP_BATCH = 10;
-/** `overlap-answers` read: rows per page (default, max), reply bytes a page may reach (limit 64 KB),
- * DB bytes a page may read (limit 1 MB) and the answer text shown per row (longer text is cut and flagged). */
-export const OVERLAP_ANSWERS_DEFAULT_LIMIT = 20;
-export const OVERLAP_ANSWERS_MAX_LIMIT = 50;
-export const OVERLAP_ANSWERS_OUTPUT_BYTES = 56 * 1024;
-export const OVERLAP_ANSWERS_READ_BYTES = 800 * 1024;
-export const OVERLAP_ANSWER_TEXT_CHARS = 4_000;
 export type OverlapFile = { blob: string; mode: string } | null;
 export type OverlapChange = {
   path: string;
@@ -259,7 +245,6 @@ export function hostedOverlapAdvice(
   peers: OverlapLane[],
   main: OverlapMain | null,
   current: { head: string; sourceRevision: number },
-  answered: Set<string>,
   complete = true,
   maxItems = 5,
   requestedPath?: string,
@@ -338,14 +323,11 @@ export function hostedOverlapAdvice(
         continue;
       }
       const priority = classification.class === 'blocking';
-      // Without answers there is no need to hash every omitted display item.
+      // Omitted display items need no id.
       const noticeId =
-        answered.size ||
-        items.length < maxItems ||
-        (priority && items.some(item => item.class === 'advisory'))
+        items.length < maxItems || (priority && items.some(item => item.class === 'advisory'))
           ? digest(JSON.stringify([priority ? 'first-write' : 'first-write-advisory', lanes, path]))
           : '';
-      if (answered.has(noticeId)) continue;
       count++;
       if (priority) blockingCount++;
       else advisoryCount++;
@@ -372,7 +354,7 @@ export function hostedOverlapAdvice(
     }
     // Declared scope: one advisory item per peer Lane that saved files inside it, before any edit here.
     const scopeId = scoped.length ? digest(JSON.stringify(['declared-scope', lanes])) : '';
-    if (scoped.length && !answered.has(scopeId)) {
+    if (scoped.length) {
       count++;
       advisoryCount++;
       scopeItems.push({
@@ -399,7 +381,7 @@ export function hostedOverlapAdvice(
     if (note && idle) {
       idleLanes.add(peer.laneId);
       idleFiles.add(note.file);
-    } else if (note && noteId && !answered.has(noteId)) {
+    } else if (note && noteId) {
       count++;
       advisoryCount++;
       if (items.length < maxItems)
@@ -423,30 +405,28 @@ export function hostedOverlapAdvice(
     const ids = [...idleLanes].sort(),
       files = [...idleFiles].sort();
     const noticeId = digest(JSON.stringify(['idle-lanes', mine.laneId, ids]));
-    if (!answered.has(noticeId)) {
-      count++;
-      advisoryCount++;
-      const hours = IDLE_NOTICE_MS / 3_600_000;
-      const item = {
-        noticeId,
-        class: 'advisory' as const,
-        reason: 'idle-lanes',
-        file: files[0]!,
-        lanes: ids.slice(0, 3),
-        participants: [],
-        text: `advisory: ${ids.length} Lane(s) idle over ${hours} h also touch ${files.length} of your files (${files[0]}${files.length > 1 ? ', ...' : ''}); their work may already be on main. No answer needed.`,
-      };
-      // A full list gives up its last advisory item; blocking ones are never displaced.
-      if (items.length >= maxItems) {
-        const last = items.map(entry => entry.class).lastIndexOf('advisory');
-        if (last >= 0) items.splice(last, 1);
-      }
-      if (items.length < maxItems) items.push(item);
+    count++;
+    advisoryCount++;
+    const hours = IDLE_NOTICE_MS / 3_600_000;
+    const item = {
+      noticeId,
+      class: 'advisory' as const,
+      reason: 'idle-lanes',
+      file: files[0]!,
+      lanes: ids.slice(0, 3),
+      participants: [],
+      text: `advisory: ${ids.length} Lane(s) idle over ${hours} h also touch ${files.length} of your files (${files[0]}${files.length > 1 ? ', ...' : ''}); their work may already be on main.`,
+    };
+    // A full list gives up its last advisory item; blocking ones are never displaced.
+    if (items.length >= maxItems) {
+      const last = items.map(entry => entry.class).lastIndexOf('advisory');
+      if (last >= 0) items.splice(last, 1);
     }
+    if (items.length < maxItems) items.push(item);
   }
   for (const item of scopeItems) if (items.length < maxItems) items.push(item);
   // Hot files (3+ open Lanes on one path): advice only, after the pair notices, at most two per read.
-  const hot = hotFiles(mine.laneId, shared, answered);
+  const hot = hotFiles(mine.laneId, shared);
   count += hot.count;
   advisoryCount += hot.count;
   for (const item of hot.items) if (items.length < maxItems) items.push(item);
@@ -470,7 +450,7 @@ export function hostedOverlapAdvice(
   const conflicts = conflictPaths.sort();
   const nudge = driftNudge(mine.laneId, conflictSequences, main?.landings);
   return {
-    unacknowledgedOverlaps: {
+    overlaps: {
       laneId: mine.laneId,
       head: mine.head,
       count,

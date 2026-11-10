@@ -10,7 +10,6 @@ import { ForgeError } from './errors.js';
 import { shellQuote } from './shell-quote.js';
 import { preflightOutcome } from './agent-preflight-incomplete.js';
 import { preflightPlan, readPreflightReceipt, PREFLIGHT_SECONDS_PER_FILE } from './agent-preflight.js';
-import { answerId, hostedOverlapNotice } from './hosted-overlap-notice.js';
 import type { EffectiveAgentDefaults } from './agent-parallel-defaults.js';
 import type { readHostedOverlapAdvice } from './hosted-overlap-client.js';
 import { diskMode } from './source-links.js';
@@ -20,58 +19,16 @@ const command = (root: string, verb: string, body: Record<string, unknown>) =>
   `nforge agent ${shellQuote(root)} ${verb} ${shellQuote(JSON.stringify(body))}`;
 
 /** Finish gates from the project's agent defaults, applied once per new finish after its save and
- * before compose. Refusals throw; advisories return. No extra server calls: the overlap read is
+ * before compose. Refusals throw; advisories return. No extra server calls: the advice read is
  * the one the finish receipt already makes, cached by the transport. */
 export function finishGates(
   root: string,
   defaults: EffectiveAgentDefaults | undefined,
   lane: { laneId: string; head: string; tree?: string },
   advice: Advice | undefined,
-  overlapAnswer?: 'accept-order',
 ) {
   const advisories: Record<string, unknown> = {};
   if (!defaults) return advisories;
-  const pending = (advice?.unacknowledgedOverlaps.items ?? []).filter(item => item.class === 'blocking');
-  if (defaults.overlapGate !== 'off' && pending.length) {
-    const ack = command(root, 'ack', { laneId: lane.laneId });
-    const files = pending.map(item => item.file).join(', ');
-    if (defaults.overlapGate === 'block' && overlapAnswer !== 'accept-order') {
-      // The refusal carries the notices it judged, from this same read: a save can change the
-      // evidence after an earlier receipt printed its banner (c8b842a9). No extra call.
-      const notice = hostedOverlapNotice(root, lane.laneId, {
-        unacknowledgedOverlaps: {
-          count: pending.length,
-          coverage: advice!.unacknowledgedOverlaps.coverage ?? 'complete',
-          items: pending,
-        },
-      })!;
-      const named = notice.items
-        .map(
-          item =>
-            `${item.file} (${item.reason}${item.with.length ? `; with Lane ${item.with.map(p => p.lane).join(', ')}` : ''})`,
-        )
-        .join('; ');
-      throw new ForgeError(
-        'OVERLAP_UNANSWERED',
-        `Answer the blocking overlap notice(s) on ${files} before landing (project overlapGate: block). Blocking: ${named}. Keep your change and land in order: ${notice.acknowledge}. Or route around: ${notice.routeAround}. Or include "overlapAnswer":"accept-order" in land --save.`,
-        undefined,
-        { overlapNotice: notice, command: notice.acknowledge },
-      );
-    }
-    advisories.overlap =
-      overlapAnswer === 'accept-order'
-        ? {
-            status: 'answered',
-            choice: overlapAnswer,
-            notices: pending.map(item => item.noticeId),
-            files: pending.map(item => item.file),
-          }
-        : {
-            status: 'unanswered',
-            files: pending.map(item => item.file),
-            acknowledge: ack,
-          };
-  }
   if (defaults.preflight !== 'off') {
     const receipt = readPreflightReceipt(root, lane.laneId);
     const sameSource =
@@ -188,17 +145,6 @@ export function finishGates(
     }
   }
   return advisories;
-}
-
-/** Answers for every listed notice with stable ids, so a repeated ack replays the same answers. */
-export function ackAnswers(laneId: string, advice: Advice, choice: string, text?: string) {
-  return advice.unacknowledgedOverlaps.items.map(item => ({
-    operationId: answerId(laneId, item.noticeId),
-    laneId,
-    noticeId: item.noticeId,
-    choice,
-    ...(text ? { text } : {}),
-  }));
 }
 
 /** Files newer than the save whose bytes are confirmed against the saved baseline per call. */

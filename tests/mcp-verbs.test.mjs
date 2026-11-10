@@ -25,8 +25,8 @@ const rows = [
   ['save', 'candidate', 'compose', 'compose'],
   ['save', 'check', 'run', 'check'],
   ['save', 'contract', 'confirm-tests', 'confirm-tests'],
-  ['save', 'overlap-answer', 'peer-ack', 'peer-ack'],
-  ['save', 'overlap-answers', null, 'overlap-acks'],
+  // Hosted overlap answers are gone (Issue 853fcde3); native pre-edit notices keep peer-ack for now.
+  ['save', 'overlap-answer', 'peer-ack', null],
   ['save', 'friction', 'friction', 'friction'],
   ['save', 'decision', 'decide', 'decide'],
   ['land', 'withdraw', null, 'withdraw'],
@@ -169,7 +169,11 @@ test('MCP accepts exactly the CLI mode forms (drift check)', async t => {
   const cliForms = Object.entries(verbModes).flatMap(([verb, modes]) =>
     Object.keys(modes).map(flag => `${verb}/${flag.slice(2)}`),
   );
-  assert.deepEqual([...new Set(modesOf((await hosted.client.listTools()).tools))].sort(), cliForms.sort());
+  // save --overlap-answer is native-only since Issue 853fcde3: hosted MCP no longer offers it.
+  assert.deepEqual(
+    [...new Set(modesOf((await hosted.client.listTools()).tools))].sort(),
+    cliForms.filter(form => form !== 'save/overlap-answer').sort(),
+  );
 });
 
 test('hosted MCP: each new form reaches the transport exactly like its old action, one dispatch each', async t => {
@@ -194,8 +198,6 @@ test('hosted MCP: each new form reaches the transport exactly like its old actio
     ['forge_task', { action: 'start', mode: 'reopen' }, 'reopen', lane],
     ['forge_task', { action: 'save', mode: 'sync' }, 'sync', { ...lane, apply: false }],
     ['forge_task', { action: 'save', mode: 'candidate' }, 'compose', lane],
-    ['forge_task', { action: 'save', mode: 'overlap-answer' }, 'peer-ack', lane],
-    ['forge_task', { action: 'save', mode: 'overlap-answers' }, 'overlap-acks', lane],
     ['forge_task', { action: 'save', mode: 'friction' }, 'friction', lane],
     ['forge_task', { action: 'save', mode: 'decision' }, 'decide', lane],
     ['forge_task', { action: 'land', mode: 'save' }, 'finish', lane],

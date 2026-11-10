@@ -58,11 +58,13 @@ function candidateWithPaths(f, paths) {
 }
 const stripSystem = row => Object.fromEntries(Object.entries(row).filter(([k]) => !k.startsWith('_')));
 const rowOf = (f, id) => [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === id);
-const mark = (f, paths, landedSubmissionId) =>
+/** One pass with main's merge lists already read (main declares none unless given). */
+const mark = (f, paths, landedSubmissionId, declared = { union: [], fragments: [] }) =>
   f.run('wouldConflict', (ctx, input) => wouldConflict.markWouldConflict(ctx, input), {
     projectId: f.projectId,
     paths,
     landedSubmissionId,
+    declared,
   });
 
 test('incident replay 2026-10-30 cost builder: a stale queued Candidate is marked wouldConflict when main lands its file', async () => {
@@ -118,6 +120,35 @@ test('shared Markdown docs are not sync-required advice: the recompose merges th
   assert.deepEqual(JSON.parse(rowOf(f, mixed.id).wouldConflict).paths, ['src/y.ts']);
   // Markdown outside docs/ and the root is not documentation scope, as in native finish.
   assert.deepEqual(JSON.parse(rowOf(f, nested.id).wouldConflict).paths, ['src/notes.md']);
+});
+
+test("files main's forge.json declares as merged lists are not sync-required advice; the one config read is an action (Issue 853fcde3)", async () => {
+  const f = await landingFixture();
+  const landing = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['lists/owners.txt', 'src/z.ts']) }),
+  );
+  const listOnly = await f.enqueue(f.request({ candidateId: candidateWithPaths(f, ['lists/owners.txt']) }));
+  const mixed = await f.enqueue(
+    f.request({ candidateId: candidateWithPaths(f, ['lists/owners.txt', 'src/z.ts']) }),
+  );
+  // A mutation cannot read main's forge.json: the first entry that would be marked hands the pass
+  // to the action, which reads main's State and forge.json off the landing write.
+  const paths = ['lists/owners.txt', 'src/z.ts'];
+  const first = await f.run('wouldConflict', (ctx, input) => wouldConflict.markWouldConflict(ctx, input), {
+    projectId: f.projectId,
+    paths,
+    landedSubmissionId: landing.id,
+  });
+  assert.equal(first, 0, 'nothing marked before the config read');
+  const handoff = f.pendingTasks().filter(t => t.name === 'projectHostedConflictMerge:wouldConflictConfig');
+  assert.equal(handoff.length, 1);
+  assert.deepEqual(handoff[0].args[0], { projectId: f.projectId, paths, landedSubmissionId: landing.id });
+  assert.equal(rowOf(f, mixed.id).wouldConflict, undefined);
+  // The action calls back with main's merge lists.
+  const marked = await mark(f, paths, landing.id, { union: ['lists/*.txt'], fragments: [] });
+  assert.equal(marked, 1);
+  assert.equal(rowOf(f, listOnly.id).wouldConflict, undefined, 'the declared list merges on recompose');
+  assert.deepEqual(JSON.parse(rowOf(f, mixed.id).wouldConflict).paths, ['src/z.ts']);
 });
 
 test('a landing with no known paths schedules nothing; publication stays constant-size', async () => {

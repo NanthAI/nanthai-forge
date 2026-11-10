@@ -19,19 +19,4 @@ export const hostedFrictionTables = {
   })
     .index('by_project_and_id', ['projectId', 'id'])
     .index('by_project', ['projectId']),
-  projectHostedOverlapAcks: defineTable({
-    ...record,
-    actor: v.string(),
-    laneId: v.string(),
-    noticeId: v.string(),
-  })
-    .index('by_project_and_id', ['projectId', 'id'])
-    // `actor` last: an answer counts only from the Lane's author or the project owner (8809fba5).
-    .index('by_project_and_lane_and_notice', ['projectId', 'laneId', 'noticeId', 'actor'])
-    // Creation-time order serves the answer window read and the 90-day cleanup (Issue b78ca196).
-    .index('by_project', ['projectId'])
-    .index('by_project_and_lane', ['projectId', 'laneId']),
-  projectHostedAckBatches: defineTable({ ...record, actor: v.string() })
-    .index('by_project_and_id', ['projectId', 'id'])
-    .index('by_project', ['projectId']),
 };

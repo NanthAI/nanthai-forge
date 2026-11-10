@@ -28,6 +28,7 @@ export const agentDefaultsSchema = z
     preflight: z.enum(['off', 'advise', 'require']).optional(),
     preflightMaxMinutes: z.number().int().min(0).max(240).optional(),
     urgentRoles: z.array(urgentRoleSchema).max(2).optional(),
+    /** Retired with path notices (flip 4, Issue 853fcde3): stored policies may still carry it; ignored. */
     overlapGate: z.enum(['off', 'warn', 'block']).optional(),
     checkpointNudgeMinutes: z.number().int().min(0).max(1440).optional(),
     /** First-write hook records "touching <path>" on the board (Issue 9c8490a4); absent is on.
@@ -52,7 +53,6 @@ export const effectiveAgentDefaultsSchema = z
     preflight: z.enum(['off', 'advise', 'require']),
     preflightMaxMinutes: z.number().int().nonnegative(),
     urgentRoles: z.array(urgentRoleSchema),
-    overlapGate: z.enum(['off', 'warn', 'block']),
     checkpointNudgeMinutes: z.number().int().nonnegative(),
     stallAlerts: z
       .object({
@@ -75,24 +75,30 @@ export const WIRE_AGENT_DEFAULT_KEYS = [
   'preflight',
   'preflightMaxMinutes',
   'urgentRoles',
-  'overlapGate',
   'checkpointNudgeMinutes',
   'stallAlerts',
 ] as const;
-const frozenDefaults = (effective: EffectiveAgentDefaults) =>
-  Object.fromEntries(WIRE_AGENT_DEFAULT_KEYS.map(key => [key, effective[key]])) as Pick<
+/** Installed CLIs before flip 4 part 2 (Issue 853fcde3) require `overlapGate` in every reply: always
+ * `off`, so none of them refuses a landing over a path notice. Current CLIs drop the key. */
+const RETIRED_WIRE = { overlapGate: 'off' } as const;
+const frozenDefaults = (effective: EffectiveAgentDefaults) => ({
+  ...(Object.fromEntries(WIRE_AGENT_DEFAULT_KEYS.map(key => [key, effective[key]])) as Pick<
     EffectiveAgentDefaults,
     (typeof WIRE_AGENT_DEFAULT_KEYS)[number]
-  >;
+  >),
+  ...RETIRED_WIRE,
+});
 /** Server side of the capabilities reply: the frozen keys, plus every key when the CLI asked for
  * `agent-defaults-extended`. */
 export const wireAgentDefaults = (effective: EffectiveAgentDefaults, extended: boolean) =>
-  extended ? effective : frozenDefaults(effective);
+  extended ? { ...effective, ...RETIRED_WIRE } : frozenDefaults(effective);
 /** Client side: unknown keys from a newer server are dropped, so a server change cannot break this
  * parse again. A key added after the freeze must take a `.default()` here (an older server omits it). */
 export const effectiveAgentDefaultsWireSchema = z.object({
   ...effectiveAgentDefaultsSchema.shape,
   stallAlerts: z.object(effectiveAgentDefaultsSchema.shape.stallAlerts.shape),
+  /** RETIRED_WIRE: kept through the server's own reply parse for installed CLIs; this CLI ignores it. */
+  overlapGate: z.enum(['off', 'warn', 'block']).optional(),
 });
 
 /** Days without a Lane record write before an open Lane is dormant. Deliberately outside the effective
@@ -113,7 +119,6 @@ export function effectiveAgentDefaults(stored: AgentDefaults | undefined): Effec
     preflight: stored?.preflight ?? AGENT_DEFAULTS.preflight,
     preflightMaxMinutes: stored?.preflightMaxMinutes ?? AGENT_DEFAULTS.preflightMaxMinutes,
     urgentRoles: [...(stored?.urgentRoles ?? AGENT_DEFAULTS.urgentRoles)],
-    overlapGate: stored?.overlapGate ?? AGENT_DEFAULTS.overlapGate,
     checkpointNudgeMinutes: stored?.checkpointNudgeMinutes ?? AGENT_DEFAULTS.checkpointNudgeMinutes,
     stallAlerts: {
       enabled: alerts?.enabled ?? AGENT_DEFAULTS.stallAlerts.enabled,

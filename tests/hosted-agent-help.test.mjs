@@ -46,7 +46,6 @@ test('hosted help and packaged docs are generated from every enforced schema', a
       'queue',
       'landings',
       'lane-history',
-      'overlap-answers',
       'wait',
       'show',
       'board',
@@ -97,7 +96,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
 test('hosted coordination entry points retain supported reads and their coverage limits', () => {
   for (const path of ['AGENTS.md', 'skills/forge-agent/SKILL.md', 'docs/agents/workflow.md']) {
     const text = readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
-    for (const field of ['unacknowledgedOverlaps', 'behindMain'])
+    for (const field of ['conflictNotice', 'behindMain'])
       assert(text.includes(field), `${path}: use the supported receipt fields`);
     assert.match(text, /unsaved/i, `${path}: saved-path coverage limit`);
     assert.match(text, /`diff/, `${path}: documented hosted diff`);
@@ -110,7 +109,8 @@ test('hosted coordination entry points retain supported reads and their coverage
   assert.match(hostedAgentHelp(), /help TOPIC/);
   assert.match(text, /peers \{laneId\?,path\?,detail\?\}/);
   assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,summary\?,cursor\?\}/);
-  assert.match(text, /unacknowledgedOverlaps and behindMain/);
+  assert.match(text, /receipts carry behindMain/);
+  assert.doesNotMatch(text, /unacknowledgedOverlaps/);
   assert.match(text, /excludes unsaved peer edits/);
   assert.match(text, /compares pinned base to saved head/);
   assert.match(text, /show \{state\?\|candidateId\?/);
@@ -172,7 +172,6 @@ test('receipt replay preserves the normalized full original parameters and journ
     message: 'Save "all"\nparameters',
     keepOpen: true,
     priority: 'normal',
-    overlapAnswer: 'accept-order',
     check: { checkId: randomUUID() },
   };
   const first = await s.transport().dispatch('finish', command);
@@ -190,73 +189,6 @@ test('receipt replay preserves the normalized full original parameters and journ
   const again = await s.transport().dispatch('finish', first.result.replayParameters);
   assert.equal(again.operationId, first.operationId);
   assert.equal(again.result.submission.id, first.result.submission.id);
-});
-
-test('inline accept-order on 600 notices records the same answers as ack in bounded batches', async t => {
-  const { effectiveAgentDefaults } = await import('../dist/agent-parallel-defaults.js');
-  const { performance } = await import('node:perf_hooks');
-  const notices = Array.from({ length: 600 }, (_, i) => ({
-    noticeId: i.toString(16).padStart(64, '0'),
-    file: `src/file-${i}.ts`,
-    class: 'blocking',
-    reason: 'same-symbol',
-    lanes: [randomUUID()],
-    text: 'Synthetic overlap',
-  }));
-  async function run(inline) {
-    const s = agentFixture(t);
-    s.caps.agentDefaults = effectiveAgentDefaults({
-      preflight: 'off',
-      overlapGate: inline ? 'block' : 'warn',
-    });
-    await s.transport().dispatch('open', { laneId: s.lane.laneId });
-    const transport = s.transport(),
-      original = transport.query.bind(transport);
-    let reads = 0;
-    const acks = [],
-      mutate = transport.mutation.bind(transport);
-    transport.mutation = async (name, args) => {
-      if (name !== 'projectHostedOverlapAcks:append') return mutate(name, args);
-      acks.push(JSON.parse(args.request).answers);
-      return { answers: JSON.parse(args.request).answers };
-    };
-    transport.query = async (name, args) => {
-      if (name !== 'projectHostedOverlaps:read') return original(name, args);
-      reads++;
-      return {
-        unacknowledgedOverlaps: { count: 600, items: notices, coverage: 'complete' },
-        behindMain: { commits: 0, conflictingPaths: [], more: 0, coverage: 'complete' },
-      };
-    };
-    s.calls.length = 0;
-    const start = performance.now();
-    const response = await transport.dispatch('finish', {
-      laneId: s.lane.laneId,
-      ...(inline ? { overlapAnswer: 'accept-order' } : {}),
-    });
-    return { calls: s.calls.map(c => c.name), acks, reads, response, ms: performance.now() - start };
-  }
-  const before = await run(false),
-    after = await run(true);
-  assert.deepEqual(after.calls, before.calls);
-  assert.equal(before.acks.length, 0);
-  // Peers and the inbox see the answer: 600 answers in six 100-answer writes, no extra reads.
-  assert.deepEqual(
-    after.acks.map(batch => batch.length),
-    [100, 100, 100, 100, 100, 100],
-  );
-  assert.deepEqual(
-    after.acks.flat().map(answer => answer.noticeId),
-    notices.map(notice => notice.noticeId),
-  );
-  assert(after.acks.flat().every(answer => answer.choice === 'accept-order' && answer.laneId));
-  assert.equal(after.reads, before.reads);
-  assert.equal(after.reads, 1, 'gate and receipt share the existing overlap read');
-  assert.equal(after.response.result.defaults.overlap.status, 'answered');
-  assert.equal(after.response.result.defaults.overlap.notices.length, 600);
-  t.diagnostic(
-    `600 synthetic notices: existing/inline calls ${before.calls.length}/${after.calls.length}, inline ack writes ${after.acks.length}, plus ${before.reads}/${after.reads} cached overlap read; inline ${after.ms.toFixed(1)} ms; answer receipt ${JSON.stringify(after.response.result.defaults.overlap).length} bytes`,
-  );
 });
 
 test('admitted pending source waits while retaining a helper-free original replay selection', async t => {
@@ -307,12 +239,6 @@ test('a refusal teaches next and learn with the caller values; code, message and
   assert.equal(operator.next, `nforge x . cancel '{"submissionId":"dfcc483d-3972-408d-9251-cc90909247e4"}'`);
   assert.equal(operator.learn, 'nforge agent . help arguments');
   const lane = '7c9295d7-6f84-4ee1-8e5c-aa27e4ccc69c';
-  const overlap = describeFailure(
-    new ForgeError('OVERLAP_UNANSWERED', 'Answer the blocking overlap notice.', undefined, { laneId: lane }),
-    cliTeachContext(['agent', '/tmp/my lane', 'land', '--save', '{"message":"m"}']),
-  );
-  assert.deepEqual(overlap.recovery, { laneId: lane });
-  assert.equal(overlap.next, `nforge agent '/tmp/my lane' ack '{"laneId":"${lane}"}'`);
   // A server continuation wins over the template; an unknown code teaches nothing and breaks nothing.
   const own = teach('COMPOSITION_CONFLICT', cliTeachContext(['agent', '.', 'land']), {
     command: `nforge agent . resolve '{"laneId":"${lane}"}'`,

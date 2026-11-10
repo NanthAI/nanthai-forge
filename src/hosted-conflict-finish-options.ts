@@ -10,7 +10,6 @@ const keys = [
   'priority',
   'keepOpen',
   'closes',
-  'overlapAnswer',
   'retry',
   'reason',
 ] as const;

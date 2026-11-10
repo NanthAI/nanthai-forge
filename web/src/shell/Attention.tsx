@@ -11,7 +11,6 @@ import type { Id } from '../../../convex/_generated/dataModel';
 import { api } from '../../../convex/_generated/api';
 import { byAttention, cockpitLanes, type CockpitWork } from '../cockpit/model';
 import {
-  overlapDecisions,
   laneDecisions,
   needsFixDecisions,
   mainCheckDecisions,
@@ -20,13 +19,7 @@ import {
   approvalDecisions,
   type OpenApproval,
 } from '../cockpit/attention';
-import {
-  overlapCounts,
-  unansweredOverlaps,
-  unansweredBySession,
-  unansweredNames,
-  overlapRows,
-} from '../cockpit/overlap-model';
+import { overlapCounts, overlapRows } from '../cockpit/overlap-model';
 import {
   CoordinationContext,
   hostedDecisions,
@@ -55,7 +48,6 @@ export function hostedAttention(
     events: Parameters<typeof withChangedFiles>[1];
     unacked: Parameters<typeof hostedDecisions>[0];
     claims: Parameters<typeof hostedOverlaps>[0];
-    overlapAnswers?: readonly import('../cockpit/overlap-model').OverlapAnswer[];
     overlapSignals?: import('../../../src/now-overlap-signals').NowOverlapSignals;
     /** The owner's open approval requests (`projectHostedApprovals:list`); absent for other viewers. */
     approvals?: { projectId: string; requests: readonly OpenApproval[] };
@@ -75,10 +67,6 @@ export function hostedAttention(
   const lanes = byAttention(
     withChangedFiles(withSessions(cockpitLanes(records, queue), live.sessions, now, true), live.events),
   );
-  const nativeAnswers = records.intents.flatMap(
-    intent => intent.notes?.flatMap(note => (note.overlapAnswer ? [note.overlapAnswer] : [])) ?? [],
-  );
-  const answers = [...(live.overlapAnswers ?? []), ...nativeAnswers];
   const laneById = new Map(lanes.map(lane => [lane.id, lane]));
   const current = live.overlapSignals;
   const pins = new Map(current?.edits.map(edit => [edit.laneId, edit.head]) ?? []);
@@ -86,9 +74,6 @@ export function hostedAttention(
     const lane = laneById.get(id);
     return lane?.open && lane.head === pins.get(id);
   };
-  const detected = current?.notices.filter(notice => notice.lanes.every(pinned));
-  const unanswered = unansweredOverlaps(lanes, answers, detected);
-  const deliveredUnanswered = unansweredOverlaps(lanes, answers);
   const currentRows = current
     ? overlapRows(
         current.edits.flatMap(edit =>
@@ -117,7 +102,7 @@ export function hostedAttention(
     hostedOverlaps(live.claims, live.sessions, lanes, fallbackEvents).map(row => [row.path, row]),
   );
   for (const row of currentRows) mergedRows.set(row.path, row);
-  const overlaps = unansweredNames([...mergedRows.values()], unanswered, lanes);
+  const overlaps = [...mergedRows.values()];
   const overlapsComplete =
     current?.complete !== false && (current?.edits.every(edit => pinned(edit.laneId)) ?? true);
   const decisions = [
@@ -126,7 +111,6 @@ export function hostedAttention(
     ...quarantineDecisions(records.runs),
     ...hostedDecisions(live.unacked, live.sessions, lanes, records),
     ...laneDecisions(lanes, overlapCounts(overlaps)),
-    ...overlapDecisions(lanes, unanswered, now),
     ...needsFixDecisions(records.needsFix ?? [], records.intents),
     ...(live.approvals ? approvalDecisions(live.approvals.projectId, live.approvals.requests) : []),
   ];
@@ -134,9 +118,6 @@ export function hostedAttention(
     lanes,
     overlaps,
     overlapsComplete,
-    unanswered,
-    deliveredUnanswered,
-    unansweredBySession: unansweredBySession(unanswered, lanes),
     decisions,
     pending,
     queue,
@@ -242,7 +223,6 @@ export function HostedAttention({
       live.events,
       live.claims,
       live.unacked,
-      live.overlapAnswers,
       live.overlapSignals,
       approvals,
       now,

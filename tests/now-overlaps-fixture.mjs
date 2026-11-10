@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-/** B3.3 A-C: four open Lanes, two gone agents, nine unique unanswered overlaps. */
+/** B3.3 A-C: four open Lanes, two gone agents, files shared by several Lanes (no answers since Issue 853fcde3). */
 export function overlapNowFixture(state = 'C') {
   const now = Date.parse('2026-10-14T10:20:00Z');
   const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -66,21 +66,6 @@ export function overlapNowFixture(state = 'C') {
     head: lane.head,
     paths: [...new Set(notices.filter(([a, b]) => a === i || b === i).map(([, , path]) => paths[path]))],
   }));
-  const detected =
-    state === 'A'
-      ? []
-      : lanes.flatMap(lane => lane.overlaps.map(({ at, ...notice }) => ({ ...notice, laneId: lane.id })));
-  const answers =
-    state === 'B3'
-      ? [
-          {
-            laneId: lanes[0].id,
-            noticeId: lanes[0].overlaps[0].noticeId,
-            actor: 'viewer',
-            at: new Date(now).toISOString(),
-          },
-        ]
-      : [];
   return {
     now,
     records: {
@@ -98,8 +83,7 @@ export function overlapNowFixture(state = 'C') {
       sessionsLoading: false,
       eventsComplete: true,
       overlapsComplete: true,
-      overlapAnswers: answers,
-      overlapSignals: { notices: detected, edits, behindMain: [], complete: true },
+      overlapSignals: { edits, behindMain: [], complete: true },
     },
     viewer: 'viewer',
   };

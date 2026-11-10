@@ -7,8 +7,7 @@ import { ForgeError } from './errors.js';
  * (src/agent-default-gates.ts); the server refuses a new agent landing that does not carry that
  * result for every Lane head it lands, so an older or hand-written client cannot skip it by
  * omission. Preflight runs on the agent's machine and is never uploaded, so the server requires the
- * reported result for the landed head; it cannot prove the tests ran. `overlapGate` stays an
- * advisory client-side check until flip 4 (Issue 853fcde3) replaces it. */
+ * reported result for the landed head; it cannot prove the tests ran. */
 
 const hash = z.string().regex(/^[0-9a-f]{64}$/);
 export const PREFLIGHT_RESULTS = [

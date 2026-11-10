@@ -15,7 +15,6 @@ import {
 } from '../dist/hosted-overlap-text.js';
 import { SymbolBudget, MAX_SYMBOL_LINKS } from '../dist/hosted-overlap-symbols.js';
 import { boundOverlapChanges, hostedOverlapAdvice, SYMBOL_LINK_BYTES } from '../dist/hosted-overlap.js';
-import { hostedOverlapNotice, overlapBanner } from '../dist/hosted-overlap-notice.js';
 import { saveHostedLane, overlapEvidenceLevel } from '../dist/hosted-save-client.js';
 import { captureHostedSave } from '../dist/hosted-save-capture.js';
 import { packageSymbolLinks } from '../dist/hosted-overlap-packages.js';
@@ -69,8 +68,7 @@ function lane(id, changes) {
   };
 }
 const advise = (mine, peers) =>
-  hostedOverlapAdvice(mine, peers, null, { head: 'base', sourceRevision: 0 }, new Set())
-    .unacknowledgedOverlaps;
+  hostedOverlapAdvice(mine, peers, null, { head: 'base', sourceRevision: 0 }).overlaps;
 
 // Miss 1 shape (Lanes 85139435 vs cc2d1a99): one Lane changes the capabilities reply schema, the other
 // changes transport lines that parse that reply, in a different file. Same-file notices saw nothing.
@@ -122,7 +120,7 @@ test('miss 1 replay: changed lines using a schema a peer changes get exactly one
   assert.equal(note.file, 'src/hosted-agent-transport.ts');
   assert.equal(
     note.text,
-    `advisory cross-file: your changed lines in src/hosted-agent-transport.ts use hostedAgentCapabilitiesSchema, which Lane ${PEER} (Intent of ${PEER}) changes in src/hosted-agent-contract.ts. No answer needed.`,
+    `advisory cross-file: your changed lines in src/hosted-agent-transport.ts use hostedAgentCapabilitiesSchema, which Lane ${PEER} (Intent of ${PEER}) changes in src/hosted-agent-contract.ts.`,
   );
   assert.deepEqual(note.lanes, [MINE, PEER].sort());
 
@@ -145,17 +143,6 @@ test('miss 1 replay: changed lines using a schema a peer changes get exactly one
     ),
   ]);
   assert.equal(advise(mine, [more]).count, 1);
-
-  // Advisory: never required, and the banner names the symbol, not a shared file.
-  const notice = hostedOverlapNotice('/r', MINE, { unacknowledgedOverlaps: seen });
-  assert.equal(notice.required, false);
-  const banner = overlapBanner(notice);
-  assert.match(banner, /OVERLAP NOTICE: ADVISORY/);
-  assert.match(
-    banner,
-    /\[advisory\] advisory cross-file: your changed lines in src\/hosted-agent-transport\.ts use hostedAgentCapabilitiesSchema/,
-  );
-  assert.doesNotMatch(banner, /also changed in/);
 });
 
 test('a class-method-only change gives no note; a class header change does', () => {
@@ -216,7 +203,7 @@ test('a pair that already has a same-file notice gets no extra cross-file note; 
     5,
     'src/x.ts',
   );
-  assert(!path.unacknowledgedOverlaps.items.some(item => item.reason === 'cross-file-symbol'));
+  assert(!path.overlaps.items.some(item => item.reason === 'cross-file-symbol'));
 });
 
 test('over-cap computation marks unavailable and never fails the save evidence', () => {
@@ -262,7 +249,10 @@ test('symbol facts are bounded per file and per Lane row; the legacy coverage bo
     overlapTextSketch(Buffer.alloc(0)),
     overlapTextSketch(Buffer.from(`${imports}\n${uses}\n`)),
     true,
-    { ...context('src/big.ts', `${imports}\n${uses}\n`), exists: p => many.has(p) },
+    {
+      ...context('src/big.ts', `${imports}\n${uses}\n`),
+      exists: p => many.has(p),
+    },
   );
   assert.equal(evidence.symbolLinks.refs.length, MAX_SYMBOL_LINKS);
   assert.equal(evidence.symbolLinks.exports.length, MAX_SYMBOL_LINKS);
@@ -275,7 +265,10 @@ test('symbol facts are bounded per file and per Lane row; the legacy coverage bo
   }));
   const bounded = boundOverlapChanges(changes);
   const plain = boundOverlapChanges(
-    changes.map(c => ({ ...c, evidence: { ...c.evidence, symbolLinks: undefined } })),
+    changes.map(c => ({
+      ...c,
+      evidence: { ...c.evidence, symbolLinks: undefined },
+    })),
   );
   assert.equal(bounded.complete, plain.complete);
   const rows = JSON.parse(bounded.changes);
@@ -298,13 +291,23 @@ test('save path: facts ride the existing pages with no added calls, and only to 
   assert.equal(overlapEvidenceLevel({}), false);
   assert.equal(overlapEvidenceLevel({ overlapEvidenceVersion: 1 }), true);
   assert.equal(
-    overlapEvidenceLevel({ overlapEvidenceVersion: 1, features: ['overlap-symbol-links'] }),
+    overlapEvidenceLevel({
+      overlapEvidenceVersion: 1,
+      features: ['overlap-symbol-links'],
+    }),
     'symbol-links',
   );
 
   const run = async level => {
     const base = mkdtempSync(join(tmpdir(), 'forge-symbol-links-'));
-    t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+    t.after(() =>
+      rmSync(base, {
+        recursive: true,
+        force: true,
+        maxRetries: 10,
+        retryDelay: 50,
+      }),
+    );
     const root = join(base, 'checkout'),
       path = 'src/hosted-agent-transport.ts';
     mkdirSync(join(root, '.forge'), { recursive: true });
@@ -362,7 +365,11 @@ test('save path: facts ride the existing pages with no added calls, and only to 
           const name = getFunctionName(ref);
           calls.push(name);
           if (name === 'projectObjectDownloads:describe')
-            return args.digests.map(id => ({ digest: id, size: s.objects.get(id).length, location: 'r2' }));
+            return args.digests.map(id => ({
+              digest: id,
+              size: s.objects.get(id).length,
+              location: 'r2',
+            }));
           if (name === 'projectHostedSaves:prepare') return s.call('prepare', api.prepare, args);
           if (name === 'projectHostedSaves:stage') {
             pages.push(JSON.parse(args.page));
@@ -409,7 +416,14 @@ test('save path: facts ride the existing pages with no added calls, and only to 
 /** A hosted Lane checkout of `path` (exporting `a`), ready for captureHostedSave. */
 async function hostedCheckout(t, path) {
   const base = mkdtempSync(join(tmpdir(), 'forge-symbol-scale-'));
-  t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() =>
+    rmSync(base, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    }),
+  );
   const root = join(base, 'checkout');
   mkdirSync(join(root, '.forge'), { recursive: true });
   mkdirSync(join(root, path, '..'), { recursive: true });
@@ -464,7 +478,10 @@ test('TS/JS under docs/ is code too: a changed export there carries symbol facts
   writeFileSync(join(root, 'docs/example/b.ts'), "import { a } from './a.js';\nexport const b = a;\n");
   const capture = await captureHostedSave(root, into);
   const change = capture.changes.find(c => c.path === 'docs/example/b.ts');
-  assert.deepEqual(change.evidence.symbolLinks, { exports: ['b'], refs: ['docs/example/a.ts#a'] });
+  assert.deepEqual(change.evidence.symbolLinks, {
+    exports: ['b'],
+    refs: ['docs/example/a.ts#a'],
+  });
 });
 
 // Package-level notes for code without import-level facts (Issue a6566fbe).
@@ -563,7 +580,7 @@ test('Go: a dependent package edit and an exported signature change get one advi
   assert.equal(note.file, 'pkg/b/b.go');
   assert.equal(
     note.text,
-    `advisory cross-file: your changed lines in pkg/b/b.go may use package go:pkg/a, where Lane ${PEER} (Intent of ${PEER}) changes Greet in pkg/a/a.go. No answer needed.`,
+    `advisory cross-file: your changed lines in pkg/b/b.go may use package go:pkg/a, where Lane ${PEER} (Intent of ${PEER}) changes Greet in pkg/a/a.go.`,
   );
   const reverse = advise(provider, [dependent]);
   assert.equal(reverse.count, 1);
@@ -661,7 +678,9 @@ test('missing facts read unavailable, never "no link"; an oversized dependency c
     unavailable: true,
   });
   // 70 packages in a dependency chain: the last depends on 69 others, past the per-file cap.
-  const chain = { 'pyproject.toml': '[tool.uv.workspace]\nmembers = ["libs/*"]\n' };
+  const chain = {
+    'pyproject.toml': '[tool.uv.workspace]\nmembers = ["libs/*"]\n',
+  };
   for (let i = 0; i < 70; i++) {
     chain[`libs/p${i}/pyproject.toml`] =
       `[project]\nname = "p${i}"\n${i ? `dependencies = ["p${i - 1}"]\n` : ''}`;
@@ -675,7 +694,14 @@ test('missing facts read unavailable, never "no link"; an oversized dependency c
 
 test('save capture: a changed Go file carries package facts from the checkout manifests', async t => {
   const base = mkdtempSync(join(tmpdir(), 'forge-package-links-'));
-  t.after(() => rmSync(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
+  t.after(() =>
+    rmSync(base, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 50,
+    }),
+  );
   const root = join(base, 'checkout'),
     path = 'pkg/a/a.go';
   mkdirSync(join(root, '.forge'), { recursive: true });

@@ -7,7 +7,6 @@ import type { CockpitLane } from './model';
 import { checkMeaning } from './check-meaning';
 import type { ApprovalKind } from '../../../src/approval-state';
 import { laneNeedsYou } from './needs-you';
-export { overlapDecisions } from './overlap-decisions';
 export { needsFixDecisions } from './needs-fix';
 
 /** Something that needs a decision from the viewer, with its one-click answers. */
@@ -20,19 +19,8 @@ export type DecisionItem = {
   version?: string;
   githubMirror?: boolean;
   queue?: QueueFact;
-  kind:
-    | 'review'
-    | 'conflict'
-    | 'handoff'
-    | 'message'
-    | 'failed'
-    | 'overlap'
-    | 'revert'
-    | 'needs-fix'
-    | 'approval';
+  kind: 'review' | 'conflict' | 'handoff' | 'message' | 'failed' | 'revert' | 'needs-fix' | 'approval';
   files?: { path: string; with: string }[];
-  noticeIds?: string[];
-  overlapCount?: number;
   tests?: string[];
   moreTests?: number;
   exact?: { reverted?: string; audit?: string; undo: string };

@@ -361,6 +361,12 @@ export async function finishFixture(
         await tx('precomposeStart', precomposeApi.start, input);
       } else if (task.name === 'projectHostedLandingWouldConflict:mark') {
         await tx('wouldConflict', wouldConflictApi.mark, input);
+      } else if (task.name === 'projectHostedConflictMerge:wouldConflictConfig') {
+        // The action reads main's forge.json from R2; the fixture's main declares no merge lists.
+        await tx('wouldConflict', wouldConflictApi.mark, {
+          ...input,
+          declared: { union: [], fragments: [] },
+        });
       } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
         // Owner channels are faked: record what would be sent, never call a network.
         metrics.stallDeliveries.push(input);

@@ -8,8 +8,6 @@ import { digest } from './portable-hash.js';
 export const HOT_FILE_LANES = 3;
 /** Hot-file items per overlap read, most-shared first; the rest are counted, not listed. */
 export const HOT_FILE_ITEMS = 2;
-/** Times one machine shows a hot-file notice for one path on one Lane (client side). */
-export const HOT_FILE_SHOWS = 3;
 /** Declared scope entries one start may send; each at most this many characters. */
 export const SCOPE_PATHS = 50;
 export const SCOPE_PATH_CHARS = 300;
@@ -24,7 +22,7 @@ export const inScope = (scope: readonly string[], path: string) =>
 
 /** Paths several open Lanes saved. `lanes` maps each path the caller cares about to the peers that
  * saved it (the caller is not in the set). Ranked by Lane count, then path. */
-export function hotFiles(laneId: string, lanes: Map<string, Set<string>>, answered: Set<string>) {
+export function hotFiles(laneId: string, lanes: Map<string, Set<string>>) {
   const hot = [...lanes]
     .filter(([, peers]) => peers.size + 1 >= HOT_FILE_LANES)
     .sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))
@@ -32,8 +30,7 @@ export function hotFiles(laneId: string, lanes: Map<string, Set<string>>, answer
       noticeId: digest(JSON.stringify(['hot-file', laneId, path])),
       path,
       peers: [...peers].sort(),
-    }))
-    .filter(entry => !answered.has(entry.noticeId));
+    }));
   return {
     count: hot.length,
     items: hot.slice(0, HOT_FILE_ITEMS).map(entry => ({
@@ -52,9 +49,7 @@ export const hotFileText = (path: string, peers: string[]) =>
   `advisory: ${path} is in ${peers.length + 1} open Lanes (yours and ${peers
     .slice(0, 3)
     .map(id => id.slice(0, 8))
-    .join(
-      ', ',
-    )}${peers.length > 3 ? ', ...' : ''}); consider a per-Issue file or landing it first. No answer needed.`.slice(
+    .join(', ')}${peers.length > 3 ? ', ...' : ''}); consider a per-Issue file or landing it first.`.slice(
     0,
     400,
   );
@@ -65,15 +60,6 @@ export type PeerLanding = {
   /** Approximate minutes until it lands, from the queue's recent service time; null when unknown. */
   etaMinutes: number | null;
 };
-
-/** One clause for an overlap item: where the peer's landing is and when it should reach main. */
-export function peerPhaseText(landing: PeerLanding | null) {
-  if (!landing) return 'peer is editing (no landing yet)';
-  const eta = landing.etaMinutes === null ? '' : `, lands in about ${landing.etaMinutes} min`;
-  if (landing.phase === 'ready') return `peer is admitted (its Lane check passed)${eta}`;
-  if (landing.phase === 'checking') return `peer landing is checking${eta}`;
-  return `peer landing is ${landing.phase}${eta}`;
-}
 
 /** The stack-on-pending-head offer: a Lane colliding with an admitted peer (check passed, so it
  * very likely lands) can build on the peer's head now instead of repairing a conflict later.

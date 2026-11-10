@@ -19,7 +19,6 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
     '--check': 'run',
     '--contract': 'confirm-tests',
     '--overlap-answer': 'peer-ack',
-    '--overlap-answers': 'overlap-acks',
     '--friction': 'friction',
     '--decision': 'decide',
   },
@@ -71,7 +70,6 @@ export const namedReads = [
   'queue',
   'landings',
   'lane-history',
-  'overlap-answers',
   'board',
   'metrics',
   'decisions',
@@ -87,7 +85,6 @@ export const namedReads = [
   'put-planning-item',
   'comment-planning-item',
   'preflight',
-  'ack',
 ] as const;
 
 /** Actions of the removed native-owner mode (docs/agents/hosted-parity.md): each names the hosted

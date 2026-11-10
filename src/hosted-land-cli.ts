@@ -37,7 +37,6 @@ import {
   landWaitContinuation,
 } from './hosted-land-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
-import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
@@ -61,9 +60,7 @@ function landBudgetSeconds() {
   const chosen = Number(process.env[LAND_BUDGET_ENV]);
   return Number.isFinite(chosen) && chosen > 0 ? chosen : AGENT_WAIT_SECONDS;
 }
-const noticeOf = (response: HostedAgentResponse) =>
-  (response as { overlapNotice?: HostedOverlapNotice }).overlapNotice;
-/** Immediate stderr progress for a submitted landing: operation id, replay and wait commands, overlap banner. */
+/** Immediate stderr progress for a submitted landing: operation id, replay and wait commands, conflict banner. */
 function announce(
   root: string,
   command: Record<string, unknown>,
@@ -71,8 +68,6 @@ function announce(
   wake: boolean,
 ) {
   for (const line of landAnnouncement(root, command, response, wake)) process.stderr.write(`${line}\n`);
-  const notice = noticeOf(response);
-  if (notice) process.stderr.write(overlapBannerOnce(notice));
   const exact = (response as { conflictNotice?: ExactConflictNotice }).conflictNotice;
   if (exact) process.stderr.write(exactConflictBannerOnce(exact));
 }
@@ -219,9 +214,6 @@ async function detachedSubmit(
   }
   const response = JSON.parse(line) as HostedAgentResponse;
   if (code === 3) process.exitCode = 3;
-  // The relayed stderr already showed this notice; the final banner must not repeat it.
-  const notice = noticeOf(response);
-  if (notice) markOverlapShown(notice);
   return response;
 }
 

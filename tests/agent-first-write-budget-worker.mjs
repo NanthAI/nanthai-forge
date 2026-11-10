@@ -9,12 +9,17 @@ import { fileURLToPath } from 'node:url';
 import { preEditHosted } from '../dist/agent-edit-hosted.js';
 import { editTarget } from '../dist/agent-edit-target.js';
 import { hostedEditServer, hostedMarker } from './hosted-edit-fixture.mjs';
+import { rememberBoardServerFeatures } from '../dist/board-local.js';
 
 export default async function firstWriteBudget() {
   const root = mkdtempSync(join(tmpdir(), 'forge-first-write-budget-'));
   const server = await hostedEditServer();
-  const previous = process.env.FORGE_AUTH_TOKEN;
+  const previous = process.env.FORGE_AUTH_TOKEN,
+    previousState = process.env.XDG_STATE_HOME;
   process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
+  // The hosted first write reads only the board (Issue 853fcde3): advertise it so the read runs.
+  process.env.XDG_STATE_HOME = join(root, 'state');
+  rememberBoardServerFeatures('synthetic-project', ['agent-board']);
   try {
     hostedMarker(root, server.url, undefined, 29000);
     const times = [],
@@ -24,7 +29,7 @@ export default async function firstWriteBudget() {
         at = process.cpuUsage();
       const result = await preEditHosted(editTarget(join(root, `fresh-${i}.txt`)), 'budget');
       times.push(cpuMilliseconds(at));
-      assert.equal(result.count, 0);
+      assert.equal(result.status, 'allowed');
       assert.equal(Atomics.load(server.counts, 0) - before, 1, 'one bounded hosted read per uncached path');
     }
     // Guard the work-count measurement itself: a planted double read must fail.
@@ -81,7 +86,7 @@ export default async function firstWriteBudget() {
         direct = run(true, `worker-${i}`);
       assert.deepEqual(supervised.output, direct.output);
       assert.equal(supervised.output.hookSpecificOutput.permissionDecision, undefined);
-      assert.match(supervised.output.hookSpecificOutput.additionalContext, /overlap; coverage=hosted/);
+      assert.match(supervised.output.hookSpecificOutput.additionalContext, /^Claim on shared\.txt: /);
       hookPeakRssBytes = Math.max(
         hookPeakRssBytes,
         supervised.memory.peakRssBytes,
@@ -125,6 +130,8 @@ export default async function firstWriteBudget() {
   } finally {
     if (previous === undefined) delete process.env.FORGE_AUTH_TOKEN;
     else process.env.FORGE_AUTH_TOKEN = previous;
+    if (previousState === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previousState;
     await server.close();
     rmSync(root, { recursive: true, force: true });
   }

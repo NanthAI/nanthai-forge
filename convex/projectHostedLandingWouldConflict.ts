@@ -8,12 +8,14 @@ import type { Id } from './_generated/dataModel';
 import { hostedRecordBody, recordHead } from './projectHostedRecords';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { markdownDoc } from '../src/docs-resolution';
+import { conflictRule } from '../src/docs-resolution';
+import type { DeclaredMergePaths } from '../src/project-config';
 
 /** Queued rows scanned and Candidates read per land. Queues at dogfood scale hold a few tens of
  * entries, most already checked or batched; the rest stay unmarked. */
 export const WOULD_CONFLICT_SCAN = 20;
 export const WOULD_CONFLICT_READS = 10;
+const NO_MERGE_PATHS: DeclaredMergePaths = { union: [], fragments: [] };
 
 /** Event-driven on each land (no polling): the publication schedules one bounded pass, only when
  * the landing changed known paths, so publication itself stays constant-size. */
@@ -33,21 +35,38 @@ export async function scheduleWouldConflict(
   );
 }
 
+const markArgs = {
+  projectId: v.id('hostedProjects'),
+  paths: v.array(v.string()),
+  landedSubmissionId: v.string(),
+};
 export const mark = internalMutation({
-  args: { projectId: v.id('hostedProjects'), paths: v.array(v.string()), landedSubmissionId: v.string() },
+  args: {
+    ...markArgs,
+    /** Main's forge.json merge lists, read by projectHostedConflictMerge:wouldConflictConfig. */
+    declared: v.optional(v.object({ union: v.array(v.string()), fragments: v.array(v.string()) })),
+  },
   returns: v.number(),
   handler: (ctx, input) => markWouldConflict(ctx, input),
 });
 
-/** Queued entries that were not checked yet and change a file the landing changed are marked
- * (Markdown docs excepted).
+/** Queued entries that were not checked yet and change a file the landing changed are marked,
+ * except files compose merges on its own (Markdown docs and main's forge.json `merge` lists).
  * Path advice, not a proven text conflict. Cost: one bounded queue read plus at most
- * WOULD_CONFLICT_READS Candidate reads (record head + record). */
+ * WOULD_CONFLICT_READS Candidate reads (record head + record). A mutation cannot read main's
+ * forge.json, so the first entry that would be marked hands the pass once to a small action that
+ * reads it (main's State, then forge.json) and calls back with `declared`. */
 export async function markWouldConflict(
   ctx: MutationCtx,
-  input: { projectId: Id<'hostedProjects'>; paths: string[]; landedSubmissionId: string },
+  input: {
+    projectId: Id<'hostedProjects'>;
+    paths: string[];
+    landedSubmissionId: string;
+    declared?: DeclaredMergePaths;
+  },
   now = Date.now(),
 ) {
+  const declared = input.declared;
   if (!input.paths.length) return 0;
   const landed = new Set(input.paths);
   const queued = await ctx.db
@@ -78,12 +97,21 @@ export async function markWouldConflict(
     if (!record) continue;
     const candidate = hostedRecordSchema.parse(JSON.parse(await hostedRecordBody(ctx, record)));
     if (candidate.kind !== 'candidate') continue;
-    // Shared Markdown docs need no sync: the queue's recompose merges them with the docs rule,
-    // and a conflict it cannot merge surfaces as an actual compose conflict (Issue 561996ac).
+    // Shared Markdown docs and declared lists need no sync: the queue's recompose merges them with
+    // the same rules, and a conflict it cannot merge surfaces as an actual compose conflict
+    // (Issues 561996ac, 853fcde3).
     const shared = (candidate.governance?.paths ?? [])
-      .filter(path => landed.has(path) && !markdownDoc(path))
+      .filter(path => landed.has(path) && !conflictRule(path, declared ?? NO_MERGE_PATHS))
       .sort();
     if (!shared.length) continue;
+    if (!declared) {
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectHostedConflictMerge:wouldConflictConfig'),
+        { projectId: input.projectId, paths: input.paths, landedSubmissionId: input.landedSubmissionId },
+      );
+      return 0;
+    }
     const paths = shared.slice(0, 10),
       more = shared.length - paths.length;
     // The Lane this entry composed (as the queue view finds it): one indexed read per marked entry, so

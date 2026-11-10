@@ -215,7 +215,13 @@ export async function landingFixture(source = null) {
           (ctx, input) => wouldConflict.markWouldConflict(ctx, input, now),
           task.args[0],
         );
-      else if (task.name === 'projectHostedLandingStallAlert:deliver') {
+      else if (task.name === 'projectHostedConflictMerge:wouldConflictConfig') {
+        // The action reads main's forge.json from R2; the fixture's main declares no merge lists.
+        result = await run('wouldConflict', (ctx, args) => wouldConflict.markWouldConflict(ctx, args, now), {
+          ...task.args[0],
+          declared: { union: [], fragments: [] },
+        });
+      } else if (task.name === 'projectHostedLandingStallAlert:deliver') {
         // Owner channels are faked: record what would be sent, never call a network.
         metrics.stallDeliveries.push(task.args[0]);
         result = null;

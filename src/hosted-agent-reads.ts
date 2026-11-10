@@ -19,7 +19,6 @@ import { memberDataNotice } from './member-data-notice.js';
 import { QUEUE_VIEW_LIMIT } from './hosted-queue-view.js';
 import { hostedLandingsSchema } from './hosted-agent-landings.js';
 import { hostedLaneHistorySchema } from './hosted-agent-lane-history.js';
-import { hostedOverlapAnswersSchema } from './hosted-agent-overlap-answers.js';
 import { liveLanesInput } from './hosted-live-lanes.js';
 import { hostedBoardSchemas } from './hosted-board.js';
 import { SELECT_LANE } from './hosted-lane-location.js';
@@ -64,8 +63,7 @@ export async function peersHostedSource(transport: HostedAgentTransport, input: 
     items: command.detail ? 50 : 5,
   });
   // Peer intents and overlap notes are member-written: one marker per read (S-17).
-  const items = (result?.unacknowledgedOverlaps as { items?: unknown[] } | undefined)?.items;
-  return result && typeof result === 'object' && (items?.length || result.peerEvidence)
+  return result && typeof result === 'object' && result.peerEvidence
     ? { ...result, notice: memberDataNotice }
     : result;
 }
@@ -123,7 +121,6 @@ export const hostedClientReadSchemas = {
   queue: hostedQueueSchema,
   landings: hostedLandingsSchema,
   'lane-history': hostedLaneHistorySchema,
-  'overlap-answers': hostedOverlapAnswersSchema,
   wait: hostedWaitSchema,
   show: hostedSourceShowSchema.omit({ action: true }),
   /** The board verbs are client actions too: `board --post`/`--reply` write one note each, `--resolve` withdraws one. */

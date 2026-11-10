@@ -10,7 +10,6 @@ import { readHostedMainSelection } from './hosted-main-marker.js';
 import { diffHostedSource, peersHostedSource, queueHostedSource } from './hosted-agent-reads.js';
 import { landingsHostedSource } from './hosted-agent-landings.js';
 import { laneHistoryHostedSource } from './hosted-agent-lane-history.js';
-import { overlapAnswersHostedSource } from './hosted-agent-overlap-answers.js';
 import { hostedObservationContinuation } from './hosted-agent-finish-result.js';
 import {
   precheckPendingConflicts,
@@ -30,15 +29,14 @@ import { autoReplaySuperseded } from './hosted-replay-holds.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { sourceTree } from './source-tree.js';
 import { withSourceRecovery } from './hosted-agent-source-recovery.js';
-import { readHostedOverlapAdvice, recordHostedOverlapDelivery } from './hosted-overlap-client.js';
-import { limitHotFiles, rememberStackOffer } from './hosted-coordination-client.js';
+import { readHostedOverlapAdvice } from './hosted-overlap-client.js';
+import { rememberStackOffer } from './hosted-coordination-client.js';
 import { presenceDelivery, presenceSince, type PresenceDelivery } from './hosted-presence-client.js';
 import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor } from './hosted-board.js';
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { memberDataNotice } from './member-data-notice.js';
 import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
-import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
 import { observedConflictRecovery, terminalConflict } from './hosted-observed-conflict.js';
@@ -67,7 +65,7 @@ import {
   unknownActionError,
 } from './hosted-agent-version.js';
 import { enrichHostedQueueAhead } from './queue-ahead-hosted.js';
-import { ackAnswers, checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
+import { checkpointNudge, finishGates, unsavedMinutes } from './agent-default-gates.js';
 import { composedLanes, landGatesArgument } from './hosted-land-gate-client.js';
 import { preflightResult } from './hosted-land-gates.js';
 import type { LandGateEntry } from './hosted-land-gates.js';
@@ -155,7 +153,6 @@ const quietActions = new Set([
   'queue',
   'landings',
   'lane-history',
-  'overlap-answers',
   'capabilities',
   'metrics',
   'check-settings',
@@ -171,7 +168,6 @@ const quietActions = new Set([
 const gateCodes = new Set([
   'BAD_ARGUMENT',
   'NOT_FOUND', // a missing record: replaying the same request cannot change it (w30)
-  'OVERLAP_UNANSWERED',
   'PREFLIGHT_REQUIRED',
   'SAVE_PENDING',
   'SAVE_SETTLE_FAILED',
@@ -212,7 +208,6 @@ export type HostedAgentResponse = {
     | 'queue'
     | 'landings'
     | 'lane-history'
-    | 'overlap-answers'
     | 'board'
     | 'board-post'
     | 'board-reply'
@@ -221,10 +216,9 @@ export type HostedAgentResponse = {
   operationId: string | null;
   resolved: { operationId: string } | null;
   result: unknown;
-  unacknowledgedOverlaps?: unknown;
   behindMain?: unknown;
-  /** Present only while an overlap is unanswered: who, which files and the acknowledge or route-around command. */
-  overlapNotice?: HostedOverlapNotice;
+  /** D2: an admitted peer touches this Lane's files; build on its pending head (sync stackOn). */
+  stackOffer?: { peerLaneId: string; mode: string; text: string; command: string };
   conflictNotice?: ExactConflictNotice;
   /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
   board?: { notices: string[]; more: number };
@@ -372,15 +366,6 @@ export class HostedAgentTransport {
         operationId: null,
         resolved: null,
         result: await laneHistoryHostedSource(this, input),
-      };
-    if (requestedAction === 'overlap-answers')
-      return {
-        schema: 1,
-        transport: 'hosted',
-        action: 'overlap-answers',
-        operationId: null,
-        resolved: null,
-        result: await overlapAnswersHostedSource(this, input),
       };
     if (requestedAction === 'queue')
       return {
@@ -883,7 +868,7 @@ export class HostedAgentTransport {
           }),
         );
       }
-      if (action === 'ack' || action === 'preflight')
+      if (action === 'preflight')
         return await this.clientAction(action, command.data as Record<string, unknown>);
       if (action === 'check-settings')
         return this.response(action, null, await hostedCheckSettings(this.query.bind(this), capabilities));
@@ -1022,7 +1007,7 @@ export class HostedAgentTransport {
             settle,
           ),
         waitUntil: this.waitUntil ?? dispatchedAt + AGENT_WAIT_SECONDS * 1000,
-        finishGates: async (laneId: string, head: string, tree?: string, overlapAnswer?: 'accept-order') => {
+        finishGates: async (laneId: string, head: string, tree?: string) => {
           const read = await this.overlapAdvice(laneId, capabilities.agentDefaults?.preflight !== 'off');
           const selected = readHostedLaneCheckout(root)?.selection;
           const advice =
@@ -1047,14 +1032,7 @@ export class HostedAgentTransport {
               ...(tree ? { tree } : {}),
             },
             advice,
-            overlapAnswer,
           );
-          // An inline answer records the same idempotent answers as ack, so peers and the inbox see it.
-          const answers = overlapAnswer && advice ? ackAnswers(laneId, advice, overlapAnswer) : [];
-          for (let at = 0; at < answers.length; at += 100)
-            await executeHostedRecords(this, 'overlap-acks', {
-              answers: answers.slice(at, at + 100),
-            });
           // The server requires this preflight result again at enqueue (Issue 029138ef).
           gatedLane = { laneId, head, preflight: preflightResult(gates.preflight) };
           return gates;
@@ -1461,27 +1439,19 @@ export class HostedAgentTransport {
     result: unknown,
     overlapLaneId?: string,
   ): Promise<HostedAgentResponse> {
-    const read = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
+    const advice = overlapLaneId ? await this.overlapAdvice(overlapLaneId) : undefined;
     this.cachedAdvice = undefined;
-    // D2: hot-file notices are capped per path on this machine; a stack offer is never shown while
-    // this checkout's own landing is live (no sync then), and the last offer is kept for stacking:auto.
-    const advice = read && overlapLaneId ? limitHotFiles(overlapLaneId, read) : read;
-    const offered = advice && 'stackOffer' in advice ? advice.stackOffer : undefined;
+    // D2: a stack offer is never shown while this checkout's own landing is live (no sync then),
+    // and the last offer is kept for stacking:auto.
+    const offered = advice?.stackOffer;
     const offer =
       offered && !(liveLanding(result) || ownsLiveLanding(hostedAgentRoot(this.root))) ? offered : undefined;
-    if (advice && overlapLaneId && advice.unacknowledgedOverlaps.coverage !== 'unavailable')
+    if (advice && overlapLaneId && advice.behindMain.coverage !== 'unavailable')
       rememberStackOffer(overlapLaneId, offer);
-    const notice =
-      advice && overlapLaneId
-        ? hostedOverlapNotice(this.root, overlapLaneId, { ...advice, stackOffer: offer })
-        : undefined;
     const presence =
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
     const conflictNotice =
       advice?.conflicts && overlapLaneId ? exactConflictNotice(overlapLaneId, advice.conflicts) : undefined;
-    // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
-    if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
-      await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
     // Conflict advice first, so the continuation never offers wait beside a recovery.
     // Finite canonical reads never hydrate conflict/advice source; a terminal conflict on
     // a landing read gets the same one-query sync recovery as wait. Mutating flows may
@@ -1501,20 +1471,26 @@ export class HostedAgentTransport {
       operationId,
       resolved: operationId ? { operationId } : null,
       result,
-      ...(advice
-        ? (({ changedPaths: _paths, presence: _presence, board: _board, conflicts: _conflicts, ...shown }) =>
-            // The stack offer is shown once, inside overlapNotice.
-            Object.fromEntries(Object.entries(shown).filter(([key]) => key !== 'stackOffer')))(advice)
+      ...(advice ? { behindMain: advice.behindMain } : {}),
+      ...(advice?.stack ? { stack: advice.stack } : {}),
+      ...(offer
+        ? {
+            stackOffer: {
+              peerLaneId: offer.peerLaneId,
+              mode: offer.mode,
+              text: offer.text,
+              command: offer.command,
+            },
+          }
         : {}),
-      ...(notice ? { overlapNotice: notice } : {}),
       ...(conflictNotice ? { conflictNotice } : {}),
       ...(presence ? { presence } : {}),
       ...(advice?.board && overlapLaneId
         ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
         : {}),
       // One marker per receipt, not per note: board notes (stack notices arrive as board notes) and
-      // overlap participants name member-written text. A stack hint holds Lane ids only.
-      ...(notice || conflictNotice || presence || (overlapLaneId && advice?.board?.messages.length)
+      // conflict and presence peers name member-written text. A stack hint holds Lane ids only.
+      ...(conflictNotice || presence || (overlapLaneId && advice?.board?.messages.length)
         ? { notice: memberDataNotice }
         : {}),
       ...this.nudge(action, result),
@@ -1603,43 +1579,19 @@ export class HostedAgentTransport {
       throw error;
     }
   }
-  private async clientAction(action: 'ack' | 'preflight', input: Record<string, unknown>) {
+  private async clientAction(action: 'preflight', input: Record<string, unknown>) {
     const root = hostedAgentRoot(this.root);
     // A save the client returned as pending may have completed on the server while the marker still
     // names the earlier head. Settle that original operation (no new save) before anything pins the
     // marker's head/tree. No pending file means no call.
     // An interrupted local apply leaves the marker describing other bytes; finish it first.
-    if (action === 'preflight') {
-      finishPendingCheckoutDelta(root);
-      await this.refreshDependencies(root);
-    }
-    const pendingSave = action === 'preflight' ? await reconcileHostedSave(root, this.exchange) : null;
+    finishPendingCheckoutDelta(root);
+    await this.refreshDependencies(root);
+    const pendingSave = await reconcileHostedSave(root, this.exchange);
     if (pendingSave) return this.response(action, null, pendingSave);
     const marker = readHostedLaneCheckout(root);
     const laneId = (input.laneId as string | undefined) ?? marker?.selection.laneId;
     invariant(laneId, 'BAD_ARGUMENT', `Select laneId, or run ${action} inside the Lane directory.`);
-    if (action === 'ack') {
-      const { choice, text } = hostedAgentCommandSchemas.ack.parse(input);
-      const answered = [];
-      // A bounded loop answers an inbox larger than one read (each round: one read, one write).
-      for (let round = 0; round < 20; round++) {
-        // 50 notices per read: one read answers the usual inbox instead of one read per five.
-        const advice = await readHostedOverlapAdvice(this, laneId, false, 50);
-        const answers = ackAnswers(laneId, advice, choice, text);
-        if (!answers.length) break;
-        const recorded = await executeHostedRecords(this, 'overlap-acks', {
-          answers,
-        });
-        answered.push(...((recorded.result as { answers?: unknown[] }).answers ?? []));
-      }
-      return this.response(action, null, {
-        status: answered.length ? 'recorded' : 'none',
-        answered: answered.length,
-        next: answered.length
-          ? 'Land again; a newer overlap shows a new notice.'
-          : 'No pending overlap notices.',
-      });
-    }
     const command = hostedAgentCommandSchemas.preflight.parse(input);
     invariant(
       marker?.selection.laneId === laneId,
@@ -1841,13 +1793,8 @@ export type HostedAgentSession = {
   action: <T = unknown>(name: string, args: Record<string, unknown>) => Promise<T>;
   main: () => Promise<z.infer<typeof hostedMainV2Schema>>;
   marker: () => ReturnType<typeof readHostedLaneCheckout>;
-  /** Agent-default finish gates (overlap, preflight); refusals throw, advisories return. */
-  finishGates?: (
-    laneId: string,
-    head: string,
-    tree?: string,
-    overlapAnswer?: 'accept-order',
-  ) => Promise<Record<string, unknown>>;
+  /** Agent-default finish gates (preflight); refusals throw, advisories return. */
+  finishGates?: (laneId: string, head: string, tree?: string) => Promise<Record<string, unknown>>;
   /** The `gates` argument for this finish's landing (feature land-gates); undefined when not sent. */
   landGates?: (composeOperationId: string) => string | undefined;
 };

@@ -1,10 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
+import { globPattern } from './autonomy-policy.js';
+import type { DeclaredMergePaths, ListMergeRule } from './project-config.js';
 
 /** Markdown documentation, matching the standard check's docs scope. Runtime-neutral (no Node
  * globals) so Convex queue advice can tell docs paths apart; the rule itself is native-docs-resolve. */
 export const markdownDoc = (path: string) => /^(?:docs\/.+|[^/]+)\.md$/.test(path);
 export const DOCS_RULE = 'keep both sides, main first';
+/** Which rule merges a conflict at `path`: a forge.json `merge` declaration first (fragments, then
+ * union), else the Markdown docs rule; undefined keeps the conflict. */
+export type ConflictRule = 'docs' | ListMergeRule;
+export function conflictRule(path: string, declared: DeclaredMergePaths): ConflictRule | undefined {
+  const matches = (globs: string[]) =>
+    globs.some(glob => {
+      try {
+        return globPattern(glob).test(path);
+      } catch {
+        return false;
+      }
+    });
+  if (matches(declared.fragments)) return 'fragments';
+  if (matches(declared.union)) return 'union';
+  return markdownDoc(path) ? 'docs' : undefined;
+}
+
 /** Paths named in a record; the count past them is `more`. */
 export const DOCS_RESOLUTION_PATHS = 100;
 

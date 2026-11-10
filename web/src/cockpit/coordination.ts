@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { useOverlapAnswers } from './overlap-answers';
 import { useToast } from '../ui/Toast';
 import { createContext, useContext, useRef } from 'react';
 import { PendingWrite } from '../pending-write';
@@ -23,7 +22,7 @@ import { useSafePaginatedQuery, useSafeQuery } from '../safe-query';
 import { freshness } from '../ui/status';
 
 import type { DecisionItem, FeedItem } from './attention';
-import { overlapRows, type OverlapAnswer, type OverlapRow } from './overlap-model';
+import { overlapRows, type OverlapRow } from './overlap-model';
 import { readViewSignals } from '../../../src/now-overlap-view';
 import type { CockpitLane, CockpitWork } from './model';
 
@@ -66,33 +65,28 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
   // One local timer drops the counts (unknown) once their last window ends; no poll, no new read.
   const liveCounts = useExpiringCounts(counts.value);
   const claims = useSafeQuery(api.projectCoordinationReads.claims, enabled ? { projectId } : 'skip');
-  const answers = useSafeQuery(api.projectHostedOverlapAcks.now, enabled ? { projectId } : 'skip');
-  const rawAnswers = answers.value;
+  // Passive overlap signals (edits and behind-main paths); nothing here asks for an answer.
+  const signals = useSafeQuery(api.projectNowOverlaps.now, enabled ? { projectId } : 'skip');
+  const rawSignals = signals.value;
   const unavailable = [
     ...(sessions.failed ? ['sessions'] : []),
     ...(recent.status === 'Error' ? ['events'] : []),
     ...(unacked.error ? ['unacked'] : []),
     ...(counts.error ? ['counts'] : []),
     ...(claims.error ? ['claims'] : []),
-    ...(answers.error ? ['overlaps'] : []),
+    ...(signals.error ? ['overlaps'] : []),
   ];
   const sessionsLoading = !sessions.failed && sessions.status !== 'Exhausted';
   const settled = (read: { value: unknown; error: Error | undefined }) =>
     read.value !== undefined || read.error !== undefined;
-  const overlaps = useMemo(() => {
-    if (!rawAnswers) return undefined;
-    const view = JSON.parse(rawAnswers) as import('../../../src/now-overlap-view').NowOverlapView;
-    const page: OverlapAnswer[] = Object.entries(view.answered).flatMap(([laneId, keys]) =>
-      keys.map(noticeId => ({ laneId, noticeId })),
-    );
-    return { ...view, page, signals: readViewSignals(view.signals) };
-  }, [rawAnswers]);
+  const overlapSignals = useMemo(() => {
+    if (!rawSignals) return undefined;
+    const view = JSON.parse(rawSignals) as import('../../../src/now-overlap-view').NowOverlapView;
+    return readViewSignals(view.signals);
+  }, [rawSignals]);
   return {
-    overlapAnswers: overlaps?.page ?? [],
-    /** When the viewer answered overlap notices on open Lanes, newest first; undefined until read. */
-    myOverlapAnswerTimes: overlaps?.mine,
-    overlapSignals: overlaps?.signals,
-    overlapsComplete: !answers.error && overlaps?.complete !== false && overlaps?.signals?.complete !== false,
+    overlapSignals,
+    overlapsComplete: !signals.error && overlapSignals?.complete !== false,
     unavailable,
     sessions: sessions.results as Session[],
     sessionsLoading: sessionsLoading,
@@ -111,8 +105,8 @@ export function useLiveCoordination(projectId: Id<'hostedProjects'>, enabled: bo
     unackedComplete: !unacked.error && (unacked.value?.complete ?? true),
     claims: claims.value?.claims ?? [],
     ...(liveCounts ? { counts: liveCounts } : {}),
-    initialLoading: !settled(unacked) || !settled(claims) || !settled(answers),
-    loading: !settled(unacked) || !settled(claims) || !settled(answers) || sessionsLoading,
+    initialLoading: !settled(unacked) || !settled(claims) || !settled(signals),
+    loading: !settled(unacked) || !settled(claims) || !settled(signals) || sessionsLoading,
   };
 }
 
@@ -124,8 +118,7 @@ type Command = Parameters<
  * Answers to messages and handoffs: acknowledge, or reply to the sender and then acknowledge.
  * Each attempt keeps its operation id until it succeeds, so a retry never publishes twice.
  */
-export function useAnswers(projectId: Id<'hostedProjects'>, viewerName?: string) {
-  const overlaps = useOverlapAnswers(projectId, viewerName);
+export function useAnswers(projectId: Id<'hostedProjects'>) {
   const toast = useToast();
   const publish = useMutation(api.projectCoordination.publish);
   const writer = useRef<PendingWrite<Command, unknown> | null>(null);
@@ -206,13 +199,12 @@ export function useAnswers(projectId: Id<'hostedProjects'>, viewerName?: string)
   const retrying = (messageId: string) =>
     Boolean(pending[`ack:${messageId}`] || pending[`reply:${messageId}`]);
   return {
-    acknowledgeOverlaps: overlaps.acknowledgeOverlaps,
     acknowledge,
     reply,
     tell,
     message,
     busy,
-    error: overlaps.error || error,
+    error,
     retrying,
     publish: (command: Command) => writer.current!.send(command),
   };

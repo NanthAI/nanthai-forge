@@ -90,7 +90,8 @@ export const deletePage = internalMutation({
   },
 });
 
-/** One bounded ownership/index description for the approved 58-table manifest. */
+/** One bounded ownership/index description for the approved manifest's tables still in the schema (58 less the
+ * three overlap-answer tables dropped after export, Issue 853fcde3). */
 export const describe = internalQuery({
   args: {},
   returns: v.array(

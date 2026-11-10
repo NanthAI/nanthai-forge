@@ -12,9 +12,9 @@
     "unreferencedExports": 22
   },
   "counts": {
-    "tables": 181,
-    "errorCodes": 494,
-    "agentActions": 66,
+    "tables": 178,
+    "errorCodes": 493,
+    "agentActions": 63,
     "cliCommands": 40,
     "glossaryTerms": 27,
     "macDependencies": 5,

@@ -230,7 +230,8 @@ acceptance-policy pins exclude these settings.
 
 Capabilities and the policy read carry a frozen key set (`preflight`, `preflightMaxMinutes`,
 `urgentRoles`, `overlapGate`, `checkpointNudgeMinutes`, `stallAlerts`) because CLIs before
-2026-11-06 parse that object strictly. `autoClaim`, `dormantAfterDays` and `stacking` are stored-only: the server
+2026-11-06 parse that object strictly. `overlapGate` was retired (Issue 853fcde3): the server always
+sends `"off"` so those CLIs still parse, and no current CLI reads it. `autoClaim`, `dormantAfterDays` and `stacking` are stored-only: the server
 reads them itself, the policy read shows them only when set, and capabilities never carry them. A
 later key that agents must read goes to capabilities only for CLIs that ask for contract feature
 `agent-defaults-extended`; current CLIs drop keys they do not know. Adding `autoClaim` to the
@@ -240,11 +241,10 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
 | --- | --- | --- | --- |
 | `preflight` | `require` | About 30% of first landing checks failed (2026-10-30), and every failure costs a full landing round on the project runner. A local run of the affected tests catches most of them first. | `advise` prints the set without refusing; `off` removes it. |
 | `preflightMaxMinutes` | `10` | A large affected set would make preflight slower than the landing check it saves. Above this estimate, preflight is advice only. | Any whole number of minutes; `0` makes every set advisory. |
-| `overlapGate` | `block` | Agents finished over unanswered overlap notices and found the clash only at composition. Only exact-base intersecting/adjacent hunks, distinct additions or delete/rename versus edit need an answer. Symbol names alone and disjoint same-file edits produce no automatic notice; missing evidence reports incomplete coverage. A peer changing an exported symbol your changed lines use in another file adds one advisory cross-file note per Lane pair, which never blocks. Languages without a TS/JS import scanner (Go, Python, Rust, Java, C#, …) are matched by package. | `warn` adds the notice to the receipt without refusing; `off` removes it. `block` is advisory (CLI-side only) until Issue 853fcde3 replaces it ([details](#overlapgate)). |
 | `urgentRoles` | `["owner"]` | Builders marked routine landings urgent, which pushed every other landing back. Urgent is for a red main or an incident the owner names. | `["owner","agents"]` lets agents on the owner's login use it again. |
 | `autoClaim` | `true` | An agent's unsaved edits were invisible to others ("unsaved edits unavailable"), and a clash on one file cost about an hour (2026-11-05). The first-write hook records "touching PATH" on the agent board so other agents' first writes to that file show it. | `false` stops new automatic claims and hides live ones. |
 | `checkpointNudgeMinutes` | `30` | A builder that stops unexpectedly loses everything unsaved. Saves take under a minute. | Any number of minutes; `0` turns the nudge off. |
-| `dormantAfterDays` | `2` | Lanes nobody saved, started or landed for days stayed active (60 on the dogfood project, 52 idle) and kept raising overlap notices, presence entries and board signals for work long on main. | Any whole number of days; `0` never marks a Lane dormant. |
+| `dormantAfterDays` | `2` | Lanes nobody saved, started or landed for days stayed active (60 on the dogfood project, 52 idle) and kept raising presence entries and board signals for work long on main. | Any whole number of days; `0` never marks a Lane dormant. |
 | `stacking` | `offer` | Two Lanes on one file both built on main, and the second repaired a conflict after the first landed (rework at 3, 5 and 10 parallel Lanes). When a peer touching your files is admitted, building on its pending head avoids that repair. `offer` prints the exact `sync {stackOn}` command; agents choose. | `auto`: the next plain `sync` stacks on the offered peer by itself. |
 | `stallAlerts` | on, 15 and 30 min | A check outage (2026-10-30, every result upload refused from 18:35 to 21:05) stalled landings for hours before anyone looked. | `{"stallAlerts":{"enabled":false}}`, thresholds, recipients and webhook preset below. |
 
@@ -560,18 +560,13 @@ frozen set on 2026-11-06 broke capabilities across CLI/server versions with `HOS
   remain required. `nforge doctor ROOT` runs the diagnostic.
 - `"run":false` only plans. Save first: receipts name saved source; unsaved edits are refused.
 
-### overlapGate
+### Overlap notices (retired)
 
-- `nforge agent ROOT ack '{"laneId":"…"}'` answers every pending overlap notice on the Lane in one
-  command (`accept-order`: keep your change and land in order). `"choice":"split"` records that you
-  moved your edit off the file. Answers have stable ids, so repeating the command replays them.
-- With `block`, `land --save` refuses with `OVERLAP_UNANSWERED` while a blocking notice is unanswered, and prints
-  the `ack` command. Disjoint same-file or documentation hunks are advisory and need no answer.
-  Each notice records its class and reason. Missing range evidence remains advisory;
-  exact landing composition still catches conflicts. The check uses the overlap read that the land receipt already makes.
-- `overlapGate` is advisory: only this CLI checks it, and a client that skips the check is not
-  refused by the server. Issue 853fcde3 replaces path overlap notices, their answers and
-  this gate with exact trial-merge conflict notices at save.
+`overlapGate`, `ack` and path overlap notices were removed (Issue 853fcde3). Every save trial-merges
+its saved files with main and with peers' saved files and reports a real conflict as `conflictNotice`,
+with nothing to answer ([exact conflicts at save](agents/workflow.md#exact-conflicts-at-save)). A stored
+`overlapGate` value is ignored. An older CLI that calls `ack`, `peer-ack`, `overlap-acks` or
+`overlap-answers` gets `CLI_UPGRADE_REQUIRED` with the upgrade step.
 
 ### Server enforcement of preflight
 

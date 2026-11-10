@@ -208,31 +208,12 @@ test('blocking notices stay visible and preserve acknowledgements across changed
   );
   peers.push(lane('blocker', [{ path: 'shared.ts', ...change(2), after: change(3).after }]));
   const current = { head: mine.baseHead, sourceRevision: 0 };
-  const result = hostedOverlapAdvice(mine, peers, null, current, new Set());
-  assert.equal(result.unacknowledgedOverlaps.blockingCount, 1);
+  const result = hostedOverlapAdvice(mine, peers, null, current);
+  assert.equal(result.overlaps.blockingCount, 1);
   // Clean pairs stay quiet; ten Lanes on shared.ts add only the one hot-file note (D2, 1eb42254).
-  assert.equal(result.unacknowledgedOverlaps.advisoryCount, 1);
-  assert.deepEqual(result.unacknowledgedOverlaps.items.map(item => item.reason ?? item.class).slice(1), [
-    'hot-file',
-  ]);
-  assert.equal(result.unacknowledgedOverlaps.items[0].class, 'blocking');
-  const oldId = hostedOverlapAdvice(mine, [peers[0]], null, current, new Set(), true, 5, 'shared.ts')
-    .unacknowledgedOverlaps.items[0].noticeId;
-  const updated = {
-    ...peers[0],
-    changes: JSON.stringify([{ path: 'shared.ts', ...change(2), after: change(3).after }]),
-  };
-  const pending = hostedOverlapAdvice(mine, [updated], null, current, new Set([oldId]));
-  assert.equal(pending.unacknowledgedOverlaps.items[0].class, 'blocking');
-  assert.notEqual(pending.unacknowledgedOverlaps.items[0].noticeId, oldId);
-  const legacyId = digest(JSON.stringify(['first-write', ['mine', 'peer-0'], 'shared.ts']));
-  assert.equal(pending.unacknowledgedOverlaps.items[0].noticeId, legacyId);
-  const moved = { ...updated, changes: JSON.stringify([{ path: 'shared.ts', ...change(2, 4) }]) };
-  assert.equal(
-    hostedOverlapAdvice(mine, [moved], null, current, new Set([legacyId])).unacknowledgedOverlaps.count,
-    0,
-    'an existing blocking answer remains valid when blocking evidence changes',
-  );
+  assert.equal(result.overlaps.advisoryCount, 1);
+  assert.deepEqual(result.overlaps.items.map(item => item.reason ?? item.class).slice(1), ['hot-file']);
+  assert.equal(result.overlaps.items[0].class, 'blocking');
 });
 
 test('real hosted finish with an advisory same-file peer reaches landed without any acknowledgement', async t => {
@@ -240,7 +221,10 @@ test('real hosted finish with an advisory same-file peer reaches landed without 
   const mine = base.replace('line 2\n', 'my edit\n');
   const peerText = base.replace('line 30\n', 'peer edit\n');
   const file = 'shared.txt';
-  const s = await resolutionFixture(t, { baselineFiles: [[file, base]], selectedFiles: [[file, mine]] });
+  const s = await resolutionFixture(t, {
+    baselineFiles: [[file, base]],
+    selectedFiles: [[file, mine]],
+  });
   const f = s.f,
     c = f.c;
   const other = await c.lane(c.state([c.baseFile, c.hidden, c.file(file, peerText)], [c.baseline.sha256]));
@@ -278,18 +262,21 @@ test('real hosted finish with an advisory same-file peer reaches landed without 
   f.patch('hostedProjects', f.projectId, {
     autonomyPolicy: {
       ...project.autonomyPolicy,
-      agentDefaults: { ...project.autonomyPolicy.agentDefaults, overlapGate: 'block', preflight: 'off' },
+      agentDefaults: {
+        ...project.autonomyPolicy.agentDefaults,
+        overlapGate: 'block',
+        preflight: 'off',
+      },
     },
   });
   await s.transport().dispatch('open', { laneId: f.lane.laneId });
   const submitted = await s.transport().dispatch('finish', { laneId: f.lane.laneId, accept: true });
-  assert.equal(submitted.unacknowledgedOverlaps.count, 0);
+  assert.equal(submitted.unacknowledgedOverlaps, undefined, 'no path notice to answer (Issue 853fcde3)');
   await f.drain();
   await f.passChecks();
   await f.drain();
   assert.equal((await f.current(submitted.result.submission.id)).submission.phase, 'landed');
   assert.equal(f.text(f.currentMain().head, file), mine);
-  assert.equal(f.tables.projectHostedOverlapAcks.size, 0, 'landed without any answer');
 });
 
 test('equal local names in separate arrow functions do not create a false shared symbol', () => {

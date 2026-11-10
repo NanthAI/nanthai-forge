@@ -13,8 +13,6 @@ import { agentSlug } from '../dist/agent-slug-session.js';
 import { landingAgentClient, landingAgentRun } from '../dist/agent-slug.js';
 import { agentClient } from '../dist/agent-turn-work.js';
 import { presenceNotice, rankPresence } from '../dist/hosted-presence.js';
-import { hostedOverlapAdvice } from '../dist/hosted-overlap.js';
-import { hostedOverlapNotice, overlapBanner } from '../dist/hosted-overlap-notice.js';
 import { slimReceipt } from '../dist/receipt-slim.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { hostedLaneSchema } from '../dist/hosted-lane.js';
@@ -284,48 +282,6 @@ test('incident replay (wave 5, b2cfa7a4 over cf63ce32): a resolution Lane over i
   assert(!shown.includes(original.lane.laneId), 'its own origin Lane is not another agent');
   assert(shown.includes(peer.lane.laneId), 'the other run on the Issue still shows');
   for (const lane of presence.lanes) assert.match(presenceNotice(lane, Date.now()), /owner-h\/brave-falcon/);
-});
-
-test('overlap notice for a peer Lane names the peer run and its paths, never "(unavailable)"', () => {
-  const lane = (agent, paths) => ({
-    laneId: randomUUID(),
-    intentId: randomUUID(),
-    intent: `Work of ${agent}`,
-    actor: 'owner-h',
-    agent,
-    head: 'h',
-    baseHead: 'b',
-    baseSequence: 0,
-    open: true,
-    // No range evidence: the server can only say both Lanes changed the file.
-    changes: JSON.stringify(
-      paths.map(path => ({
-        path,
-        before: { blob: 'base', mode: '100644' },
-        after: { blob: `${path}:${agent}`, mode: '100644' },
-      })),
-    ),
-    complete: true,
-  });
-  const mine = lane('azure-ibis', ['src/a.ts', 'src/b.ts']);
-  const peer = lane('brave-falcon', ['src/a.ts', 'src/b.ts']);
-  const advice = hostedOverlapAdvice(mine, [peer], null, { head: 'b', sourceRevision: 0 }, new Set());
-  const notice = hostedOverlapNotice('/root', mine.laneId, advice);
-  assert(notice.items.length >= 1);
-  assert(
-    notice.items.every(item => item.reason === 'unavailable'),
-    'fixture has no range evidence',
-  );
-  const banner = overlapBanner(notice);
-  assert.doesNotMatch(banner, /\(unavailable\)/);
-  assert.match(banner, /src\/a\.ts \(same file; line ranges unknown\)/);
-  assert.match(banner, new RegExp(`Lane ${peer.laneId} by owner-h/brave-falcon`));
-  if (!notice.required) {
-    const slim = slimReceipt({ transport: 'hosted', action: 'save', overlapNotice: notice, result: {} });
-    assert.deepEqual(slim.overlapNotice.with, [
-      `${peer.laneId.slice(0, 8)} owner-h/brave-falcon: ${notice.items.map(item => item.file).join(', ')}`,
-    ]);
-  }
 });
 
 test('receipts carry the agent run that landed them; old receipts without it still read', async () => {

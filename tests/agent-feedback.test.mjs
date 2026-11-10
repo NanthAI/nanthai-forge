@@ -9,7 +9,6 @@ import { digest } from '../dist/hash.js';
 import { agentFixture } from './hosted-agent-fixture.mjs';
 import { submitHostedLand, relayFile } from '../dist/hosted-land-cli.js';
 import { landWaitCommand, landAnnouncement } from '../dist/hosted-land-wait.js';
-import { hostedOverlapNotice, overlapBannerOnce } from '../dist/hosted-overlap-notice.js';
 import { hostedShowCli } from '../dist/hosted-show-cli.js';
 import { showHostedSource } from '../dist/mcp-hosted-source.js';
 import {
@@ -53,34 +52,11 @@ const state = (files, message) =>
       at: '2026-01-01T00:00:00.000Z',
     }),
   );
-const noticeFor = (root, laneId) =>
-  hostedOverlapNotice(root, laneId, {
-    unacknowledgedOverlaps: {
-      count: 1,
-      coverage: 'hosted',
-      items: [
-        {
-          noticeId: 'n'.repeat(64),
-          class: 'blocking',
-          reason: 'same-symbol',
-          file: 'src/a.ts',
-          lanes: [laneId, 'peer'],
-          text: 'x',
-          participants: [
-            { lane: laneId, actor: 'me', intent: 'mine' },
-            { lane: 'efa2859d', actor: 'other', intent: 'Landed work' },
-          ],
-        },
-      ],
-    },
-  });
-
-test('finish prints the original operation wait and overlap banner before waiting', async t => {
+test('finish prints the original operation wait before waiting; an old server notice prints no banner (Issue 853fcde3)', async t => {
   const lines = captureStderr(t);
   const root = '/tmp/lane-root';
   const operationId = randomUUID();
   const laneId = randomUUID();
-  const notice = noticeFor(root, laneId);
   const replies = [{ phase: 'finish', submission: { phase: 'queued', observation: { state: 'pending' } } }];
   const transport = {
     dispatch: async action => ({
@@ -89,7 +65,8 @@ test('finish prints the original operation wait and overlap banner before waitin
       action,
       operationId,
       result: replies.shift(),
-      overlapNotice: notice,
+      // An older server still sends the retired notice; the CLI ignores it.
+      overlapNotice: { required: true, count: 1, items: [{ file: 'src/a.ts' }] },
     }),
   };
   // The first receipt already announces, before any waiting.
@@ -114,10 +91,7 @@ test('finish prints the original operation wait and overlap banner before waitin
       'm',
     ),
   );
-  assert.match(text, /OVERLAP NOTICE: ACTION REQUIRED/);
-  assert.match(text, /efa2859d/);
-  // Printed once: the exit-time banner for the same notice is empty.
-  assert.equal(overlapBannerOnce(notice), '');
+  assert.doesNotMatch(text, /OVERLAP NOTICE/);
 });
 
 test('relayed child stderr appears while the child still runs, not at its exit', async t => {

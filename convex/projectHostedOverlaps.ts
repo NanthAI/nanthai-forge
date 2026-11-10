@@ -12,13 +12,15 @@ import { invariant } from '../src/errors';
 import { report } from './errors';
 import { safeRelative } from '../src/safe-relative';
 import { boardDelivery } from './projectBoardDelivery';
-import { mayActFor } from './projectLaneAuthority';
 import { stackRestackHint } from './projectHostedStackNotice';
 import { peerLandings } from './projectHostedOverlapPeers';
-import { peerPhaseText, stackOffer, SCOPE_PATHS, SCOPE_PATH_CHARS } from '../src/hosted-overlap-coordination';
+import { stackOffer, SCOPE_PATHS, SCOPE_PATH_CHARS } from '../src/hosted-overlap-coordination';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { stackingMode } from '../src/agent-parallel-defaults';
 import { laneConflicts } from './projectHostedConflicts';
+
+/** Path notices were removed (flip 4, Issue 853fcde3); exact trial-merge conflicts replace them. */
+const RETIRED_OVERLAPS = { count: 0, items: [], coverage: 'unavailable' } as const;
 
 const savedPaths = (changes: string) => {
   try {
@@ -41,7 +43,7 @@ export const read = query({
      * prefixes; open peers that saved files inside it get one advisory item each. */
     scope: v.optional(v.array(v.string())),
     detail: v.optional(v.boolean()),
-    /** Notices to list, 5 by default; ack asks for more so one read answers a large inbox. */
+    /** Overlap items to list on a detail or path read (peers), 5 by default, at most 50. */
     items: v.optional(v.number()),
     /** Presence (capability presenceVersion): related open Lanes. `since` is the previous reply's `at`. */
     presence: v.optional(v.object({ since: v.optional(v.number()) })),
@@ -140,18 +142,12 @@ export const read = query({
               changes: '[]',
               complete: lane.head === lane.base.head,
             };
-      // A Lane with no saved path changes cannot overlap anything: skip the peer, head and answer
+      // A Lane with no saved path changes cannot overlap anything: skip the peer and head
       // reads (the bulk of this query's I/O) instead of scanning every open Lane for nothing.
       const idle = !path && !scope?.length && focus.complete && focus.changes === '[]';
       const readPeers = () =>
         Promise.all([
           liveOpenOverlapLanes(ctx, projectId, cutoff),
-          ctx.db
-            .query('projectHostedOverlapAcks')
-            .withIndex('by_project_and_lane_and_notice', q =>
-              q.eq('projectId', projectId).eq('laneId', laneId),
-            )
-            .take(101),
           ctx.db
             .query('projectHostedRecordHeads')
             .withIndex('by_project_and_kind_and_status', q =>
@@ -160,9 +156,7 @@ export const read = query({
             .order('desc')
             .take(51),
         ]);
-      const [peers, acks, headers] = idle
-        ? ([[], [], []] as Awaited<ReturnType<typeof readPeers>>)
-        : await readPeers();
+      const [peers, headers] = idle ? ([[], []] as Awaited<ReturnType<typeof readPeers>>) : await readPeers();
       const versions = new Map(headers.map(header => [header.key, header.version]));
       // Newest-first windows hold current work, but retained stale active Lanes can still push
       // a live peer out of the 51-row window (2026-10-30: 125 active heads hid every peer).
@@ -204,43 +198,28 @@ export const read = query({
         peers.length <= 50 &&
         headers.length <= 50 &&
         unmatched.every(header => dormantLanes?.has(header.key));
-      // Only the Lane's author (or the project owner) answers its notices; anyone else's answer is ignored.
-      const answered = new Set(
-        acks.filter(ack => mayActFor(ack.actor, lane.actor, project.owner)).map(ack => ack.noticeId),
+      const advice = hostedOverlapAdvice(
+        focus,
+        currentPeers.slice(0, 50),
+        latest,
+        main,
+        complete,
+        Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
+        path,
+        // The default read summarizes idle Lanes in one line; detail and path reads list them all.
+        detail || path ? undefined : Date.now() - IDLE_NOTICE_MS,
+        scope?.length ? scope : undefined,
       );
-      const compute = () =>
-        hostedOverlapAdvice(
-          focus,
-          currentPeers.slice(0, 50),
-          latest,
-          main,
-          answered,
-          complete,
-          Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
-          path,
-          // The default read summarizes idle Lanes in one line; detail and path reads list them all.
-          detail || path ? undefined : Date.now() - IDLE_NOTICE_MS,
-          scope?.length ? scope : undefined,
-        );
-      // Peer phase and ETA on pair items, and the stack offer (D2): bounded reads, only for named peers.
-      // A detail read is a listing of every peer (board, peers(detail)); it carries no phases.
-      const coordinate = async (found: ReturnType<typeof compute>) => {
+      // The stack offer (D2): bounded reads, only for peers sharing a saved file. A detail read is a
+      // listing of every peer (board, peers(detail)); it carries no phases.
+      const coordinate = async () => {
         if (detail) return {};
-        const pairs = found.unacknowledgedOverlaps.items.filter(
+        const pairs = advice.overlaps.items.filter(
           item => item.reason !== 'hot-file' && item.reason !== 'idle-lanes',
         );
         const named = pairs.flatMap(item => item.lanes.filter(id => id !== laneId));
         if (!named.length) return {};
         const landings = await peerLandings(ctx, projectId, named);
-        for (const item of pairs) {
-          const peer = item.lanes.find(id => id !== laneId);
-          if (!peer || !landings.has(peer)) continue;
-          const landing = landings.get(peer)!;
-          Object.assign(item, {
-            peerLanding: landing,
-            text: `${item.text} ${peerPhaseText(landing)}.`.slice(0, 480),
-          });
-        }
         const offer = stackOffer({
           laneId,
           stacked: Boolean(lane.stack && !lane.stack.detached),
@@ -250,7 +229,6 @@ export const read = query({
         });
         return offer && lane.state === 'active' ? { stackOffer: offer } : {};
       };
-      let advice = compute();
       // Presence is for members with write access only; readers and public viewers get no field.
       const writer =
         presence &&
@@ -279,21 +257,12 @@ export const read = query({
             ),
           }
         : {};
-      // Preflight selection input: free here, the Lane's projection is already loaded.
+      // peers(path|detail) and preflight selection input: free here, the Lane's projection is already loaded.
       const evidence =
         detail || path
           ? {
               peerEvidence: {
-                ...hostedOverlapAdvice(
-                  focus,
-                  currentPeers.slice(0, 50),
-                  latest,
-                  main,
-                  new Set(),
-                  complete,
-                  Math.min(50, Math.max(1, Math.floor(items ?? (detail ? 50 : 5)))),
-                  path,
-                ).unacknowledgedOverlaps,
+                ...advice.overlaps,
                 scope: 'saved-paths',
                 unsavedEdits: 'unavailable',
                 ...(path ? { path } : {}),
@@ -343,61 +312,11 @@ export const read = query({
       // Exact conflicts a trial merge of saved files found (flip 4): one small index read.
       const found = lane.state === 'active' ? await laneConflicts(ctx, projectId, laneId, lane.head) : [];
       const conflictsField = found.length ? { conflicts: found } : {};
-      if (acks.length > 100) {
-        // A large old inbox stays bounded. Verify every displayed item against the
-        // exact answer index, so an answer outside the window can never repeat.
-        let checked = 0;
-        for (;;) {
-          const selected = advice.unacknowledgedOverlaps.items;
-          let removed = false;
-          for (const item of selected) {
-            if (++checked > 20) break;
-            const answeredBy = (actor: string) =>
-              ctx.db
-                .query('projectHostedOverlapAcks')
-                .withIndex('by_project_and_lane_and_notice', q =>
-                  q
-                    .eq('projectId', projectId)
-                    .eq('laneId', laneId)
-                    .eq('noticeId', item.noticeId)
-                    .eq('actor', actor),
-                )
-                .first();
-            const ack =
-              (await answeredBy(lane.actor)) ??
-              (project.owner !== lane.actor ? await answeredBy(project.owner) : null);
-            if (ack) {
-              answered.add(item.noticeId);
-              removed = true;
-            }
-          }
-          if (checked > 20) {
-            advice.unacknowledgedOverlaps.items = [];
-            break;
-          }
-          if (!removed) break;
-          advice = compute();
-        }
-        const offered = await coordinate(advice);
-        return JSON.stringify({
-          ...advice,
-          ...offered,
-          ...changedPaths,
-          ...evidence,
-          ...present,
-          ...boardField,
-          ...stackField,
-          ...conflictsField,
-          unacknowledgedOverlaps: {
-            ...advice.unacknowledgedOverlaps,
-            count: null,
-            coverage: 'hosted-incomplete',
-          },
-        });
-      }
-      const offered = await coordinate(advice);
+      const offered = await coordinate();
       return JSON.stringify({
-        ...advice,
+        behindMain: advice.behindMain,
+        // Installed CLIs before flip 4 part 2 require this field; empty, so they show no path notice.
+        ...(detail || path ? {} : { unacknowledgedOverlaps: RETIRED_OVERLAPS }),
         ...offered,
         ...changedPaths,
         ...evidence,

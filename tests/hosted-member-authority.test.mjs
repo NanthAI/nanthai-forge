@@ -32,12 +32,9 @@ test('class guard: public mutations that select a client-named Lane or landing c
       );
     });
   assert.deepEqual(unguarded, [], 'call requireMemberAuthority before changing a selected Lane');
-  // Landing entry points select by submission or Candidate id, not by Lane.
-  for (const name of [
-    'projectHostedLandingCancel.ts',
-    'projectHostedLandingPins.ts',
-    'projectHostedOverlaps.ts',
-  ])
+  // Landing entry points select by submission or Candidate id, not by Lane. (The overlap read has no
+  // mutation since its ack actions were removed, Issue 853fcde3.)
+  for (const name of ['projectHostedLandingCancel.ts', 'projectHostedLandingPins.ts'])
     assert.match(readFileSync(new URL(name, dir), 'utf8'), /from '\.\/projectLaneAuthority'/, name);
 });
 

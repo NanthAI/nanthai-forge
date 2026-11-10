@@ -9,24 +9,6 @@ import { stackHintSchema } from './hosted-stack-restack.js';
 import { exactConflictsSchema } from './hosted-conflict-notice.js';
 
 const advice = z.object({
-  unacknowledgedOverlaps: z.object({
-    laneId: z.string().optional(),
-    head: z.string().optional(),
-    count: z.number().nullable(),
-    blockingCount: z.number().optional(),
-    advisoryCount: z.number().optional(),
-    coverage: z.string(),
-    items: z.array(
-      z.looseObject({
-        noticeId: z.string(),
-        class: z.enum(['blocking', 'advisory']).default('advisory'),
-        reason: z.string().default('unavailable'),
-        file: z.string(),
-        lanes: z.array(z.string()),
-        text: z.string(),
-      }),
-    ),
-  }),
   behindMain: z.object({
     head: z.string().optional(),
     baseHead: z.string().optional(),
@@ -87,39 +69,7 @@ export async function readHostedOverlapAdvice(
     if (['PROJECT_UNAVAILABLE', 'AUTH_REQUIRED', 'FORBIDDEN', 'SOURCE_AUTHORITY_CHANGED'].includes(safe.code))
       throw safe;
     return {
-      unacknowledgedOverlaps: { count: null, items: [], coverage: 'unavailable' },
       behindMain: { commits: null, conflictingPaths: [], more: 0, coverage: 'unavailable' },
     };
-  }
-}
-
-/** The delivery record behind metric 5.4. Best effort: a missing record is a gap, never a failed action. */
-export async function recordHostedOverlapDelivery(
-  transport: Pick<HostedAgentTransport, 'mutation'>,
-  laneId: string,
-  surface: string,
-  found: Awaited<ReturnType<typeof readHostedOverlapAdvice>>,
-) {
-  const overlaps = found.unacknowledgedOverlaps;
-  if (!overlaps.items.length || !overlaps.head || !overlaps.count) return;
-  try {
-    await transport.mutation('projectHostedOverlapDeliveries:record', {
-      request: JSON.stringify({
-        laneId,
-        head: overlaps.head,
-        surface,
-        count: overlaps.count,
-        coverage: overlaps.coverage,
-        items: overlaps.items.slice(0, 5).map(item => ({
-          noticeId: item.noticeId,
-          file: item.file,
-          class: item.class,
-          reason: item.reason,
-          lanes: item.lanes,
-        })),
-      }),
-    });
-  } catch {
-    /* Older servers have no delivery endpoint. */
   }
 }

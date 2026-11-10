@@ -20,7 +20,6 @@ export const teachingByCode: Record<string, Entry> = {
   BAD_ARGUMENT: { learn: 'arguments', next: '<command> --help' },
   LANDING_STALLED: { learn: 'queue', next: land },
   HOSTED_ACTION_UNSUPPORTED: { learn: 'hosted', next: 'nforge agent <root> help' },
-  OVERLAP_UNANSWERED: { learn: 'overlap', next: `nforge agent <root> ack '<lane>'` },
   WORK_STALE: { learn: 'retry', next: '<replay>' },
   LANDING_CANCELLED: { learn: 'queue', next: land },
   NOT_FOUND: { learn: 'arguments' },

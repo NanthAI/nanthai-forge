@@ -38,12 +38,7 @@ export type FinishSelection = z.infer<typeof selectionSchema>;
 /** Journal key: this finish was refused before it submitted anything (a known refusal code). */
 export const finishRefusedKey = 'finish-refused';
 /** Refusals thrown before compose or submission: the operation ended, nothing runs on the server. */
-export const FINISH_REFUSALS = new Set([
-  'NOTHING_TO_LAND',
-  'UNSAVED_LANE_EDITS',
-  'OVERLAP_UNANSWERED',
-  'PREFLIGHT_REQUIRED',
-]);
+export const FINISH_REFUSALS = new Set(['NOTHING_TO_LAND', 'UNSAVED_LANE_EDITS', 'PREFLIGHT_REQUIRED']);
 export type FinishContext = {
   command: Record<string, unknown>;
   clean: HostedLaneSelection | null;
