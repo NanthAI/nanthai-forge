@@ -23,6 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exec } from './exec.mjs';
 import { buildRepository, recipes } from './shapes.mjs';
+import { teardown } from './teardown.mjs';
 import {
   baselineOf,
   ciScript,
@@ -247,57 +248,6 @@ function report(root, argv, catalog) {
       : '\nNo regression against the baseline.',
   );
   return regressions.length ? 1 : 0;
-}
-
-async function teardown(root, repos, { projectsOnly = false } = {}) {
-  const zoo = JSON.parse(readFileSync(join(root, 'zoo.json'), 'utf8'));
-  const statePath = join(root, 'state.json');
-  const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : { repos: {} };
-  const out = [];
-  for (const entry of repos) {
-    const projectId = state.repos[entry.id]?.projectId;
-    let project = 'none';
-    if (projectId) {
-      const del = slug =>
-        exec('nforge', [
-          'host',
-          root,
-          '--delete-project',
-          projectId,
-          '--confirm',
-          slug,
-          '--deployment',
-          zoo.deployment,
-        ]);
-      let r = await del(`bench-zoo-${entry.id}`);
-      const named = /\(here: ([a-z0-9-]+)\)/i.exec(r.stderr + r.stdout)?.[1];
-      if (r.code && named) r = await del(named);
-      // The purge runs on the server; the command is retried (same operation) until it confirms.
-      for (let i = 0; i < 20 && r.code && /HOST_DELETE_PENDING/.test(r.stderr + r.stdout); i++) {
-        await new Promise(resolve => setTimeout(resolve, 15_000));
-        r = await del(named ?? `bench-zoo-${entry.id}`);
-      }
-      project = r.code ? `NOT DELETED (${(r.stderr || r.stdout).slice(-120).trim()})` : 'deleted';
-      if (!r.code) delete state.repos[entry.id];
-    }
-    if (projectsOnly) {
-      out.push({ id: entry.id, project, repo: 'kept' });
-      continue;
-    }
-    const gone = await exec('gh', ['repo', 'delete', entry.fork, '--yes']);
-    out.push({
-      id: entry.id,
-      project,
-      repo:
-        gone.code === 0
-          ? 'deleted'
-          : /Could not resolve|404/.test(gone.stderr)
-            ? 'absent'
-            : `NOT DELETED (${gone.stderr.slice(-120).trim()})`,
-    });
-  }
-  writeFileSync(statePath, JSON.stringify(state, null, 1) + '\n');
-  return out;
 }
 
 async function main(argv) {

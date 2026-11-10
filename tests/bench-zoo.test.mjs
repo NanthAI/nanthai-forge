@@ -588,3 +588,79 @@ test('a repository waits for the disk reserve and the run stops when it never re
   assert.equal(reads, 3, 'polled until 23 GiB were free, no longer');
   await assert.rejects(waitForDisk(22, { pollMs: 0, timeoutMs: -1, free: () => 10 }), /ZOO_DISK_RESERVE/);
 });
+
+import { teardown } from '../scripts/bench-zoo/teardown.mjs';
+
+test('zoo teardown deletes suffixed and forgotten imports by their exact current slugs and retains purge receipts', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-teardown-'));
+  try {
+    writeFileSync(join(root, 'zoo.json'), JSON.stringify({ deployment: 'https://example.invalid' }));
+    writeFileSync(join(root, 'state.json'), JSON.stringify({ repos: { go: { projectId: 'new' } } }));
+    const gone = [];
+    const result = await teardown(root, [{ id: 'go', fork: 'example/zoo-go' }], {
+      projectsOnly: true,
+      list: async () => [
+        { id: 'old', name: 'bench-zoo-go', slug: 'bench-zoo-go' },
+        { id: 'new', name: 'bench-zoo-go', slug: 'bench-zoo-go-2' },
+        { id: 'other', name: 'bench-zoo-python', slug: 'bench-zoo-python' },
+      ],
+      run: async (cmd, args) => {
+        const projectId = args[args.indexOf('--delete-project') + 1];
+        const slug = args[args.indexOf('--confirm') + 1];
+        gone.push([projectId, slug]);
+        return { code: 0, json: { projectId, operationId: `op-${projectId}`, purgeComplete: true } };
+      },
+    });
+    assert.deepEqual(gone, [
+      ['old', 'bench-zoo-go'],
+      ['new', 'bench-zoo-go-2'],
+    ]);
+    assert.equal(
+      result.every(r => r.project === 'deleted'),
+      true,
+    );
+    assert.deepEqual(JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')).repos, {});
+    const journal = JSON.parse(readFileSync(join(root, 'teardown.json'), 'utf8'));
+    assert.equal(journal.new.receipt.operationId, 'op-new');
+    assert.equal(journal.new.confirmed, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('zoo teardown reconciles pending purges with the same slug and keeps state until completion is confirmed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-teardown-'));
+  try {
+    writeFileSync(join(root, 'zoo.json'), JSON.stringify({ deployment: 'https://example.invalid' }));
+    const state = { repos: { go: { projectId: 'p' } } };
+    writeFileSync(join(root, 'state.json'), JSON.stringify(state));
+    writeFileSync(join(root, 'teardown.json'), JSON.stringify({ p: { slug: 'bench-zoo-go-2' } }));
+    const replies = [
+      { code: 1, stderr: 'HOST_DELETE_PENDING', stdout: '' },
+      { code: 0, json: { purgeComplete: false }, stdout: '{}', stderr: '' },
+    ];
+    const calls = [];
+    const result = await teardown(root, [{ id: 'go' }], {
+      projectsOnly: true,
+      list: async () => [{ id: 'p', removal: 'deleting' }],
+      sleep: async () => {},
+      run: async (cmd, args) => {
+        calls.push(args);
+        return replies.shift();
+      },
+    });
+    assert.deepEqual(calls[0], calls[1], 'pending purge retries the exact confirmed identity');
+    assert.match(result[0].project, /NOT DELETED/);
+    assert.deepEqual(JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')), state);
+    const tombstone = await teardown(root, [{ id: 'go' }], {
+      projectsOnly: true,
+      list: async () => [{ id: 'p', removal: 'deleted' }],
+      run: async () => {
+        throw Error('a confirmed tombstone needs no deletion call');
+      },
+    });
+    assert.equal(tombstone[0].project, 'deleted');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -406,7 +406,9 @@ node scripts/bench-zoo/suite.mjs teardown ZOO_ROOT    # delete the Forge project
 
 `run` is [`run.mjs`](../../scripts/bench-zoo/run.mjs) (the scenario above: import, clone, four Lanes, save, sync, overtaken
 landing, forced conflict, keep-both resolution, plain git beside it) followed by `report`, which writes `SUITE.md` and
-`SUITE.json`. It judges nine paths per repository (import, clone, **fidelity**, save, sync, land, landReuse, conflict,
+`SUITE.json`. Teardown discovers matching zoo imports in paged project metadata, including older imports
+no longer in `state.json`, uses their exact current slugs (including numeric suffixes), and retains
+purge receipts in `teardown.json`. It clears state only after server purge confirmation. It judges nine paths per repository (import, clone, **fidelity**, save, sync, land, landReuse, conflict,
 resolve), each pass, fail or not reached. A land passes only when its check passed and the change reached main. **Fidelity** compares the
 Forge clone with a plain `git clone --recurse-submodules` of the same fork on the same machine: path, kind (file,
 executable, symlink), size and symlink target; a path git itself could not write there is listed as a platform limit, not
