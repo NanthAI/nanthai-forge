@@ -1206,6 +1206,18 @@ A missing variable fails the write with `R2_NOT_CONFIGURED`; Forge never falls b
 - Otherwise clones and Lane opens read signed pages of up to 500 objects (`describe`/`lanePage` with `runs`). Requested objects that sit back to back in one stored upload pack (a GitHub import window, or a save's upload pack) form a run: the server signs one byte range covering exactly those objects, never a gap, and the client reads it with one ranged GET, eight at a time, checking each object's digest as it completes. Other objects keep their own signed range or URL. A run whose signature expired, or one only partly needed, falls back to per-object reads; an older server without `runs` keeps 100-object pages. Both functions read a page's object rows concurrently (`findObjects`), resolving catalog entries in digest order so each catalog row is read at most once per call.
 - Rows written to Convex file storage before R2 was the only path stay readable there. `nforge maintenance r2-backfill ROOT --dry-run` reports what is left to move and which Convex copies cleanup could delete ([R2 backfill](operations/r2-backfill.md)). Deleting them is a separate owner-approved step.
 
+### State trees (dual-write)
+
+Off by default, per project. Operators use internal functions on the deployment (development first):
+
+```sh
+npx convex run projectStateTrees:configure '{"projectId":"PROJECT_ID","write":true}'
+npx convex run projectStateTreeConvert:convert '{"projectId":"PROJECT_ID"}'   # main's head; safe to repeat
+npx convex run projectStateTrees:status '{"projectId":"PROJECT_ID"}'
+```
+
+`convert` reads every file of the State once (one query per 100 files, at most 20,000 files) and reports files, bytes read, segment bytes and calls. After it, each save and merge on a State with a pointer writes one more R2 object and makes no extra Convex call. `status` shows the flags, main's head and its pointer, and `refused` when a State's tree form failed its read-back check: that State was saved flat and nothing was lost, but its descendants stay flat until a `convert`. Find the cause from the `forge-state-tree` error line (State id and code), then acknowledge with `configure {"projectId":"…","clearRefused":true}`. `write:false` stops new tree writes at once; existing pointers and segments stay.
+
 ## Self-host
 
 The same Convex schema runs on the pinned official local Convex backend (SQLite and local files). The launcher supports macOS arm64 and Linux x64. It is a loopback development setup with no TLS, public ingress or production guarantee.

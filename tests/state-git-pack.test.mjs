@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { deflateSync, inflateSync } from 'node:zlib';
 import { digest } from '../dist/hash.js';
+import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
+import { MemoryMergeSource, MemorySourceReader } from '../dist/hosted-source-memory.js';
+import { runSmallSourceSave } from '../dist/hosted-source-small-save.js';
 import { readGitPack, writeGitPack } from '../dist/state-git-pack.js';
 import { emptyStateGitCache, gitObjectId, stateToGit } from '../dist/state-git.js';
 import { dualWriteStateTree } from '../dist/state-tree-dual.js';
@@ -468,6 +471,162 @@ test('dual-write: a pointer exists only when the stored tree reproduces the flat
     return id;
   };
   await refused({ store: lossy }, 'SOURCE_HASH_MISMATCH');
+});
+
+test('dual-write wiring: a save and a merge get a pointer with no extra descriptor call or blob read; a refusal leaves the flat save byte-identical', async () => {
+  const first = manifest(treeSample, 'first'),
+    objects = new Map(),
+    at = '2026-11-10T00:00:00.000Z';
+  const pin = bytes => {
+    const value = { sha256: digest(bytes), size: bytes.length };
+    objects.set(value.sha256, Buffer.from(bytes));
+    return value;
+  };
+  const blob = text => pin(Buffer.from(text));
+  const edited = blob('edited\n'),
+    packed = blob('from an upload pack\n'),
+    readme = blob(treeSample['README.md']),
+    delta = [
+      // New bytes the step streams: their Git id is hashed from that same stream.
+      {
+        path: 'a/c/d.ts',
+        before: { blob: digest(treeSample['a/c/d.ts']), mode: 'file' },
+        after: { blob: edited.sha256, mode: 'file', content: { object: edited, recipe: null } },
+      },
+      // A rename: the base tree already holds this blob's Git id.
+      { path: 'README.md', before: { blob: readme.sha256, mode: 'file' }, after: null },
+      {
+        path: 'docs/README.md',
+        before: null,
+        after: { blob: readme.sha256, mode: 'file', content: { object: readme, recipe: null } },
+      },
+      // A file the submitting action committed from an upload pack: its Git id came with it.
+      {
+        path: 'new/packed',
+        before: null,
+        after: { blob: packed.sha256, mode: 'file', content: { object: packed, recipe: null } },
+      },
+    ],
+    pages = buildSavePages(delta);
+  for (const page of pages.pages) pin(saveBytes(page.value));
+  const input = pin(
+    saveBytes({
+      schema: 1,
+      kind: 'forge-hosted-save-input',
+      baseline: { object: pin(first), recipe: null },
+      pages: pages.root,
+      pageCount: 1,
+      changeCount: delta.length,
+      message: 'saved',
+      at,
+    }),
+  );
+  const verified = [{ ...packed, git: gitObjectId('blob', Buffer.from('from an upload pack\n')) }];
+  const run = async trees => {
+    const windows = [],
+      reads = [],
+      writes = new Map();
+    const output = await runSmallSourceSave(
+      input,
+      {
+        ...(trees ? { trees } : {}),
+        prepareRead: async pins => void windows.push(pins.length),
+        read: async wanted => {
+          reads.push(wanted.sha256);
+          return (async function* () {
+            yield objects.get(wanted.sha256);
+          })();
+        },
+        upload: async (wanted, stream) => {
+          const parts = [];
+          for await (const part of stream) parts.push(part);
+          writes.set(wanted.sha256, Buffer.concat(parts));
+        },
+      },
+      [],
+      verified,
+    );
+    return { output, windows, reads: reads.sort(), writes };
+  };
+  const wiring = (store, pointers) => {
+    const outcomes = [];
+    return {
+      outcomes,
+      trees: {
+        store,
+        pointer: id => pointers.get(id),
+        settled: (state, result) => {
+          outcomes.push(result.status === 'refused' ? result.code : result.status);
+          if (result.status === 'written') pointers.set(state, result.pointer);
+        },
+      },
+    };
+  };
+  const store = segmentStore(),
+    pointers = new Map([[digest(first), (await convertStateTree(store, first, fileOf)).pointer]]),
+    flat = await run(null),
+    on = wiring(store, pointers),
+    dual = await run(on.trees);
+  assert.deepEqual(on.outcomes, ['written']);
+  assert.deepEqual(dual.output, flat.output, 'the save result is the flat one');
+  assert.deepEqual([...dual.writes], [...flat.writes], 'the flat State and manifest bytes are unchanged');
+  assert.deepEqual(dual.windows, flat.windows, 'no extra descriptor window');
+  assert.deepEqual(
+    dual.reads,
+    flat.reads,
+    'no extra blob read: renamed and pack-committed files are not read',
+  );
+  const saved = [...dual.writes.values()].find(bytes => bytes.includes('"forge-source-state"'));
+  assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(saved)))), saved);
+  // A base without a pointer is skipped; a store that returns other bytes is refused. Both keep
+  // the flat save exactly as it was and record no pointer.
+  const none = wiring(segmentStore(), new Map());
+  assert.deepEqual((await run(none.trees)).output, flat.output);
+  assert.deepEqual(none.outcomes, ['skipped']);
+  const lossy = segmentStore();
+  for (const [id, bytes] of store.objects) lossy.objects.set(id, Buffer.from(bytes));
+  const put = lossy.put;
+  lossy.put = async bytes => {
+    const id = await put(bytes);
+    lossy.objects.get(id)[0] ^= 1;
+    return id;
+  };
+  const bad = wiring(lossy, new Map([[digest(first), pointers.get(digest(first))]])),
+    refused = await run(bad.trees);
+  assert.deepEqual(bad.outcomes, ['SOURCE_HASH_MISMATCH']);
+  assert.deepEqual(refused.output, flat.output);
+  assert.deepEqual([...refused.writes], [...flat.writes]);
+  assert.equal(bad.trees.pointer(digest(saved)), undefined);
+
+  // A merge State (two parents) published by the merge step: files it takes from the other
+  // parent get their Git ids from that parent's tree, so nothing is described or read.
+  const other = manifest({ ...treeSample, 'other/side.ts': 'theirs\n' }, 'other', [digest(first)]);
+  pointers.set(digest(other), (await convertStateTree(store, other, fileOf)).pointer);
+  const merged = Buffer.from(
+    JSON.stringify({
+      ...JSON.parse(saved.toString()),
+      parents: [digest(saved), digest(other)],
+      files: [...filesOf(saved), filesOf(other).find(file => file.path === 'other/side.ts')].sort((a, b) =>
+        a.path < b.path ? -1 : 1,
+      ),
+      message: 'merge',
+    }),
+  );
+  const source = new MemoryMergeSource({});
+  source.objects.set(digest(saved), saved);
+  let described = 0;
+  const merge = wiring(store, pointers);
+  await new MemorySourceReader(source, {
+    trees: merge.trees,
+    describeBatch: async ids => ((described += ids.length), []),
+    read: async () => assert.fail('a merge dual-write reads no blob here'),
+    upload: async (_pin, stream) => {
+      for await (const _part of stream);
+    },
+  }).publishMany([merged]);
+  assert.deepEqual(merge.outcomes, ['written']);
+  assert.equal(described, 0);
+  assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(merged)))), merged);
 });
 
 /** A synthetic repository: `count` files, 9 per folder, 3 levels deep (about one folder per 8 files). */

@@ -3,8 +3,11 @@
 // resolve reads object rows, not manifests, so its source bytes do not grow with main's distance.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { scaleFixture } from './convex-source-scale-fixture.mjs';
+import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { syncHistory, syncInput, resolveInput } from './measure-sync-ancestry.mjs';
+import { convertStateTree } from '../dist/state-tree-save.js';
+import { TreeSession } from '../dist/state-tree-store.js';
+import { readStateTree, treeFile } from '../dist/state-tree.js';
 
 async function run({ distance, recordParents, conflict = true }) {
   const s = await scaleFixture();
@@ -127,4 +130,78 @@ test('recorded parents are written once, exact and immutable', async () => {
   } finally {
     s.restore();
   }
+});
+
+// Trees in packs, dual-write (Issue 676efbc2): the real Convex step records a State's tree pointer
+// only for a project with tree writes on, in the commit it already makes.
+async function treeSync(write) {
+  const s = await scaleFixture();
+  try {
+    const row = digest => [...s.tables.projectObjects.values()].find(r => r.digest === digest);
+    const store = {
+      get: async id => s.bytes({ sha256: id }),
+      put: async bytes => (await s.putSpec(Buffer.from(bytes))).sha256,
+    };
+    // States as the native writer serializes them (the tree form reproduces exactly these bytes).
+    const blob = async text => (await s.putSpec(Buffer.from(text))).sha256,
+      shared = await blob('synthetic\n');
+    const state = async (parents, edits, generation) => {
+      const files = Array.from({ length: 400 }, (_, i) => {
+        const path = `src/dir${i % 20}/module-${String(i).padStart(4, '0')}.ts`;
+        return { path, blob: edits[path] ?? shared, mode: 'file' };
+      }).sort((a, b) => (a.path < b.path ? -1 : 1));
+      const value = { schema: 1, kind: 'forge-source-state', parents, files, message: 'state', at };
+      return s.putSpec(Buffer.from(JSON.stringify(value)), undefined, generation, { parents });
+    };
+    const base = await state([], {}, 1),
+      h = {
+        main: await state([base.sha256], { 'src/dir1/module-0001.ts': await blob('main\n') }, 2),
+        lane: await state([base.sha256], { 'src/dir2/module-0002.ts': await blob('lane\n') }, 2),
+      };
+    // Both tips were converted earlier (the one-time conversion), whatever the flag says now.
+    for (const pin of [h.lane, h.main]) {
+      const converted = await convertStateTree(store, await s.bytes(pin), async file =>
+        treeFile(file, await s.bytes({ sha256: file.blob })),
+      );
+      assert.ok(converted.exact);
+      await s.ctx.db.patch(row(pin.sha256)._id, { stateTree: converted.pointer });
+    }
+    if (write) await s.ctx.db.patch(s.projectId, { stateTrees: { write: true } });
+    const rowsBefore = s.tables.projectObjects.size;
+    const id = await s.enqueue(await syncInput(s, h)),
+      sync = await s.drain(),
+      job = await s.job(id);
+    assert.equal(job.status, 'completed');
+    const output = (await s.bytes(job.output)).toString(),
+      merged = row(JSON.parse(output).result.state.sha256);
+    assert.deepEqual([...merged.stateParents].sort(), [h.lane.sha256, h.main.sha256].sort());
+    const project = await s.ctx.db.get(s.projectId);
+    return { s, sync, output, merged, store, rows: s.tables.projectObjects.size - rowsBefore, project, row };
+  } finally {
+    s.restore();
+  }
+}
+
+test('dual-write in the Convex step: a merged State gets a proven tree pointer and one segment row, with no extra call or blob read; off records none', async t => {
+  const off = await treeSync(false),
+    on = await treeSync(true);
+  assert.equal(off.merged.stateTree, undefined, 'tree writes off: no pointer');
+  assert.equal(on.output, off.output, 'the flat result is byte-identical');
+  const pointer = on.merged.stateTree;
+  assert.ok(pointer, 'tree writes on: the merged State has a pointer');
+  // The pointer rebuilds the exact flat State from what the object store holds.
+  const rebuilt = await readStateTree(new TreeSession(on.store, { strict: true }), pointer);
+  assert.deepEqual(
+    Buffer.from(rebuilt.manifest),
+    await on.s.bytes({ sha256: on.merged.digest }),
+    'the stored tree is the flat State',
+  );
+  assert.ok(on.row(pointer.segment), 'the segment has its object row');
+  assert.equal(on.rows, off.rows + 1, 'one more object row per State: its segment');
+  assert.equal(on.project.stateTrees.refused, undefined, 'no alarm');
+  // Calls never rise: the pointer and the segment row ride the step's own commit, and files taken
+  // from main get their Git ids from main's tree.
+  assert.equal(on.sync.functionCalls, off.sync.functionCalls);
+  assert.equal(on.sync.steps, off.sync.steps);
+  t.diagnostic(JSON.stringify({ off: off.sync, on: on.sync, segmentBytes: pointer.size }));
 });

@@ -106,6 +106,21 @@ export async function treeFiles(
   );
   return lists.flat();
 }
+/** One file's entry by path, opening only the folders on that path. */
+export async function treeFileAt(
+  session: TreeSession,
+  root: TreeRef | undefined,
+  path: string,
+): Promise<TreeFile | undefined> {
+  const names = path.split('/');
+  let ref = root;
+  for (let i = 0; ref && i < names.length; i++) {
+    const entry = (await session.load(ref)).find(candidate => candidate.name === names[i]);
+    if (i === names.length - 1) return entry && entry.mode !== '40000' ? asFile(entry) : undefined;
+    ref = asRef(entry);
+  }
+  return undefined;
+}
 const sameEntry = (x: TreeEntry | undefined, y: TreeEntry | undefined) =>
   x === y || (!!x && !!y && x.id === y.id && x.mode === y.mode);
 const folderOrAbsent = (entry: TreeEntry | undefined) => !entry || entry.mode === '40000';

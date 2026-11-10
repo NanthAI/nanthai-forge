@@ -34,6 +34,17 @@ export interface SegmentStore {
 /** What Convex keeps for a State in tree form: its segment and its root node id. Every byte read
  * through it is checked against one of these two identities. */
 export type StateTreePointer = { segment: string; size: number; root: string };
+const hash = /^[a-f0-9]{64}$/;
+export const validStateTreePointer = (value: unknown): value is StateTreePointer => {
+  const pointer = value as StateTreePointer | null;
+  return (
+    !!pointer &&
+    hash.test(pointer.segment) &&
+    hash.test(pointer.root) &&
+    Number.isSafeInteger(pointer.size) &&
+    pointer.size > 0
+  );
+};
 /** Segments up to this size are read whole (one GET, digest checked); larger ones by range. */
 export const WHOLE_SEGMENT_BYTES = 256 * 1024;
 /** A wide folder whose chunks sit in more segments than this has its most scattered chunks

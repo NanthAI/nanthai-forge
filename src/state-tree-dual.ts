@@ -24,8 +24,9 @@ export type StateTreeDualInput = {
 };
 export type StateTreeDualResult =
   | { status: 'written'; pointer: StateTreePointer; bytes: number; records: number }
-  /** Nothing was attempted: the base has no tree form yet (a conversion job supplies it). */
-  | { status: 'skipped'; reason: 'BASE_HAS_NO_TREE' }
+  /** Nothing was attempted: the base has no tree form yet (a conversion job supplies it), or too
+   * many changed files have no known Git id to read them back in one bounded batch. */
+  | { status: 'skipped'; reason: 'BASE_HAS_NO_TREE' | 'GIT_IDS_UNKNOWN' }
   /** The tree form was refused and the State stays flat-only. This is the alarm case. */
   | { status: 'refused'; code: string; message: string };
 

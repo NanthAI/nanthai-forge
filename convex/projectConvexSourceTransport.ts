@@ -18,6 +18,9 @@ import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
 import { sourceStepClock } from '../src/source-step-clock';
+import { r2SegmentStore } from './projectStateTreeStore';
+import { validStateTreePointer, type StateTreePointer } from '../src/state-tree-store';
+import { logStateTree } from '../src/state-tree-output';
 const reference = (name: string) => makeFunctionReference<'mutation'>(name);
 /** Result manifests up to this size ride on the step's commit instead of a later R2 read. */
 export const sourceResultInlineBytes = 64 * 1024;
@@ -25,6 +28,7 @@ export type ObjectLocation = {
   descriptor: WorkerObject;
   stateGeneration?: number;
   stateParents?: string[];
+  stateTree?: StateTreePointer;
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
@@ -39,8 +43,11 @@ export function convexSourceTransport(
   {
     overlapWrites = false,
     preloaded = [],
+    trees = false,
   }: {
     overlapWrites?: boolean;
+    /** The project dual-writes States in tree form (`hostedProjects.stateTrees.write`). */
+    trees?: boolean;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -59,16 +66,30 @@ export function convexSourceTransport(
     writing: Promise<SourceOutput>[] = [];
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
+    // Each segment this step wrote gets its object row with the same commit.
+    if (segments) outputs.push(...segments.written.splice(0));
   };
   const durable = sourceStorage(ctx, projectId);
   const generations = new Map<string, number>(),
-    parents = new Map<string, string[]>();
+    parents = new Map<string, string[]>(),
+    pointers = new Map<string, StateTreePointer>();
+  // Dual-write: segments are read by key and written beside the State; the outcome is counted
+  // here and a refusal is the step's alarm (the flat State is recorded either way).
+  const segments = trees ? r2SegmentStore(ctx, projectId) : null,
+    tree = {
+      written: 0,
+      skipped: 0,
+      refused: null as { state: string; code: string } | null,
+      bytes: 0,
+      ms: 0,
+    };
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
       locations.set(row.descriptor.object.sha256, row);
       if (validStateGeneration(row.stateGeneration))
         generations.set(row.descriptor.object.sha256, row.stateGeneration);
       if (validStateParents(row.stateParents)) parents.set(row.descriptor.object.sha256, row.stateParents);
+      if (validStateTreePointer(row.stateTree)) pointers.set(row.descriptor.object.sha256, row.stateTree);
     }
   };
   remember(initial);
@@ -112,6 +133,28 @@ export function convexSourceTransport(
     return rows.map(row => row.descriptor);
   };
   const io: StepTransport = {
+    ...(segments
+      ? {
+          trees: {
+            store: {
+              ...segments.store,
+              put: bytes => clock.write(() => segments.store.put(bytes)),
+            },
+            pointer: id => pointers.get(id),
+            direct: pin => segments.direct(pin),
+            settled: (state, result, ms) => {
+              tree.ms += ms;
+              if (result.status === 'written') {
+                pointers.set(state, result.pointer);
+                tree.written++;
+                tree.bytes += result.bytes;
+              } else if (result.status === 'skipped') tree.skipped++;
+              else tree.refused ??= { state, code: result.code.slice(0, 64) };
+              logStateTree({ jobId, step }, state, result, { ms, ...segments.stats });
+            },
+          },
+        }
+      : {}),
     stateGeneration: id => generations.get(id),
     stateParents: id => parents.get(id),
     rememberStateGenerations: values => {
@@ -307,6 +350,8 @@ export function convexSourceTransport(
       small.set(pin.sha256, new TextDecoder().decode(bytes));
       if (small.size > 8) small.delete(small.keys().next().value!);
     }
+    // Only a State this step proved in tree form carries a pointer (settled before its upload).
+    const stateTree = stateParents === undefined ? undefined : pointers.get(pin.sha256);
     return {
       async store(): Promise<SourceOutput> {
         const ref = await clock.write(() => durable.store(bytes)),
@@ -315,6 +360,7 @@ export function convexSourceTransport(
           ...pin,
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
           ...(stateParents === undefined ? {} : { stateParents }),
+          ...(stateTree === undefined ? {} : { stateTree }),
           ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
         };
       },
@@ -328,6 +374,9 @@ export function convexSourceTransport(
     locations,
     reads,
     clock,
+    /** Dual-write outcomes of this step, and its R2 segment traffic (null when off). */
+    tree,
+    treeIo: segments?.stats ?? null,
     /** This step's own small output with exactly this pin, as text; otherwise null. */
     smallOutput: (pin: { sha256: string; size: number } | null) => {
       const text = pin ? small.get(pin.sha256) : undefined;

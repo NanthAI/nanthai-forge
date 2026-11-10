@@ -3,6 +3,14 @@ import { defineTable } from 'convex/server';
 import { v } from 'convex/values';
 import { backfillFields } from './r2BackfillFields';
 export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
+export const stateTreePointer = v.object({ segment: v.string(), size: v.number(), root: v.string() });
+/** Operations that may read a State through its tree pointer (each switched on its own). */
+export const stateTreeReaders = ['merge', 'diff', 'checkout'] as const;
+export const stateTreesFields = v.object({
+  write: v.optional(v.boolean()),
+  read: v.optional(v.array(v.union(...stateTreeReaders.map(name => v.literal(name))))),
+  refused: v.optional(v.object({ state: v.string(), code: v.string(), at: v.number(), count: v.number() })),
+});
 export const objectFields = {
   projectId: v.id('hostedProjects'),
   digest: v.string(),
@@ -12,6 +20,10 @@ export const objectFields = {
   /** Exact parents of a hash-verified State (Git commit-graph parity), written once beside its
    * generation so ancestry walks read this row instead of the manifest. Absent on old rows. */
   stateParents: v.optional(v.array(v.string())),
+  /** A State's proven tree form (src/state-tree-dual.ts): the R2 segment that holds its root and
+   * the root's node id. Written once, only after the stored segment reproduced the flat manifest
+   * byte for byte; the flat manifest stays the authority. */
+  stateTree: v.optional(stateTreePointer),
   nonce: v.string(),
   storageId: v.optional(v.id('_storage')),
   ...backfillFields,

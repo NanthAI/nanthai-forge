@@ -47,13 +47,17 @@ export const step = internalAction({
         const state = JSON.parse(loaded);
         generation = state.generation ?? generation;
         input.generation = generation;
-        const { io, outputs, settle, clock, smallOutput } = convexSourceTransport(
+        const { io, outputs, settle, clock, smallOutput, tree } = convexSourceTransport(
             ctx,
             input,
             state.locations,
             supplied ? delegatedAt : undefined,
             // Texts the delegating action holds come only through `loaded` (never from a schedule).
-            { overlapWrites: true, preloaded: supplied ? state.preloaded : undefined },
+            {
+              overlapWrites: true,
+              preloaded: supplied ? state.preloaded : undefined,
+              trees: state.trees === true,
+            },
           ),
           durable = sourceStorage(ctx, input.projectId);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
@@ -134,6 +138,7 @@ export const step = internalAction({
               output: result.cursor.output,
               failure: null,
               timing: { ...clock.value(), ...result.metrics.detail },
+              ...(tree.refused ? { treeRefused: tree.refused } : {}),
               ...(resultText === null ? {} : { result: resultText }),
             },
           );

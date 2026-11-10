@@ -39,7 +39,7 @@ export async function sourceStep(
   gate?: StepGate,
 ) {
   const loaded = await loadSourceJob(ctx, args.projectId, args.jobId);
-  await hostedWriteProject(ctx, args.projectId, loaded.control.actor, loaded.authorityEpoch);
+  const project = await hostedWriteProject(ctx, args.projectId, loaded.control.actor, loaded.authorityEpoch);
   const row = await rowFor(ctx, args.projectId, args.jobId);
   if (!row || sourceJobTerminal(loaded) || row.step !== args.step) return null;
   const job = gate ? await gate(loaded, row) : loaded;
@@ -63,5 +63,6 @@ export async function sourceStep(
       'SOURCE_JOB_FENCED',
       'Source execution changed or expired.',
     );
-  return { job, row };
+  // The project row this check already read: callers take flags from it without another read.
+  return { job, row, project };
 }

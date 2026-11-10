@@ -27,6 +27,7 @@ export async function sourceObjectLocation(
     descriptor,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
+    ...(object.stateTree === undefined ? {} : { stateTree: object.stateTree }),
     storageId: url ? null : (object.storageId ?? null),
     url,
     ...(object.pack ? { range: packRange(object)! } : {}),

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { sha1 } from '@noble/hashes/legacy.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { digest } from './portable-hash.js';
 import { saveInputSchema, validateSavePage, savePin } from './hosted-save.js';
 import { parseNativeState, overlappingPaths, type NativeState } from './native-state-format.js';
@@ -10,6 +11,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
+import { writeOutputTree } from './state-tree-output.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
@@ -44,7 +46,7 @@ export async function runSmallSourceSave(
    * size and sha256 checksum (R2 also enforced that checksum on their create-only PUT). Staging
    * already bound them to this save, and the step does not use their bytes, so it does not
    * download them again only to re-hash them. Every other changed object is read and checked. */
-  verified: readonly WorkerPin[] = [],
+  verified: readonly (WorkerPin & { git?: string })[] = [],
 ): Promise<WorkerPin | null> {
   if (input.size > smallSaveInputBytes) return null;
   const early = new Map(
@@ -114,14 +116,19 @@ export async function runSmallSourceSave(
   ];
   // Descriptors were prepared in one window above; changed bytes are streamed and
   // discarded, several in flight (each read is a round trip, not CPU).
+  // Dual-write (tree form): a changed file's Git id is hashed from the same verified stream.
+  const oids = new Map(verified.flatMap(pin => (pin.git ? [[pin.sha256, pin.git] as const] : [])));
   await mapSourceOrdered(verify, async pin => {
-    const hash = sha256.create();
+    const hash = sha256.create(),
+      git = io.trees ? sha1.create().update(utf8ToBytes(`blob ${pin.size}\0`)) : null;
     let size = 0;
     for await (const part of await io.read(pin)) {
       size += part.length;
       invariant(size <= pin.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
       hash.update(part);
+      git?.update(part);
     }
+    if (git) oids.set(pin.sha256, bytesToHex(git.digest()));
     invariant(
       size === pin.size && bytesToHex(hash.digest()) === pin.sha256,
       'SOURCE_HASH_MISMATCH',
@@ -169,7 +176,22 @@ export async function runSmallSourceSave(
       'INVALID_NATIVE_SOURCE',
       'Source file and directory paths overlap.',
     );
-    state = publish(new TextEncoder().encode(JSON.stringify(next)));
+    const manifest = new TextEncoder().encode(JSON.stringify(next));
+    if (io.trees) {
+      const sizes = new Map(after.map(ref => [ref.object.sha256, ref.object]));
+      await writeOutputTree(io.trees, manifest, {
+        files: id => (id === plan.baseline.object.sha256 ? baseline.files : undefined),
+        oids,
+        bytes: async files => {
+          const pins = files.map(file => sizes.get(file.blob)!),
+            direct = await Promise.all(pins.map(pin => io.trees!.direct?.(pin)));
+          const rest = pins.filter((_, i) => !direct[i]);
+          if (rest.length) await io.prepareRead?.(rest);
+          return Promise.all(pins.map((pin, i) => direct[i] ?? readExact(io, pin)));
+        },
+      });
+    }
+    state = publish(manifest);
   }
   const output = publish(
     new TextEncoder().encode(

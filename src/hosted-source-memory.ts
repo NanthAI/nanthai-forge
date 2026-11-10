@@ -9,6 +9,7 @@ import { invariant } from './errors.js';
 import type { WorkerObject, WorkerPin } from './hosted-source-worker-format.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
+import { writeOutputTree } from './state-tree-output.js';
 
 /** Parents are compact, verified metadata. A file tree is loaded only when the
  * native merge actually requests it, rather than for every ancestor visited. */
@@ -65,6 +66,11 @@ export class MemoryMergeSource extends LazyMergeSource {
       this.states.add(id);
     }
     return value;
+  }
+  /** A State's flat file list when this calculation already parsed it; never a read. */
+  heldFiles(id: string) {
+    const bytes = this.parsed.has(id) ? undefined : this.objects.get(id);
+    return this.parsed.get(id)?.files ?? (bytes && parseNativeState(bytes).files);
   }
   override async fetchMissing(reader: SourceWorkerReader, error: NeededObject) {
     await reader.resolveMany([error.id]);
@@ -199,6 +205,20 @@ export class MemorySourceReader extends SourceWorkerReader {
     }
   }
   override async publishMany(bytes: Buffer[]): Promise<WorkerPin[]> {
+    // Dual-write (tree form) each State of this window before its upload records it, in order: a
+    // later State may build on an earlier one's pointer.
+    const trees = this.io.trees;
+    if (trees)
+      for (const value of bytes) {
+        if (!value.subarray(0, 256).includes('"kind":"forge-source-state"')) continue;
+        await writeOutputTree(trees, value, {
+          files: id => this.source.heldFiles(id),
+          bytes: async files => {
+            await this.resolveMany(files.map(file => file.blob));
+            return files.map(file => this.source.objects.get(file.blob)!);
+          },
+        });
+      }
     const pins = await super.publishMany(bytes);
     for (let i = 0; i < pins.length; i++) this.source.objects.set(pins[i]!.sha256, bytes[i]!);
     return pins;
