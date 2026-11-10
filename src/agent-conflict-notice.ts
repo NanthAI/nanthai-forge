@@ -9,7 +9,6 @@ import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 import type { NativeMergeConflict } from './native-merge.js';
 
-export const noticeChoices = ['accept-order', 'swap', 'split'] as const;
 export type NoticeParticipant = {
   lane: string;
   workspace?: string;
@@ -41,7 +40,6 @@ export type ConflictNotice = {
   participants: NoticeParticipant[];
   proposedOrder: string[];
   reason: string;
-  choices: readonly string[];
   conflicts: {
     path: string;
     kind: 'text' | 'binary' | 'path';
@@ -51,7 +49,6 @@ export type ConflictNotice = {
     right?: NativeFile;
     entries?: { left: NativeFile[]; right: NativeFile[] };
   }[];
-  decisions?: { operationId: string; laneId: string; choice: string; text?: string }[];
   after?: string;
   detail?: string;
 };
@@ -145,7 +142,6 @@ export function conflictNotice(
     participants,
     proposedOrder: ordered.map(item => item.p.lane),
     reason: 'Closer to landing, then smaller conflicting diff, then earlier start (Lane id breaks ties).',
-    choices: noticeChoices,
     conflicts: [
       ...conflicts.map(c => {
         const marked =

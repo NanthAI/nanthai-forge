@@ -80,7 +80,7 @@ const rows = [
   ['pre-edit', 'retired'],
   ['install-hooks', 'x install-hooks'],
   ['uninstall-hooks', 'x uninstall-hooks'],
-  ['peer-ack', 'save --overlap-answer', 'peer-ack', 'peer-ack'],
+  ['peer-ack', 'retired'],
   ['handoff', 'retired'],
   ['handoff-read', 'retired'],
   ['report', 'retired'],
@@ -132,6 +132,16 @@ async function help(args, options) {
     return { code: error.code };
   }
 }
+
+test('save --overlap-answer is refused with the conflictNotice explanation (path notices were removed, Issue 853fcde3)', () => {
+  assert.throws(
+    () => parseVerbForm('save', ['--overlap-answer', '{}']),
+    error =>
+      error.code === 'HOSTED_ACTION_UNSUPPORTED' &&
+      error.message ===
+        `save --overlap-answer was removed with native mode. Use ${retiredActions['peer-ack']}.`,
+  );
+});
 
 for (const [action, form, nativeWire, hostedWire] of rows)
   test(`V1 mapping row ${action} → ${form ?? 'kept'}`, async () => {

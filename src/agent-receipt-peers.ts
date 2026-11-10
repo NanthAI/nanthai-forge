@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 import { withPeerLanding } from './peer-landing.js';
-import { recordMetricOverlapSave } from './self-metrics-overlap.js';
-import { changedPaths } from './agent-sync.js';
 import { PeersCache } from './agent-peers-cache.js';
 import { pathsOverlap } from './coordination-paths.js';
 import { laneOwnership } from './agent-ownership.js';
@@ -207,53 +205,5 @@ export function indexedReceiptPeers(
     });
   } catch {
     return { v: 1, coverage: 'local-incomplete' };
-  }
-}
-
-/** Save metrics compare immutable manifests only; full alert analysis stays detached. */
-export async function recordIndexedOverlapSave(store: WorkStore, laneId: string) {
-  try {
-    // Workflow defaults load the action schemas; keep them out of peer-schema initialization.
-    const { currentChannelHead } = await import('./agent-defaults.js');
-    store.observing(() => {
-      const tx = store.readRecords();
-      const open = (
-        tx
-          ? Array.from(
-              { length: tx.manifest.collections.lanes?.count ?? 0 },
-              (_, index) => tx.fieldsAt('lanes', index).record,
-            )
-          : store.load().lanes
-      ).filter(lane => ['active', 'paused', 'ready'].includes(lane.state));
-      const focus = open.find(lane => lane.id === laneId);
-      if (!focus) return;
-      const main = currentChannelHead(store, 'main');
-      const source = new PeersSource(store, focus.base, RECEIPT_ANCESTRY_READS);
-      const recent = source.ancestry(),
-        ancestry = source.ancestry('');
-      let complete = true;
-      const lanes = open.filter(lane => {
-        try {
-          if (main && lane.head !== main && recent.contains(lane.head, main)) return true;
-          return !(main && ancestry.contains(main, lane.head));
-        } catch {
-          complete = false;
-          return false;
-        }
-      });
-      const paths = new Map<string, string[]>();
-      for (const lane of [focus, ...lanes]) {
-        try {
-          const head = source.state(lane.head);
-          const base = lane.id === focus.id ? (head.parents[0] ?? lane.base) : lane.base;
-          paths.set(lane.id, changedPaths(source.state(base).files, head.files));
-        } catch {
-          complete = false;
-        }
-      }
-      recordMetricOverlapSave(store.directory, focus, lanes, lane => paths.get(lane.id) ?? [], complete);
-    });
-  } catch {
-    // Optional metrics cannot invalidate the durable checkpoint.
   }
 }

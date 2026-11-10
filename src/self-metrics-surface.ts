@@ -14,7 +14,6 @@ export const metricNames = {
   '5.1': 'Landings by path',
   '5.2': 'Lifecycle errors per 100 finishes',
   '5.3': 'Dropped landings',
-  '5.4': 'Overlap delivery and acknowledgement',
   '5.5': 'Interventions per landing',
   '5.6': 'Check minutes per landing and reuse',
   '5.7': 'Authority lag and contradictions',
@@ -113,7 +112,6 @@ export function metricTotals(
       count(records.receipts.filter(row => row.kind === 'lifecycle')),
     ),
     '5.3': wrap(result.metric3, count(records.submissions)),
-    '5.4': wrap(result.metric4, observed('save', 'overlap-delivery', 'overlap-answer')),
     '5.5': wrap(result.metric5, count(records.receipts.filter(row => row.kind === 'mutation'))),
     '5.6': wrap(
       records.error

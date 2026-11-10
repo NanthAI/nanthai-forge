@@ -2,12 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { readOverlapInbox } from '../dist/overlap-inbox.js';
 const nowApi = await import(moduleUrl('../convex/projectNowOverlaps.ts'));
 const { NOW_OVERLAP_VIEW_BUDGET, readViewSignals } = await import(moduleUrl('../src/now-overlap-view.ts'));
 // Overlap answers are gone (Issue 853fcde3): the Now page's one read carries the bounded signals only.
@@ -121,32 +117,6 @@ test('paused and ready canonical Lanes stay open; missing lifecycle markers rema
   const missing = (await now(s, 'missing marker')).signals;
   assert.equal(missing.edits.length, 1);
   assert.equal(missing.complete, false);
-});
-test('retained hook inbox publishes twenty newest exact deliveries, ignores unrelated files and uses no network', t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-now-inbox-'));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  assert.deepEqual(readOverlapInbox(root, 'lane'), []);
-  mkdirSync(join(root, 'overlap-inbox/lane'), { recursive: true });
-  for (let i = 0; i < 25; i++) {
-    const noticeId = i.toString(16).padStart(64, '0');
-    writeFileSync(
-      join(root, 'overlap-inbox/lane', `${noticeId}.json`),
-      JSON.stringify({
-        noticeId,
-        file: `file-${i}`,
-        lanes: ['lane', 'peer'],
-        at: new Date(1700000000000 + i * 1000).toISOString(),
-        text: 'private detail never published',
-        regions: [],
-      }),
-    );
-  }
-  writeFileSync(join(root, 'overlap-inbox/lane/unrelated.txt'), 'ignored');
-  const rows = readOverlapInbox(root, 'lane');
-  assert.equal(rows.length, 20);
-  assert.equal(rows[0].file, 'file-24');
-  assert.equal(rows[19].file, 'file-5');
-  assert.deepEqual(Object.keys(rows[0]).sort(), ['at', 'file', 'lanes', 'noticeId']);
 });
 test('the Now read: one call, no writes, shared paths only, the same for a reader, under the byte budget', async t => {
   // Two of the 20 open Lanes share files, as on dev; every Lane saved 200 paths.

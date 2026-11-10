@@ -123,8 +123,6 @@ export type MetricRecords = {
   billHistoryFrom?: string;
   /** Earliest instant for which the producer guarantees complete collection. */
   coverage?: {
-    overlaps?: string | undefined;
-    overlapAnswers?: string | undefined;
     authority?: string | undefined;
     surfaces?: string | undefined;
     fullResults?: string | undefined;

@@ -2,7 +2,7 @@
 import { existsSync, openSync, readSync, closeSync, realpathSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 
-export type EditTarget = { root: string; laneId: string; path: string; project: string; url?: string };
+export type EditTarget = { root: string; laneId: string; path: string; project: string; url: string };
 export function canonicalEditPath(path: string): string {
   try {
     return realpathSync(path);
@@ -31,19 +31,6 @@ export function editTarget(path: string): EditTarget | null {
         laneId,
         project: projectId,
         url: value.url,
-        path: relative(root, absolute).split(sep).join('/'),
-      };
-    }
-    if (
-      /^lane-[a-f0-9-]{36}$/.test(basename(root)) &&
-      basename(dirname(root)) === 'work' &&
-      basename(dirname(dirname(root))) === '.forge'
-    ) {
-      const owner = dirname(dirname(dirname(root)));
-      return {
-        root: owner,
-        laneId: basename(root).slice(5),
-        project: owner,
         path: relative(root, absolute).split(sep).join('/'),
       };
     }

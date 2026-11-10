@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { firstAttemptLandRate } from './first-attempt-land-rate.js';
-import { calculateOverlapMetrics, calculateAuthorityMetrics } from './self-metrics-joins.js';
+import { calculateAuthorityMetrics } from './self-metrics-joins.js';
 import { calculateBillingMetrics } from './self-metrics-billing.js';
 import { calculateRedMainMetrics } from './self-metrics-red-main.js';
 import { calculateBackstopMetrics } from './self-metrics-backstop.js';
@@ -423,12 +423,6 @@ export function calculateSelfMetrics(
       dropped: deliveryGaps.length && !dropped.length ? null : dropped.length,
       rows: dropped,
     },
-    metric4: joined(
-      calculateOverlapMetrics(options.headline ? { ...records, observations: [], receipts: [] } : records, {
-        ...period,
-        asOf,
-      }),
-    ),
     metric7: joined(
       calculateAuthorityMetrics(options.headline ? { ...records, observations: [], receipts: [] } : records, {
         ...period,

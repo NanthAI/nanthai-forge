@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readEditPeers } from './agent-edit-peers.js';
 import { withPeerLanding } from './peer-landing.js';
 import { retainIndexedPeers } from './agent-receipt-peers.js';
 import { integrationPreviewStatus } from './integration-preview-auto.js';
@@ -113,16 +112,6 @@ export function agentPeers(
   options: { receipt?: boolean } = {},
 ): PeersDigest {
   const command = peersInputSchema.parse(input);
-  if (command.path) {
-    const result = readEditPeers(store.root, command.laneId, command.path);
-    const inbox = command.detail ? result.overlaps : result.overlaps.slice(0, 5);
-    return {
-      v: 1,
-      coverage: result.coverage,
-      inbox,
-      ...(result.overlaps.length > inbox.length ? { more: result.overlaps.length - inbox.length } : {}),
-    };
-  }
   return store.observing(() => {
     const peers = boundPeers(
       withPeerLanding(store, readPeers(store, command, options.receipt)),

@@ -591,13 +591,6 @@ export function agentCheckpoint(
               operation: { id: command.operationId, request: hash },
             };
             const updateMetadata = () => {
-              if (candidate?.overlapInbox.length) {
-                const selected = tx.find('lanes', lane.id)!;
-                tx.replace('lanes', selected.position, {
-                  ...selected.record,
-                  overlapInbox: candidate.overlapInbox,
-                });
-              }
               if (after) {
                 lane.after = after;
                 tx.patchFields('lanes', lane.id, { after });

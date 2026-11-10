@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cliBuildCommit } from './cli-installation.js';
-import { rememberCaller } from './agent-caller-overlaps.js';
 import { readAgentTurn } from './agent-edit-context.js';
-import { unacknowledgedOverlaps } from './agent-edit-notices.js';
-import { preEdit } from './agent-pre-edit.js';
-import { acknowledgeOverlap } from './agent-overlap-ack.js';
 import { configureEditHooks } from './agent-install-hooks.js';
 import { checkQuarantine } from './check-quarantine.js';
 import { queueAheadStackSync } from './queue-ahead-stack-sync.js';
@@ -41,7 +37,6 @@ import { candidateCommand } from './candidate-names.js';
 import { agentTake } from './agent-take.js';
 import { parseAgentAction } from './agent-action-parse.js';
 import { undoOptimisticRevert } from './optimistic-undo.js';
-import { CoordinationJournal } from './agent-coordination-journal.js';
 import { agentPeers, RECEIPT_PEER_LIMIT } from './agent-peers.js';
 import { cancelLandingEntry } from './landing-batch-cancel.js';
 import { retryWorkPhase } from './work-retry.js';
@@ -116,15 +111,7 @@ export class AgentWorkflow {
       process.env.FORGE_LANE_ID;
     if (!laneId) return response;
     this.callerLaneId = laneId;
-    rememberCaller(this.work.store.root, laneId);
-    try {
-      return {
-        ...response,
-        unacknowledgedOverlaps: unacknowledgedOverlaps(this.work.store.directory, laneId),
-      };
-    } catch {
-      return { ...response, unacknowledgedOverlaps: { count: null, items: [], coverage: 'unavailable' } };
-    }
+    return response;
   }
   private async dispatchCore(input: unknown) {
     // Bound server source operations use hosted records; local Work is a cache.
@@ -361,11 +348,6 @@ export class AgentWorkflow {
     laneRun = false,
   ): Promise<{ revision: number; result: unknown }> {
     const store = this.work.store;
-    if (command.action === 'pre-edit')
-      return {
-        revision: store.revision(),
-        result: preEdit(store.root, command.laneId, command.paths, command.conversation),
-      };
     if (command.action === 'install-hooks' || command.action === 'uninstall-hooks')
       return {
         revision: store.revision(),
@@ -394,28 +376,6 @@ export class AgentWorkflow {
     if (command.action === 'tests' || command.action === 'confirm-tests')
       return agentLaneTests(store, command);
     if (command.action === 'take') return agentTake(store, command);
-    if (command.action === 'peer-ack') {
-      const overlap = acknowledgeOverlap(store, { ...command, operationId: command.operationId! });
-      if (overlap) return overlap;
-      const journal = new CoordinationJournal(store),
-        request = { ...command, operationId: command.operationId! };
-      let answer = journal.replay(request);
-      if (!answer) {
-        const notice = agentPeers(store, { laneId: command.laneId, detail: true }).conflicts?.find(
-          n => n.noticeId === command.noticeId,
-        );
-        invariant(
-          notice,
-          'NOTICE_STALE',
-          'Conflict notice changed or cleared; read peers for current source.',
-        );
-        answer = journal.ack(request, notice);
-      }
-      return {
-        revision: store.revision(),
-        result: { status: 'recorded', ...answer, peers: agentPeers(store, { laneId: command.laneId }) },
-      };
-    }
     if (command.action === 'peers') return { revision: store.revision(), result: agentPeers(store, command) };
     if (command.action === 'link')
       return { revision: store.revision(), result: await agentLinks(store, command) };
@@ -860,7 +820,7 @@ export class AgentWorkflow {
           });
         try {
           if (!admission)
-            store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT, true));
+            store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT));
         } catch {
           /* Advisory coordination never invalidates a saved checkpoint. */
         }

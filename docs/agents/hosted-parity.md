@@ -52,7 +52,7 @@ hosted command that does its job (`retiredActions` in `src/agent-verbs.ts`).
 | `x clean` | Reclaim regenerable local artifacts | FOLD | Existing explicit prune/maintenance with pins and in-use safeguards | 995c8da9; 75170a57 |
 | `x take` | Continue another agent's Lane | FOLD | `start --open`/status delivery and pending-operation pins; retain authorship | 657d63ee |
 | `x guidance` | Store agent instructions | DROP | Remove native agent surface; retain hosted guidance UI/API and repo instructions | 657d63ee |
-| `x pre-edit` | Observe overlaps on first write | FOLD | Local cached wrapper over path-scoped `peers`; incomplete reads fail open | e6f4b0a6; 5283a92f |
+| `x pre-edit` | Observe overlaps on first write | FOLD | The first-write hook reads board claims and notes; overlap notices were removed (Issue 853fcde3); incomplete reads fail open | e6f4b0a6; 5283a92f |
 | `x install-hooks` | Install first-write notices | FOLD | Local installer/first-run, reversible and idempotent, with off setting | e6f4b0a6 |
 | `x uninstall-hooks` | Undo hook installation | FOLD | Discoverable local installer/settings inverse preserving other hooks | e6f4b0a6 |
 | `x friction-triage` | Record a friction disposition | FOLD | Existing planning updates/comments with IDs, reasons and fix evidence | 88d3cfba |

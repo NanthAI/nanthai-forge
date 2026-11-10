@@ -69,7 +69,6 @@ export function diagnosePreview(
       granularity: 'symbol',
       participants: group.map(lane => noticeParticipant(store, source, lane)),
       proposedOrder: [],
-      choices: [],
       conflicts: [],
       reason: `Integration preview: Lanes ${laneIds.join(' and ')} pass alone (with dependency closure) on main ${result.main} but fail together. Observed failing set; global minimization incomplete. ${observed.errors.join('\n')}`,
       integration: { main: result.main, key: result.key, inputs: result.inputs, errors: observed.errors },

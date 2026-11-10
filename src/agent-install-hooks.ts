@@ -91,7 +91,8 @@ export function installEditHooks(
           ),
         }))
         .filter(group => group.hooks.length);
-      if (!uninstall)
+      // UserPromptSubmit only fed the retired native turn store: installs now remove it.
+      if (!uninstall && event !== 'UserPromptSubmit')
         groups.push(
           event === 'Stop'
             ? // Turn-end guard: blocks only a first stop while owned Forge work runs.

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { retainEditNotices } from './agent-edit-notices.js';
 import type { PreviewMeasurement } from './train-accounting.js';
 import { decorateRepair } from './agent-repair-lineage.js';
 import { landingRepairNotices } from './landing-repair-notice.js';
@@ -9,26 +8,16 @@ import { mkdirBelow } from './mkdir-below.js';
 import { lstatSync, readFileSync, writeFileSync, renameSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
 import type { OverlapAlert } from './agent-overlap-alerts.js';
 import type { PeersDigest } from './agent-peers.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { workLocked } from './work-lock.js';
-import { noticeChoices, type ConflictNotice } from './agent-conflict-notice.js';
+import type { ConflictNotice } from './agent-conflict-notice.js';
 import type { Lane } from './work-types.js';
 import type { BriefEvent } from './agent-brief-types.js';
 import type { WorkStore } from './work-store.js';
-export const peerAckSchema = z.object({
-  action: z.literal('peer-ack'),
-  operationId: z.string().uuid().optional(),
-  laneId: z.string().uuid(),
-  noticeId: z.string().regex(/^[a-f0-9]{64}$/),
-  choice: z.enum(noticeChoices),
-  text: z.string().optional(),
-});
 type Handover = NonNullable<Lane['handovers']>[number] & { laneId: string; intentId: string };
-type Ack = z.infer<typeof peerAckSchema> & { operationId: string };
 
 /** Local advisory journal, separate from portable Work and disposable peers cache.
  * Immutable per-operation files and a separate lock avoid lost concurrent answers. */
@@ -105,7 +94,6 @@ export class CoordinationJournal {
       },
       { operation: 'local overlap notices' },
     );
-    retainEditNotices(this.store.directory, notices);
   }
   overlaps(laneId?: string): OverlapAlert[] {
     try {
@@ -176,75 +164,13 @@ export class CoordinationJournal {
     );
   }
   decorate(notice: ConflictNotice, laneId: string): ConflictNotice {
-    let names: string[];
-    try {
-      if (lstatSync(this.directory).isSymbolicLink()) return decorateRepair(this.store, notice);
-      names = readdirSync(this.directory);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return decorateRepair(this.store, notice);
-      throw error;
-    }
-    const answers = names
-      .filter(name => name.startsWith('ack-'))
-      .flatMap(name => {
-        const row = this.read<{ command: Ack; sequence: number }>(name);
-        return row?.command.noticeId === notice.noticeId ? [row] : [];
-      })
-      .sort((a, b) => a.sequence - b.sequence);
-    let order =
+    const order =
       this.read<ConflictNotice>(`notice-${notice.noticeId}.json`)?.proposedOrder ?? notice.proposedOrder;
-    for (const { command } of answers) {
-      // Swap means this participant proposes going first, independent of receipt orientation.
-      if (command.choice === 'swap') order = [command.laneId, ...order.filter(id => id !== command.laneId)];
-    }
     return decorateRepair(this.store, {
       ...notice,
       proposedOrder: order,
-      ...(answers.length
-        ? {
-            decisions: answers.map(({ command: { operationId, laneId, choice, text } }) => ({
-              operationId,
-              laneId,
-              choice,
-              ...(text ? { text } : {}),
-            })),
-          }
-        : {}),
       ...(order[0] !== laneId ? { after: order[0] } : {}),
     });
-  }
-  replay(command: Ack) {
-    const prior = this.read<{ command: Ack; sequence: number }>(`ack-${command.operationId}.json`);
-    if (!prior) return;
-    invariant(
-      digest(JSON.stringify(prior.command)) === digest(JSON.stringify(command)),
-      'WORK_OPERATION_CHANGED',
-      'This coordination operation has different inputs.',
-    );
-    return prior;
-  }
-  ack(command: Ack, notice: ConflictNotice) {
-    this.prepare();
-    return workLocked(
-      join(this.directory, 'lock'),
-      () => {
-        const prior = this.replay(command);
-        if (prior) return prior;
-        invariant(
-          notice.participants.some(p => p.lane === command.laneId),
-          'BAD_ARGUMENT',
-          'Lane is not a notice participant.',
-        );
-        this.recordUnlocked([notice]);
-        const row = {
-          command,
-          sequence: readdirSync(this.directory).filter(name => name.startsWith('ack-')).length + 1,
-        };
-        this.write(`ack-${command.operationId}.json`, row);
-        return row;
-      },
-      { operation: 'local coordination answer' },
-    );
   }
   handoverReplay(operationId: string, request: string, laneId: string) {
     try {
@@ -388,19 +314,6 @@ export class CoordinationJournal {
           });
     }
     messages.push(...overlapMessages);
-    for (const notice of notices)
-      for (const decision of notice.decisions ?? []) {
-        if (!decision.text) continue;
-        const participant = notice.participants.find(p => p.lane === decision.laneId);
-        messages.push({
-          id: decision.operationId,
-          actor: participant?.owner?.name ?? decision.laneId,
-          kind: 'message',
-          text: decision.text,
-          laneId: laneId ?? decision.laneId,
-          paths: notice.conflicts.map(c => c.path),
-        });
-      }
     return { handovers, handoffs, notices, messages: [...deliveryMessages, ...messages] };
   }
 }

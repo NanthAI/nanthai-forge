@@ -70,7 +70,7 @@ test('JSON includes all metrics every UTC day, window totals, source counts and 
   const result = metricsSurface(fixture(), metricPeriod(from, to));
   assert.equal(result.days.length, 7);
   assert.equal(result.days[0].metrics['5.1'].landings, 0);
-  for (const key of ['5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', 'R']) {
+  for (const key of ['5.1', '5.2', '5.3', '5.5', '5.6', '5.7', '5.8', 'R']) {
     assert.equal(typeof result.totals[key].sourceRecords, 'number');
     assert.equal(typeof result.totals[key].partial, 'boolean');
   }
@@ -98,7 +98,7 @@ test('report exports all metrics and comparison columns; compact status keeps he
   const report = formatMetricReport(result, result);
   assert.match(report, /Before \| After/);
   assert.match(report, /Source records \(before \/ after\)/);
-  for (const id of ['5.1', '5.2', '5.3', '5.4', '5.5', '5.6', '5.7', '5.8', 'R'])
+  for (const id of ['5.1', '5.2', '5.3', '5.5', '5.6', '5.7', '5.8', 'R'])
     assert.ok(report.includes(`| ${id} `));
   const lines = formatMetricsHeadline(metricsHeadline(result.totals));
   assert.equal(lines.length, 2);

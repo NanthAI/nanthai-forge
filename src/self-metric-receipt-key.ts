@@ -5,7 +5,5 @@ import type { CallerReceipt } from './self-metric-receipts.js';
 export function callerReceiptKey(receipt: CallerReceipt, actor: string) {
   return receipt.kind === 'outcome'
     ? `outcome:${actor}:${receipt.operationId}:${receipt.action}:${[...receipt.errorCodes].sort().join(',')}`
-    : receipt.kind === 'first-write'
-      ? `first-write:${actor}:${receipt.laneId}:${receipt.writeId}`
-      : `delivery:${actor}:${receipt.entryId}:${receipt.state}`;
+    : `delivery:${actor}:${receipt.entryId}:${receipt.state}`;
 }

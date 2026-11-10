@@ -25,8 +25,6 @@ const rows = [
   ['save', 'candidate', 'compose', 'compose'],
   ['save', 'check', 'run', 'check'],
   ['save', 'contract', 'confirm-tests', 'confirm-tests'],
-  // Hosted overlap answers are gone (Issue 853fcde3); native pre-edit notices keep peer-ack for now.
-  ['save', 'overlap-answer', 'peer-ack', null],
   ['save', 'friction', 'friction', 'friction'],
   ['save', 'decision', 'decide', 'decide'],
   ['land', 'withdraw', null, 'withdraw'],
@@ -169,11 +167,7 @@ test('MCP accepts exactly the CLI mode forms (drift check)', async t => {
   const cliForms = Object.entries(verbModes).flatMap(([verb, modes]) =>
     Object.keys(modes).map(flag => `${verb}/${flag.slice(2)}`),
   );
-  // save --overlap-answer is native-only since Issue 853fcde3: hosted MCP no longer offers it.
-  assert.deepEqual(
-    [...new Set(modesOf((await hosted.client.listTools()).tools))].sort(),
-    cliForms.filter(form => form !== 'save/overlap-answer').sort(),
-  );
+  assert.deepEqual([...new Set(modesOf((await hosted.client.listTools()).tools))].sort(), cliForms.sort());
 });
 
 test('hosted MCP: each new form reaches the transport exactly like its old action, one dispatch each', async t => {

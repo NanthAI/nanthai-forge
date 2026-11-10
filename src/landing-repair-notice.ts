@@ -41,7 +41,6 @@ export function landingRepairNotices(store: WorkStore, laneId?: string): Conflic
       granularity: 'symbol',
       participants,
       proposedOrder: [],
-      choices: [],
       conflicts: [],
       evidence: [evidence],
       applicability:

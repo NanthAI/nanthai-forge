@@ -105,10 +105,6 @@ export function boundPeers(value: PeersDigest, detail = false): PeersDigest {
     if (size(value) > PEERS_MAX_BYTES)
       for (const notice of value.conflicts) {
         notice.participants = [];
-        if (notice.decisions)
-          notice.decisions = notice.decisions
-            .slice(-2)
-            .map(({ operationId, laneId, choice }) => ({ operationId, laneId, choice }));
         notice.conflicts = notice.conflicts.slice(0, 3);
         notice.reason = '';
         notice.conflicts = notice.conflicts.map(({ path, kind }) => ({ path, kind }));

@@ -6,7 +6,6 @@ import { handoffSchema, handoffReadSchema } from './agent-handoff-types.js';
 import { frictionInputSchema, frictionTriageSchema } from './friction-types.js';
 import { landSchema } from './land-schema.js';
 import { metricPagingFields } from './self-metrics-page.js';
-import { peerAckSchema } from './agent-coordination-journal.js';
 import { viewReadSchemas } from './view-reads.js';
 import { policyWriteSchema } from './autonomy-policy.js';
 import { briefInputSchema } from './agent-brief-types.js';
@@ -37,12 +36,6 @@ const acceptPin = z.object({
 export const agentActionSchema = z.discriminatedUnion('action', [
   ...viewReadSchemas,
   z.object({
-    action: z.literal('pre-edit'),
-    laneId: id,
-    paths: z.array(z.string()).min(1),
-    conversation: conversationSchema,
-  }),
-  z.object({
     action: z.literal('install-hooks'),
     laneId: id.optional(),
     scope: z.enum(['project', 'user']).optional(),
@@ -67,7 +60,6 @@ export const agentActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('landing'), operationId: id }),
   handoffSchema,
   handoffReadSchema,
-  peerAckSchema,
   peersInputSchema.extend({ action: z.literal('peers') }),
   z.object({
     action: z.literal('take'),

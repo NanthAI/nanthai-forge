@@ -27,21 +27,8 @@ export function hostedCallerReceipts(
       });
       continue;
     }
-    if (row.kind === 'first-write') {
-      // Metric 5.4: the edit hook delivered overlap notices before this first write (hosted Lane).
-      (records.observations ??= []).push({
-        type: 'overlap-delivery',
-        id: `first-write:${row.writeId}`,
-        at: row.at,
-        laneId: row.laneId,
-        head: 'unsaved',
-        paths: row.paths,
-        noticeIds: [],
-        via: 'hook',
-        firstWriteId: row.writeId,
-      });
-      continue;
-    }
+    // Retired first-write rows (metric 5.4, Issue 853fcde3) stay stored but are not joined.
+    if (row.kind === 'first-write') continue;
     const actor = { kind: 'agent' as const, name: row.actor };
     if (row.kind === 'outcome') {
       outcomes.add(row.operationId);

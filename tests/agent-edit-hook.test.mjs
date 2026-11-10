@@ -44,7 +44,7 @@ test('install/uninstall are idempotent and preserve existing Claude and Codex co
   for (const path of ['.claude/settings.json', '.codex/hooks.json']) {
     const config = JSON.parse(readFileSync(join(home, path), 'utf8'));
     assert.equal(config.hooks.PreToolUse.length, 2);
-    assert.equal(config.hooks.UserPromptSubmit.length, 1);
+    assert.equal(config.hooks.UserPromptSubmit, undefined, 'the prompt hook only fed native turn records');
     assert.ok(
       config.hooks.PreToolUse[1].hooks[0].command.includes(
         fileURLToPath(new URL('../dist/agent-edit-hook.js', import.meta.url)),

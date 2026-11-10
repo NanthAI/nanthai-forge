@@ -449,10 +449,13 @@ No real database-only restore or bucket drill has been run by this implementatio
 ## Retired Convex tables (B1.9)
 
 The Bet 1 deletions left four tables with no writers: `projectPublicationAttempts`,
-`projectPublications`, `projectPublicationPages` and `projectReturnSupersessions`.
+`projectPublications`, `projectPublicationPages` and `projectReturnSupersessions`. The three
+overlap-answer tables of Issue 853fcde3 (`projectHostedOverlapAcks`, `projectHostedAckBatches`,
+`projectHostedOverlapDeliveries`) are on the same list with `gate: 'exported'`; their definitions
+already left the schema.
 (`ownerAcceptanceMachines` and `ownerAcceptanceRequests` were empty on dev, so their
 definitions, reader and purge entries were removed from the schema; a Route A restore of
-an older backup that still holds them must skip those two tables.) Their definitions stay in
+an older backup that still holds them must skip those two tables.) The first four definitions stay in
 the schema until the rows are exported and purged, because schema push and a Route A
 restore of an older weekly backup still contain them. The optional fields
 `exchangeCleanupCursor`, `exchangeCleanupDone`, `work.intentMigration`,
@@ -471,7 +474,7 @@ node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --
 - `restore` imports only into an empty deployment other than the source and then proves
   every row came back. The weekly backup also holds these tables, so a restore of any
   retained backup is a second copy.
-- `purge` is a dry run. It reports the four retired tables, their live rows and JSON
+- `purge` is a dry run. It reports the retired tables, their live rows and JSON
   bytes, export coverage, estimated calls/I/O and source readers that still require
   the table definitions. The optional live fields above remain report-only.
 - `--execute --approval FILE --operation-id UUID` replaces only populated retired
@@ -480,6 +483,10 @@ node scripts/retired-tables.mjs purge --deployment NAME --dir NEW_PRIVATE_DIR --
   is a closed backup fix, a received real failure alert and one verified post-deploy
   backup (`verifiedBackup: {id, completedAt, r2Bytes, sha256}`, `backupFixClosed: true`,
   `alertReceived: true`); the two-weekly-backups wait is removed.
+- A table with `gate: 'exported'` (dropped from the schema, rows exported to private storage, dev
+  only) needs no backup proof: its approval names the verified export manifest and table set, plus
+  `leadDecision` (the standing cleanup rule or decision) and `issue`. A populated table without
+  that gate still needs the backup proof above.
 - Every live row must exactly match its exported row before any deletion. A retained
   private operation receipt next to the approval reconciles an unknown import outcome;
   replay the same operation ID and original inputs. A changed export, deployment or

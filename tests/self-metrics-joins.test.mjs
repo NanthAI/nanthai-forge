@@ -18,8 +18,6 @@ const base = () => ({
   observations: [],
   gaps: [],
   coverage: {
-    overlaps: period.from,
-    overlapAnswers: period.from,
     authority: period.from,
     surfaces: period.from,
     fullResults: period.from,
@@ -27,67 +25,6 @@ const base = () => ({
   },
 });
 const move = (id, head, at, inputs = [], extra = {}) => ({ id, head, at, inputs, kind: 'landing', ...extra });
-const save = (id, laneId, head, hhmm, overlaps = []) => ({
-  type: 'save',
-  id,
-  laneId,
-  head,
-  at: at(hhmm),
-  overlaps,
-  complete: true,
-});
-const delivery = (id, laneId, head, hhmm, paths = ['shared.ts']) => ({
-  type: 'overlap-delivery',
-  id,
-  laneId,
-  head,
-  at: at(hhmm),
-  paths,
-  noticeIds: [],
-  via: 'lifecycle',
-});
-
-test('metric 4: overlapping saves, timely delivery, median and acknowledgements use exact saved heads', () => {
-  const r = base(),
-    peer = [{ laneId: 'A', head: 'a1', paths: ['shared.ts'] }];
-  r.observations = [
-    save('b1', 'B', 'h1', '10:00', peer),
-    save('b2', 'B', 'h2', '10:10', peer),
-    save('c1', 'C', 'c1', '10:20', peer),
-    save('unrelated', 'D', 'd1', '11:00'),
-    delivery('d1', 'B', 'h1', '10:01'),
-    delivery('late', 'B', 'h1', '10:11'),
-    delivery('wrong-head', 'B', 'other', '10:11'),
-    delivery('d2', 'B', 'h2', '10:12'),
-    delivery('wrong-file', 'C', 'c1', '10:21', ['elsewhere.ts']),
-    { type: 'overlap-answer', id: 'ack', at: at('10:13'), deliveryId: 'd2', disposition: 'routed-around' },
-  ];
-  r.observations.push(r.observations[0], r.observations[4]);
-  const m = calculateSelfMetrics(r, period).metric4;
-  assert.equal(m.overlappingSaves, 3);
-  assert.equal(m.delivered, 2);
-  assert.equal(m.deliveryRate, 2 / 3);
-  assert.equal(m.medianDeliverySeconds, 90);
-  assert.equal(m.acknowledgementRate, 0.5);
-  assert.equal(m.rows[2].deliveryId, null);
-  r.observations = [
-    save('b1', 'B', 'h1', '10:00', peer),
-    save('b2', 'B', 'h2', '10:10'),
-    delivery('late', 'B', 'h1', '10:10'),
-  ];
-  assert.equal(calculateSelfMetrics(r, period).metric4.delivered, 0);
-});
-
-test('metric 4: missing or incomplete save coverage is partial, never an established zero', () => {
-  const r = base();
-  delete r.coverage.overlaps;
-  const m = calculateSelfMetrics(r, period).metric4;
-  assert.equal(m.overlappingSaves, null);
-  assert.equal(m.partial, true);
-  r.observations = [{ ...save('s', 'B', 'h', '10:00'), complete: false }];
-  assert.equal(calculateSelfMetrics(r, period).metric4.partial, true);
-});
-
 test('metric 7: both revision directions retain per-day p50/p95, pending revisions and epoch boundaries', () => {
   const r = base();
   for (const mode of ['owner-hosted', 'hosted-cache']) {

@@ -18,7 +18,6 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
     '--candidate': 'compose',
     '--check': 'run',
     '--contract': 'confirm-tests',
-    '--overlap-answer': 'peer-ack',
     '--friction': 'friction',
     '--decision': 'decide',
   },
@@ -113,7 +112,9 @@ export const retiredActions: Readonly<Record<string, string>> = {
   clean: 'nforge prune removes local roots of landed or abandoned Lanes',
   take: 'start --open {laneId} opens another Lane here',
   guidance: 'repository AGENTS.md and the project guidance page hold agent instructions',
-  'pre-edit': 'the first-write hook (x install-hooks) reports overlaps on first write',
+  'pre-edit': 'the first-write hook (x install-hooks) reports board claims and notes on first write',
+  'peer-ack':
+    'save, which trial-merges saved files and reports a real conflict as conflictNotice (nothing to answer)',
   'define-check': 'x configure-check defines a check',
   'pending-status': 'status reads pending work in a hosted checkout',
 };
@@ -121,6 +122,7 @@ const retiredModes: Readonly<Record<string, string>> = {
   'save --handoff': 'handoff',
   'save --report': 'report',
   'save --preview': 'integrate',
+  'save --overlap-answer': 'peer-ack',
   'land --resume-ready': 'land-ready',
 };
 

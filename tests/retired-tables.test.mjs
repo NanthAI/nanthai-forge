@@ -89,8 +89,8 @@ test('inventory counts retired rows and bytes, and reports live-field usage with
   assert.equal(usage['hostedProjects.work.intentMigration'], 1);
   assert.equal(usage['projectBackups.ownerDerived'], 1);
   assert.equal(usage['projectBackups.metadataPublication'], 0);
-  // 4 retired tables + one read each for hostedProjects and projectBackups.
-  assert.equal(source.calls.data, 6);
+  // Every retired table + one read each for hostedProjects and projectBackups.
+  assert.equal(source.calls.data, Object.keys(RETIRED_TABLES).length + 2);
   assert.deepEqual(source.calls.imports, []);
 });
 
@@ -136,7 +136,7 @@ test('restore round trip: an export of the source rebuilds identical rows in an 
     assert.equal(result.restored.projectPublications, 19);
     assert.equal(result.restored.projectPublicationPages, 0);
     for (const table of Object.keys(RETIRED_TABLES))
-      assert.deepEqual(scratch.store.get(table) ?? [], source.store.get(table), table);
+      assert.deepEqual(scratch.store.get(table) ?? [], source.store.get(table) ?? [], table);
     // Empty tables are not imported: 3 populated tables, 1 import each.
     assert.equal(scratch.calls.imports.length, 3);
     assert.ok(scratch.calls.imports.every(call => call.mode === 'append'));
@@ -185,7 +185,7 @@ test('purge dry run reports tables, calls and I/O, measures the call budget and 
     assert.equal(plan.tables.projectPublicationAttempts.unexportedRows, 1);
     assert.equal(plan.tables.projectPublications.unexportedRows, 0);
     assert.equal(plan.cost.userFunctionCalls, 0);
-    assert.equal(plan.cost.cliRequests, 4 + 3 * 2);
+    assert.equal(plan.cost.cliRequests, Object.keys(RETIRED_TABLES).length + 3 * 2);
     assert.equal(plan.cost.documentsDeleted, plan.totals.rows);
     assert.equal(plan.cost.indexEntriesDeleted, 12 * 3 + 19 * 3 + 2 * 2);
     assert.equal(plan.cost.basis, 'estimate');
@@ -258,7 +258,7 @@ test('purge --execute is refused without a matching approval record, then execut
     source.calls.data = 0;
     const result = await execute({ ...command, now }, source);
     assert.deepEqual(result.after, { rows: 0, bytes: 0 });
-    assert.equal(source.calls.data, 7); // Four plan reads, three populated-table verification reads.
+    assert.equal(source.calls.data, Object.keys(RETIRED_TABLES).length + 3); // Plan reads, then one verification read per populated table.
     assert.equal(source.calls.imports.length, 3);
     assert.deepEqual((await execute({ ...command, now }, source)).after, result.after);
     assert.equal(source.calls.imports.length, 3); // A replay adds no writes.
@@ -266,6 +266,46 @@ test('purge --execute is refused without a matching approval record, then execut
     await writeFile(file, '{');
     await assert.rejects(execute({ ...command, now }, source), error => error.code === 'APPROVAL_INVALID');
     assert.notEqual(JSON.stringify([...source.store]), before);
+  });
+});
+
+test('dropped tables exported to private storage are approved by the named lead decision and Issue; backup-gated tables still need the B1.9 backup proof', async () => {
+  const overlap = () => ({
+    projectHostedOverlapAcks: rowsFor('projectHostedOverlapAcks', 3),
+    projectHostedAckBatches: rowsFor('projectHostedAckBatches', 2),
+    projectHostedOverlapDeliveries: rowsFor('projectHostedOverlapDeliveries', 4),
+  });
+  const now = new Date('2026-11-10T13:00:00Z');
+  await temporary(async directory => {
+    const source = fake(overlap());
+    await exportTables(source, directory + '/out', { deployment: 'dev-a' });
+    const plan = await purgePlan(source, directory + '/out', {});
+    const lead = patch => ({
+      ...approvalFor(plan, { backupFixClosed: false, alertReceived: false, verifiedBackup: null }),
+      approvedBy: 'lead',
+      leadDecision: 'standing cleanup rule: dropped tables, exported, dev only',
+      issue: '853fcde3-3c8a-47e0-ac75-5e9b9be7e5d2',
+      ...patch,
+    });
+    assert.doesNotThrow(() => checkApproval(lead({}), plan, { now }));
+    for (const patch of [{ leadDecision: '' }, { issue: undefined }])
+      assert.throws(() => checkApproval(lead(patch), plan, { now }), { code: 'APPROVAL_INVALID' });
+    assert.throws(() => checkApproval(lead({ manifestSha256: 'f'.repeat(64) }), plan, { now }), {
+      code: 'APPROVAL_MISMATCH',
+    });
+  });
+  await temporary(async directory => {
+    const source = fake({ ...overlap(), projectPublications: rowsFor('projectPublications', 1) });
+    await exportTables(source, directory + '/out', { deployment: 'dev-a' });
+    const plan = await purgePlan(source, directory + '/out', { deployedAt });
+    const withoutBackup = {
+      ...approvalFor(plan, { verifiedBackup: null }),
+      leadDecision: 'standing cleanup rule',
+      issue: '853fcde3-3c8a-47e0-ac75-5e9b9be7e5d2',
+    };
+    assert.throws(() => checkApproval(withoutBackup, plan, { deployedAt, now }), {
+      code: 'APPROVAL_BACKUPS_INSUFFICIENT',
+    });
   });
 });
 
@@ -365,8 +405,8 @@ test('definition blockers name live code that still reads retired tables (schema
     await readFile(join(root, 'convex/ownerAcceptanceFields.ts'), 'utf8'),
     await readFile(join(root, 'convex/projectPublicationFields.ts'), 'utf8'),
   ].join('\n');
-  for (const table of Object.keys(RETIRED_TABLES))
-    assert.match(schema, new RegExp(`\\b${table}: defineTable`));
+  for (const [table, { gate }] of Object.entries(RETIRED_TABLES))
+    if (gate !== 'exported') assert.match(schema, new RegExp(`\\b${table}: defineTable`));
 });
 
 test('command parsing refuses unsafe combinations', () => {

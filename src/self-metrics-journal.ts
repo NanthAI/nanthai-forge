@@ -9,7 +9,6 @@ import { workActorSchema, type WorkActor } from './work-actor.js';
 import type { DiskSample } from './self-metrics-disk.js';
 import type { MetricObservation } from './self-metrics-observations.js';
 import { sampleSelfMetricDisk } from './self-metrics-disk.js';
-import { recordLifecycleOverlap } from './self-metrics-overlap.js';
 import { READ_ONLY_ACTIONS } from './agent-read-actions.js';
 
 export type Requester = {
@@ -18,7 +17,6 @@ export type Requester = {
   /** `account`: a hosted receipt written before agent/person was recorded; only the account is known. */
   actor: WorkActor | { kind: 'system'; name: string } | { kind: 'account'; name: string };
   origin: 'command' | 'system';
-  savedHead?: { laneId: string; head: string };
 };
 export type SelfMetricReceipt = Requester & {
   schema: 1;
@@ -127,10 +125,6 @@ export function readSelfMetricReceipts(directory: string, name = 'self-metrics.j
 export function metricRequesterActor(actor: WorkActor) {
   const current = request.getStore();
   if (current) current.actor = actor;
-}
-export function metricSavedHead(laneId: string, head: string) {
-  const current = request.getStore();
-  if (current) current.savedHead = { laneId, head };
 }
 export function metricOperationId(operationId: string) {
   const current = request.getStore();
@@ -253,8 +247,6 @@ export async function withLifecycleMetric<T>(
               ]
             : [],
       );
-      if (['checkpoint', 'finish', 'land'].includes(action))
-        recordLifecycleOverlap(directory, input, response, current, name);
       return response;
     } catch (error) {
       errorCode = error instanceof ForgeError ? error.code : 'INTERNAL_ERROR';

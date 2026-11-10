@@ -134,7 +134,7 @@ export async function execute(
       operation: 'purge',
       dryRun: true,
       wouldDelete: false,
-      deletion: 'not performed; --execute needs the owner approval record and operation ID',
+      deletion: 'not performed; --execute needs the approval record and operation ID',
       ...plan,
       definitionRemovalBlockers: await definitionBlockers(root),
     };

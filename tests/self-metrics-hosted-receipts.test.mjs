@@ -77,13 +77,8 @@ test('caller receipts ride on a successful CLI mutation, bound to its project an
   const request = f.request();
   await enqueue(request, JSON.stringify(carried));
   const rows = receiptRows(f);
-  assert.deepEqual(rows.map(row => row.kind).sort(), ['delivery', 'first-write', 'outcome']);
-  assert.deepEqual(JSON.parse(rows.find(row => row.kind === 'first-write').value), {
-    count: 2,
-    laneId: firstWrite.laneId,
-    paths: ['src/shared.ts'],
-    writeId: firstWrite.writeId,
-  });
+  // An older client's first-write receipt (retired metric 5.4) is skipped, never stored or refused.
+  assert.deepEqual(rows.map(row => row.kind).sort(), ['delivery', 'outcome']);
   assert(rows.every(row => row.projectId === f.projectId && row.actor === 'owner'));
   assert.deepEqual(JSON.parse(rows.find(row => row.kind === 'outcome').value), {
     action: 'finish',
@@ -352,12 +347,6 @@ test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and 
     ['set-policy', 14, 'person'],
   ])
     receipt('mutation', 'owner', at(minutes), { action, operationId: randomUUID(), actorKind });
-  receipt('first-write', 'owner', at(15), {
-    laneId: randomUUID(),
-    writeId: 'b'.repeat(64),
-    count: 1,
-    paths: ['src/shared.ts'],
-  });
   const window = { from: at(0), to: at(600) };
   const read = async () => metricsSurface((await readHostedMetricPages(f.query, window)).records, window);
   let totals = (await read()).totals;
@@ -385,9 +374,7 @@ test('hosted reader makes 5.2, 5.3 and 5.5 complete after collection starts and 
       ['person:owner', 2],
     ],
   );
-  // A hosted first write that delivered notices counts in 5.4.
-  assert.equal(totals['5.4'].firstWrites, 1);
-  assert.equal(totals['5.4'].firstWriteAlerts, 1);
+  assert.equal(totals['5.4'], undefined, 'metric 5.4 was retired with path notices (Issue 853fcde3)');
   // A caller that never reported keeps both caller metrics partial; it is not a zero.
   request(randomUUID(), at(60), 'terminal-failed');
   totals = (await read()).totals;

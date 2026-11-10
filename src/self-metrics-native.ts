@@ -101,10 +101,6 @@ export function nativeSelfMetricsReader(
         supplemental.push({ type: 'culprit', id: `culprit:${id}`, landingId: id, at: move.at });
       }
       const coverage = {
-        overlaps: receipts.find(r => r.observation?.type === 'save')?.at,
-        overlapAnswers: receipts.find(
-          r => r.observation?.type === 'overlap-delivery' && r.observation.via === 'hook',
-        )?.at,
         lifecycle: receipts.find(r => r.kind === 'lifecycle')?.at,
         mutations: receipts.find(r => r.kind === 'mutation')?.at,
         deliveries: receipts.find(r => r.kind === 'lifecycle')?.at,

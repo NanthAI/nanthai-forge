@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-import { withCallerOverlaps } from './agent-caller-overlaps.js';
 import { hostedRootRequired } from './agent-root.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { HostedAgentTransport } from './hosted-agent-transport.js';
@@ -43,9 +42,7 @@ export async function startMcp(
   async function result(action: () => unknown | Promise<unknown>) {
     try {
       return {
-        content: [
-          { type: 'text' as const, text: JSON.stringify(await withCallerOverlaps(root, await action())) },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(await action()) }],
       };
     } catch (error) {
       const failure = {
@@ -56,7 +53,7 @@ export async function startMcp(
       };
       return {
         isError: true,
-        content: [{ type: 'text' as const, text: JSON.stringify(await withCallerOverlaps(root, failure)) }],
+        content: [{ type: 'text' as const, text: JSON.stringify(failure) }],
       };
     }
   }

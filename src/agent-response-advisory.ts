@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { withQueueSlot } from './landing-queue.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { writeRecoveryState } from './recovery-state.js';
-import { indexedReceiptPeers, retainIndexedPeers, recordIndexedOverlapSave } from './agent-receipt-peers.js';
+import { indexedReceiptPeers, retainIndexedPeers } from './agent-receipt-peers.js';
 import { scheduleIntegrationPreview } from './integration-preview-auto.js';
 import { frictionReceipt } from './friction-auto.js';
 import { overlapReceipt } from './agent-overlap-receipt.js';
@@ -57,7 +57,6 @@ export async function agentResponseAdvisory(
       },
     };
   }
-  if (indexed && command.action === 'checkpoint') await recordIndexedOverlapSave(store, command.laneId);
   const friction = delivered ? frictionReceipt(store, command, response.result) : {};
   const ownershipStop =
     command.action === 'take' && (response.result as { status: string }).status === 'ownership';
@@ -65,7 +64,7 @@ export async function agentResponseAdvisory(
     !delivered ||
     ownershipStop ||
     command.action === 'handoff' ||
-    ['pre-edit', 'install-hooks', 'uninstall-hooks'].includes(command.action) ||
+    ['install-hooks', 'uninstall-hooks'].includes(command.action) ||
     READ_ONLY_ACTIONS.has(command.action)
       ? undefined
       : recordAgentActivity(store, command, response.result, false, liveMcp ? 'MCP call' : undefined);
@@ -99,10 +98,7 @@ export async function agentResponseAdvisory(
     try {
       overlapCoverage = await retryWorkPhase(
         command.operationId!,
-        () =>
-          store.observing(() =>
-            recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT, command.action === 'checkpoint'),
-          ),
+        () => store.observing(() => recordOverlapAlerts(store, command.laneId, RECEIPT_PEER_LIMIT)),
         ['SOURCE_CHANGED'],
       );
     } catch {

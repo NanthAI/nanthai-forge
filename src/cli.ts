@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 import { printedReceipt } from './receipt-slim.js';
-import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import type { ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
@@ -353,10 +352,7 @@ if (syncPending) {
 }
 try {
   invariant(supportedNode(), 'UNSUPPORTED_NODE', nodeRequirement);
-  const output = await withCallerOverlaps(
-    process.argv[3] ?? process.cwd(),
-    await main(process.argv.slice(2)),
-  );
+  const output = await main(process.argv.slice(2));
   if (syncPending) {
     invariant(
       output && typeof output === 'object' && 'pushed' in output,
@@ -367,10 +363,6 @@ try {
     const reason = (output as { reason?: unknown }).reason;
     process.exitCode = output.pushed === true || reason === 'dry-run' || reason === 'nothing-to-push' ? 0 : 1;
     syncPending = false;
-  }
-  if (Array.isArray(output)) {
-    const overlaps = await callerOverlaps(process.argv[3] ?? process.cwd());
-    if (overlaps) process.stderr.write(JSON.stringify({ unacknowledgedOverlaps: overlaps }) + '\n');
   }
   if (output !== undefined) {
     // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
@@ -418,9 +410,7 @@ try {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);
   } else {
-    process.stderr.write(
-      `${JSON.stringify(await withCallerOverlaps(process.argv[3] ?? process.cwd(), { error: failure }))}\n`,
-    );
+    process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
   }
   process.exitCode = 1;
 }

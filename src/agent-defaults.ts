@@ -86,7 +86,6 @@ export function resolveAgentDefaults(
     case 'decide':
     case 'friction':
     case 'friction-triage':
-    case 'peer-ack':
       next = { ...command, operationId: pin('operationId', command.operationId, randomUUID) };
       break;
     case 'checkpoint':

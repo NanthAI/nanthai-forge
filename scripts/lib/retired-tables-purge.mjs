@@ -76,6 +76,14 @@ export function checkApproval(record, plan, { deployedAt, now = new Date() }) {
     Object.keys(plan.tables).some(table => !record.tables.includes(table))
   )
     throw failure('APPROVAL_MISMATCH');
+  // Dropped tables exported to private storage need no backup attestation: the verified export
+  // (live rows must equal it before any deletion) plus the named lead decision and Issue.
+  const populated = Object.entries(plan.tables).filter(([, entry]) => entry.rows > 0);
+  // A replay after completion has nothing left to delete.
+  if (populated.length && populated.every(([table]) => RETIRED_TABLES[table].gate === 'exported')) {
+    if (!text(record.leadDecision) || !text(record.issue)) throw failure('APPROVAL_INVALID');
+    return;
+  }
   if (!deployedAt) throw failure('DEPLOY_TIME_REQUIRED');
   const backup = record.verifiedBackup;
   const completedAt = at(backup?.completedAt);

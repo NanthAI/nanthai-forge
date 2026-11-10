@@ -95,7 +95,6 @@ test('hand-computed authority seam keeps hosted acceptances/costs, removes stale
   assert.equal(result.totals['5.3'].dropped, null, 'confirmed acceptance is not a dropped landing');
   assert.equal(result.totals.R.sources[0].minutes, null, 'check name/status is not full-suite evidence');
   assert.equal(result.totals['5.2'].errors, null);
-  assert.equal(result.totals['5.4'].delivered, null);
   assert(result.totals['5.6'].gaps.some(gap => gap.includes('Authority seam')));
 });
 

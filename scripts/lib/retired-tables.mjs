@@ -6,11 +6,17 @@ import { failure } from './hosted-durability-compare.mjs';
 
 // Phase 5 B1.9: tables whose writers B1.6-B1.8 deleted. `indexes` counts declared indexes
 // (each deleted row also removes one entry per index plus the creation-time index).
+// `gate` (default 'backup') is what a purge approval must prove for a populated table: the B1.9 backup
+// attestation, or for 'exported' tables only the verified export plus the named lead decision and Issue.
 export const RETIRED_TABLES = {
   projectPublicationAttempts: { indexes: 2 },
   projectPublications: { indexes: 2 },
   projectPublicationPages: { indexes: 2 },
   projectReturnSupersessions: { indexes: 1 },
+  // Overlap answers, removed with path notices (Issue 853fcde3); indexes counted from the dropped definitions.
+  projectHostedOverlapAcks: { indexes: 4, gate: 'exported' },
+  projectHostedAckBatches: { indexes: 2, gate: 'exported' },
+  projectHostedOverlapDeliveries: { indexes: 2, gate: 'exported' },
 };
 // Optional fields on live rows. Reported only: live code still reads them, so they are not purged here.
 export const REPORT_ONLY_FIELDS = [

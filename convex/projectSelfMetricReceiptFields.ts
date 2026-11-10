@@ -11,6 +11,7 @@ export const selfMetricReceiptTables = {
       v.literal('outcome'),
       v.literal('delivery'),
       v.literal('mutation'),
+      // Retired kind (metric 5.4, Issue 853fcde3): no new rows, stored rows stay valid and unread.
       v.literal('first-write'),
     ),
     actor: v.string(),
