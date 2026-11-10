@@ -653,6 +653,32 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
   assert.deepEqual(merge.outcomes, ['written']);
   assert.equal(described, 0);
   assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(merged)))), merged);
+
+  // With `defer` (the Convex transport; scratch merge +0.9 s 2026-11-10), publishMany returns
+  // before the tree's PUT is confirmed, so that PUT runs beside the overlapped uploads; no pointer
+  // exists until the deferred work settles, which the transport awaits before its commit.
+  const again = Buffer.from(JSON.stringify({ ...JSON.parse(merged.toString()), message: 'merge again' }));
+  let open;
+  const gate = new Promise(resolve => (open = resolve)),
+    confirmed = store.put,
+    deferred = [];
+  store.put = async bytes => (await gate, confirmed(bytes));
+  const late = wiring(store, pointers);
+  await new MemorySourceReader(source, {
+    trees: { ...late.trees, defer: work => deferred.push(work) },
+    describeBatch: async ids => ((described += ids.length), []),
+    read: async () => assert.fail('a merge dual-write reads no blob here'),
+    upload: async (_pin, stream) => {
+      for await (const _part of stream);
+    },
+  }).publishMany([again]);
+  assert.equal(deferred.length, 1);
+  assert.deepEqual(late.outcomes, [], 'returned before the PUT was confirmed; no pointer yet');
+  open();
+  await Promise.all(deferred);
+  store.put = confirmed;
+  assert.deepEqual(late.outcomes, ['written']);
+  assert.deepEqual(Buffer.from(await cold(store, pointers.get(digest(again)))), again);
 });
 
 test('dual-write gate off the critical path (dogfood +0.6 s per save 2026-11-10): no pointer before the store confirms the write, and the written segment is never read back', async () => {

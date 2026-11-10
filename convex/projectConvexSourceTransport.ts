@@ -74,8 +74,11 @@ export function convexSourceTransport(
     small = new Map<string, string>(),
     // Overlapped writes in upload order, at most sourceIoConcurrency in flight.
     writing: Promise<SourceOutput>[] = [];
+  // Dual-write work handed over by the step (it never rejects): awaited here, beside the writes.
+  let treeWork: Promise<unknown> = Promise.resolve();
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
+    await treeWork;
     // A dual-write that overlapped its State's upload settled after that output was prepared.
     for (const output of outputs)
       if (output.stateParents && !output.stateTree && pointers.has(output.sha256))
@@ -157,6 +160,9 @@ export function convexSourceTransport(
             write: trees,
             read: treeRead,
             baseline: treeBaseline,
+            defer: work => {
+              treeWork = Promise.all([treeWork, work]);
+            },
             derived: (state, ok) => {
               if (ok) tree.derived++;
               else tree.refused ??= { state, code: 'SOURCE_DIGEST_MISMATCH' };

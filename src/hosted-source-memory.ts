@@ -18,6 +18,9 @@ export class MemoryMergeSource extends LazyMergeSource {
   /** Merge reader (trees): the first State with a tree pointer this calculation holds; other
    * States are rebuilt from their trees as differences from it. Parsed on first use. */
   treeBase?: { state: string; bytes: Buffer; files?: readonly NativeFile[] };
+  /** The flat download that will become `treeBase`, while it runs: State reads that start
+   * meanwhile wait for it instead of also reading flat. */
+  treeBaseLoading?: { state: string; done: Promise<void> } | undefined;
   private readonly parsed = new Map<string, NativeState>();
   private cutList: string[] | undefined;
   private cutIds = new Set<string>();
@@ -120,6 +123,8 @@ export class MemoryMergeSource extends LazyMergeSource {
 /** No filesystem, checkout, import or repository execution. The cache belongs
  * to one bounded calculation and is discarded when its action returns. */
 export class MemorySourceReader extends SourceWorkerReader {
+  /** The dual-write of the States published so far, in order. */
+  private treeChain: Promise<void> = Promise.resolve();
   constructor(
     readonly source: MemoryMergeSource,
     private readonly io: SourceWorkerTransport,
@@ -134,7 +139,18 @@ export class MemorySourceReader extends SourceWorkerReader {
       return prior;
     }
     const trees = this.io.trees,
-      base = this.source.treeBase;
+      loading = this.source.treeBaseLoading;
+    // Only a State with a pointer can be rebuilt; any other read never waits.
+    if (
+      trees?.read &&
+      !ref.recipe &&
+      !this.source.treeBase &&
+      loading &&
+      loading.state !== ref.object.sha256 &&
+      trees.pointer(ref.object.sha256)
+    )
+      await loading.done;
+    const base = this.source.treeBase;
     if (trees?.read && base && !ref.recipe) {
       base.files ??= parseNativeState(base.bytes).files;
       const rebuilt = await manifestFromTree(trees, ref.object.sha256, {
@@ -148,6 +164,23 @@ export class MemorySourceReader extends SourceWorkerReader {
         return derived;
       }
     }
+    // The first flat State with a pointer becomes the merge reader's base (below).
+    let claimed: (() => void) | undefined;
+    if (trees?.read && !ref.recipe && !this.source.treeBase && !this.source.treeBaseLoading)
+      if (trees.pointer(ref.object.sha256)) {
+        const done = new Promise<void>(resolve => (claimed = resolve));
+        this.source.treeBaseLoading = { state: ref.object.sha256, done };
+      }
+    try {
+      return await this.download(ref, trees);
+    } finally {
+      if (claimed) {
+        this.source.treeBaseLoading = undefined;
+        claimed();
+      }
+    }
+  }
+  private async download(ref: WorkerObject, trees: SourceWorkerTransport['trees']): Promise<Buffer> {
     let bytes: Buffer;
     if (ref.recipe) {
       invariant(
@@ -244,6 +277,8 @@ export class MemorySourceReader extends SourceWorkerReader {
       window = new Map(bytes.map(value => [digest(value), value] as const));
     const written = (async () => {
       if (!trees) return;
+      // A later window may build on an earlier one's pointer.
+      await this.treeChain;
       for (const value of bytes) {
         if (!value.subarray(0, 256).includes('"kind":"forge-source-state"')) continue;
         await writeOutputTree(trees, value, {
@@ -266,7 +301,9 @@ export class MemorySourceReader extends SourceWorkerReader {
       }
     })();
     written.catch(() => {});
-    const [pins] = await Promise.all([super.publishMany(bytes), written]);
+    this.treeChain = written.catch(() => {});
+    if (trees?.defer) trees.defer(this.treeChain);
+    const [pins] = await Promise.all([super.publishMany(bytes), trees?.defer ? null : written]);
     for (let i = 0; i < pins.length; i++) this.source.objects.set(pins[i]!.sha256, bytes[i]!);
     return pins;
   }

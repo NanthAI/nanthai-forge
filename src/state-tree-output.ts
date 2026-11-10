@@ -22,6 +22,10 @@ export type StateTreeIo = {
   /** Self-heal: the nearest State with a proven pointer this step knows, searching the known
    * ancestry of these States (then any base the step was handed for this purpose). */
   nearest?(states: readonly string[]): string | undefined;
+  /** Dual-write work the step's `settle` awaits before it attaches pointers, so the work (its
+   * segment PUT above all) runs beside the uploads that overlap the rest of the step instead of
+   * in front of it. Without it the caller awaits the work itself. */
+  defer?(work: Promise<unknown>): void;
   /** `ms` is the wall time the dual-write added to the step. */
   settled(state: string, result: StateTreeDualResult, ms: number): void;
   /** Exact bytes of a raw object this project stores under its own key, read without a
