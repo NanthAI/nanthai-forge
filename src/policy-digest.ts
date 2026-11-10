@@ -2,6 +2,7 @@
 import { digest } from './portable-hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
+import { effectiveAgentDefaults } from './agent-parallel-defaults.js';
 
 /** The part of the policy that decides what a landing may accept: gate, mode, protected paths, auto
  * actors, checks, lifecycle and enforced trust. The preset is only a label (any edit turns it into
@@ -37,11 +38,15 @@ const legacyDigest = (policy: AutonomyPolicy) => {
 export const policyDigestCurrent = (policy: AutonomyPolicy, pinned: string) =>
   pinned === acceptancePolicyDigest(policy) || pinned === legacyDigest(policy);
 
-type GateClass = 'gated' | 'relax' | { exempt: string };
+/** `relax` holds a change only when it lowers owner oversight: `held(previous, next)` says when. */
+type Relax = { relax: string; held: (previous: AutonomyPolicy, policy: AutonomyPolicy) => boolean };
+type GateClass = 'gated' | Relax | { exempt: string };
+const alertsOf = (policy: AutonomyPolicy) => effectiveAgentDefaults(policy.agentDefaults).stallAlerts;
+const landingModeOf = (policy: AutonomyPolicy) => policy.acceptance.landingMode ?? 'strict';
 const notLanding = 'the landing check still decides what lands';
-const alerts = 'when and how alerts go out; webhook destinations come from deployment settings, not policy';
+const timing = 'alert timing, capped by the schema (first alert within 24 h, repeat within 48 h)';
 /** The owner gate (Issue 470ef29b): how an agent sign-in's policy edit is decided, per field. `gated`
- * holds any change for the owner person; `relax` holds a change away from the safe value; an exempt
+ * holds any change for the owner person; `relax` holds a change that lowers owner oversight; an exempt
  * field applies at once, for the stated reason. A field that is not listed is gated, and a test fails
  * until it is listed (tests/public-governance.test.mjs). */
 export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
@@ -76,10 +81,18 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'agentDefaults.autoClaim': { exempt: 'board notes about touched paths' },
   'agentDefaults.dormantAfterDays': { exempt: 'marks idle Lanes in listings; nothing is removed' },
   'agentDefaults.stacking': { exempt: `where a Lane is based before its check; ${notLanding}` },
-  'agentDefaults.stallAlerts.enabled': { exempt: alerts },
-  'agentDefaults.stallAlerts.notifyAfterMinutes': { exempt: alerts },
-  'agentDefaults.stallAlerts.repeatAfterMinutes': { exempt: alerts },
-  'agentDefaults.stallAlerts.webhook': { exempt: alerts },
+  // Turning alerts off removes owner oversight, like relaxing the landing mode; turning them on is free.
+  'agentDefaults.stallAlerts.enabled': {
+    relax: 'turning alerts off is held',
+    held: (previous, policy) => alertsOf(previous).enabled && !alertsOf(policy).enabled,
+  },
+  'agentDefaults.stallAlerts.notifyAfterMinutes': { exempt: timing },
+  'agentDefaults.stallAlerts.repeatAfterMinutes': { exempt: timing },
+  // The webhook URL comes from deployment settings; switching the message format among presets is free.
+  'agentDefaults.stallAlerts.webhook': {
+    relax: 'turning the webhook off is held',
+    held: (previous, policy) => alertsOf(previous).webhook !== 'off' && alertsOf(policy).webhook === 'off',
+  },
   // Recipients are who receives project notices outside Forge.
   'agentDefaults.stallAlerts.email': 'gated',
   'acceptance.mode': 'gated',
@@ -88,7 +101,11 @@ export const OWNER_GATE: Readonly<Record<string, GateClass>> = {
   'acceptance.autoRevert': 'gated',
   'acceptance.hostedCrossHeadReuse': 'gated',
   // Outside the pinned digest so queued landings survive a switch; back to strict needs no one.
-  'acceptance.landingMode': 'relax',
+  'acceptance.landingMode': {
+    relax: 'switching fast landing on is held',
+    held: (previous, policy) =>
+      landingModeOf(policy) !== 'strict' && landingModeOf(policy) !== landingModeOf(previous),
+  },
   'acceptance.scopedRecheck': 'gated',
   'acceptance.landing': 'gated',
   'acceptance.admissionCheck': 'gated',
@@ -136,8 +153,9 @@ function pruned(value: unknown): unknown {
     .filter(([, item]) => item !== undefined);
   return kept.length ? Object.fromEntries(kept) : undefined;
 }
-const landingMode = (policy: AutonomyPolicy) => policy.acceptance.landingMode ?? 'strict';
 /** True when an agent sign-in's edit from `previous` to `policy` needs the owner person. */
 export const ownerGated = (previous: AutonomyPolicy, policy: AutonomyPolicy) =>
   canonicalPayload(gateView(previous) ?? null) !== canonicalPayload(gateView(policy) ?? null) ||
-  (landingMode(policy) !== 'strict' && landingMode(policy) !== landingMode(previous));
+  Object.values(OWNER_GATE).some(
+    rule => typeof rule === 'object' && 'held' in rule && rule.held(previous, policy),
+  );

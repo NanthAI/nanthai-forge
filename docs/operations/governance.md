@@ -64,10 +64,11 @@ Two cases apply directly and say so: an agent's writes on a project with no acce
 landing yet (`rule:"bootstrap"`, so scratch, zoo and bench setup keep working), and
 policy edits that change only fields listed as exempt in `OWNER_GATE`
 (`src/policy-digest.ts`: most `agentDefaults`, `notify.awaySummary`, the `preset` label,
-trust in shadow mode, and a switch back to strict landing: `rule:"no-gate-change"`). Each
+trust in shadow mode, and relax-only fields moved toward more oversight: `rule:"no-gate-change"`). Each
 exempt field states its reason there. Every other field is held, including alert email
-recipients, switching fast landing on and any field not yet listed; a test fails until a
-new policy field is listed. The owner person's writes are
+recipients and any field not yet listed; a test fails until a new policy field is listed.
+Relax-only fields are held only when a change lowers owner oversight: switching fast landing
+on, or turning stall alerts or their webhook off. Turning them back on applies at once. The owner person's writes are
 `rule:"owner-person"`; granted ones are `rule:"owner-approved"`. Settings requests
 never hold a landing and the landing path reads nothing more for them; a held write
 costs one approval-row write, and the bootstrap test one indexed read on agent

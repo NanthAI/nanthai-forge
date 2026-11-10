@@ -1062,7 +1062,8 @@ test('every set-policy field is classified for the owner gate, and an unlisted f
     'no stale entries',
   );
   for (const [field, rule] of Object.entries(OWNER_GATE))
-    if (typeof rule === 'object') assert.ok(rule.exempt.length > 10, `${field} states why it is exempt`);
+    if (typeof rule === 'object')
+      assert.ok((rule.exempt ?? rule.relax).length > 10, `${field} states why it is exempt or relax-only`);
   const base = policyPreset('trusted');
   // Deny by default: a field the table does not know about is held.
   assert.equal(ownerGated(base, { ...base, futureField: true }), true);
@@ -1070,6 +1071,32 @@ test('every set-policy field is classified for the owner gate, and an unlisted f
   // Exempt fields apply at once, also when their object was absent before.
   assert.equal(ownerGated(base, { ...base, agentDefaults: { stacking: 'auto' } }), false);
   assert.equal(ownerGated(base, { ...base, notify: { awaySummary: false } }), false);
+  // Owner oversight is relax-only: an agent cannot turn stall alerts or their webhook off alone,
+  // turning them on or changing their timing is free, and the schema caps timing so it cannot silence them.
+  const { stallAlertsSchema } = await import('../dist/agent-parallel-defaults.js');
+  const alerting = { ...base, agentDefaults: { stallAlerts: { enabled: true, webhook: 'ntfy' } } };
+  const alerts = stallAlerts => ({ ...base, agentDefaults: { stallAlerts } });
+  assert.equal(ownerGated(alerting, alerts({ enabled: false, webhook: 'ntfy' })), true);
+  assert.equal(ownerGated(alerting, alerts({ enabled: true, webhook: 'off' })), true);
+  assert.equal(ownerGated(base, alerts({ enabled: false })), true, 'alerts are on by default');
+  assert.equal(ownerGated(alerts({ enabled: false, webhook: 'off' }), alerting), false);
+  assert.equal(ownerGated(alerting, alerts({ enabled: true, webhook: 'slack' })), false);
+  assert.equal(
+    ownerGated(
+      alerting,
+      alerts({ enabled: true, webhook: 'ntfy', notifyAfterMinutes: 1440, repeatAfterMinutes: 2880 }),
+    ),
+    false,
+  );
+  assert.equal(stallAlertsSchema.safeParse({ notifyAfterMinutes: 1441 }).success, false);
+  assert.equal(
+    stallAlertsSchema.safeParse({ notifyAfterMinutes: 1440, repeatAfterMinutes: 2881 }).success,
+    false,
+  );
+  // Fast landing is relax-only too: on is held, back to strict is free.
+  const fast = { ...base, acceptance: { ...base.acceptance, landingMode: 'fast' } };
+  assert.equal(ownerGated(base, fast), true);
+  assert.equal(ownerGated(fast, base), false);
   // Trust in shadow mode changes no gate; enabling it does.
   assert.equal(ownerGated(base, { ...base, trust: { enabled: false, trustedAt: 3 } }), false);
   assert.equal(ownerGated(base, { ...base, trust: { enabled: true } }), true);
