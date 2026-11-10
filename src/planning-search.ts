@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { getDocumentSize } from 'convex/values';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import type { IndexEntry } from './work-hosted-index.js';
 import type { PlanningItem } from './work-planning-types.js';
 

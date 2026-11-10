@@ -11,7 +11,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 /** Verified checkout source is also a cache. Evicting objects must never force a
  * refresh to download unchanged source. Installation verifies these clones again.
  * Publish independent cache copies atomically, including concurrent/retried pulls. */

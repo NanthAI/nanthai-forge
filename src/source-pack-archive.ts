@@ -9,7 +9,7 @@ import { pipeline, finished } from 'node:stream/promises';
 import { createGzip, createGunzip } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { digest } from './hash.js';
-import type { NativeState, NativeFile } from './native-state-format.js';
+import type { NativeState, NativeFile } from './state/format.js';
 import { invariant } from './errors.js';
 import { sourcePackBytes, sourcePackTreeBytes, sourcePackFileBytes, type SourcePack } from './source-pack.js';
 

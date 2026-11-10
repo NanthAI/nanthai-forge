@@ -16,7 +16,7 @@ import { NativeSource } from './native-source.js';
 import { receiptSchema } from './work-run-receipt.js';
 import type { CheckRun } from './work-types.js';
 import type { WorkStore } from './work-store.js';
-import { syncDirectory, syncReadOnlyDescriptor } from './native-durability.js';
+import { syncDirectory, syncReadOnlyDescriptor } from './state/durability.js';
 
 type StoreAccess = Pick<WorkStore, 'root'>;
 /** Validate and flush retained evidence before authorizing removal of its disposable copy. */

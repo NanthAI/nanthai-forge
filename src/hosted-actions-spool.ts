@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, opendir, link, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { syncDirectoryAsync } from './native-durability.js';
+import { syncDirectoryAsync } from './state/durability.js';
 import {
   outputStreamId,
   outputChunkSchema,

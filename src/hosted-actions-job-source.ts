@@ -3,7 +3,7 @@ import { mkdir, copyFile, chmod, symlink, rm, readlink, lstat, stat, readFile } 
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { SourceWorkerReader } from './hosted-source-worker-reader.js';
-import { parseNativeState, type NativeState } from './native-state-format.js';
+import { parseNativeState, type NativeState } from './state/format.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
 import { fileDigest, downloadSourcePack, unpackSourcePack } from './source-pack-archive.js';

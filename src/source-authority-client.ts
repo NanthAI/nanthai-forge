@@ -15,7 +15,7 @@ import { requireOwnerDrained } from './hosted-agent-owner-drain.js';
 import { digest } from './hash.js';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { parseHostedResponse } from './hosted-response.js';
 

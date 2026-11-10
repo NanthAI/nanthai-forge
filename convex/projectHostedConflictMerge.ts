@@ -9,7 +9,7 @@ import { rawContent } from './projectObjectContent';
 import { r2Config, presignGet, r2Key } from './r2';
 import { exchangeFetch } from '../src/exchange-request';
 import { digest } from '../src/hash';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { trialMerge, TrialUnavailable } from '../src/hosted-trial-merge';
 import { mergePathsOf } from '../src/native-docs-resolve';
 import { FORGE_CONFIG_FILE, type DeclaredMergePaths } from '../src/project-config';

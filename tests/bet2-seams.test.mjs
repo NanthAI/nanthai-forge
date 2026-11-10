@@ -7,7 +7,7 @@ import { checkGateSchema, mainGateSchema } from '../dist/bet2-gate.js';
 import { hostedCheckRequestSchema, hostedCheckRunSchema } from '../dist/hosted-check.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { hostedRecordSchema } from '../dist/hosted-records.js';
-import { stateSchema } from '../dist/native-state-format.js';
+import { stateSchema } from '../dist/state/format.js';
 import { semanticPayload } from '../dist/semantic-payload.js';
 import { checksFixture } from './hosted-checks-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';

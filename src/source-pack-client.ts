@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { makeFunctionReference } from 'convex/server';
 import { sourcePackDownloadSchema, type SourcePackDownload } from './source-pack.js';
 import { createSourcePack } from './source-pack-archive.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { HostedCheckoutCache, type CheckoutObjectTransport } from './hosted-checkout-cache.js';
 import { invariant } from './errors.js';
 

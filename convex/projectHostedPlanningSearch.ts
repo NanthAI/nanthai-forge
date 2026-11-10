@@ -5,7 +5,7 @@ import { query } from './cliServer';
 import { recordCaller } from './projectHostedFrictionStore';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { planningIdPrefix, planningSearchTerms } from '../src/planning-search';
 import { workHead } from './projectWorkHead';
 import { invariant } from '../src/errors';

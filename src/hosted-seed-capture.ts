@@ -7,11 +7,11 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync } from 'nod
 import { join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { NativeSource } from './native-source.js';
 import { nativeReachable } from './native-reachable.js';
 import { buildWorkRecords, recordBytes } from './work-exchange-records.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { retainExchangeMetadata } from './exchange-receive-cache.js';
 import { buildExchangeRoot } from './native-exchange-tree.js';
 import { nativeManifestSchema, sourceManifestSchema } from './work-archive-metadata.js';

@@ -3,7 +3,7 @@
 // the paged copy, the read-only compare and the dual write, so all three agree on one shape.
 import { planningItemSchema, planningCommentSchema } from './work-planning-types.js';
 import { noteSchema } from './work-types.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import type { HostedRecord } from './hosted-records.js';
 
 /** Journal index collections the copy moves, in copy order. */

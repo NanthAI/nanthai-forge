@@ -3,7 +3,7 @@ import { convexFetch, networkTimeout } from './networkFetch';
 import type { ActionCtx } from './server';
 import type { Id } from './_generated/dataModel';
 import { makeFunctionReference } from 'convex/server';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { r2Config, r2Key, presignGet } from './r2';
 import { storeSourceBytes } from './projectSourceBytes';

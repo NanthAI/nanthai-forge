@@ -3,7 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { metricReadProjection, metricRunKind } from './projectMetricReadProjection';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 
 /** Reuse canonical rows the mutation already read. The compact row's identity/digest ride on
  * the canonical write, so upkeep needs neither another lookup nor a status-observer change. */

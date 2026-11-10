@@ -12,7 +12,7 @@ import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { captureHostedSave } from './hosted-save-capture.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { advanceMarkerMetadata } from './hosted-marker-advance.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { canonicalPayload } from './hosted-source-operation.js';

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { classifyOverlap, type OverlapEvidence, type OverlapClass } from './hosted-overlap-evidence.js';
 import { crossFileSymbolNote, symbolFacts, symbolNoteText } from './hosted-overlap-symbol-notes.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { agentActor } from './agent-slug.js';
 import { hotFiles, inScope } from './hosted-overlap-coordination.js';
 

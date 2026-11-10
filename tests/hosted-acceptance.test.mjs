@@ -9,7 +9,7 @@ import { policyPreset as preset } from '../dist/autonomy-policy.js';
 // Server preflight gate (Issue 029138ef) has its own tests (hosted-landing-desired.test.mjs).
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { acceptancePolicyDigest, policyDigestCurrent } from '../dist/policy-digest.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { moduleUrl } from './convex-module.mjs';
 const lanes = await import(moduleUrl('../convex/projectHostedLanes.ts'));

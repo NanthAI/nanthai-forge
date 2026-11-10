@@ -11,7 +11,7 @@ import { policyPreset as preset } from '../dist/autonomy-policy.js';
 const policyPreset = name => ({ ...preset(name), agentDefaults: { preflight: 'advise' } });
 import { hostedRecordSchema } from '../dist/hosted-records.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
-import { stateSchema } from '../dist/native-state-format.js';
+import { stateSchema } from '../dist/state/format.js';
 import { moduleUrl } from './convex-module.mjs';
 const gate = await import(moduleUrl('../convex/projectHostedGate.ts'));
 const at = '2026-01-01T00:00:00.000Z',

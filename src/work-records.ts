@@ -24,7 +24,7 @@ import { readSource } from './files.js';
 import { assertCurrentWorkFormat } from './work-format.js';
 import { invariant } from './errors.js';
 import { indexBuild, recordKeys, validateIndex, type IndexIO } from './work-record-index.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const collectionSchema = z.object({
   count: z.number().safe().nonnegative(),

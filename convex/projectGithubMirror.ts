@@ -15,7 +15,7 @@ import {
   type MirrorIO,
 } from '../src/hosted-github-mirror';
 import { MemorySourceReader, MemoryMergeSource } from '../src/hosted-source-memory';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format';
 import { ForgeError, invariant } from '../src/errors';
 import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';

@@ -17,7 +17,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { readSource } from './files.js';
 import { invariant } from './errors.js';
 import { summarizeCheckLines, summarizeExecutions } from './check-report-summary.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 
 const coverageAtEnd = (text: string) =>
   text

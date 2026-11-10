@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { cloneNativePath, type NativeClone } from './native-clone.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { syncDirectory, syncFile } from './state/durability.js';
 import type { NativeSource } from './native-source.js';
 
 /** A snapshot is already a logical clone of its parent's manifest. Clone only

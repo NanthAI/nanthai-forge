@@ -2,7 +2,7 @@
 import { open, mkdir, rename } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { syncDirectory } from '../../dist/native-durability.js';
+import { syncDirectory } from '../../dist/state/durability.js';
 /** Fsync the exact original mutation request before it can be sent. */
 export async function privateJson(path, value) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });

@@ -134,11 +134,11 @@ const noReadonlyFsync = {
     type: 'problem',
     docs: {
       description:
-        'fsync through a read-only handle (a directory, or a file opened only to flush it) fails with EPERM on Windows; use src/native-durability.ts helpers (incident 89460350: init-native failed on windows-latest).',
+        'fsync through a read-only handle (a directory, or a file opened only to flush it) fails with EPERM on Windows; use src/state/durability.ts helpers (incident 89460350: init-native failed on windows-latest).',
     },
     messages: {
       readonly:
-        'Windows refuses fsync on a read-only handle and has no directory fsync; use syncDirectory, syncFile, fileFlushFlags or syncReadOnlyDescriptor from native-durability.ts.',
+        'Windows refuses fsync on a read-only handle and has no directory fsync; use syncDirectory, syncFile, fileFlushFlags or syncReadOnlyDescriptor from state/durability.ts.',
     },
     schema: [],
   },
@@ -299,11 +299,11 @@ const renameOverDirectory = {
     type: 'problem',
     docs: {
       description:
-        'Renaming a directory onto a directory just created to claim its name works on POSIX but fails with EPERM on Windows; use publishDirectory from src/native-durability.ts (incident 89460350: import-native-git failed on windows-latest).',
+        'Renaming a directory onto a directory just created to claim its name works on POSIX but fails with EPERM on Windows; use publishDirectory from src/state/durability.ts (incident 89460350: import-native-git failed on windows-latest).',
     },
     messages: {
       rename:
-        'Windows cannot rename onto an existing directory; use publishDirectory from native-durability.ts.',
+        'Windows cannot rename onto an existing directory; use publishDirectory from state/durability.ts.',
     },
     schema: [],
   },

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { createWork } from './work-create.js';
 import { nativeManifestSchema } from './work-archive-metadata.js';
 import { materializeWork } from './work-hosted-index.js';

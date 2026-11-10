@@ -7,7 +7,7 @@ import { invariant } from './errors.js';
 import { recordObject } from './work-records.js';
 import { recordRoots } from './work-record-reachability.js';
 import { backupRecordsOwner, verifiedRecordBackup } from './work-record-backup.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import type { WorkStore } from './work-store.js';
 
 type StoreAccess = Pick<WorkStore, 'directory' | 'locked' | 'native' | 'revision' | 'root' | 'select'>;

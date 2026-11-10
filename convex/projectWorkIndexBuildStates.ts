@@ -11,7 +11,7 @@ import { indexReadContext, indexTransient } from './projectWorkIndexRetry';
 import { indexEntry } from './projectWorkIndexFields';
 import { sourceTreeEntries } from '../src/source-tree-index';
 import type { IndexEntry } from '../src/work-hosted-index';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { reviewPaths } from '../src/native-source-review';
 import { viewContributors } from '../src/view-read-model';
 import type { WorkData } from '../src/work-types';

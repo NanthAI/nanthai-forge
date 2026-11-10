@@ -5,7 +5,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { updateTimingHistory } from '../scripts/test-shards.mjs';
 import { readTimingHistory } from '../scripts/test-timings-file.mjs';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { NativeSource } from './native-source.js';
 import { workLocked } from './work-lock.js';
 import type { WorkStore } from './work-store.js';

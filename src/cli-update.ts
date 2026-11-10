@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError, invariant } from './errors.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { tryHeavySlot } from './heavy-slots.js';
 import { shareDependencies } from './shared-dependencies.js';

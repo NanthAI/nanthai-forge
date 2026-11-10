@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import type { WorkStore } from './work-store.js';
 
 type StoreAccess = Pick<WorkStore, 'directory'>;

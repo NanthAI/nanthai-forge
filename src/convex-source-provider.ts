@@ -5,7 +5,7 @@ import type {
   SourceLookup,
   SourceDispatchResult,
 } from './hosted-source-job.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 export const convexSourceWorker = 'forge-convex-source-v1';
 export const convexSourceRuntime = digest(convexSourceWorker);

@@ -12,7 +12,7 @@ import { existsSync } from 'node:fs';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import type { WorkStore } from './work-store.js';

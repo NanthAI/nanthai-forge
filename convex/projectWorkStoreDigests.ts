@@ -4,7 +4,7 @@ import { writeFingerprint as put } from './projectWorkStoreFingerprintWrites';
 import type { MutationCtx, QueryCtx } from './_generated/server';
 import type { Doc, Id } from './_generated/dataModel';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { hostedRecordValue, type HostedRecordRef } from '../src/hosted-records';
 import { journalRow, workStoreRecord, type WorkStoreSource } from '../src/work-store-records';
 import { record as indexed } from './projectWorkIndexStore';

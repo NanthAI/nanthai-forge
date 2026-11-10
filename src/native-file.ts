@@ -5,7 +5,7 @@ import { readSource, safeRelative } from './files.js';
 import { invariant } from './errors.js';
 import { gitlinkDirectory, gitlinkDirectoryPointer } from './gitlink-workspace.js';
 import { regularFileMode } from './file-mode.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { linkFallback } from './source-links.js';
 
 /** Read the link itself, never its target; reject redirected parent directories. */

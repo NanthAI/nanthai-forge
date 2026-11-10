@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { mkdirBelow } from './mkdir-below.js';
 import { processAlive } from './local-process.js';
 import type { WorkStore } from './work-store.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 
 type StoreAccess = Pick<WorkStore, 'directory'>;
 const schema = z.object({

@@ -7,7 +7,7 @@ import { refreshSourcePack } from './source-pack.js';
 import { directSourceWindow, sourceWindowOrder } from './hosted-actions-direct.js';
 import type { ActionsJobClient } from './hosted-actions-job-client.js';
 import type { materializeActionsSource } from './hosted-actions-job-source.js';
-import type { NativeState } from './native-state-format.js';
+import type { NativeState } from './state/format.js';
 import { digest } from './hash.js';
 import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
 import { invariant } from './errors.js';

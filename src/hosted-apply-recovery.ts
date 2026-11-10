@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { withSubmoduleCheckouts } from './submodule-checkout.js';
 import {
@@ -19,7 +19,7 @@ import { hostedLaneMarkerName } from './hosted-lane-checkout-marker.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { type LaneTransport } from './hosted-lane-checkout.js';
 import { hostedRecoveryCommand } from './hosted-agent-resolution.js';
-import { parseNativeState, parseNativeStateValue, type NativeFile } from './native-state-format.js';
+import { parseNativeState, parseNativeStateValue, type NativeFile } from './state/format.js';
 import { readFileSync } from 'node:fs';
 import { digest } from './hash.js';
 import { checkoutDelta, deltaObstructed, type CheckoutDelta } from './hosted-checkout-delta.js';

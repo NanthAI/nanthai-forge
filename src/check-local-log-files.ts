@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import {
   appendFileSync,
   existsSync,

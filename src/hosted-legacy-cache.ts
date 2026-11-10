@@ -14,7 +14,7 @@ import {
 import { dirname, join } from 'node:path';
 import { ForgeError, invariant } from './errors.js';
 import { createHash } from 'node:crypto';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 
 function verifiedObject(path: string, id: string) {
   const descriptor = openSync(path, 'r');

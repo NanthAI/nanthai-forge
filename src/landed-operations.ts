@@ -2,7 +2,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 
 /** Machine-local record of landing operations this client saw land, newest first per project
  * (edcb0fc8). The CLI canary's wait step uses only these: a landed `finish` operation is always

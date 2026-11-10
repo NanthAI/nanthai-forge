@@ -5,8 +5,8 @@ import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import { internalAction } from './_generated/server';
 import { internal } from './_generated/api';
 import { exchangeObjectReader } from './projectExchangeReader';
-import { deriveStateGenerationPage, orderStateGenerationDependencies } from '../src/state-generation-page';
-import { parseNativeState } from '../src/native-state-format';
+import { deriveStateGenerationPage, orderStateGenerationDependencies } from '../src/state/generation-page';
+import { parseNativeState } from '../src/state/format';
 import { invariant } from '../src/errors';
 const operator = { projectId: v.id('hostedProjects'), actor: v.string(), operationId: v.string() };
 type Schedule = {

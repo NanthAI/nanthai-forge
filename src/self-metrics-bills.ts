@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { metricObservationSchema, type MetricObservation } from './self-metrics-observation-schema.js';
 import type { MetricPeriod, MetricRecords } from './self-metrics-types.js';

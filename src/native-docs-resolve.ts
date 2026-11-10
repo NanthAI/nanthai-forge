@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { attributionEdits as edits, attributionLines as lines } from './native-text-merge.js';
 import { overlappingPaths, type NativeFile, type NativeSource } from './native-source.js';
-import { nativeMergeMessage, type NativeMergeResolution } from './native-merge.js';
+import { nativeMergeMessage, type NativeMergeResolution } from './state/merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import { conflictRule, markdownDoc, type ConflictRule } from './docs-resolution.js';
 import { declaredMergePaths, FORGE_CONFIG_FILE, type DeclaredMergePaths } from './project-config.js';

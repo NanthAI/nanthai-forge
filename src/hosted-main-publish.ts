@@ -12,7 +12,7 @@ import {
 import { dirname, join } from 'node:path';
 import { z } from 'zod';
 import { checkoutPathExists as exists } from './hosted-checkout-files.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { digest } from './hash.js';
 import { nativeFile } from './native-file.js';
 import { safeRelative } from './safe-relative.js';

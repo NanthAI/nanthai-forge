@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, type 
 import { join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { captureExclusion, readSource } from './files.js';
 import { preserveLegacyCacheUse } from './client-cache-use.js';
 import { ignoredBy, ignoreLayer } from './source-ignore.js';

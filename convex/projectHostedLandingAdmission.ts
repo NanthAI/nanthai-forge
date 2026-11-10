@@ -32,7 +32,7 @@ import {
   preQueueCheck,
   recordOutcome,
 } from '../src/hosted-landing-admission';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 
 type Selected = Awaited<ReturnType<typeof requireLandingLease>>;
 /** Stable per submission (and platform restart), so a replay reconciles the same run. */

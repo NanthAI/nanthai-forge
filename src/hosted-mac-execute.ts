@@ -21,7 +21,7 @@ import {
   checkoutPackMinimum,
   type CheckoutObjectTransport,
 } from './hosted-checkout-cache.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { installHostedCheckout } from './hosted-checkout-files.js';
 import { checkSubmodules, submoduleFailureCommand } from './submodule-materialize.js';
 import { checkEnvironment, checkProcessEnvironment, checkPassthrough } from './check-environment.js';

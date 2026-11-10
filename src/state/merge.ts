@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile, NativeSource } from './native-source.js';
-import { mergeFileMetadata } from './native-file-merge.js';
-import { NativeAncestry } from './native-ancestry.js';
-import { invariant } from './errors.js';
+import type { NativeFile, NativeSource } from '../native-source.js';
+import { mergeFileMetadata } from '../native-file-merge.js';
+import { NativeAncestry } from '../native-ancestry.js';
+import { invariant } from '../errors.js';
 import {
   mergeNativeText,
   type NativeInsertionOrder,
   type NativeTextResolution,
-} from './native-text-merge.js';
+} from '../native-text-merge.js';
 
 export type NativeMergeOptions = { insertionOrder?: NativeInsertionOrder };
 export type NativeMergeResolution = NativeTextResolution & { path: string };

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseNativeState, parseNativeStateValue } from '../dist/native-state-format.js';
+import { parseNativeState, parseNativeStateValue } from '../dist/state/format.js';
 const state = {
   schema: 1,
   kind: 'forge-source-state',

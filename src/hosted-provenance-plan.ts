@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { provenanceHistoryReply } from './hosted-provenance-schema.js';
-import type { NativeState } from './native-state-format.js';
+import type { NativeState } from './state/format.js';
 import type { FileProvenancePlan, ProvenanceFile } from './view-provenance-plan.js';
 
 type History = z.infer<typeof provenanceHistoryReply>;

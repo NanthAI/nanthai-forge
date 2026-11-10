@@ -8,7 +8,7 @@ import { checksFixture } from './hosted-checks-fixture.mjs';
 import { hostedRecordValue, hostedRecordSchema } from '../dist/hosted-records.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
 import { hostedCheckRunSchema, checkPin } from '../dist/hosted-check.js';
-import { stateSchema } from '../dist/native-state-format.js';
+import { stateSchema } from '../dist/state/format.js';
 import {
   culpritId,
   culpritProbeBudget,

@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { mapExchange } from './exchange-parallel.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { ForgeError, invariant } from './errors.js';
 import { spoolBackfill, putBackfill, sampleBackfill } from './r2-backfill-transfer.js';
 import { backfillKinds, type BackfillState, type BackfillTransport } from './r2-backfill-types.js';

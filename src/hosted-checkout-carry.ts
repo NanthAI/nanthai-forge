@@ -3,7 +3,7 @@ import { lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
 import type { CheckoutDelta } from './hosted-checkout-delta.js';
 import { diskMode } from './source-links.js';

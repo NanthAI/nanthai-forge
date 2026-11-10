@@ -12,9 +12,9 @@ import {
 } from './hosted-lane-checkout-marker.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import type { HostedLaneSelection } from './hosted-lane.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { invariant } from './errors.js';
 import { finishPendingCheckoutDelta, settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';

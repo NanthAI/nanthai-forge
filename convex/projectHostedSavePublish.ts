@@ -19,7 +19,7 @@ import { hostedSaveInput } from './projectHostedSaves';
 import { saveResultSchema, savePin, saveDurationMs } from '../src/hosted-save';
 import { workerResultSchema } from '../src/hosted-source-worker-format';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { laneFinishes, laneFinishActiveMessage, supersedeSyncRequired } from './projectHostedLaneFinish';
 import { invariant } from '../src/errors';
 

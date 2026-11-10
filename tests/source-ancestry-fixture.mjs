@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { saveBytes } from '../dist/hosted-save.js';
-import { parseNativeState } from '../dist/native-state-format.js';
+import { parseNativeState } from '../dist/state/format.js';
 import { buildComposePages } from '../dist/hosted-compose.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
 import { prepareMergeStep, computeMergeStep } from '../dist/hosted-source-step-merge.js';

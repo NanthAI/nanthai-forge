@@ -46,7 +46,7 @@ import {
   workSourcePins,
 } from './work-archive-metadata.js';
 import { type WorkData } from './work-types.js';
-import { publishDirectory } from './native-durability.js';
+import { publishDirectory } from './state/durability.js';
 
 type StoreAccess = Pick<
   WorkStore,

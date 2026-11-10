@@ -2,7 +2,7 @@
 import { readSubmodulePointers } from '../../src/gitlink';
 import { verifiedBytes } from './verified-blob';
 import { ObjectDownloadReader } from '../../src/blob-download';
-import { parseNativeState } from '../../src/native-state-format';
+import { parseNativeState } from '../../src/state/format';
 import { reviewPaths, reviewTextPage } from '../../src/source-review-format';
 import { computeHunks } from '../../src/review-hunks-core';
 import { readChangeMap } from '../../src/change-map';

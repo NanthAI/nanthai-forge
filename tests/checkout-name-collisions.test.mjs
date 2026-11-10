@@ -15,7 +15,7 @@ import {
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { foldedCollisions } from '../dist/native-state-format.js';
+import { foldedCollisions } from '../dist/state/format.js';
 import {
   installHostedCheckout,
   installHostedFile,

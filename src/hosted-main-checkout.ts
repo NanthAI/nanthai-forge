@@ -12,9 +12,9 @@ import { basename, dirname, join } from 'node:path';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
-import { parseNativeState, parseNativeStateValue } from './native-state-format.js';
+import { parseNativeState, parseNativeStateValue } from './state/format.js';
 import { hostedMainSchema, type HostedMain, type MainExpectation } from './hosted-main.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import {
   cleanHostedCheckout,
   installHostedFiles,

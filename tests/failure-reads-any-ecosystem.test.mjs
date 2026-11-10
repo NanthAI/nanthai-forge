@@ -4,7 +4,7 @@ import test from 'node:test';
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import {
   learnFailures,
   learnFromLanding,

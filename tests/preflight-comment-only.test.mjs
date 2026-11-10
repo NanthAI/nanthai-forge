@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commentOnlyEdit } from '../dist/preflight-comment-only.js';
 import { preflightPlan, preflightRuntime } from '../dist/agent-preflight.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { clientCacheRoot } from '../dist/root-paths.js';
 import { selectPreflightTests, selectTests } from '../scripts/test-impact.mjs';
 

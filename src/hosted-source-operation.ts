@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 
 /** How long an operation receipt answers a retry of its operation id (same value as overlap answers).

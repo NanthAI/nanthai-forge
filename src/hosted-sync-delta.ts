@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
-import { oid, stateSchema, type NativeFile, type NativeState } from './native-state-format.js';
+import { digest } from './state/hash.js';
+import { oid, stateSchema, type NativeFile, type NativeState } from './state/format.js';
 
 /** One-trip sync (fea47345 B): the resulting State as a change list from the State the client's
  * checkout already holds (`from`, the Lane head before the sync). It rides only on the submitting

@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { processAlive, processIdentity } from './local-process.js';
 import { withQueueSlot } from './landing-queue.js';

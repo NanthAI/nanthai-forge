@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { jobObject } from './hosted-source-job.js';
-import { stateSchema } from './native-state-format.js';
+import { stateSchema } from './state/format.js';
 
 export const workerObjectSchema = z
   .object({

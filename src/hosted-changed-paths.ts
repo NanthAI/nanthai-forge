@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { reviewPaths } from './source-review-format.js';
 import { hostedMainV2Schema } from './hosted-main.js';
 import type { HostedAgentTransport } from './hosted-agent-transport.js';

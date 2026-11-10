@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { jobHash, jobNumber } from './hosted-source-job.js';
 import { workerObjectSchema } from './hosted-source-worker-format.js';
-import { stateSchema } from './native-state-format.js';
+import { stateSchema } from './state/format.js';
 import { treeRefSchema } from './byte-tree-format.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { invariant } from './errors.js';

@@ -5,7 +5,7 @@ import { readHostedRecord } from './projectHostedRecords';
 import { loadLanding } from './projectHostedLandingStore';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import type { HostedLandingRequest } from '../src/hosted-landing';
 

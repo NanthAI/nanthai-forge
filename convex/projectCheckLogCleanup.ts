@@ -15,7 +15,7 @@ import { source } from './projectWorkLoad';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { resolveExchangeWork } from '../src/native-exchange-stream';
 import { sourceManifestSchema } from '../src/work-archive-metadata';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
 import { isCheckMaintenancePath } from '../src/check-log-policy';
 import { checkLogStoragePlan, type LogStorageSnapshot } from '../src/check-log-storage-plan';

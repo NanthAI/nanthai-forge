@@ -8,7 +8,7 @@ import { effectivePolicy } from './autonomy-policy.js';
 import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';
 import { digest } from './hash.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { NativeSource, type NativeFile } from './native-source.js';
 import { readSyncJournal } from './native-sync-journal.js';
 import { syncWorkspace } from './native-sync-workspace.js';

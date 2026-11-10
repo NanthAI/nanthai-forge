@@ -294,7 +294,7 @@ export async function drill(command, env = process.env) {
           import('../dist/exchange-client.js'),
           import('../dist/hosted-lane-transport.js'),
           import('../dist/hosted-checkout-cache.js'),
-          import('../dist/native-state-format.js'),
+          import('../dist/state/format.js'),
         ]);
       const exchange = new ConvexExchange(url, 'restore-drill', command.projectId, '', null);
       const issuer = 'https://restore-drill.invalid';

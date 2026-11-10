@@ -4,7 +4,7 @@ import { existsSync, lstatSync, mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { readSource } from './files.js';
 import { digest } from './hash.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { invariant } from './errors.js';
 import { hydrateRun, actionResult, type WorkDetailPin } from './work-record-details.js';
 import type { WorkStore } from './work-store.js';

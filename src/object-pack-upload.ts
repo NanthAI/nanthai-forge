@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: also runs in the Convex non-Node runtime.
 import { invariant } from './errors.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** Upload packs (feature upload-packs, Issue 98ee14e8): a client sends several new small objects
  * as one R2 object, in the GitHub import's pack format (members back to back, nothing between),

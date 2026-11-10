@@ -14,7 +14,7 @@ import { ConvexError } from 'convex/values';
 import { continueLongAction } from './long-action.js';
 import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { forgeTempDir } from './forge-disk.js';
 
 const help = 'nforge maintenance check-logs ROOT --dry-run|--apply --plan FILE [--hosted]';

@@ -14,8 +14,8 @@ import {
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ForgeError } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import type { NativeFile } from './state/format.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { indexedBlob, type CheckoutStatIndex } from './checkout-stat-index.js';
 import { workingMatches, worktreeText } from './checkout-text.js';
 import { keptApplyRoot, type KeptEntry } from './hosted-apply-kept.js';

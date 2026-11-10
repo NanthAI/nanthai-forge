@@ -4,7 +4,7 @@ import { readFile, readdir, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { childEnv, toolchainEnvAllow } from '../scripts/child-env.mjs';
 import { digest } from './hash.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { verifySourceTree } from './hosted-actions-job-source.js';
 import type { HostedCheckRun } from './hosted-check.js';
 import { invariant } from './errors.js';

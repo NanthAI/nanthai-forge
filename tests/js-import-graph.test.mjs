@@ -5,7 +5,7 @@ import test from 'node:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { preflightPlan, preflightRuntime } from '../dist/agent-preflight.js';
 import { importGraphTests, jsImportGraph } from '../dist/js-import-graph.js';
 import { projectTestRunner, runnerSelection, runnerTestPath } from '../dist/project-test-runner.js';

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { hostedActionsRecipeSchema, hostedActionsRuntime, type ActionsExport } from './hosted-actions.js';
 import { checkPin } from './hosted-check.js';
 import type { HostedCheckDispatch } from './hosted-check-controller.js';

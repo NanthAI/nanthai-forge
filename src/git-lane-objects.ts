@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { gitHash, gitMode } from './hosted-github-git.js';
 import { invariant } from './errors.js';
 

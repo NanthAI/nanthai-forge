@@ -7,7 +7,7 @@ import { cleanupReceipt, recordCleanup, recentCleanup } from './legacyStorageRec
 import { requireCleanupWindow } from './legacyStoragePause';
 import { maintenanceEnabled } from './r2Maintenance';
 import schema from './schema';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 export const deletePage = internalMutation({
   args: {

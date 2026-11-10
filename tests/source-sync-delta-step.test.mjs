@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { initialSourceStep, runSourceStep } from '../dist/hosted-source-step.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { applySyncStateDelta } from '../dist/hosted-sync-delta.js';
-import { parseNativeState } from '../dist/native-state-format.js';
+import { parseNativeState } from '../dist/state/format.js';
 import { digest } from '../dist/hash.js';
 
 const at = '2026-01-01T00:00:00.000Z';

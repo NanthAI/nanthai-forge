@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { sourceAncestryCut, sourceAncestryFrontier } from '../dist/hosted-source-ancestry-cut.js';
 import { MemoryMergeSource } from '../dist/hosted-source-memory.js';
-import { parseNativeState } from '../dist/native-state-format.js';
+import { parseNativeState } from '../dist/state/format.js';
 import { digest } from '../dist/hash.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { ancestryFixture } from './source-ancestry-fixture.mjs';

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant, itemChanged } from './errors.js';
 import type { PlanningWrite } from './work-planning-types.js';
 import type { WorkData } from './work-types.js';

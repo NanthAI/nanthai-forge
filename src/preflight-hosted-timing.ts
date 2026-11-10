@@ -2,7 +2,7 @@
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { retainedRootSibling } from './root-paths.js';
 
 /** How long this project's hosted landing checks ran, from the landing timing the client already

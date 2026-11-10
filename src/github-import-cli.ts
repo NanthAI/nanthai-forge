@@ -14,7 +14,7 @@ import { z } from 'zod';
 import { deploymentUrl, readAuth, resolveAuthToken } from './auth-store.js';
 import { deadlineConvexClient, deadlineConvexSubscription } from './network-convex-client.js';
 import { hostedActionError } from './hosted-action-error.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { ForgeError, invariant } from './errors.js';
 
 export const IMPORT_HELP = `nforge import <github-url|OWNER/NAME> [--ref BRANCH|TAG|SHA] [--name NAME] [--deployment URL] [--operation-id UUID] [--no-wait]

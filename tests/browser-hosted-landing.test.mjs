@@ -316,7 +316,7 @@ test('unconfirmed hosted runner start is a stale observation and reads schedule 
 });
 test('decision failure excerpts verify exact output and never download artifacts', async t => {
   const { landingFailureExcerpt } = await import(moduleUrl('../web/src/lane/landing-output.ts'));
-  const { digest } = await import('../dist/portable-hash.js');
+  const { digest } = await import('../dist/state/hash.js');
   const bytes = new TextEncoder().encode(
     '✖ browser ranges\nnot ok 2 - upload retries\nAssertionError: expected 206\n',
   );

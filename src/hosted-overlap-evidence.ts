@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 const emptyBlob = digest('');
 const position = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const range = z.object({ start: position, end: position });

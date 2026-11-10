@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 
 /** A gitlink object stores only its pinned commit, never submodule source bytes.
  * A terminating newline is allowed when a person edits the pointer in a Lane. */

@@ -8,7 +8,7 @@
  * Pure data and pure derivations: no imports with runtime code, so Convex (V8) and every CLI path
  * can read it. Derived tables are built once at module load; lookups are in memory. */
 
-/** Grammars of the merge parse gate (src/native-merge-syntax.ts and -other.ts load them lazily). */
+/** Grammars of the merge parse gate (src/state/merge-syntax.ts and -other.ts load them lazily). */
 export type MergeGrammar = 'typescript' | 'python' | 'java' | 'rust' | 'json';
 /** Readers of the duplicate-import fix-up (src/native-import-merge.ts, src/native-import-languages.ts). */
 export type ImportFixupLanguage = 'javascript' | 'python' | 'java' | 'rust' | 'go' | 'csharp';

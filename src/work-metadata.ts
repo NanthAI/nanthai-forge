@@ -8,7 +8,7 @@ import { validateAnchorView } from './work-source-anchor.js';
 import { intentLifecycle } from './work-lifecycle.js';
 import type { IntentMetadataCommand } from './work-intent-types.js';
 import { applyPlanningMetadata, planningRequest, stampPlanningAuthor } from './work-planning-state.js';
-import { digest, digestChunks } from './portable-hash.js';
+import { digest, digestChunks } from './state/hash.js';
 import { jsonChunks } from './json-chunks.js';
 import { invariant } from './errors.js';
 import { retainedSource, type ArchiveSource } from './work-archive-metadata.js';

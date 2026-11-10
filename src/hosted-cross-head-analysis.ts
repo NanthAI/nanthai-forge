@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseNativeState, type NativeState } from './native-state-format.js';
+import { parseNativeState, type NativeState } from './state/format.js';
 import { digest } from './hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import {

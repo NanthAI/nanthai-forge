@@ -111,7 +111,7 @@ try {
       notices.includes(file) ||
         runtimeScripts.includes(file) ||
         file.startsWith('node_modules/') ||
-        /^dist\/[^/]+\.(?:js|d\.ts)$/.test(file) ||
+        /^dist\/(?:state\/)?[^/]+\.(?:js|d\.ts)$/.test(file) ||
         // The speed budget file (b7851c44), read by the CLI's metrics report.
         file === 'dist/speed-budgets.json',
       `Unexpected package file: ${file}`,

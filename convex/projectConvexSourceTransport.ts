@@ -7,13 +7,13 @@ import type { WorkerObject, WorkerPin } from '../src/hosted-source-worker-format
 import { mapSourceOrdered, sourceIoConcurrency } from '../src/hosted-source-parallel';
 import type { StepTransport } from '../src/hosted-source-step';
 import type { SourceOutput } from './projectConvexSourceOutput';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key, presignGet, r2Config } from './r2';
 import { r2Counts } from './presign';
 import { ForgeError, invariant } from '../src/errors';
-import { parseNativeState } from '../src/native-state-format';
-import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state-generation';
+import { parseNativeState } from '../src/state/format';
+import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state/generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';

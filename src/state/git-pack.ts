@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { deflateSync, inflateSync } from 'node:zlib';
-import { invariant } from './errors.js';
-import { gitObjectId, type GitObject, type GitObjectType } from './state-git.js';
+import { invariant } from '../errors.js';
+import { gitObjectId, type GitObject, type GitObjectType } from './git.js';
 
 /** Git pack format version 2 with whole (deflated, non-delta) objects only, so
  * a pack is readable by Git itself and can be sent to `git-receive-pack`. */

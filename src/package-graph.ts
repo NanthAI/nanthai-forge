@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digestChunks } from './portable-hash.js';
+import { digestChunks } from './state/hash.js';
 import { manifestNames } from './ecosystems.js';
 import { documentationPath } from './prose-paths.js';
 import { moduleEcosystem, moduleNarrowing } from './module-selection.js';

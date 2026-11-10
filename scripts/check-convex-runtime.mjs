@@ -82,7 +82,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const violations = await findRuntimeViolations(root);
   for (const { module, chain } of violations)
     console.error(
-      `CONVEX_RUNTIME_IMPORT ${module} runs in V8 (no "use node") but reaches ${chain.at(-1)}: ${chain.join(' -> ')}. Use a portable module (src/portable-hash instead of src/hash) or split the helper out.`,
+      `CONVEX_RUNTIME_IMPORT ${module} runs in V8 (no "use node") but reaches ${chain.at(-1)}: ${chain.join(' -> ')}. Use a portable module (src/state/hash instead of src/hash) or split the helper out.`,
     );
   if (violations.length) process.exit(1);
   const bundled = await checkConvexBundles(root, { registeredOnly: true });

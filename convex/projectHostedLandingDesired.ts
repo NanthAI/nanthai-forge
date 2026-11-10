@@ -23,7 +23,7 @@ import { hostedLandingDesiredSchema } from '../src/hosted-landing-desired';
 import { hostedLandingStateSchema, landingObservation } from '../src/hosted-landing';
 import { hostedRecordSchema } from '../src/hosted-records';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { report } from './errors';
 

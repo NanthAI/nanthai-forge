@@ -8,7 +8,7 @@ import {
   saveBytes,
   savePin,
 } from './hosted-save.js';
-import { stateSchema } from './native-state-format.js';
+import { stateSchema } from './state/format.js';
 import { invariant } from './errors.js';
 import { docsMergeSchema } from './docs-resolution.js';
 export const COMPOSE_ALGORITHM = 'forge-native-compose-v1';

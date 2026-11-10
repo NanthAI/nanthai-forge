@@ -2,7 +2,7 @@
 import type { BatchDropped } from './hosted-landing-batch.js';
 import { composeStack } from './native-stack-compose.js';
 import { NativeSource, overlappingPaths } from './native-source.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { savePin, saveBytes } from './hosted-save.js';

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digestChunks } from './portable-hash.js';
+import { digestChunks } from './state/hash.js';
 import { moduleGraphLanguages, nonSourceDirPattern } from './ecosystems.js';
 import { goFacts, resolveGo } from './module-graph-go.js';
 import { jvmFacts, resolveJvm } from './module-graph-jvm.js';

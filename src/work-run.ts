@@ -15,7 +15,7 @@ import { prepareRunRegistration } from './work-run-preparation.js';
 import { retryWorkPhase } from './work-retry.js';
 import { launchDetachedCheck, hasDetachedCheckRequest } from './check-controller.js';
 import { detachedChecksRequired } from './check-execution-context.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { wakeLandingWorker } from './landing-worker-wake.js';
 import { localActor } from './work-actor.js';
 import {

@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { invariant } from './errors.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 // One rename publishes a complete retry payload. A partial staging directory is
 // never interpreted as a committed request, and concurrent originals cannot be replaced.
 export function commitExchangeDirectory(directory: string, files: Record<string, string | Buffer>) {

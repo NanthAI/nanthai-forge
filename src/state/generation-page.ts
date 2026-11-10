@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import { nextStateGeneration } from './state-generation.js';
-import { invariant } from './errors.js';
+import { nextStateGeneration } from './generation.js';
+import { invariant } from '../errors.js';
 
 /** Untrusted dependency hints only order the later byte-verification pages.
  * Never use this continuation graph to derive or commit a generation. */

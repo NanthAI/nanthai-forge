@@ -24,7 +24,7 @@ import type { WorkStore } from './work-store.js';
 import { invariant } from './errors.js';
 import { agentSyncSchema, compactAgentSync } from './agent-sync-state.js';
 import { reportedTokensSchema } from './making-of.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 const binding = z.object({
   projectId: z.string(),
   deployment: z.url(),

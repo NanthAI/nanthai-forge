@@ -12,7 +12,7 @@ import { loadSourceJob } from './projectSourceJobs';
 import { sourceR2Counts, sourceServerTiming } from './projectSourceStepTiming';
 import { composeResultSchema } from '../src/hosted-compose';
 import { savePin } from '../src/hosted-save';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import type { HostedRecord } from '../src/hosted-records';
 import { invariant } from '../src/errors';

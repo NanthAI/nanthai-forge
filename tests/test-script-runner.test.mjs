@@ -4,7 +4,7 @@ import test from 'node:test';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { sourceTree } from '../dist/source-tree.js';
 import { preflightPlan, preflightRuntime, runPreflight } from '../dist/agent-preflight.js';
 import {

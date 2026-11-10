@@ -30,7 +30,7 @@ import {
 } from './checkout-stat-index.js';
 import { buildSavePages, type SaveChange } from './hosted-save.js';
 import type { HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { LANE_SNAPSHOT, snapshotTree } from './lane-snapshot-contract.js';
 import { scanSecretText, SECRET_SCAN_MAX_FILE_BYTES } from './secret-scan.js';
 

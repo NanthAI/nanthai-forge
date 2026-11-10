@@ -3,7 +3,7 @@ import { CompactCheckWriter } from './check-compact-output.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import type { CheckExecutionEvent } from './check-execution-event.js';
 import { failedTestFiles } from './check-failure-files.js';
 

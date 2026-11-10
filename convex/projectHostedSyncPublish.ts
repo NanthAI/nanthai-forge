@@ -14,7 +14,7 @@ import { sourceServerTiming } from './projectSourceStepTiming';
 import { syncOutputSchema, syncResultSchema } from '../src/hosted-sync';
 import { syncDocsUndo } from '../src/docs-resolution';
 import { savePin } from '../src/hosted-save';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { canonicalPayload, type HostedTerminalReceipt } from '../src/hosted-source-operation';
 import { syncLaneSelection } from './projectHostedSyncUpToDate';
 import { invariant } from '../src/errors';

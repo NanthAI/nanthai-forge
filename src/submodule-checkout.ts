@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { readSource } from './files.js';
 import { gitlinkCommit, gitmoduleUrls } from './gitlink.js';
 import { gitlinkDirectory, gitlinkDirectoryPointer } from './gitlink-workspace.js';
-import { durableReplace, syncDirectory, syncFile } from './native-durability.js';
+import { durableReplace, syncDirectory, syncFile } from './state/durability.js';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { safeRelative } from './safe-relative.js';
 import { SubmoduleFetcher, vetted } from './submodule-materialize.js';

@@ -3,7 +3,7 @@ import { gitlinkCommit } from './gitlink.js';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';

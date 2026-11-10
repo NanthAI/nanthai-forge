@@ -2,9 +2,9 @@
 import { readSourceExact } from './hosted-source-exact.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { saveInputSchema, validateSavePage, savePin } from './hosted-save.js';
-import { parseNativeState, overlappingPaths, type NativeState } from './native-state-format.js';
+import { parseNativeState, overlappingPaths, type NativeState } from './state/format.js';
 import { workerResultSchema, type WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { canonicalPayload } from './hosted-source-operation.js';

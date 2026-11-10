@@ -329,7 +329,7 @@ test('5,000 pointer bumps use 50 descriptor windows and four GitHub metadata cal
 test('two-way: the GitHub tree diff walks only changed directories and builds the exact Lane State', async () => {
   const { diffGithubTrees, applyInbound, inboundConflicts } = await import('../dist/github-inbound.js');
   const { inboundMessage } = await import('../dist/github-inbound-job.js');
-  const { parseNativeState } = await import('../dist/native-state-format.js');
+  const { parseNativeState } = await import('../dist/state/format.js');
   const trees = new Map();
   const sha = value => gitHash('blob', Buffer.from(value));
   /** Store a flat {path: [mode, text]} map as nested GitHub trees; returns the root SHA. */

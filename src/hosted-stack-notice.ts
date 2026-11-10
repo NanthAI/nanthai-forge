@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: runs in the Convex non-Node runtime and in test fixtures.
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** Dependents notified per parent event; a stack is a few levels deep, so this is a safety bound. */
 export const STACK_NOTICE_FANOUT = 20;

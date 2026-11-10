@@ -19,7 +19,7 @@ import {
   samePolicy,
 } from '../dist/autonomy-policy.js';
 import { acceptancePolicyDigest, policyDigestCurrent } from '../dist/policy-digest.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { llmDocuments } from '../scripts/llm-documents.mjs';
 

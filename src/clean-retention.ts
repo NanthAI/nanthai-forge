@@ -17,7 +17,7 @@ import { join, dirname, basename } from 'node:path';
 import { allRecords } from './agent-lifecycle.js';
 import { processBlocker, type workingProcesses } from './clean-processes.js';
 import { processGroupAlive } from './local-process.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { retentionPins, references } from './clean-retention-pins.js';
 import { terminalReceipt, remoteExecutionBlocker } from './clean-terminal-receipt.js';
 import type { WorkStore } from './work-store.js';

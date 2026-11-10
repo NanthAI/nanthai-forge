@@ -3,7 +3,7 @@ import { lstatSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { dirname, isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import { ForgeError } from './errors.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 
 // Artifacts are native filesystem names, not portable source paths. Preserve
 // names containing newlines or POSIX backslashes without allowing traversal.

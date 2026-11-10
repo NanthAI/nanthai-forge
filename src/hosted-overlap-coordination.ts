@@ -2,7 +2,7 @@
 // Coordination before the queue (Issue 1eb42254, D2). Pure: Convex (V8) and the CLI both import it.
 // Everything here rides on the overlap read that start, save, sync and the first-write hook already
 // make: no added call, and no read at all for a Lane whose items name no peer.
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** A file or directory saved by this many open Lanes (the caller's included) is hot. */
 export const HOT_FILE_LANES = 3;

@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { findObject } from './projectObjectFind';
-import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state-generation';
+import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state/generation';
 import { invariant } from '../src/errors';
 
 /** Operator repair, one page of 100 published States per call (review 3aa618e2 F1): a hosted State

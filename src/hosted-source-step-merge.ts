@@ -11,7 +11,7 @@ import {
 import { syncInputSchema } from './hosted-sync.js';
 import { saveBytes, savePin } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import { buildHostedComposeState, changedPaths, type ComposeBases } from './hosted-compose-worker.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';

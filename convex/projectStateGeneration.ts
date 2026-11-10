@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { internalMutation, internalQuery, type QueryCtx } from './server';
 import { activeOwnedProject } from './projectAuthority';
 import { findObject } from './projectObjectFind';
-import { validStateGeneration } from '../src/state-generation';
+import { validStateGeneration } from '../src/state/generation';
 import { recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { channelRow } from './projectHostedChannels';
 import { invariant } from '../src/errors';

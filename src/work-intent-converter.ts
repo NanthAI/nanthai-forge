@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { planningIntentStatus } from './work-planning-lifecycle.js';
 import { invariant } from './errors.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { workSchema, type WorkData } from './work-types.js';
 import { unifiedWorkSchema, type UnifiedIntent, type UnifiedWorkData } from './work-unified-types.js';
 

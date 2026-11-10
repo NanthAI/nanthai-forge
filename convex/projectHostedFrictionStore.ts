@@ -5,7 +5,7 @@ import type { Id } from './_generated/dataModel';
 import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { isPlanningUuid, planningIdMaxCandidates } from '../src/planning-id';
 import type { FrictionEvent, FrictionTriageState } from '../src/friction-types';

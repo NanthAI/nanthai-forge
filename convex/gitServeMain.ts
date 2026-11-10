@@ -8,7 +8,7 @@ import { storeSourceBytes } from './projectSourceBytes';
 import { r2Config, r2Key } from './r2';
 import { deleteR2Object } from './r2Operations';
 import { workerConfig, workerServes } from './gitServeWorker';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { published } from '../src/hosted-github-mirror';
 import { gitHash, gitMode } from '../src/hosted-github-git';

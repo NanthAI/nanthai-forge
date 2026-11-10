@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import { contractTestPath, standardTestPath } from './intent-test-contract.js';
-import type { NativeState } from './native-state-format.js';
+import type { NativeState } from './state/format.js';
 import type { HostedCheckRun } from './hosted-check.js';
 
 const outcome = z.enum(['failed', 'passed', 'error']);

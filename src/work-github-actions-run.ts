@@ -16,7 +16,7 @@ import { cleanupActionsResult, sweepActionsRefs } from './github-actions-cleanup
 import { actionsJournal, deleteActionsRef, exportActionsSnapshot } from './github-actions-export.js';
 import { ActionsDispatchRejected, ActionsDispatchExhausted } from './github-actions-dispatch.js';
 import { controlActions } from './github-actions-controller.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { remoteCancellation, cancellationDetails } from './work-run-cancellation.js';
 import { updateRemoteRun } from './work-remote-run.js';
 import { CheckQueue } from './check-queue.js';

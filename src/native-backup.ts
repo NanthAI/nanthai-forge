@@ -53,7 +53,7 @@ import {
 import { createWork } from './work-create.js';
 import { restoreWorkFormat } from './work-restore-format.js';
 import { stageRecords, publishRecords } from './work-records.js';
-import { publishDirectory } from './native-durability.js';
+import { publishDirectory } from './state/durability.js';
 
 type StoreAccess = Pick<
   WorkStore,

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
 import {
   workerInputSchema,

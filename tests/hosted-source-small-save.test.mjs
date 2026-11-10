@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { runSmallSourceSave, smallSaveStateBytes } from '../dist/hosted-source-small-save.js';
 import { initialSourceStep, runSourceStep } from '../dist/hosted-source-step.js';
 const at = '2026-10-28T00:00:00.000Z';

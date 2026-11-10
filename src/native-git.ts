@@ -30,7 +30,7 @@ import { ForgeError, invariant } from './errors.js';
 import { shownGitPath } from './git-path-bytes.js';
 
 import { createWork } from './work-create.js';
-import { publishDirectory } from './native-durability.js';
+import { publishDirectory } from './state/durability.js';
 
 type StoreAccess = Pick<WorkStore, 'directory' | 'native' | 'root' | 'save'>;
 

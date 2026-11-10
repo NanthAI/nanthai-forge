@@ -20,7 +20,7 @@ import { foldHostedRecoveryCache } from './recovery-hosted.js';
 import { hostedRecoverySchema, type HostedRecovery } from './recovery-hosted-protocol.js';
 import { writeRecoveryState } from './recovery-state.js';
 import { validateRunnerRecovery } from './recovery-runner-cache.js';
-import { syncDirectory, publishDirectory } from './native-durability.js';
+import { syncDirectory, publishDirectory } from './state/durability.js';
 import { runnerRecoveryTransport, type RunnerRecoveryTransport } from './recovery-runner-transport.js';
 import { parseHostedResponse } from './hosted-response.js';
 

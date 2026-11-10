@@ -11,7 +11,7 @@ import type { VerifyCursor } from './hosted-source-step-verify.js';
 import { sourceStepBytes, meter, full, verifySourceObject } from './hosted-source-step-verify.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { MemoryMergeSource, MemorySourceReader } from './hosted-source-memory.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import {
   calculateSourceFiles,
   type SourceCalculation,

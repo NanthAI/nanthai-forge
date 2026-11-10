@@ -39,7 +39,7 @@ import {
   type SettingRule,
 } from './projectSettingApprovals';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { retargetGithubMirror } from './projectGithubMirrorRetarget';
 /** Device identity always uses agent authority; callers may explicitly downscope to it. */
 export async function acceptanceActor(

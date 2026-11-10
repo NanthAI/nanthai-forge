@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
 import { LazyMergeSource, NeededObject } from './hosted-merge-reader.js';
-import { parseNativeState, type NativeState } from './native-state-format.js';
+import { parseNativeState, type NativeState } from './state/format.js';
 import { SourceWorkerReader, type SourceWorkerTransport } from './hosted-source-worker-reader.js';
 import { readObjectRecipe, objectRecipeSchema } from './object-chunks.js';
 import { digest } from './hash.js';

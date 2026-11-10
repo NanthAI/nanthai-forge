@@ -8,10 +8,10 @@ import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:f
 import { basename, dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { hostedLaneSelectionSchema, type HostedLaneSelection } from './hosted-lane.js';
-import type { NativeFile } from './native-state-format.js';
-import { parseNativeState } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
+import { parseNativeState } from './state/format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { readSource } from './files.js';

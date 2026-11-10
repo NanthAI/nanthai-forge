@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { conversationSchema } from './agent-edit-types.js';
+import { conversationSchema } from '../agent-edit-types.js';
 import { z } from 'zod';
-import { safeRelative } from './safe-relative.js';
-import { ForgeError, invariant } from './errors.js';
+import { safeRelative } from '../safe-relative.js';
+import { ForgeError, invariant } from '../errors.js';
 export const oid = z.string().regex(/^[0-9a-f]{64}$/);
 export const gitImport = z
   .object({

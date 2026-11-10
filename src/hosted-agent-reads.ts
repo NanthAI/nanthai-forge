@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { clientCacheRoot } from './root-paths.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { reviewPaths } from './source-review-format.js';
 import { contextualHunks } from './review-hunks.js';
 import { safeRelative } from './safe-relative.js';

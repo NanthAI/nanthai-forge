@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { checkoutPathExists as exists } from './hosted-checkout-files.js';
 import { readCheckoutStatIndex, statEntry, writeCheckoutStatIndex } from './checkout-stat-index.js';
 import {

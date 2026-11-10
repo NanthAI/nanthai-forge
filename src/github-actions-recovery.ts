@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { randomUUID } from 'node:crypto';
 import type { ActionsJournal } from './github-actions-export.js';
 import type { WorkRecordTransaction } from './work-record-transaction.js';

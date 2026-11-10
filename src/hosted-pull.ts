@@ -10,7 +10,7 @@ import { hostedMainSchema } from './hosted-main.js';
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { ForgeError, invariant } from './errors.js';
 import { shellQuote } from './shell-quote.js';

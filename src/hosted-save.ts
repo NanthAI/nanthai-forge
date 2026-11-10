@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { stateSchema } from './native-state-format.js';
+import { stateSchema } from './state/format.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { safeRelative } from './safe-relative.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { overlapEvidenceSchema } from './hosted-overlap-evidence.js';
 import { invariant } from './errors.js';
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { HostedCheckRun } from './hosted-check.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 const checkPin = (value: unknown) => digest(canonicalPayload(value));
 

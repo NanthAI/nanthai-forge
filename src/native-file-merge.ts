@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 type File = NativeFile | undefined;
 const same = (a: File, b: File) => a === b || (!!a && !!b && a.blob === b.blob && a.mode === b.mode);
 /** The native merge's metadata-only cases. Null needs content merging or conflict handling;

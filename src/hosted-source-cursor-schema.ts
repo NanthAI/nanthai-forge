@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { jobHash, jobNumber, jobObject } from './hosted-source-job.js';
 import { workerObjectSchema, workerInputSchema } from './hosted-source-worker-format.js';
-import { stateSchema } from './native-state-format.js';
+import { stateSchema } from './state/format.js';
 import { saveChangeSchema, saveInputSchema } from './hosted-save.js';
 import { composeEntrySchema, composeInputSchema } from './hosted-compose.js';
 import { batchDroppedSchema, HOSTED_BATCH_MEMBERS } from './hosted-landing-batch.js';

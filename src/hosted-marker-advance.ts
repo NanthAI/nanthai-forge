@@ -2,7 +2,7 @@
 import { join } from 'node:path';
 import { realpathSync } from 'node:fs';
 import { clientCacheRoot } from './root-paths.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { settlePendingCheckoutDelta } from './hosted-checkout-delta-pending.js';
 import { hostedLaneCheckoutMarkerSchema, readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';

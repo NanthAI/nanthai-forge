@@ -4,7 +4,7 @@ import { landingMessageSchema, cohortMessagesSchema } from './landing-message.js
 import { candidateIsolationModeSchema, checkSkippedSchema, hostedMacEvidenceSchema } from './hosted-check.js';
 import { hostedLandingAttemptSchema } from './hosted-landing.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { crossHeadProofSchema } from './hosted-cross-head-proof.js';
 import { secretAllowMarkSchema } from './secret-allow.js';
 import { docsResolutionSchema } from './docs-resolution.js';

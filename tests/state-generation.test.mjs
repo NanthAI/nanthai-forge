@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getFunctionName } from 'convex/server';
-import { nextStateGeneration, validStateGeneration } from '../dist/state-generation.js';
+import { nextStateGeneration, validStateGeneration } from '../dist/state/generation.js';
 import { workerObjectSchema } from '../dist/hosted-source-worker-format.js';
 import { initialSourceStep } from '../dist/hosted-source-step.js';
 import { saveSourceProgress, loadSourceProgress } from '../dist/hosted-source-step-progress.js';

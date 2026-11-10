@@ -5,7 +5,7 @@ import { internal } from './_generated/api';
 import type { Id } from './_generated/dataModel';
 import { r2Config, r2Key, presignGet } from './r2';
 import { convexFetch } from './networkFetch';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { ForgeError } from '../src/errors';
 import { githubSyncCommitSchema } from '../src/github-sync-types';
 import { overCap } from './gitServeWorkerStore';

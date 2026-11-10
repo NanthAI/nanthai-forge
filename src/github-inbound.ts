@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { stateSchema, type NativeFile, type NativeState } from './native-state-format.js';
+import { stateSchema, type NativeFile, type NativeState } from './state/format.js';
 import type { GithubRequest } from './hosted-github-api.js';
 import { publicationExclusion } from './files.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { refuseLossyGitPaths } from './git-path-bytes.js';
 

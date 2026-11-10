@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { safeRelative } from './safe-relative.js';
 import { SourceFileReader } from './source-file-reader.js';
 import { conflictMarkerScan, scanConflictMarkers, conflictMarkersFound } from './conflict-markers.js';

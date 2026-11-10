@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** Follow-ups after an Issue's first Intent landed (e4a71127). A planned Issue's first Intent shares
  * the Issue id. Once it is completed or abandoned, the next start creates the Intent whose id is

@@ -5,7 +5,7 @@ import { checkoutIo, mapCheckoutIo } from './checkout-io.js';
 import { join } from 'node:path';
 import { fingerprintPrivateFile } from './files.js';
 import { invariant } from './errors.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import type { ContentPin } from './native-exchange.js';
 import type { SourcePackDownload } from './source-pack.js';

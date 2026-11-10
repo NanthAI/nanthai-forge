@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { clientCacheRoot } from './root-paths.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { HostedAgentJournal, hostedAgentDirectory } from './hosted-agent-journal.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { hostedLaneDirty } from './hosted-lane-dirty.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedRootLanePath } from './hosted-root-checkout.js';

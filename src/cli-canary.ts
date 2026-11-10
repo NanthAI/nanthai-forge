@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { childEnv } from '../scripts/child-env.mjs';
 import { ForgeError } from './errors.js';
 import { stopProcessTree } from './local-process.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { cliBuildCommit } from './cli-installation.js';
 import { landedOperations } from './landed-operations.js';
 import { deliverStallAlert, STALL_ALERT_ENV } from './stall-alerts.js';

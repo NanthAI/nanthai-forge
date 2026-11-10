@@ -6,7 +6,7 @@ import { invariant } from './errors.js';
 import { clientCacheRoot } from './root-paths.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import type { HostedAgentSession } from './hosted-agent-transport.js';
 import { parseHostedResponse } from './hosted-response.js';
 

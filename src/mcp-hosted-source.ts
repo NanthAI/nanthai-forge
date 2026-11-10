@@ -8,7 +8,7 @@ import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
 import { hostedLaneExpectationSchema, readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';
 import { hostedMainV2Schema } from './hosted-main.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { reviewTextPage, SHOW_MAX_BYTES } from './source-review-format.js';
 import { safeRelative } from './safe-relative.js';
 import { ForgeError, invariant } from './errors.js';

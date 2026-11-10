@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process';
 import { writeSourceLink } from './source-links.js';
 import { networkDeadline } from './network-fetch.js';
 import { invariant } from './errors.js';
-import type { NativeState } from './native-state-format.js';
+import type { NativeState } from './state/format.js';
 import type { HostedCheckRun } from './hosted-check.js';
 import { proofTests, proofReportSchema } from './landing-proof.js';
 import { digest } from './hash.js';

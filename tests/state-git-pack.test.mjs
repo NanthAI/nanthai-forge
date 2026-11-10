@@ -7,8 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { digest } from '../dist/hash.js';
-import { readGitPack, writeGitPack } from '../dist/state-git-pack.js';
-import { gitObjectId } from '../dist/state-git.js';
+import { readGitPack, writeGitPack } from '../dist/state/git-pack.js';
+import { gitObjectId } from '../dist/state/git.js';
 
 function scratch(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-state-git-pack-')));

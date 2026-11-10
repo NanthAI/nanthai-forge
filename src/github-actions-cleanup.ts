@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type ActionsApi, type ActionsRun, observe } from './github-actions-api.js';
 import { actionsJournal, deleteActionsRef, type ActionsJournal } from './github-actions-export.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { validateRemoteCheckPlan, type RemoteCheckPlan } from './remote-check-plan.js';
 import { receiptSchema } from './work-run-receipt.js';
 import type { WorkStore } from './work-store.js';

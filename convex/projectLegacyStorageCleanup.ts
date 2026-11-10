@@ -8,7 +8,7 @@ import type { Id } from './_generated/dataModel';
 import { cleanupPin, cleanupResult } from './legacyStorageCleanupFields';
 import { requireCleanupWindow, activeStoragePause } from './legacyStoragePause';
 import { storageDigest } from './storageDigest';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import schema from './schema';
 import {

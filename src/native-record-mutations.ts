@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { dirname } from 'node:path';
 import { localActor, type WorkActor } from './work-actor.js';
 import { diskGuard } from './disk-guard.js';

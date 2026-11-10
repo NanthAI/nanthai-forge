@@ -3,7 +3,7 @@ import { clientCacheRoot } from './root-paths.js';
 import { lstatSync, readFileSync, type Stats } from 'node:fs';
 import { join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 
 /** Local stat index of a hosted checkout, kept beside it in `<root>.forge-client` (never source,
  * never sent anywhere). An entry says "a file with exactly this lstat had this blob", so capture

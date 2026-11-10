@@ -3,7 +3,7 @@ import { clientCacheRoot, rootSibling } from './root-paths.js';
 import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { digest } from './hash.js';
 import type { captureHostedSave } from './hosted-save-capture.js';
 

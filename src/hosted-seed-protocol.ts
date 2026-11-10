@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { HOSTED_RECORD_PAGE_ROWS, HOSTED_RECORD_PAGE_BYTES } from './hosted-records.js';
 import { invariant } from './errors.js';

@@ -3,9 +3,9 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type ts from 'typescript';
 import { loadTypescript } from './lazy-typescript.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
 import { clientCacheRoot } from './root-paths.js';
 
 const scriptKind = (path: string) =>

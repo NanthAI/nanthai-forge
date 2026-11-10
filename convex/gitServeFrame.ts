@@ -9,7 +9,7 @@ import { convexFetch } from './networkFetch';
 import { storeSourceBytes } from './projectSourceBytes';
 import { discardHistoryChunks } from './projectHistoryImport';
 import { historyChunk, historyChunkBytes } from './projectHistoryFields';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { ForgeError } from '../src/errors';
 import { PackFramer } from '../src/git-worker-plan';
 import { setTrailer } from './gitServeWorker';

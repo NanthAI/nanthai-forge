@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ForgeError } from './errors.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import {
   alertCliCanary,
   cliCanaryBackoffMs,

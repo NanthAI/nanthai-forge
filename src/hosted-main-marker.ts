@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { readSource } from './files.js';
 import { hostedMainSchema } from './hosted-main.js';
-import { parseNativeStateValue } from './native-state-format.js';
+import { parseNativeStateValue } from './state/format.js';
 export const hostedMainMarkerSchema = z.object({ selection: hostedMainSchema, state: z.unknown() }).strict();
 export function readHostedMainMarker(root: string) {
   const bytes = readSource(root, join('.forge', 'hosted-main.json'), Number.MAX_SAFE_INTEGER);

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 /** Reporting key, not permission to reuse evidence. Restart pins and Node patches are excluded. */
 export function selfMetricReuseKey(input: {

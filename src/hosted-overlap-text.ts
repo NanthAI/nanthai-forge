@@ -6,7 +6,7 @@ import { parser } from '@lezer/javascript';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { attributionEdits, attributionLines } from './native-text-merge.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { overlapEvidenceSchema, type OverlapEvidence } from './hosted-overlap-evidence.js';
 import { readSource } from './files.js';
 import type { SymbolLinks } from './hosted-overlap-evidence.js';

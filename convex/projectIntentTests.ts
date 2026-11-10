@@ -6,7 +6,7 @@ import { action, type ActionCtx } from './cliServer';
 import { makeFunctionReference } from 'convex/server';
 import type { Id } from './_generated/dataModel';
 import { exchangeObjectReader, type ExchangeObjectReader } from './projectExchangeReader';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import {
   contractTestsInput,
   contractProposal,

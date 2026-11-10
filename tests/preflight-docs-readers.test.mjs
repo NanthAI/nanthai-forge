@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { docsReaders } from '../scripts/docs-readers.mjs';
 import { selectPreflightTests, selectTests } from '../scripts/test-impact.mjs';
 import { planLine, preflightPlan, preflightRuntime, runPreflight } from '../dist/agent-preflight.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 
 test.beforeEach(t =>
   t.mock.method(preflightRuntime, 'filesystemEventHealth', () => ({

@@ -7,7 +7,7 @@ import { readJob } from './projectGithubImportRead';
 import { inventory, jobIdentity, retain } from './projectGithubImportInventory';
 import { objectCatalogPage } from './projectObjectFind';
 import { importPageFiles } from '../src/github-import-pages';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { purgePageBudget, documentBytes } from './projectPurgeBudget';

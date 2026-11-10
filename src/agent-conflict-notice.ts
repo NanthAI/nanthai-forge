@@ -7,7 +7,7 @@ import type { PeersSource } from './agent-peers-source.js';
 import type { NativeFile } from './native-source.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
-import type { NativeMergeConflict } from './native-merge.js';
+import type { NativeMergeConflict } from './state/merge.js';
 
 type StoreAccess = Pick<WorkStore, 'directory' | 'load' | 'path' | 'readRecords'>;
 

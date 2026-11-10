@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { knownLockfiles } from './ecosystems.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { retainedRootSibling } from './root-paths.js';
 import { safeRelative } from './safe-relative.js';
 import { readHostedLaneCheckout } from './hosted-lane-checkout-marker.js';

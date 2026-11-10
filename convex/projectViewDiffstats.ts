@@ -5,7 +5,7 @@ import { action } from './cliServer';
 import { internal } from './_generated/api';
 import { exchangeObjectReader } from './projectExchangeReader';
 import { compareCounts } from './projectDiffstats';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { reviewPaths } from '../src/native-source-review';
 import { invariant } from '../src/errors';
 import { report } from './errors';

@@ -17,7 +17,7 @@ import { encodeSnapshotPack, type SnapshotPackRefs } from './lane-snapshot-pack.
 import { saveBytes } from './hosted-save.js';
 import { putR2 } from './exchange-blobs.js';
 import { mapExchange } from './exchange-parallel.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { hostedActionError } from './hosted-action-error.js';
 import { neverIndex } from './forge-disk.js';

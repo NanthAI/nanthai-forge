@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import { projectSource } from './projectGithubMirror';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { ForgeError } from '../src/errors';
 
 /** Reuse the recipe-aware hash-verified source reader, retaining only file presence. */

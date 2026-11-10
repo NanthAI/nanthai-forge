@@ -3,7 +3,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from 'node:path';
 import { commitActionsSnapshot } from './github-actions-commit.js';
 import { retrySyncGit, syncGit, syncGitSleep } from './github-sync-git.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { invariant } from './errors.js';
 import { githubActionsRecipe, githubActionsWorkflow } from './github-actions-workflow.js';
 import type { JobUsage } from './check-cost.js';

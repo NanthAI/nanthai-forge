@@ -4,7 +4,7 @@ import { readFile, open } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { earlyPurgeBackup } from './lib/r2-purge-backup.mjs';
 import { dirname, resolve } from 'node:path';
-import { syncDirectory } from '../dist/native-durability.js';
+import { syncDirectory } from '../dist/state/durability.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { deploymentOptions } from './hosted-durability.mjs';

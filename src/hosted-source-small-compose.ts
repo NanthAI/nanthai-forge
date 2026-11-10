@@ -9,9 +9,9 @@ import {
 import { readSourceExact } from './hosted-source-exact.js';
 import { saveBytes, savePin } from './hosted-save.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { parseNativeState, stateSchema, overlappingPaths, type NativeFile } from './native-state-format.js';
+import { parseNativeState, stateSchema, overlappingPaths, type NativeFile } from './state/format.js';
 import { mergeFileMetadata } from './native-file-merge.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import type { WorkerPin, WorkerObject } from './hosted-source-worker-format.js';

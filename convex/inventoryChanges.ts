@@ -3,7 +3,7 @@ import { v } from 'convex/values';
 import { makeFunctionReference, paginationOptsValidator } from 'convex/server';
 import { query } from './cliServer';
 import { readerAllowed } from './sharing';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 
 /** Reactive invalidation contains only an opaque digest, never retained locations. */
 export const watch = query({

@@ -43,7 +43,7 @@ import {
 import { recordSourceStep, sourceR2Counts, sourceStepTiming } from './projectSourceStepTiming';
 import { saveStepReads, sourceObjectLocation } from './projectSourceBeginReads';
 import { sourceResultInlineBytes } from './projectConvexSourceTransport';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { publishSourceResult } from './projectSourcePublishInline';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string() };
 /** The step's own result text, when publication may take it without the complete action's R2 read. */

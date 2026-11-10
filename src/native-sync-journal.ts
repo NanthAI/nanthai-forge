@@ -3,7 +3,7 @@ import { lstatSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { stackSyncSchema } from './work-types.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { readSource, safeRelative } from './files.js';
 import { invariant } from './errors.js';
 const hash = z.string().regex(/^[a-f0-9]{64}$/);

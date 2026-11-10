@@ -5,7 +5,7 @@ import { semanticPlanSchema } from './intent-semantic-conflict.js';
 import { intentTestContractSchema } from './intent-test-contract.js';
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 import { sourceJobControlSchema } from './hosted-source-job.js';
 import { docsMergeSchema } from './docs-resolution.js';

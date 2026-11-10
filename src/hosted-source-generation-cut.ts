@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { validStateGeneration } from './state-generation.js';
+import { validStateGeneration } from './state/generation.js';
 
 /** Generation-ordered paint, with one colour per selected tip. A shared base
  * paints its parents stale. Once at most one non-stale colour remains, no new

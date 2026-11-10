@@ -73,7 +73,7 @@ test('Windows keeps recorded executable modes and flushes through writable handl
   assert.equal(executableBitMatches(0o644, 'executable', 'linux'), false);
   assert.equal(gitFileMode(0o755, '100644', 'linux'), '100755');
 
-  const { fileFlushFlags, syncFile, syncDirectory } = await import(moduleUrl('native-durability'));
+  const { fileFlushFlags, syncFile, syncDirectory } = await import(moduleUrl('state/durability'));
   assert.equal(fileFlushFlags(), process.platform === 'win32' ? 'r+' : 'r');
   const directory = mkdtempSync(join(tmpdir(), 'forge-flush-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { RecoveryStateQueue } from './recovery-state-queue.js';
 import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { fingerprintPrivateFile } from './files.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { syncDirectory, syncFile } from './state/durability.js';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
 import { digest } from './hash.js';

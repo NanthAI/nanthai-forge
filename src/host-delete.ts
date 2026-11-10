@@ -17,7 +17,7 @@ import { coordinationClient, type CoordinationTransport } from './coordination-c
 import { readHostState, updateHostState, retirePendingHost } from './host-binding.js';
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { deriveProjectPhase } from './project-phase.js';
 
 type Project = {

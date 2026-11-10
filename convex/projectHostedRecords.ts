@@ -8,7 +8,7 @@ import { activeProject, accessibleProject } from './projectAuthority';
 import { sourceAuthority } from '../src/hosted-source-authority';
 import { hostedRecordValue, hostedRecordIndex, type HostedRecordKind } from '../src/hosted-records';
 import { invariant } from '../src/errors';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import {
   effectiveLifecycleRecord,
   visibleLifecycleRecord,

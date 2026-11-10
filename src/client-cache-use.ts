@@ -11,7 +11,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { randomUUID } from 'node:crypto';
 import { invariant } from './errors.js';
 

@@ -5,7 +5,7 @@ import { lstat, mkdir, readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { ForgeError } from './errors.js';
 import { gitlinkCommit, gitmoduleUrls } from './gitlink.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { safeRelative } from './safe-relative.js';
 import { inTestProcess } from './test-isolation.js';
 import { submoduleAllowCommand } from './submodule-allowlist.js';

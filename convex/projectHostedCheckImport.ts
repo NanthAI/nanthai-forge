@@ -4,7 +4,7 @@ import { v } from 'convex/values';
 import { mutation, type MutationCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
 import { settingKey } from './projectSettingApprovals';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { saveCheckSetting } from './projectHostedCheckDefinitions';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { checkHash, checkNumber, importedHostedCheck } from '../src/hosted-check';

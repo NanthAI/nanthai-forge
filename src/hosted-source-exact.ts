@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 import type { WorkerPin } from './hosted-source-worker-format.js';
 import type { SourceWorkerTransport } from './hosted-source-worker-reader.js';

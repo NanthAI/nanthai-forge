@@ -5,7 +5,7 @@ import { digest } from './hash.js';
 import { ForgeError } from './errors.js';
 import { clientCacheRoot } from './root-paths.js';
 import { machineObjectsDirectory } from './machine-object-store.js';
-import { parseNativeState } from './native-state-format.js';
+import { parseNativeState } from './state/format.js';
 import { reviewPaths } from './source-review-format.js';
 import { readLaneEntry } from './lane-registry.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';

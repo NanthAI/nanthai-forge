@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { mergeNativeText, nativeConflictRegions } from './native-text-merge.js';
-import { syntaxConflictReason } from './native-merge-syntax.js';
+import { syntaxConflictReason } from './state/merge-syntax.js';
 import { conflictRule, resolveListText } from './native-docs-resolve.js';
 import type { DeclaredMergePaths } from './project-config.js';
 
 /** Exact conflicts at save (flip 4, Issue 853fcde3). A save trial-merges each file it shares with
  * main (when main changed it after the Lane's base) and with other open Lanes that saved the same
- * file, using composition's own rules: the per-file entry rule of native-merge, mergeNativeText,
+ * file, using composition's own rules: the per-file entry rule of state/merge, mergeNativeText,
  * the compose syntax gate, and compose's conflict rules (Markdown docs and main's forge.json
  * `merge` lists), so a notice never names a conflict the landing would merge on its own. Pure: the caller supplies the bytes; nothing is written anywhere. */
 export type TrialFile = { blob: string; mode: string } | null;
@@ -47,7 +47,7 @@ const refuse = (reason: string, left: TrialRange[] = [], right: TrialRange[] = [
 /** Bytes of a file this trial needs but could not read (recipe-only, too large, or missing). */
 export class TrialUnavailable extends Error {}
 
-/** One file, three versions: the same decision as native-merge's per-file entry (x = the current
+/** One file, three versions: the same decision as state/merge's per-file entry (x = the current
  * side, y = the Lane composed onto it), then the compose syntax gate on a text merge. A text conflict
  * compose would resolve (resolveDocsComposition: Markdown docs, main's declared lists; an add on both
  * sides with one mode against an empty base) is merged the same way, with no syntax gate. */

@@ -29,14 +29,14 @@ import {
   type NativeMergeOptions,
   type NativeMergeResolution,
   type NativeMergeConflict,
-} from './native-merge.js';
+} from './state/merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import { diskGuard } from './disk-guard.js';
 import { nativeFile } from './native-file.js';
 import { NativeWorkspaceFiles } from './native-workspace-files.js';
 import { cloneLaneTree } from './native-lane-cache.js';
 import { writeRecoveryState } from './recovery-state.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { syncDirectory, syncFile } from './state/durability.js';
 import { NativeAncestry } from './native-ancestry.js';
 
 import {
@@ -47,14 +47,14 @@ import {
   parseNativeState,
   type NativeFile,
   type NativeState,
-} from './native-state-format.js';
+} from './state/format.js';
 export {
   stateSchema,
   overlappingPaths,
   parseNativeState,
   type NativeFile,
   type NativeState,
-} from './native-state-format.js';
+} from './state/format.js';
 const markerSchema = z
   .object({ schema: z.literal(1), kind: z.literal('forge-native'), owner: z.string() })
   .strict();

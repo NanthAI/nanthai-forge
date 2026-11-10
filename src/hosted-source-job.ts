@@ -2,7 +2,7 @@
 import { z } from 'zod';
 import { sourceFailureSchema } from './hosted-source-retry.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 export const jobHash = z.string().regex(/^[0-9a-f]{64}$/);
 export const jobNumber = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);

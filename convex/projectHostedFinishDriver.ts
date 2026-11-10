@@ -6,7 +6,7 @@ import { finishStep, resumeFinishIO, type FinishIdentity } from './projectHosted
 import { loadLanding } from './projectHostedLandingStore';
 import { scheduleFinish } from './projectHostedFinishWake';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import type { FinishCommand } from '../src/hosted-finish';
 import { r2Config, r2Key, presignPut } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';

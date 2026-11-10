@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile, NativeState } from './native-state-format.js';
+import type { NativeFile, NativeState } from './state/format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { GithubMirrorApiError, type GithubRequest } from './hosted-github-api.js';
 import { gitlinkCommit } from './gitlink.js';

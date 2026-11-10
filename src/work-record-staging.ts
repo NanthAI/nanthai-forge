@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { processIdentity } from './local-process.js';
 

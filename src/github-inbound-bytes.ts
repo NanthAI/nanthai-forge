@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import type { GithubFetch } from './github.js';
 import type { InboundChange } from './github-inbound.js';
 import { inboundBytes } from './github-inbound.js';
 import { LfsImport } from './github-lfs-import.js';
 import { ObjectRecipeBuilder } from './object-chunks.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { lfsImportDefaultBytes } from './github-import-pages.js';
 import { ForgeError } from './errors.js';
 

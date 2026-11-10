@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { digest } from './hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { invariant } from './errors.js';

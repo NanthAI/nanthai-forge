@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { clientCacheRoot, retainedRootSibling } from './root-paths.js';
 import {
   existsSync,
@@ -41,7 +41,7 @@ import {
   staticChecks,
   type StaticCheckResult,
 } from './agent-preflight-static.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { sourceTree } from './source-tree.js';
 import { incompletePreflight, preflightVerdict } from './agent-preflight-incomplete.js';
 import {

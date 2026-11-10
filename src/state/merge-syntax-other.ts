@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { Parser, SyntaxNode, Tree } from '@lezer/common';
-import { mergeGates, type MergeGrammar } from './ecosystems.js';
+import { mergeGates, type MergeGrammar } from '../ecosystems.js';
 
 /** The merge syntax gate beyond JS/TS. Python, Java and Rust use the Lezer
  * parsers already in the dependencies; JSON uses `JSON.parse`. Source only:

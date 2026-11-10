@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import type { GithubSyncCommit } from './github-sync-types.js';
 import { invariant } from './errors.js';
 export const gitMode = (mode: NativeFile['mode']) =>

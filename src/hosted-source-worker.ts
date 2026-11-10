@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NativeSource } from './native-source.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { parseNativeState, type NativeFile } from './state/format.js';
 import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { buildHostedSyncState } from './hosted-sync-worker.js';

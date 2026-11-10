@@ -10,7 +10,7 @@ import { importReadToken } from './githubAppToken';
 import { storeSourceBytes } from './projectSourceBytes';
 import { r2Config, r2Key } from './r2';
 import { deleteR2Object } from './r2Operations';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 import { fetchGitPack, PackLimitError } from '../src/git-upload-pack';
 import { historyChunkBytes } from './projectHistoryFields';

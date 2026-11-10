@@ -8,7 +8,7 @@ import test from 'node:test';
 import { digest } from '../dist/hash.js';
 import { gitHash, gitTree } from '../dist/hosted-github-git.js';
 import { NativeSource, nativeMarker } from '../dist/native-source.js';
-import { emptyStateGitCache, gitObjectId, gitToState, stateCommit, stateToGit } from '../dist/state-git.js';
+import { emptyStateGitCache, gitObjectId, gitToState, stateCommit, stateToGit } from '../dist/state/git.js';
 
 function owner(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'forge-state-git-')));

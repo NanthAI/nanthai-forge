@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 import { ForgeError } from './errors.js';
 import { hostedAgentActions } from './hosted-agent-contract.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 
 /** CLI/server skew is reported as an upgrade step, never as a bare unsupported action. */
 export const CLI_UPGRADE_STEP =

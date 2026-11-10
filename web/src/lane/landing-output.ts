@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { LandingIO, Pin } from './hosted-landing-client';
-import { digest } from '../../../src/portable-hash';
+import { digest } from '../../../src/state/hash';
 import { invariant } from '../../../src/errors';
 import { failingTests } from './CheckPanel';
 /** A decision excerpt reads one tail chunk per text stream, without a tail loop.

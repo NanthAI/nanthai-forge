@@ -2,7 +2,7 @@
 import { closeSync, openSync, fsyncSync, writeFileSync, renameSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 
 export function writeRecoveryState(path: string, value: unknown) {
   writeRecoveryText(path, JSON.stringify(value) + '\n');

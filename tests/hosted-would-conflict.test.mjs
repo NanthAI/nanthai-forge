@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { landingFixture } from './hosted-landing-fixture.mjs';
 import { synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
 import { observeHostedSubmissions } from '../dist/hosted-agent-submission-wait.js';

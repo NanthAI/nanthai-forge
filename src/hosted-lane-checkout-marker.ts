@@ -4,7 +4,7 @@ import { checkoutPathExists } from './hosted-checkout-files.js';
 import { z } from 'zod';
 import { readSource, safeRelative } from './files.js';
 import { hostedLaneSelectionSchema } from './hosted-lane.js';
-import { parseNativeStateValue, stateSchema } from './native-state-format.js';
+import { parseNativeStateValue, stateSchema } from './state/format.js';
 import { invariant } from './errors.js';
 export const hostedLaneExpectationSchema = hostedLaneSelectionSchema.pick({
   head: true,

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { mergeNativeText, type NativeTextResolution } from './native-text-merge.js';
-import { syntaxCheckedPath, syntaxConflictReason } from './native-merge-syntax.js';
+import { syntaxCheckedPath, syntaxConflictReason } from './state/merge-syntax.js';
 import type { LazyMergeSource } from './hosted-merge-reader.js';
 
 type Merged = { path: string; key: string; left: NativeFile; right: NativeFile; blob: string };

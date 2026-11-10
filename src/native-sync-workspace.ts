@@ -16,7 +16,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { readSyncJournal, syncApplication } from './native-sync-journal.js';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { NativeSource, type NativeFile } from './native-source.js';
 import { safeRelative } from './files.js';
 import { nativeFile } from './native-file.js';

@@ -10,7 +10,7 @@ import {
   firstSyntaxProblem,
   syntaxConflictReason,
   SYNTAX_GATE_MAX_BYTES,
-} from '../dist/native-merge-syntax.js';
+} from '../dist/state/merge-syntax.js';
 
 const at = '2026-01-01T00:00:00.000Z';
 const PATH = 'tests/agent-action-parse.test.mjs';

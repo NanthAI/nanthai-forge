@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { runSmallSourceSave } from '../dist/hosted-source-small-save.js';
 import { buildSavePages, saveBytes } from '../dist/hosted-save.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 const objects = new Map();
 const put = bytes => {
   const pin = { sha256: digest(bytes), size: bytes.length };

@@ -7,7 +7,7 @@ import type { Doc } from './_generated/dataModel';
 import { composeRow, composeStateSchema } from './projectHostedComposeStore';
 import { cancelHostedLanding } from './projectHostedLandingCancel';
 import { hostedWriteProject } from './projectHostedRecords';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedLandingStateSchema } from '../src/hosted-landing';
 import { invariant } from '../src/errors';

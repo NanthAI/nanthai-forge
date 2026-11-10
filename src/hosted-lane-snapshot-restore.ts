@@ -37,7 +37,7 @@ import {
   type SnapshotEntry,
   type SnapshotsCommand,
 } from './lane-snapshot-contract.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 
 const call = async (
   client: SnapshotClient,

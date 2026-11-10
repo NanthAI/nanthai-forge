@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { scaleFixture, at } from './convex-source-scale-fixture.mjs';
 import { saveBytes } from '../dist/hosted-save.js';
-import { parseNativeState } from '../dist/native-state-format.js';
+import { parseNativeState } from '../dist/state/format.js';
 import { buildHostedSourceState } from '../dist/hosted-source-worker.js';
 import { digest } from '../dist/hash.js';
 

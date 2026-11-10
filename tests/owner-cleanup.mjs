@@ -105,7 +105,7 @@ export async function stopOwnerCheckControllers(root) {
   const { WorkStore } = await import('../dist/work-store.js');
   const { wakeLandingWorker } = await import('../dist/landing-worker-wake.js');
   const { createRunReceipt } = await import('../dist/work-run-receipt.js');
-  const { durableReplace } = await import('../dist/native-durability.js');
+  const { durableReplace } = await import('../dist/state/durability.js');
   const store = new WorkStore(root);
   assert.equal(store.root, realpathSync(root), 'A Lane must never resolve teardown into its real owner');
   assert.ok(

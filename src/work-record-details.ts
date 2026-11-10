@@ -2,7 +2,7 @@
 import { packRecord, unpackRecord } from './work-record-codec.js';
 import { preserveFields } from './work-normalization.js';
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { invariant } from './errors.js';
 import { checkRunSchema, type CheckRun, type WorkData } from './work-types.js';
 

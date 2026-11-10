@@ -2,7 +2,7 @@
 import { v } from 'convex/values';
 import type { Doc, Id } from './_generated/dataModel';
 import { projectBackupPreview } from './schema';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 export const backupTransferArgs = {
   key: v.string(),

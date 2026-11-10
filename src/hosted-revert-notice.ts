@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Pure: runs in the Convex non-Node runtime and in test fixtures.
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** Lanes of one reverted receipt told per revert; a receipt usually carries one Lane, a cohort a few. */
 export const REVERT_NOTICE_FANOUT = 20;

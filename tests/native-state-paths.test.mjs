@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { overlappingPaths, parseNativeStateValue } from '../dist/native-state-format.js';
+import { overlappingPaths, parseNativeStateValue } from '../dist/state/format.js';
 import { safeRelative } from '../dist/safe-relative.js';
 
 // Reference implementations: the straightforward segment-splitting forms the fast paths replaced.

@@ -27,5 +27,5 @@ s=s.replace("from 'zod'", 'from '+JSON.stringify(import.meta.resolve('zod')));
 s=s.replace(/from '(\.\/[^']+)'/g,(_,relative)=>'from '+JSON.stringify(pathToFileURL(join(pinned,'dist',relative)).href));
 writeFileSync(join(output,'baseline-open.mjs'),ts.transpileModule(s,{compilerOptions:{target:ts.ScriptTarget.ESNext,module:ts.ModuleKind.ESNext}}).outputText);
 const sha=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
-writeFileSync(join(output,'baseline-module-pins.json'),JSON.stringify({pinned,source:sha(join(pinned,'src/hosted-lane-checkout.ts')),modules:Object.fromEntries(['hosted-checkout-cache','hosted-checkout-files','checkout-materialization','files','checkout-stat-index','native-durability'].map(name=>[name,sha(join(pinned,'dist',name+'.js'))]))}));
+writeFileSync(join(output,'baseline-module-pins.json'),JSON.stringify({pinned,source:sha(join(pinned,'src/hosted-lane-checkout.ts')),modules:Object.fromEntries(['hosted-checkout-cache','hosted-checkout-files','checkout-materialization','files','checkout-stat-index','state/durability'].map(name=>[name,sha(join(pinned,'dist',name+'.js'))]))}));
 console.log('Prepared instrumented baseline checkout module from '+pinned);

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { makeFunctionReference } from 'convex/server';
 import { syncResultSchema } from './hosted-sync.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { applyHostedSync } from './hosted-sync-client.js';
 import {

@@ -31,9 +31,9 @@ import { digest } from './hash.js';
 import { readSource } from './files.js';
 import { scanSourcePaths } from './source-paths.js';
 import { notSavedCollector, notSavedFile } from './save-not-saved.js';
-import { durableReplace, syncFile } from './native-durability.js';
+import { durableReplace, syncFile } from './state/durability.js';
 import { invariant } from './errors.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import type { SaveChange } from './hosted-save.js';
 import {
   rememberOverlapSketch,

@@ -32,7 +32,7 @@ import { invariant } from './errors.js';
 import { materializeActionsSource } from './hosted-actions-job-source.js';
 import { scopedRecheckBase, scopedRecheckPairs } from './scoped-recheck-policy.js';
 import { batchScopedRecheckSelection, scopedRecheckSelection } from './scoped-recheck.js';
-import type { NativeState } from './native-state-format.js';
+import type { NativeState } from './state/format.js';
 import { refreshSourcePack } from './source-pack.js';
 import { refreshActionsSourcePack } from './hosted-actions-job-pack.js';
 import { testedDocs } from './tested-docs.js';

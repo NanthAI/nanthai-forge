@@ -8,7 +8,7 @@ import { viewReadModels } from './view-read-model.js';
 import { viewIndexEntries } from './view-hosted-index.js';
 import type { ProvenanceFile } from './view-provenance-plan.js';
 import { hostedAncestry } from './work-hosted-ancestry.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { laneSummary, viewSummary, runSummary } from './work-hosted-summary.js';
 import type { WorkData, HostedEvent } from './work-types.js';
 import { archiveSource, archiveChannels, type sourceManifestSchema } from './work-archive-metadata.js';

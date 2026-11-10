@@ -3,7 +3,7 @@ import { lstatSync, readdirSync, readFileSync, renameSync, rmSync } from 'node:f
 import { join } from 'node:path';
 import { canonicalRoot, clientCacheRoot } from './root-paths.js';
 import { ForgeError } from './errors.js';
-import { syncDirectory } from './native-durability.js';
+import { syncDirectory } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { checkoutPathExists as exists } from './hosted-checkout-files.js';
 import { deltaJournalName } from './hosted-checkout-delta.js';

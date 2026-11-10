@@ -21,7 +21,7 @@ import {
   type ResultEnvelope,
 } from '../src/hosted-actions-result-batch';
 import { invariant } from '../src/errors';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { deleteR2Object } from './r2Operations';
 
 /** CPU-only targets added to the existing plan response; never stored in the run or given to

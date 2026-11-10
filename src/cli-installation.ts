@@ -4,7 +4,7 @@ import { basename, dirname, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cliRuntimePaths, type CliRuntimeUser } from './cli-runtime-processes.js';
 import { randomUUID } from 'node:crypto';
-import { durableReplace, syncDirectory } from './native-durability.js';
+import { durableReplace, syncDirectory } from './state/durability.js';
 import { processAlive, processStartTime } from './local-process.js';
 import {
   CLI_RUNTIME_WAIT_MS,

@@ -9,7 +9,7 @@ import { namedPathsField } from '../src/work-schedule';
 import { assembleIndexValue } from '../src/work-index-value';
 import type { PlanningItem } from '../src/work-planning-types';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 
 /** Explicit operator preparation for pre-search generations. One page/operation, no scheduler,

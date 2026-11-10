@@ -20,7 +20,7 @@ import {
 } from './projectCheckLogCleanupTypes';
 import { snapshotReader } from './projectCheckLogCleanupSnapshot';
 import { exchangeObjectReader } from './projectExchangeReader';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { objectRecipeSchema, objectChunkPageSchema } from '../src/object-chunks';
 import { isCheckMaintenancePath, portableCheckPath } from '../src/check-log-policy';
 import { hostedCheckRunSchema, hostedCheckTerminal } from '../src/hosted-check';

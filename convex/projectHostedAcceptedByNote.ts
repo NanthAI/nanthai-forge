@@ -8,7 +8,7 @@ import { postSystemLaneNote } from './projectBoardSystem';
 import { publicActorLabel } from './publicPeople';
 import { fitNote } from './projectHostedApprovalStore';
 import { composeLaneSchema, validateComposePage } from '../src/hosted-compose';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { landingAcceptedBySchema, type LandingAcceptedBy } from '../src/landing-accepted-by';
 
 export function acceptedByNoteId(receiptId: string) {

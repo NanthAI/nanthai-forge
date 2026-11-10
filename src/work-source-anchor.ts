@@ -3,7 +3,7 @@ import type { SourceAnchor } from './work-intent-types.js';
 import type { WorkData } from './work-types.js';
 import type { NativeFile } from './native-source.js';
 import { invariant } from './errors.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 export function validateAnchorView(
   view: WorkData['views'][number] | undefined,

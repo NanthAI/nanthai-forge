@@ -21,7 +21,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import { readHostedLaneCheckout, type HostedLaneCheckoutMarker } from './hosted-lane-checkout-marker.js';
 import { hostedAgentDirectory, readAgentJson, HostedAgentJournal } from './hosted-agent-journal.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { hostedActionError } from './hosted-action-error.js';
 import type { HostedLaneSelection } from './hosted-lane.js';

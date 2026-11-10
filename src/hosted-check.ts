@@ -8,7 +8,7 @@ import { githubActionsRunsOnSchema } from './github-actions-runner-label.js';
 import { ciStatusProviderSchema } from './ci-status.js';
 import { checkLogsSchema } from './check-log-policy.js';
 import { checkSchema } from './work-types.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { contractTestPath } from './intent-test-contract.js';

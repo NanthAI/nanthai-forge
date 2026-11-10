@@ -6,7 +6,7 @@ import { loadSourceJob, saveSourceJob, sourceJobTerminal } from './projectSource
 import { hostedWriteProject } from './projectHostedRecords';
 import { sourceDispatch } from '../src/hosted-source-job-controller';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import type { SourceDispatch } from '../src/hosted-source-job';
 

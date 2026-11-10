@@ -10,7 +10,7 @@ import { checkoutHostedMain, type MainTransport } from './hosted-main-checkout.j
 import { HostedCheckoutDownloads } from './hosted-checkout-downloads.js';
 import { hostedAgentDirectory, readAgentJson } from './hosted-agent-journal.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { workLocked } from './work-lock.js';
 import { ForgeError, invariant } from './errors.js';
 export const CLONE_HELP = 'nforge clone <project-url|project-id> DIR [--deployment URL]\n';

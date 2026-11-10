@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import { digest } from './hash.js';
 import { readSource } from './files.js';
 import { invariant } from './errors.js';
-import { durableReplace, syncDirectory, syncFile } from './native-durability.js';
+import { durableReplace, syncDirectory, syncFile } from './state/durability.js';
 import { readWorkFile } from './work-records.js';
 import type { WorkStore } from './work-store.js';
 

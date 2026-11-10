@@ -7,7 +7,7 @@ import type { Id } from './_generated/dataModel';
 import { storeSourceBytes } from './projectSourceBytes';
 import { r2Config, r2Key } from './r2';
 import { deleteR2Object } from './r2Operations';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { published } from '../src/hosted-github-mirror';
 import { gitHash } from '../src/hosted-github-git';
 import { laneCommitBytes, type PackObject } from '../src/git-lane-objects';

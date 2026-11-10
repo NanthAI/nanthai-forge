@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Automatic restack of a stacked Lane onto its parent's newest saved head (Issue f61e9339).
 import { z } from 'zod';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 
 /** The overlap read's `stack` field: the parent saved newer work than this Lane is stacked on. */
 export const stackHintSchema = z.object({

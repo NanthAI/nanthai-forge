@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from 'node:crypto';
-import { digest } from './hash.js';
-import { invariant } from './errors.js';
-import { gitlinkCommit } from './gitlink.js';
-import { gitMode } from './hosted-github-git.js';
-import { parseNativeState, type NativeFile } from './native-state-format.js';
+import { digest } from '../hash.js';
+import { invariant } from '../errors.js';
+import { gitlinkCommit } from '../gitlink.js';
+import { gitMode } from '../hosted-github-git.js';
+import { parseNativeState, type NativeFile } from './format.js';
 
 /** P5-SG source layer: a Forge State keeps its SHA-256 identity (the hash of its
  * exact manifest bytes) while its file list is stored as Git trees and blobs.

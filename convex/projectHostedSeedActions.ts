@@ -8,7 +8,7 @@ import { caller } from './projectWorkActions';
 import { digest } from '../src/hash';
 import { recordReferences, recordKey } from '../src/work-exchange-records';
 import { channelMoveSchema } from '../src/work-types';
-import { parseNativeState } from '../src/native-state-format';
+import { parseNativeState } from '../src/state/format';
 import { exchangeRootSchema } from '../src/native-exchange-tree';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { seedPageSchema, seedRequestSchema, validateSeedPage } from '../src/hosted-seed-protocol';

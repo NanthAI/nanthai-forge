@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { recordsFixture } from './hosted-records-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
-import { deriveStateGenerationPage } from '../dist/state-generation-page.js';
+import { deriveStateGenerationPage } from '../dist/state/generation-page.js';
 import { digest } from '../dist/hash.js';
 import { fakeSourceR2 } from './convex-source-r2-fixture.mjs';
 const api = await import(moduleUrl('../convex/projectStateGeneration.ts'));

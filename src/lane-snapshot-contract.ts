@@ -2,7 +2,7 @@
 // Pure: also runs in the Convex non-Node runtime.
 import { z } from 'zod';
 import { canonicalPayload } from './hosted-source-operation.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { SNAPSHOT_INTERVAL_MINUTES } from './lane-snapshot-interval.js';
 
 /**

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type ts from 'typescript';
-import { firstOtherSyntaxProblem, otherSyntaxLanguage } from './native-merge-syntax-other.js';
-import { mergeGates } from './ecosystems.js';
+import { firstOtherSyntaxProblem, otherSyntaxLanguage } from './merge-syntax-other.js';
+import { mergeGates } from '../ecosystems.js';
 
 /** A text merge can combine two edits that each compile alone into a file that
  * does not (two `const root` declarations, an unbalanced brace). The merge is
@@ -10,7 +10,7 @@ import { mergeGates } from './ecosystems.js';
  * source only: nothing in the project is imported, evaluated or run. JS/TS uses
  * the TypeScript parser and binder already in the dependencies, plus a
  * module-scope import/declaration clash check the binder leaves to its type
- * checker; the other languages use native-merge-syntax-other.
+ * checker; the other languages use state/merge-syntax-other.
  *
  * Only a merged file that fails while BOTH side versions parse cleanly is a
  * conflict. A side that already fails is left to the check; it is not blocked.

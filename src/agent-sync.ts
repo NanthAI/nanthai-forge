@@ -17,7 +17,7 @@ import {
   syncSelection,
   syncSelectionName,
 } from './native-sync-journal.js';
-import { durableReplace } from './native-durability.js';
+import { durableReplace } from './state/durability.js';
 import { syncWorkspace, syncFileKey as key, type SyncTarget as Target } from './native-sync-workspace.js';
 export { syncWorkspace, syncTestHooks } from './native-sync-workspace.js';
 import { NativeSource, nativeOwner, type NativeFile } from './native-source.js';

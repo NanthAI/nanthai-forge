@@ -4,7 +4,7 @@ import { makeFunctionReference } from 'convex/server';
 import type { Id } from '../../../convex/_generated/dataModel';
 import { api } from '../../../convex/_generated/api';
 import { saveBytes, savePin } from '../../../src/hosted-save';
-import { digest } from '../../../src/portable-hash';
+import { digest } from '../../../src/state/hash';
 import { invariant } from '../../../src/errors';
 import type { LandingIO, Pin } from './hosted-landing-client';
 import { packHeaders, verifyPackRange, type PackRange } from '../../../src/object-pack-range';

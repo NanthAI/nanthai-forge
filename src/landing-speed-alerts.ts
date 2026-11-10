@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { z } from 'zod';
 import type { HostedLandingState } from './hosted-landing.js';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { percentile } from './self-metrics-joins.js';
 import { costGuardSchema, costBudgetSchema } from './cost-budgets.js';
 

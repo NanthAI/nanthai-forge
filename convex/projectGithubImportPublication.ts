@@ -7,7 +7,7 @@ import { jobIdentity, retain } from './projectGithubImportInventory';
 import { projectBackupPreview } from './schema';
 import { indexEntry } from './projectWorkIndexFields';
 import { HOSTED_WORK_INDEX_FORMAT } from '../src/work-hosted-summary';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { isStored } from './projectObjectFields';
 import { findObject } from './projectObjectFind';
 import { internal } from './_generated/api';

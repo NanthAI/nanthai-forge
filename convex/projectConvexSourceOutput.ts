@@ -4,7 +4,7 @@ import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
 import { r2Key } from './r2';
 import { isR2Object } from './projectObjectFields';
-import { validStateGeneration, validStateParents } from '../src/state-generation';
+import { validStateGeneration, validStateParents } from '../src/state/generation';
 import { findObject, objectRow } from './projectObjectFind';
 export type SourceOutput = {
   sha256: string;

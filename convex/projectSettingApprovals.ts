@@ -10,7 +10,7 @@ import {
   type ApprovalRow,
 } from './projectHostedApprovalStore';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 
 /**

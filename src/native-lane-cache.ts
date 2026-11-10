@@ -6,7 +6,7 @@ import { digest } from './hash.js';
 import { invariant } from './errors.js';
 import { mkdirBelow } from './mkdir-below.js';
 import { nativeFile } from './native-file.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { syncDirectory, syncFile } from './state/durability.js';
 import { workLocked, workLockWaitMs } from './work-lock.js';
 import { writeRecoveryState } from './recovery-state.js';
 import type { NativeSource, NativeFile } from './native-source.js';

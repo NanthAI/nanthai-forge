@@ -11,7 +11,7 @@ import type { InlinePublication } from './projectSourcePublishInline';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 
 const savePinOfText = (text: string) => {
   const bytes = new TextEncoder().encode(text);

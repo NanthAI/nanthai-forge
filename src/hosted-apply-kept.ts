@@ -15,10 +15,10 @@ import { z } from 'zod';
 import { ForgeError, invariant } from './errors.js';
 import { digest } from './hash.js';
 import { retainedRootSibling } from './root-paths.js';
-import { syncDirectory, syncFile } from './native-durability.js';
+import { syncDirectory, syncFile } from './state/durability.js';
 import { checkoutPathExists } from './hosted-checkout-files.js';
 import type { CheckoutChange } from './hosted-checkout-clean.js';
-import type { NativeFile } from './native-state-format.js';
+import type { NativeFile } from './state/format.js';
 import { diskShapeMatches, writeSourceLink } from './source-links.js';
 
 /** Local changes an explicit recover-apply set aside are kept this long after the apply is confirmed. */

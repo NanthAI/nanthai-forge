@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-import type { NativeFile } from './native-state-format.js';
-import type { NativeMergeConflict, NativeMergeResolution } from './native-merge.js';
+import type { NativeFile } from './state/format.js';
+import type { NativeMergeConflict, NativeMergeResolution } from './state/merge.js';
 import { mergeNativeText, markNativeTextConflicts, wholeFileConflict } from './native-text-merge.js';
 import type { NativeInsertionOrder } from './native-text-merge.js';
 import type { SourceStepCursor, StepTransport } from './hosted-source-step.js';
@@ -9,7 +9,7 @@ import type { WorkerObject } from './hosted-source-worker-format.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { SourceIoError, sourceCall } from './hosted-source-io-error.js';
 import { invariant } from './errors.js';
-import { syntaxConflictReason } from './native-merge-syntax.js';
+import { syntaxConflictReason } from './state/merge-syntax.js';
 import { docsMainSide, resolveListText } from './native-docs-resolve.js';
 import type { ListMergeRule } from './project-config.js';
 /** Bounds for the native whole-file text/import parser. Its memory grows with

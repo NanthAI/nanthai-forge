@@ -47,7 +47,7 @@ different plan digest once, when this landed.
 
 Some fields name code that lives in a module of its own. A new value there needs that code too:
 
-- A new `mergeGate` grammar: a lazily loaded parser in `src/native-merge-syntax-other.ts`. It must
+- A new `mergeGate` grammar: a lazily loaded parser in `src/state/merge-syntax-other.ts`. It must
   load on compose only and never enter the Convex bundle.
 - A new `importFixup` language: a reader in `READERS` in `src/native-import-languages.ts`.
 - A new `moduleGraph` or `codeMap` language: its reader (`src/module-graph-*.ts`, the analysers). With no

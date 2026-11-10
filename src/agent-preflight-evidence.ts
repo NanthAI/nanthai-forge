@@ -4,10 +4,10 @@ import { join } from 'node:path';
 import { gzipSync, gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { selectionSourcePath } from '../scripts/test-impact.mjs';
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { clientCacheRoot } from './root-paths.js';
 import { sourceTree } from './source-tree.js';
-import { stateSchema, type NativeFile } from './native-state-format.js';
+import { stateSchema, type NativeFile } from './state/format.js';
 
 // Increment when execution or partition semantics change. Runtime/config changes
 // cannot transfer a local pass; package/config deltas also select full coverage.

@@ -20,7 +20,7 @@ import {
 import { assertBoardPaths, assertBoardText, boardIdPrefix, parseBoardTarget } from '../src/board-text';
 import { isAgentSlug } from '../src/agent-slug';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 import { report } from './errors';
 

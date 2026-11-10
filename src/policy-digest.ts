@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from './portable-hash.js';
+import { digest } from './state/hash.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import type { AutonomyPolicy } from './autonomy-policy.js';
 import { effectiveAgentDefaults } from './agent-parallel-defaults.js';

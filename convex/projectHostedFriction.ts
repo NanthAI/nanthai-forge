@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { v } from 'convex/values';
 import { z } from 'zod';
 import { query, mutation } from './cliServer';

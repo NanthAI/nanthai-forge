@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { HostedLandingState } from '../src/hosted-landing';
 import type { HostedCheckRun } from '../src/hosted-check';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { canonicalPayload } from '../src/hosted-source-operation';
 
 /** Solo and shared runs retain the same observed progress, without changing

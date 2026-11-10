@@ -3,7 +3,7 @@ import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { boardStopped, BOARD_PROJECT_LIVE_CAP, BOARD_RETENTION_MS } from './projectBoardLimits';
 import { boardTextProblem } from '../src/board-text';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 
 /**
  * A system-written note to one Lane (Issue dc62b120): the same board row a member's `board --post`

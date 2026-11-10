@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { sourceStepClock } from '../dist/source-step-clock.js';
 import { serverSyncTiming, syncTiming } from '../dist/sync-timing.js';
-import { digest } from '../dist/portable-hash.js';
+import { digest } from '../dist/state/hash.js';
 const { recordSourceStep, sourceR2Counts } = await import(moduleUrl('../convex/projectSourceStepTiming.ts'));
 const { inlineSourceResult } = await import(moduleUrl('../convex/projectConvexSourceStore.ts'));
 

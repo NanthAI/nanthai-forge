@@ -15,8 +15,8 @@ import { applyInbound, diffGithubTrees, inboundConflicts, type InboundChange } f
 import { bringInChanges } from '../src/github-inbound-bytes';
 import { isGitattributesPath } from '../src/github-lfs';
 import { lfsAttributeBytes } from '../src/github-lfs-import';
-import type { NativeFile } from '../src/native-state-format';
-import { digest } from '../src/portable-hash';
+import type { NativeFile } from '../src/state/format';
+import { digest } from '../src/state/hash';
 import { ForgeError, invariant } from '../src/errors';
 
 const mutation = (name: string) => makeFunctionReference<'mutation'>(name);

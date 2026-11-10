@@ -5,7 +5,7 @@ import { loadSourceJob, saveSourceJob, sourceJobTerminal } from './projectSource
 import { hostedWriteProject } from './projectHostedRecords';
 import { sourceJobCallbackSchema } from '../src/hosted-source-job';
 import { canonicalPayload } from '../src/hosted-source-operation';
-import { digest } from '../src/portable-hash';
+import { digest } from '../src/state/hash';
 import { invariant } from '../src/errors';
 
 /** Only the output manifest reference becomes job evidence. H06/H07 separately

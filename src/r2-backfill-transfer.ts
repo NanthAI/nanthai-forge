@@ -7,7 +7,7 @@ import { Transform, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { BackfillPin, BackfillTarget } from './r2-backfill-types.js';
 import { invariant, ForgeError } from './errors.js';
-import { syncDirectory, syncFileAsync } from './native-durability.js';
+import { syncDirectory, syncFileAsync } from './state/durability.js';
 
 async function verifyFile(path: string, pin: BackfillPin) {
   const hash = createHash('sha256');

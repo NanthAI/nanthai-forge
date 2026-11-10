@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { auditFixture, state } from './hosted-main-audit-fixture.mjs';
 import { hostedRecordValue, hostedRecordIndex } from '../dist/hosted-records.js';
 import { hostedAcceptanceSchema } from '../dist/hosted-acceptance.js';
-import { stateSchema } from '../dist/native-state-format.js';
+import { stateSchema } from '../dist/state/format.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
 
 test('600 Intents, 575 receipts and 3k files: a 30-landing day runs three bounded audits; idle zero', async t => {
