@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { resultBatchTargetsSchema } from './hosted-actions-result-batch.js';
 import { prepareLandingProof } from './hosted-actions-job-proof.js';
 import { mkdir } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
@@ -266,9 +267,12 @@ export async function prepareActionsJob(
     );
   const planned = (await client.call({
     kind: 'plan',
+    ...(client.capabilities.includes('results.batch') ? { resultsBatch: true as const } : {}),
     plan: { recipe, lockfile: lockfileDigest(state.files) },
     ...(packRefresh ? { packRefresh: true as const } : {}),
   })) as typeof run | { run: typeof run; claims: unknown };
+  const bundled = planned as { run?: typeof run; resultBatch?: unknown };
+  if (bundled.resultBatch) client.resultBatch = resultBatchTargetsSchema.parse(bundled.resultBatch);
   let claims: PoolClaim[] | null = null;
   if (recipe.pool) {
     const reply = planned as { run: typeof run; claims: unknown };
@@ -278,7 +282,7 @@ export async function prepareActionsJob(
     claims =
       parsed.success && parsed.data.length === poolUnits(groups, recipe.pool).length ? parsed.data : null;
     if (!claims) console.log('Shard pool: claim targets unavailable; shards run their static groups');
-  } else client.run = planned as typeof run;
+  } else client.run = bundled.run ?? (planned as typeof run);
   lap('planCallMs');
   console.log(`plan: phases ${JSON.stringify(phases)}`);
   const proof =

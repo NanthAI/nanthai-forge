@@ -15,6 +15,10 @@ import { CatalogTable } from '../dist/import-catalog-table.js';
 import { importStateFiles } from '../dist/import-state-scan.js';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { childEnv } from '../scripts/child-env.mjs';
 import { getFunctionName } from 'convex/server';
 import { startFakeR2, fakeR2Config } from './fake-r2.mjs';
 const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
@@ -1055,10 +1059,47 @@ test('Issue 96f164ce: a publication retry reads the stored State one file at a t
 });
 
 test('Issue 96f164ce: an archive step keeps file pins in columns, under 300 bytes of heap per file from listing to archive-complete (150,612 files peaked at 494 of 512 MB)', async t => {
+  if (process.env.FORGE_ARCHIVE_HEAP_WORKER !== '1') {
+    // Earlier archive cases change V8's retained caches and heap baseline. Measure this
+    // per-file contract in a fresh process, with the same finite heap as the Node action.
+    let stdout;
+    try {
+      ({ stdout } = await promisify(execFile)(
+        process.execPath,
+        [
+          '--max-old-space-size=512',
+          '--import',
+          './tests/check-runtime.mjs',
+          '--test',
+          '--test-reporter=tap',
+          '--test-name-pattern=^Issue 96f164ce: an archive step keeps file pins',
+          fileURLToPath(import.meta.url),
+        ],
+        {
+          env: childEnv({
+            allow: ['FORGE_TEST_PRECOMPILED', 'FORGE_TEST_MODULE_DIRECTORY'],
+            extra: { FORGE_ARCHIVE_HEAP_WORKER: '1' },
+          }),
+          maxBuffer: 1024 * 1024,
+        },
+      ));
+    } catch (error) {
+      const output = `${error.stdout ?? ''}\n${error.stderr ?? ''}`;
+      const measured = output.match(/\d+ heap bytes per file between listing and archive-complete/);
+      if (output.trim()) t.diagnostic(output.slice(-8000));
+      throw new Error(`Archive heap worker failed: ${measured?.[0] ?? error.message}`, { cause: error });
+    }
+    // A successful process that selected no test is not memory evidence.
+    const measured = stdout.match(/\d+ heap bytes per file between listing and archive-complete/);
+    assert(measured, 'the isolated archive import reported its per-file heap measurement');
+    t.diagnostic(measured[0]);
+    return;
+  }
   setFlagsFromString('--expose-gc');
   const gc = runInNewContext('gc');
-  // A small import first loads every module the step uses, so the large one measures per-file cost.
-  const repo = repository({ files: 200, directories: 20, submodules: 0 }),
+  // Warm several receipt windows and table growth, not only the first page. Fixed
+  // initialization belongs in the baseline; the measured 30,000-file import stays the same.
+  const repo = repository({ files: 2000, directories: 200, submodules: 0 }),
     counts = {};
   await serve(t, repo, counts);
   await importArchive(pagedFixture());

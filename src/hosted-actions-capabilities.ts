@@ -17,6 +17,7 @@ export const actionsSubmoduleAccessCapability = 'checks.submoduleAccess';
  * jobs' conclusions instead of waiting for the run's (friction 0064c3b2). */
 export const actionsPackVerdictCapability = 'checks.packVerdict';
 /** Results say where the shard ran project code (`user` or `shared`); the run and receipt keep it. */
+export const actionsBatchCapability = 'results.batch';
 export const actionsIsolationCapability = 'results.isolation';
 /** Advertise only implemented extensions. Absent advertisement means the oldest protocol. */
 export const hostedActionsCapabilities = [
@@ -32,12 +33,18 @@ export const hostedActionsCapabilities = [
   actionsSubmoduleAccessCapability,
   actionsPackVerdictCapability,
   actionsIsolationCapability,
+  actionsBatchCapability,
 ] as const;
-/** Convex function calls per Actions job: preflight query, then either output
+/** Batched jobs use only their existing preflight; result collection is fixed work per run.
+ * Legacy Convex function calls per Actions job: preflight query, then either output
  * (action + mutation) and result (action + session + result mutations), or one
  * result action with its output and result mutations. */
 export const actionsJobCalls = (capabilities: readonly string[]) =>
-  capabilities.includes(actionsInlineLogCapability) ? 4 : 6;
+  capabilities.includes(actionsBatchCapability)
+    ? 1
+    : capabilities.includes(actionsInlineLogCapability)
+      ? 4
+      : 6;
 export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'session.timings': 'session.timingHistory',
   'result.result.testFiles': 'results.testFiles',
@@ -47,11 +54,13 @@ export const actionsCapabilityFields: Readonly<Record<string, string>> = {
   'plan.plan.recipe.pool': actionsPoolCapability,
   'result.result.pool': actionsPoolCapability,
   'plan.plan.recipe.actions': actionsToolchainsCapability,
+  'plan.resultsBatch': actionsBatchCapability,
   'plan.packRefresh': actionsPackVerdictCapability,
   'result.result.isolation': actionsIsolationCapability,
 };
 /** Whole-command extensions gate every nested runner-sent field. */
 export const actionsCapabilityCommands: Readonly<Record<string, string>> = {
+  results: actionsBatchCapability,
   sourcePack: 'sourcePack',
   submoduleAccess: actionsSubmoduleAccessCapability,
 };

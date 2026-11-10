@@ -190,3 +190,32 @@ export const presignDelete = (config: R2Config, key: string) =>
     secretAccessKey: config.secretAccessKey,
     expires: headExpiry,
   });
+
+/** Run-scoped supervisor inbox: create-only unknown result bytes, never a source object grant.
+ * The collector checks the existing metadata window while streaming. Only the trusted supervisor
+ * receives these URLs; Candidate code receives neither the bundle nor its parent directory. */
+export async function presignResultSlot(config: R2Config, key: string) {
+  const signed = {
+    ...target(config, key),
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    expires: 12 * 3600,
+  };
+  const headers = { 'if-none-match': '*' };
+  return {
+    put: { url: await presign({ method: 'PUT', ...signed, headers }), headers },
+    get: await presign({ method: 'GET', ...signed }),
+    head: await presign({ method: 'HEAD', ...signed }),
+  };
+}
+
+export async function presignResultList(config: R2Config, prefix: string) {
+  return presign({
+    method: 'GET',
+    ...target(config, ''),
+    accessKeyId: config.accessKeyId,
+    secretAccessKey: config.secretAccessKey,
+    expires: 12 * 3600,
+    query: { 'list-type': '2', 'max-keys': '1000', prefix },
+  });
+}

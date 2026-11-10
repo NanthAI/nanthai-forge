@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { detachCheckReports } from './projectHostedCheckReports';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
@@ -28,6 +29,7 @@ export const prepare = internalMutation({
     recipeR2Key: v.optional(v.string()),
     /** The plan starts the optional source-pack job (friction 0064c3b2). */
     packRefresh: v.optional(v.literal(true)),
+    resultsBatch: v.optional(v.literal(true)),
   },
   // JSON text (Issue 0c457ae4): a replayed plan can return a finished run with per-file reports.
   returns: v.string(),
@@ -177,6 +179,22 @@ export const prepare = internalMutation({
       // A runner's fallback code and its reason ride this plan write; unknown codes are dropped (7c2e69e1, 7cb61db1).
       Object.assign(run, runFallback(recipe.selection));
       // Recorded for the run's evidence; every pass reads the required jobs' conclusions.
+      if (input.resultsBatch) {
+        detachCheckReports(run);
+        const batch = await ctx.db
+          .query('projectHostedActionsResults')
+          .withIndex('by_project_and_run_and_index', q =>
+            q.eq('projectId', input.projectId).eq('runId', run.id).eq('index', -2),
+          )
+          .unique();
+        if (!batch)
+          await ctx.db.insert('projectHostedActionsResults', {
+            projectId: input.projectId,
+            runId: run.id,
+            index: -2,
+            digest: run.planDigest!,
+          });
+      }
       if (input.packRefresh && run.actions) run.actions.packRefresh = true;
       run.status = 'running';
       if (run.gate) await ctx.db.patch(row._id, { gate: run.gate });

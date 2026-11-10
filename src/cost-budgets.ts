@@ -36,8 +36,8 @@ export const costBudgetSchema = z
   .object({
     id: z.string().regex(/^[a-z0-9-]+$/),
     area: z.string().min(1),
-    /** landing-, driver-, snapshot-, planning-, metrics- and trial-merge-fixture: judged on change by the landing check. capture: a
-     * live number for reading, judged nowhere (no deterministic measure exists). */
+    /** Fixture quantities are judged on change by the landing check. Capture values are
+     * live context only, with no deterministic measurement to judge. */
     measuredBy: z.enum([
       'proof-fixture',
       'landing-fixture',
@@ -47,6 +47,7 @@ export const costBudgetSchema = z
       'trial-merge-fixture',
       'ci-result-fixture',
       'metrics-fixture',
+      'ci-batch-fixture',
       'capture',
     ]),
     metric: z.string().min(1),

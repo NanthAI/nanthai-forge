@@ -115,8 +115,10 @@ export const directCommandSchema = z.discriminatedUnion('kind', [
       plan: directPlanSchema,
       /** The plan starts the optional source-pack job: settle a pass from the required jobs. */
       packRefresh: z.literal(true).optional(),
+      resultsBatch: z.literal(true).optional(),
     })
     .strip(),
+  z.object({ kind: z.literal('results') }).strip(),
   z.object({ kind: z.literal('output'), index: checkNumber, log: directLogSchema }).strip(),
   z
     .object({

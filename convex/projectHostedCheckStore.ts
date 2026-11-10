@@ -1,8 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
+import {
+  reportsDetached,
+  detachCheckReports,
+  hydrateCheckReports,
+  storeCheckReports,
+} from './projectHostedCheckReports';
+import { hostedVerdictKey } from '../src/hosted-check-evidence';
 import { onGateRunTerminal } from './projectHostedMainAuditState';
 import { semanticPayload } from '../src/semantic-payload';
 import { wakeExpiredLogs } from './projectCheckLogRetention';
 import { restoreShardReports } from './projectHostedActionsReports';
+import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -89,7 +97,7 @@ export const completeCheckOperation = (ctx: MutationCtx, operation: HostedOperat
       },
     },
   });
-export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckIdentity) {
+export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckIdentity, withReports = true) {
   const row = await ctx.db
     .query('projectHostedCheckRuns')
     .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
@@ -101,12 +109,16 @@ export async function loadHostedCheck(ctx: QueryCtx | MutationCtx, input: CheckI
     'EVIDENCE_CHANGED',
     'Hosted run identity differs from its record.',
   );
+  if (row.reportParts !== undefined) {
+    detachCheckReports(run, row.reportParts, row.reportDigest ?? '');
+    if (withReports) await hydrateCheckReports(ctx, run);
+  }
   return { row, run };
 }
 /** A run row already loaded (and write-authorized) in this transaction. */
 export type LoadedHostedCheck = Awaited<ReturnType<typeof writableHostedCheck>>;
-export async function writableHostedCheck(ctx: MutationCtx, input: CheckIdentity) {
-  const selected = await loadHostedCheck(ctx, input);
+export async function writableHostedCheck(ctx: MutationCtx, input: CheckIdentity, withReports = false) {
+  const selected = await loadHostedCheck(ctx, input, withReports);
   const project = await hostedWriteProject(
     ctx,
     input.projectId,
@@ -120,14 +132,20 @@ export async function writeHostedCheck(
   ctx: MutationCtx,
   id: Id<'projectHostedCheckRuns'>,
   run: HostedCheckRun,
+  providerAttested = false,
 ) {
   if (run.actions?.watchdog && hostedCheckTerminal(run)) {
     await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
   }
+  const reports = await storeCheckReports(ctx, run);
+  const stored = { ...run };
+  if ('reportParts' in reports) delete stored.contractReports;
   await ctx.db.patch(id, {
+    ...reports,
     status: run.status,
-    value: semanticPayload(hostedCheckRunSchema.parse(run), true),
+    ...(providerAttested && run.status === 'passed' ? { verdictKey: hostedVerdictKey(run) } : {}),
+    value: semanticPayload(hostedCheckRunSchema.parse(stored), true),
   });
   await notifyLandingCheck(ctx, {
     projectId: run.projectId as Id<'hostedProjects'>,
@@ -136,6 +154,15 @@ export async function writeHostedCheck(
   });
 }
 export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun) {
+  // Existing terminal events also clear an interrupted batch inbox; no sweep or idle timer.
+  if (reportsDetached(run) && run.plan && run.executionId && !['passed', 'failed'].includes(run.status))
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedActionsBatch:collect'), {
+      projectId: run.projectId,
+      runId: run.id,
+      fence: run.fence,
+      executionId: run.executionId,
+      conclusion: null,
+    });
   await restoreShardReports(ctx, run);
   await onGateRunTerminal(ctx, run);
   // Two-way sync: a pull request check-only run settles forge/verify (one indexed read).

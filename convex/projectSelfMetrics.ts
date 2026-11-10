@@ -262,7 +262,11 @@ export const page = query({
               settleSeconds: submitted ? (landingSpeedSample(submitted)?.settle ?? null) : null,
             };
           }
-          if (input.stream === 'runs') return metricRunRow(JSON.parse(row.value) as HostedCheckRun);
+          if (input.stream === 'runs')
+            return metricRunRow(
+              JSON.parse(row.value) as HostedCheckRun,
+              'reportFlakes' in row ? row.reportFlakes : undefined,
+            );
           if (input.stream === 'requests') {
             const request = JSON.parse(row.value) as HostedLandingState;
             return {

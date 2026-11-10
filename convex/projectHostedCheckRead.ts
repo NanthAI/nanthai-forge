@@ -124,13 +124,15 @@ export async function requireHostedCheckEvidence(
   loadedRun?: HostedCheckRun,
 ) {
   const project = await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
-  const run = loadedRun ?? (await loadHostedCheck(ctx, input)).run;
+  const selected = loadedRun ? null : await loadHostedCheck(ctx, input, false);
+  const run = loadedRun ?? selected!.run;
   invariant(
     run.id === input.runId && run.projectId === input.projectId,
     'EVIDENCE_CHANGED',
     'Hosted run identity differs from its record.',
   );
-  await hostedWriteProject(ctx, input.projectId, run.actor, input.authorityEpoch);
+  if (run.actor !== input.actor)
+    await hostedWriteProject(ctx, input.projectId, run.actor, input.authorityEpoch);
   const check = await checkSetting(ctx, input.projectId, 'definition', input.checkId);
   const runner = await checkSetting(ctx, input.projectId, 'runner', 'runner');
   invariant(
@@ -138,7 +140,18 @@ export async function requireHostedCheckEvidence(
     'EVIDENCE_CHANGED',
     'The current check definition or runner configuration changed.',
   );
-  exactHostedCheckEvidence(run, input);
+  let sameTreeReuse = false;
+  if (run.request.candidateId !== input.candidateId) {
+    const row = selected?.row ?? (await loadHostedCheck(ctx, input, false)).row;
+    const alias = await ctx.db
+      .query('projectHostedCheckCallbacks')
+      .withIndex('by_project_and_run_and_event', q =>
+        q.eq('projectId', input.projectId).eq('runId', run.id).eq('eventId', `reuse:${input.candidateId}`),
+      )
+      .unique();
+    sameTreeReuse = Boolean(row.verdictKey && alias?.digest === row.verdictKey);
+  }
+  exactHostedCheckEvidence(run, input, sameTreeReuse);
   if (isMachineRunner(run.configuration)) {
     const machineId = run.configuration.machineId;
     const machine = await requireMacMachine(ctx, input.projectId, machineId);

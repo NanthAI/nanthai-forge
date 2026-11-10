@@ -1360,3 +1360,90 @@ retains its prior call and retry behavior.
 
 Installed App permissions and real-provider stop latency require operator
 qualification; the local tests use synthetic installations only.
+
+### Batched result inbox
+
+Supervisors advertising `results.batch` ask for it during the existing plan call.
+The plan returns private create-only R2 result slots scoped to the project, run,
+dispatch fence and provider execution. They remain in the supervisor bundle;
+Candidate processes receive neither that bundle nor the upload capabilities. The
+run bundle is written and restored with owner-only file permissions before
+Candidate execution.
+Each completed shard uploads its immutable result and redacted log, then reads
+one bounded inbox listing. A create-only coordinator slot elects one supervisor
+to call Forge after every planned result is present. The signed provider-completed
+webhook recovers an interrupted coordinator. This adds no workflow step or timer.
+
+Forge streams each slot within the existing 512 KiB metadata window and commits
+results in pages below 768 KiB. Each page folds all its shards in memory and
+writes the run head once, preserving per-shard identities, retry budgets, pool
+settlement, failure excerpts and immutable result digests. An ordinary 10–12-shard
+run fits one page; unusually large report sets use one mutation per metadata page.
+The CI reply contains only run identity, status and counts. Older supervisors keep
+the original result protocol.
+
+For these batched runs, terminal per-file reports live in bounded records in the
+existing Actions results table. Run heads keep counts and failure/flaky summaries.
+Readers that need per-file evidence hydrate the report pages; provider verdicts,
+webhook updates and metrics read the slim head. Timing aggregation is scheduled
+once after provider completion, rather than loading reports into the webhook.
+Logs retain their existing R2 placement and retention behavior. Ingested inbox
+objects are regenerable scratch bytes and are removed after successful ingestion.
+
+Only the provider's independent conclusion makes a passing verdict reusable.
+Reuse is indexed by exact source digest, check definition, runner configuration,
+runtime, environment, authority epoch, actor, gate and contract. An identical
+recheck references the original verdict without another CI dispatch, run or result
+write. A different Candidate records a small provenance alias; operation-id receipts
+still reconcile retries. Supervisor results alone never enter this reuse index.
+
+### CI byte guard and serving estimate
+
+`ci-batch-fixture` in `src/speed-budgets.json` guards the result path separately
+from the small synthetic check in the six-landing `landing-fixture`. It runs eleven
+interleaved legacy/batch pairs with the same 886 test files, two recovered flakes,
+twelve shards and one check run per fixture landing. Provider conclusion, final
+output and the deferred timing mutation are included. The before path remains
+executable for older supervisors. Values below are one representative pair on merged metrics-projection code;
+KB means 1,000 bytes.
+
+| Function / phase | Before calls | Before read / write KB per call | After calls | After read / write KB per call |
+| --- | ---: | ---: | ---: | ---: |
+| Output authorization / batch prepare | 12 | 4.7 / 0 | 1 | 4.2 / 0 |
+| Shard result / batch result | 12 | 26.0 / 41.8 | 1 | 16.1 / 135.8 |
+| Final output apply | 1 | 78.1 / 0.5 | 1 | 7.1 / 0.5 |
+| Provider completed webhook | 1 | 158.1 / 250.6 | 1 | 15.0 / 11.3 |
+| Timing aggregation | included in webhook | included above | 1 | 85.2 / 95.0 |
+
+Across the full result path, mutations fall from 26 to 5; including its HTTP
+actions, calls fall from 38 to 6. Read/write totals are 604.7/752.7 KB before and
+127.6/242.6 KB after. CI response bytes fall from about 111.6 KB across twelve
+replies to 113 bytes in one reply. Preflight and planning calls are excluded from both
+sides; their function-call counts are unchanged. The plan reply grows from 2.9 KB
+to 36.3 KB for private upload capabilities; that added egress is separately guarded
+and included in the price model. The existing plan write adds
+only the batch marker and report-placement fields. A reused provider-attested
+pass dispatches no CI and writes no additional verdict or result; its operation
+receipt and any cross-Candidate alias still record provenance.
+
+R2 Class A/B requests rise from 13/13 to 38/25. PUT bytes rise from 17,231 to
+110,768, with the difference going to regenerable inbox objects removed after
+ingestion; retained logs keep their existing placement. The 25 scratch deletes
+are [free R2 operations](https://developers.cloudflare.com/r2/pricing/).
+Using $0.20/GB DB I/O, $0.12/GB CI egress and R2's $4.50/$0.36 per million
+Class A/B operations, with no call charge, the modeled marginal slice falls
+from about $0.3484 to $0.2584 per 1,000 fixture landings. The median paired difference
+is about -$0.0900, with a 95% bootstrap interval near [-$0.0901, -$0.0899]
+(seed 1, 10,000 resamples, eleven pairs). This excludes action compute, retained
+storage, provider allowances and other landing work; it is not an invoice saving.
+
+Live verification still needs the lead's log-only meter on the deployed version.
+The reported baseline was 23.7 MB / 231 result calls, 14.8 MB / 215 webhook calls
+and 14.8 MB Actions HTTP egress over about nine landings. Those totals include
+more than one twelve-shard run per landing and multiple webhook phases; they
+cannot be compared directly with this one-run fixture. The earlier 75cb5074
+fixture's projected 62% read reduction versus the observed 25% also mixed a
+smaller report/timing payload with live run shapes and event counts. Payload
+shape, retained timing history, provider-verdict work and rechecks are known
+coverage differences; their individual contributions to that gap remain
+unmeasured. No live capture, export, import or load test is run by this guard.

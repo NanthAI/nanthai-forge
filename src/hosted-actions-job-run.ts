@@ -9,10 +9,16 @@ import { semanticCheckCommand } from './semantic-check-command.js';
 import { semanticTests } from './intent-semantic-conflict.js';
 import { workspaceTestRunner } from './workspace-test-runner.js';
 import { digest } from './hash.js';
-import { directLogBytes } from './hosted-actions-direct.js';
+import { resultEnvelopeBody, readResultSlot, uploadResultSlot } from './hosted-actions-result-batch.js';
+import { directLogBytes, directResultSchema } from './hosted-actions-direct.js';
 import { ActionsJobClient } from './hosted-actions-job-client.js';
 import { checkFileSummary } from './check-file-summary.js';
-import { retryActionsInfrastructure, actionsInfrastructureResponse } from './hosted-actions-retry.js';
+import {
+  retryActionsInfrastructure,
+  actionsInfrastructureResponse,
+  actionsDeliveryDeadlineMs,
+  actionsDeliveryPolicy,
+} from './hosted-actions-retry.js';
 import { invariant } from './errors.js';
 import { setupActionsJob } from './hosted-actions-job-setup.js';
 import { actionsInlineLogCapability } from './hosted-actions-capabilities.js';
@@ -338,6 +344,87 @@ async function executeActiveActionsJob(
     // Files this home shard yielded to another claimer; the server fails the check if none reports them.
     ...(yielded ? { pool: { yielded } } : {}),
   };
+  // New servers give the fixed supervisor a private immutable inbox in the plan bundle.
+  // Candidate code never sees its capabilities. Upload contains the log and reports together.
+  if (client.resultBatch) {
+    result.execution.endedAt = new Date().toISOString();
+    const targets = client.resultBatch;
+    let body: string;
+    let selected: ReturnType<typeof directResultSchema.parse> = result;
+    try {
+      // Preserve the existing deterministic-validation fallback: malformed report names fail
+      // the shard once with its log, rather than repeatedly reporting runner-unavailable.
+      directResultSchema.parse(selected);
+    } catch {
+      exitCode ||= 1;
+      selected = {
+        index,
+        exitCode,
+        execution: result.execution,
+        isolation: result.isolation,
+        ...(log
+          ? {
+              log: {
+                ...log,
+                failureSummary:
+                  `Forge refused this shard's test reports as invalid. Read the shard log.\n${log.failureSummary}`.slice(
+                    0,
+                    4096,
+                  ),
+              },
+            }
+          : {}),
+      };
+    }
+    const encodedLog = log ? tail.toString('base64') : undefined;
+    const request = async (url: string, init?: RequestInit) =>
+      actionsInfrastructureResponse(await client.request(url, init));
+    try {
+      body = resultEnvelopeBody({ result: selected, ...(encodedLog ? { logBytes: encodedLog } : {}) });
+    } catch (error) {
+      if (!encodedLog || (error as { code?: string }).code !== 'BAD_ARGUMENT') throw error;
+      // A large report page keeps the original window by putting its log in a separate slot.
+      body = resultEnvelopeBody({ result: selected });
+      await retryActionsInfrastructure(
+        signal => uploadResultSlot(targets.slots[index]!.log, encodedLog, request, signal),
+        60_000,
+        actionsDeliveryDeadlineMs,
+        actionsDeliveryPolicy,
+      );
+    }
+    await retryActionsInfrastructure(
+      signal => uploadResultSlot(targets.slots[index]!, body, request, signal),
+      60_000,
+      actionsDeliveryDeadlineMs,
+      actionsDeliveryPolicy,
+    );
+    // One bounded LIST per completed shard, no per-shard Convex call. A create-only coordinator
+    // slot elects one caller; the signed workflow completion recovers a lost coordinator.
+    const ready = await retryActionsInfrastructure(async signal => {
+      const response = await request(targets.list, { signal, redirect: 'error' });
+      invariant(response.ok, 'R2_VERIFY_FAILED', 'Read result inbox membership.');
+      const text = await readResultSlot(response);
+      const keys = [...text.matchAll(/<Key>([^<]+)<\/Key>/g)].map(match => decodeURIComponent(match[1]!));
+      return targets.slots.every((_, i) => keys.some(key => key.endsWith(`/${i}`)));
+    });
+    if (ready) {
+      const response = await retryActionsInfrastructure(signal =>
+        request(targets.coordinator.put.url, {
+          method: 'PUT',
+          headers: targets.coordinator.put.headers,
+          body: 'collect',
+          signal,
+          redirect: 'error',
+        }),
+      );
+      invariant(response.ok || response.status === 412, 'R2_VERIFY_FAILED', 'Elect the result collector.');
+      await response.body?.cancel();
+      if (response.ok) await client.call({ kind: 'results' });
+    }
+    lap('reportMs');
+    console.log(`run: phases ${JSON.stringify(phases)}`);
+    return exitCode;
+  }
   // One result call stores the log too, unless it would crowd the server's metadata window.
   const logBytes =
     log &&

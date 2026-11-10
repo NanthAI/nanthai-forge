@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { resultBatchIndex } from '../src/hosted-actions-result-batch';
 import { convexFetch } from './networkFetch';
 import { z } from 'zod';
 import { v } from 'convex/values';
@@ -88,6 +89,26 @@ export const receive = internalMutation({
       // Every shard reported passing: GitHub's own conclusion decides (src/hosted-check-verdict.ts).
       await applyConclusion(ctx, selected, workflow.conclusion);
     } else if (payload.action === 'completed') {
+      const batch = await ctx.db
+        .query('projectHostedActionsResults')
+        .withIndex('by_project_and_run_and_index', q =>
+          q.eq('projectId', row.projectId).eq('runId', run.id).eq('index', resultBatchIndex),
+        )
+        .unique();
+      if (batch?.digest === run.planDigest) {
+        await ctx.scheduler.runAfter(
+          0,
+          makeFunctionReference<'action'>('projectHostedActionsBatch:collect'),
+          {
+            projectId: row.projectId,
+            runId: run.id,
+            fence: run.fence,
+            executionId: run.executionId,
+            conclusion: workflow.conclusion,
+          },
+        );
+        return null;
+      }
       const conclusion = workflow.conclusion;
       // Workflow failure is not Candidate evidence: OIDC/source/setup can fail
       // before tests run. Only an authenticated failed shard proves a check failed.

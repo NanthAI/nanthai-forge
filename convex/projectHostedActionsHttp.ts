@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { cleanPoolClaims } from './projectHostedActionsPool';
+export { cleanPoolClaims } from './projectHostedActionsPool';
+import { collectResultBatch, resultBatchTargets } from './projectHostedActionsBatch';
 import { actionsPreflightSignature } from '../src/hosted-actions-preflight';
 import { makeFunctionReference } from 'convex/server';
 import { httpAction, type ActionCtx } from './_generated/server';
@@ -24,17 +27,10 @@ import type { SessionInput } from './projectHostedActionsSession';
 import { activeStoragePause } from './legacyStoragePause';
 import { presignPoolClaim, r2Config } from './r2';
 import type { HostedActionsRecipe } from '../src/hosted-actions';
-import {
-  poolClaimBody,
-  poolClaimExpirySeconds,
-  poolClaimKey,
-  poolClaimPrefix,
-  poolUnits,
-} from '../src/hosted-actions-pool';
+import { poolClaimBody, poolClaimExpirySeconds, poolClaimKey, poolUnits } from '../src/hosted-actions-pool';
 import { submoduleReadTokens, type SubmodulePolicy } from './githubAppToken';
 import type { RunnerScope } from './githubBindingAccess';
 import { convexFetch } from './networkFetch';
-import { deleteR2Object, listR2Prefix } from './r2Operations';
 /** Refused writes that resolve on their own: the runner keeps its result and
  * retries the same request (Issue 72d50375). */
 // EXCHANGE_REQUEST_*: convexFetch transport faults (deadline or lost connection).
@@ -59,37 +55,6 @@ async function poolClaims(projectId: string, run: HostedCheckRun, recipe: Hosted
       ),
     ),
   );
-}
-/** Forge deletes its own claim objects, so no bucket lifecycle rule is needed: the final result
- * deletes this run's claims, then one page of other runs' claims older than their signed URLs
- * (a cancelled or crashed check never posts a final result), starting after this run's random id
- * so successive checks sweep the whole prefix. Best effort and time bounded: never fails a result. */
-export async function cleanPoolClaims(projectId: string, runId: string, now = Date.now()) {
-  const config = r2Config(),
-    root = poolClaimPrefix(projectId),
-    own = `${root}${runId}/`,
-    stale = now - poolClaimExpirySeconds * 1000;
-  const remove = (keys: string[]) => Promise.all(keys.map(key => deleteR2Object(config, key)));
-  const work = Promise.allSettled([
-    (async () => {
-      // At most two pages: a run has at most maxPoolUnits (128) claims.
-      let cursor: string | null = null;
-      for (let page = 0; page < 2; page++) {
-        const listed = await listR2Prefix(config, own, cursor);
-        await remove(listed.keys);
-        if (!(cursor = listed.cursor)) break;
-      }
-    })(),
-    (async () => {
-      const listed = await listR2Prefix(config, root, null, `${own}~`);
-      await remove(
-        listed.keys.filter((key, index) => !key.startsWith(own) && listed.modified[index]! < stale),
-      );
-    })(),
-  ]);
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([work, new Promise(resolve => (timer = setTimeout(resolve, 10_000)))]);
-  clearTimeout(timer);
 }
 export const handle = httpAction(async (ctx, request) => {
   let reason: 'authorization' | 'validation' | 'storage' | 'cancelled' | 'limit' = 'authorization';
@@ -141,6 +106,7 @@ export const handle = httpAction(async (ctx, request) => {
         ...input,
         digests: command.digests,
       });
+    else if (command.kind === 'results') value = await collectResultBatch(ctx, input);
     else if (command.kind === 'output')
       value = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsResults:output'), {
@@ -217,18 +183,28 @@ export const handle = httpAction(async (ctx, request) => {
           recipe: canonicalPayload(plan.recipe),
           lockfile: plan.lockfile,
           ...(command.packRefresh ? { packRefresh: true } : {}),
+          ...(command.resultsBatch ? { resultsBatch: true } : {}),
           ...('storageId' in selection
             ? { selectionStorage: selection.storageId }
             : { selectionR2Key: selection.r2Key }),
           ...('storageId' in recipe ? { recipeStorage: recipe.storageId } : { recipeR2Key: recipe.r2Key }),
         }),
       );
+      if (command.resultsBatch)
+        value = {
+          run: value,
+          resultBatch: await resultBatchTargets(value as HostedCheckRun),
+        };
       // Shard pool: sign one claim per unit here (CPU only), so shards claim with no Convex call.
       if (plan.recipe.pool) {
         reason = 'storage';
         value = {
-          run: value,
-          claims: await poolClaims(input.projectId, value as HostedCheckRun, plan.recipe),
+          ...(command.resultsBatch ? (value as object) : { run: value }),
+          claims: await poolClaims(
+            input.projectId,
+            (command.resultsBatch ? (value as { run: HostedCheckRun }).run : value) as HostedCheckRun,
+            plan.recipe,
+          ),
         };
       }
     } else if (command.logBytes !== undefined) {
@@ -375,7 +351,7 @@ async function settleResult(
   }
 }
 type FinalOutput = { root: OutputRoot; target: { url: string; headers: Record<string, string> } } | null;
-async function finalOutput(
+export async function finalOutput(
   ctx: ActionCtx,
   input: SessionInput,
   settled: HostedCheckRun,

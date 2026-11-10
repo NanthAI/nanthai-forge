@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reportsDetached } from './projectHostedCheckReports';
 import type { z } from 'zod';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -76,16 +77,24 @@ const rows = (ctx: MutationCtx, run: HostedCheckRun) =>
   ctx.db
     .query('projectHostedActionsResults')
     .withIndex('by_project_and_run_and_index', q =>
-      q.eq('projectId', run.projectId as Id<'hostedProjects'>).eq('runId', run.id),
+      q
+        .eq('projectId', run.projectId as Id<'hostedProjects'>)
+        .eq('runId', run.id)
+        .gte('index', -1),
     )
     // One row per planned shard plus the progress row.
-    .take(run.plan!.shardCount + 1);
+    .take(run.plan!.shardCount + 2);
 /** Exact accumulated reports from the shard rows (then the current step, if any, held in
  * memory), after which the shard rows drop their raw copies. */
-async function replayShardReports(ctx: MutationCtx, run: HostedCheckRun, last?: ShardStep) {
+async function replayShardReports(
+  ctx: MutationCtx,
+  run: HostedCheckRun,
+  last?: ShardStep,
+  batch: ShardStep[] = [],
+) {
   const all = await rows(ctx, run);
   const shards = all
-    .filter(row => row.index !== progressIndex && row.reports !== undefined)
+    .filter(row => row.index >= 0 && row.reports !== undefined)
     .sort((a, b) => a.sequence! - b.sequence!);
   let state = { reports: {} as Reports, pending: [] as string[] };
   for (const row of shards) {
@@ -96,6 +105,7 @@ async function replayShardReports(ctx: MutationCtx, run: HostedCheckRun, last?: 
       complete: row.complete!,
     });
   }
+  for (const step of batch) state = foldShardStep(state, step);
   if (last) state = foldShardStep(state, last);
   for (const row of all)
     if (row.index === progressIndex) await ctx.db.delete(row._id);
@@ -114,6 +124,7 @@ export async function recordShardReports(
     contractReports?: Reports;
     pool?: { yielded: string[] };
   },
+  batch?: ShardReportBatch,
 ) {
   const step: ShardStep = {
     reports: result.contractReports ?? {},
@@ -124,6 +135,7 @@ export async function recordShardReports(
     projectId: run.projectId as Id<'hostedProjects'>,
     runId: run.id,
   };
+  if (batch) return recordBatchStep(ctx, run, result, step, batch);
   if (run.contractReports) {
     const folded = foldShardStep({ reports: run.contractReports, pending: run.poolPending ?? [] }, step);
     await ctx.db.insert('projectHostedActionsResults', {
@@ -187,9 +199,10 @@ function settle(run: HostedCheckRun, reports: Reports, pending: string[], retain
 }
 
 /** Any other terminal (cancel, watchdog, webhook settlement) keeps the reports shards sent. */
-export async function restoreShardReports(ctx: MutationCtx, run: HostedCheckRun) {
+export async function restoreShardReports(ctx: MutationCtx, run: HostedCheckRun, includeDetached = false) {
   if (
     run.contractReports ||
+    (reportsDetached(run) && !includeDetached) ||
     !run.counts.completed ||
     run.configuration.provider !== 'github-actions' ||
     run.configuration.credential ||
@@ -198,4 +211,76 @@ export async function restoreShardReports(ctx: MutationCtx, run: HostedCheckRun)
     return;
   const replayed = await replayShardReports(ctx, run);
   if (replayed.shards) run.contractReports = replayed.reports;
+}
+
+type BatchResult = { index: number; digest: string; contractReports?: Reports; pool?: { yielded: string[] } };
+export type ShardReportBatch = {
+  steps: ShardStep[];
+  results: BatchResult[];
+  state?: { reports: Reports; pending: string[] };
+  progress?: { _id: Id<'projectHostedActionsResults'> } | null;
+  count: number;
+};
+export const createShardReportBatch = (): ShardReportBatch => ({ steps: [], results: [], count: 0 });
+async function recordBatchStep(
+  ctx: MutationCtx,
+  run: HostedCheckRun,
+  result: BatchResult,
+  step: ShardStep,
+  batch: ShardReportBatch,
+) {
+  if (!batch.state) {
+    const progress = await ctx.db
+      .query('projectHostedActionsResults')
+      .withIndex('by_project_and_run_and_index', q =>
+        q
+          .eq('projectId', run.projectId as Id<'hostedProjects'>)
+          .eq('runId', run.id)
+          .eq('index', progressIndex),
+      )
+      .unique();
+    const saved = progress ? JSON.parse(progress.state!) : { notable: {}, plain: [], count: 0 };
+    batch.progress = progress;
+    batch.count = saved.count;
+    batch.state = { reports: expandReports(saved), pending: run.poolPending ?? [] };
+  }
+  batch.steps.push(step);
+  batch.results.push(result);
+  if (step.complete) {
+    const replayed = await replayShardReports(ctx, run, undefined, batch.steps);
+    return settle(run, replayed.reports, replayed.pending, true);
+  }
+  batch.state = foldShardStep(batch.state, step);
+  return settle(run, batch.state.reports, batch.state.pending, false);
+}
+/** A page persists each result once and its progress once, never once per shard. */
+export async function flushShardReportBatch(ctx: MutationCtx, run: HostedCheckRun, batch: ShardReportBatch) {
+  if (!batch.results.length) return;
+  const complete = run.counts.completed === run.plan!.shardCount;
+  const key = { projectId: run.projectId as Id<'hostedProjects'>, runId: run.id };
+  for (const [sequence, result] of batch.results.entries())
+    await ctx.db.insert('projectHostedActionsResults', {
+      ...key,
+      index: result.index,
+      digest: result.digest,
+      ...(!complete
+        ? {
+            sequence: batch.count + sequence,
+            complete: false,
+            reports: canonicalPayload({
+              ...packShardReports(batch.steps[sequence]!.reports),
+              yielded: batch.steps[sequence]!.yielded,
+            }),
+          }
+        : {}),
+    });
+  if (!complete) {
+    const state = canonicalPayload({
+      ...compactReports(batch.state!.reports),
+      count: batch.count + batch.results.length,
+    });
+    if (batch.progress) await ctx.db.patch(batch.progress._id, { state });
+    else
+      await ctx.db.insert('projectHostedActionsResults', { ...key, index: progressIndex, digest: '', state });
+  }
 }

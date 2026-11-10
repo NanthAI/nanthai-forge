@@ -4,11 +4,13 @@
 // (the runner's common path) over a realistic report set and meters every mutation.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, createPublicKey, sign } from 'node:crypto';
-import { getFunctionName } from 'convex/server';
+import { bootstrapInterval } from '../scripts/bootstrap-interval.mjs';
 import { speedBudgets } from '../dist/speed-budgets.js';
 import { judgeCosts, formatCostVerdicts } from '../dist/cost-budgets.js';
+import { generateKeyPairSync, createPublicKey, sign } from 'node:crypto';
+import { getFunctionName } from 'convex/server';
 import { checksFixture } from './hosted-checks-fixture.mjs';
+import { code } from './hosted-checks-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { actionsIssuer } from '../dist/github-actions-oidc.js';
 import { hostedActionsRuntime } from '../dist/hosted-actions.js';
@@ -18,6 +20,10 @@ import { digest } from '../dist/hash.js';
 import { applyCheckRetryBudget, capCheckReports } from '../dist/check-report-cap.js';
 import { checkFileSummary } from '../dist/check-file-summary.js';
 import { mergeShardReports, settlePoolPending } from '../dist/hosted-actions-pool.js';
+const timingStore = await import(moduleUrl('../convex/projectHostedTestTimings.ts'));
+const batchStore = await import(moduleUrl('../convex/projectHostedActionsBatchStore.ts'));
+const batchCollector = await import(moduleUrl('../convex/projectHostedActionsBatch.ts'));
+const { resultSlotKey, resultEnvelopeBody } = await import('../dist/hosted-actions-result-batch.js');
 const direct = await import(moduleUrl('../convex/projectHostedActionsDirect.ts'));
 const sessions = await import(moduleUrl('../convex/projectHostedActionsSession.ts'));
 const plans = await import(moduleUrl('../convex/projectHostedActionsPlan.ts'));
@@ -91,7 +97,7 @@ const report = i =>
       }
     : { durationMs: 1000 + ((i * 37) % 9000) + 0.123, failed: false };
 
-async function landing(t, shards) {
+async function landing(t, shards, batch = false) {
   variables(t, {
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
@@ -103,11 +109,15 @@ async function landing(t, shards) {
     R2_SECRET_ACCESS_KEY: 'synthetic-secret',
   });
   const s = await checksFixture(),
-    storage = new Map();
+    storage = new Map(),
+    scheduled = [];
   process.env.FORGE_GITHUB_REPO_BINDINGS = `${s.projectId}=${repository}`;
   s.decorateContext(ctx => {
     ctx.scheduler = {
-      runAfter: async () => 'scheduled',
+      runAfter: async (delay, ref, input) => {
+        scheduled.push({ name: getFunctionName(ref), input });
+        return `scheduled-${scheduled.length}`;
+      },
       cancel: async () => {},
     };
     ctx.storage = { getMetadata: async id => storage.get(id) ?? null };
@@ -150,15 +160,43 @@ async function landing(t, shards) {
     lockfile: 'e'.repeat(64),
     selectionStorage: 'selection',
     recipeStorage: 'recipe',
+    ...(batch ? { resultsBatch: true } : {}),
   });
-  const logs = new Map();
+  const logs = new Map(),
+    inbox = new Map(),
+    r2 = { classA: 0, classB: 0, bytesPut: 0, deletes: 0 };
   let logUploadBytes = 0;
+
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
-    if (init.method === 'PUT') {
+    const parsedUrl = new URL(url),
+      key = parsedUrl.pathname;
+    if (parsedUrl.searchParams.get('list-type') === '2') {
+      r2.classA++;
+      return new Response(
+        `<ListBucketResult>${[...inbox.keys()]
+          .map(key => `<Contents><Key>${key}</Key></Contents>`)
+          .join('')}</ListBucketResult>`,
+      );
+    }
+    if (init?.method === 'PUT') {
       logUploadBytes += Buffer.byteLength(init.body);
+      r2.classA++;
+      r2.bytesPut += Buffer.byteLength(init.body);
+      if (inbox.has(key)) return new Response(null, { status: 412 });
+      inbox.set(key, Buffer.from(init.body));
       return new Response(null, { status: 200 });
     }
+    if (init?.method === 'DELETE') {
+      r2.deletes++;
+      inbox.delete(key);
+      return new Response(null, { status: 204 });
+    }
+    r2.classB++;
+    if (!init?.method || init.method === 'GET') {
+      return new Response(inbox.get(key) ?? null, { status: inbox.has(key) ? 200 : 404 });
+    }
+
     const known = [...logs.keys()].find(sha => url.includes(sha));
     const bytes = known
       ? logs.get(known)
@@ -177,6 +215,7 @@ async function landing(t, shards) {
     projectHostedActionsOutput: finalOutput,
     projectHostedActionsSession: sessions,
     projectHostedActionsResults: results,
+    projectHostedActionsBatchStore: batchStore,
   };
   const ctx = {
     runMutation: (ref, input) => {
@@ -264,7 +303,22 @@ async function landing(t, shards) {
         },
       }),
     });
-  return { s, id, send, post, stored, responses, conclude, logUploadBytes: () => logUploadBytes };
+  return {
+    logUploadBytes: () => logUploadBytes,
+    s,
+    id,
+    send,
+    post,
+    stored,
+    responses,
+    conclude,
+    inbox,
+    ctx,
+    logs,
+    r2,
+    scheduled,
+    fence: reserved.fence,
+  };
 }
 const sum = (meters, key) => meters.reduce((n, m) => n + m[key], 0);
 const kb = n => Math.round(n / 102.4) / 10;
@@ -692,4 +746,472 @@ test('Issue 0c457ae4: 5,000 test files complete through the hosted result path a
     for (const row of l.s.tables[table].values()) checkConvexValue(row, table);
   const runRow = [...l.s.tables.projectHostedCheckRuns.values()].find(row => row.runId === l.id.runId);
   t.diagnostic(JSON.stringify({ files: many.length, shards, runRowKB: kb(Buffer.byteLength(runRow.value)) }));
+});
+
+async function batchedLanding(t, shards, steps, { conclude = true, replay = false } = {}) {
+  const l = await landing(t, shards, true);
+  const r = l.stored();
+  for (const result of steps)
+    l.inbox.set(
+      `/synthetic-bucket/${resultSlotKey(r, result.index)}`,
+      Buffer.from(resultEnvelopeBody({ result })),
+    );
+  const input = { ...l.id, fence: r.fence, executionId: r.executionId, claims: JSON.stringify(claims()) };
+  const start = l.s.counts.length;
+  const collect = async () => {
+    const response = await handle._handler(
+      l.ctx,
+      new Request(`${audience}/checks/actions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${oidc()}` },
+        body: JSON.stringify({ ...l.id, fence: r.fence, command: { kind: 'results' } }),
+      }),
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  };
+  await collect();
+  if (replay) await collect();
+  if (conclude) await l.conclude();
+  return { ...l, meters: l.s.counts.slice(start), input };
+}
+
+test('batched CI results: one verdict fold per check run, immutable replay, provider attestation and failure details', async t => {
+  for (const failed of [false, true]) {
+    const steps = Array.from({ length: 12 }, (_, index) => ({
+      index,
+      exitCode: failed && index === 4 ? 1 : 0,
+      contractReports: {
+        [`tests/batch-${index}.test.mjs`]: {
+          failed: failed && index === 4,
+          durationMs: 10,
+          ...(failed && index === 4 ? { firstError: 'synthetic batch failure' } : {}),
+        },
+      },
+    }));
+    const l = await batchedLanding(t, 12, steps, { conclude: false, replay: true });
+    assert.equal(l.stored().status, failed ? 'failed' : 'running');
+    const ingests = l.meters.filter(m => m.name === 'projectHostedActionsResults:batch');
+    assert.equal(ingests.length, 2, 'one new batch plus one unchanged retry');
+    assert.equal(
+      ingests[0].written.filter(t => t === 'projectHostedCheckRuns').length,
+      1,
+      'one run write for twelve shard results',
+    );
+    assert.equal(
+      ingests[1].written.filter(t => t === 'projectHostedCheckRuns').length,
+      0,
+      'replayed batch writes no new verdict',
+    );
+    if (failed) {
+      const { checkFailureDetail } = await import('../dist/check-failure-detail.js');
+      assert.match(checkFailureDetail(await l.s.status(l.id.runId)), /batch-4.*synthetic batch failure/s);
+    } else {
+      assert.equal(
+        [...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey,
+        undefined,
+        'supervisor results alone never enter the reusable verdict index',
+      );
+      await l.conclude();
+      assert.equal(l.stored().status, 'passed');
+      assert(
+        [...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey,
+        'only the signed provider conclusion makes the verdict reusable',
+      );
+    }
+  }
+});
+
+test('batch report fold retains shared retry budget, excerpt caps, pool failures and per-file details', async t => {
+  const steps = trickySteps(6),
+    expected = referenceFold(steps, 6).at(-1);
+  const l = await batchedLanding(t, 6, steps);
+  assert.equal(l.stored().status, 'failed');
+  assert.deepEqual((await l.s.status(l.id.runId)).contractReports, expected.reports);
+  assert.deepEqual(l.stored().testFiles, expected.testFiles);
+});
+
+test('batch authority rejects stale fences, foreign executions, substituted indices and changed replay bytes', async t => {
+  const l = await landing(t, 2, true),
+    r = l.stored();
+  const input = { ...l.id, fence: r.fence, executionId: r.executionId, claims: JSON.stringify(claims()) };
+  for (const changed of [{ fence: r.fence + 1 }, { executionId: 'other' }])
+    await assert.rejects(batchCollector.collectResultBatch(l.ctx, { ...input, ...changed }));
+  l.inbox.set(
+    `/synthetic-bucket/${resultSlotKey(r, 0)}`,
+    Buffer.from(resultEnvelopeBody({ result: { index: 1, exitCode: 0 } })),
+  );
+  await assert.rejects(batchCollector.collectResultBatch(l.ctx, input));
+  assert.equal(l.stored().counts.completed, 0);
+  l.inbox.set(
+    `/synthetic-bucket/${resultSlotKey(r, 0)}`,
+    Buffer.from(resultEnvelopeBody({ result: { index: 0, exitCode: 0 } })),
+  );
+  await batchCollector.collectResultBatch(l.ctx, input);
+  await assert.rejects(
+    l.s.transaction('batch-replay', results.batch, {
+      ...input,
+      results: JSON.stringify([{ index: 0, exitCode: 1 }]),
+    }),
+  );
+  assert.equal(l.stored().counts.completed, 1);
+});
+
+test('identical tree and definition reuse a provider-attested verdict without writing another run or result', async t => {
+  const l = await batchedLanding(t, 2, [
+    { index: 0, exitCode: 0 },
+    { index: 1, exitCode: 0 },
+  ]);
+  const original = l.stored();
+  const start = l.s.counts.length;
+  const reused = await l.s.enqueue({ ...original.request, operationId: crypto.randomUUID() });
+  assert.equal(reused.id, original.id);
+  assert.equal(l.s.tables.projectHostedCheckRuns.size, 1);
+  const writes = l.s.counts.slice(start).flatMap(m => m.written);
+  assert(!writes.includes('projectHostedCheckRuns'));
+  assert(!writes.includes('projectHostedActionsResults'));
+  assert(!writes.includes('projectHostedCheckShards'));
+  await assert.rejects(
+    l.s.enqueue({
+      ...original.request,
+      operationId: crypto.randomUUID(),
+      expectedEnvironment: '0'.repeat(64),
+    }),
+    code('EVIDENCE_CHANGED'),
+  );
+});
+
+test('batched reports: 20,000 files retain details in bounded records and keep provider webhook writes slim', async t => {
+  const many = Array.from({ length: 20000 }, (_, i) => `tests/batch-limit-${i}.test.mjs`);
+  const steps = Array.from({ length: 12 }, (_, index) => ({
+    index,
+    exitCode: 0,
+    contractReports: Object.fromEntries(
+      many
+        .filter((_, i) => i % 12 === index)
+        .map(file => [
+          file,
+          {
+            failed: false,
+            durationMs: 10,
+            ...(file === many[0]
+              ? {
+                  flaky: true,
+                  firstError: 'retained flaky error',
+                  attempts: [
+                    { failed: true, durationMs: 20 },
+                    { failed: false, durationMs: 10 },
+                  ],
+                }
+              : {}),
+          },
+        ]),
+    ),
+  }));
+  const l = await batchedLanding(t, 12, steps, { conclude: false });
+  const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
+  assert(row.reportParts > 1, 'large report metadata is paged');
+  assert.equal(l.stored().contractReports, undefined, 'the run head never embeds report metadata');
+  assert(Buffer.byteLength(row.value) < 12 * 1024, 'the run head stays small');
+  for (const report of l.s.tables.projectHostedActionsResults.values())
+    assert(Buffer.byteLength(JSON.stringify(report)) < 300 * 1024, 'each stored document stays bounded');
+  const start = l.s.counts.length;
+  await l.conclude();
+  const webhook = l.s.counts.slice(start).find(m => m.name === 'webhook');
+  assert(webhook.readBytes < 24 * 1024, `webhook reads ${webhook.readBytes}`);
+  assert(webhook.writeBytes < 24 * 1024, `webhook writes ${webhook.writeBytes}`);
+  const { read } = await import('./hosted-checks-fixture.mjs');
+  const status = JSON.parse(await l.s.transaction('large-status', read.status, l.id));
+  assert.equal(Object.keys(status.contractReports).length, 20000);
+  assert.equal(status.status, 'passed');
+  const projected = [...l.s.tables.projectFinishReadRows.values()].find(
+    row => row.kind === 'projectMetricCheckRuns' && row.runId === l.id.runId,
+  );
+  const metric = JSON.parse(projected.value);
+  assert.equal(metric.flaky.total, 1);
+  assert.equal(
+    metric.flaky.files[0].firstError,
+    'retained flaky error',
+    'compact metric projections retain detached report evidence',
+  );
+  assert.deepEqual(metric.flaky.files[0].attempts, status.contractReports[many[0]].attempts);
+});
+
+async function resultPathBytes(t, batch) {
+  const l = await landing(t, 12, batch),
+    run = l.stored(),
+    steps = [];
+  const planReplyBytes = Buffer.byteLength(
+    JSON.stringify(batch ? { run, resultBatch: await batchCollector.resultBatchTargets(run) } : run),
+  );
+  const per = Math.ceil(files.length / 12);
+  const start = l.s.counts.length;
+  const r2Before = { ...l.r2 };
+  let replyBytes = 0;
+  for (let index = 0; index < 12; index++) {
+    if (!batch) {
+      const sent = await l.send(index);
+      replyBytes += Buffer.byteLength(JSON.stringify(sent.body));
+    } else {
+      const bytes = Buffer.from(`synthetic shard ${index} log `.repeat(64));
+      l.logs.set(digest(bytes), bytes);
+      const result = {
+        index,
+        exitCode: 0,
+        log: { object: { sha256: digest(bytes), size: bytes.length }, failureSummary: '' },
+        contractReports: Object.fromEntries(
+          files.slice(index * per, (index + 1) * per).map((file, i) => [file, report(index * per + i)]),
+        ),
+        execution: {
+          startedAt: new Date(Date.now() - 60000).toISOString(),
+          endedAt: new Date().toISOString(),
+        },
+      };
+      steps.push(result);
+      await fetch(
+        `https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/${resultSlotKey(run, index)}`,
+        {
+          method: 'PUT',
+          headers: { 'if-none-match': '*' },
+          body: resultEnvelopeBody({ result, logBytes: bytes.toString('base64') }),
+        },
+      );
+      await fetch('https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/?list-type=2');
+    }
+  }
+  if (batch) {
+    await fetch(
+      `https://synthetic-account.r2.cloudflarestorage.com/synthetic-bucket/${resultSlotKey(run, 'coordinator')}`,
+      {
+        method: 'PUT',
+        headers: { 'if-none-match': '*' },
+        body: 'collect',
+      },
+    );
+    replyBytes = Buffer.byteLength(
+      JSON.stringify(
+        await batchCollector.collectResultBatch(l.ctx, {
+          ...l.id,
+          fence: run.fence,
+          executionId: run.executionId,
+          claims: JSON.stringify(claims()),
+        }),
+      ),
+    );
+  }
+  await l.conclude();
+  for (const task of l.scheduled.filter(task => task.name === 'projectHostedTestTimings:record'))
+    await l.s.transaction(task.name, timingStore.record, task.input);
+  const meters = l.s.counts.slice(start),
+    perFunction = {};
+  for (const m of meters) {
+    const f = (perFunction[m.name] ??= { calls: 0, readBytes: 0, writeBytes: 0 });
+    f.calls++;
+    f.readBytes += m.readBytes;
+    f.writeBytes += m.writeBytes;
+  }
+  return {
+    mutations: meters.length,
+    readBytes: sum(meters, 'readBytes'),
+    writeBytes: sum(meters, 'writeBytes'),
+    replyBytes,
+    planReplyBytes,
+    perFunction,
+    r2: Object.fromEntries(Object.entries(l.r2).map(([key, value]) => [key, value - r2Before[key]])),
+    calls: meters.length + (batch ? 1 : 12),
+  };
+}
+
+test('CI byte ledger: interleaved identical 12-shard report sets cut I/O and CI reply bytes', async t => {
+  const pairs = [];
+  for (let pair = 0; pair < 11; pair++) {
+    const before = await resultPathBytes(t, false),
+      after = await resultPathBytes(t, true);
+    assert(after.mutations < before.mutations);
+    assert(after.readBytes < before.readBytes);
+    assert(after.writeBytes < before.writeBytes);
+    assert(after.replyBytes < 1024, 'the CI reply has only run identity, status and counts');
+    pairs.push({ before, after });
+  }
+  const median = values => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const measured = Object.fromEntries(
+    ['calls', 'readBytes', 'writeBytes', 'replyBytes', 'planReplyBytes'].map(key => [
+      key,
+      median(pairs.map(p => p.after[key])),
+    ]),
+  );
+  Object.assign(measured, {
+    r2ClassA: pairs[0].after.r2.classA,
+    r2ClassB: pairs[0].after.r2.classB,
+    r2BytesPut: median(pairs.map(p => p.after.r2.bytesPut)),
+  });
+  const verdicts = judgeCosts(speedBudgets.costs, speedBudgets.costGuard, 'ci-batch-fixture', measured);
+  for (const line of formatCostVerdicts(verdicts)) t.diagnostic(line);
+  assert(!verdicts.some(v => v.status === 'fail'), 'CI batching byte ledger regressed');
+  const model = row =>
+    ((row.readBytes + row.writeBytes) / 1e6) * 0.2 +
+    ((row.replyBytes + row.planReplyBytes) / 1e6) * 0.12 +
+    row.r2.classA * 0.0045 +
+    row.r2.classB * 0.00036;
+  const differences = pairs.map(p => model(p.after) - model(p.before));
+  const interval = bootstrapInterval(differences, { seed: 1, resamples: 10000 });
+  assert(
+    interval.excludesZero && interval.medianDifference < 0,
+    'modeled billed I/O, CI egress and R2 costs fall together',
+  );
+  t.diagnostic(
+    JSON.stringify({
+      before: pairs[0].before,
+      after: pairs[0].after,
+      measured,
+      usdPer1000: {
+        before: median(pairs.map(p => model(p.before))),
+        after: median(pairs.map(p => model(p.after))),
+        interval,
+      },
+      pairs: pairs.map(p => ({
+        beforeIo: p.before.readBytes + p.before.writeBytes,
+        afterIo: p.after.readBytes + p.after.writeBytes,
+      })),
+    }),
+  );
+});
+
+test('immutable result slots reconcile a lost PUT reply and refuse different retry bytes', async () => {
+  const { uploadResultSlot } = await import('../dist/hosted-actions-result-batch.js');
+  const target = {
+    put: { url: 'https://synthetic.invalid/slot', headers: { 'if-none-match': '*' } },
+    get: 'https://synthetic.invalid/slot',
+  };
+  let saved;
+  const request = async (_url, init = {}) => {
+    if (init.method !== 'PUT') return new Response(saved);
+    if (saved !== undefined) return new Response(null, { status: 412 });
+    saved = init.body;
+    throw new TypeError('synthetic lost reply');
+  };
+  await assert.rejects(uploadResultSlot(target, 'original', request), TypeError);
+  assert.equal(await uploadResultSlot(target, 'original', request), false);
+  await assert.rejects(uploadResultSlot(target, 'changed', request), code('WORK_OPERATION_CHANGED'));
+});
+
+test('signed workflow completion recovers a lost batch coordinator without trusting the job verdict', async t => {
+  const l = await landing(t, 2, true),
+    run = l.stored();
+  for (let index = 0; index < 2; index++)
+    l.inbox.set(
+      `/synthetic-bucket/${resultSlotKey(run, index)}`,
+      Buffer.from(resultEnvelopeBody({ result: { index, exitCode: 0 } })),
+    );
+  await l.conclude();
+  assert.equal(l.stored().status, 'running', 'the provider event schedules evidence collection');
+  const task = l.scheduled.find(task => task.name === 'projectHostedActionsBatch:collect');
+  assert(task);
+  await batchCollector.collect._handler(l.ctx, task.input);
+  assert.equal(l.stored().status, 'passed');
+  assert([...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey);
+});
+
+test('provider completion with missing shards retains received failure details and cannot pass', async t => {
+  const l = await landing(t, 3, true),
+    run = l.stored();
+  l.inbox.set(
+    `/synthetic-bucket/${resultSlotKey(run, 0)}`,
+    Buffer.from(
+      resultEnvelopeBody({
+        result: {
+          index: 0,
+          exitCode: 1,
+          contractReports: {
+            'tests/interrupted.test.mjs': { failed: true, firstError: 'received before interruption' },
+          },
+        },
+      }),
+    ),
+  );
+  await l.conclude('failure');
+  const task = l.scheduled.find(task => task.name === 'projectHostedActionsBatch:collect');
+  await batchCollector.collect._handler(l.ctx, task.input);
+  assert.equal(l.stored().status, 'failed');
+  assert.equal(
+    (await l.s.status(l.id.runId)).contractReports['tests/interrupted.test.mjs'].firstError,
+    'received before interruption',
+  );
+  assert.equal([...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey, undefined);
+});
+
+test('cancellation clears regenerable batch inbox bytes without accepting a late result', async t => {
+  const l = await landing(t, 2, true),
+    run = l.stored();
+  l.inbox.set(
+    `/synthetic-bucket/${resultSlotKey(run, 0)}`,
+    Buffer.from(resultEnvelopeBody({ result: { index: 0, exitCode: 0 } })),
+  );
+  await l.s.cancel(l.id.runId);
+  const task = l.scheduled.find(task => task.name === 'projectHostedActionsBatch:collect');
+  assert(task, 'the existing terminal event schedules cleanup');
+  await batchCollector.collect._handler(l.ctx, task.input);
+  assert.equal(l.stored().status, 'cancelled');
+  assert.equal(l.stored().counts.completed, 0);
+  assert(![...l.inbox.keys()].some(key => key.includes('/check-results/')));
+});
+
+test('exact-tree reuse across Candidates retains provenance and rejects unrecorded aliases or a changed definition', async t => {
+  const l = await batchedLanding(t, 2, [
+    { index: 0, exitCode: 0 },
+    { index: 1, exitCode: 0 },
+  ]);
+  const original = l.stored();
+  const records = await import(moduleUrl('../convex/projectHostedRecords.ts'));
+  const candidate = { ...l.s.candidate, id: crypto.randomUUID(), version: 0 };
+  await l.s.run('same-tree-candidate', records.writeHostedRecord, {
+    ...l.s.auth,
+    expectedVersion: null,
+    record: candidate,
+  });
+  const request = { ...original.request, candidateId: candidate.id, operationId: crypto.randomUUID() };
+  assert.equal((await l.s.enqueue(request)).id, original.id);
+  assert.equal(
+    (await l.s.enqueue(request)).id,
+    original.id,
+    'lost enqueue reply reconciles the original reuse',
+  );
+  const { read } = await import('./hosted-checks-fixture.mjs');
+  const evidence = {
+    ...l.id,
+    actor: original.actor,
+    candidateId: candidate.id,
+    head: original.request.expectedHead,
+    checkId: original.check.id,
+    definition: original.check.definition,
+    configuration: original.request.expectedConfiguration,
+    environment: original.request.expectedEnvironment,
+    authorityEpoch: original.request.authorityEpoch,
+  };
+  const requireEvidence = { _handler: (ctx, input) => read.requireHostedCheckEvidence(ctx, input) };
+  assert.equal((await l.s.transaction('same-tree-evidence', requireEvidence, evidence)).id, original.id);
+  await assert.rejects(
+    l.s.transaction('unrecorded-alias', requireEvidence, { ...evidence, candidateId: crypto.randomUUID() }),
+    code('EVIDENCE_CHANGED'),
+  );
+  const definition = await l.s.configure(
+    {
+      kind: 'definition',
+      checkId: original.check.id,
+      command: {
+        name: 'verify',
+        executable: 'node',
+        args: ['scripts/changed-check.mjs'],
+        environmentLabel: 'clean',
+      },
+    },
+    original.request.expectedDefinition,
+  );
+  const changed = await l.s.enqueue({
+    ...request,
+    operationId: crypto.randomUUID(),
+    expectedDefinition: definition.digest,
+  });
+  assert.notEqual(changed.id, original.id);
+  assert.equal(changed.status, 'queued');
 });

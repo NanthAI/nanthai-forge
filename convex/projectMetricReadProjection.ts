@@ -21,6 +21,6 @@ export function metricReadProjection(row: Record<string, unknown>) {
     projectId: row.projectId as HostedCheckRun['projectId'],
     runId: row.runId as string,
     sourceCreatedAt,
-    value: canonicalPayload(metricRunRow(run)),
+    value: canonicalPayload(metricRunRow(run, row.reportFlakes)),
   };
 }

@@ -7,6 +7,7 @@ import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import {
   checkHash,
+  checkPin,
   checkNumber,
   checkObject,
   hostedCheckCostSchema,
@@ -102,6 +103,7 @@ export function exactHostedCheckEvidence(
     environment: string;
     authorityEpoch: number;
   },
+  sameTreeReuse = false,
 ) {
   const r = run.request;
   invariant(
@@ -114,7 +116,7 @@ export function exactHostedCheckEvidence(
       run.counts.passed === run.plan.shardCount &&
       run.counts.failed === 0 &&
       run.exitCode === 0 &&
-      r.candidateId === pins.candidateId &&
+      (r.candidateId === pins.candidateId || sameTreeReuse) &&
       r.expectedHead === pins.head &&
       r.checkId === pins.checkId &&
       r.expectedDefinition === pins.definition &&
@@ -125,4 +127,26 @@ export function exactHostedCheckEvidence(
     'A passing provider run for these exact Candidate, definition, environment and authority pins is required.',
   );
   return run;
+}
+
+/** Provider-attested verdict identity. A different contract, gate, authority, actor, runtime or
+ * environment cannot borrow a pass merely because its source tree and command match. */
+export function hostedVerdictKey(run: HostedCheckRun) {
+  const r = run.request;
+  const gate = run.gate ? { ...run.gate } : null;
+  if (gate) delete gate.effective;
+  return checkPin({
+    domain: 'forge-ci-verdict-v1',
+    projectId: run.projectId,
+    head: r.expectedHead,
+    checkId: r.checkId,
+    definition: r.expectedDefinition,
+    configuration: r.expectedConfiguration,
+    environment: r.expectedEnvironment,
+    runtime: run.configuration.runtime,
+    epoch: r.authorityEpoch,
+    actor: run.actor,
+    semanticPlan: run.semanticPlan ?? null,
+    gate,
+  });
 }

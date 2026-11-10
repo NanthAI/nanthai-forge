@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import type { ResultBatchTargets } from './hosted-actions-result-batch.js';
 import { networkFetch } from './network-fetch.js';
 import { actionsPreflightTicketSchema, type ActionsPreflightTicket } from './hosted-actions-preflight.js';
 import type { HostedCheckRun } from './hosted-check.js';
@@ -33,6 +34,7 @@ export class ActionsJobClient {
   proofTicket: ActionsPreflightTicket | null = null;
   /** Shard pool claim targets from the plan bundle (unvalidated until used). */
   poolClaims: unknown = null;
+  resultBatch: ResultBatchTargets | null = null;
   private token = '';
   private expires = 0;
   private oidcRequest: { url: string | undefined; token: string | undefined } | null = null;
@@ -53,7 +55,7 @@ export class ActionsJobClient {
       command: actionsCommandForCapabilities(command, this.capabilities),
     });
     // A finished check's output and result outlast a write outage (72d50375).
-    const delivery = command.kind === 'result' || command.kind === 'output';
+    const delivery = command.kind === 'result' || command.kind === 'results' || command.kind === 'output';
     const { response, value } = await retryActionsInfrastructure(
       async signal => {
         // Per attempt: a long delivery window outlives one OIDC token.

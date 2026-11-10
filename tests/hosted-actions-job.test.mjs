@@ -685,10 +685,12 @@ test('shard count keeps Convex calls per check within the budget for old and inl
     runs: [],
     files: Object.fromEntries(tests.map(file => [file, { durationMs: 45000, updatedAt: '2026-01-01' }])),
   };
-  const oldServer = hostedActionsCapabilities.filter(value => value !== actionsInlineLogCapability);
+  const oldServer = hostedActionsCapabilities.filter(
+    value => value !== actionsInlineLogCapability && value !== 'results.batch',
+  );
   for (const [capabilities, shards, calls] of [
     [oldServer, 7, 6],
-    [hostedActionsCapabilities, 11, 4],
+    [hostedActionsCapabilities, 11, 1],
   ]) {
     const s = fixture(t, { timingHistory, capabilities });
     s.run.request.expectedHead = s.state([
@@ -1119,8 +1121,8 @@ test('an inline-log server receives the bounded log inside the one result call',
   assert.deepEqual(result.log.object, { sha256: digest(bytes), size: bytes.length });
   assert.equal(result.exitCode, 7);
   assert.equal(result.contractReports['tests/synthetic.test.mjs'].failed, true);
-  assert.equal(actionsJobCalls(hostedActionsCapabilities), 4);
-  assert.equal(actionsJobCalls(withoutInlineLog), 6);
+  assert.equal(actionsJobCalls(hostedActionsCapabilities), 1);
+  assert.equal(actionsJobCalls(withoutInlineLog), 1);
 });
 
 test('any check command may write JUnit XML to FORGE_JUNIT_DIR; the result names its failing files', async t => {
@@ -2910,4 +2912,87 @@ test('a declared check pins toolchains and cache in its recipe and needs the ins
   assert.equal('actions' in unchanged.recipe, false);
   assert.deepEqual(unchanged.toolchains, {});
   assert.deepEqual(unchanged.depsCache, {});
+});
+
+test('batched supervisor uploads one immutable slot and elects one result call while preserving a failing shard log', async t => {
+  const s = fixture(t),
+    candidate = join(s.directory, 'candidate');
+  const prepared = await prepareActionsJob(s.client, candidate, join(s.directory, 'objects'));
+  const path = join(s.directory, 'batch-plan.json');
+  writeFileSync(path, JSON.stringify(prepared.recipe));
+  const count = s.client.run.plan.shardCount;
+  assert.equal(count, 1, 'the configured fixture runs in its static job');
+  const target = key => ({
+    put: { url: `https://batch.invalid/${key}`, headers: { 'if-none-match': '*' } },
+    get: `https://batch.invalid/${key}`,
+  });
+  s.client.resultBatch = {
+    slots: [{ ...target('0'), head: 'https://batch.invalid/0', log: target('log-0') }],
+    coordinator: target('coordinator'),
+    list: 'https://batch.invalid/list',
+  };
+  const objects = new Map(),
+    posted = [],
+    realRequest = s.client.request;
+  s.client.request = async (url, init) => {
+    if (!url.startsWith('https://batch.invalid/')) return realRequest(url, init);
+    const key = new URL(url).pathname.slice(1);
+    if (init?.method === 'PUT') {
+      assert.equal(init.headers['if-none-match'], '*');
+      if (objects.has(key)) return new Response(null, { status: 412 });
+      objects.set(key, String(init.body));
+      return new Response(null, { status: 200 });
+    }
+    if (key === 'list')
+      return new Response('<ListBucketResult><Contents><Key>inbox/0</Key></Contents></ListBucketResult>');
+    return new Response(objects.get(key) ?? null, { status: objects.has(key) ? 200 : 404 });
+  };
+  const realCall = s.client.call.bind(s.client);
+  s.client.call = async command => {
+    if (['result', 'results', 'output'].includes(command.kind)) {
+      posted.push(command);
+      return {};
+    }
+    return realCall(command);
+  };
+  t.mock.method(process.stdout, 'write', () => true);
+  const exit = await executeActionsJob(s.client, candidate, path, 'static', [
+    process.execPath,
+    '--eval',
+    "console.log('__FORGE_TESTS__'+JSON.stringify({file:'tests/batch-supervisor.test.mjs',complete:true,durationMs:5,results:[{name:'fails',passed:false}]}));process.exitCode=7;",
+  ]);
+  assert.equal(exit, 7);
+  assert.deepEqual(
+    posted.map(c => c.kind),
+    ['results'],
+  );
+  const envelope = JSON.parse(objects.get('0'));
+  assert.equal(envelope.result.exitCode, 7);
+  assert.equal(envelope.result.contractReports['tests/batch-supervisor.test.mjs'].failed, true);
+  assert.equal(digest(Buffer.from(envelope.logBytes, 'base64')), envelope.result.log.object.sha256);
+});
+
+test('result-write capabilities remain private when a run bundle is written, replaced or restored from an artifact', async t => {
+  const { writeActionsRunBundle, readActionsRunBundle } =
+    await import('../dist/hosted-actions-job-bundle.js');
+  const folder = mkdtempSync(join(tmpdir(), 'forge-private-run-'));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const path = join(folder, 'run.json');
+  writeFileSync(path, '{}', { mode: 0o644 });
+  const bundle = { runId: 'synthetic', resultBatch: { writeCapability: 'synthetic-private-capability' } };
+  writeActionsRunBundle(path, bundle);
+  if (process.platform !== 'win32')
+    assert.equal(
+      fs.statSync(path).mode & 0o777,
+      0o600,
+      'Candidate users cannot read a new or replaced capability bundle',
+    );
+  fs.chmodSync(path, 0o644);
+  assert.deepEqual(readActionsRunBundle(path), bundle);
+  if (process.platform !== 'win32')
+    assert.equal(
+      fs.statSync(path).mode & 0o777,
+      0o600,
+      'restoring an artifact reestablishes the supervisor-only boundary before Candidate spawn',
+    );
 });

@@ -101,7 +101,7 @@ async function settle(
     reason,
   });
   await completeHostedCheck(ctx, run);
-  await writeHostedCheck(ctx, row._id, run);
+  await writeHostedCheck(ctx, row._id, run, status === 'passed');
 }
 
 /** Before any GitHub IO: the mirror seed that publishes this Candidate on top of main's mirrored

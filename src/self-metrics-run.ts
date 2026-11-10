@@ -2,11 +2,11 @@
 import { hostedCheckTerminal, type HostedCheckRun } from './hosted-check.js';
 import { hostedRunReuseKey } from './self-metrics-reuse-key.js';
 import { isScopedRecheck } from './scoped-recheck-policy.js';
-import { runFlakes } from './self-metrics-flakes.js';
+import { runFlakes, type RunFlakes } from './self-metrics-flakes.js';
 import { contractGateFallback } from './fallback-reasons.js';
 
 /** The exact metric fields, shared by legacy source reads and transactional read projections. */
-export function metricRunRow(run: HostedCheckRun) {
+export function metricRunRow(run: HostedCheckRun, reportFlakes?: unknown) {
   return {
     id: run.id,
     at: run.at,
@@ -23,7 +23,10 @@ export function metricRunRow(run: HostedCheckRun) {
           (run.gate ?? run.request.gate)!.effective === 'full'
         : null,
     ...(isScopedRecheck(run.gate) ? { scopedRecheck: true as const } : {}),
-    flaky: runFlakes(run) ?? null,
+    flaky:
+      typeof reportFlakes === 'string'
+        ? (JSON.parse(reportFlakes) as RunFlakes | null)
+        : (runFlakes(run) ?? null),
     selectionFallback: run.fallback ?? null,
     gateFallback: contractGateFallback(run.gate) ?? null,
     auditRunnerSeconds:

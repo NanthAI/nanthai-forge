@@ -59,7 +59,7 @@ export async function completeFromResults(
     exitCode: status === 'cancelled' ? null : status === 'failed' ? 1 : 0,
     output: null,
     cost: actionsExecutionCost(run, run.plan!.shardCount),
-    contractReports: run.contractReports,
+    ...(run.contractReports ? { contractReports: run.contractReports } : {}),
   });
   return receiveHostedCheckCallback(
     ctx,
@@ -68,6 +68,7 @@ export async function completeFromResults(
       callback: complete,
       signature: signHostedCheckCallback(complete, outputSigningKey(run.keyId)),
       loaded,
+      ...(status === 'passed' ? { providerAttested: true } : {}),
     },
     outputSigningKey,
   );

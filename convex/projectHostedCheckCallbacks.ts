@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reportsDetached } from './projectHostedCheckReports';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
 import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
@@ -37,6 +38,10 @@ export async function receiveHostedCheckCallback(
     beforeWrite?: (run: HostedCheckRun) => Promise<void>;
     /** The caller's run row from this same transaction; skips a second read of it. */
     loaded?: LoadedHostedCheck;
+    /** A batch commits its in-memory run once after folding all shard callbacks. */
+    deferWrite?: boolean;
+    /** Set only by a provider conclusion handler, never a supervisor callback. */
+    providerAttested?: boolean;
   },
   key: (keyId: string) => string,
   now = Date.now(),
@@ -204,10 +209,23 @@ export async function receiveHostedCheckCallback(
     runId: run.id,
     eventId: callback.eventId,
     digest,
-    value: callbackReceipt(callback),
+    value:
+      reportsDetached(run) && callback.result.kind === 'complete' && callback.result.contractReports
+        ? canonicalPayload({
+            ...callback,
+            result: {
+              ...Object.fromEntries(
+                Object.entries(callback.result).filter(([key]) => key !== 'contractReports'),
+              ),
+              contractReportsOmitted: Object.keys(callback.result.contractReports).length,
+            },
+          })
+        : callbackReceipt(callback),
   });
   await input.beforeWrite?.(run);
-  await writeHostedCheck(ctx, row._id, run);
-  await notifyActionsProgress(ctx, run, now);
+  if (!input.deferWrite) {
+    await writeHostedCheck(ctx, row._id, run, input.providerAttested);
+    await notifyActionsProgress(ctx, run, now);
+  }
   return run;
 }

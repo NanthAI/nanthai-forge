@@ -52,6 +52,10 @@ export const hostedCheckTables = {
     projectId: v.id('hostedProjects'),
     runId: v.string(),
     candidateId: v.string(),
+    verdictKey: v.optional(v.string()),
+    reportParts: v.optional(v.number()),
+    reportDigest: v.optional(v.string()),
+    reportFlakes: v.optional(v.string()),
     /** Optional proof metadata beside the run; immutable receipts never change. */
     proof: v.optional(v.string()),
     machineId: v.optional(v.string()),
@@ -63,6 +67,7 @@ export const hostedCheckTables = {
     .index('by_project_and_metrics_projection', ['projectId', 'metricsProjected'])
     .index('by_run', ['runId'])
     .index('by_project_and_run', ['projectId', 'runId'])
+    .index('by_project_and_verdict', ['projectId', 'verdictKey'])
     .index('by_project_and_candidate', ['projectId', 'candidateId'])
     .index('by_project_and_status', ['projectId', 'status'])
     .index('by_project_and_machine_and_status', ['projectId', 'machineId', 'status']),

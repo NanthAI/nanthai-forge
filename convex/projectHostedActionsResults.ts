@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { inheritCheckReports } from './projectHostedCheckReports';
+import { batchArgs, batchSession } from './projectHostedActionsBatchStore';
+import { z } from 'zod';
+import { resultPageBytes } from '../src/hosted-actions-result-batch';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import type { MutationCtx } from './_generated/server';
@@ -24,11 +28,18 @@ import {
   type HostedCheckRun,
 } from '../src/hosted-check';
 import { semanticPayload } from '../src/semantic-payload';
-import { writeHostedCheck } from './projectHostedCheckStore';
+import { type LoadedHostedCheck, writeHostedCheck } from './projectHostedCheckStore';
 import { checkFileSummary } from '../src/check-file-summary';
 import { invariant } from '../src/errors';
-import { recordShardReports } from './projectHostedActionsReports';
-import { completeFromResults, holdForConclusion } from './projectHostedActionsVerdict';
+import {
+  restoreShardReports,
+  recordShardReports,
+  createShardReportBatch,
+  flushShardReportBatch,
+  type ShardReportBatch,
+} from './projectHostedActionsReports';
+import { settleDirectActions } from './projectHostedActionsDirect';
+import { applyConclusion, completeFromResults, holdForConclusion } from './projectHostedActionsVerdict';
 import { hostedCheckOutputSettled } from '../src/hosted-check-verdict';
 export const output = internalMutation({
   // withRun: an inline-log result also needs the session run to verify the stored object.
@@ -73,9 +84,17 @@ export const result = internalMutation({
 });
 /** A run as loadHostedCheck would parse it back from the value writeHostedCheck stores. */
 const storedHostedCheck = (run: HostedCheckRun) =>
-  hostedCheckRunSchema.parse(JSON.parse(semanticPayload(hostedCheckRunSchema.parse(run), true)));
-async function settle(ctx: MutationCtx, input: SessionInput & { result: string }) {
-  const selected = await actionsSession(ctx, input);
+  inheritCheckReports(
+    run,
+    hostedCheckRunSchema.parse(JSON.parse(semanticPayload(hostedCheckRunSchema.parse(run), true))),
+  );
+async function settle(
+  ctx: MutationCtx,
+  input: SessionInput & { result: string },
+  batch?: LoadedHostedCheck,
+  reports?: ShardReportBatch,
+) {
+  const selected = batch ?? (await actionsSession(ctx, input));
   const row = selected.row;
   let run = selected.run;
   const result = directResultSchema.parse(JSON.parse(input.result));
@@ -132,7 +151,9 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
     if (result.isolation && current.actions)
       current.actions.isolation = current.actions.isolation === 'shared' ? 'shared' : result.isolation;
     // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
-    current.testFiles = checkFileSummary(await recordShardReports(ctx, current, { ...result, digest }));
+    current.testFiles = checkFileSummary(
+      await recordShardReports(ctx, current, { ...result, digest }, reports),
+    );
   };
   let recorded = false;
   run = await receiveHostedCheckCallback(
@@ -143,12 +164,13 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
       signature: signHostedCheckCallback(callback, outputSigningKey(run.keyId)),
       beforeWrite: current => ((recorded = true), record(current)),
       loaded: selected,
+      ...(batch ? { deferWrite: true } : {}),
     },
     outputSigningKey,
   );
   if (!recorded) {
     await record(run);
-    await writeHostedCheck(ctx, row._id, run);
+    if (!batch) await writeHostedCheck(ctx, row._id, run);
   }
   if (run.counts.completed === run.plan!.shardCount) {
     const failed = run.counts.failed > 0 || Object.values(run.contractReports!).some(report => report.failed);
@@ -164,3 +186,60 @@ async function settle(ctx: MutationCtx, input: SessionInput & { result: string }
   }
   return run;
 }
+
+/** One mutation per bounded page, one run write after folding all new shard results. The legacy
+ * result entry remains for already running or older supervisors. Only the collector calls this. */
+export const batch = internalMutation({
+  args: { ...batchArgs, results: v.string(), conclusion: v.optional(v.union(v.string(), v.null())) },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    invariant(
+      new TextEncoder().encode(input.results).length <= resultPageBytes,
+      'BAD_ARGUMENT',
+      'Page the result metadata.',
+    );
+    const selected = await batchSession(ctx, input);
+    const results = z.array(directResultSchema).parse(JSON.parse(input.results));
+    invariant(
+      new Set(results.map(r => r.index)).size === results.length,
+      'EVIDENCE_CHANGED',
+      'Each shard belongs to a batch page once.',
+    );
+    let run = selected.run;
+    const before = run.counts.completed;
+    const reports = createShardReportBatch();
+    for (const result of results) {
+      run = await settle(
+        ctx,
+        { ...input, claims: input.claims ?? '', result: JSON.stringify(result) },
+        selected,
+        reports,
+      );
+      selected.run = run;
+    }
+    await flushShardReportBatch(ctx, run, reports);
+    if (run.counts.completed !== before && run.counts.completed < run.plan!.shardCount)
+      await writeHostedCheck(ctx, selected.row._id, run);
+    if (!hostedCheckTerminal(run) && input.conclusion !== undefined) {
+      if (run.actions?.verdictPending) run = await applyConclusion(ctx, selected, input.conclusion);
+      else {
+        await restoreShardReports(ctx, run, true);
+        if (run.contractReports) run.testFiles = checkFileSummary(run.contractReports);
+        run = await settleDirectActions(
+          ctx,
+          selected,
+          input.conclusion === 'cancelled'
+            ? 'cancelled'
+            : run.counts.failed || run.testFiles?.counts.failed
+              ? 'failed'
+              : 'runner-unavailable',
+          'Actions completed without complete job evidence.',
+        );
+      }
+    }
+    const final = hostedCheckOutputSettled(run) ? await finalOutputTarget(ctx, input, run) : null;
+    const head = { ...run };
+    delete head.contractReports;
+    return JSON.stringify({ run: head, final: final === undefined ? 'prepare' : final });
+  },
+});

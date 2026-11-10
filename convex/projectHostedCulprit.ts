@@ -7,6 +7,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
+import { detachCheckReports, hydrateCheckReports } from './projectHostedCheckReports';
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';
 import { insertHostedCheckRun } from './projectHostedChecks';
 import { hostedWriteProject, readHostedRecord, writeHostedRecord } from './projectHostedRecords';
@@ -598,6 +599,10 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', state.pass!.runId))
       .unique();
     const green = greenRow ? hostedCheckRunSchema.parse(JSON.parse(greenRow.value)) : null;
+    if (green && greenRow?.reportParts !== undefined) {
+      detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
+      await hydrateCheckReports(ctx, green);
+    }
     if (
       !green ||
       green.status !== 'passed' ||

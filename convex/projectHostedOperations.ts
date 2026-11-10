@@ -112,7 +112,8 @@ export async function beginHostedOperation(
     });
     await pruneExpiredHostedOperations(ctx, input.projectId, Date.now());
   }
-  return prepared;
+  // Reuse this authorized snapshot within the current transaction.
+  return { ...prepared, project };
 }
 export async function finishHostedOperation(
   ctx: MutationCtx,

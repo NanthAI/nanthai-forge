@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { writeFileSync, appendFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { writeActionsRunBundle, readActionsRunBundle } from '../dist/hosted-actions-job-bundle.js';
 import { actionsCapacityFile, parseActionsCapacity } from '../dist/hosted-actions-capacity.js';
 const capacityPath = resolve(process.env.RUNNER_TEMP ?? '.', actionsCapacityFile);
 /** The runner queue read: the one step that holds the GitHub token, so no step that plans or
@@ -49,17 +50,15 @@ try {
     );
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-state.json'), result.stateBytes);
     writeFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-plan.json'), JSON.stringify(result.recipe));
-    writeFileSync(
-      resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'),
-      JSON.stringify({
-        ...result.run,
-        capabilities: client.capabilities,
-        preflightTicket: client.preflightTicket,
-        ...(client.proofTicket ? { proofTicket: client.proofTicket } : {}),
-        // Shard pool claim targets: read by the fixed supervisor only, never logged.
-        ...(result.claims ? { poolClaims: result.claims } : {}),
-      }),
-    );
+    writeActionsRunBundle(resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'), {
+      ...result.run,
+      capabilities: client.capabilities,
+      preflightTicket: client.preflightTicket,
+      ...(client.proofTicket ? { proofTicket: client.proofTicket } : {}),
+      resultBatch: client.resultBatch,
+      // Shard pool claim targets: read by the fixed supervisor only, never logged.
+      ...(result.claims ? { poolClaims: result.claims } : {}),
+    });
     // Forge's own suite installs from the control lockfile, so only it reads the npm download cache.
     const npmCache = result.recipe.standard === true;
     // The only step that writes workflow outputs: it reads the Candidate as data and runs none of
@@ -135,12 +134,14 @@ function restoreRun() {
     capabilities = [],
     preflightTicket = null,
     poolClaims = null,
+    resultBatch = null,
     proofTicket = null,
     ...run
-  } = JSON.parse(readFileSync(resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'), 'utf8'));
+  } = readActionsRunBundle(resolve(process.env.RUNNER_TEMP, 'forge-actions-run.json'));
   client.run = hostedCheckRunSchema.parse(run);
   client.preflightTicket = preflightTicket;
   client.poolClaims = poolClaims;
+  client.resultBatch = resultBatch;
   client.proofTicket = proofTicket;
   client.capabilities = Array.isArray(capabilities)
     ? capabilities.filter(value => typeof value === 'string')

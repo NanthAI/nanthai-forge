@@ -73,7 +73,7 @@ export async function metricRunsPage(
       .paginate(options);
     return {
       ...rows,
-      page: rows.page.map(row => metricRunRow(JSON.parse(row.value) as HostedCheckRun)),
+      page: rows.page.map(row => metricRunRow(JSON.parse(row.value) as HostedCheckRun, row.reportFlakes)),
       continueCursor: rows.isDone
         ? ''
         : prefix + JSON.stringify({ ...selected, cursor: rows.continueCursor }),

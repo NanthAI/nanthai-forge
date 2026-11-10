@@ -30,8 +30,8 @@ export const sessionArgs = {
 export type SessionInput = { projectId: Id<'hostedProjects'>; runId: string; claims: string; fence?: number };
 /** HTTP verifies the JWT signature. Every transaction rechecks current epoch,
  * original actor authority, dispatch fence, and exact repository/workflow/run. */
-export async function actionsSession(ctx: MutationCtx, input: SessionInput) {
-  const selected = await writableHostedCheck(ctx, input),
+export async function actionsSession(ctx: MutationCtx, input: SessionInput, withReports = true) {
+  const selected = await writableHostedCheck(ctx, input, withReports),
     { row, run, project } = selected;
   assertHostedCheckActive(run);
   invariant(

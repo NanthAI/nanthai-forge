@@ -123,6 +123,7 @@ test('old check and landing documents remain valid; additive metadata is validat
     'by_project_and_metrics_projection',
     'by_run',
     'by_project_and_run',
+    'by_project_and_verdict',
     'by_project_and_candidate',
     'by_project_and_status',
     'by_project_and_machine_and_status',

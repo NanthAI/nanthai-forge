@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { reusedHostedVerdict } from './projectHostedCheckVerdictReuse';
 import { scheduleCiStatus } from './projectCiStatus';
 import { fixGate } from '../src/culprit-bisect';
 import { isMachineRunner } from '../src/hosted-machine-runner';
@@ -132,7 +133,10 @@ export async function enqueueHostedCheck(
     return (
       await loadHostedCheck(ctx, {
         projectId: input.projectId,
-        runId: prepared.operation.firstAttempt.ids.run!,
+        runId:
+          prepared.operation.terminal?.outcome.status === 'completed'
+            ? (prepared.operation.terminal.outcome.result as { runId: string }).runId
+            : prepared.operation.firstAttempt.ids.run!,
       })
     ).run;
   const row = await readHostedRecord(ctx, {
@@ -198,7 +202,7 @@ export async function enqueueHostedCheck(
     semantic.batchIntentIds = candidate.semanticPlan.batchIntentIds;
   if (semantic && candidate.semanticPlan?.afterSequence !== undefined)
     semantic.afterSequence = candidate.semanticPlan.afterSequence;
-  const loaded = (await ctx.db.get(input.projectId))!;
+  const loaded = prepared.project;
   // A project that predates the derived entry list gets it here once, before the gate reads it.
   const project =
     loaded.checkEntries === undefined
@@ -291,6 +295,16 @@ export async function enqueueHostedCheck(
     output: null,
     cost: { status: 'unknown' },
   });
+  const reused = await reusedHostedVerdict(ctx, run);
+  if (reused) {
+    await completeCheckOperation(ctx, prepared.operation, {
+      runId: reused.id,
+      status: reused.status,
+      head: reused.request.expectedHead,
+      terminalDigest: reused.terminalDigest,
+    });
+    return reused;
+  }
   return insertHostedCheckRun(ctx, run);
 }
 
