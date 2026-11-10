@@ -15,6 +15,7 @@ import { readWouldConflict, syncRequiredQueue } from './projectHostedLandingWoul
 import { latestStallAlert } from './projectHostedLandingStallAlert';
 import { reuseHostedLanding } from './projectHostedLandingIdentity';
 import { startLandingAdmission } from './projectHostedLandingAdmission';
+import { submissionReservation, landingReservationForReader } from './projectHostedLandingReservation';
 import { preQueueCheck } from '../src/hosted-landing-admission';
 import { v } from 'convex/values';
 import { mutation, query, receiptMutation } from './cliServer';
@@ -134,6 +135,7 @@ export const status = query({
       const pin = held(state) ? heldPolicy(project, attempt) : null;
       const queue = await readQueueStatus(ctx, state);
       const orderWait = landingOrderWaitForReader(row, state);
+      const reservation = landingReservationForReader(row);
       return canonicalPayload({
         request: noteHeldPolicy(
           landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),
@@ -146,6 +148,7 @@ export const status = query({
         queueAheadSelection: await hostedQueueAheadSelection(ctx, state, undefined, queue?.entriesAhead),
         ...(wouldConflict ? { wouldConflict } : {}),
         ...(stallAlert ? { stallAlert } : {}),
+        ...(reservation ? { reservation } : {}),
       });
     } catch (error) {
       return report(error);
@@ -317,6 +320,7 @@ export async function enqueueHostedLanding(
       gates: input.gates.value,
     });
   const submissionId = first.ids.submission!;
+  let intentId: string | undefined;
   const attempt = await pinLandingAttempt(ctx, {
     projectId: input.projectId,
     actor,
@@ -328,8 +332,11 @@ export async function enqueueHostedLanding(
     number: 0,
     at: first.at,
     operations: { check: first.ids.check!, accept: first.ids.accept! },
+    intent: id => (intentId = id),
   });
   const admission = await startLandingAdmission(ctx, { projectId: input.projectId, attempt, request });
+  // Issue 10d253c6: the same work superseded after a passed check reserves its files now.
+  const reservation = await submissionReservation(ctx, { projectId: input.projectId, intentId }, Date.now());
   const queue = await ensureLandingQueue(ctx, { projectId: input.projectId, channel: request.channel });
   const sequence = queue.sequence + 1;
   const state = hostedLandingStateSchema.parse({
@@ -381,6 +388,7 @@ export async function enqueueHostedLanding(
         }
       : {}),
     ...(request.revertOf ? { revertOf: request.revertOf } : {}),
+    ...reservation,
     actor: actor.id,
     ...landingPriority(project, actor, request.priority),
     priorityVersion: 0,

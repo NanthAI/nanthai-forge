@@ -111,9 +111,11 @@ for (const history of [575, 1150])
     // open overlap rows that predate lastActivityAt, to stamp them from their Lane record. Calls and writes unchanged.
     // Reads 1349 -> 1351 (435c7c2f): each of the 2 new operation receipts first looks, through one indexed range,
     // for receipts older than 90 days to delete; nothing is expired here, so no document is read. Calls and writes unchanged.
+    // Reads 1351 -> 1352 (10d253c6): a submission reads its Intent's previous landing (one indexed row, take 1) to
+    // grant a landing reservation after a supersession; here the second landing finds the first. Calls and writes unchanged.
     assert(
       budget.calls <= 71 &&
-        source.reduce((n, c) => n + c.documents, 0) <= 1351 &&
+        source.reduce((n, c) => n + c.documents, 0) <= 1352 &&
         source.reduce((n, c) => n + c.writes, 0) <= 414,
       JSON.stringify({
         ...budget,

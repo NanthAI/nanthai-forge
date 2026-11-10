@@ -262,7 +262,7 @@ export async function calculateSourceFiles(
       if (marked) {
         kind = 'text';
         // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
-        bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, labelsOf(request));
+        bytes = marked.conflicted ? marked.bytes : wholeFileConflict(base, left, right, labelsOf(request));
       }
     }
     const pin = bytes

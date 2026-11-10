@@ -39,6 +39,8 @@ npm run model:landing-queue -- expiry          # expected: an outage nobody ends
 npm run model:landing-queue -- expiry-fixed
 npm run model:landing-queue -- progresswake    # expected liveness violation: a skip rule that also drops the terminal wake (7ecc4884)
 npm run model:landing-queue -- progresswake-fixed
+npm run model:landing-queue -- reserve         # expected: a large Lane on hot files is superseded on every passed check (10d253c6)
+npm run model:landing-queue -- reserve-fixed
 npm run model:landing-queue -- moving
 npm run model:landing-queue -- reuse
 npm run model:landing-queue -- reuse-fixed
@@ -548,6 +550,25 @@ algorithm drift: changes to these code anchors require manual model review.
    one the empty drive's claim armed a moment later). Replayed in
    `tests/hosted-landing-controller-wakes.test.mjs`.
 
+11. **Large Lane starves on hot files (10d253c6; core-claim incident 2026-11-10,
+   fixed).** A 130-path Lane's pre-queue check holds no queue order, so small
+   Lanes on the same hot files land while it runs and each passed check fails
+   COMPOSITION_CONFLICT when it composes onto the moved main (10 land operations,
+   about 2.5 h). `reserve` (Incidents) shows the loop: the third attempt breaks
+   `WithinTwo`. `reserve-fixed` grants the attempt after one supersession a
+   reservation on its files (`src/landing-reservation.ts`,
+   `convex/projectHostedLandingReservation.ts`): overlapping landings wait for it
+   (`claimReadyLanding`), and the holder never waits for an older entry its
+   reservation holds back (`olderLandingAhead`). It checks `WithinTwo`,
+   `ReserveSettles`, `ReserveEnds` (every reservation ends: it is released when
+   its landing lands or fails, else at its 30-minute bound), `StreamFlows` (the
+   waiters always move again) and TLC deadlock. Three mutations were checked by
+   hand: granting after two supersessions breaks `WithinTwo`; dropping the holder's
+   skip deadlocks it with an older waiter; dropping the bound deadlocks the stream
+   behind a check that never ends. Assumption: the bound exceeds one check plus
+   acceptance, so it passes only while a check runs past it. Replayed in
+   `tests/hosted-landing-starvation.test.mjs`.
+
 `isolation.cfg` checks the 51bbbd00 isolation semantics in the core model:
 combined-failure evidence may name suspects (released with the reason, never
 re-stacked onto: `NoStackOnSuspect`), and a group stacked on an unpassed
@@ -594,6 +615,8 @@ or production historical replay is implied.
 | `expiry-fixed` | 5 | 5 | 0.774 | Passed |
 | `progresswake` | 4 | 4 | 0.707 | Expected liveness violation |
 | `progresswake-fixed` | 5 | 5 | 0.565 | Passed |
+| `reserve` | 88 | 50 | 4.628 | Expected WithinTwo |
+| `reserve-fixed` | 77 | 44 | 2.411 | Passed; TLC deadlock checked |
 | `moving` | 8 | 7 | 0.568 | Expected liveness violation |
 | `reuse` | 4 | 4 | 0.550 | Expected ExactCheckedHead |
 | `reuse-fixed` | 4 | 4 | 0.551 | Passed |
@@ -638,6 +661,8 @@ All 18 configurations matched their expected outcomes on the registered Java 25.
 The two `prequeue-early` rows were added with Issue 7fe54c7c (2026-11-06, Lane 6d62d7fe); all 41 configurations, Incidents included, were re-run with them and matched. `prequeue-cohort` and `prequeue-cohort-mixed` are from that run (the earlier counts predated later spec changes); `prequeue-early` explores a superset of `prequeue-cohort`'s states, as `"early"` only adds refusals.
 
 All 48 configurations, Incidents included, were re-run with the first-check change (Issue 7fe54c7c, 2026-11-06, Lane a3fed1a0) and matched; every row above is from that run. `Breaks = {}` adds no states: `submission`, `reuse-core`, `prequeue` and `prequeue-strict` were also run on an unmodified copy of the main model with identical counts, so rows that changed here had predated earlier spec changes. `prequeue-suffix` and `prequeue-hold-order` stop at their liveness counterexample; their partial counts vary between runs (the unmodified copy stopped `prequeue-suffix` at 162,842 / 74,207).
+
+The two `reserve` rows were added with Issue 10d253c6 (2026-11-10, Lane 0ada81a0). The `Spec` gained two weak-fairness conjuncts that are never enabled outside `reserve`; every Incidents configuration was re-run and matched with unchanged counts. Disk was 18 GiB free, below the runner's 40 GB reserve, so these litmus runs called the same pinned jar with the runner's flags directly; each used under 1 MB.
 
 The seven `fast` rows are from the landing-mode change (Issue 81d12a32, 2026-11-09, Lane 6ca68b15), run on a machine at load 30 to 45, so their wall times are not comparable with the rows above.
 

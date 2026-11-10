@@ -95,7 +95,7 @@ test('conflict markers retain auto-resolved insertion hunks alongside a real mod
   assert.equal(result.conflicted, true);
   assert.equal(
     result.bytes.toString(),
-    'main\nlane\nanchor\nunchanged\n<<<<<<< main\nLEFT\n=======\nRIGHT\n>>>>>>> lane\n',
+    'main\nlane\nanchor\nunchanged\n<<<<<<< main\nLEFT\n||||||| base\nlast\n=======\nRIGHT\n>>>>>>> lane\n',
   );
   assert.deepEqual(result.resolutions, [{ baseLine: 1, resolved: 'both-insertions' }]);
 });
@@ -146,6 +146,8 @@ test('incident 113bc7b3: a same-line edit in a Windows-1252 file gets ASCII mark
         ...legacy.slice(0, 2),
         latin('<<<<<<< lane'),
         latin('int b = 20; /* \xe9 */'),
+        latin('||||||| base'),
+        legacy[2],
         latin('======='),
         latin('int b = 21; /* \xf1 */'),
         latin('>>>>>>> main'),
@@ -183,11 +185,14 @@ test('incident d36380ca: markers take the hunk EOL: CRLF in CRLF files, LF uncha
     Buffer.from('a\r\nR\r\nc\r\n'),
     ['lane', 'main'],
   );
-  assert.equal(crlf.bytes.toString(), 'a\r\n<<<<<<< lane\r\nL\r\n=======\r\nR\r\n>>>>>>> main\r\nc\r\n');
+  assert.equal(
+    crlf.bytes.toString(),
+    'a\r\n<<<<<<< lane\r\nL\r\n||||||| base\r\nb\r\n=======\r\nR\r\n>>>>>>> main\r\nc\r\n',
+  );
   const resolved = crlf.bytes
     .toString()
     .split('\r\n')
-    .filter(line => !/^(<<<<<<<|=======|>>>>>>>)/.test(line))
+    .filter(line => !/^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)/.test(line))
     .join('\r\n');
   assert.doesNotMatch(resolved, /[^\r]\n/, 'removing marker lines leaves no lone LF');
   // A last line without EOL in a CRLF file is terminated with CRLF inside the hunk.
@@ -196,14 +201,14 @@ test('incident d36380ca: markers take the hunk EOL: CRLF in CRLF files, LF uncha
       'lane',
       'main',
     ]).bytes.toString(),
-    'a\r\n<<<<<<< lane\r\nL\r\n=======\r\nR\r\n>>>>>>> main\r\n',
+    'a\r\n<<<<<<< lane\r\nL\r\n||||||| base\r\nb\r\n=======\r\nR\r\n>>>>>>> main\r\n',
   );
   assert.equal(
     markNativeTextConflicts(Buffer.from('a\nb\nc\n'), Buffer.from('a\nL\nc\n'), Buffer.from('a\nR\nc\n'), [
       'lane',
       'main',
     ]).bytes.toString(),
-    'a\n<<<<<<< lane\nL\n=======\nR\n>>>>>>> main\nc\n',
+    'a\n<<<<<<< lane\nL\n||||||| base\nb\n=======\nR\n>>>>>>> main\nc\n',
   );
   assert.equal(
     markNativeTextConflicts(
@@ -212,7 +217,7 @@ test('incident d36380ca: markers take the hunk EOL: CRLF in CRLF files, LF uncha
       Buffer.from('a\nR\nc\n'),
       ['lane', 'main'],
     ).bytes.toString(),
-    'a\n<<<<<<< lane\nL\r\n=======\nR\n>>>>>>> main\nc\n',
+    'a\n<<<<<<< lane\nL\r\n||||||| base\nb\r\n=======\nR\n>>>>>>> main\nc\n',
   );
 });
 function fixture(t, withDocs = false) {

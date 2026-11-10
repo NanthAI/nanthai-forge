@@ -14,6 +14,8 @@ import { overtakeOlder, sealedOlder, unrelatedChanges } from '../src/landing-ove
 import { landingChangedPaths, overtakingSide } from './projectHostedLandingOvertake';
 import { landingSuspect } from '../src/hosted-landing-suspect';
 import { effectiveAgentDefaults, urgentAllowed, urgentRefusal } from '../src/agent-parallel-defaults';
+import { HOSTED_RESERVATION_MS } from '../src/landing-reservation';
+import { heldBackByReservation } from './projectHostedLandingReservation';
 
 /** Queue jumping: the project owner only, further limited by agentDefaults.urgentRoles. */
 export function landingPriority(
@@ -91,7 +93,9 @@ export type OrderHeld =
   | 'unsealed'
   | 'no-proof'
   | 'combined'
-  | 'composing';
+  | 'composing'
+  // A later landing of reserved files waits for the holder (Issue 10d253c6).
+  | 'reserved';
 /** The oldest submission that must take main before this one, or null. One
  * indexed window per accept attempt. Urgent entries wait only for older urgent
  * ones; batch members never wait for their own batch. A passed solo entry never
@@ -120,6 +124,13 @@ export async function olderLandingAhead(
   const canOvertake = solo && !(batch && batchSchema.parse(JSON.parse(batch.value)).predecessor);
   let mine: Awaited<ReturnType<typeof overtakingSide>> | undefined;
   const side = async () => (mine === undefined ? (mine = await overtakingSide(ctx, row, state)) : mine);
+  let reserved: string[] | null | undefined;
+  const holder = {
+    row,
+    state,
+    paths: async () =>
+      reserved === undefined ? (reserved = await landingChangedPaths(ctx, row, state)) : reserved,
+  };
   const older = await ctx.db
     .query('projectHostedLandingRequests')
     .withIndex('by_project_and_channel_and_orderLive_and_sequence', q =>
@@ -136,6 +147,9 @@ export async function olderLandingAhead(
     const value = hostedLandingStateSchema.parse(JSON.parse(other.value));
     if (state.batchId && value.batchId === state.batchId) continue;
     if (!holdsLandingOrder(other, value)) continue;
+    // A live reservation holder goes ahead of an older entry it holds back (10d253c6).
+    if (row.reservedUntil !== undefined && (await heldBackByReservation(ctx, holder, other, value, now)))
+      continue;
     // Only an entry that entered the queue late (pre-queue Lane check, refused proof)
     // can be stacked behind a younger group; others cost no extra read.
     if (other.admission?.full && (await stackedBehind(ctx, row, state, value))) continue;
@@ -252,11 +266,18 @@ async function footprintsOf(
  * a READY entry waited 7.6 min with no reason in status). It uses the row the reader
  * already loaded: no extra document read, call or subscription dependency. */
 export function landingOrderWaitForReader(
-  row: Pick<LandingRow, 'orderWait' | 'phase'> | null | undefined,
+  row: Pick<LandingRow, 'orderWait' | 'orderWaits' | 'phase'> | null | undefined,
   state: HostedLandingState,
 ) {
   if (!row?.orderWait || row.phase !== 'ready' || state.phase !== 'ready') return null;
   if (state.observation.state !== 'pending') return null;
+  const last = row.orderWaits?.at(-1);
+  if (last?.submissionId === row.orderWait && last.held === 'reserved')
+    return {
+      submissionId: row.orderWait,
+      reason: 'reservation' as const,
+      message: `Check passed; submission ${row.orderWait} holds a landing reservation on files this change touches (it was superseded after a passed check, Issue 10d253c6). This landing continues when that one lands or fails, or when its reservation ends (at most ${HOSTED_RESERVATION_MS / 60_000} minutes). observe {"submissionId":"${row.orderWait}"} follows it.`,
+    };
   return {
     submissionId: row.orderWait,
     message: `Check passed; waiting for older submission ${row.orderWait} to take main first (submission order). When it lands or leaves the order this landing continues; observe {"submissionId":"${row.orderWait}"} follows it.`,

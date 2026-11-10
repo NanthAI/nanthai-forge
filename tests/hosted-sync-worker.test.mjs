@@ -81,7 +81,7 @@ test('incident 113bc7b3: Windows-1252 CRLF disjoint edits merge in the hosted sy
   assert.deepEqual(
     s.objects.get(draft.blob),
     latin(
-      '/* caf\xe9 */\r\nint a;\r\n<<<<<<< lane\r\nint b = \x93q\x94;\r\n=======\r\nint b = \xf1;\r\n>>>>>>> target\r\n',
+      '/* caf\xe9 */\r\nint a;\r\n<<<<<<< lane\r\nint b = \x93q\x94;\r\n||||||| base\r\nint b;\r\n=======\r\nint b = \xf1;\r\n>>>>>>> target\r\n',
     ),
   );
 });
@@ -200,11 +200,11 @@ test('incident 949888b8: landing-conflict drafts label main as main and the Lane
   const landing = await landingDraft(s, main, lane);
   assert.equal(
     draftFile(s, landing, 'text.txt').bytes.toString(),
-    'a\n<<<<<<< main\nMAIN\n=======\nLANE\n>>>>>>> lane\nc\n',
+    'a\n<<<<<<< main\nMAIN\n||||||| base\nbase\n=======\nLANE\n>>>>>>> lane\nc\n',
   );
   assert.equal(
     draftFile(s, landing, 'whole.txt').bytes.toString(),
-    '<<<<<<< main\nONE-main\ntwo\nthree\n=======\none\ntwo\nTHREE-lane\n>>>>>>> lane\n',
+    '<<<<<<< main\nONE-main\ntwo\nthree\n||||||| base\none\ntwo\nthree\n=======\none\ntwo\nTHREE-lane\n>>>>>>> lane\n',
   );
   // A binary landing conflict holds main's bytes unchanged, as CONFLICT_SIDE_REQUIRED names it.
   assert.equal(draftFile(s, landing, 'blob.bin').bytes.toString(), 'main\0');
@@ -213,11 +213,11 @@ test('incident 949888b8: landing-conflict drafts label main as main and the Lane
   assert.equal(sync.status, 'conflict');
   assert.equal(
     draftFile(s, sync, 'text.txt').bytes.toString(),
-    'a\n<<<<<<< lane\nLANE\n=======\nMAIN\n>>>>>>> target\nc\n',
+    'a\n<<<<<<< lane\nLANE\n||||||| base\nbase\n=======\nMAIN\n>>>>>>> target\nc\n',
   );
   assert.equal(
     draftFile(s, sync, 'whole.txt').bytes.toString(),
-    '<<<<<<< lane\none\ntwo\nTHREE-lane\n=======\nONE-main\ntwo\nthree\n>>>>>>> target\n',
+    '<<<<<<< lane\none\ntwo\nTHREE-lane\n||||||| base\none\ntwo\nthree\n=======\nONE-main\ntwo\nthree\n>>>>>>> target\n',
   );
   assert.equal(draftFile(s, sync, 'blob.bin').bytes.toString(), 'lane\0');
 });

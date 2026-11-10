@@ -440,8 +440,11 @@ test('incident 949888b8: a journaled landing-resolution draft labels main and la
     x.objects.get(JSON.parse(x.objects.get(expected.output.sha256)).result.state.sha256),
   );
   const bytes = path => x.objects.get(draft.files.find(f => f.path === path).blob).toString();
-  assert.equal(bytes('t'), 'a\n<<<<<<< main\nMAIN\n=======\nLANE\n>>>>>>> lane\nc\n');
-  assert.equal(bytes('w'), '<<<<<<< main\nONE\ntwo\n=======\none\nTWO\n>>>>>>> lane\n');
+  assert.equal(bytes('t'), 'a\n<<<<<<< main\nMAIN\n||||||| base\nbase\n=======\nLANE\n>>>>>>> lane\nc\n');
+  assert.equal(
+    bytes('w'),
+    '<<<<<<< main\nONE\ntwo\n||||||| base\none\ntwo\n=======\none\nTWO\n>>>>>>> lane\n',
+  );
   assert.equal(bytes('b'), 'main\0');
 });
 

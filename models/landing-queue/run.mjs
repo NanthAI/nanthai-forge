@@ -73,6 +73,8 @@ if (config === 'all') {
     'firstcheck-mixed',
     'progresswake',
     'progresswake-fixed',
+    'reserve',
+    'reserve-fixed',
     'fast',
     'fast-witness',
     'fast-decision',

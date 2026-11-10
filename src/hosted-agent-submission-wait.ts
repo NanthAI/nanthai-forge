@@ -42,6 +42,7 @@ const eventSchema = z.object({
   queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
   orderWait: z.unknown().optional(),
+  reservation: z.unknown().optional(),
   recovery: z.unknown().optional(),
   conflict: z.unknown().optional(),
 });
@@ -60,6 +61,7 @@ const pageSchema = eventSchema.extend({
   queueAheadSelection: z.unknown().optional(),
   wouldConflict: z.unknown().optional(),
   orderWait: z.unknown().optional(),
+  reservation: z.unknown().optional(),
   recovery: z.unknown().optional(),
   conflict: z.unknown().optional(),
 });
@@ -125,6 +127,7 @@ export async function observeHostedSubmissions(
                 queue,
                 wouldConflict,
                 orderWait,
+                reservation,
                 queueAheadSelection,
                 recovery,
                 conflict,
@@ -137,6 +140,7 @@ export async function observeHostedSubmissions(
                 ...(queue ? { queue } : {}),
                 ...(wouldConflict ? { wouldConflict } : {}),
                 ...(orderWait ? { orderWait } : {}),
+                ...(reservation ? { reservation } : {}),
                 ...(queueAheadSelection !== undefined ? { queueAheadSelection } : {}),
               });
             }
@@ -419,6 +423,7 @@ async function observeHostedSubmissionsOnce(
                 : {}),
               ...(page.wouldConflict ? { wouldConflict: page.wouldConflict } : {}),
               ...(page.orderWait ? { orderWait: page.orderWait } : {}),
+              ...(page.reservation ? { reservation: page.reservation } : {}),
             })
           : page.events.at(-1)!,
       );

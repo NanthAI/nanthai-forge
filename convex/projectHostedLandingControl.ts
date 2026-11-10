@@ -24,6 +24,7 @@ import {
 } from './projectHostedLandingStore';
 import { nextTrainLandingRow, scheduleLandingWake, releaseLandingQueue } from './projectHostedLandingWake';
 import { olderLandingAhead, recordOrderWait } from './projectHostedLandingOrder';
+import { reservationAhead } from './projectHostedLandingReservation';
 import { overtakeMark } from '../src/landing-overtake';
 import { hostedWriteProject, readHostedRecord } from './projectHostedRecords';
 import { retrySoloLandingCheck } from './projectHostedLandingCheckRetry';
@@ -361,7 +362,9 @@ export async function claimReadyLanding(
   // not given up its place yet is overtaken once (7d98c7da). Each new wait is recorded
   // for the receipt (`orderWaits`).
   const spent: LandingRow[] = [];
-  const ahead = await olderLandingAhead(ctx, row, state, now, spent);
+  // A live landing reservation on files this one changes holds it first (Issue 10d253c6).
+  const ahead =
+    (await reservationAhead(ctx, row, state, now)) ?? (await olderLandingAhead(ctx, row, state, now, spent));
   if (ahead) {
     if (row.alarm) await ctx.scheduler.cancel(row.alarm.taskId);
     const parked = row.orderWait !== ahead.row.submissionId;

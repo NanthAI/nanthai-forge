@@ -286,10 +286,49 @@ ProgressWake == /\ Scenario = "progresswake"
        [] pc = 3 /\ owner -> /\ b' = "landed" /\ pc' = 4
                      /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
        [] OTHER -> FALSE
+\* Incident 10d253c6 (core claim, 2026-11-10): b is a large Lane on hot files; a
+\* is the next small landing of a stream on the same files, so every move of main
+\* conflicts with b. applied = b's attempts (submissions); checked = 1 once main
+\* moved after b's attempt began; returned = a was queued before b's attempt (an
+\* older entry b would wait for in submission order). pc 0 = b submits, 1 = its
+\* check runs (a pre-queue check holds no queue order), 2 = passed, 3 = landed or
+\* failed, 4 = its check runs past any bound. owner = the attempt holds a
+\* reservation; inputsDone = its time bound passed. Unfixed, the stream lands
+\* during every check and each passed check fails COMPOSITION_CONFLICT at
+\* publication. Fixed, an attempt after one supersession reserves b's files: a
+\* waits (at most until the bound) and b, which never waits for an entry its
+\* reservation holds back, publishes on its passed check. Timing assumption: the
+\* bound (30 min) exceeds one check plus acceptance, so it passes only while b's
+\* check runs past it. The stream, b's steps and the clock are weakly fair.
+ReserveLive == owner /\ ~inputsDone /\ pc \in {1, 2, 4}
+ReserveDriver == /\ Scenario = "reserve"
+  /\ CASE pc = 0 /\ applied < 3 ->
+                     /\ applied' = applied + 1 /\ checked' = 0 /\ b' = "checking"
+                     /\ owner' = (Fixed /\ applied >= 1) /\ inputsDone' = FALSE
+                     /\ returned' = (a = "queued") /\ pc' = 1
+                     /\ UNCHANGED <<canonical, observed, a, main>>
+       [] pc = 1 -> /\ b' \in {"passed", "failed", "stuck"}
+                     /\ pc' = (IF b' = "passed" THEN 2 ELSE IF b' = "failed" THEN 3 ELSE 4)
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 2 /\ (ReserveLive \/ ~(returned /\ a = "queued")) ->
+                     /\ b' = (IF checked = 0 THEN "landed" ELSE "conflict")
+                     /\ pc' = (IF checked = 0 THEN 3 ELSE 0)
+                     /\ UNCHANGED <<canonical, observed, inputsDone, returned, a, main, checked, applied, owner>>
+       [] pc = 4 /\ ReserveLive -> /\ inputsDone' = TRUE
+                     /\ UNCHANGED <<pc, canonical, observed, returned, a, b, main, checked, applied, owner>>
+       [] OTHER -> FALSE
+ReserveStream == /\ Scenario = "reserve"
+  /\ \/ /\ a = "queued" /\ ~ReserveLive /\ a' = "landed" /\ returned' = FALSE
+        /\ checked' = (IF pc \in {1, 2} THEN 1 ELSE checked)
+        /\ UNCHANGED <<pc, canonical, observed, inputsDone, b, main, applied, owner>>
+     \/ /\ a = "landed" /\ a' = "queued"
+        /\ UNCHANGED <<pc, canonical, observed, inputsDone, returned, b, main, checked, applied, owner>>
+Reserve == ReserveDriver \/ ReserveStream
 Step == Wait \/ CohortConflict \/ LostWake \/ MovingMain \/ CrossHead \/ OrderWake \/ Outage \/ CohortHold \/ LostDispatch
         \/ Supervisor \/ CheckRound
-        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake
-Spec == Init /\ [][Step]_vars /\ WF_vars(Step)
+        \/ RetryKeep \/ OrderChain \/ OutageExpiry \/ ProgressWake \/ Reserve
+\* The two reserve fairness conjuncts are never enabled in any other scenario.
+Spec == Init /\ [][Step]_vars /\ WF_vars(Step) /\ WF_vars(ReserveDriver) /\ WF_vars(ReserveStream)
 FreshTerminal == returned => observed = canonical
 NoOrphanConflict == ~(a \in {"failed", "cancelled"} /\ b = "conflict" /\ main = 0 /\ checked = 0)
 NoPrematureConflict == Scenario = "cohort" /\ checked = 0 /\ a = "checking" => b # "conflict"
@@ -310,4 +349,10 @@ KeepsSameHead == Scenario = "retrykeep" /\ applied > 0 => main = 1
 StackSettles == Scenario = "retrykeep" => <>(pc = 5)
 \* A skipped progress event leaves every queue-visible fact as it was.
 ProgressSkipIsNoop == Scenario = "progresswake" /\ pc = 2 => b = "checking" /\ owner = FALSE /\ ~returned
+\* 10d253c6: b lands within two attempts; every reservation ends; the stream is
+\* never held for good (no deadlock between b and the waiters it holds back).
+WithinTwo == Scenario = "reserve" => applied <= 2
+ReserveSettles == Scenario = "reserve" => <>(pc \in {3, 4})
+ReserveEnds == Scenario = "reserve" => [](ReserveLive => <>~ReserveLive)
+StreamFlows == Scenario = "reserve" => []<>(a = "landed")
 =============================================================================

@@ -51,7 +51,7 @@ More: help wait, help conflict, help check, help overlap.`,
   conflict: {
     title: 'Resolving a conflict',
     text: `COMPOSITION_CONFLICT: your Lane and main changed the same lines. The receipt names the files and the exact sync or resolve command; run it.
-- The folder it names (workIn on stderr) holds main's lines under <<<<<<< main, yours after =======, closed by >>>>>>> lane (a sync is the other way round).
+- The folder it names (workIn on stderr) holds main's lines under <<<<<<< main, yours after =======, closed by >>>>>>> lane (a sync is the other way round); the lines under ||||||| base are what both started from. A label ending 'Suggested resolution: keep the lane side' means your Lane removed the region the other side edited.
 - Edit every listed file free of markers, keeping both intents, then land --save from that folder: it saves the resolution and lands it. Forge completes the original Lane.
 - RESOLUTION_REQUIRED: a direct finish of the original Lane was refused; run the one resolve command it prints.
 - CONFLICT_MARKERS: a saved file still has markers; remove them and save again.

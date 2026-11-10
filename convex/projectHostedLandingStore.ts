@@ -221,6 +221,10 @@ export async function writeLanding(
     !cohortHeld(row, state, runnable) &&
     holdsLandingOrder({ phase: state.phase as LandingRow['phase'], hold: row.hold }, state);
   const deciding = decidingSince(row, state, attempt, orderLive);
+  // A landing reservation (10d253c6) lasts until this landing lands or fails; while it lasts its
+  // waiters stay parked on it even during the pre-queue check, and its exit wakes them once.
+  const reserving =
+    row.reservedUntil !== undefined && state.phase !== 'landed' && state.phase !== 'terminal-failed';
   // Graph-sealed order (c6b81429): a main-race attempt whose pass cannot be carried across a moved
   // main (a scoped re-check, or a proof no dependent change refused) stops independent entries
   // overtaking this one for free. Set once, from the attempt already loaded, in this one write.
@@ -256,15 +260,17 @@ export async function writeLanding(
     runnable,
     wouldConflict,
     orderLive: orderLive ? true : undefined,
+    reservedUntil: reserving ? row.reservedUntil : undefined,
     // Queued advisory conflicts also depend on an existing settlement event.
     // A same-attempt diagnostic write must not silently discard that owner.
     orderWait: state.phase === 'ready' || (speculative && !retireAdvice) ? row.orderWait : undefined,
-    orderWaited: orderLive ? row.orderWaited : undefined,
+    orderWaited: orderLive || reserving ? row.orderWaited : undefined,
     value: semanticPayload(state),
   });
   if (row.admitting && !admitting) await releaseAdmissionWaiters(ctx, row.projectId);
   if (row.deciding !== undefined && deciding === undefined) await releaseCohortHolds(ctx, row.projectId);
-  if (row.orderWaited && (!orderLive || retiresSolo)) await wakeLandingOrderWaiters(ctx, row, orderLive);
+  if (row.orderWaited && ((!orderLive && !reserving) || retiresSolo))
+    await wakeLandingOrderWaiters(ctx, row, orderLive);
   if (
     releaseRun &&
     row.runId &&

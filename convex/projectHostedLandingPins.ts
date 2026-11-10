@@ -42,6 +42,8 @@ export async function pinLandingAttempt(
     deferCheck?: boolean;
     retainedSelection?: HostedLandingAttempt['candidate'];
     recheck?: ScopedRecheckBasis;
+    /** Receives the pinned Candidate's Intent (landing reservation, 10d253c6): no second read. */
+    intent?: (intentId: string) => void;
   },
 ) {
   invariant(
@@ -175,6 +177,7 @@ export async function pinLandingAttempt(
       };
     }
   }
+  input.intent?.(candidate.intentId);
   const policy = effectivePolicy(project);
   return hostedLandingAttemptSchema.parse({
     ...(semanticPlan ? { semanticPlan } : {}),

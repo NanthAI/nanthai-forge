@@ -133,6 +133,18 @@
       "what": "Core claim: batch a9187ad9 (normal Lane + resolution Lane c456f8db) mirrored as GitHub f233bf1c with only one member's message; the resolution landing named no message",
       "file": "tests/landing-message-mirror.test.mjs",
       "test": "incident f233bf1c: a batch of a normal Lane and a resolution Lane mirrors both messages"
+    },
+    {
+      "incident": "10d253c6",
+      "what": "Core claim: a 130-path Lane on hot files took 10 land operations (about 2.5 h): each passed pre-queue check was superseded by small hot-file landings",
+      "file": "tests/hosted-landing-starvation.test.mjs",
+      "test": "incident replay 10d253c6: a 130-path Lane against a stream of small hot-file landings lands within 2 attempts"
+    },
+    {
+      "incident": "10d253c6",
+      "what": "Core claim: past the diff cap every main edit to a hot file conflicted with a whole-file draft; an edit inside a removed region is now one local diff3 hunk with a suggestion",
+      "file": "tests/hosted-landing-starvation.test.mjs",
+      "test": "the incident shape: a 600-line cut and a main edit elsewhere in the file merge; an edit inside the cut is one local diff3 hunk that offers the deletion"
     }
   ]
 }

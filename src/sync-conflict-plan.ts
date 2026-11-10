@@ -42,16 +42,17 @@ export function conflictPlan(
       conflicts.push({ path: item.path, kind: result.kind });
       continue;
     }
-    const left = read(item.left),
+    const base = read(item.base),
+      left = read(item.left),
       right = read(item.right),
-      marked = markNativeTextConflicts(read(item.base), left, right, labels, 'right-first');
+      marked = markNativeTextConflicts(base, left, right, labels, 'right-first');
     if (!marked) {
       if (item.left) files.push(item.left);
       conflicts.push({ path: item.path, kind: 'binary' });
       continue;
     }
     // Markers keep the file's line ending (d36380ca); text input always yields bytes here.
-    const bytes = marked.conflicted ? marked.bytes : wholeFileConflict(left, right, labels)!;
+    const bytes = marked.conflicted ? marked.bytes : wholeFileConflict(base, left, right, labels)!;
     files.push({ path: item.path, mode: item.left?.mode ?? item.right?.mode ?? 'file', bytes });
     conflicts.push({ path: item.path, kind: 'text' });
   }

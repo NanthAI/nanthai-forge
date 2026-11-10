@@ -45,6 +45,23 @@ configured check (no `configure-check`) skips it and queues as before.
      not its submission time: an older submission still checking, or one that
      re-entered after a refused proof, never holds back a change that entered
      before it.
+   - **Reservation after a supersession** (Issue 10d253c6). Because a checking
+     submission holds no order, small changes to the same files can land while a
+     large change checks, and its passed check then fails `COMPOSITION_CONFLICT`
+     when it composes onto the moved main. The next submission of the same Intent
+     after one such supersession (a passed check, then the conflict) reserves the
+     files it changes for 30 minutes: a passed landing that changes any of them
+     waits for it (order wait `reason:"reservation"`) instead of taking main
+     first, and the holder never waits for an older entry its reservation holds
+     back. The reservation ends when its landing lands or fails, or at its time,
+     whichever is first; nothing extends it. Urgent owner landings, members of the
+     holder's own group and an earlier holder never wait; unknown paths count as
+     overlapping. `status`, the finish wait and the land summary show
+     `reservation {until, live, superseded}`. Cost: the count and the end are
+     stored on the new submission's own row (no extra write); a claim reads one
+     indexed window of live reservations and, only while one is live, the paths.
+     The landing-queue model checks it (`reserve`, `reserve-fixed`: within two
+     attempts, no deadlock, every reservation ends).
 3. **The queue re-verifies only the combination.** An admitted change first tries
    its own Lane run, once:
    - on unchanged main, that run is the exact acceptance evidence and the change

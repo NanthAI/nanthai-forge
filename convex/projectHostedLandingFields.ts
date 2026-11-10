@@ -214,6 +214,13 @@ export const hostedLandingTables = {
         }),
       ),
     ),
+    /** The Candidate's Intent, so the next submission of the same work finds this one (10d253c6). */
+    intentId: v.optional(v.string()),
+    /** Supersessions after a passed check in a row, ending with the previous landing of this Intent. */
+    superseded: v.optional(v.number()),
+    /** Landing reservation end (src/landing-reservation.ts): landings that change this one's files
+     * wait for it until then. Cleared when this landing lands or fails. */
+    reservedUntil: v.optional(v.number()),
     phase,
     runId: v.union(v.string(), v.null()),
     /** Last delivered event of the current run, independent of queue phase. */
@@ -302,6 +309,8 @@ export const hostedLandingTables = {
       'sequence',
     ])
     .index('by_project_and_channel_and_deciding', ['projectId', 'channel', 'deciding'])
+    .index('by_project_and_intent', ['projectId', 'intentId'])
+    .index('by_project_and_channel_and_reservedUntil', ['projectId', 'channel', 'reservedUntil'])
     .index('by_project_and_run_and_phase', ['projectId', 'runId', 'phase'])
     .index('by_project_run_phase_checkWakeVersion', ['projectId', 'runId', 'phase', 'checkWakeVersion']),
   projectHostedLandingAttempts: defineTable({

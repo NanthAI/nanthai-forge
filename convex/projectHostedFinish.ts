@@ -2,6 +2,7 @@
 import { supersededOutcome } from '../src/landing-state';
 import { readQueueStatus, queueAwareLandingState } from './projectHostedQueueStatus';
 import { landingOrderWaitForReader, landingStateForReader } from './projectHostedLandingOrder';
+import { landingReservationForReader } from './projectHostedLandingReservation';
 import { hostedQueueAheadSelection } from './projectHostedQueueAhead';
 import { finishPendingForReader } from '../src/hosted-finish';
 import { v } from 'convex/values';
@@ -62,7 +63,9 @@ export const status = query({
       const queue = await readQueueStatus(ctx, state);
       const stallAlert = await latestStallAlert(ctx, input, queueAwareLandingState(state, queue));
       const orderWait = landingOrderWaitForReader(row, state);
+      const reservation = landingReservationForReader(row);
       return canonicalPayload({
+        ...(reservation ? { reservation } : {}),
         version: state.version,
         unchanged: state.phase !== 'queued' && input.version === state.version,
         submission: landingStateForReader(queueAwareLandingState(state, queue), input.priorityInfo),

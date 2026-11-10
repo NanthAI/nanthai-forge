@@ -52,7 +52,9 @@ test('Q4 selected reconnect stays bounded with dogfood source and twice retained
   assert(result.sourceDocumentsWritten <= 160, 'bounded selected lifecycle writes');
   // 60 -> 62 (435c7c2f): the largest transaction begins two operations, each first looking, through one indexed
   // range, for receipts older than 90 days to delete (the fixture counts an empty range as one document).
-  assert(result.sourceMaxDocumentsPerTransaction <= 62, 'bounded transaction window');
+  // 62 -> 63 (10d253c6): the submission reads its Intent's previous landing (one indexed range, take 1) for the
+  // landing reservation; the Intent comes from the Candidate the pin already read.
+  assert(result.sourceMaxDocumentsPerTransaction <= 63, 'bounded transaction window');
   assert(result.peakRssMiB <= 1024, 'synthetic provider snapshot harness memory budget');
 });
 test('Q4 hosted acceptance is recoverable on a clean root with no native acceptance owner', async t => {

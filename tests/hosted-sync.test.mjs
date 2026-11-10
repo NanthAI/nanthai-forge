@@ -30,7 +30,7 @@ test('resolution pins the immutable Candidate conflict even after original Lanes
   const draft = JSON.parse(s.objects.get(result.lane.head));
   assert.match(
     s.objects.get(draft.files.find(f => f.path === 'a.txt').blob).toString(),
-    /^<<<<<<< main\nleft\n=======\nright\n>>>>>>> lane\n$/,
+    /^<<<<<<< main\nleft\n\|\|\|\|\|\|\| base\na\nb\nc\n=======\nright\n>>>>>>> lane\n$/,
   );
   assert(!output.reads.some(p => p.sha256 === s.hidden.blob));
   assert.equal(draft.parents.length, 1, 'draft does not claim a resolved right parent');

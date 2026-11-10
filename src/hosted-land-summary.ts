@@ -41,7 +41,8 @@ type Result = {
   };
   conflict?: { command?: string; instruction?: string; workIn?: string };
   /** A passed entry parked behind an older submission that takes main first. */
-  orderWait?: { submissionId?: string };
+  orderWait?: { submissionId?: string; reason?: string };
+  reservation?: { until?: string; live?: boolean };
   /** The owner accepted public check logs on this runner: said on every outcome. */
   checkLogs?: string;
 };
@@ -114,8 +115,12 @@ function classifyLand(response: HostedAgentResponse): { kind: LandOutcomeKind; l
   if (phase === 'ready' && submission?.observation?.state !== 'terminal-failed')
     return out('ready', [
       result.orderWait?.submissionId
-        ? `CHECK PASSED; not landed yet: waiting for older submission ${result.orderWait.submissionId} to take main first`
-        : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
+        ? result.orderWait.reason === 'reservation'
+          ? `CHECK PASSED; not landed yet: submission ${result.orderWait.submissionId} reserved files this change touches; it lands first or its reservation ends`
+          : `CHECK PASSED; not landed yet: waiting for older submission ${result.orderWait.submissionId} to take main first`
+        : result.reservation?.live
+          ? `CHECK PASSED; queued to land first on its reserved files (reserved until ${result.reservation.until})`
+          : 'CHECK PASSED; queued to land, not landed yet (waiting for acceptance)',
     ]);
   if (result.phase === 'check' && result.run?.status === 'passed')
     return out('check-passed', ['CHECK PASSED (check only; this command does not land)']);
