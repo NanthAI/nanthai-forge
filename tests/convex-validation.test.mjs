@@ -310,3 +310,22 @@ test('direct _handler calls check the declared returns validator; undeclared ret
   const untyped = queryGeneric({ args: {}, handler: () => promise });
   assert.equal(untyped._handler({}, {}), promise);
 });
+
+test('deploy-invalid literal validator identifiers fail locally while dynamic planning state keys keep their output (5a85cb5f)', () => {
+  const wire = validator => ({ exportReturns: () => JSON.stringify(validator.json) });
+  for (const key of ['in-progress', 'has space', 'dotted.name', '']) {
+    const invalid = v.object({ [key]: v.number() });
+    for (const validator of [invalid, v.array(invalid), v.object({ nested: v.union(v.null(), invalid) })])
+      assert.throws(() => checkReturns(wire(validator), null, 'definition'), /ValidatorDefinitionError/);
+    assert.throws(
+      () => checkArgs({ exportArgs: () => JSON.stringify(invalid.json) }, {}, 'definition'),
+      /ValidatorDefinitionError/,
+    );
+  }
+  const states = { proposed: 0, open: 2, 'in-progress': 1, closed: 392, abandoned: 1 };
+  checkReturns(wire(v.record(v.string(), v.number())), states, 'planning counts');
+  assert.throws(
+    () => checkReturns(wire(v.record(v.string(), v.number())), { ...states, open: 'two' }, 'planning counts'),
+    /ReturnsValidationError/,
+  );
+});

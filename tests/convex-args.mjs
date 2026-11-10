@@ -34,6 +34,13 @@ export function checkConvexValue(value, path = 'value', kind = 'ConvexValueError
 function compile(spec) {
   const type = spec.type;
   if (type === 'object') {
+    // Convex accepts ASCII punctuation in dynamic record keys, but literal validator fields are
+    // identifiers. The provider rejects an invalid definition at push, before validating any value.
+    for (const key of Object.keys(spec.value))
+      if (!/^[A-Za-z0-9_]+$/.test(key))
+        throw new Error(
+          `ValidatorDefinitionError: object field ${JSON.stringify(key)} is not an identifier; use v.record for dynamic keys`,
+        );
     const fields = Object.entries(spec.value).map(([key, field]) => [
       key,
       field.optional,

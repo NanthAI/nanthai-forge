@@ -115,15 +115,8 @@ export const records = query({
   returns: v.object({
     ...identity,
     coverage: v.optional(v.string()),
-    counts: v.optional(
-      v.object({
-        proposed: v.number(),
-        open: v.number(),
-        'in-progress': v.number(),
-        closed: v.number(),
-        abandoned: v.number(),
-      }),
-    ),
+    // State names are dynamic record keys: a literal object validator cannot name `in-progress`.
+    counts: v.optional(v.record(v.string(), v.number())),
     ...paginationResultValidator(v.object({ id: v.string(), position: v.number(), value: v.string() }))
       .fields,
   }),
