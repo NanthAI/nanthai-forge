@@ -64,48 +64,6 @@ export const inventory = internalQuery({
 export { projectGuard } from './projectCheckLogCleanupGuard';
 
 const identity = { ...address, operationId: v.string() };
-export const operation = internalQuery({
-  args: identity,
-  returns: v.union(v.string(), v.null()),
-  handler: async (ctx, input) => {
-    await activeOwnedProject(ctx, input.projectId, input.actor);
-    const row = await ctx.db
-      .query('projectCheckLogCleanups')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .unique();
-    return row?.value ?? null;
-  },
-});
-export const begin = internalMutation({
-  args: { ...identity, value: v.string() },
-  returns: v.string(),
-  handler: async (ctx, input) => {
-    const project = await activeOwnedProject(ctx, input.projectId, input.actor);
-    const row = await ctx.db
-      .query('projectCheckLogCleanups')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .unique();
-    if (row) return row.value;
-    const plan = JSON.parse(input.value);
-    if (!plan.totalPages) plan.phase = 'ready';
-    input.value = JSON.stringify(plan);
-    invariant(
-      plan.guard === (await projectGuard(ctx, project)),
-      'WORK_STALE',
-      'Project changed during log cleanup planning.',
-    );
-    await ctx.db.insert('projectCheckLogCleanups', {
-      projectId: input.projectId,
-      operationId: input.operationId,
-      value: input.value,
-    });
-    return input.value;
-  },
-});
 /** Exact original row bindings fence late deletes from a replacement upload.
  * R2 cleanup uses the existing pending-key lifecycle and rotates before IO. */
 export const claim = internalMutation({
@@ -200,66 +158,6 @@ export const complete = internalMutation({
       await ctx.db.patch(ledger._id, { value: JSON.stringify(state) });
     }
     return JSON.stringify(state);
-  },
-});
-
-export const pages = internalQuery({
-  args: { ...identity, cursor: v.union(v.string(), v.null()) },
-  returns: v.string(),
-  handler: async (ctx, input) => {
-    await activeOwnedProject(ctx, input.projectId, input.actor);
-    const page = await ctx.db
-      .query('projectCheckLogCleanupPages')
-      .withIndex('by_project_and_operation_and_part_and_position', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .paginate({ cursor: input.cursor, numItems: 50 });
-    return JSON.stringify(page);
-  },
-});
-export const stage = internalMutation({
-  args: { ...identity, part: v.string(), position: v.number(), planDigest: v.string(), value: v.string() },
-  returns: v.null(),
-  handler: async (ctx, input) => {
-    const project = await activeOwnedProject(ctx, input.projectId, input.actor);
-    const ledger = await ctx.db
-      .query('projectCheckLogCleanups')
-      .withIndex('by_project_and_operation', q =>
-        q.eq('projectId', input.projectId).eq('operationId', input.operationId),
-      )
-      .unique();
-    invariant(ledger, 'NOT_FOUND', 'Prepare this cleanup first.');
-    const state = JSON.parse(ledger.value);
-    invariant(
-      state.planDigest === input.planDigest && state.guard === (await projectGuard(ctx, project)),
-      'WORK_STALE',
-      'Cleanup source or scope changed during preparation.',
-    );
-    const existing = await ctx.db
-      .query('projectCheckLogCleanupPages')
-      .withIndex('by_project_and_operation_and_part_and_position', q =>
-        q
-          .eq('projectId', input.projectId)
-          .eq('operationId', input.operationId)
-          .eq('part', input.part)
-          .eq('position', input.position),
-      )
-      .unique();
-    if (existing)
-      invariant(existing.value === input.value, 'EVIDENCE_CHANGED', 'Retain the original cleanup page.');
-    else {
-      await ctx.db.insert('projectCheckLogCleanupPages', {
-        projectId: input.projectId,
-        operationId: input.operationId,
-        part: input.part,
-        position: input.position,
-        value: input.value,
-      });
-      state.stagedPages++;
-      if (state.stagedPages === state.totalPages) state.phase = 'ready';
-      await ctx.db.patch(ledger._id, { value: JSON.stringify(state) });
-    }
-    return null;
   },
 });
 

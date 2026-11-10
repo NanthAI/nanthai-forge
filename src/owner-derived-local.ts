@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { existsSync, readFileSync, writeFileSync, renameSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, statSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { digest } from './hash.js';
@@ -61,8 +61,4 @@ export function ownerDerivedBytes(
     }
   }
   return bytes;
-}
-export function preparedOwnerDerived(directory: string) {
-  const path = join(directory, 'owner-derived.json');
-  return existsSync(path) ? readFileSync(path) : undefined;
 }

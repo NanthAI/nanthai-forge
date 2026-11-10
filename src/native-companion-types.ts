@@ -17,4 +17,3 @@ export const companionReceiptSchema = z.object({
   hostedRevision: z.number().safe().nonnegative(),
   eventIds: z.array(z.uuid()),
 });
-export type CompanionReceipt = z.infer<typeof companionReceiptSchema>;

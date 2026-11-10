@@ -23,10 +23,6 @@ export async function recordCleanup(
     result: JSON.stringify(result),
   });
 }
-export const cleanupBackup = {
-  run: 41887010710,
-  maxAgeMs: 5 * 60_000,
-} as const;
 export function recentCleanup(value: string, since: number, window: number) {
   const at = Date.parse(value);
   return Number.isFinite(at) && at >= since && at <= Date.now() && Date.now() - at <= window;

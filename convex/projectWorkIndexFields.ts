@@ -22,14 +22,6 @@ export const indexEntry = v.object({
   position: v.number(),
   value: v.string(),
 });
-export const returnProjection = v.object({
-  deltaPartitionId: v.optional(v.id('projectWorkGenerations')),
-  partitionId: v.optional(v.id('projectWorkGenerations')),
-  generationId: v.optional(v.id('projectWorkGenerations')),
-  metadata: v.string(),
-  entries: v.array(indexEntry),
-  removed: v.array(v.object({ collection: v.string(), key: v.string() })),
-});
 export const generationFields = {
   planningSearchVersion: v.optional(v.union(v.literal(1), v.literal(2))),
   /** Source blobs resolve through the project object catalog (no per-blob record). */

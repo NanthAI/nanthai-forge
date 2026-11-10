@@ -97,6 +97,9 @@ update command:
 - `node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`
   also raises a count that rose, and appends the kind, the old and new count, the reason and the date to the
   baseline's `reasons` ledger. A reason shorter than 12 characters is refused.
+  A rise of `unreferencedExports` also needs the 8-hex Forge Issue that deletes the extra exports in the reason
+  (the same rule as a machine dependency); a reason without one is refused, and a ledger rise with no Issue fails the check.
+  Lowering never needs a reason, so two Lanes that both lower the baseline merge by re-running `--update` after the sync.
 - `node scripts/check-growth.mjs --print [--json]` prints the current, baseline and phase-start counts. A phase
   close records this table against the phase start (`start`). Add `--machines` to list every machine dependency with its
   Issue or reason and the hosted paths guarded; the P6 close report prints this block, which shows

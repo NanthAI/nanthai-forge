@@ -35,7 +35,6 @@ export type SettingOrigin = 'policy' | 'check-definition' | 'check-import' | 'ru
 /** Settings requests share the approvals table under a `setting:` key, one row per setting. Like fork
  * PR requests they are never `live` (they hold no landing, so the landing gate's read never sees
  * them); a request is open until it `ended`. */
-export const isSettingKey = (key: string) => key.startsWith('setting:');
 export const settingKey = (origin: SettingOrigin, item?: string) =>
   `setting:${origin}${item ? `:${item}` : ''}`;
 

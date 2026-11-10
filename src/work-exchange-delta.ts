@@ -400,9 +400,3 @@ export function applyWorkDelta(
     ]),
   ) as WorkData;
 }
-export function changedRecordPins(root: WorkRecordRoot, delta: WorkDelta): RecordPin[] {
-  const records = recordMap(root);
-  return delta.changes.flatMap(change =>
-    change.next ? [records.get(recordIdentity(change.collection, change.key))!.record] : [],
-  );
-}

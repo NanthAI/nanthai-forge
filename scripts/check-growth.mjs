@@ -9,6 +9,7 @@
 //   node scripts/check-growth.mjs --print --machines [--json]  also list the machine dependencies and the hosted paths guarded
 //   node scripts/check-growth.mjs --update             lower the baseline to the current counts; a rise needs --reason
 //   node scripts/check-growth.mjs --update --reason "removes X / merges Y / nothing can go because Z"
+//                                                      (a rise of unreferencedExports must name an 8-hex Forge Issue in the reason)
 //   node scripts/check-growth.mjs --init               write the first baseline; refuses to overwrite one
 //
 // What is counted (each is a distinct name, so renaming one is neutral and adding one is a rise):
@@ -64,6 +65,11 @@ const LABEL = {
   unreferencedExports: 'unreferenced exports',
 };
 const MIN_REASON = 12;
+// A rise of these kinds must name the Forge Issue that removes it again (8-hex id), like a machine dependency
+// (Issue ed28fc6b): the unreferenced export count was re-baselined from 19 to 68 with prose alone.
+const ISSUE_KINDS = new Set(['unreferencedExports']);
+const ISSUE_ID = /\b[0-9a-f]{8}\b/;
+const issueOf = text => (typeof text === 'string' ? ISSUE_ID.exec(text)?.[0] : undefined);
 
 const strip = source => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const names = (source, pattern) => [...source.matchAll(pattern)].map(match => match[1]);
@@ -271,6 +277,11 @@ export function growthFindings(current, baseline) {
       findings.push(
         `${LABEL[kind]}: ${current[kind]} now, baseline ${allowed}. Remove or merge one, or record why nothing can go: node scripts/check-growth.mjs --update --reason "<what the change removes or merges, or why nothing can go>"`,
       );
+    for (const entry of rises(baseline, kind))
+      if (ISSUE_KINDS.has(kind) && entry.to > entry.from && !issueOf(entry.issue ?? entry.reason))
+        findings.push(
+          `${GROWTH_BASELINE}: the ${LABEL[kind]} rise ${entry.from} -> ${entry.to} names no Issue; a rise needs the 8-hex Issue that removes it: --update --reason "<what it removes, Issue ID>"`,
+        );
     const ceiling =
       (baseline.start[kind] ?? 0) +
       rises(baseline, kind).reduce((sum, entry) => sum + (entry.to - entry.from), 0);
@@ -292,8 +303,16 @@ export function updateBaseline(current, baseline, reason, at) {
   const why = typeof reason === 'string' ? reason.trim() : '';
   for (const kind of KINDS) {
     if (current[kind] <= baseline.counts[kind]) next.counts[kind] = current[kind];
-    else if (why.length >= MIN_REASON) {
-      next.reasons.push({ kind, from: baseline.counts[kind], to: current[kind], reason: why, at });
+    else if (why.length >= MIN_REASON && (!ISSUE_KINDS.has(kind) || issueOf(why))) {
+      const issue = ISSUE_KINDS.has(kind) ? issueOf(why) : undefined;
+      next.reasons.push({
+        kind,
+        from: baseline.counts[kind],
+        to: current[kind],
+        reason: why,
+        ...(issue && { issue }),
+        at,
+      });
       next.counts[kind] = current[kind];
     } else refused.push(kind);
   }
@@ -346,7 +365,9 @@ function main(argv) {
     console.log(formatCounts(current, next));
     for (const kind of refused)
       console.error(
-        `${LABEL[kind]}: ${current[kind]} is above baseline ${baseline.counts[kind]}; pass --reason "<what the change removes or merges, or why nothing can go>" (at least ${MIN_REASON} characters) to record the rise.`,
+        ISSUE_KINDS.has(kind)
+          ? `${LABEL[kind]}: ${current[kind]} is above baseline ${baseline.counts[kind]}; pass --reason "<what removes it again>, Issue <8-hex id>" naming the Forge Issue that deletes the extra exports.`
+          : `${LABEL[kind]}: ${current[kind]} is above baseline ${baseline.counts[kind]}; pass --reason "<what the change removes or merges, or why nothing can go>" (at least ${MIN_REASON} characters) to record the rise.`,
       );
     return refused.length ? 1 : 0;
   }

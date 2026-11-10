@@ -197,6 +197,29 @@ test('--update lowers counts that fell and never raises one without a reason', (
   assert.deepEqual(next.reasons, []);
 });
 
+test('an unreferenced-export rise needs an Issue id in --update --reason; prose alone is refused (re-baselined 19 -> 68 silently, ed28fc6b)', () => {
+  const baseline = initialBaseline(start, '2026-11-09');
+  const grown = { ...start, unreferencedExports: start.unreferencedExports + 3 };
+  for (const reason of [undefined, 'cascade Lanes will delete them again', 'Issue 657d63e removes them'])
+    assert.deepEqual(updateBaseline(grown, baseline, reason, '2026-11-10').refused, ['unreferencedExports']);
+  const { baseline: next, refused } = updateBaseline(
+    grown,
+    baseline,
+    'cascade Lane deletes them again (Issue 657d63ee)',
+    '2026-11-10',
+  );
+  assert.deepEqual(refused, []);
+  assert.equal(next.reasons[0].issue, '657d63ee');
+  assert.deepEqual(growthFindings(grown, next), []);
+  const handWritten = structuredClone(next);
+  handWritten.reasons[0] = {
+    ...handWritten.reasons[0],
+    reason: 'cascade Lane deletes them again',
+    issue: undefined,
+  };
+  assert.match(growthFindings(grown, handWritten).join('\n'), /rise \d+ -> \d+ names no Issue/);
+});
+
 test('a hand-raised baseline with no ledger entry fails', () => {
   const baseline = initialBaseline(start, '2026-11-09');
   baseline.counts.tables = 12;

@@ -39,11 +39,6 @@ export const hostedRecordFields = {
   bytes: v.number(),
   lifecyclePlanId: v.optional(v.id('projectHostedLifecyclePlans')),
 };
-export const hostedRecordDocument = v.object({
-  _id: v.id('projectHostedRecords'),
-  _creationTime: v.number(),
-  ...hostedRecordFields,
-});
 export const hostedRecordTables = {
   projectHostedRecordBodies: defineTable({ projectId: v.id('hostedProjects'), value: v.string() }).index(
     'by_project',

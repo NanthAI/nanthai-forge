@@ -14,7 +14,6 @@ import type { WorkStore } from './work-store.js';
 export const nativeObjectCommandSchema = z.object({
   action: z.enum(['inspect-native-objects', 'collect-native-objects']),
 });
-export type NativeObjectCommand = z.infer<typeof nativeObjectCommandSchema>;
 
 // Collection shares the existing Work lock with every referencing CAS registration.
 // No ages, cached scans, temporary-file cleanup or background deletion are involved.

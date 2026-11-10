@@ -25,11 +25,6 @@ export const publicationFields = {
   validated: v.boolean(),
   validation: v.optional(publicationValidation),
 };
-export const publicationDocument = v.object({
-  _id: v.id('projectPublications'),
-  _creationTime: v.number(),
-  ...publicationFields,
-});
 export const publicationTables = {
   projectPublicationAttempts: defineTable({
     projectId: v.id('hostedProjects'),

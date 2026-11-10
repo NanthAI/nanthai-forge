@@ -95,14 +95,6 @@ export const change = v.object({
   paths: v.optional(v.array(v.string())),
   pathCount: v.optional(v.number()),
 });
-/** Lane-level detail a source return may attach to its change events. */
-export const returnChange = v.object({
-  intentId: v.optional(v.string()),
-  laneId: v.optional(v.string()),
-  head: v.optional(v.string()),
-  paths: v.optional(v.array(v.string())),
-  pathCount: v.optional(v.number()),
-});
 export const sessionFields = {
   ...sessionStructure,
   kind: v.optional(sessionKind),
@@ -163,11 +155,6 @@ export const claimFields = {
   expiresAt: v.number(),
   releasedAt: v.optional(v.number()),
 };
-export const sessionDocument = v.object({
-  _id: v.id('projectCoordinationSessions'),
-  _creationTime: v.number(),
-  ...sessionFields,
-});
 export const eventDocument = v.object({
   _id: v.id('projectCoordinationEvents'),
   _creationTime: v.number(),

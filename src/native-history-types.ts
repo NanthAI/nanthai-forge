@@ -78,4 +78,3 @@ export const historicalCommandSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('export-work-history'), id }),
 ]);
 export type HistoricalWork = z.infer<typeof historicalWorkSchema>;
-export type HistoricalCommand = z.infer<typeof historicalCommandSchema>;

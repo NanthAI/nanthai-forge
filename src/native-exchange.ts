@@ -11,7 +11,6 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { z } from 'zod';
 import { portableCheckPath } from './check-log-policy.js';
 import { invariant } from './errors.js';
 import { mapExchange } from './exchange-parallel.js';
@@ -20,7 +19,7 @@ import { fingerprintPrivateFile, readSource, safeRelative } from './files.js';
 import { digest } from './hash.js';
 import { withValidatedNativeArchive } from './native-archive-validation.js';
 import { restoreNativeExchangeStage } from './native-backup.js';
-import { nativeManifestSchema, sourceManifestSchema } from './work-archive-metadata.js';
+import { sourceManifestSchema } from './work-archive-metadata.js';
 import { overlayHostedJournal, restoreWork } from './work-backup.js';
 import { parseWorkBytes } from './work-metadata.js';
 import { WorkStore } from './work-store.js';
@@ -31,7 +30,6 @@ export type TransferReceipt = {
   uploadedLogicalObjects?: number;
 };
 export type ContentPin = { sha256: string; size: number };
-export type ExchangeManifest = z.infer<typeof nativeManifestSchema>;
 export interface ExchangeTransport {
   missing(objects: ContentPin[]): Promise<string[]>;
   upload(pin: ContentPin, bytes: Buffer): Promise<void | TransferReceipt>;

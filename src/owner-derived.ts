@@ -65,7 +65,6 @@ export const ownerDerivedSchema = z
   })
   .strict();
 export const OWNER_DERIVED_MAX_BYTES = 4 * 1024 * 1024;
-export const OWNER_DISPLAY_PROTOCOL = 3 as const;
 export type OwnerDerivedBaseline = { states: ReadonlySet<string>; data?: WorkData | undefined };
 export type OwnerDerived = z.infer<typeof ownerDerivedSchema>;
 export const viewFingerprint = (data: WorkData, index: number) => {
