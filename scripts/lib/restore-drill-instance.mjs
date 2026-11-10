@@ -59,9 +59,9 @@ export async function adminClient(instance) {
 
 const importFailed = () => Object.assign(new Error('Import failed.'), { code: 'IMPORT_FAILED' });
 
-/** The failed import's cause, by name. A backup older than a table in the current schema cannot go
- * in after the schema push: the push numbers that table first, and a backup table carries the same
- * number in its ids. Only table names leave the backend's message; never row data. */
+/** The failed import's cause, by name. The drill adds each schema table a backup lacks to the import
+ * empty, so a table numbered by the schema push is replaced too; a conflict left is named here. Only
+ * table names leave the backend's message; never row data. */
 export function importFailure(state) {
   const conflict = /New table `([^`]+)` has IDs that conflict with existing table `([^`]+)`/.exec(
     state?.error_message ?? '',

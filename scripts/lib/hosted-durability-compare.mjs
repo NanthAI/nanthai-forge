@@ -157,7 +157,8 @@ export function snapshotAccumulator({ databaseOnly = false } = {}) {
  * the ZIP. `source` is a path or an async iterable of the ZIP's bytes (piped, never written to
  * disk). With `filter` ({projectId, sink}) the same pass streams the one-project ZIP to
  * `sink(readable)` (awaited; its failure fails the read) and ends with
- * `{kind:'filtered', kept, dropped}`. `signal` stops the reader. Fails with SNAPSHOT_READ_FAILED when the reader cannot
+ * `{kind:'filtered', kept, dropped, created}`; `filter.schemaTables` names the restoring schema's tables,
+ * and each one the backup lacks goes into that ZIP empty (`created`). `signal` stops the reader. Fails with SNAPSHOT_READ_FAILED when the reader cannot
  * finish. */
 export async function* snapshotEvents(source, { filter, signal } = {}) {
   const piped = typeof source !== 'string';
@@ -166,7 +167,7 @@ export async function* snapshotEvents(source, { filter, signal } = {}) {
     [
       fileURLToPath(new URL('./hosted-durability-zip.py', import.meta.url)),
       piped ? '-' : source,
-      ...(filter ? [filter.projectId] : []),
+      ...(filter ? [filter.projectId, (filter.schemaTables ?? []).join(',')] : []),
     ],
     {
       env: childEnv(),

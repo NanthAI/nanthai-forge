@@ -9,6 +9,10 @@ shells), and all table metadata and stored files unchanged; imported alone it re
 project without the rest of the deployment. fd 3 is a pipe, so that ZIP (data descriptors,
 zip64) is never written whole either. The last event then counts kept and dropped rows.
 
+SCHEMA_TABLES (comma-separated, after PROJECT) names the tables the restoring schema defines. One the
+backup's _tables lacks (a table added after the backup) goes into that ZIP empty, with the next free
+table number, so the import replaces it too instead of finding its number taken by the schema push.
+
 Entries are read from their local headers; the central directory must list exactly the entries
 read, in order. Errors exit 1 without echoing private input."""
 import hashlib
@@ -170,8 +174,10 @@ def central(tail):
 
 
 def main():
-    source, project = (sys.argv[1:3] + [None])[:2]
+    source, project, schema = (sys.argv[1:4] + [None, None])[:3]
+    schema = [name for name in (schema or "").split(",") if name]
     marker = project.encode() if project else None
+    created = []
     stream = sys.stdin.buffer if source == "-" else open(source, "rb")
     reader, seen, entries, kept, dropped = Reader(stream), set(), [], 0, 0
     sink_file = open(3, "wb") if project else None
@@ -195,6 +201,7 @@ def main():
             table = parts[0] if parts[1] == "documents.jsonl" else name
             filtered = sink and parts[1] == "documents.jsonl" and not parts[0].startswith("_")
             emit({"kind": "table", "table": table})
+            numbered = {}
             for line in lines(data):
                 if not line.strip():
                     continue
@@ -202,11 +209,17 @@ def main():
                 emit({"kind": "record", "table": table, "value": row})
                 if not sink:
                     continue
+                if name == "_tables/documents.jsonl":
+                    numbered[row["name"]] = row["id"]
                 if not filtered or "projectId" not in row or row["projectId"] == project or marker in line:
                     sink.write(line + b"\n")
                     kept += filtered
                 else:
                     dropped += 1
+            if sink and schema and name == "_tables/documents.jsonl":
+                created = [table for table in schema if table not in numbered]
+                for number, table in enumerate(created, max(numbered.values(), default=10000) + 1):
+                    sink.write(json.dumps({"name": table, "id": number}, separators=(",", ":")).encode() + b"\n")
         else:
             digest, size = hashlib.sha256(), 0
             for chunk in data:
@@ -217,12 +230,15 @@ def main():
             emit({"kind": "file", "path": name, "sha256": digest.hexdigest(), "size": size})
         if sink:
             sink.close()
+        if sink and name == "_tables/documents.jsonl":
+            for table in created:
+                out.open(table + "/documents.jsonl", "w", force_zip64=True).close()
     if central(reader.rest()) != entries:
         raise ValueError("central directory differs")
     if out:
         out.close()
         sink_file.close()
-        emit({"kind": "filtered", "kept": kept, "dropped": dropped})
+        emit({"kind": "filtered", "kept": kept, "dropped": dropped, "created": created})
     sys.stdout.flush()
 
 

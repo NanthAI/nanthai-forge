@@ -15,6 +15,7 @@ import {
   compareSnapshots,
   readSnapshot,
   snapshotAccumulator,
+  snapshotEvents,
 } from '../scripts/lib/hosted-durability-compare.mjs';
 import { deploymentOptions, execute, parseCommand } from '../scripts/hosted-durability.mjs';
 import {
@@ -504,7 +505,11 @@ test('restore drill streams the backup once: export-format ZIP bytes are read an
     assert.deepEqual(streamed.deployment, fromPath.deployment);
     assert.deepEqual([...streamed.rows], [...fromPath.rows]);
     const userRows = Object.entries(tables).filter(([table]) => !table.startsWith('_'));
-    assert.deepEqual(streamed.filter, { kept: userRows.flatMap(([, rows]) => rows).length - 1, dropped: 1 });
+    assert.deepEqual(streamed.filter, {
+      kept: userRows.flatMap(([, rows]) => rows).length - 1,
+      dropped: 1,
+      createdEmpty: [],
+    });
     // The one-project ZIP keeps every row and stored file except the other project's row.
     const restored = await readProjectSnapshot(filtered, id);
     assert.deepEqual([...restored.rows], [...fromPath.rows]);
@@ -522,6 +527,62 @@ test('restore drill streams the backup once: export-format ZIP bytes are read an
       throw Object.assign(new Error('SYNTHETIC_SECRET'), { code: 'BACKUP_R2_FAILED' });
     }
     await assert.rejects(readProjectSnapshot(failing(), id), { code: 'BACKUP_R2_FAILED' });
+  }));
+
+test('restore drill puts a schema table the backup lacks into the import empty, with a table number no backup table uses (incident 2026-11-10)', () =>
+  temporary(async directory => {
+    // The schema push numbers every schema table before the import. A table added after the backup can
+    // take a number a backup table's ids carry; replacing it in the same import (empty, with a free
+    // number) lets the backup's tables keep theirs. Checked against the pinned backend 2026-11-10.
+    const id = 'k'.repeat(32),
+      bytes = streamedZip([
+        [
+          '_tables/documents.jsonl',
+          '{"name":"hostedProjects","id":10001}\n{"name":"alpha","id":10002}\n{"name":"beta","id":10003}\n',
+        ],
+        ['hostedProjects/documents.jsonl', `${JSON.stringify({ _id: id, owner: 'owner' })}\n`],
+        ['alpha/documents.jsonl', `${JSON.stringify({ _id: 'a1', projectId: id })}\n`],
+        ['beta/documents.jsonl', `${JSON.stringify({ _id: 'b1', text: 'shared' })}\n`],
+      ]),
+      path = join(directory, 'backup.zip'),
+      filtered = join(directory, 'project.zip');
+    await writeFile(path, bytes);
+    const side = await readProjectSnapshot(path, id, {
+      whole: false,
+      sink: zip => pipeline(zip, createWriteStream(filtered, { flags: 'wx' })),
+      schemaTables: ['addedLater', 'alpha', 'beta', 'hostedProjects', 'alsoLater'],
+    });
+    assert.deepEqual(side.filter.createdEmpty, ['addedLater', 'alsoLater']);
+    const tables = [],
+      numbers = [];
+    for await (const event of snapshotEvents(filtered)) {
+      if (event.kind === 'table') tables.push(event.table);
+      if (event.kind === 'record' && event.table === '_tables') numbers.push(event.value);
+    }
+    assert.deepEqual(numbers, [
+      { name: 'hostedProjects', id: 10001 },
+      { name: 'alpha', id: 10002 },
+      { name: 'beta', id: 10003 },
+      { name: 'addedLater', id: 10004 },
+      { name: 'alsoLater', id: 10005 },
+    ]);
+    assert.deepEqual(tables.sort(), [
+      '_tables',
+      'addedLater',
+      'alpha',
+      'alsoLater',
+      'beta',
+      'hostedProjects',
+    ]);
+    // The rows are unchanged: the restored project still compares row for row with the backup.
+    assert.deepEqual([...(await readProjectSnapshot(filtered, id, { whole: false })).rows], [...side.rows]);
+    // Without schema tables (or with none missing) nothing is added.
+    const plain = await readProjectSnapshot(path, id, {
+      whole: false,
+      sink: zip => pipeline(zip, createWriteStream(join(directory, 'plain.zip'), { flags: 'wx' })),
+      schemaTables: ['alpha', 'beta', 'hostedProjects'],
+    });
+    assert.deepEqual(plain.filter.createdEmpty, []);
   }));
 
 test('restore drill reads restored rows from the instance database: newest revision only, deletions and inactive tables excluded', () =>

@@ -16,9 +16,14 @@ function projectRow(rows, table, row, projectId) {
 /** One pass over a snapshot ZIP (a path, or its bytes as an async iterable): every row that
  * names `projectId`, hashed canonically by table and `_id`, plus (for the full backup) the backup
  * verifier's whole-deployment summary. With `sink` the same pass streams the backup reduced to
- * the project to `sink(readable)` (the drill uploads it straight into the scratch import). Rows from other projects never leave the stream; only hashes and object
+ * the project to `sink(readable)` (the drill uploads it straight into the scratch import), with each of
+ * `schemaTables` the backup lacks added empty (`filter.createdEmpty`). Rows from other projects never leave the stream; only hashes and object
  * pins are kept. */
-export async function readProjectSnapshot(source, projectId, { whole = true, sink = null, signal } = {}) {
+export async function readProjectSnapshot(
+  source,
+  projectId,
+  { whole = true, sink = null, schemaTables = [], signal } = {},
+) {
   const deployment = whole ? snapshotAccumulator() : null,
     rows = new Map(),
     objects = new Map(),
@@ -27,11 +32,11 @@ export async function readProjectSnapshot(source, projectId, { whole = true, sin
   let project = null,
     filtered = null;
   for await (const event of snapshotEvents(source, {
-    filter: sink && { projectId, sink },
+    filter: sink && { projectId, sink, schemaTables },
     signal,
   })) {
     if (event.kind === 'filtered') {
-      filtered = { kept: event.kept, dropped: event.dropped };
+      filtered = { kept: event.kept, dropped: event.dropped, createdEmpty: event.created };
       continue;
     }
     deployment?.add(event);

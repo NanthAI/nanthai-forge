@@ -518,10 +518,13 @@ indexes never finished (each attempt outlived the backend's retention window).
 
 Exit 0 means restored and equal, 2 a difference (the report names it), 1 a failed
 step (`failed.step`, `failed.code`; the private `drill.log` stays only with
-`--keep`). `BACKUP_OLDER_THAN_SCHEMA` (with `failed.tables` and `failed.next`) means
-the schema gained a table after the backup was taken: the schema push numbers that
-table first, and the backup's ids still carry the number. Take a new backup (the
-hosted-backup workflow) and run the drill on it. Not covered: real auth configuration and Secret Object values (synthetic
+`--keep`). A table the current schema has and the backup lacks (added after the
+backup was taken) goes into the import empty, with a table number no backup table
+uses, and `filter.createdEmpty` lists it: the schema push numbered that table first,
+and without it in the import a backup table whose ids carry the same number could not
+go in. `BACKUP_OLDER_THAN_SCHEMA` (with `failed.tables` and `failed.next`) names a
+conflict that is still left; take a new backup (the hosted-backup workflow) and run the
+drill on it. Not covered: real auth configuration and Secret Object values (synthetic
 keyring), and projects whose R2 prefix was purged after the backup: their rows
 restore but their bytes are gone, so choose a project that still exists.
 

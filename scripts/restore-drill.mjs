@@ -216,6 +216,12 @@ export async function drill(command, env = process.env) {
       }),
     );
     deployRun.catch(() => {}); // awaited by the import; a failure surfaces there
+    // The tables the restored schema defines: one the backup lacks (added after the backup) goes into
+    // the import empty, so its number from the schema push never blocks a backup table's ids.
+    const schemaTables = await timed('schema.read', async () => {
+      const { moduleUrl } = await import('../tests/convex-module.mjs');
+      return Object.keys((await import(moduleUrl('../convex/schema.ts'))).default.tables);
+    });
     // One streamed pass over the backup: its checksum, the backup verifier's whole-snapshot
     // validation, the project's rows, and the one-project ZIP uploaded into the scratch import as
     // it is written. Neither the backup nor that ZIP is ever a file.
@@ -240,6 +246,7 @@ export async function drill(command, env = process.env) {
             ready: deployRun,
           });
         },
+        schemaTables,
         signal: stop.signal,
       });
       if (size !== manifest.size || hash.digest('hex') !== manifest.sha256)
