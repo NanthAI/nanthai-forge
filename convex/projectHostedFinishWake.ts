@@ -149,7 +149,11 @@ export async function wakeLandingOrderWaiters(
             )
           : undefined;
       await ctx.db.patch(waiter._id, { orderWait: undefined, ...(alarm ? { alarm } : {}) });
-      if (drive) await scheduleFinish(ctx, finish);
+      // The order ended early: replace its reservation/hold expiry timer.
+      // Coalescing with that pending future task strands an already passed
+      // cohort until the obsolete bound (stucktrain). A parked finish has no
+      // IO in flight; keep its wake identity and cancel the old task atomically.
+      if (drive) await scheduleFinish(ctx, finish, 0, true);
       // A waiter that no longer holds its place cannot wake others; wake the next one too.
       if (waiter.orderLive) next = waiter;
     }

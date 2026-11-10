@@ -192,7 +192,8 @@ export async function repairStalledLanding(
     await reconcileUnacknowledgedCheck(ctx, { projectId: input.projectId, runId: canonical.runId }, now);
   if (canonical.orderWait && canonical.phase === 'ready' && !(await aheadHoldsOrder(ctx, canonical))) {
     const finish = await finishRow(ctx, input);
-    if (finish) await scheduleFinish(ctx, finish);
+    // The holder already ended; its old expiry timer must not suppress repair.
+    if (finish) await scheduleFinish(ctx, finish, 0, true);
   }
   const redriven = await redriveLanding(ctx, input);
   if (canonical.phase !== 'queued') return redriven;

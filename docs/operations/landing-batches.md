@@ -159,7 +159,9 @@ Checks of independent submissions run in parallel, but submissions take main in
 that order. A passed submission waits while an older one in its priority class is
 still queued, checking or passed; an urgent one waits only for older urgent ones.
 An older entry gives up its place when it fails, stalls, is held for red main, or
-waits for review or a dependency.
+waits for review or a dependency. An order-release event replaces any pending
+reservation or hold expiry wake immediately; a passed cohort never waits for an
+obsolete bound after its holder ends.
 
 A passed solo submission does not wait for an older entry it is independent of: when
 neither change's paths equal, contain or sit inside the other's (the Candidates'

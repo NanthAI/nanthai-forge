@@ -163,6 +163,12 @@
       "what": "An owner-held predicted predecessor stranded a READY follower until someone approved the unrelated landing.",
       "file": "tests/hosted-landing-pipeline.test.mjs",
       "test": "incident 62033ba2: owner-held predecessor releases its follower (${identical ? 'same' : 'changed'} tree, follower ${String(followerFirst)})"
+    },
+    {
+      "incident": "stucktrain",
+      "what": "A passed three-Lane cohort was stranded behind an obsolete reservation-expiry wake after its holder ended.",
+      "file": "tests/hosted-landing-order-release.test.mjs",
+      "test": "incident stucktrain: ending a reservation accepts a passed three-Lane cohort before its expiry timer (${ending})"
     }
   ]
 }
