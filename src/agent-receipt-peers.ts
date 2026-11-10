@@ -6,7 +6,6 @@ import { laneOwnership } from './agent-ownership.js';
 import { CoordinationJournal } from './agent-coordination-journal.js';
 import { predictiveOverlaps } from './agent-predictive-overlap.js';
 import { PeersSource, RECEIPT_ANCESTRY_READS } from './agent-peers-source.js';
-import { regionSummary } from './agent-region-summary.js';
 import { dependentOn } from './contract-deps.js';
 import { moveDelta, scopedCode, usedByLane } from './agent-peers-contracts.js';
 import { boundPeers, type PeersDigest } from './agent-peers.js';
@@ -29,20 +28,6 @@ export function retainIndexedPeers(store: WorkStore, laneId: string, peers: Peer
       head: lane.head,
       peers,
     } satisfies Indexed);
-  }
-}
-
-/** Prepare the saved region inventory before publication, outside the owner lock.
- * No workspace scan or peer recomposition belongs on the durable return path. */
-export function prepareReceiptSource(store: WorkStore, base: string, head: string) {
-  try {
-    const source = new PeersSource(store, base);
-    regionSummary(source, new PeersCache(store.root), base, head, () => [
-      source.state(base).files,
-      source.state(head).files,
-    ]);
-  } catch {
-    // Missing analysis remains explicitly incomplete in the receipt.
   }
 }
 

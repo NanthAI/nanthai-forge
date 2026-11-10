@@ -2,7 +2,7 @@
 import { checkFailedOrInfrastructure } from './check-run-state.js';
 import { checkFileSummary } from './check-file-summary.js';
 import { providerLogUrl } from './check-log-policy.js';
-import type { CheckRun, Lane, WorkView, WorkData } from './work-types.js';
+import type { CheckRun, Lane, WorkData } from './work-types.js';
 export const laneReceipt = (lane: Lane, path: string) => ({
   laneId: lane.id,
   ...(lane.stack ? { stack: lane.stack } : {}),
@@ -14,20 +14,6 @@ export const laneReceipt = (lane: Lane, path: string) => ({
   head: lane.head,
   state: lane.state,
   path,
-});
-export const viewReceipt = (view: WorkView) => ({
-  viewId: view.id,
-  intentId: view.intentId,
-  base: view.base,
-  ...(view.composedMain ? { composedMain: view.composedMain } : {}),
-  head: view.head ?? null,
-  status: view.status,
-  inputs: view.inputs,
-  dependencyCount: view.dependencies?.length ?? 0,
-  ...(view.status === 'conflict'
-    ? { conflicts: view.details.slice(0, 2048), conflictDetailsTruncated: view.details.length > 2048 }
-    : {}),
-  reviewDeferred: view.status === 'clean' || view.details.length > 2048,
 });
 export const runReceipt = (run: CheckRun) => ({
   ...(run.backend ? { backend: run.backend } : {}),

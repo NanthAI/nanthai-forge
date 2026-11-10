@@ -13,4 +13,3 @@ export const landSchema = z.object({
   waitMs: z.number().int().min(0).max(60000).optional(),
   keepOpen: z.boolean().optional(),
 });
-export type LandCommand = z.infer<typeof landSchema> & { operationId: string };

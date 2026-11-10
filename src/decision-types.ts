@@ -60,8 +60,6 @@ export const decisionRecordSchema = z.object({
 });
 export type DecisionRecord = z.infer<typeof decisionRecordSchema>;
 export type DecisionTarget = DecisionRecord['target'];
-export const sameDecisionTarget = (a: DecisionTarget, b: DecisionTarget) =>
-  a.kind === b.kind && (a.kind === 'project' || (b.kind === 'intent' && a.intentId === b.intentId));
 
 /** Supersession is derived from retained replacement records; no earlier fact is rewritten.
  * Multiple explicit replacements remain visible rather than silently choosing one. */

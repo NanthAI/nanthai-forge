@@ -5,6 +5,3 @@ import { randomBytes } from 'node:crypto';
  * user (owner rule: people and machines appear only as a Forge handle or public login). Defaults
  * are neutral labels the owner can replace. */
 export const neutralDeviceName = () => `device-${randomBytes(2).toString('hex')}`;
-
-/** Lane setup label when FORGE_MACHINE is unset. */
-export const NEUTRAL_MACHINE = 'local';

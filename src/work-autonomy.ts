@@ -18,10 +18,6 @@ import {
 import type { WorkStore } from './work-store.js';
 import type { WorkData, WorkView } from './work-types.js';
 export const localPerson = (): AcceptanceActor => ({ kind: 'person', id: userInfo().username });
-export const localAgent = (): AcceptanceActor => ({
-  kind: 'agent',
-  id: process.env.FORGE_ACTOR ?? userInfo().username,
-});
 export const readPolicy = (store: WorkStore) => effectivePolicy(store.readRecords()?.data() ?? store.load());
 export function setPolicy(store: WorkStore, input: unknown, actor: AcceptanceActor, revision: number) {
   const parsed = policyWriteSchema.safeParse(input);

@@ -12,8 +12,6 @@ import { readHostedMetricPages, type MetricQuery } from './self-metrics-hosted-p
 import type { WorkStore } from './work-store.js';
 import type { MetricRecords, MetricPeriod } from './self-metrics-types.js';
 import type { HostedAgentAddress } from './hosted-agent-contract.js';
-import { metricsHeadline } from './self-metrics-format.js';
-import { metricPeriod, metricTotals } from './self-metrics-surface.js';
 
 /** Inspect only retained addressing. Never construct a WorkStore or wake an owner. */
 export function metricAddress(root: string): { owner: string; address: HostedAgentAddress | null } {
@@ -120,19 +118,4 @@ export async function readMetricRecords(
       'Hosted cutover timestamp is unavailable; native history cannot be joined safely.',
     );
   return records;
-}
-/** Four page calls maximum; no full-history metric calculation on the status path. */
-export async function hostedStatusMetrics(root: string, now = new Date().toISOString(), query?: MetricQuery) {
-  const selected = metricAddress(root);
-  if (!selected.address) return null;
-  const period = metricPeriod(undefined, undefined, now);
-  // Do not hydrate native history in the bounded status reader.
-  const { records, cutover } = await readHostedMetricPages(
-    query ?? metricQuery(selected.address),
-    period,
-    true,
-  );
-  if (!cutover || period.from < cutover)
-    records.surfaceGaps!.push('Status omits pre-cutover native context; read metrics for the joined window.');
-  return { period, ...metricsHeadline(metricTotals(records, period, { headline: true })) };
 }

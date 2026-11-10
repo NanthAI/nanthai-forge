@@ -15,5 +15,3 @@ function readContext(directory: string, laneId: string, kind: string): Conversat
 
 export const readEditContext = (directory: string, laneId: string) =>
   readContext(directory, laneId, 'edit-context');
-export const readAgentTurn = (directory: string, laneId: string) =>
-  readContext(directory, laneId, 'agent-turn') ?? readEditContext(directory, laneId);

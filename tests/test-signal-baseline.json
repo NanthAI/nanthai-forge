@@ -4,56 +4,23 @@
     "tests/actions-runner-fixture.test.mjs": {
       "sleep": 2
     },
-    "tests/agent-clean.test.mjs": {
-      "sleep": 1
-    },
-    "tests/agent-command-return.test.mjs": {
-      "sleep": 1
-    },
-    "tests/agent-edit-hook.test.mjs": {
-      "sleep": 1,
-      "elapsed": 1
-    },
     "tests/agent-edit-hosted.test.mjs": {
       "elapsed": 1
     },
     "tests/agent-feedback.test.mjs": {
       "sleep": 1
     },
-    "tests/agent-finish.test.mjs": {
-      "sleep": 7
-    },
-    "tests/agent-landing.test.mjs": {
-      "sleep": 9
-    },
-    "tests/agent-lock-snapshots.test.mjs": {
-      "sleep": 4,
-      "elapsed": 2
-    },
     "tests/agent-no-dead-ends.test.mjs": {
       "elapsed": 1
     },
-    "tests/agent-peers.test.mjs": {
-      "sleep": 1
-    },
-    "tests/agent-reads-never-write.test.mjs": {
-      "sleep": 1,
-      "elapsed": 1
-    },
     "tests/agent-run-observer.test.mjs": {
-      "sleep": 5
+      "sleep": 2
     },
     "tests/agent-turn-end-hook.test.mjs": {
       "elapsed": 2
     },
-    "tests/agent-workflow.test.mjs": {
-      "sleep": 1
-    },
     "tests/another-process.test.mjs": {
       "sleep": 1
-    },
-    "tests/automatic-cleanup.test.mjs": {
-      "sleep": 4
     },
     "tests/bench-t3code-relay.test.mjs": {
       "sleep": 4,
@@ -65,9 +32,6 @@
     },
     "tests/browser-r2-bytes.test.mjs": {
       "sleep": 1
-    },
-    "tests/candidate-names.test.mjs": {
-      "docs": 1
     },
     "tests/check-brief.test.mjs": {
       "docs": 1
@@ -90,12 +54,6 @@
     "tests/check-queue-preemption.test.mjs": {
       "sleep": 1
     },
-    "tests/check-resilience.test.mjs": {
-      "sleep": 3
-    },
-    "tests/checkonly-finish.test.mjs": {
-      "sleep": 2
-    },
     "tests/checkout-small-admission.test.mjs": {
       "sleep": 4
     },
@@ -115,9 +73,6 @@
       "sleep": 7
     },
     "tests/compute-calls.test.mjs": {
-      "sleep": 1
-    },
-    "tests/contracts.test.mjs": {
       "sleep": 1
     },
     "tests/convex-function-names.test.mjs": {
@@ -144,10 +99,6 @@
     "tests/disjoint-fast-path.test.mjs": {
       "sleep": 2
     },
-    "tests/docs-conflict-resolve.test.mjs": {
-      "sleep": 1,
-      "docs": 1
-    },
     "tests/docs-readers-selection.test.mjs": {
       "docs": 1
     },
@@ -157,14 +108,11 @@
     "tests/exchange-request.test.mjs": {
       "sleep": 1
     },
-    "tests/finish-work-stale.test.mjs": {
-      "sleep": 3
-    },
     "tests/forge-only-rules.test.mjs": {
       "docs": 1
     },
     "tests/github-actions-backend.test.mjs": {
-      "sleep": 5
+      "sleep": 3
     },
     "tests/github-actions-burst.test.mjs": {
       "sleep": 2
@@ -267,54 +215,11 @@
     "tests/import-object-packs.test.mjs": {
       "sleep": 1
     },
-    "tests/integration-preview-auto.test.mjs": {
-      "sleep": 4
-    },
-    "tests/interaction-finish.test.mjs": {
-      "sleep": 1
-    },
     "tests/invariants.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-admission.test.mjs": {
-      "sleep": 3
-    },
-    "tests/landing-batch-contention.test.mjs": {
-      "sleep": 2
-    },
-    "tests/landing-batch-lock-context.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-batch.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-burst.test.mjs": {
-      "sleep": 5
-    },
-    "tests/landing-desired.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-driver-starvation.test.mjs": {
-      "sleep": 7,
-      "elapsed": 1
-    },
-    "tests/landing-journal-reads.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-journal-settle.test.mjs": {
-      "sleep": 1
-    },
-    "tests/landing-stale-incident.test.mjs": {
       "sleep": 1
     },
     "tests/landing-worker-wake.test.mjs": {
       "sleep": 1
-    },
-    "tests/landing-worker.test.mjs": {
-      "sleep": 3
-    },
-    "tests/lane-auto-snapshot.test.mjs": {
-      "sleep": 4
     },
     "tests/legacy-storage-cleanup.test.mjs": {
       "sleep": 1
@@ -329,7 +234,7 @@
       "sleep": 5
     },
     "tests/local-reliability.test.mjs": {
-      "sleep": 11
+      "sleep": 5
     },
     "tests/local-watcher.test.mjs": {
       "sleep": 14,
@@ -337,12 +242,6 @@
     },
     "tests/mcp-hosted-source.test.mjs": {
       "elapsed": 1
-    },
-    "tests/mcp-lifecycle.test.mjs": {
-      "sleep": 1
-    },
-    "tests/mcp.test.mjs": {
-      "sleep": 1
     },
     "tests/metrics-deadline.test.mjs": {
       "sleep": 4,
@@ -358,7 +257,7 @@
       "sleep": 4
     },
     "tests/native-git-export-waits.test.mjs": {
-      "sleep": 4
+      "sleep": 2
     },
     "tests/native-git.test.mjs": {
       "sleep": 1
@@ -376,7 +275,7 @@
       "sleep": 1
     },
     "tests/native-work.test.mjs": {
-      "sleep": 2
+      "sleep": 1
     },
     "tests/network-deadlines.test.mjs": {
       "sleep": 2,
@@ -385,17 +284,14 @@
     "tests/optimistic-landing.test.mjs": {
       "sleep": 1
     },
-    "tests/overlap-alerts-ordering.test.mjs": {
-      "sleep": 5
-    },
     "tests/owner-cleanup.test.mjs": {
-      "sleep": 3
+      "sleep": 1
     },
     "tests/parallel-work-defaults.test.mjs": {
       "sleep": 1
     },
     "tests/playbooks.test.mjs": {
-      "sleep": 5
+      "sleep": 4
     },
     "tests/preflight-docs-readers.test.mjs": {
       "docs": 3
@@ -406,10 +302,6 @@
     "tests/preflight-static.test.mjs": {
       "sleep": 1
     },
-    "tests/presence.test.mjs": {
-      "sleep": 12,
-      "elapsed": 1
-    },
     "tests/projectWorkIndex-progress.test.mjs": {
       "sleep": 1
     },
@@ -419,9 +311,6 @@
     "tests/publication.test.mjs": {
       "sleep": 1
     },
-    "tests/queue-control.test.mjs": {
-      "sleep": 1
-    },
     "tests/r2-backfill.test.mjs": {
       "sleep": 1
     },
@@ -429,8 +318,7 @@
       "elapsed": 1
     },
     "tests/robust-errors.test.mjs": {
-      "sleep": 2,
-      "elapsed": 1
+      "sleep": 1
     },
     "tests/sandbox-process-identity.test.mjs": {
       "sleep": 2
@@ -460,9 +348,6 @@
     "tests/state-git.test.mjs": {
       "elapsed": 1
     },
-    "tests/status-summary.test.mjs": {
-      "sleep": 1
-    },
     "tests/test-bootstrap-cleanup.test.mjs": {
       "sleep": 1
     },
@@ -484,18 +369,12 @@
     "tests/verify-stream.test.mjs": {
       "sleep": 2
     },
-    "tests/work-backup.test.mjs": {
-      "sleep": 1
-    },
     "tests/work-index-cost.test.mjs": {
       "elapsed": 1
     },
     "tests/work-lock-async.test.mjs": {
       "sleep": 3,
       "elapsed": 1
-    },
-    "tests/work-lock-queue.test.mjs": {
-      "sleep": 11
     },
     "tests/work-phase-retry.test.mjs": {
       "sleep": 1

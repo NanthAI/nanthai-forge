@@ -171,13 +171,6 @@ export function landingMatch(
   while (!next.done) next = build.next();
   return next.value.positions.get(JSON.stringify([field, value])) ?? [];
 }
-
-/** A worker and its execution adapter share the same owner's disposable index. */
-export function shareLandingRecords(source: WorkStore, target: WorkStore) {
-  invariant(source.directory === target.directory, 'INVALID_WORK_STORE', 'Landing index owner differs.');
-  const retained = snapshots.get(source);
-  if (retained) snapshots.set(target, retained);
-}
 export function landingRunBatch(
   store: WorkStore,
   tx: WorkRecordTransaction,

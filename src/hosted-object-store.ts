@@ -7,7 +7,6 @@ import { HostedCheckoutCache } from './hosted-checkout-cache.js';
 import { ConvexLaneTransport } from './hosted-lane-transport.js';
 import type { HostedAgentExchange } from './hosted-agent-transport.js';
 import type { ConvexExchange } from './exchange-client.js';
-import type { NativeSource } from './native-source.js';
 
 /** Source identity stays independent of physical storage (current R2 keys). */
 export interface ObjectStore {
@@ -60,27 +59,6 @@ export class HostedObjectStore implements ObjectStore {
   async put(bytes: Buffer) {
     return hostedObjectWriter(this.exchange).put(bytes);
   }
-}
-
-/** Only source records and their files are needed to materialise a saved head;
- * historical ancestry remains hosted and is fetched when selected. */
-export async function cacheHostedState(source: NativeSource, objects: ObjectStore, head: string) {
-  invariant(
-    source.put(await objects.get(head)) === head,
-    'SOURCE_HASH_MISMATCH',
-    'State differs from its pin.',
-  );
-  const state = source.state(head);
-  await Promise.all(
-    [...new Set(state.files.map(file => file.blob))].map(async id => {
-      invariant(
-        source.put(await objects.get(id)) === id,
-        'SOURCE_HASH_MISMATCH',
-        'Blob differs from its pin.',
-      );
-    }),
-  );
-  return state;
 }
 
 /** The upload transport already performs missing-only R2 presign and commit.

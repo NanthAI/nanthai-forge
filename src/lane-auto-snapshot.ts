@@ -19,19 +19,6 @@ import { workLocked } from './work-lock.js';
 import type { WorkStore } from './work-store.js';
 import type { Lane } from './work-types.js';
 
-/** Defaults: snapshot a few seconds after the last edit, at most every 30 s, and
- * no later than a minute into continuous editing. Env overrides exist for tests. */
-export const AUTO_SNAPSHOT = { debounceMs: 5_000, minIntervalMs: 30_000, maxWaitMs: 60_000 } as const;
-const setting = (name: string, fallback: number) => {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value >= 0 && process.env[name] !== '' ? value : fallback;
-};
-const settings = () => ({
-  debounceMs: setting('FORGE_AUTO_SNAPSHOT_DEBOUNCE_MS', AUTO_SNAPSHOT.debounceMs),
-  minIntervalMs: setting('FORGE_AUTO_SNAPSHOT_INTERVAL_MS', AUTO_SNAPSHOT.minIntervalMs),
-  maxWaitMs: setting('FORGE_AUTO_SNAPSHOT_MAX_WAIT_MS', AUTO_SNAPSHOT.maxWaitMs),
-});
-
 const oid = z.string().regex(/^[0-9a-f]{64}$/);
 const pointerSchema = z.object({
   schema: z.literal(1),
@@ -266,53 +253,4 @@ function capture(store: WorkStore, laneId: string): AutoSnapshotResult {
   }
   saveCache();
   return { status: 'snapshot', state, changedPathCount: paths.length, reread, ms: elapsed() };
-}
-
-/** Debounced driver for one watched Lane. Edits only schedule; idle Lanes cost nothing. */
-export function laneAutoSnapshots(store: WorkStore, laneId: string, unref: boolean) {
-  let timer: NodeJS.Timeout | undefined,
-    firstEdit: number | undefined,
-    lastEdit = 0,
-    lastSnapshot = 0,
-    closed = false;
-  const schedule = () => {
-    if (closed || firstEdit === undefined) return;
-    const { debounceMs, minIntervalMs, maxWaitMs } = settings(),
-      due = Math.max(Math.min(lastEdit + debounceMs, firstEdit + maxWaitMs), lastSnapshot + minIntervalMs);
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(run, Math.max(0, due - Date.now()));
-    if (unref) timer.unref();
-  };
-  const run = () => {
-    timer = undefined;
-    if (closed) return;
-    const pendingSince = firstEdit;
-    firstEdit = undefined;
-    let result: AutoSnapshotResult;
-    try {
-      result = snapshotLane(store, laneId);
-    } catch {
-      result = { status: 'skipped', reason: 'error' };
-    }
-    lastSnapshot = Date.now();
-    // A busy Lane or a raced collection keeps its edits pending for a later attempt.
-    // Other skips wait for the next edit: idle Lanes never poll.
-    if (result.status === 'skipped' && (result.reason === 'busy' || result.reason === 'collected')) {
-      firstEdit = pendingSince;
-      schedule();
-    }
-  };
-  return {
-    edited() {
-      if (closed) return;
-      lastEdit = Date.now();
-      firstEdit ??= lastEdit;
-      schedule();
-    },
-    close() {
-      closed = true;
-      if (timer) clearTimeout(timer);
-      timer = undefined;
-    },
-  };
 }

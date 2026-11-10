@@ -8,27 +8,6 @@ import { recordBillCli } from './metrics-bill-cli.js';
 import { metricAddress, metricQuery } from './self-metrics-source.js';
 import { nameFlakeIssues } from './self-metrics-flake-issues.js';
 import { pageMetrics, METRICS_PAGE_MAX, METRICS_CONTEXT_DAYS_MAX } from './self-metrics-page.js';
-export async function readMetrics(
-  owner: string,
-  options: {
-    from?: string | undefined;
-    to?: string | undefined;
-    limit?: number | undefined;
-    cursor?: string | undefined;
-    contextDays?: number | undefined;
-  } = {},
-  pointer?: Buffer | null,
-) {
-  const period = metricPeriod(options.from, options.to);
-  return pageMetrics(
-    metricsSurface(
-      await readMetricRecords(owner, period, { pointer, contextDays: options.contextDays }),
-      period,
-    ),
-    period,
-    options,
-  );
-}
 export async function metricsCli(args: string[]) {
   if (args[0] === 'record-bill') return recordBillCli(args.slice(1));
   if (!args.length || args[0] === '--help') {
