@@ -37,4 +37,20 @@ Things we built, measured and removed. Each entry says what the numbers were, so
 
 **What would have to change.** An identity change: a State named by the root of its tree, so a save needs only the folders it touches. That touches every row and receipt that names a State, and needs the client protocol, conversion above 20k files and a migration. It is worth trying only for a repository large enough that flat State bytes dominate the bill (about $31 per 1,000 landings at 190k files against a target of about $2 for everything).
 
-**What replaced it.** Flat States stay. The follow-up is to store large flat States in chunks, with the existing recipe format, so a save uploads only what changed: Issue 2f4e04ad.
+**What replaced it.** Flat States stay. The follow-up is to store large flat States in chunks, with the existing recipe format, so a save uploads only what changed: Issue 2f4e04ad, also dropped (next entry).
+
+### Chunked flat States (Issue 2f4e04ad)
+
+**What we tried.** Keep the flat manifest and its SHA-256 identity, but upload States over 4 MiB as a recipe: content-defined chunks (64 KiB to 1 MiB, the existing object recipe format), with forced cuts around the file list so the parents and message at each end stay out of the stable chunks. A save sent only the chunks its base did not have; a merge read its inputs back part by part.
+
+**The numbers that ended it.** Built code, interleaved paired runs, Kubernetes (31.7k files) and LLVM (190k files) paths with synthetic contents; network model 100 ms per request and 50 MB/s.
+
+- Bytes: identical at 4k (no State is that large). At 31.7k a save uploaded 0.96 MB against 5.35 MB (5.6× fewer, mean), and a merge 0.29 MB. At 190k a save uploaded 1.63 MB against 28.9 MB (17.7×), and a merge 0.28 MB.
+- Server time: at 4k unchanged. At 31.7k a save cost 91 ms more CPU and a merge about 580 ms more with network time: each recipe level is a sequential describe, sign and GET. At 190k a save broke even with network time and a merge cost 0.25 to 0.76 s more.
+- Memory: not better. A State's identity still needs the whole manifest in memory, so peak RSS rose slightly (179 to 204 MiB at 31.7k; 591 to 600 MiB per save and 777 to 798 MiB per merge at 190k). Both formats are past the 512 MB action limit at 190k.
+- Client: the download reader walks a recipe one node at a time, about 3 Convex calls per leaf. Reading a State took 50 calls and 7.3 s against 3 calls and 0.67 s flat at 31.7k, and 218 calls and 32 s against 1.7 s at 190k.
+- Cost: State bytes per 1,000 landings went from $5.65 to about $1.24 at 31.7k and from $30.5 to about $2.79 at 190k, client calls included; unchanged ($0.49) at 4k.
+
+**Why it failed.** The kill rule needed live memory and latency at 150k+ files within the action limit and no worse than flat, and nothing slower on the client. Chunks cut bytes but not memory, because identity is still the flat manifest, and they added sequential round trips on the server and many more on the client.
+
+**What would have to change.** Two things together. First, one call that signs all of a recipe's leaves (the leaf list on the object row, or a single describe of the whole tree), on the server and in the client reader, so depth costs nothing. Second, a 190k State that fits in an action, which is the memory problem of flat States, not of chunking. With both, the byte saving above is the prize. The faster chunker loop from this experiment (4 to 5 times faster, same boundaries) was kept.

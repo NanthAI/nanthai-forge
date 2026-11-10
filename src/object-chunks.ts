@@ -5,7 +5,10 @@ import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
 import { treeRefSchema, type TreeRef } from './byte-tree-format.js';
 const pinSchema = z
-  .object({ sha256: z.string().regex(/^[0-9a-f]{64}$/), size: z.number().safe().nonnegative() })
+  .object({
+    sha256: z.string().regex(/^[0-9a-f]{64}$/),
+    size: z.number().safe().nonnegative(),
+  })
   .strict();
 export type ChunkPin = z.infer<typeof pinSchema>;
 export const objectChunkPageSchema = z
@@ -31,10 +34,13 @@ export const objectChunkBytes = 1024 * 1024,
 const minimum = 64 * 1024,
   maximum = objectChunkBytes,
   mask = 256 * 1024 - 1;
-const gear = Array.from({ length: 256 }, (_, index) =>
+const gear = Uint32Array.from({ length: 256 }, (_, index) =>
   Buffer.from(digest(`forge-content-byte-${index}`), 'hex').readUInt32LE(0),
 );
-const pin = (bytes: Buffer): ChunkPin => ({ sha256: digest(bytes), size: bytes.length });
+const pin = (bytes: Buffer): ChunkPin => ({
+  sha256: digest(bytes),
+  size: bytes.length,
+});
 /** Chunk boundaries are independent of input read size. The sink must consume
  * each temporary chunk before returning; only compact references are retained. */
 export class ObjectRecipeBuilder {
@@ -45,15 +51,33 @@ export class ObjectRecipeBuilder {
   private rolling = 0;
   constructor(private readonly put: (bytes: Buffer, offset: number | null) => ChunkPin) {}
   update(bytes: Buffer) {
-    for (const byte of bytes) {
-      this.buffer[this.length++] = byte;
-      this.rolling = ((this.rolling << 1) + gear[byte]!) >>> 0;
-      if (this.length >= minimum && ((this.rolling & mask) === 0 || this.length >= maximum)) this.leaf();
+    // Index loop and one copy per boundary: an iterator per byte made a 29 MB State take seconds.
+    let rolling = this.rolling,
+      length = this.length,
+      start = 0;
+    for (let index = 0; index < bytes.length; index++) {
+      rolling = ((rolling << 1) + gear[bytes[index]!]!) >>> 0;
+      length++;
+      if (length >= minimum && ((rolling & mask) === 0 || length >= maximum)) {
+        this.buffer.set(bytes.subarray(start, index + 1), this.length);
+        this.length = length;
+        this.leaf();
+        rolling = 0;
+        length = 0;
+        start = index + 1;
+      }
     }
+    this.buffer.set(bytes.subarray(start), this.length);
+    this.length = length;
+    this.rolling = rolling;
   }
   private leaf() {
     const bytes = this.buffer.subarray(0, this.length);
-    this.leaves.push({ ...this.put(bytes, this.offset), height: 0, length: this.length });
+    this.leaves.push({
+      ...this.put(bytes, this.offset),
+      height: 0,
+      length: this.length,
+    });
     this.offset += this.length;
     this.length = 0;
     this.rolling = 0;
@@ -83,13 +107,26 @@ export class ObjectRecipeBuilder {
         children.length === 1
           ? children[0]!
           : {
-              ...put(Buffer.from(JSON.stringify({ kind: 'forge-byte-tree', schema: 1, children }))),
+              ...put(
+                Buffer.from(
+                  JSON.stringify({
+                    kind: 'forge-byte-tree',
+                    schema: 1,
+                    children,
+                  }),
+                ),
+              ),
               height: Math.max(...children.map(child => child.height)) + 1,
               length: children.reduce((sum, child) => sum + child.length, 0),
             },
       );
     }
-    const recipe: ObjectRecipe = { kind: 'forge-object-recipe', schema: 1, object, tree: refs[0]! };
+    const recipe: ObjectRecipe = {
+      kind: 'forge-object-recipe',
+      schema: 1,
+      object,
+      tree: refs[0]!,
+    };
     return { recipe, bytes: Buffer.from(JSON.stringify(recipe)) };
   }
 }
