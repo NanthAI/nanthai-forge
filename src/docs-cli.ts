@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
+import { allHelpTopics, hostedAgentHelp, hostedAgentHelpMarkdown } from './hosted-agent-help.js';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { invariant } from './errors.js';
@@ -15,7 +15,7 @@ function documents(directory = 'docs'): string[] {
 export function docsCli(args: string[]): undefined {
   invariant(args.length <= 1, 'BAD_ARGUMENT', 'Use nforge docs [name].');
   if (args[0] === 'agents/hosted') {
-    process.stdout.write(`${hostedAgentHelp()}\n${hostedAgentHelpMarkdown()}\n`);
+    process.stdout.write(`${hostedAgentHelp()}\n${allHelpTopics()}\n${hostedAgentHelpMarkdown()}\n`);
     return;
   }
   const paths = ['README.md', 'skills/forge-agent/SKILL.md', ...documents()].sort();

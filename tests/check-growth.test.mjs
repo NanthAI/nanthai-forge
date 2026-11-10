@@ -250,3 +250,32 @@ test('the phase-close print lists the Mac dependencies against the start', () =>
   assert.match(text, /mac-runner\s+stays/);
   assert.match(text, /Already off the Mac \(1\): dogfood-checks/);
 });
+
+test('error teaching: every public code has a topic; a new untaught code or a missing command fails (0a7d6f56)', async t => {
+  const { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } =
+    await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { errorTeachingFindings } = await import('../scripts/check-error-teaching.mjs');
+  const repo = new URL('..', import.meta.url).pathname;
+  assert.deepEqual(await errorTeachingFindings(repo), []);
+  const root = mkdtempSync(join(tmpdir(), 'forge-teaching-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'src'));
+  for (const file of ['agent-verbs.ts', 'cli.ts', 'hosted-agent-reads.ts', 'help-topics.ts'])
+    copyFileSync(join(repo, 'src', file), join(root, 'src', file));
+  const teaching = readFileSync(join(repo, 'src/error-teaching.ts'), 'utf8').replace(
+    "NOT_FOUND: { learn: 'arguments' },",
+    "NOT_FOUND: { learn: 'nowhere', next: `nforge agent <root> no-such-action '{}'` },",
+  );
+  writeFileSync(join(root, 'src/error-teaching.ts'), teaching);
+  writeFileSync(
+    join(root, 'src/thrower.ts'),
+    "throw new ForgeError('ZZQ_UNTAUGHT', 'x'); throw new ForgeError('NOT_FOUND', 'y');\n",
+  );
+  const findings = (await errorTeachingFindings(root)).join('\n');
+  assert.match(findings, /no learn topic: ZZQ_UNTAUGHT/);
+  assert.match(findings, /NOT_FOUND: learn names topic nowhere/);
+  assert.match(findings, /names action no-such-action, which does not exist/);
+  assert.match(findings, /no public error code COMPOSITION_CONFLICT exists/);
+});

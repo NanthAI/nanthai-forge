@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { teach } from './error-teaching.js';
 import {
   hostedDiffSchema,
   hostedPeersSchema,
@@ -66,6 +67,7 @@ async function result(action: () => Promise<unknown>) {
               code: safe.code,
               message: safe.message,
               ...(safe.recovery ? { recovery: safe.recovery } : {}),
+              ...teach(safe.code, { surface: 'mcp' }, safe.recovery),
             },
           }),
         },

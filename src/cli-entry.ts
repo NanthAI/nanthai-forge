@@ -4,6 +4,7 @@ import { isAbsolute } from 'node:path';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { describeFailure, recordFailure } from './system-errors.js';
+import { cliTeachContext } from './error-teaching.js';
 
 // Check before hook setup and imports that resolve relative paths.
 try {
@@ -31,7 +32,9 @@ if (process.argv[2] === 'wait') {
     const { resolveTurnWait } = await import('./agent-turn-wait.js');
     process.argv.splice(2, process.argv.length - 2, ...resolveTurnWait(process.argv.slice(3)));
   } catch (error) {
-    const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);
+    const teaching = cliTeachContext(process.argv.slice(2));
+    const failure =
+      error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
     process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
     process.exit(1);
   }
@@ -44,7 +47,9 @@ try {
   const { cliStartup } = await import('./cli-version.js');
   runCommand = await cliStartup();
 } catch (error) {
-  const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);
+  const teaching = cliTeachContext(process.argv.slice(2));
+  const failure =
+    error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
   process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
   process.exitCode = 1;
 }
@@ -69,7 +74,9 @@ if (runCommand) {
           : await hostedCloneCli(process.argv.slice(3), undefined, beforeDispatch, beforeLocal);
       if (output !== undefined) process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
     } catch (error) {
-      const failure = error instanceof ForgeError ? describeFailure(error) : recordFailure(error);
+      const teaching = cliTeachContext(process.argv.slice(2));
+      const failure =
+        error instanceof ForgeError ? describeFailure(error, teaching) : recordFailure(error, teaching);
       process.stderr.write(`${JSON.stringify({ error: failure })}\n`);
       process.exitCode = 1;
     }

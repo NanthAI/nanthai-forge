@@ -3,7 +3,8 @@ import { requireAgentRoot } from './agent-root.js';
 import { validateHostedCliCommand, validateNativeFrictionCommand } from './hosted-cli-validation.js';
 import { actionableNotFound, resolveShortLaneId } from './argument-errors.js';
 import { resolve } from 'node:path';
-import { hostedAgentHelp } from './hosted-agent-help.js';
+import { hostedAgentHelp, hostedHelpFor } from './hosted-agent-help.js';
+import { helpTopicIndex, helpTopicText, isHelpTopic } from './help-topics.js';
 import { callerOverlaps } from './agent-caller-overlaps.js';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { discoversCapabilitiesFirst, startEarlyCapabilities } from './hosted-capabilities-early.js';
@@ -557,6 +558,20 @@ export async function agentCli(args: string[], options: AgentCliOptions = {}): P
   return result;
 }
 
+/** `help` with no topic prints the command overview; `help TOPIC` prints one topic or one hosted action's
+ * help (Issue 0a7d6f56). Local only: no network, no Convex call. */
+function helpText(root: string | undefined, topic: string | undefined) {
+  const hosted = Boolean(root && hostedAgentAddress(root, {}));
+  if (!topic) return hosted ? hostedAgentHelp() : `${AGENT_HELP}${helpTopicIndex()}\n`;
+  const text = isHelpTopic(topic) ? helpTopicText(topic) : hosted ? hostedHelpFor(topic) : undefined;
+  invariant(
+    text,
+    'BAD_ARGUMENT',
+    `No help topic ${topic}. ${helpTopicIndex()} For an action's parameters run nforge agent ROOT ACTION --help.`,
+  );
+  return text;
+}
+
 async function runAgentCli(args: string[], options: AgentCliOptions, notices: string[]): Promise<unknown> {
   let stdin: string | undefined;
   const read = (path: string, name: string) => {
@@ -566,7 +581,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
   };
   if (!args.length || args[0] === '--help' || args[0] === 'help') {
     await options.beforeLocal?.();
-    process.stdout.write(AGENT_HELP);
+    process.stdout.write(helpText(undefined, args[1]));
     return undefined;
   }
   const textMode = args[1] === 'wait' && args.includes('--text');
@@ -582,7 +597,7 @@ async function runAgentCli(args: string[], options: AgentCliOptions, notices: st
     tail = client.rest;
   if (requestedAction === 'help' || requestedAction === '--help') {
     await options.beforeLocal?.();
-    process.stdout.write(hostedAgentAddress(root!, {}) ? hostedAgentHelp() : AGENT_HELP);
+    process.stdout.write(helpText(root, rawTail[0]));
     return undefined;
   }
   if (requestedAction) noticeViewAlias(requestedAction);

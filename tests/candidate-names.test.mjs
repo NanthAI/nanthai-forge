@@ -259,6 +259,12 @@ test('native resolution aliases reconcile one original command identity and keep
     assert.equal(missing.status, 1);
     const lines = missing.stderr.trim().split('\n');
     assert.equal(lines.length, action === 'view' ? 2 : 1);
-    assert.deepEqual(JSON.parse(lines.at(-1)).error, { code: 'NOT_FOUND', message: 'Candidate not found.' });
+    // Older clients read code and message unchanged; errors that teach (0a7d6f56) only add learn.
+    const { code, message, learn, ...rest } = JSON.parse(lines.at(-1)).error;
+    assert.deepEqual(
+      { code, message, rest },
+      { code: 'NOT_FOUND', message: 'Candidate not found.', rest: {} },
+    );
+    assert.match(learn, /^nforge agent \S+ help arguments$/);
   }
 });

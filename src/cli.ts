@@ -7,6 +7,7 @@ import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { resolve } from 'node:path';
 import { describeFailure, recordFailure } from './system-errors.js';
+import { cliTeachContext, teachReceipt } from './error-teaching.js';
 import { readFileSync } from 'node:fs';
 
 const HELP = `Forge is a source host and workspace for humans and AI agents working on the same code.
@@ -501,12 +502,17 @@ try {
   }
   if (output !== undefined) {
     // Hosted agent receipts leave the process without the facts the agent already holds; --detail keeps all.
-    const printed = printedReceipt(output, {
+    const receipt = printedReceipt(output, {
       agent: process.argv[2] === 'agent',
       detail: process.argv.includes('--detail'),
       // The land submitter's stdout is parsed by its parent, which needs the full receipt.
       landChild: process.env.FORGE_LAND_CHILD === '1',
     });
+    // A terminal error inside an agent receipt (a conflict, a failed check) names its help topic.
+    const printed =
+      (process.argv[2] === 'agent' || process.argv[2] === 'x') && process.env.FORGE_LAND_CHILD !== '1'
+        ? teachReceipt(receipt, cliTeachContext(process.argv.slice(2)))
+        : receipt;
     process.stdout.write(
       `${JSON.stringify(printed, null, process.argv[2] === 'agent' || process.argv[2] === 'x' || (process.argv[2] === 'host' && process.argv.includes('--json')) ? undefined : 2)}\n`,
     );
@@ -529,7 +535,8 @@ try {
 } catch (error) {
   // Known errors stay terse; system and unexpected errors also log the stack and name the log.
   const known = error instanceof ForgeError;
-  const failure = known ? describeFailure(error) : recordFailure(error);
+  const teaching = cliTeachContext(process.argv.slice(2));
+  const failure = known ? describeFailure(error, teaching) : recordFailure(error, teaching);
   if (process.argv[2] === 'github-sync') {
     syncPending = false;
     process.stdout.write(`${JSON.stringify({ pushed: false, reason: failure.code, error: failure })}\n`);

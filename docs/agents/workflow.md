@@ -2405,6 +2405,16 @@ same one). `node scripts/measure-agent-context.mjs` prints the hosted MCP tool l
   listing is constant, so a policy change never re-sends it). Claude Code and Codex receive the same
   listing (`scripts/measure-agent-context.mjs` prints each harness's view). A change that adds an action
   or field must keep `tests/mcp-tool-list.test.mjs` inside its budget or record why the budget moves.
+- **Help topics and errors that teach.** `nforge agent ROOT help` prints the command overview and the
+  topic list; `help TOPIC` prints one section of at most 1,500 characters, and `ACTION --help` prints the
+  action's schema plus only its own topic (MCP: `forge_work_overview {action:"help",topic}`). Every CLI
+  refusal adds `next` (one command to run now, with the caller's root, Lane and run ids where known; a
+  CAPITALS placeholder is a value to supply) and `learn` (the help command for its topic) beside the
+  unchanged `code`, `message` and `recovery`; a server continuation in `recovery` becomes `next`. MCP
+  refusals add `learn` as a help call. A terminal error inside a CLI receipt gains `learn`. `npm run check`
+  fails when a public error code has no topic, or a `next` or topic names a command, action or topic that
+  does not exist (`scripts/check-error-teaching.mjs`; the table is `src/error-teaching.ts`, the topics
+  `src/help-topics.ts`). Help and teaching are local: no Convex call.
 - **Receipts.** The CLI prints, and MCP replies carry, a brief receipt of about 300 characters when
   healthy: `action`, `operationId` and the next step's facts. `start`: Lane id and path; `save`: the saved
   head; `sync`: `up-to-date|merged|resolved` and the head; a landed landing: the acceptance receipt, State

@@ -5,10 +5,15 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { hostedAgentCommandSchemas } from '../dist/hosted-agent-contract.js';
 import {
+  allHelpTopics,
   hostedAgentHelp,
   hostedAgentHelpEntries,
   hostedAgentHelpMarkdown,
 } from '../dist/hosted-agent-help.js';
+import { HELP_TOPIC_MAX, helpTopics, helpTopicText } from '../dist/help-topics.js';
+import { cliTeachContext, teach, teachReceipt } from '../dist/error-teaching.js';
+import { describeFailure } from '../dist/system-errors.js';
+import { ForgeError } from '../dist/errors.js';
 import { landAnnouncement } from '../dist/hosted-land-wait.js';
 import { canonicalRoot } from '../dist/root-paths.js';
 import { agentCli } from '../dist/agent-cli.js';
@@ -73,7 +78,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
     assert.equal(await output(() => agentCli([s.root, ...form, '--help'])), hostedAgentHelp(action));
   assert.equal(
     await output(() => docsCli(['agents/hosted'])),
-    `${hostedAgentHelp()}\n${hostedAgentHelpMarkdown()}\n`,
+    `${hostedAgentHelp()}\n${allHelpTopics()}\n${hostedAgentHelpMarkdown()}\n`,
   );
   assert.equal(s.calls.length, before, 'help and docs make zero Convex calls');
   const text = hostedAgentHelp();
@@ -100,7 +105,9 @@ test('hosted coordination entry points retain supported reads and their coverage
     assert.doesNotMatch(text, /Receipts include advisory peers;[^\n]*`peers/);
     assert.doesNotMatch(text, /Source reads: `diff` compares Lane base/);
   }
-  const text = hostedAgentHelp();
+  // The prose lives in its help topics (Issue 0a7d6f56), one fetch away from `help`.
+  const text = helpTopicText('review') + helpTopicText('overlap');
+  assert.match(hostedAgentHelp(), /help TOPIC/);
   assert.match(text, /peers \{laneId\?,path\?,detail\?\}/);
   assert.match(text, /diff \{laneId\?,paths\?,byteBudget\?,summary\?,cursor\?\}/);
   assert.match(text, /unacknowledgedOverlaps and behindMain/);
@@ -267,4 +274,76 @@ test('admitted pending source waits while retaining a helper-free original repla
   assert(!line.includes('"command":'));
   const again = await s.transport().dispatch('finish', first.result.replayParameters);
   assert.equal(again.operationId, first.operationId);
+});
+
+test('help TOPIC prints one section, at most 1,500 characters, with no Convex call (0a7d6f56)', async t => {
+  const s = agentFixture(t);
+  await s.transport().dispatch('open', { laneId: s.lane.laneId });
+  const before = s.calls.length;
+  for (const [id, topic] of Object.entries(helpTopics))
+    assert(`${topic.title}\n${topic.text}`.length <= HELP_TOPIC_MAX, id);
+  const conflict = await output(() => agentCli([s.root, 'help', 'conflict']));
+  assert.equal(conflict, helpTopicText('conflict'));
+  assert(!conflict.includes(helpTopics.board.text), 'one topic, not the manual');
+  // An action name prints that action's schema plus only its own topic.
+  const wait = hostedAgentHelp('wait');
+  assert(wait.includes(helpTopics.wait.text) && !wait.includes(helpTopics.board.text));
+  assert(hostedAgentHelp().length < 6000, 'the overview keeps how-to prose in topics');
+  await assert.rejects(
+    agentCli([s.root, 'help', 'no-such-topic']),
+    error => error.code === 'BAD_ARGUMENT' && /Topics \(one section each\)/.test(error.message),
+  );
+  assert.equal(s.calls.length, before);
+});
+
+test('a refusal teaches next and learn with the caller values; code, message and recovery stay as they were', () => {
+  // Bench B1.5d: agents typed the operator form under agent and repeated the same BAD_ARGUMENT.
+  const operator = describeFailure(
+    new ForgeError('BAD_ARGUMENT', 'Use agent ROOT ACTION [JSON | --command-file FILE].'),
+    cliTeachContext(['agent', '.', 'x', 'cancel', '{"submissionId":"dfcc483d-3972-408d-9251-cc90909247e4"}']),
+  );
+  assert.equal(operator.code, 'BAD_ARGUMENT');
+  assert.equal(operator.message, 'Use agent ROOT ACTION [JSON | --command-file FILE].');
+  assert.equal(operator.next, `nforge x . cancel '{"submissionId":"dfcc483d-3972-408d-9251-cc90909247e4"}'`);
+  assert.equal(operator.learn, 'nforge agent . help arguments');
+  const lane = '7c9295d7-6f84-4ee1-8e5c-aa27e4ccc69c';
+  const overlap = describeFailure(
+    new ForgeError('OVERLAP_UNANSWERED', 'Answer the blocking overlap notice.', undefined, { laneId: lane }),
+    cliTeachContext(['agent', '/tmp/my lane', 'land', '--save', '{"message":"m"}']),
+  );
+  assert.deepEqual(overlap.recovery, { laneId: lane });
+  assert.equal(overlap.next, `nforge agent '/tmp/my lane' ack '{"laneId":"${lane}"}'`);
+  // A server continuation wins over the template; an unknown code teaches nothing and breaks nothing.
+  const own = teach('COMPOSITION_CONFLICT', cliTeachContext(['agent', '.', 'land']), {
+    command: `nforge agent . resolve '{"laneId":"${lane}"}'`,
+  });
+  assert.equal(own.next, `nforge agent . resolve '{"laneId":"${lane}"}'`);
+  assert.deepEqual(teach('NOT_A_PUBLIC_CODE'), {});
+  // A replay longer than the budget is omitted rather than cut.
+  const long = teach(
+    'WORK_STALE',
+    cliTeachContext(['agent', '.', 'save', `{"message":"${'x'.repeat(400)}"}`]),
+  );
+  assert.equal(long.next, undefined);
+  assert.equal(long.learn, 'nforge agent . help retry');
+  // Without a caller context (in-process callers) the failure is exactly as before.
+  assert.deepEqual(describeFailure(new ForgeError('NOT_FOUND', 'x')), { code: 'NOT_FOUND', message: 'x' });
+  // MCP learns through its own help call and never gets a shell command it cannot run.
+  assert.deepEqual(teach('CHECK_FAILED', { surface: 'mcp' }), {
+    learn: 'forge_work_overview {"action":"help","topic":"check"}',
+  });
+});
+
+test('a terminal error inside a receipt names its topic; a healthy receipt is returned unchanged', () => {
+  const healthy = { result: { status: 'landed', receiptId: 'r' } };
+  assert.equal(teachReceipt(healthy, { surface: 'cli' }), healthy);
+  const failed = teachReceipt(
+    { result: { submission: { error: { code: 'COMPOSITION_CONFLICT', message: 'conflicts' } } } },
+    cliTeachContext(['agent', '.', 'wait', '{}']),
+  );
+  assert.deepEqual(failed.result.submission.error, {
+    code: 'COMPOSITION_CONFLICT',
+    message: 'conflicts',
+    learn: 'nforge agent . help conflict',
+  });
 });

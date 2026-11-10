@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, renameSync, rmSync, statSync } f
 import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ForgeError } from './errors.js';
+import { type TeachContext, withTeaching } from './error-teaching.js';
 import { refuseRealUserState } from './test-isolation.js';
 
 const NO_RESULT = 'No successful result is claimed.';
@@ -23,6 +24,10 @@ export type Failure = {
   hint?: string;
   diagnostics?: string;
   recovery?: Record<string, unknown>;
+  /** One command to run now, filled with the caller's values (Issue 0a7d6f56). */
+  next?: string;
+  /** The help command for this error's topic. */
+  learn?: string;
 };
 
 const underForge = (path: string) => {
@@ -43,8 +48,14 @@ function hint(code: string, path: string | undefined) {
   return 'Check that the path exists and was not removed or moved, then retry.';
 }
 
-/** Describe any thrown value without exposing environment or file contents. */
-export function describeFailure(error: unknown): Failure {
+/** Describe any thrown value without exposing environment or file contents. With a caller context the
+ * failure also teaches (next, learn); code, message and recovery are unchanged. */
+export function describeFailure(error: unknown, context?: TeachContext): Failure {
+  const failure = describeBare(error);
+  return context ? withTeaching(failure, context) : failure;
+}
+
+function describeBare(error: unknown): Failure {
   if (error instanceof ForgeError)
     return {
       code: error.code,
@@ -85,8 +96,8 @@ export function writeDiagnostics(directory: string, entry: string): string | und
 }
 
 /** Log the full stack and command words (never arguments: they can carry payloads). The log lives in the per-user `~/.forge/logs`, else the temp directory, never inside an owner or checkout root: a checkout treats unknown files in its `.forge` as local work and refuses to pull over them. */
-export function recordFailure(error: unknown): Failure {
-  const failure = describeFailure(error);
+export function recordFailure(error: unknown, context?: TeachContext): Failure {
+  const failure = describeFailure(error, context);
   const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
   const entry = `${new Date().toISOString()} ${failure.code} pid=${process.pid} command=${process.argv
     .slice(2, 4)

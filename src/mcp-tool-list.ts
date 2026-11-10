@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { helpTopicText, helpTopics, isHelpTopic } from './help-topics.js';
 import { ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 
@@ -211,7 +212,8 @@ export function toolHelp(tools: Tool[], help: ToolHelp, topic?: string): unknown
           .map(actionOf)
           .filter((value, i, all) => value && all.indexOf(value) === i),
       })),
-      usage: 'forge_work_overview {action:"help",topic:"<tool or action>"}',
+      guides: Object.keys(helpTopics),
+      usage: 'forge_work_overview {action:"help",topic:"<tool, action or guide>"}',
     };
   const byTool = tools.find(tool => tool.name === topic);
   if (byTool)
@@ -233,13 +235,16 @@ export function toolHelp(tools: Tool[], help: ToolHelp, topic?: string): unknown
           .map(m => help.prose[m.tool])
           .filter(Boolean)
           .filter((v, i, a) => a.indexOf(v) === i),
+        ...(isHelpTopic(topic) ? { guide: helpTopicText(topic) } : {}),
       }
-    : {
-        error: {
-          code: 'BAD_ARGUMENT',
-          message: `No tool or action named ${topic}. Call help without a topic to list them.`,
-        },
-      };
+    : isHelpTopic(topic)
+      ? { guide: topic, text: helpTopicText(topic) }
+      : {
+          error: {
+            code: 'BAD_ARGUMENT',
+            message: `No tool, action or guide named ${topic}. Call help without a topic to list them.`,
+          },
+        };
 }
 
 type Handler = (request: unknown, extra: unknown) => Promise<{ tools: Tool[] }> | { tools: Tool[] };
