@@ -110,10 +110,12 @@ export function pathVerdicts(r, entry = {}) {
     }
     const s = forge(op);
     // A hazard repository (paths a case-insensitive or UTF-8-only volume cannot hold) passes its
-    // clone by a structured, named refusal: lossy silent success is the failure.
+    // import or clone by a structured, named refusal: lossy silent success is the failure.
     const refusal =
-      entry.hazard && op === 'clone'
-        ? (r.refusals ?? []).find(x => x.where === 'clone' && /^[A-Z][A-Z_]+$/.test(x.code))
+      entry.hazard && (op === 'import' || op === 'clone')
+        ? (r.refusals ?? []).find(
+            x => x.where === op && /^[A-Z][A-Z_]+$/.test(x.code) && x.code !== 'IMPORT_FAILED',
+          )
         : null;
     if (refusal) {
       out[op] = { v: 'refused', why: refusal.code };
@@ -197,9 +199,12 @@ export function summarize(r, entry = {}) {
     paths,
     // A refused hazard ends the scenario there: the paths after it are not reached and not failed.
     pass:
-      (paths.clone?.v === 'refused' ? ['import', 'clone'] : PATHS).every(op =>
-        ['pass', 'refused'].includes(paths[op].v),
-      ) && !paths.crash,
+      (paths.import?.v === 'refused'
+        ? ['import']
+        : paths.clone?.v === 'refused'
+          ? ['import', 'clone']
+          : PATHS
+      ).every(op => ['pass', 'refused'].includes(paths[op].v)) && !paths.crash,
     seconds: timings(r),
     gapSeconds: median(gaps.map(g => g.seconds)),
     gaps,

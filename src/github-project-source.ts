@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { assertGithubRateLimit, githubJson, type GithubFetch } from './github.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
+import { refuseLossyGitPaths } from './git-path-bytes.js';
 import { digest } from './hash.js';
 
 export type GithubSourceEntry = {
@@ -76,6 +77,10 @@ export async function discoverGithubSource(
     tree.sha === directory.sha && Array.isArray(tree.tree) && tree.truncated === false,
     'GITHUB_RESPONSE',
     'GitHub returned an incomplete directory; main was not published.',
+  );
+  refuseLossyGitPaths(
+    tree.tree.map(entry => (directory.path ? `${directory.path}/${entry.path}` : entry.path)),
+    'This GitHub repository',
   );
   const next = structuredClone(cursor);
   next.pending.shift();

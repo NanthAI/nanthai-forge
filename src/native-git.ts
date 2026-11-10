@@ -27,6 +27,7 @@ import { withGithubTransport } from './work-github.js';
 import { safeRelative } from './files.js';
 import { digest } from './hash.js';
 import { ForgeError, invariant } from './errors.js';
+import { shownGitPath } from './git-path-bytes.js';
 
 import { createWork } from './work-create.js';
 import { publishDirectory } from './native-durability.js';
@@ -48,15 +49,14 @@ export function filesFromGit(root: string, head: string, source: NativeSource): 
     .map((record): NativeFile => {
       const split = record.indexOf('\t'),
         header = record.slice(0, split).split(' ');
+      const raw = Buffer.from(record.slice(split + 1), 'binary');
       let path: string;
       try {
-        path = new TextDecoder('utf-8', { fatal: true }).decode(
-          Buffer.from(record.slice(split + 1), 'binary'),
-        );
+        path = new TextDecoder('utf-8', { fatal: true }).decode(raw);
       } catch {
         throw new ForgeError(
           'UNSUPPORTED_NATIVE_GIT_FILE',
-          'Git source path is not UTF-8. Original history is retained.',
+          `Git source path ${shownGitPath(raw)} is not UTF-8; Forge never renames a path silently. Rename it in Git (git mv) to a UTF-8 name and retry. Original history is retained.`,
         );
       }
       invariant(

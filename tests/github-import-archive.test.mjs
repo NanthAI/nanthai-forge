@@ -529,6 +529,57 @@ test('tar reader rejects corrupted headers and early ends', async () => {
   await assert.rejects(read(raw.subarray(0, 1024 + 512 + 100)), /ended early/);
 });
 
+test('Issue 6a0dd2e8: a Git path that is not UTF-8 is refused by name at import, never decoded into another name', async () => {
+  // Archive member names carry Git's raw path bytes: one Latin-1 byte (0xE9) in place of X.
+  const raw = (await import('node:zlib')).gunzipSync(
+    tarball([{ path: 'src/cafX.py', bytes: Buffer.from('LATIN1 = 1\n') }]),
+  );
+  const at = raw.indexOf('cafX.py'),
+    block = raw.subarray(at - (at % 512), at - (at % 512) + 512);
+  raw[at + 3] = 0xe9;
+  block.fill(32, 148, 156);
+  let sum = 0;
+  for (const byte of block) sum += byte;
+  block.write(sum.toString(8).padStart(6, '0') + '\0 ', 148);
+  const read = async () => {
+    for await (const entry of tarEntries(
+      (async function* () {
+        yield raw;
+      })(),
+    ))
+      void entry;
+  };
+  await assert.rejects(
+    read(),
+    error =>
+      error.code === 'GITHUB_SOURCE_UNSUPPORTED' &&
+      error.message.includes('src/caf\\xE9.py') &&
+      error.message.includes('git mv'),
+  );
+  // GitHub's tree API shows such bytes as U+FFFD: every listed one is named in one refusal.
+  const id = n => n.toString(16).padStart(40, '0');
+  await assert.rejects(
+    listGithubTree('fixture/arch', id(1), undefined, async () =>
+      Response.json({
+        sha: id(1),
+        truncated: false,
+        tree: [
+          { path: 'src', mode: '040000', type: 'tree', sha: id(2) },
+          { path: 'src/caf\uFFFD.py', mode: '100644', type: 'blob', sha: id(3), size: 1 },
+          { path: 'src/ok.py', mode: '100644', type: 'blob', sha: id(4), size: 1 },
+          { path: 'na\uFFFDve.md', mode: '100644', type: 'blob', sha: id(5), size: 1 },
+        ],
+      }),
+    ),
+    error =>
+      error.code === 'GITHUB_SOURCE_UNSUPPORTED' &&
+      error.message.includes('2 paths') &&
+      error.message.includes('src/caf\\uFFFD.py') &&
+      error.message.includes('na\\uFFFDve.md') &&
+      !error.message.includes('src/ok.py'),
+  );
+});
+
 test('Git LFS paths import as their object bytes, fetched once per oid; other pointers keep their bytes', async t => {
   const repo = lfsRepository(),
     counts = {},

@@ -196,6 +196,18 @@ test('no repository access and incomplete/oversized trees never advance progress
     );
   assert.equal(cursor.files.length, 0);
   assert.equal(cursor.completed, 0);
+  // Issue 6a0dd2e8: GitHub shows a path that is not UTF-8 with U+FFFD; discovery refuses it by name.
+  await assert.rejects(
+    discoverGithubSource(cursor, undefined, async () =>
+      Response.json({
+        sha: 'b'.repeat(40),
+        truncated: false,
+        tree: [{ path: 'caf\uFFFD.py', mode: '100644', type: 'blob', sha: 'c'.repeat(40), size: 1 }],
+      }),
+    ),
+    error => error.code === 'GITHUB_SOURCE_UNSUPPORTED' && error.message.includes('caf\\uFFFD.py'),
+  );
+  assert.equal(cursor.files.length, 0);
 });
 
 test('raw blob hash and length failures never reach the object sink', async () => {

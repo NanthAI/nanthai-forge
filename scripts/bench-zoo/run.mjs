@@ -133,7 +133,8 @@ export async function runRepo(cfg, repo, state, runDir, io) {
       report: res.report,
       error: res.error ?? null,
     });
-    if (res.phase !== 'ready') return (refuse('import', 'IMPORT_FAILED', JSON.stringify(res.error)), r);
+    if (res.phase !== 'ready')
+      return (refuse('import', res.error?.code ?? 'IMPORT_FAILED', JSON.stringify(res.error)), r);
     s = state.repos[repo.id] = { projectId: res.projectId, commit: res.commit };
     io.saveState();
   } else r.notes.push(`import reused: project ${s.projectId}`);

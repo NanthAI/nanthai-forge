@@ -408,6 +408,17 @@ test('two-way: the GitHub tree diff walks only changed directories and builds th
     skipped: 0,
     directories: 0,
   });
+  // Issue 6a0dd2e8: a pushed path GitHub shows with U+FFFD (bytes that are not UTF-8) is refused
+  // by name, never brought in under the substituted name.
+  const lossy = build({
+    ...unchanged,
+    'README.md': ['100644', 'hello'],
+    'src/caf\uFFFD.py': ['100644', 'l'],
+  });
+  await assert.rejects(
+    diffGithubTrees(api, 'synthetic/mirror', after, lossy),
+    error => error.code === 'GITHUB_SOURCE_UNSUPPORTED' && error.message.includes('src/caf\\uFFFD.py'),
+  );
   const file = (path, blob, mode = 'file') => ({ path, blob, mode });
   const base = {
     schema: 1,

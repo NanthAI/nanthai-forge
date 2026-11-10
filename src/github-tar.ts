@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
+import { gitPathText } from './git-path-bytes.js';
 
 /** Exact-length reads over a provider byte stream. Memory is one provider chunk
  * plus the requested window; nothing buffers the whole archive. */
@@ -67,11 +68,16 @@ export type TarEntry = {
   /** Streams the entry body; unread bytes are skipped before the next entry. */
   read: (consume: (bytes: Buffer) => Promise<void>) => Promise<void>;
 };
-const text = (block: Buffer, start: number, length: number) => {
-  const field = block.subarray(start, start + length),
-    end = field.indexOf(0);
-  return field.subarray(0, end < 0 ? field.length : end).toString('utf8');
+const field = (block: Buffer, start: number, length: number) => {
+  const bytes = block.subarray(start, start + length),
+    end = bytes.indexOf(0);
+  return bytes.subarray(0, end < 0 ? bytes.length : end);
 };
+const text = (block: Buffer, start: number, length: number) => field(block, start, length).toString('utf8');
+/** A member path as Git wrote it: bytes that are not UTF-8 are refused by name, never decoded
+ * lossily into another path (Issue 6a0dd2e8). */
+const pathText = (block: Buffer, start: number, length: number) =>
+  gitPathText(field(block, start, length), 'This GitHub archive');
 function octal(block: Buffer, start: number, length: number) {
   const field = block.subarray(start, start + length);
   if (field[0]! & 0x80) {
@@ -102,9 +108,13 @@ function pax(body: Buffer) {
       'GITHUB_RESPONSE',
       'GitHub archive metadata is invalid.',
     );
-    const record = body.subarray(space + 1, at + length - 1).toString('utf8'),
-      equals = record.indexOf('=');
-    if (equals > 0) values[record.slice(0, equals)] = record.slice(equals + 1);
+    const record = body.subarray(space + 1, at + length - 1),
+      equals = record.indexOf(0x3d);
+    if (equals > 0) {
+      const key = record.subarray(0, equals).toString('utf8'),
+        value = record.subarray(equals + 1);
+      values[key] = key === 'path' ? gitPathText(value, 'This GitHub archive') : value.toString('utf8');
+    }
     at += length;
   }
   return values;
@@ -127,12 +137,12 @@ export async function* tarEntries(source: AsyncIterable<Uint8Array>): AsyncGener
       const body = await reader.exact(size);
       await reader.skip(padding(size));
       if (flag === 'x') next = { ...next, ...pax(body) };
-      else if (flag === 'L') next = { ...next, path: text(body, 0, body.length) };
+      else if (flag === 'L') next = { ...next, path: pathText(body, 0, body.length) };
       else if (flag === 'K') next = { ...next, linkpath: text(body, 0, body.length) };
       continue;
     }
-    const prefix = text(block, 345, 155),
-      name = text(block, 0, 100);
+    const prefix = pathText(block, 345, 155),
+      name = pathText(block, 0, 100);
     const path = next.path ?? (prefix ? `${prefix}/${name}` : name),
       linkname = next.linkpath ?? text(block, 157, 100),
       length = next.size !== undefined ? Number(next.size) : size;

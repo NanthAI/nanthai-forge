@@ -4,6 +4,7 @@ import type { GithubRequest } from './hosted-github-api.js';
 import { publicationExclusion } from './files.js';
 import { digest } from './portable-hash.js';
 import { ForgeError, invariant } from './errors.js';
+import { refuseLossyGitPaths } from './git-path-bytes.js';
 
 /** One GitHub path change between two trees: the new entry, or null when removed. */
 export type InboundChange = {
@@ -33,7 +34,8 @@ export async function diffGithubTrees(
   before: string,
   after: string,
 ): Promise<{ changes: InboundChange[]; skipped: number; directories: number }> {
-  const changes: InboundChange[] = [];
+  const changes: InboundChange[] = [],
+    lossy: string[] = [];
   let skipped = 0,
     directories = 0;
   const list = async (sha: string | null) => {
@@ -65,6 +67,7 @@ export async function diffGithubTrees(
       changes.push({ path, after: null });
       return;
     }
+    if (path.includes('\uFFFD')) lossy.push(path);
     const mode = nativeMode(entry.mode);
     if (!mode) throw new ForgeError('GITHUB_INBOUND_MODE', `GitHub path ${path} has an unsupported mode.`);
     if (previous && previous.sha === entry.sha && previous.mode === entry.mode) return;
@@ -91,6 +94,8 @@ export async function diffGithubTrees(
     }
   };
   await visit('', before, after);
+  // A pushed path GitHub shows with U+FFFD is refused by name, never brought in renamed (6a0dd2e8).
+  refuseLossyGitPaths(lossy, 'This GitHub push');
   invariant(changes.length <= inboundFileLimit, 'GITHUB_INBOUND_TOO_LARGE', 'Too many changed files.');
   return {
     changes: changes.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)),

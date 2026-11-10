@@ -29,6 +29,13 @@ upstream creates a public mirror; a private upstream stays private. Access is
 checked through the existing GitHub authorization path. Credentials are never
 stored in progress or cursor records.
 
+Paths stay exactly as Git has them. Git allows any path bytes; Forge stores UTF-8
+paths only. A path that is not valid UTF-8 (GitHub's API shows those bytes as
+U+FFFD) is never renamed: the import, or an inbound GitHub push, refuses with
+`GITHUB_SOURCE_UNSUPPORTED` naming every such path (`\uFFFD` or `\xNN` for the
+bytes) and main is not changed. Rename them in Git to UTF-8 names (`git mv`), push,
+and retry.
+
 ## Which GitHub token pays
 
 | Request | Token |

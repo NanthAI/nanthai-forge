@@ -6,6 +6,7 @@ import { githubBlobEndpointBytes, type GithubSourceEntry } from './github-projec
 import { tarEntries } from './github-tar.js';
 import { invariant } from './errors.js';
 import { safeRelative } from './files.js';
+import { refuseLossyGitPaths } from './git-path-bytes.js';
 import { ListingBuilder, type ListingTable } from './github-listing-codec.js';
 import {
   splitGithubTree,
@@ -61,9 +62,11 @@ export async function listGithubTree(
   let totalBytes = 0,
     submodules = 0,
     entries = 0;
+  const lossy: string[] = [];
   walkSplitTree(listed!, (path, entry) => {
     entries++;
     if (typeof path !== 'string' || !safeRelative(path) || !gitId(entry.sha)) invalid();
+    if (path.includes('\uFFFD')) lossy.push(path);
     invariant(
       !path
         .toLowerCase()
@@ -96,6 +99,8 @@ export async function listGithubTree(
     totalBytes += entry.size!;
   });
   listed = null;
+  // One refusal names every path GitHub could not show as UTF-8 (Issue 6a0dd2e8).
+  if (lossy.length) refuseLossyGitPaths(lossy, 'This GitHub repository');
   // Recursive replies list parents first; a file under an undeclared or file
   // parent would be a tree GitHub never committed, and a path is a file or a directory.
   for (let i = 0; i < rows.length; i++) {

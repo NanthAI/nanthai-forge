@@ -465,6 +465,18 @@ test('a hazard repository passes by a named clone refusal; a plain repository th
     compareToBaseline([broke], baseline).map(x => `${x.op}:${x.was}->${x.now}`),
     ['clone:refused->skip'],
   );
+  // Issue 6a0dd2e8: a non-UTF-8 path is refused at import by name; the scenario ends there.
+  // The generic IMPORT_FAILED (no code from the import) never counts as a named refusal.
+  const atImport = {
+    id: 'shapes-nonutf8',
+    steps: { import: { forge: { ok: false, error: { code: 'GITHUB_SOURCE_UNSUPPORTED' } } } },
+    refusals: [{ where: 'import', code: 'GITHUB_SOURCE_UNSUPPORTED' }],
+  };
+  const nonutf8 = summarize(atImport, { hazard: true });
+  assert.deepEqual([nonutf8.paths.import.v, nonutf8.paths.clone.v, nonutf8.pass], ['refused', 'skip', true]);
+  assert.equal(summarize(atImport, {}).pass, false);
+  const unnamed = { ...atImport, refusals: [{ where: 'import', code: 'IMPORT_FAILED' }] };
+  assert.equal(summarize(unnamed, { hazard: true }).pass, false);
 });
 
 test('the result-to-commit gap is the time from the last check run end to the commit; prep reads start, clone and job overhead', () => {
