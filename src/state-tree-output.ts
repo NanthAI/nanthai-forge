@@ -95,6 +95,7 @@ async function writeOnBase(
   base: string,
 ): Promise<StateTreeDualResult> {
   const pointer = io.pointer(base)!,
+    began = performance.now(),
     session = new TreeSession(io.store),
     /** Git ids the base's own tree names, when its file list was read from that tree. */
     walked = new Map<string, TreeFile>();
@@ -105,7 +106,8 @@ async function writeOnBase(
     for (const file of listed) walked.set(key(file), { mode: file.mode, blob: file.blob, oid: file.oid });
     files = listed.map(({ path, blob, mode }) => ({ path, blob, mode }));
   }
-  const before = new Map(files.map(file => [file.path, file])),
+  const baseMs = Math.round(performance.now() - began),
+    before = new Map(files.map(file => [file.path, file])),
     after = new Map(value.files.map(file => [file.path, file])),
     changes: { path: string; after: NativeFile | null }[] = [];
   for (const file of value.files)
@@ -160,15 +162,21 @@ async function writeOnBase(
   const bytes = unknown.length ? await sources.bytes(unknown).catch(() => null) : [];
   if (!bytes || bytes.some(value => !value)) return { status: 'skipped', reason: 'GIT_IDS_UNKNOWN' };
   unknown.forEach((file, i) => gitIds.set(key(file), bytes[i]!));
-  const result = await dualWriteStateTree({
-    store: io.store,
-    base: { pointer, state: base, files },
-    next: { value, manifest },
-    state,
-    changes,
-    gitFile: async file => gitIds.get(key(file))!,
-  });
-  return result.status === 'written' && !value.parents.includes(base) ? { ...result, healed: base } : result;
+  const idsMs = Math.round(performance.now() - began) - baseMs,
+    result = await dualWriteStateTree({
+      store: io.store,
+      base: { pointer, state: base, files },
+      next: { value, manifest },
+      state,
+      changes,
+      gitFile: async file => gitIds.get(key(file))!,
+    });
+  if (result.status !== 'written') return result;
+  return {
+    ...result,
+    ...(value.parents.includes(base) ? {} : { healed: base }),
+    phases: { baseMs, idsMs, ...result.phases! },
+  };
 }
 
 /** Fetch the segments a State's tree lives in, while the step still has other work to do (the
@@ -243,7 +251,12 @@ export function logStateTree(
     status: result.status,
     ...io,
     ...(result.status === 'written'
-      ? { bytes: result.bytes, records: result.records, ...(result.healed ? { healed: result.healed } : {}) }
+      ? {
+          bytes: result.bytes,
+          records: result.records,
+          ...(result.healed ? { healed: result.healed } : {}),
+          ...result.phases,
+        }
       : {}),
     ...(result.status === 'skipped' ? { reason: result.reason } : {}),
     ...(result.status === 'refused' ? { code: result.code.slice(0, 64) } : {}),

@@ -27,7 +27,16 @@ export type StateTreeDualInput = {
 export type StateTreeDualResult =
   /** `healed`: written as edits on this State with a pointer, not on a parent (the parents were
    * flat). */
-  | { status: 'written'; pointer: StateTreePointer; bytes: number; records: number; healed?: string }
+  | {
+      status: 'written';
+      pointer: StateTreePointer;
+      bytes: number;
+      records: number;
+      healed?: string;
+      /** Where the wall time went, in ms: the base's file list, the changed files' Git ids, the
+       * segment build (base-tree reads) and the gate (verify beside the confirmed PUT). */
+      phases?: { baseMs?: number; idsMs?: number; buildMs: number; gateMs: number };
+    }
   /** Nothing was attempted: the base has no tree form yet (a conversion job supplies it), or too
    * many changed files have no known Git id to read them back in one bounded batch. */
   | { status: 'skipped'; reason: 'BASE_HAS_NO_TREE' | 'GIT_IDS_UNKNOWN' }
@@ -83,7 +92,9 @@ export async function dualWriteStateTree(input: StateTreeDualInput): Promise<Sta
         input.state ?? digest(next.manifest),
       ),
       staged = stagedStore(store),
-      written = await saveStateTree(staged.store, base.pointer, record, changes);
+      built = performance.now(),
+      written = await saveStateTree(staged.store, base.pointer, record, changes),
+      gated = performance.now();
     // The gate: the segment must give back the flat manifest byte for byte. It is checked on the
     // bytes in hand while their write is in flight; the pointer is returned only after both.
     await Promise.all([
@@ -94,7 +105,9 @@ export async function dualWriteStateTree(input: StateTreeDualInput): Promise<Sta
       ),
       staged.flush(),
     ]);
-    return { status: 'written', ...written };
+    const buildMs = Math.round(gated - built),
+      gateMs = Math.round(performance.now() - gated);
+    return { status: 'written', ...written, phases: { buildMs, gateMs } };
   } catch (error) {
     return {
       status: 'refused',
