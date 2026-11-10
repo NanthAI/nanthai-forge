@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { copyRecipeClosure } from './object-pack-range.js';
+import { downloadClosureSchema } from './blob-download-format.js';
 import { checkoutIo } from './checkout-io.js';
 import { closeSync, openSync, unlinkSync } from 'node:fs';
 import { makeFunctionReference } from 'convex/server';
@@ -60,6 +62,7 @@ const rowSchema = z.discriminatedUnion('location', [
     digest: z.string(),
     size: z.number().safe().nonnegative(),
     location: z.literal('recipe'),
+    closure: downloadClosureSchema.optional(),
     recipe: z.object({
       digest: z.string(),
       size: z.number().safe().nonnegative(),
@@ -197,6 +200,25 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         'Source location differs from selected size.',
       );
   }
+  private async refresh(pin: ContentPin) {
+    const window = this.window.getStore(),
+      root = window?.closureRoots.get(pin.sha256);
+    if (!window || !root) return this.describe([pin.sha256], false).then(() => {});
+    let renewing = window.renewals.get(root.sha256);
+    if (!renewing) {
+      renewing = this.describe([root.sha256], false).then(() => {
+        const row = this.row(root.sha256);
+        invariant(
+          row?.location === 'recipe' && row.closure,
+          'EXCHANGE_DOWNLOAD_DENIED',
+          'Recipe is no longer readable.',
+        );
+        for (const leaf of row.closure) window.rows.set(leaf.digest, { ...leaf, location: 'r2' });
+      });
+      window.renewals.set(root.sha256, renewing);
+    }
+    await renewing;
+  }
   private async read<T>(
     pin: ContentPin,
     consume: (response: Response, progressed: () => void) => Promise<T>,
@@ -234,7 +256,7 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
         },
       );
       if (!result.refresh) return result.value;
-      await this.describe([pin.sha256], false);
+      await this.refresh(pin);
       row = this.row(pin.sha256)!;
       invariant(
         row.size === pin.size && row.location === 'r2' && !!row.url,
@@ -334,6 +356,22 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
       });
     const fd = await checkoutIo(async () => openSync(path, 'wx', 0o600));
     try {
+      if (row.closure) {
+        for (const leaf of row.closure) {
+          this.state().rows.set(leaf.digest, { ...leaf, location: 'r2' });
+          this.state().closureRoots.set(leaf.digest, pin);
+        }
+        const bytes = await copyRecipeClosure(pin, row.closure, leaf =>
+          this.physical({ sha256: leaf.digest, size: leaf.size }),
+        );
+        invariant(
+          digest(bytes) === pin.sha256,
+          'INVALID_NATIVE_SOURCE',
+          'Recipe differs from selected source.',
+        );
+        await checkoutIo(async () => writeAll(fd, bytes));
+        return;
+      }
       const recipePin = { sha256: row.recipe.digest, size: row.recipe.size };
       const recipe =
         this.state().recipes.get(pin.sha256) ??
@@ -370,7 +408,10 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     }
   }
   private async prepareRecipes(pins: ContentPin[]) {
-    const logical = pins.filter(pin => this.row(pin.sha256)?.location === 'recipe');
+    const logical = pins.filter(pin => {
+      const row = this.row(pin.sha256);
+      return row?.location === 'recipe' && !row.closure;
+    });
     const recipePin = (pin: ContentPin) => {
       const row = this.row(pin.sha256)!;
       invariant(row.location === 'recipe', 'INVALID_NATIVE_SOURCE', 'Select recipe content.');
@@ -477,5 +518,17 @@ export class HostedCheckoutDownloads implements CheckoutObjectTransport {
     return own;
   }
 }
-type Window = { rows: Map<string, Row>; recipes: Map<string, ObjectRecipe>; indexPages: Map<string, Buffer> };
-const newWindow = (): Window => ({ rows: new Map(), recipes: new Map(), indexPages: new Map() });
+type Window = {
+  rows: Map<string, Row>;
+  recipes: Map<string, ObjectRecipe>;
+  indexPages: Map<string, Buffer>;
+  closureRoots: Map<string, ContentPin>;
+  renewals: Map<string, Promise<void>>;
+};
+const newWindow = (): Window => ({
+  rows: new Map(),
+  recipes: new Map(),
+  indexPages: new Map(),
+  closureRoots: new Map(),
+  renewals: new Map(),
+});

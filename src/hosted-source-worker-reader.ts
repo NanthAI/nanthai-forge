@@ -18,6 +18,10 @@ export interface SourceWorkerTransport {
   stateGeneration?(id: string): number | undefined;
   rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;
+  recipeLeaves?(id: string): readonly { sha256: string; size: number }[] | undefined;
+  readInto?(pin: WorkerPin, destination: Uint8Array): Promise<boolean>;
+  /** Only after the caller checked the whole exact digest; no authority or source revision hints. */
+  rememberBytes?(pin: WorkerPin, bytes: Uint8Array): void;
   prepareRead?(pins: WorkerPin[]): Promise<void>;
   describe?(sha256: string): Promise<WorkerObject>;
   describeAndRead?(sha256s: string[]): Promise<
@@ -161,7 +165,7 @@ export class SourceWorkerReader {
     const path = join(this.directory, pin.sha256),
       temporary = join(this.directory, randomUUID());
     let bytes: AsyncIterable<Uint8Array>;
-    if (input.recipe) {
+    if (input.recipe && !this.transport.recipeLeaves?.(pin.sha256)) {
       const recipe = objectRecipeSchema.parse(await this.json(input.recipe));
       invariant(
         recipe.object.sha256 === pin.sha256 && recipe.object.size === pin.size,

@@ -20,10 +20,14 @@ export function sourceR2Pin(ref: string) {
   invariant(Number.isSafeInteger(size), 'SOURCE_HASH_MISMATCH', 'Source storage size changed.');
   return { sha256: match[1]!, size };
 }
-export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
+export function sourceStorage(
+  ctx: ActionCtx,
+  projectId: Id<'hostedProjects'>,
+  hash: (bytes: Uint8Array) => string = digest,
+) {
   return {
     async store(bytes: Uint8Array): Promise<string> {
-      const pin = { sha256: digest(bytes), size: bytes.length };
+      const pin = { sha256: hash(bytes), size: bytes.length };
       const stored = await storeSourceBytes(ctx, projectId, bytes, pin);
       return 'r2Key' in stored ? `r2source:${pin.sha256}:${pin.size}` : stored.storageId;
     },
@@ -75,7 +79,7 @@ export function sourceStorage(ctx: ActionCtx, projectId: Id<'hostedProjects'>) {
         throw new SourceIoError(error, 'durable-body', pin.sha256, response.status);
       }
       invariant(
-        bytes.length === pin.size && digest(bytes) === pin.sha256,
+        bytes.length === pin.size && hash(bytes) === pin.sha256,
         'SOURCE_HASH_MISMATCH',
         'Durable source data changed.',
       );

@@ -49,8 +49,16 @@ export function browserObjects(client: Client, projectId: Id<'hostedProjects'>) 
   let reader = projects.get(projectId);
   if (!reader) {
     reader = new ObjectDownloadReader({
-      describe: digests => client.mutation(api.projectObjectDownloads.describe, { projectId, digests }),
-      sign: digests => client.mutation(api.projectObjectDownloads.signDownloads, { projectId, digests }),
+      describe: (digests, signed) =>
+        client.mutation(api.projectObjectDownloads.describe, {
+          projectId,
+          digests,
+          ...(signed ? { signed: true } : {}),
+        }),
+      sign: async digests =>
+        (await client.mutation(api.projectObjectDownloads.signDownloads, { projectId, digests })).filter(
+          row => 'url' in row,
+        ),
     });
     projects.set(projectId, reader);
   }

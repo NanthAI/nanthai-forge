@@ -115,7 +115,14 @@ export class ConvexLaneTransport implements LaneTransport {
     for (const { pin } of files) {
       const row = this.descriptors.get(pin.sha256);
       invariant(row?.size === pin.size, 'INVALID_WORK_BACKUP', 'Download binding changed.');
-      if (row.url && !runs.has(row.digest)) signed.set(row.digest, { ...row, url: row.url });
+      if (row.closure) signed.set(row.digest, { digest: row.digest, size: row.size, closure: row.closure });
+      else if (row.url && !runs.has(row.digest))
+        signed.set(row.digest, {
+          digest: row.digest,
+          size: row.size,
+          url: row.url,
+          ...(row.range ? { range: row.range } : {}),
+        });
     }
     const direct = await readSigned(
       async (_projectId, digests) => {
@@ -124,7 +131,20 @@ export class ConvexLaneTransport implements LaneTransport {
           for (const id of digests) signed.delete(id);
           return rows;
         }
-        return (await this.page(digests, true)).flatMap(row => (row.url ? [{ ...row, url: row.url }] : []));
+        return (await this.page(digests, true)).flatMap((row): SignedObject[] =>
+          row.closure
+            ? [{ digest: row.digest, size: row.size, closure: row.closure }]
+            : row.url
+              ? [
+                  {
+                    digest: row.digest,
+                    size: row.size,
+                    url: row.url,
+                    ...(row.range ? { range: row.range } : {}),
+                  },
+                ]
+              : [],
+        );
       },
       this.exchange.projectId,
       files.filter(file => signed.has(file.pin.sha256)).map(file => file.pin),

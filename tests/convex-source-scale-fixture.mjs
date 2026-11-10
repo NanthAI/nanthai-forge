@@ -369,6 +369,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
       failedActions: jobMetrics.filter(m => m.failed).length,
       maxFailedRssBytes: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.maxRssBytes)),
       maxFailedStepMs: Math.max(0, ...jobMetrics.filter(m => m.failed).map(m => m.elapsedMs)),
+      workCpuMicros: jobMetrics.reduce((n, m) => n + (m.workCpuMicros ?? 0), 0),
       cpuMicros: jobMetrics.reduce((n, m) => n + m.cpuMicros, 0),
       actionMs: jobMetrics.reduce((n, m) => n + m.elapsedMs, 0),
       peakActive,

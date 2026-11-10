@@ -49,7 +49,7 @@ export async function runSmallSourceSave(
   if (
     plan.pages.size > smallSavePageBytes ||
     plan.pageCount !== 1 ||
-    plan.baseline.recipe ||
+    (plan.baseline.recipe && !io.recipeLeaves?.(plan.baseline.object.sha256)) ||
     plan.baseline.object.size > smallSaveStateBytes
   )
     return null;

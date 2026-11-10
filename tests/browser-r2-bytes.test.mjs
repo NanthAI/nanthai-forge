@@ -141,11 +141,19 @@ test('expired URLs refresh once, including CORS-masked network errors, then fail
     reader = browserObjects(b, 'project');
   fake.forbidGets = 1;
   assert.equal(new TextDecoder().decode((await reader.read([p]))[0]), 'expiring');
-  assert.equal(b.calls.filter(call => call.method === 'signDownloads').length, 2);
+  assert.equal(
+    b.calls.filter(call => call.method === 'signDownloads').length,
+    1,
+    'initial URL rides on describe; only the expired URL refresh signs again',
+  );
   const other = browser(s);
   fake.forbidGets = 10;
   await assert.rejects(browserObjects(other, 'project').read([p]), code('EXCHANGE_DOWNLOAD_DENIED'));
-  assert.equal(other.calls.filter(call => call.method === 'signDownloads').length, 2);
+  assert.equal(
+    other.calls.filter(call => call.method === 'signDownloads').length,
+    1,
+    'a fresh signature is attempted once before refusal',
+  );
   fake.forbidGets = 0;
   let attempts = 0,
     signs = 0;

@@ -490,3 +490,266 @@ test('trusted closure refuses unstaged, packed, wrong-size and oversized project
     );
   assert(!rows(s).some(row => row.digest === pin.sha256));
 });
+
+async function trustedClosureFixture(t, count = 12) {
+  const { s, fake } = await setup(t),
+    exchange = client(s);
+  const parts = Array.from({ length: count }, (_, i) => {
+    const bytes = Buffer.alloc(128 * 1024, 65 + i);
+    bytes.writeUInt32LE(i);
+    return bytes;
+  });
+  for (const bytes of parts) await exchange.uploadBatch(content([bytes]));
+  const bytes = Buffer.concat(parts),
+    pin = { sha256: digest(bytes), size: bytes.length },
+    leaves = pins(parts);
+  const index = Buffer.from(
+    JSON.stringify({
+      kind: 'forge-byte-tree',
+      schema: 1,
+      children: leaves.map(leaf => ({ ...leaf, height: 0, length: leaf.size })),
+    }),
+  );
+  await exchange.uploadBatch(content([index]));
+  const recipe = Buffer.from(
+    JSON.stringify({
+      kind: 'forge-object-recipe',
+      schema: 1,
+      object: pin,
+      tree: { ...pins([index])[0], height: 1, length: pin.size },
+    }),
+  );
+  await exchange.uploadBatch(content([recipe]));
+  const { moduleUrl } = await import('./convex-module.mjs');
+  const { storeSourceOutputs } = await import(moduleUrl('../convex/projectConvexSourceOutput.ts'));
+  await storeSourceOutputs(s.ctx, 'project', 'trusted-worker', [
+    { ...pin, recipe: pins([recipe])[0], recipeClosure: leaves },
+  ]);
+  return { s, fake, pin, bytes, leaves, moduleUrl };
+}
+
+test('trusted closures read through CLI, browser, server and both checkout transports with flat-object call counts', async t => {
+  const { s, pin, bytes, moduleUrl } = await trustedClosureFixture(t);
+  const { getFunctionName } = await import('convex/server');
+  const exchange = client(s),
+    calls = [];
+  const original = exchange.client.mutation;
+  exchange.client.mutation = (ref, args) => {
+    calls.push(getFunctionName(ref));
+    return original(ref, args);
+  };
+  assert.deepEqual(await exchange.download(pin), bytes);
+  assert.deepEqual(
+    calls,
+    ['projectObjectDownloads:signDownloads'],
+    'CLI obtains the entire closure in the existing signing call',
+  );
+  const { ObjectDownloadReader } = await import('../dist/blob-download.js');
+  let described = 0;
+  const browser = new ObjectDownloadReader({
+    describe: (digests, signed) => {
+      described++;
+      return downloads.describe._handler(s.ctx, { projectId: 'project', digests, signed });
+    },
+    sign: () => assert.fail('closure incurred a second signing call'),
+  });
+  assert.deepEqual(Buffer.from((await browser.read([pin]))[0]), bytes);
+  assert.equal(described, 2, 'browser retains the flat before/after access reads');
+  const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+  let resolved = 0;
+  const query = s.ctx.runQuery;
+  s.ctx.runQuery = (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjects:resolve') resolved++;
+    return query(ref, args);
+  };
+  assert.deepEqual(await exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [pin]), [bytes]);
+  assert.equal(resolved, 2, 'server retains the flat before/after access reads');
+  const directory = mkdtempSync(join(tmpdir(), 'forge-r2-closure-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  for (const [index, name] of ['HostedCheckoutDownloads', 'ConvexLaneTransport'].entries()) {
+    const module = await import(
+      name === 'HostedCheckoutDownloads'
+        ? '../dist/hosted-checkout-downloads.js'
+        : '../dist/hosted-lane-transport.js'
+    );
+    const checkout = new module[name](exchange),
+      path = join(directory, String(index));
+    calls.length = 0;
+    await checkout.objects([pin.sha256]);
+    await checkout.downloadFiles([{ pin, path }]);
+    assert.deepEqual(readFileSync(path), bytes);
+    assert.equal(
+      calls.length,
+      name === 'HostedCheckoutDownloads' ? 1 : 2,
+      'checkout uses the existing signed page and ordinary final authority read',
+    );
+  }
+});
+
+test('trusted closure corruption, whole-digest disagreement and mid-read revocation never expose reconstructed bytes', async t => {
+  const { s, fake, pin, leaves, moduleUrl } = await trustedClosureFixture(t, 3);
+  const { ObjectDownloadReader } = await import('../dist/blob-download.js');
+  const reader = () =>
+    new ObjectDownloadReader({
+      describe: (digests, signed) =>
+        downloads.describe._handler(s.ctx, { projectId: 'project', digests, signed }),
+      sign: () => assert.fail('unexpected sign'),
+    });
+  fake.corrupt.add(fake.key(`v1/p/project/o/${leaves[0].sha256}`));
+  await assert.rejects(reader().read([pin]), code('BLOB_DIGEST_MISMATCH'));
+  fake.corrupt.clear();
+  const row = rows(s).find(row => row.digest === pin.sha256);
+  row.recipeClosure.reverse();
+  await assert.rejects(reader().read([pin]), code('BLOB_DIGEST_MISMATCH'));
+  row.recipeClosure.reverse();
+  const { exchangeObjectReader } = await import(moduleUrl('../convex/projectExchangeReader.ts'));
+  const read = globalThis.fetch;
+  globalThis.fetch = async (...args) => {
+    const response = await read(...args);
+    s.tables.hostedProjects.get('project').owner = 'another';
+    return response;
+  };
+  try {
+    await assert.rejects(
+      exchangeObjectReader(s.ctx, false, 0).read('project', 'owner', [pin]),
+      code('PROJECT_UNAVAILABLE'),
+    );
+  } finally {
+    globalThis.fetch = read;
+    s.tables.hostedProjects.get('project').owner = 'owner';
+  }
+});
+
+test('trusted closure source transport fills the existing destination without another descriptor call', async t => {
+  const { s, pin, bytes, moduleUrl } = await trustedClosureFixture(t, 3);
+  const [row] = await downloads.describe._handler(s.ctx, {
+    projectId: 'project',
+    digests: [pin.sha256],
+    signed: true,
+  });
+  const { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts'));
+  const io = convexSourceTransport(
+    { storage: {}, runMutation: () => assert.fail('extra source descriptor call') },
+    { projectId: 'project', jobId: 'trusted', step: 0 },
+    [
+      {
+        descriptor: { object: pin, recipe: { sha256: row.recipe.digest, size: row.recipe.size } },
+        storageId: null,
+        url: null,
+        closure: row.closure,
+      },
+    ],
+  ).io;
+  const { readSourceExact } = await import('../dist/hosted-source-exact.js');
+  assert.deepEqual(Buffer.from(await readSourceExact(io, pin)), bytes);
+  assert.equal(io.recipeLeaves(pin.sha256).length, 3);
+});
+
+test('expired closure signatures renew the logical grant once for all leaves', async t => {
+  const { s, fake, pin, bytes } = await trustedClosureFixture(t, 3);
+  const { getFunctionName } = await import('convex/server');
+  const exchange = client(s),
+    original = exchange.client.mutation;
+  let signatures = 0;
+  exchange.client.mutation = (ref, args) => {
+    if (getFunctionName(ref) === 'projectObjectDownloads:signDownloads') signatures++;
+    return original(ref, args);
+  };
+  fake.forbidGets = 3;
+  assert.deepEqual(await exchange.download(pin), bytes);
+  assert.equal(signatures, 2, 'one initial logical signature call and one renewal for every expired leaf');
+});
+
+test('prepared closure grants are reused and browser/checkouts share one renewal across expired leaves', async t => {
+  const { s, fake, pin, bytes } = await trustedClosureFixture(t, 3);
+  const { getFunctionName } = await import('convex/server');
+  const exchange = client(s),
+    original = exchange.client.mutation,
+    calls = [];
+  exchange.client.mutation = (ref, args) => {
+    calls.push(getFunctionName(ref));
+    return original(ref, args);
+  };
+  await exchange.prepareDownloads([pin]);
+  assert.deepEqual(await exchange.download(pin), bytes);
+  assert.deepEqual(calls, ['projectObjectDownloads:signDownloads']);
+  const { ObjectDownloadReader } = await import('../dist/blob-download.js');
+  let describes = 0;
+  const browser = new ObjectDownloadReader({
+    describe: (digests, signed) => {
+      describes++;
+      return downloads.describe._handler(s.ctx, { projectId: 'project', digests, signed });
+    },
+    sign: () => assert.fail('unexpected leaf signing'),
+  });
+  fake.forbidGets = 3;
+  assert.deepEqual(Buffer.from((await browser.read([pin]))[0]), bytes);
+  assert.equal(describes, 3, 'initial page, one closure renewal, and final current-access check');
+  const { HostedCheckoutDownloads } = await import('../dist/hosted-checkout-downloads.js');
+  const dir = mkdtempSync(join(tmpdir(), 'forge-r2-renewed-closure-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const checkout = new HostedCheckoutDownloads(exchange),
+    path = join(dir, 'file');
+  calls.length = 0;
+  await checkout.objects([pin.sha256]);
+  fake.forbidGets = 3;
+  await checkout.downloadFiles([{ pin, path }]);
+  assert.deepEqual(readFileSync(path), bytes);
+  assert.equal(calls.length, 2, 'one initial page and one shared closure renewal');
+});
+
+test('destination reads keep verified bytes in the existing action cache across quanta', async t => {
+  const { s, fake, pin, bytes, moduleUrl } = await trustedClosureFixture(t, 24);
+  const [row] = await downloads.describe._handler(s.ctx, {
+    projectId: 'project',
+    digests: [pin.sha256],
+    signed: true,
+  });
+  const { convexSourceTransport } = await import(moduleUrl('../convex/projectConvexSourceTransport.ts'));
+  const { readSourceExact } = await import('../dist/hosted-source-exact.js');
+  const { cachedReads } = await import('../dist/hosted-source-read-cache.js');
+  const original = convexSourceTransport(
+    { storage: {}, runMutation: () => assert.fail('extra descriptor read') },
+    { projectId: 'project', jobId: 'trusted', step: 0 },
+    [
+      {
+        descriptor: { object: pin, recipe: { sha256: row.recipe.digest, size: row.recipe.size } },
+        storageId: null,
+        url: null,
+        closure: row.closure,
+      },
+    ],
+  );
+  const io = cachedReads(original.io, { bytes: new Map(), held: 0 }, 8 * 1024 * 1024);
+  const first = await readSourceExact(io, pin),
+    requests = fake.requests.length;
+  assert.deepEqual(Buffer.from(first), bytes);
+  first.fill(0);
+  assert.deepEqual(Buffer.from(await readSourceExact(io, pin)), bytes);
+  assert.equal(fake.requests.length, requests, 'a later quantum never refetches the same projected State');
+  assert.equal(original.reads.bytes, pin.size);
+});
+
+test('older signature endpoints are negotiated once and current authorization errors never select a fallback', async () => {
+  const { signDownloadObjects } = await import('../dist/exchange-r2-read.js');
+  const calls = [];
+  const older = {
+    mutation: async (_ref, args) => {
+      calls.push(args.recipes ?? false);
+      if (args.recipes) throw Error('Object contains extra field `recipes`');
+      return [];
+    },
+  };
+  await signDownloadObjects(older, 'project', []);
+  await signDownloadObjects(older, 'project', []);
+  assert.deepEqual(calls, [true, false, false]);
+  let refused = 0;
+  const denied = {
+    mutation: async () => {
+      refused++;
+      throw Error('AUTH_REVOKED');
+    },
+  };
+  await assert.rejects(signDownloadObjects(denied, 'project', []), /AUTH_REVOKED/);
+  assert.equal(refused, 1);
+});

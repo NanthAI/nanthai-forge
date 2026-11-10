@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
+import { digest as nativeDigest } from '../src/hash';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import { convexSourceTransport } from './projectConvexSource';
@@ -32,8 +33,8 @@ export const run = internalAction({
         );
         if (!loaded) return null;
         const state = JSON.parse(loaded),
-          { io, outputs } = convexSourceTransport(ctx, input);
-        const { read, store } = sourceStorage(ctx, input.projectId);
+          { io, outputs } = convexSourceTransport(ctx, input, [], undefined, { hash: nativeDigest });
+        const { read, store } = sourceStorage(ctx, input.projectId, nativeDigest);
         let result: Awaited<ReturnType<typeof runSourceTask>>;
         try {
           const previous = state.progress

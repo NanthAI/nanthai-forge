@@ -1,4 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import { copyRecipeClosure } from './object-pack-range.js';
+import type { SignedDownload } from './blob-download-format.js';
+import type { ConvexHttpClient } from 'convex/browser';
+import { makeFunctionReference } from 'convex/server';
 import type { ContentPin } from './native-exchange.js';
 import { mapExchange } from './exchange-parallel.js';
 import { ForgeError, invariant } from './errors.js';
@@ -7,8 +11,34 @@ import { digest } from './hash.js';
 import { packHeaders, verifyPackRange, type PackRange } from './object-pack-range.js';
 
 /** A signed GET the server returned for one committed R2 object of the project. */
-export type SignedObject = { digest: string; size: number; url: string; range?: PackRange };
+export type SignedObject = { digest: string; size: number } & (
+  | { url: string; range?: PackRange; closure?: never }
+  | { closure: SignedDownload[]; url?: never; range?: never }
+);
 export type SignDownloads = (projectId: string, digests: string[]) => Promise<SignedObject[]>;
+
+// Only older servers need one compatibility retry; current servers sign both encodings in one call.
+const closureSupport = new WeakMap<object, boolean>();
+export async function signDownloadObjects(
+  client: Pick<ConvexHttpClient, 'mutation'>,
+  projectId: string,
+  digests: string[],
+): Promise<SignedObject[]> {
+  const recipes = closureSupport.get(client) !== false;
+  const request = (closures: boolean) =>
+    client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:signDownloads'), {
+      projectId,
+      digests,
+      ...(closures ? { recipes: true } : {}),
+    }) as Promise<SignedObject[]>;
+  try {
+    return await request(recipes);
+  } catch (error) {
+    if (!recipes || !/extra field [`'"]?recipes/.test(String((error as Error)?.message))) throw error;
+    closureSupport.set(client, false);
+    return request(false);
+  }
+}
 
 /** Disposable process memory, scoped to one exchange client. Never persisted or logged. */
 export class SignedDownloadCache {
@@ -28,12 +58,17 @@ export class SignedDownloadCache {
     // Derive the lifetime from the actual signature, including time spent getting it.
     // Unknown/malformed lifetimes can be used for this fetch but are never cached.
     try {
-      const query = new URL(object.url).searchParams,
-        date = query.get('X-Amz-Date') ?? '',
-        issued = Date.parse(date.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z')),
-        ttl = Number(query.get('X-Amz-Expires')),
-        reuseUntil = issued + ttl * 1000 - 60_000;
-      if (Number.isFinite(reuseUntil) && ttl > 0 && reuseUntil > Date.now())
+      const lifetimes = (object.closure ? object.closure.map(leaf => leaf.url) : [object.url]).map(url => {
+        const query = new URL(url).searchParams,
+          date = query.get('X-Amz-Date') ?? '',
+          issued = Date.parse(
+            date.replace(/^(\d{4})(\d\d)(\d\d)T(\d\d)(\d\d)(\d\d)Z$/, '$1-$2-$3T$4:$5:$6Z'),
+          ),
+          ttl = Number(query.get('X-Amz-Expires'));
+        return ttl > 0 ? issued + ttl * 1000 - 60_000 : NaN;
+      });
+      const reuseUntil = Math.min(...lifetimes);
+      if (Number.isFinite(reuseUntil) && reuseUntil > Date.now())
         this.entries.set(this.key(projectId, object.digest), { object, reuseUntil });
     } catch {
       // A URL without a parseable expiry is not reusable.
@@ -54,6 +89,7 @@ export async function getSigned(
   onBytes?: (done: number, total?: number) => void,
   onCall?: (name: string, pending: boolean) => void,
   range?: PackRange,
+  destination?: Uint8Array,
 ): Promise<Buffer | 'forbidden'> {
   onCall?.('R2 object download', true);
   try {
@@ -71,7 +107,21 @@ export async function getSigned(
         'R2_READ_FAILED',
         `R2 object download returned HTTP ${response.status}. Retry the command.`,
       );
-    const bytes = Buffer.from(await response.arrayBuffer());
+    let bytes: Buffer;
+    if (destination && response.body) {
+      let at = 0;
+      for await (const part of response.body as unknown as AsyncIterable<Uint8Array>) {
+        invariant(
+          at + part.length <= destination.length,
+          'BLOB_DIGEST_MISMATCH',
+          'Recipe leaf exceeds its exact size.',
+        );
+        destination.set(part, at);
+        at += part.length;
+      }
+      invariant(at === destination.length, 'BLOB_DIGEST_MISMATCH', 'Recipe leaf is truncated.');
+      bytes = Buffer.from(destination.buffer, destination.byteOffset, destination.byteLength);
+    } else bytes = Buffer.from(await response.arrayBuffer());
     verifyPackRange(response, range, pin.size);
     invariant(
       bytes.length === pin.size && digest(bytes) === pin.sha256,
@@ -121,12 +171,48 @@ export async function readSigned(
     readConcurrency,
     async object => {
       const pin = wanted.get(object.digest)!;
+      if (object.closure) {
+        let refreshed: Promise<SignedObject> | undefined;
+        const result = await copyRecipeClosure(pin, object.closure, async (leaf, destination) => {
+          const physical = { sha256: leaf.digest, size: leaf.size };
+          let value = await getSigned(leaf.url, physical, 4, undefined, onCall, leaf.range, destination);
+          if (value === 'forbidden') {
+            refreshed ??= sign(projectId, [object.digest]).then(rows => {
+              const next = rows.find(row => row.digest === object.digest && row.size === object.size);
+              invariant(
+                next?.closure,
+                'EXCHANGE_DOWNLOAD_DENIED',
+                'The selected recipe is no longer readable.',
+              );
+              return next;
+            });
+            const next = (await refreshed).closure!.find(
+              row => row.digest === leaf.digest && row.size === leaf.size,
+            );
+            invariant(next, 'EXCHANGE_DOWNLOAD_DENIED', 'Recipe leaf is no longer readable.');
+            value = await getSigned(next.url, physical, 4, undefined, onCall, next.range, destination);
+            invariant(
+              value !== 'forbidden',
+              'EXCHANGE_DOWNLOAD_DENIED',
+              'Fresh recipe signature was refused.',
+            );
+          }
+          return value;
+        });
+        invariant(
+          digest(result) === pin.sha256,
+          'BLOB_DIGEST_MISMATCH',
+          'Recipe differs from the selected whole-object digest.',
+        );
+        onBytes?.(pin, pin.size);
+        return Buffer.from(result.buffer, result.byteOffset, result.byteLength);
+      }
       let result = await getSigned(object.url, pin, 4, done => onBytes?.(pin, done), onCall, object.range);
       if (result === 'forbidden') {
         cache.delete(projectId, object.digest);
         const [again] = await sign(projectId, [object.digest]);
         invariant(
-          again && again.digest === pin.sha256 && again.size === pin.size,
+          again && !again.closure && again.digest === pin.sha256 && again.size === pin.size,
           'EXCHANGE_DOWNLOAD_DENIED',
           'Object storage no longer lets this account read the selected content.',
         );

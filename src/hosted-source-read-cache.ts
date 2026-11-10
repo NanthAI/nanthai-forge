@@ -12,8 +12,30 @@ export function cachedReads<T extends Pick<SourceWorkerTransport, 'read'>>(
   cache: { bytes: Map<string, Buffer>; held: number },
   limit: number,
 ): T {
+  const delegated = io as Pick<SourceWorkerTransport, 'readInto' | 'rememberBytes'>;
   return {
     ...io,
+    ...(delegated.readInto
+      ? {
+          readInto: async (pin: WorkerPin, destination: Uint8Array) => {
+            const prior = cache.bytes.get(pin.sha256);
+            if (prior && prior.length === pin.size) {
+              destination.set(prior);
+              return true;
+            }
+            return delegated.readInto!(pin, destination);
+          },
+        }
+      : {}),
+    rememberBytes: (pin: WorkerPin, bytes: Uint8Array) => {
+      delegated.rememberBytes?.(pin, bytes);
+      // This hook is called only after the whole-object hash check. It also keeps
+      // destination reads in the same action cache as ordinary streams.
+      if (!cache.bytes.has(pin.sha256) && cache.held + pin.size <= limit && bytes.length === pin.size) {
+        cache.bytes.set(pin.sha256, Buffer.from(bytes));
+        cache.held += pin.size;
+      }
+    },
     read: async (pin: WorkerPin) => {
       const prior = cache.bytes.get(pin.sha256);
       if (prior && prior.length === pin.size)

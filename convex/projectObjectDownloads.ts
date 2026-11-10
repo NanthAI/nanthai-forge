@@ -20,6 +20,9 @@ import { packRange, packHeaders, type ObjectPack } from '../src/object-pack-rang
 import { signRecipeClosure } from './projectRecipeClosure';
 import { runValue, signRuns, type RunBinding } from './projectObjectRuns';
 const rangeValue = v.optional(v.object({ offset: v.number(), total: v.number() }));
+const signedClosureValue = v.array(
+  v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue }),
+);
 export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
   if (user) return accessibleProject(ctx, projectId, user.subject);
@@ -41,16 +44,30 @@ export async function readableProject(ctx: MutationCtx, projectId: Id<'hostedPro
  * without sign-in, within the signed-out budget in convex/abuseLimits.ts. Without the R2 settings
  * this fails closed. */
 export const signDownloads = mutation({
-  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()) },
-  returns: v.array(v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue })),
-  handler: async (ctx, { projectId, digests }) => {
+  args: { projectId: v.id('hostedProjects'), digests: v.array(v.string()), recipes: v.optional(v.boolean()) },
+  returns: v.array(
+    v.union(
+      v.object({ digest: v.string(), size: v.number(), url: v.string(), range: rangeValue }),
+      v.object({
+        digest: v.string(),
+        size: v.number(),
+        closure: signedClosureValue,
+      }),
+    ),
+  ),
+  handler: async (ctx, { projectId, digests, recipes }) => {
     try {
       invariant(digests.length <= 100, 'BAD_ARGUMENT', 'Sign downloads in pages of at most 100.');
       await readableProject(ctx, projectId);
       const found = [];
+      const closures = [];
       for (const digest of new Set(digests)) {
         if (!/^[0-9a-f]{64}$/.test(digest)) continue;
         const row = await findObject(ctx, projectId, digest);
+        if (recipes && row && !row.removed && row.recipe && row.recipeClosure) {
+          closures.push({ digest, size: row.size, closure: (await signRecipeClosure(row))! });
+          continue;
+        }
         if (
           row &&
           !row.removed &&
@@ -64,16 +81,19 @@ export const signDownloads = mutation({
             ...(row.pack ? { range: packRange(row)! } : {}),
           });
       }
-      if (!found.length) return [];
+      if (!found.length) return closures;
       const config = r2Config();
-      return await Promise.all(
-        found.map(async ({ digest, size, key, ...binding }) => ({
-          digest,
-          size,
-          url: await presignGet(config, key, packHeaders(binding.range, size)),
-          ...binding,
-        })),
-      );
+      return [
+        ...closures,
+        ...(await Promise.all(
+          found.map(async ({ digest, size, key, ...binding }) => ({
+            digest,
+            size,
+            url: await presignGet(config, key, packHeaders(binding.range, size)),
+            ...binding,
+          })),
+        )),
+      ];
     } catch (error) {
       return report(error);
     }
@@ -106,7 +126,7 @@ export const describe = mutation({
         digest: v.string(),
         size: v.number(),
         location: v.literal('recipe'),
-        closure: v.optional(v.array(v.object({ digest: v.string(), size: v.number(), url: v.string() }))),
+        closure: v.optional(signedClosureValue),
         /** Signed calls also sign the recipe object itself, so reading it needs no second call. */
         recipe: v.object({
           digest: v.string(),
@@ -272,6 +292,7 @@ export const lanePage = mutation({
       size: v.number(),
       url: v.optional(v.string()),
       range: rangeValue,
+      closure: v.optional(signedClosureValue),
       run: runValue,
     }),
   ),
@@ -310,6 +331,7 @@ export const lanePage = mutation({
         result.push({
           digest,
           size: row.size,
+          ...(signed && row.recipeClosure ? { closure: (await signRecipeClosure(row))! } : {}),
           ...(row.pack ? { range: packRange(row)! } : {}),
           ...(signed && isR2Object(row) && !deferred
             ? { url: await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), row.size)) }

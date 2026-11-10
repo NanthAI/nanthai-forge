@@ -5,5 +5,6 @@ export type HostedDownloadDescriptor = {
   digest: string;
   size: number;
   url?: string;
+  closure?: import('./blob-download-format.js').SignedDownload[];
   range?: import('./object-pack-range.js').PackRange;
 };

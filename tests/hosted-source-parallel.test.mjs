@@ -269,3 +269,36 @@ test('the per-step source log line carries bounded counts and names only', async
   assert.equal(line.bytes, null);
   assert.equal(line.objects, 8);
 });
+
+test('cost 298f9675: destination reads retain stream quantum accounting and exact save output', async () => {
+  const samples = [];
+  for (const destination of [false, true]) {
+    const x = fixture(),
+      { save } = scenario(x);
+    let filled = 0;
+    if (destination)
+      x.io.readInto = async (pin, target) => {
+        target.set(x.objects.get(pin.sha256));
+        filled++;
+        return true;
+      };
+    let cursor = initialSourceStep(save);
+    const meters = [];
+    while (cursor.phase !== 'done') {
+      const result = await runSourceStep(cursor, x.io);
+      meters.push({
+        objects: result.metrics.objects,
+        bytes: result.metrics.bytes,
+        stop: result.metrics.detail.stop,
+      });
+      cursor = JSON.parse(JSON.stringify(result.cursor));
+    }
+    if (destination) assert(filled > 0);
+    samples.push({ meters, output: cursor.output });
+  }
+  assert.deepEqual(
+    samples[1],
+    samples[0],
+    'destination reads cannot bypass byte/heap yields or change source identity',
+  );
+});

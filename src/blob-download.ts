@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { copyRecipeClosure } from './object-pack-range.js';
 import { networkFetch } from './network-fetch.js';
 import { verifiedBytes } from './verified-blob.js';
 import { ForgeError, invariant } from './errors.js';
@@ -12,7 +13,7 @@ import {
   type SignedDownload,
 } from './blob-download-format.js';
 export type DownloadTransport = {
-  describe(digests: string[]): Promise<DownloadRow[]>;
+  describe(digests: string[], signed?: boolean): Promise<DownloadRow[]>;
   sign(digests: string[]): Promise<SignedDownload[]>;
   fetch?: typeof fetch;
   now?: () => number;
@@ -39,11 +40,14 @@ export class ObjectDownloadReader {
     this.cache.set(pin.sha256, { bytes: bytes.slice(), until: this.now() + 60_000 });
     this.retained += bytes.length;
   }
-  private async rows(pins: DownloadPin[]) {
+  private async rows(pins: DownloadPin[], signed = false) {
     const result = new Map<string, DownloadRow>();
     for (let at = 0; at < pins.length; at += 100) {
       const page = pins.slice(at, at + 100);
-      for (const row of await this.transport.describe(page.map(pin => pin.sha256)))
+      for (const row of await this.transport.describe(
+        page.map(pin => pin.sha256),
+        signed,
+      ))
         result.set(row.digest, row);
       for (const pin of page)
         invariant(
@@ -68,12 +72,19 @@ export class ObjectDownloadReader {
     }
     return result;
   }
-  private async get(row: DownloadRow, signed?: SignedDownload) {
+  private async get(
+    row: DownloadRow,
+    signed?: SignedDownload,
+    renew?: () => Promise<SignedDownload>,
+    destination?: Uint8Array,
+  ) {
     invariant(row.location !== 'recipe', 'INVALID_WORK_BACKUP', 'Resolve the recipe before reading bytes.');
     let url = row.location === 'r2' ? signed!.url : row.url;
     let range = row.location === 'r2' ? signed!.range : undefined;
     const refresh = async () => {
-      const next = (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!;
+      const next = renew
+        ? await renew()
+        : (await this.signatures([{ sha256: row.digest, size: row.size }])).get(row.digest)!;
       url = next.url;
       range = next.range;
     };
@@ -115,7 +126,21 @@ export class ObjectDownloadReader {
           'INVALID_WORK_BACKUP',
           'Stored content returned different byte offsets.',
         );
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      let bytes: Uint8Array;
+      if (destination && response.body) {
+        bytes = destination;
+        let at = 0;
+        for await (const part of response.body as unknown as AsyncIterable<Uint8Array>) {
+          invariant(
+            at + part.length <= bytes.length,
+            'BLOB_DIGEST_MISMATCH',
+            'Downloaded leaf exceeds its exact size.',
+          );
+          bytes.set(part, at);
+          at += part.length;
+        }
+        invariant(at === bytes.length, 'BLOB_DIGEST_MISMATCH', 'Downloaded leaf is truncated.');
+      } else bytes = new Uint8Array(await response.arrayBuffer());
       invariant(
         bytes.length === row.size,
         'BLOB_DIGEST_MISMATCH',
@@ -137,7 +162,7 @@ export class ObjectDownloadReader {
       const found = new Map([...unique.keys()].map((id, index) => [id, values[index]!]));
       return pins.map(pin => found.get(pin.sha256)!.slice());
     }
-    const rows = await this.rows(pins);
+    const rows = await this.rows(pins, true);
     // Select hits once. Signing another object can cross a cache expiry boundary;
     // an already-authorized immutable hit must not fall through to an unsigned GET.
     const hits = new Map<string, Uint8Array>();
@@ -145,7 +170,10 @@ export class ObjectDownloadReader {
       const hit = this.cache.get(pin.sha256);
       if (hit && hit.until > this.now()) hits.set(pin.sha256, hit.bytes);
     }
-    const direct = pins.filter(pin => rows.get(pin.sha256)!.location === 'r2' && !hits.has(pin.sha256));
+    const direct = pins.filter(pin => {
+      const row = rows.get(pin.sha256)!;
+      return row.location === 'r2' && !row.url && !hits.has(pin.sha256);
+    });
     const signed = await this.signatures([...new Map(direct.map(pin => [pin.sha256, pin])).values()]);
     const result: Uint8Array[] = [];
     // Eight concurrent GETs per batch; arbitrary selections continue through every batch.
@@ -158,7 +186,9 @@ export class ObjectDownloadReader {
             invariant(!ancestors.has(pin.sha256), 'INVALID_WORK_BACKUP', 'Stored recipe contains a cycle.');
             const row = rows.get(pin.sha256)!;
             let bytes: Uint8Array;
-            if (row.location === 'recipe') {
+            if (row.location === 'recipe' && row.closure) {
+              bytes = await this.closure(pin, row.closure);
+            } else if (row.location === 'recipe') {
               const next = new Set(ancestors);
               next.add(pin.sha256);
               const [recipeBytes] = await this.read(
@@ -172,7 +202,12 @@ export class ObjectDownloadReader {
                 'Stored recipe differs from its logical binding.',
               );
               bytes = await this.tree(pin, recipe.tree, next);
-            } else bytes = await this.get(row, signed.get(pin.sha256));
+            } else
+              bytes = await this.get(
+                row,
+                signed.get(pin.sha256) ??
+                  (row.location === 'r2' && row.url ? { ...row, url: row.url } : undefined),
+              );
             this.remember(pin, bytes);
             return bytes.slice();
           }),
@@ -239,9 +274,51 @@ export class ObjectDownloadReader {
     invariant(copied === length, 'INVALID_WORK_BACKUP', 'Stored tree range is incomplete.');
     return offset === 0 && length === pin.size ? verifiedBytes(bytes, pin.sha256) : bytes;
   }
+  private async closure(pin: DownloadPin, leaves: SignedDownload[]) {
+    let refreshed: Promise<DownloadRow> | undefined;
+    const bytes = await copyRecipeClosure(pin, leaves, (leaf, destination) =>
+      this.get(
+        {
+          digest: leaf.digest,
+          size: leaf.size,
+          location: 'r2',
+          ...(leaf.range ? { range: leaf.range } : {}),
+        },
+        leaf,
+        async () => {
+          refreshed ??= this.rows([pin], true).then(rows => rows.get(pin.sha256)!);
+          const row = await refreshed;
+          invariant(
+            row.location === 'recipe' && row.closure,
+            'EXCHANGE_DOWNLOAD_DENIED',
+            'Recipe is no longer readable.',
+          );
+          const next = row.closure.find(item => item.digest === leaf.digest && item.size === leaf.size);
+          invariant(next, 'EXCHANGE_DOWNLOAD_DENIED', 'Recipe leaf is no longer readable.');
+          return next;
+        },
+        destination,
+      ),
+    );
+    return verifiedBytes(bytes, pin.sha256);
+  }
   async range(pin: DownloadPin, offset: number, length: number) {
-    const rows = await this.rows([pin]),
+    const rows = await this.rows([pin], true),
       row = rows.get(pin.sha256)!;
+    invariant(
+      Number.isSafeInteger(offset) &&
+        offset >= 0 &&
+        Number.isSafeInteger(length) &&
+        length >= 0 &&
+        offset + length <= pin.size,
+      'INVALID_WORK_BACKUP',
+      'Stored range has different logical offsets.',
+    );
+    if (row.location === 'recipe' && row.closure) {
+      const bytes = await this.closure(pin, row.closure);
+      await this.rows([pin]);
+      return bytes.slice(offset, offset + length);
+    }
     if (row.location !== 'recipe') return (await this.read([pin]))[0]!.slice(offset, offset + length);
     const [bytes] = await this.read([{ sha256: row.recipe.digest, size: row.recipe.size }]);
     const recipe = downloadRecipeSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));

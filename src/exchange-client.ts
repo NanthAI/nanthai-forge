@@ -3,7 +3,7 @@ import { deadlineConvexClient } from './network-convex-client.js';
 import { CUTOVER_CLI_VERSION } from './cutover-version.js';
 
 import { ExchangeDownloadCache } from './exchange-download-cache.js';
-import { SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
+import { SignedDownloadCache, signDownloadObjects } from './exchange-r2-read.js';
 import { sourceAuthoritySchema } from './hosted-source-authority.js';
 import { hostedMainSchema, type MainExpectation } from './hosted-main.js';
 import { exchangeConvexFetch } from './exchange-convex-fetch.js';
@@ -26,7 +26,6 @@ import { SourceFileReader } from './source-file-reader.js';
 import { downloadExchangeFile } from './exchange-download-file.js';
 import { parseHostedResponse } from './hosted-response.js';
 const query = (name: string) => makeFunctionReference<'query'>(name);
-const mutation = (name: string) => makeFunctionReference<'mutation'>(name);
 const action = (name: string) => makeFunctionReference<'action'>(name);
 const chunked = (pin: ContentPin) => {
   const path = (pin as ContentPin & { path?: string }).path;
@@ -481,12 +480,10 @@ export class ConvexExchange implements ExchangeTransport {
     for (let at = 0; at < missing.length; at += 100) pages.push(missing.slice(at, at + 100));
     await mapExchange(pages, 4, async page => {
       const wanted = new Map(page.map(pin => [pin.sha256, pin]));
-      const signed: SignedObject[] = await this.client.mutation(
-        mutation('projectObjectDownloads:signDownloads'),
-        {
-          projectId: this.projectId,
-          digests: page.map(pin => pin.sha256),
-        },
+      const signed = await signDownloadObjects(
+        this.client,
+        this.projectId,
+        page.map(pin => pin.sha256),
       );
       for (const object of signed) {
         invariant(

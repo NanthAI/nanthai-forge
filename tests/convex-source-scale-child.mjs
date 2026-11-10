@@ -87,6 +87,7 @@ process.on('message', async message => {
       };
     }
     const module = await import(message.url);
+    const workCpuStarted = process.cpuUsage();
     await module[message.method]._handler(ctx, message.args);
     process.send({
       done: true,
@@ -94,6 +95,7 @@ process.on('message', async message => {
         elapsedMs: performance.now() - started,
         maxRssBytes: process.resourceUsage().maxRSS * 1024,
         cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),
+        workCpuMicros: Object.values(process.cpuUsage(workCpuStarted)).reduce((n, v) => n + v, 0),
       },
     });
   } catch (error) {

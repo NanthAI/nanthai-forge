@@ -138,8 +138,13 @@ Trusted source-worker recipe outputs may additionally retain a bounded ordered
 projection of raw R2 leaf pins on their existing object row. Publication validates
 those pins against committed project objects; client recipe completion never supplies
 the projection. Existing authorized download and job-descriptor reads sign the whole
-projection together without leaf lookups or new calls. Recipes without this optional
-projection retain their original readers. State identity and recipe bytes are unchanged.
+projection together without leaf lookups or new calls. Browser, exchange, Lane checkout and trusted source readers consume the leaf
+projection in their existing signed descriptor/signature call. Leaves fill their
+final destination spans in bounded byte windows; only logical bytes enter existing
+caches. Physical leaf and whole-object hashes, pack ranges and ordinary final
+access fences remain checked. Small saves can consume a projected recipe baseline
+within their existing byte bound. Legacy recipes without the projection retain
+their original readers. State identity and recipe bytes are unchanged.
 
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 

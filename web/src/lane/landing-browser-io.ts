@@ -55,7 +55,7 @@ export function landingBrowserIO(client: ConvexReactClient, projectId: Id<'hoste
                 projectId,
                 digests: [pin.sha256],
               })
-            )[0];
+            ).find(row => 'url' in row);
       invariant(target, 'SOURCE_UNAVAILABLE', 'Exact metadata download is unavailable.');
       const response = await fetch(target.url, { headers: packHeaders(target.range, pin.size) });
       invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Metadata download failed.');

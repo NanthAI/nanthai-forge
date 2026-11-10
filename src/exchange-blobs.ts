@@ -5,8 +5,8 @@ import type { ContentPin } from './native-exchange.js';
 import { exchangeFetch } from './exchange-request.js';
 import { ForgeError } from './errors.js';
 import { ObjectDownloadReader } from './blob-download.js';
-import type { DownloadRow } from './blob-download-format.js';
-import { readSigned, SignedDownloadCache, type SignedObject } from './exchange-r2-read.js';
+import type { DownloadRow, SignedDownload } from './blob-download-format.js';
+import { readSigned, SignedDownloadCache, signDownloadObjects } from './exchange-r2-read.js';
 
 /** The one place the CLI moves exchange object bytes. Callers verify sizes and
  * digests; this seam only transports. Uploads are presigned create-only R2 PUTs;
@@ -67,26 +67,23 @@ export class ConvexExchangeBlobs implements ExchangeBlobs {
           ...init,
           headers: { ...init?.headers, 'accept-encoding': 'identity' },
         }),
-      describe: digests =>
+      describe: (digests, signed) =>
         this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:describe'), {
           projectId,
           digests,
+          ...(signed ? { signed: true } : {}),
         }) as Promise<DownloadRow[]>,
       sign: digests =>
         this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:signDownloads'), {
           projectId,
           digests,
-        }) as Promise<SignedObject[]>,
+        }) as Promise<SignedDownload[]>,
     });
   }
   put = putTarget;
   getSigned(projectId: string, pins: ContentPin[]): Promise<Map<string, Buffer>> {
     return readSigned(
-      (id, digests) =>
-        this.client.mutation(makeFunctionReference<'mutation'>('projectObjectDownloads:signDownloads'), {
-          projectId: id,
-          digests,
-        }) as Promise<SignedObject[]>,
+      (id, digests) => signDownloadObjects(this.client, id, digests),
       projectId,
       pins,
       this.signedDownloads,

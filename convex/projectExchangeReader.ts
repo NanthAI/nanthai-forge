@@ -139,7 +139,7 @@ export function exchangeObjectReader(
         pins,
       );
       const recipeBytes = new Map(recipeIndexes.map((index, i) => [index, recipes[i]!]));
-      if (!recipeIndexes.length) await resolve(projectId, actor, pins);
+      if (recipeIndexes.every(i => !!rows[i]!.recipeClosure)) await resolve(projectId, actor, pins);
       const bytes: Buffer[] = [];
       for (const [index, outcome] of outcomes.entries()) {
         if (outcome.status === 'rejected') throw outcome.reason;

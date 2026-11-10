@@ -386,6 +386,17 @@ export async function runSourceStep(cursor: SourceStepCursor, io: StepTransport)
           },
         }
       : {}),
+    // Destination reads obey the same heap/quantum accounting as streams, even
+    // when the action cache supplies their bytes. They must not bypass a yield.
+    readInto: async (pin, destination) => {
+      const filled = await original.readInto?.(pin, destination);
+      if (filled) {
+        m.objects++;
+        m.bytes += pin.size;
+        m.kinds.set(pin.sha256, readKind(Buffer.from(destination.subarray(0, 256)).toString('latin1')));
+      }
+      return !!filled;
+    },
     read: async pin => {
       const stream = await original.read(pin);
       m.objects++;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import type { MutationCtx } from './server';
 import type { Id } from './_generated/dataModel';
-import { saveObject, saveStateSchema } from './projectHostedSaveStore';
+import { saveObjects, saveStateSchema } from './projectHostedSaveStore';
 import { signRecipeClosure } from './projectRecipeClosure';
 import { presignGet, r2Config } from './r2';
 import { findObject } from './projectObjectFind';
@@ -15,9 +15,9 @@ export async function sourceObjectLocation(
   projectId: Id<'hostedProjects'>,
   pin: { sha256: string; size: number },
 ) {
-  const descriptor = await saveObject(ctx, projectId, pin);
   const object = await findObject(ctx, projectId, pin.sha256);
   invariant(object, 'SOURCE_UNAVAILABLE', 'Source input is absent.');
+  const [descriptor] = await saveObjects(ctx, projectId, [pin], [object]);
   const url =
     object.location === 'r2' && object.r2Key
       ? await presignGet(r2Config(), object.r2Key, packHeaders(packRange(object), object.size))
@@ -25,7 +25,7 @@ export async function sourceObjectLocation(
   // The State's generation and parents, as resolve returns them: the step derives its output
   // State's generation from them (review 3aa618e2 F1).
   return {
-    descriptor,
+    descriptor: descriptor!,
     ...(object.stateGeneration === undefined ? {} : { stateGeneration: object.stateGeneration }),
     ...(object.stateParents === undefined ? {} : { stateParents: object.stateParents }),
     storageId: url ? null : (object.storageId ?? null),
@@ -53,8 +53,12 @@ export async function saveStepReads(ctx: MutationCtx, projectId: Id<'hostedProje
     state.request.pageCount !== 1 ||
     !pages ||
     pages.size > smallSavePageBytes ||
-    state.baseline.recipe ||
     state.baseline.object.size > smallSaveStateBytes
+  )
+    return [];
+  if (
+    state.baseline.recipe &&
+    !(await findObject(ctx, projectId, state.baseline.object.sha256))?.recipeClosure
   )
     return [];
   return [state.baseline.object, pages];

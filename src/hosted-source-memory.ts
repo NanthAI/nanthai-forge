@@ -128,7 +128,7 @@ export class MemorySourceReader extends SourceWorkerReader {
   }
   private async download(ref: WorkerObject): Promise<Buffer> {
     let bytes: Buffer;
-    if (ref.recipe) {
+    if (ref.recipe && !this.io.recipeLeaves?.(ref.object.sha256)) {
       invariant(
         ref.recipe.size <= 2 * 1024 * 1024,
         'SOURCE_PAGE_INVALID',
@@ -148,22 +148,27 @@ export class MemorySourceReader extends SourceWorkerReader {
         parts.push(chunk);
       bytes = Buffer.concat(parts);
     } else {
-      const hash = createHash('sha256'),
-        parts: Buffer[] = [];
+      const hash = createHash('sha256');
+      bytes = Buffer.allocUnsafe(ref.object.size);
       let length = 0;
-      for await (const part of await this.io.read(ref.object)) {
-        length += part.length;
-        invariant(length <= ref.object.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
-        hash.update(part);
-        parts.push(Buffer.from(part));
-        this.metrics.maxChunkBytes = Math.max(this.metrics.maxChunkBytes, part.length);
-      }
+      if (await this.io.readInto?.(ref.object, bytes)) {
+        hash.update(bytes);
+        length = bytes.length;
+        this.metrics.maxChunkBytes = Math.max(this.metrics.maxChunkBytes, bytes.length);
+      } else
+        for await (const part of await this.io.read(ref.object)) {
+          length += part.length;
+          invariant(length <= ref.object.size, 'SOURCE_HASH_MISMATCH', 'Source exceeds its exact size.');
+          hash.update(part);
+          bytes.set(part, length - part.length);
+          this.metrics.maxChunkBytes = Math.max(this.metrics.maxChunkBytes, part.length);
+        }
       invariant(
         length === ref.object.size && hash.digest('hex') === ref.object.sha256,
         'SOURCE_HASH_MISMATCH',
         'Source bytes differ from their exact hash and size.',
       );
-      bytes = Buffer.concat(parts);
+      this.io.rememberBytes?.(ref.object, bytes);
       this.metrics.downloads++;
       this.metrics.downloadedBytes += length;
     }

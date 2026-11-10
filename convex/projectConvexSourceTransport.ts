@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { copyRecipeClosure } from '../src/object-pack-range';
+import type { SignedDownload } from '../src/blob-download-format';
 import { convexFetch, networkTimeout } from './networkFetch';
 import { makeFunctionReference } from 'convex/server';
 import type { ActionCtx } from './_generated/server';
@@ -29,6 +31,7 @@ export type ObjectLocation = {
   storageId: Id<'_storage'> | null;
   url: string | null;
   range?: PackRange;
+  closure?: SignedDownload[];
 };
 export function convexSourceTransport(
   ctx: ActionCtx,
@@ -39,9 +42,12 @@ export function convexSourceTransport(
    * behind the work after it; callers must `settle()` before they read `outputs`. */
   {
     overlapWrites = false,
+    hash = digest,
     preloaded = [],
   }: {
     overlapWrites?: boolean;
+    /** Node supplies native SHA-256; V8 retains portable hashing. */
+    hash?: (bytes: Uint8Array) => string;
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
@@ -61,7 +67,7 @@ export function convexSourceTransport(
   const settle = async () => {
     while (writing.length) outputs.push(await writing.shift()!);
   };
-  const durable = sourceStorage(ctx, projectId);
+  const durable = sourceStorage(ctx, projectId, hash);
   const generations = new Map<string, number>(),
     parents = new Map<string, string[]>();
   const remember = (rows: ObjectLocation[]) => {
@@ -77,7 +83,7 @@ export function convexSourceTransport(
     generatedKeys = new Map<string, string>();
   for (const value of preloaded) {
     const bytes = new TextEncoder().encode(value.text);
-    if (bytes.length === value.size && digest(bytes) === value.sha256) held.set(value.sha256, bytes);
+    if (bytes.length === value.size && hash(bytes) === value.sha256) held.set(value.sha256, bytes);
   }
   let heldBytes = [...held.values()].reduce((n, bytes) => n + bytes.length, 0);
   const keep = (pin: WorkerPin, bytes: Uint8Array) => {
@@ -85,7 +91,7 @@ export function convexSourceTransport(
       !held.has(pin.sha256) &&
       heldBytes + bytes.length <= 2 * 1024 * 1024 &&
       bytes.length === pin.size &&
-      digest(bytes) === pin.sha256
+      hash(bytes) === pin.sha256
     ) {
       held.set(pin.sha256, bytes);
       heldBytes += bytes.length;
@@ -126,6 +132,26 @@ export function convexSourceTransport(
     return rows.map(row => row.descriptor);
   };
   const io: StepTransport = {
+    recipeLeaves: id => locations.get(id)?.closure?.map(leaf => ({ sha256: leaf.digest, size: leaf.size })),
+    rememberBytes: (pin, bytes) => {
+      // The reader has just verified this exact whole-object pin. Keep one private
+      // copy for the existing small fallback hand-off, without hashing it again.
+      if (!held.has(pin.sha256) && heldBytes + pin.size <= 2 * 1024 * 1024 && bytes.length === pin.size) {
+        held.set(pin.sha256, bytes.slice());
+        heldBytes += pin.size;
+      }
+    },
+    readInto: async (pin, destination) => {
+      const prior = held.get(pin.sha256);
+      if (prior && prior.length === pin.size) {
+        destination.set(prior);
+        return true;
+      }
+      const row = locations.get(pin.sha256);
+      if (!row?.closure) return false;
+      await readClosure(pin, row.closure, destination);
+      return true;
+    },
     stateGeneration: id => generations.get(id),
     stateParents: id => parents.get(id),
     rememberStateGenerations: values => {
@@ -200,6 +226,11 @@ export function convexSourceTransport(
           yield bytes;
         })();
       if (!locations.has(pin.sha256)) await resolve([pin.sha256]);
+      const row = locations.get(pin.sha256)!;
+      if (row.closure)
+        return (async function* () {
+          yield await readClosure(pin, row.closure!);
+        })();
       const stream = await clock.read(() => openRead(pin));
       if (heldBytes + pin.size > 2 * 1024 * 1024) return stream;
       return (async function* () {
@@ -245,8 +276,42 @@ export function convexSourceTransport(
       }
     },
   };
-  async function openRead(pin: WorkerPin): Promise<AsyncIterable<Uint8Array>> {
-    const row = locations.get(pin.sha256)!;
+  async function readClosure(pin: WorkerPin, closure: SignedDownload[], destination?: Uint8Array) {
+    return copyRecipeClosure(
+      pin,
+      closure,
+      async (leaf, bytes) => {
+        const physical = { sha256: leaf.digest, size: leaf.size };
+        const row: ObjectLocation = {
+          descriptor: { object: physical, recipe: null },
+          storageId: null,
+          url: leaf.url,
+          ...(leaf.range ? { range: leaf.range } : {}),
+        };
+        let at = 0;
+        for await (const part of await clock.read(() => openRead(physical, row))) {
+          invariant(
+            at + part.length <= leaf.size,
+            'SOURCE_HASH_MISMATCH',
+            'Recipe leaf exceeded its exact size.',
+          );
+          bytes.set(part, at);
+          at += part.length;
+        }
+        invariant(
+          at === leaf.size && hash(bytes) === leaf.digest,
+          'SOURCE_HASH_MISMATCH',
+          'Recipe leaf changed.',
+        );
+        return bytes;
+      },
+      destination,
+    );
+  }
+  async function openRead(
+    pin: WorkerPin,
+    row = locations.get(pin.sha256)!,
+  ): Promise<AsyncIterable<Uint8Array>> {
     if (!row.url && generatedKeys.has(pin.sha256))
       row.url = await presignGet(r2Config(), generatedKeys.get(pin.sha256)!);
     invariant(
@@ -317,7 +382,7 @@ export function convexSourceTransport(
       offset += part.length;
     }
     invariant(
-      bytes.length === pin.size && digest(bytes) === pin.sha256,
+      bytes.length === pin.size && hash(bytes) === pin.sha256,
       'SOURCE_HASH_MISMATCH',
       'Source output changed.',
     );

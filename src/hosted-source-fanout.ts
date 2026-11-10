@@ -130,6 +130,14 @@ export async function runSourceTask(
     m = meter();
   const io: StepTransport = {
     ...original,
+    readInto: async (pin, destination) => {
+      const filled = await original.readInto?.(pin, destination);
+      if (filled) {
+        m.objects++;
+        m.bytes += pin.size;
+      }
+      return !!filled;
+    },
     read: async (pin: Parameters<SourceWorkerTransport['read']>[0]) => {
       const stream = await original.read(pin);
       m.objects++;

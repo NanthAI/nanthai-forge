@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
 import { v } from 'convex/values';
+import { digest as nativeDigest } from '../src/hash';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import {
@@ -56,10 +57,11 @@ export const step = internalAction({
             // Texts the delegating action holds come only through `loaded` (never from a schedule).
             {
               overlapWrites: true,
+              hash: nativeDigest,
               preloaded: supplied ? state.preloaded : undefined,
             },
           ),
-          durable = sourceStorage(ctx, input.projectId);
+          durable = sourceStorage(ctx, input.projectId, nativeDigest);
         let cursor: SourceStepCursor = initialSourceStep(state.input),
           progress: SourceProgress | null = null;
         let result!: Awaited<ReturnType<typeof runSourceStep>>;

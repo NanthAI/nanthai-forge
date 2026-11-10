@@ -7,10 +7,11 @@ import type { Id } from './_generated/dataModel';
 import { internal } from './_generated/api';
 import { exchangeFetch } from '../src/exchange-request';
 import { invariant } from '../src/errors';
+import { copyRecipeClosure } from '../src/object-pack-range';
 import { digest } from '../src/hash';
 import { storageDigest } from './projectStorage';
 import { isR2Object } from './projectObjectFields';
-import { r2Config, presignGet } from './r2';
+import { r2Config, presignGet, r2Key } from './r2';
 import { readRecipeTrees } from './projectObjectTreeRead';
 import { objectRecipeSchema, objectChunkPageBytes, type ChunkPin } from '../src/object-chunks';
 import type { ObjectView } from './projectObjectFind';
@@ -23,7 +24,7 @@ export const rawKey = (row: ObjectView) => row.storageId ?? row.r2Key;
 
 /** Server-side read of an R2 object by signed GET. Used only where Convex itself needs the bytes
  * (publication, derived views); clients read R2 directly. Verifies size and sha256. */
-async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
+async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destination?: Uint8Array) {
   const url = await presignGet(r2Config(), row.r2Key!, packHeaders(packRange(row), pin.size));
   const response = await exchangeFetch(
     'server R2 object download',
@@ -41,7 +42,21 @@ async function r2Content(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
     'R2_OBJECT_UNAVAILABLE',
     `Stored content is unavailable in object storage (HTTP ${response.status}).`,
   );
-  const data = Buffer.from(await response.arrayBuffer());
+  let data: Buffer;
+  if (destination && response.body) {
+    let at = 0;
+    for await (const part of response.body as unknown as AsyncIterable<Uint8Array>) {
+      invariant(
+        at + part.length <= destination.length,
+        'BLOB_DIGEST_MISMATCH',
+        'Recipe leaf exceeds its size.',
+      );
+      destination.set(part, at);
+      at += part.length;
+    }
+    invariant(at === destination.length, 'BLOB_DIGEST_MISMATCH', 'Recipe leaf is truncated.');
+    data = Buffer.from(destination.buffer, destination.byteOffset, destination.byteLength);
+  } else data = Buffer.from(await response.arrayBuffer());
   verifyPackRange(response, packRange(row), pin.size);
   invariant(
     data.length === pin.size && digest(data) === pin.sha256,
@@ -73,8 +88,8 @@ async function readMetadata(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
     'Stored content differs from its digest.',
   );
 }
-async function readContent(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
-  if (isR2Object(row)) return r2Content(ctx, row, pin);
+async function readContent(ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destination?: Uint8Array) {
+  if (isR2Object(row)) return r2Content(ctx, row, pin, destination);
   const blob = await blobStore(ctx).get(row.storageId!);
   invariant(blob, 'INVALID_WORK_BACKUP', 'Stored content is unavailable.');
   const bytes = Buffer.from(await blob.arrayBuffer());
@@ -87,8 +102,8 @@ async function readContent(ctx: ActionCtx, row: ObjectView, pin: ChunkPin) {
 }
 export const rawMetadata = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin) =>
   indexObjectRead(ctx, pin, () => readMetadata(ctx, row, pin));
-export const rawContent = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin) =>
-  indexObjectRead(ctx, pin, () => readContent(ctx, row, pin));
+export const rawContent = (ctx: ActionCtx, row: ObjectView, pin: ChunkPin, destination?: Uint8Array) =>
+  indexObjectRead(ctx, pin, () => readContent(ctx, row, pin, destination));
 type RawReader = typeof rawContent;
 
 type Selected = { pin: ChunkPin; ancestors: ReadonlySet<string> };
@@ -187,6 +202,35 @@ export async function objectContents(
       result[i] = range ? bytes.subarray(range.offset, range.offset + range.length) : bytes;
       continue;
     }
+    if (row.recipe && row.recipeClosure) {
+      const closure = row.recipeClosure.map(leaf => ({ digest: leaf.sha256, size: leaf.size, url: '' }));
+      const value = await copyRecipeClosure(pin, closure, async (leaf, destination) => {
+        const physical = { sha256: leaf.digest, size: leaf.size };
+        return raw(
+          ctx,
+          {
+            projectId: row.projectId,
+            digest: leaf.digest,
+            size: leaf.size,
+            nonce: '',
+            removed: false,
+            location: 'r2',
+            r2Committed: true,
+            r2Key: r2Key(row.projectId, leaf.digest),
+          },
+          physical,
+          destination,
+        );
+      });
+      invariant(
+        digest(value) === pin.sha256,
+        'BLOB_DIGEST_MISMATCH',
+        'Recipe differs from its whole-object binding.',
+      );
+      const bytes = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+      result[i] = range ? bytes.subarray(range.offset, range.offset + range.length) : bytes;
+      continue;
+    }
     const ancestry = Array.isArray(ancestors) ? ancestors[i]! : ancestors;
     invariant(
       row.recipe && row.recipe.size <= objectChunkPageBytes && !ancestry.has(row.digest),
@@ -238,7 +282,14 @@ export async function objectContent(
   ancestors: ReadonlySet<string> = new Set(),
   raw: RawReader = rawContent,
 ): Promise<Buffer> {
-  return (await objectContents(ctx, [row], [pin], actor, ancestors, raw))[0]!;
+  const bytes = (await objectContents(ctx, [row], [pin], actor, ancestors, raw))[0]!;
+  if (row.recipeClosure)
+    await ctx.runQuery(internal.projectObjects.resolve, {
+      projectId: row.projectId,
+      actor,
+      digests: [row.digest],
+    });
+  return bytes;
 }
 /** A bound recipe already proved the full hash; ranges verify every fetched node. */
 export async function objectRange(
@@ -257,5 +308,11 @@ export async function objectRange(
     rawContent,
     { offset, length },
   );
+  if (row.recipeClosure)
+    await ctx.runQuery(internal.projectObjects.resolve, {
+      projectId: row.projectId,
+      actor,
+      digests: [row.digest],
+    });
   return Uint8Array.from(bytes!).buffer;
 }

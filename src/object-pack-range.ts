@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { invariant } from './errors.js';
+import type { DownloadPin, SignedDownload } from './blob-download-format.js';
 
 /** An immutable logical object's byte interval inside a project-scoped pack. */
 export type ObjectPack = { digest: string; size: number; offset: number };
@@ -70,4 +71,68 @@ export function packRuns(
     if (run && run.members.length > 1) runs.push(run);
   }
   return runs;
+}
+
+/** Copy verified leaves straight to their final spans. Only the destination survives;
+ * `read` must check each leaf's digest, as the existing physical readers do;
+ * neither tree pages nor leaf buffers enter a second cache. The caller retains its
+ * existing whole-object digest and current-access checks before exposing the result. */
+export async function copyRecipeClosure(
+  pin: DownloadPin,
+  closure: readonly SignedDownload[],
+  read: (leaf: SignedDownload, destination: Uint8Array) => Promise<Uint8Array>,
+  destination: Uint8Array = new Uint8Array(pin.size),
+) {
+  invariant(
+    closure.length > 0 &&
+      closure.length <= 100 &&
+      destination.length === pin.size &&
+      closure.every(
+        leaf =>
+          /^[a-f0-9]{64}$/.test(leaf.digest) &&
+          Number.isSafeInteger(leaf.size) &&
+          leaf.size >= 0 &&
+          leaf.size <= 1024 * 1024,
+      ) &&
+      closure.reduce((n, leaf) => n + leaf.size, 0) === pin.size,
+    'INVALID_WORK_BACKUP',
+    'Recipe closure differs from the selected logical content.',
+  );
+  const groups = new Map<string, { leaf: SignedDownload; offsets: number[] }>();
+  let offset = 0;
+  for (const leaf of closure) {
+    let group = groups.get(leaf.digest);
+    invariant(
+      !group || group.leaf.size === leaf.size,
+      'INVALID_WORK_BACKUP',
+      'Recipe leaf has inconsistent physical sizes.',
+    );
+    if (!group) groups.set(leaf.digest, (group = { leaf, offsets: [] }));
+    group.offsets.push(offset);
+    offset += leaf.size;
+  }
+  // One bounded byte wave, rather than one metadata/sign round per tree level.
+  // Writers select this representation only inside the existing small-State window.
+  const pending = [...groups.values()];
+  for (let at = 0; at < pending.length;) {
+    let end = at,
+      held = 0;
+    while (end < pending.length && (!held || held + pending[end]!.leaf.size <= 4 * 1024 * 1024))
+      held += pending[end++]!.leaf.size;
+    const results = await Promise.allSettled(
+      pending.slice(at, end).map(async ({ leaf, offsets }) => {
+        const target = destination.subarray(offsets[0]!, offsets[0]! + leaf.size);
+        const bytes = await read(leaf, target);
+        invariant(
+          bytes.length === leaf.size,
+          'BLOB_DIGEST_MISMATCH',
+          'Recipe leaf differs from its exact size.',
+        );
+        for (const at of offsets) if (at !== offsets[0] || bytes !== target) destination.set(bytes, at);
+      }),
+    );
+    for (const result of results) if (result.status === 'rejected') throw result.reason;
+    at = end;
+  }
+  return destination;
 }
