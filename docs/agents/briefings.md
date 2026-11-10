@@ -77,7 +77,7 @@ merges (or why nothing can go).
    afterwards. Slot count, disk reserve and builder count come from local machine
    setup and the brief, not from the repo. Format only with `npm run format` (oxfmt);
    never `npx prettier`, which rewrites files in another style.
-6. Save at milestones/~30 minutes; read the head and capture coverage. Use `mktemp`
+6. Save after each meaningful step (at least every ~30 minutes): each save runs the exact conflict check; read the head and capture coverage. Use `mktemp`
    logs, never shared fixed paths. Keep a private handoff with observation time,
    saved head, operation id and next action for interruption recovery.
 7. Read hosted start/save/status overlap advice and `presence` notices before editing

@@ -18,6 +18,7 @@ import { peerLandings } from './projectHostedOverlapPeers';
 import { peerPhaseText, stackOffer, SCOPE_PATHS, SCOPE_PATH_CHARS } from '../src/hosted-overlap-coordination';
 import { effectivePolicy } from '../src/autonomy-policy';
 import { stackingMode } from '../src/agent-parallel-defaults';
+import { laneConflicts } from './projectHostedConflicts';
 
 const savedPaths = (changes: string) => {
   try {
@@ -339,6 +340,9 @@ export const read = query({
         stack: lane.stack,
       });
       const stackField = hint ? { stack: hint } : {};
+      // Exact conflicts a trial merge of saved files found (flip 4): one small index read.
+      const found = lane.state === 'active' ? await laneConflicts(ctx, projectId, laneId, lane.head) : [];
+      const conflictsField = found.length ? { conflicts: found } : {};
       if (acks.length > 100) {
         // A large old inbox stays bounded. Verify every displayed item against the
         // exact answer index, so an answer outside the window can never repeat.
@@ -383,6 +387,7 @@ export const read = query({
           ...present,
           ...boardField,
           ...stackField,
+          ...conflictsField,
           unacknowledgedOverlaps: {
             ...advice.unacknowledgedOverlaps,
             count: null,
@@ -399,6 +404,7 @@ export const read = query({
         ...present,
         ...boardField,
         ...stackField,
+        ...conflictsField,
       });
     } catch (error) {
       return report(error);

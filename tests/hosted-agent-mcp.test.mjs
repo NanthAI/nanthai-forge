@@ -313,6 +313,7 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
     return [saveBytes(input.pages[0].value)];
   });
   let billPages = 0;
+  let conflictSummaries = 0;
   t.mock.method(s.exchange.client, 'query', async (ref, args) => {
     if (getFunctionName(ref) === 'projectSelfMetricBills:page') {
       billPages++;
@@ -320,6 +321,10 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
     }
     if (getFunctionName(ref) === 'projectBytePlacement:convexWritten')
       return { count: 0, bytes: 0, isDone: true, cursor: '' };
+    if (getFunctionName(ref) === 'projectHostedConflicts:summary') {
+      conflictSummaries++;
+      return JSON.stringify({ notices: 0, complete: true });
+    }
     if (getFunctionName(ref) !== 'projectSelfMetrics:page') return original(ref, args);
     checkArgs(api.page, args, 'metrics');
     pages++;
@@ -368,6 +373,9 @@ test('MCP hosted metrics uses eight finite metadata streams, one bill page and i
     'receipts',
   ]);
   assert.equal(objectCalls, 1);
+  // One read-only exact-conflict lead-time summary (flip 4).
+  assert.equal(conflictSummaries, 1);
+  assert.deepEqual(result.result.exactConflicts, { notices: 0, complete: true });
   assert(s.calls.every(call => call.name === 'projectHostedAgent:capabilities'));
   assert(!existsSync(`${s.root}.forge-metrics.jsonl`));
 });

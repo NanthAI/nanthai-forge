@@ -245,12 +245,13 @@ export function driftNudge(
 
 /** The Lane a resolution Lane resolves, and every Lane of one resolution: their shared paths are one
  * piece of work the agent cannot act on. Exact Lane ids, so a moved head cannot break the match. */
-const sameResolution = (a: OverlapLane, b: OverlapLane) =>
+type Related = Pick<OverlapLane, 'laneId' | 'resolutionOrigin' | 'stackRoot'>;
+export const sameResolution = (a: Related, b: Related) =>
   a.resolutionOrigin === b.laneId ||
   b.resolutionOrigin === a.laneId ||
   (a.resolutionOrigin !== undefined && a.resolutionOrigin === b.resolutionOrigin);
 /** Lanes of one stack build on each other, so the paths they share are the stack's own. */
-const sameStack = (a: OverlapLane, b: OverlapLane) => (a.stackRoot ?? a.laneId) === (b.stackRoot ?? b.laneId);
+export const sameStack = (a: Related, b: Related) => (a.stackRoot ?? a.laneId) === (b.stackRoot ?? b.laneId);
 
 /** Saved range/path advice. Actual text conflicts are still decided by composition. */
 export function hostedOverlapAdvice(

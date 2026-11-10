@@ -36,6 +36,7 @@ import { canonicalPayload, hostedPayloadHash } from '../src/hosted-source-operat
 import { savePin } from '../src/hosted-save';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { markConflictLand } from './projectHostedConflicts';
 const identity = { projectId: v.id('hostedProjects'), operationId: v.string() };
 async function caller(
   ctx: QueryCtx | MutationCtx,
@@ -249,6 +250,8 @@ export const stage = mutation({
             key,
             ...('laneId' in entry ? { head: entry.head } : {}),
           });
+        // Lead-time record of exact conflicts at save: this Lane's first land.
+        if (!duplicate && 'laneId' in entry) await markConflictLand(ctx, input.projectId, entry.laneId);
       }
       const next = {
         next: page.next,

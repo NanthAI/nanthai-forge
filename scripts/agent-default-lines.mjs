@@ -28,7 +28,9 @@ export function agentDefaultLines(defaults, root = 'ROOT') {
           : '.'),
     );
   if (defaults.checkpointNudgeMinutes > 0)
-    lines.push(`Save at least every ${defaults.checkpointNudgeMinutes} minutes of edits.`);
+    lines.push(
+      `Save after each meaningful step, at least every ${defaults.checkpointNudgeMinutes} minutes of edits: each save checks your saved files for exact conflicts with main and other open Lanes.`,
+    );
   if (!defaults.urgentRoles.includes('agents'))
     lines.push('Never request urgent priority; it is owner-only.');
   lines.push(

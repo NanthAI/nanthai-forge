@@ -2211,6 +2211,30 @@ stall, cancelled and other. It does not infer that a failed check was a flake.
 Internal hosted child attempts remain part of their original land entry. All
 calculation is read-time work over landing records, with no new background job.
 
+### Exact conflicts at save
+
+Every hosted save (including `land --save`, a sync and a resolve) that moves an open Lane's head
+trial-merges the files it shares: against main when main changed one of its saved files after the
+Lane's base, and against the latest saved head of every other open Lane that saved the same file.
+The merge is composition's own: the per-file rule, `mergeNativeText` and the compose syntax gate,
+so a notice and a real compose agree (two independent insertions at one place merge, as on land).
+Only a real conflict is reported, to both Lanes, as `conflictNotice` on their next start, save,
+status or land response: each item names the file, the line ranges in your file and in theirs, the
+reason, and the other Lane's goal (member-written data, quoted, at most 160 characters) or `main`.
+`next` says what to do: sync for a main conflict; for a Lane conflict, agree an order or split with
+that Lane (a board note) or change your edit, then save. There is nothing to acknowledge. A notice
+clears when a later save of either Lane no longer conflicts, or when one side lands or is abandoned.
+Hidden or automatic snapshots never run it; only Lane-record head moves do.
+
+Cost: a save that shares no file with main's newer changes or another open Lane reads one slim
+presence window inside its existing record write and schedules nothing (no added call). A save
+that shares files schedules one Convex action that reads the bytes from R2 and one mutation that
+records the result (two calls); no file bytes reach Convex. Bounds: 8 peer Lanes, 24 files, 1 MiB
+per file, a 16 MiB main manifest; a file past a bound, or one stored only as a recipe, is left out
+(no notice) and the landing's composition still decides. Each run logs one `FORGE_TRIAL_MERGE` line
+(files, merges, conflicts, bytes, ms). Each notice row keeps when it was flagged, when its Lane
+first ran land and when the Lane started, for reading lead time later.
+
 ### Hosted overlap advice
 
 Hosted agent start, save and Lane status responses include

@@ -23,6 +23,7 @@ const encoded = rows => JSON.stringify(rows);
 export function lanesFixture() {
   const tables = Object.fromEntries(Object.keys(schema.tables).map(name => [name, new Map()]));
   const counts = [];
+  const scheduled = [];
   let serial = 0,
     decorate,
     lastReadSet;
@@ -94,6 +95,18 @@ export function lanesFixture() {
       };
       const locate = id => Object.keys(baseline).find(table => view(table).has(id));
       const ctx = validateContext({
+        // Scheduled work is recorded, never run (a save's trial merge, flip 4): tests read `scheduled`.
+        scheduler: {
+          runAfter: async (delay, fn, args) => {
+            scheduled.push({ fn, args, delay });
+            return `scheduled-${scheduled.length}`;
+          },
+          runAt: async (at, fn, args) => {
+            scheduled.push({ fn, args, at });
+            return `scheduled-${scheduled.length}`;
+          },
+          cancel: async () => {},
+        },
         auth: {
           getUserIdentity: async () =>
             actor === null ? null : typeof actor === 'object' ? actor : { subject: actor },
@@ -322,6 +335,7 @@ export function lanesFixture() {
   }
   return {
     bindRepository,
+    scheduled,
     tables,
     counts,
     insert,

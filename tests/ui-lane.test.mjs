@@ -419,3 +419,17 @@ test('a Lane nobody holds shows the banner with Hand to an agent, Take it and Ab
   assert.match(banner, />Abandon…</);
   assert.match(html, />Source changes</);
 });
+
+test('an exact conflict at save marks the file and explains it above the diff, goal text escaped', async () => {
+  const { ChangesPanel } = await import(moduleUrl('../web/src/lane/ChangesPanel.tsx'));
+  const html = renderToStaticMarkup(
+    h(ChangesPanel, {
+      paths: [{ path: 'a.ts', status: 'modified', approximate: false }],
+      conflicts: new Map([['a.ts', ['Lane 12345678 (“goal <b>”) at lines 3-4']]]),
+      load: async () => ({}),
+    }),
+  );
+  assert.match(html, /title="Conflicts with Lane 12345678 \(“goal &lt;b&gt;”\) at lines 3-4"/);
+  assert.match(html, /Saved edits conflict with <b>Lane 12345678 \(“goal &lt;b&gt;”\) at lines 3-4<\/b>/);
+  assert.doesNotMatch(html, /also changes this file/);
+});

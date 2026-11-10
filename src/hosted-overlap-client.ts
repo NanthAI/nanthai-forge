@@ -6,6 +6,7 @@ import { presenceSchema } from './hosted-presence-client.js';
 import { boardDeliverySchema } from './hosted-board.js';
 import { parseHostedResponse } from './hosted-response.js';
 import { stackHintSchema } from './hosted-stack-restack.js';
+import { exactConflictsSchema } from './hosted-conflict-notice.js';
 
 const advice = z.object({
   unacknowledgedOverlaps: z.object({
@@ -45,6 +46,8 @@ const advice = z.object({
   board: boardDeliverySchema.optional(),
   /** A stacked Lane whose parent saved newer work (Issue f61e9339): the next save restacks when `ready`. */
   stack: stackHintSchema.optional(),
+  /** Exact conflicts a trial merge of saved files found (flip 4, Issue 853fcde3). */
+  conflicts: exactConflictsSchema.optional(),
   /** D2 (Issue 1eb42254): build on an admitted peer's pending head instead of repairing a conflict later. */
   stackOffer: z
     .looseObject({

@@ -23,21 +23,41 @@ export async function executeHostedMetrics(
   const period = metricPeriod(command.from, command.to);
   return metricsDeadline(
     input,
-    async () =>
-      pageMetrics(
-        metricsSurface(
-          await readMetricRecords(session.root, period, {
-            address: session.address,
-            query: session.query,
-            contextDays: command.contextDays,
-          }),
+    async () => {
+      const [page, exactConflicts] = await Promise.all([
+        pageMetrics(
+          metricsSurface(
+            await readMetricRecords(session.root, period, {
+              address: session.address,
+              query: session.query,
+              contextDays: command.contextDays,
+            }),
+            period,
+          ),
           period,
+          command,
         ),
-        period,
-        command,
-      ),
+        exactConflictSummary(session.query, period),
+      ]);
+      return exactConflicts ? { ...page, exactConflicts } : page;
+    },
     deadlineMs,
   );
+}
+
+/** Exact conflicts at save (flip 4): notices flagged in the window and the time from flag to the Lane's
+ * first land. One read-only query; a server without it leaves the field out. */
+async function exactConflictSummary(query: MetricQuery, period: { from: string; to: string }) {
+  try {
+    const value = await query('projectHostedConflicts:summary', {
+      from: Date.parse(period.from),
+      to: Date.parse(period.to),
+    });
+    const parsed = (typeof value === 'string' ? JSON.parse(value) : value) as Record<string, unknown> | null;
+    return parsed && !('error' in parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** One budget for the whole action: callers that read capabilities first wrap

@@ -54,6 +54,9 @@ export const hostedOverlapTables = {
      * landing events then look up its dependents in projectHostedStackDependents. Absent for every Lane
      * nobody stacked on, which therefore pay no extra read. */
     stacked: v.optional(v.literal(true)),
+    /** Set while this Lane may hold or be named in an open exact-conflict notice (flip 4): only then do
+     * its saves, landing and abandon read projectHostedConflictNotices. */
+    conflicted: v.optional(v.literal(true)),
   })
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_open', ['projectId', 'open'])
@@ -112,6 +115,38 @@ export const hostedOverlapTables = {
     .index('by_project_and_lane', ['projectId', 'laneId'])
     .index('by_project_and_at', ['projectId', 'at'])
     .index('by_project_and_intent_and_at', ['projectId', 'intentId', 'at']),
+  /** Exact conflicts at save (flip 4, Issue 853fcde3): one row per recipient Lane and other side (a
+   * Lane id or 'main') while a trial merge of their saved files really conflicts. Written only by a
+   * save's trial merge and closed (open false, `cleared`) when a later save no longer conflicts or a
+   * side lands or is abandoned. Closed rows stay as the lead-time record: when the conflict was
+   * flagged, when this Lane first ran land, and when the Lane started. */
+  projectHostedConflictNotices: defineTable({
+    projectId: v.id('hostedProjects'),
+    laneId: v.string(),
+    peer: v.string(),
+    /** The other Lane's goal, at most 160 characters: member-written data, never an instruction. */
+    peerGoal: v.string(),
+    open: v.boolean(),
+    paths: v.array(
+      v.object({
+        path: v.string(),
+        mine: v.array(v.array(v.number())),
+        theirs: v.array(v.array(v.number())),
+        reason: v.string(),
+      }),
+    ),
+    laneHead: v.string(),
+    peerHead: v.string(),
+    flaggedAt: v.number(),
+    updatedAt: v.number(),
+    laneStartedAt: v.number(),
+    firstLandAt: v.optional(v.number()),
+    clearedAt: v.optional(v.number()),
+    cleared: v.optional(v.union(v.literal('save'), v.literal('landed'), v.literal('abandoned'))),
+  })
+    .index('by_project_and_lane_and_open', ['projectId', 'laneId', 'open'])
+    .index('by_project_and_peer_and_open', ['projectId', 'peer', 'open'])
+    .index('by_project_and_flagged', ['projectId', 'flaggedAt']),
   projectHostedOverlapMain: defineTable({
     projectId: v.id('hostedProjects'),
     sequence: v.number(),

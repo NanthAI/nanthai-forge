@@ -38,6 +38,7 @@ import {
 } from './hosted-land-wait.js';
 import { recordTurnWait, settleTurnWork } from './agent-turn-work.js';
 import { markOverlapShown, overlapBannerOnce, type HostedOverlapNotice } from './hosted-overlap-notice.js';
+import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { LAND_INVOKED_ENV, landTiming, landTimingLine, startLandTiming } from './land-timing.js';
 import { AGENT_WAIT_SECONDS } from './agent-operation-wait.js';
 import { waitFailure } from './wait-failure.js';
@@ -72,6 +73,8 @@ function announce(
   for (const line of landAnnouncement(root, command, response, wake)) process.stderr.write(`${line}\n`);
   const notice = noticeOf(response);
   if (notice) process.stderr.write(overlapBannerOnce(notice));
+  const exact = (response as { conflictNotice?: ExactConflictNotice }).conflictNotice;
+  if (exact) process.stderr.write(exactConflictBannerOnce(exact));
 }
 
 /** The submitter: replays finish while its save job is still running, so compose and submission

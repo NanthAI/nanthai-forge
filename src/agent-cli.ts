@@ -64,6 +64,10 @@ land --save waits for the outcome (--no-wait returns after submission; a killed 
 Hosted start prints {"started":{laneId,path}} on stderr first; path:DIR opens there, open:false skips the checkout.
 Heavy local commands: nforge heavy CMD. Settings: nforge settings; docs: nforge docs parallel-work-defaults.
 
+Save after each meaningful step, not only at land: each hosted save trial-merges the saved files
+with main and with other open Lanes that changed them, and a real conflict reaches both Lanes as
+conflictNotice (file, line ranges, the other Lane's goal) on their next call. No answer is needed;
+it clears when a later save no longer conflicts or a side lands or is abandoned.
 land --save checkpoints, syncs the Lane with main if main moved, composes, runs the
 "verify" check (or the only check) and requests acceptance under project policy.
 CHANNEL_CHANGED retries use a per-Channel landing queue (maxRetries defaults to 3);

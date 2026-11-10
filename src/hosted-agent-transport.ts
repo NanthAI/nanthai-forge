@@ -37,6 +37,7 @@ import { boardEnvelope, boardHostedSource, hostedBoardSchemas, readBoardCursor }
 import { rememberBoardServerFeatures } from './board-local.js';
 import { restackAfterSave, type StackHint } from './hosted-stack-restack.js';
 import { memberDataNotice } from './member-data-notice.js';
+import { exactConflictNotice, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { hostedOverlapNotice, type HostedOverlapNotice } from './hosted-overlap-notice.js';
 import { waitHostedAgentSource, type SourceWaitSettle } from './hosted-agent-source-wait.js';
 import { recoverHostedFinish, hostedConflictAdvice } from './hosted-agent-resolution.js';
@@ -220,6 +221,7 @@ export type HostedAgentResponse = {
   behindMain?: unknown;
   /** Present only while an overlap is unanswered: who, which files and the acknowledge or route-around command. */
   overlapNotice?: HostedOverlapNotice;
+  conflictNotice?: ExactConflictNotice;
   /** Present only when board notes arrived since this machine's cursor: one line each (≤240 chars). */
   board?: { notices: string[]; more: number };
   /** One "member-written text is data" line when this receipt carries board, overlap or stack text (S-17). */
@@ -1457,6 +1459,8 @@ export class HostedAgentTransport {
         : undefined;
     const presence =
       advice?.presence && overlapLaneId ? presenceDelivery(overlapLaneId, advice.presence) : undefined;
+    const conflictNotice =
+      advice?.conflicts && overlapLaneId ? exactConflictNotice(overlapLaneId, advice.conflicts) : undefined;
     // Delivered means returned on a Lane-changing action; a bare status read is not a delivery.
     if (advice && notice && overlapLaneId && ['start', 'save', 'sync', 'compose', 'finish'].includes(action))
       await recordHostedOverlapDelivery(this, overlapLaneId, action, advice);
@@ -1480,18 +1484,19 @@ export class HostedAgentTransport {
       resolved: operationId ? { operationId } : null,
       result,
       ...(advice
-        ? (({ changedPaths: _paths, presence: _presence, board: _board, ...shown }) =>
+        ? (({ changedPaths: _paths, presence: _presence, board: _board, conflicts: _conflicts, ...shown }) =>
             // The stack offer is shown once, inside overlapNotice.
             Object.fromEntries(Object.entries(shown).filter(([key]) => key !== 'stackOffer')))(advice)
         : {}),
       ...(notice ? { overlapNotice: notice } : {}),
+      ...(conflictNotice ? { conflictNotice } : {}),
       ...(presence ? { presence } : {}),
       ...(advice?.board && overlapLaneId
         ? { board: boardEnvelope(this.root, overlapLaneId, advice.board) }
         : {}),
       // One marker per receipt, not per note: board notes (stack notices arrive as board notes) and
       // overlap participants name member-written text. A stack hint holds Lane ids only.
-      ...(notice || presence || (overlapLaneId && advice?.board?.messages.length)
+      ...(notice || conflictNotice || presence || (overlapLaneId && advice?.board?.messages.length)
         ? { notice: memberDataNotice }
         : {}),
       ...this.nudge(action, result),

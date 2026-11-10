@@ -3,6 +3,7 @@
 import { printedReceipt } from './receipt-slim.js';
 import { callerOverlaps, withCallerOverlaps } from './agent-caller-overlaps.js';
 import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice.js';
+import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
 import { resolve } from 'node:path';
@@ -521,6 +522,9 @@ try {
       ?.overlapNotice;
     if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && notice)
       process.stderr.write(overlapBannerOnce(notice));
+    const exact = (output as { conflictNotice?: ExactConflictNotice } | null)?.conflictNotice;
+    if ((process.argv[2] === 'agent' || process.argv[2] === 'x') && exact)
+      process.stderr.write(exactConflictBannerOnce(exact));
     if (
       process.argv[2] === 'agent' &&
       (process.argv[4] === 'finish' || (process.argv[4] === 'land' && process.argv[5] === '--save'))

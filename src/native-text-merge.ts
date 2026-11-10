@@ -281,5 +281,45 @@ export function markNativeTextConflicts(
   return { bytes: bytes(output), conflicted, ...(resolutions.length ? { resolutions } : {}) };
 }
 
+/** One conflicting region: 1-based inclusive line ranges in each side's own file (an empty side
+ * range names the line the other side's edit sits at). */
+export type NativeConflictRegion = { left: [number, number]; right: [number, number] };
+/** Where mergeNativeText refuses: the regions the two sides both changed, in each side's own line
+ * numbers, using the same edits, duplicate and independent-insertion rules. Null for non-text or an
+ * alignment past the diff budget (the merge refuses those too). An empty list with a refused merge
+ * means the import reconcile refused it (the whole file). */
+export function nativeConflictRegions(
+  base: Buffer,
+  left: Buffer,
+  right: Buffer,
+): NativeConflictRegion[] | null {
+  const text = textLines([base, left, right]);
+  if (!text) return null;
+  const [original, a, b] = text.lines as [string[], string[], string[]];
+  const first = edits(original, a),
+    second = edits(original, b);
+  if (!first || !second) return null;
+  const shift = (edit: Edit) => edit.lines.length - (edit.end - edit.start);
+  // The region in one side's own file: the base lines start..end, moved by that side's earlier
+  // edits and resized by its own edit inside the region.
+  const span = (side: Edit[], own: Edit, start: number, end: number): [number, number] => {
+    const from =
+      side.reduce((line, edit) => (edit !== own && edit.end <= start ? line + shift(edit) : line), start) + 1;
+    return [from, Math.max(from, from + end - start + shift(own) - 1)];
+  };
+  const regions: NativeConflictRegion[] = [];
+  for (const edit of second)
+    for (const other of first) {
+      if (!overlaps(edit, other)) continue;
+      const same =
+        edit.start === other.start && edit.end === other.end && edit.lines.join('') === other.lines.join('');
+      if (same || independentInsertions(other, edit)) continue;
+      const start = Math.min(edit.start, other.start),
+        end = Math.max(edit.end, other.end);
+      regions.push({ left: span(first, other, start, end), right: span(second, edit, start, end) });
+    }
+  return regions;
+}
+
 // Shared deterministic alignment for source attribution; this never executes source.
 export { lines as attributionLines, edits as attributionEdits };

@@ -10,7 +10,13 @@ import { profileDiff } from './diff-profile';
 import { Diff, DiffModes, type Comparison } from './Diff';
 import { useLanePreference } from './preferences';
 
-export type ChangedPath = { path: string; status: string; add?: number; del?: number; approximate: boolean };
+export type ChangedPath = {
+  path: string;
+  status: string;
+  add?: number;
+  del?: number;
+  approximate: boolean;
+};
 
 /** Changed files beside the selected file's line diff. Overlapping files carry a note above their diff. */
 export function ChangesPanel({
@@ -20,6 +26,7 @@ export function ChangesPanel({
   error,
   subtitle,
   overlaps,
+  conflicts,
   load,
   footer,
   onSettled,
@@ -34,6 +41,8 @@ export function ChangesPanel({
   error?: string;
   subtitle?: ReactNode;
   overlaps?: ReadonlyMap<string, string[]>;
+  /** Exact conflicts found by a trial merge at save, by path: who it conflicts with and where. */
+  conflicts?: ReadonlyMap<string, string[]>;
   load: (path: string, signal: AbortSignal) => Promise<Comparison>;
   footer?: ReactNode;
   onSettled?: () => void;
@@ -58,7 +67,11 @@ export function ChangesPanel({
     chooseMode(next);
   };
   const [retry, setRetry] = useState(0);
-  const [diff, setDiff] = useState<{ path: string; comparison?: Comparison; error?: string } | null>(null);
+  const [diff, setDiff] = useState<{
+    path: string;
+    comparison?: Comparison;
+    error?: string;
+  } | null>(null);
   const current =
     paths?.find(item => item.path === selected) ?? (neighbour?.path === selected ? neighbour : paths?.[0]);
   const currentPath = current?.path;
@@ -151,12 +164,23 @@ export function ChangesPanel({
                     >
                       <span
                         title={
-                          overlaps?.has(item.path)
-                            ? `Also changed by ${overlaps.get(item.path)!.join(', ')}`
-                            : undefined
+                          conflicts?.has(item.path)
+                            ? `Conflicts with ${conflicts.get(item.path)!.join('; ')}`
+                            : overlaps?.has(item.path)
+                              ? `Also changed by ${overlaps.get(item.path)!.join(', ')}`
+                              : undefined
                         }
                       >
-                        <Glyph name={overlaps?.has(item.path) ? 'overlap' : 'file'} size={13} />
+                        <Glyph
+                          name={
+                            conflicts?.has(item.path)
+                              ? 'conflict'
+                              : overlaps?.has(item.path)
+                                ? 'overlap'
+                                : 'file'
+                          }
+                          size={13}
+                        />
                       </span>
                       <PathLabel path={item.path} />
                       <span className="fx-diffstat">
@@ -202,6 +226,14 @@ export function ChangesPanel({
                   </label>
                   <DiffModes mode={mode} onChange={setMode} />
                 </div>
+                {conflicts?.has(current.path) && (
+                  <div className="fx-file-note">
+                    <Callout tone="conflict">
+                      Saved edits conflict with <b>{conflicts.get(current.path)!.join('; ')}</b>. Agree an
+                      order or split, or change the edit, then save; this clears on its own.
+                    </Callout>
+                  </div>
+                )}
                 {overlaps?.has(current.path) && (
                   <div className="fx-file-note">
                     <Callout tone="waiting">
@@ -254,7 +286,9 @@ function ChangeMapToggleOrFiles({
   source,
   children,
   ...props
-}: Omit<Parameters<typeof ChangeMapToggle>[0], 'source'> & { source?: MapSource }) {
+}: Omit<Parameters<typeof ChangeMapToggle>[0], 'source'> & {
+  source?: MapSource;
+}) {
   return source ? (
     <div className="fx-map-browser">
       <ChangeMapToggle source={source} {...props}>

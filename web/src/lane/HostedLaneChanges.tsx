@@ -4,7 +4,7 @@ import { usePageCritical } from '../ui/page-critical';
 import { useReadRetry } from '../ui/read-retry';
 import { useQuery } from 'convex/react';
 import { workIndex, type WorkIndexWorkspace } from '../hosted-work-index';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Id } from '../../../convex/_generated/dataModel';
 import type { ReviewPath } from '../../../src/native-source-review';
 import { hostedError } from '../snapshot';
@@ -12,12 +12,18 @@ import { ChangesPanel, type ChangedPath } from './ChangesPanel';
 import type { Comparison } from './Diff';
 import type { MapPeer } from './ChangeMapToggle';
 import { numberedLines } from './diff-rows';
+import { api } from '../../../convex/_generated/api';
+import type { ExactConflicts } from '../../../src/hosted-conflict-notice';
 type Index =
   | { available: true; paths: (ReviewPath & { add?: number; del?: number })[] }
   | { available: false; reason: string };
 type File =
   | { available: true; file: ReviewPath; comparison: Comparison }
   | { available: false; reason: string };
+const lineText = (ranges: number[][]) =>
+  ranges.length
+    ? ` at lines ${ranges.map(([from, to]) => (from === to ? `${from}` : `${from}-${to}`)).join(', ')}`
+    : '';
 /** Manifest first, then only the selected file. No source is fetched to populate the file list. */
 export function HostedLaneChanges({
   projectId,
@@ -51,8 +57,25 @@ export function HostedLaneChanges({
     workspace.counts.sourcePins !== undefined;
   const pinArgs = (id: string) =>
     indexedPins
-      ? { projectId, generationId: workspace!.generationId, collection: 'sourcePins', id }
+      ? {
+          projectId,
+          generationId: workspace!.generationId,
+          collection: 'sourcePins',
+          id,
+        }
       : ('skip' as const);
+  // Exact conflicts at save (flip 4): a reactive read that changes only when this Lane's notices do.
+  const conflictRows = useQuery(api.projectHostedConflicts.forLane, laneId ? { projectId, laneId } : 'skip');
+  const conflicts = useMemo(() => {
+    const byPath = new Map<string, string[]>();
+    for (const row of conflictRows ? (JSON.parse(conflictRows) as ExactConflicts) : [])
+      for (const file of row.files)
+        byPath.set(file.path, [
+          ...(byPath.get(file.path) ?? []),
+          `${row.with === 'main' ? 'main' : `Lane ${row.with.slice(0, 8)} (“${row.goal.slice(0, 80)}”)`}${lineText(file.mine)}`,
+        ]);
+    return byPath;
+  }, [conflictRows]);
   const basePin = useQuery(workIndex.detail, pinArgs(base));
   const headPin = useQuery(workIndex.detail, pinArgs(head));
   const pinsLoading = indexedPins && (basePin === undefined || headPin === undefined);
@@ -128,7 +151,15 @@ export function HostedLaneChanges({
   return (
     <ChangesPanel
       onSettled={markDiffReady}
-      mapSource={{ kind: 'lane', id: laneId ?? head, base, head, projectId, backupId, peers }}
+      mapSource={{
+        kind: 'lane',
+        id: laneId ?? head,
+        base,
+        head,
+        projectId,
+        backupId,
+        peers,
+      }}
       loadNeighbour={load}
       compactFiles={Boolean(selectedPaths)}
       title={title}
@@ -136,6 +167,7 @@ export function HostedLaneChanges({
       error={error || (index && !index.available ? index.reason : undefined)}
       subtitle={selectedPaths ? 'Candidate changes · selected save’s files' : 'against the Lane base'}
       load={load}
+      conflicts={conflicts}
     />
   );
 }

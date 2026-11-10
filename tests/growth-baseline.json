@@ -12,7 +12,7 @@
     "unreferencedExports": 22
   },
   "counts": {
-    "tables": 180,
+    "tables": 181,
     "errorCodes": 501,
     "agentActions": 89,
     "cliCommands": 53,
@@ -41,6 +41,13 @@
       "to": 89,
       "reason": "Lane snapshots (Issue 7ac4e32f): table projectLaneSnapshots, error SNAPSHOTS_OFF, agent action snapshots",
       "at": "2026-11-09"
+    },
+    {
+      "kind": "tables",
+      "from": 180,
+      "to": 181,
+      "reason": "flip 4 (853fcde3) adds projectHostedConflictNotices for exact trial-merge conflicts; its subtraction slice deletes projectHostedOverlapAcks and projectHostedOverlapDeliveries (net -1) after the side-by-side",
+      "at": "2026-11-10"
     }
   ]
 }
