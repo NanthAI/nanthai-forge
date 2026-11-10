@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedProvenanceSchema } from './hosted-provenance-schema.js';
 import { teach } from './error-teaching.js';
 import {
   hostedClientReadSchemas,
@@ -244,10 +245,11 @@ export function registerHostedAgentWorkflow(
   server.registerTool(
     'forge_review',
     {
-      description: 'Read pinned source, diffs, peers and queue.',
+      description: 'Read pinned changes and contributors.',
       inputSchema: {
         command: z.union([
           hostedSourceShowSchema,
+          hostedProvenanceSchema.extend({ action: z.literal('provenance') }),
           hostedDiffSchema.extend({ action: z.literal('diff') }),
           hostedPeersSchema.extend({ action: z.literal('peers') }),
           hostedQueueSchema.extend({ action: z.literal('queue') }),
@@ -257,6 +259,12 @@ export function registerHostedAgentWorkflow(
     },
     ({ command }) =>
       result(() => {
+        if (command.action === 'provenance')
+          return import('./hosted-agent-provenance.js').then(m => {
+            const { action: _, ...input } = command;
+            void _;
+            return m.provenanceHostedSource(transport, input);
+          });
         if (command.action === 'show') return showHostedSource(transport, command);
         const { action, ...input } = command;
         if (action === 'queue') return queueHostedSource(transport, input);
@@ -264,7 +272,7 @@ export function registerHostedAgentWorkflow(
       }),
   );
   prose.forge_review =
-    'show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
+    'provenance: candidateId,file?,lines?,cursor?; one file/20 Lane versions, explicit partial coverage and pinned continuations; source and executor identities never guessed. show: exact Lane/main/state/candidateId file; force permits binary/large bytes. diff: pinned Lane base to saved head, paths/byteBudget/cursor; summary:true returns per path equal|absent|different against current main with no hunks. peers: laneId/path/detail saved overlap evidence; incomplete coverage never proves independence. queue: landing queue entries (Lane, Intent, phase, failing tests, recompose count). Unsaved bytes excluded.';
   server.registerTool(
     'forge_wait',
     {

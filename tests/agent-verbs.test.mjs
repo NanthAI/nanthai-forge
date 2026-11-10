@@ -70,7 +70,7 @@ const rows = [
   ['view', 'retired'],
   ['candidates', 'retired'],
   ['views', 'retired'],
-  ['provenance', 'retired'],
+  ['provenance', null],
   ['review', 'retired'],
   ['diff', null],
   ['show', null],

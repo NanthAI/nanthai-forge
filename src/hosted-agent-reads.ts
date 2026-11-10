@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hostedProvenanceSchema } from './hosted-provenance-schema.js';
 import { hostedRecordsReadSchema } from './hosted-record-read.js';
 import { hostedCheckLogSchema } from './hosted-check-log.js';
 import { readFileSync } from 'node:fs';
@@ -117,6 +118,7 @@ export function markQueueLane(view: unknown, laneId: string | undefined) {
 /** Client-side reads: validated, helped and dispatched by name before any hosted-action lookup.
  * Add a read here once; validation and help derive from it, and a test drives each through dispatch. */
 export const hostedClientReadSchemas = {
+  provenance: hostedProvenanceSchema,
   records: hostedRecordsReadSchema,
   log: hostedCheckLogSchema.omit({ action: true }),
   lanes: liveLanesInput,

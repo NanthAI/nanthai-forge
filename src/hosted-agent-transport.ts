@@ -218,6 +218,7 @@ export type HostedAgentResponse = {
   action:
     | HostedAgentAction
     | 'diff'
+    | 'provenance'
     | 'records'
     | 'log'
     | 'peers'
@@ -356,6 +357,15 @@ export class HostedAgentTransport {
     input: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<HostedAgentResponse> {
+    if (requestedAction === 'provenance')
+      return {
+        schema: 1,
+        transport: 'hosted',
+        action: 'provenance',
+        operationId: null,
+        resolved: null,
+        ...(await (await import('./hosted-agent-provenance.js')).provenanceHostedSource(this, input)),
+      };
     if (requestedAction === 'records' || requestedAction === 'log') {
       const result =
         requestedAction === 'records'

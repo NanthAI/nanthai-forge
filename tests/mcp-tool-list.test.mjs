@@ -9,8 +9,10 @@ import { agentFixture } from './hosted-agent-fixture.mjs';
 
 // Issue 47558a99: the advertised tool list is per-session context. Budgets are in characters of the
 // tools/list JSON; tokens are about chars / 4. Raise one only with before/after numbers on the Issue.
-const LIST_CHARS = 6_100; // 1.5k tokens, the Issue target. 2026-11-06: ~5,950 (was 11,725, before that 54,565). 2026-11-07: land --save gained allowEmpty (a930de4c): list 5,882 -> 5,895, Codex form ~5,998 -> 6,011. 2026-11-08: metrics gained contextDays (e32cb0e7, bounds the pre-window read): list +14 chars, Codex form 6,060. 2026-11-09: resolve gained keep (113bc7b3, explicit side choice instead of a silent drop): list now 5,965, Codex form 6,060 -> 6,081 (+21)
-const DESCRIPTION_CHARS = 1_400; // 2026-11-06: ~1,150 of the 6,000 (was 2,259, then 3,955)
+const LIST_CHARS = 5_758; // 657d63ee: measured pre-parity tools/list, including array punctuation.
+const CLAUDE_CHARS = 5_746;
+const CODEX_CHARS = 5_874; // Same baseline as server-prefixed Codex function definitions.
+const DESCRIPTION_CHARS = 920;
 const body = response => JSON.parse(response.content[0].text);
 // The listing names fields in a description ("Fields: a b:n c=x|y ...") and required fields per action.
 function listing(tool) {
@@ -65,7 +67,17 @@ test('the hosted tool list stays inside its context budget', async t => {
       parameters: tool.inputSchema,
     })),
   ).length;
-  assert(codex <= LIST_CHARS, `Codex function definitions: ${codex}`);
+  t.diagnostic(`Codex definitions ${codex} chars`);
+  assert(codex <= CODEX_CHARS, `Codex function definitions: ${codex}`);
+  const claude = JSON.stringify(
+    tools.map(tool => ({
+      name: `mcp__nanthai-forge__${tool.name}`,
+      description: tool.description,
+      input_schema: tool.inputSchema,
+    })),
+  ).length;
+  t.diagnostic(`Claude definitions ${claude} chars`);
+  assert(claude <= CLAUDE_CHARS, `Claude tool definitions: ${claude}`);
   assert(descriptions <= DESCRIPTION_CHARS, `description characters: ${descriptions}`);
 });
 

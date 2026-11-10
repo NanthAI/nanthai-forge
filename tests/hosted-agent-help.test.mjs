@@ -41,6 +41,7 @@ test('hosted help and packaged docs are generated from every enforced schema', a
     hostedAgentHelpEntries.map(e => e.action),
     [
       ...Object.keys(hostedAgentCommandSchemas),
+      'provenance',
       'records',
       'log',
       'lanes',
@@ -123,7 +124,6 @@ test('unsupported actions give a supported alternative without upgrade advice or
       'handoff',
       'handoff-read',
       'report',
-      'provenance',
       'making-of',
       'pending-status',
       'improve',
