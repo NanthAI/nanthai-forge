@@ -85,9 +85,10 @@ is published.
 The tree is listed once per import job. `start` stores the listing (path, Git object ID,
 size, mode per file; plus totals) as one scratch object under the project's R2 prefix, in
 columns (one paths string with offsets, binary object IDs, sizes and mode codes). It builds
-those columns as it reads: each tree reply is kept in the same column form (GitHub's entry
-objects and API URLs are dropped per reply) and the rows are sorted once at the end, so the
-listing holds no object per file. `start` pins the stored table on the job; every archive step reads that object back, verifies its digest and
+those columns as it reads: each tree reply is scanned from its bytes into the same column
+form (no object per entry, API URLs skipped; a reply GitHub truncated is not read, since it is
+read again in pieces) and the rows are sorted once at the end, so the listing holds no object
+per file. `start` pins the stored table on the job; every archive step reads that object back, verifies its digest and
 tree id, and makes no tree request. A missing or altered object is listed again, never
 trusted. Publication deletes it; project deletion removes it with the rest of the prefix.
 The listing holds no per-file Convex rows.

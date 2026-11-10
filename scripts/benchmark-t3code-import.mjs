@@ -336,7 +336,8 @@ let teardown = null;
 if (process.env.FORGE_IMPORT_TEARDOWN === '1')
   try {
     await guard.stop();
-    const until = Date.now() + 15 * 60_000;
+    // The purge settles 20 minutes after removal (purgeSettleMs: presigned PUT expiry + 5 min).
+    const until = Date.now() + 25 * 60_000;
     while (!(await guard.confirmDeleted()) && Date.now() < until) await wait(10_000);
     teardown = guard.report().deleted ? 'deleted' : 'delete-pending';
   } catch (error) {

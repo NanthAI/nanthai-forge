@@ -92,6 +92,8 @@ export async function githubJson<T>(
   path: string,
   token?: string,
   request: GithubFetch = networkFetch,
+  /** Reads the reply bytes; the default parses them as JSON. */
+  parse: (bytes: Buffer) => T = bytes => JSON.parse(bytes.toString('utf8')) as T,
 ): Promise<T> {
   invariant(
     path.startsWith('/') && !path.split(/[/?]/).includes('..'),
@@ -129,7 +131,7 @@ export async function githubJson<T>(
     chunks.push(chunk);
   }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T;
+    return parse(Buffer.concat(chunks));
   } catch {
     throw new ForgeError('GITHUB_RESPONSE', 'GitHub returned invalid JSON.');
   }

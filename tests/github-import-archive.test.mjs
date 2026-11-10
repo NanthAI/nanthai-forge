@@ -10,7 +10,7 @@ import { readObjectRecipe } from '../dist/object-chunks.js';
 import { readFileSync } from 'node:fs';
 import { listGithubTree } from '../dist/github-archive-source.js';
 import { ListingBuilder, ListingTable } from '../dist/github-listing-codec.js';
-import { TreeRows } from '../dist/github-tree-split.js';
+import { TreeRows, readTreeReply } from '../dist/github-tree-split.js';
 import { CatalogTable } from '../dist/import-catalog-table.js';
 import { importStateFiles } from '../dist/import-state-scan.js';
 import { setFlagsFromString } from 'node:v8';
@@ -831,7 +831,7 @@ test('Issue 96f164ce: the stored file table round-trips as columns; a lookup fin
 
 test('Issue 96f164ce: a listing is built from reply columns in any order; malformed entries keep their own error', async () => {
   const id = n => n.toString(16).padStart(40, '0');
-  const rows = new TreeRows([
+  const rows = TreeRows.from([
     { path: 'b/two', mode: '100755', type: 'blob', sha: id(2), size: 9, url: 'https://api.github.com/x' },
     { path: 'b', mode: '040000', type: 'tree', sha: id(3) },
     { path: 'a', mode: '100755', type: 'blob', sha: 'not-a-sha', size: 1 },
@@ -884,6 +884,71 @@ test('Issue 96f164ce: a listing is built from reply columns in any order; malfor
     ),
     /GITHUB_RESPONSE|outside its listed directories/,
   );
+});
+
+test('Issue 96f164ce: a tree reply is scanned into columns with the entries JSON.parse reads, and a truncated one is not read', () => {
+  const id = (n, bytes = 20) => n.toString(16).padStart(bytes * 2, '0');
+  const entries = reply => Array.from({ length: reply.rows.length }, (_, i) => reply.rows.entry(i));
+  const parsed = text => {
+    const json = JSON.parse(text);
+    return {
+      sha: json.sha,
+      truncated: json.truncated !== false,
+      entries: entries({ rows: TreeRows.from(json.tree) }),
+    };
+  };
+  const tree = [
+    {
+      path: 'a "quoted"\\path é/日本.txt',
+      mode: '100644',
+      type: 'blob',
+      sha: id(1),
+      size: 12,
+      url: 'https://x/"y"',
+    },
+    { path: 'dir', mode: '040000', type: 'tree', sha: id(2), url: 'u' },
+    { path: 'link', mode: '120000', type: 'blob', sha: id(3), size: 0 },
+    { path: 'mod', mode: '160000', type: 'commit', sha: id(4) },
+    { path: 'odd-mode', mode: '100666', type: 'blob', sha: id(5), size: 1 },
+    { path: 'upper', mode: '100644', type: 'blob', sha: id(6).toUpperCase(), size: 1 },
+    { path: 'sha256', mode: '100644', type: 'blob', sha: id(7, 32), size: 1 },
+    { path: 'fraction', mode: '100644', type: 'blob', sha: id(8), size: 1.5 },
+    { path: 'nullsize', mode: '100644', type: 'blob', sha: id(9), size: null },
+    { path: 7, mode: '100644', type: 'blob', sha: id(10), size: 1 },
+  ];
+  const replies = [
+    JSON.stringify({ sha: id(99), url: 'u', tree, truncated: false }),
+    JSON.stringify({ sha: id(99), url: 'u', tree, truncated: false }, null, 2),
+    JSON.stringify({ truncated: false, tree, sha: id(99) }),
+    JSON.stringify({ sha: id(99), tree }),
+    '{"sha":"' +
+      id(99) +
+      '","tree":[{"path":"p","path":"q","mode":"100644","type":"blob","sha":"' +
+      id(1) +
+      '","size":1e1}],"truncated":false}',
+    '{"sha":"' +
+      id(99) +
+      '","tree":[{"path":"\\u0070","mode":"\\u0031" ,"type":"blob","sha":"' +
+      id(1) +
+      '","size":-0}],"truncated":false}',
+    // Not flat: read by JSON.parse instead.
+    JSON.stringify({ sha: id(99), tree: [{ ...tree[0], extra: { nested: true } }], truncated: false }),
+  ];
+  for (const text of replies) {
+    const scanned = readTreeReply(Buffer.from(text));
+    assert.deepEqual(
+      { sha: scanned.sha, truncated: scanned.truncated, entries: entries(scanned) },
+      parsed(text),
+      text.slice(0, 80),
+    );
+  }
+  // GitHub's truncated layout: sha first, truncated last; nothing in the tree is read.
+  const cut = readTreeReply(
+    Buffer.from(JSON.stringify({ sha: id(99), url: 'u', tree: [{ bad: 1 }], truncated: true }, null, 2)),
+  );
+  assert.deepEqual([cut.sha, cut.truncated, cut.rows.length], [id(99), true, 0]);
+  assert.throws(() => readTreeReply(Buffer.from('{"sha":"x","tree":7}')), /another tree/);
+  assert.throws(() => readTreeReply(Buffer.from('{"sha":')), SyntaxError);
 });
 
 test('Issue 96f164ce: the stored-object table answers has/get/set/values like the Map it replaces, and sorts by digest', () => {

@@ -109,17 +109,21 @@ export class ListingTable {
         shaBytes: this.shaBytes,
       }),
     );
-    const length = Buffer.alloc(4);
-    length.writeUInt32LE(header.length);
-    return Buffer.concat([
-      length,
+    // One buffer, paths encoded in place: no second copy of the table while it is written.
+    const parts = [
       header,
       Buffer.from(this.starts.buffer, this.starts.byteOffset, this.starts.byteLength),
       Buffer.from(this.sizes.buffer, this.sizes.byteOffset, this.sizes.byteLength),
       Buffer.from(this.modes.buffer, this.modes.byteOffset, this.modes.byteLength),
       this.shas,
-      Buffer.from(this.paths, 'utf8'),
-    ]);
+    ];
+    const pathBytes = Buffer.byteLength(this.paths, 'utf8');
+    const bytes = Buffer.allocUnsafe(4 + parts.reduce((sum, part) => sum + part.length, 0) + pathBytes);
+    bytes.writeUInt32LE(header.length);
+    let at = 4;
+    for (const part of parts) at += part.copy(bytes, at);
+    bytes.write(this.paths, at, 'utf8');
+    return bytes;
   }
   /** Null when the bytes are not a well-formed table for `tree`: the caller lists again. */
   static decode(bytes: Buffer, tree: string): ListingTable | null {

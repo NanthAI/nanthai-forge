@@ -10,9 +10,8 @@ import { ListingBuilder, type ListingTable } from './github-listing-codec.js';
 import {
   splitGithubTree,
   TreeSplitUnavailable,
-  TreeRows,
+  readTreeReply,
   walkSplitTree,
-  type GithubTreeEntry,
   type SplitTree,
 } from './github-tree-split.js';
 
@@ -33,23 +32,18 @@ export async function listGithubTree(
   request: GithubFetch = networkFetch,
 ): Promise<ListingTable | null> {
   invariant(gitId(tree), 'GITHUB_RESPONSE', 'GitHub returned an invalid object identity.');
-  const reply = await githubJson<{ sha: string; truncated: boolean; tree: GithubTreeEntry[] }>(
+  const reply = await githubJson(
     `/repos/${repository}/git/trees/${tree}?recursive=1`,
     token,
     request,
+    readTreeReply,
   );
-  invariant(
-    reply.sha === tree && Array.isArray(reply.tree),
-    'GITHUB_RESPONSE',
-    'GitHub returned another tree.',
-  );
+  invariant(reply.sha === tree, 'GITHUB_RESPONSE', 'GitHub returned another tree.');
   let listed: SplitTree | null = null,
     stats: { requests: number; splits: number } | null = null;
-  if (reply.truncated === false) listed = { rows: new TreeRows(reply.tree), nested: [] };
+  if (!reply.truncated) listed = { rows: reply.rows, nested: [] };
   else {
     stats = { requests: 1, splits: 0 };
-    // The truncated reply (up to 100,000 entries) is not part of the listing: release it.
-    reply.tree = [];
     try {
       listed = await splitGithubTree(repository, tree, token, request, stats);
     } catch (error) {
