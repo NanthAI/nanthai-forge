@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // B1.5d version record (B2/B3/S6): everything that defines the system under test, read at
-// cell start and end. Any difference voids the cell, except the readings that only follow
-// nanthai-forge main (RECORDED_KEYS: builders keep landing during scored batches, exit plan
-// "Quiet rule and deploys"); the driver also holds every cell of a run to the first cell's
+// cell start and end. Any difference voids the cell except GitHub main moving while
+// builders land. The bench has its own pinned deployment; the driver holds every cell
+// of a run to the first cell's
 // record (the run pin), so cells compare like with like.
 import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -202,81 +202,11 @@ const KEYS = [
   ['harness.filesSha256', s => s.harness?.filesSha256],
   ['agent', s => s.agent],
 ];
-// Readings that follow nanthai-forge main. Builders keep landing while a scored batch runs
-// (lead 2026-11-09, exit plan "Quiet rule and deploys"): main, the deploy head and the
-// deployed convex/ tree moving are recorded (`moved`), never voids by themselves. A deployed
-// convex/ change voids only when it touches the landing path (`landingPathChanges`), and
-// forge-check.yml (the Forge arm's check) still voids when it changes. Dry runs waive all four.
-export const RECORDED_KEYS = ['githubMain', 'deploy.headSha', 'convexTree.deploy'];
+// GitHub main can move while builders work. The bench deployment is pinned separately;
+// its deployed code and both check workflows remain part of the version guard.
+export const RECORDED_KEYS = ['githubMain'];
 export const LIVE_MAIN_KEYS = [...RECORDED_KEYS, 'checkWorkflow.forge'];
 
-// convex/ files off the landing path (land, queue, check, acceptance): a deploy that changes
-// only these is recorded, not a void (exit plan "Quiet rule and deploys"). Any other changed
-// convex/ file voids, and so does a change list that cannot be read (void when unsure). Board
-// and briefing code is on the path: Forge-arm agents read notices, claims and the briefing
-// during a cell (lead c75ed83f).
-export const OFF_LANDING_PATH = Object.freeze([
-  'convex/gitServe',
-  'convex/projectGithubImport',
-  'convex/projectGithubInbound',
-  'convex/projectPeople',
-  'convex/projectPurge',
-  'convex/projectR2Purge',
-  'convex/projectR2Sweep',
-  'convex/projectArchive',
-  'convex/projectBackup',
-  'convex/projectLegacy',
-  'convex/legacy',
-  'convex/archive',
-  'convex/backup',
-  'convex/account',
-  'convex/abuse',
-  'convex/sharing',
-  'convex/team',
-]);
-export const offLandingPath = file => OFF_LANDING_PATH.some(prefix => file.startsWith(prefix));
-
-/** The deployed convex/ change between two snapshots, classified: `voids` (empty when the tree
- * did not change or only off-path files changed) and the changed convex/ `files`. One GitHub
- * compare call between the two deploy heads, only when the tree changed. */
-export async function landingPathChanges(a, b, exec = out) {
-  const from = a.convexTree?.deploy ?? null,
-    to = b.convexTree?.deploy ?? null;
-  if (from && to && from === to) return { voids: [], files: [] };
-  const x = a.deploy?.headSha,
-    y = b.deploy?.headSha;
-  const unsure = why => ({
-    voids: [`convexTree.deploy: ${from} -> ${to} (${why}; void when unsure)`],
-    files: null,
-  });
-  if (!from || !to || !x || !y) return unsure('unreadable');
-  let view;
-  try {
-    view = JSON.parse(
-      await exec('gh', [
-        'api',
-        `repos/${FORGE}/compare/${x}...${y}`,
-        '--jq',
-        '{status: .status, n: (.files | length), files: [.files[].filename]}',
-      ]),
-    );
-  } catch (error) {
-    return unsure(`changed files unreadable: ${String(error.message ?? error).slice(0, 120)}`);
-  }
-  // GitHub lists at most 300 files per compare; a longer list cannot be classified.
-  if (view.status !== 'ahead' || view.n >= 300) return unsure(`compare ${view.status}, ${view.n} files`);
-  const files = view.files.filter(f => f.startsWith('convex/'));
-  if (!files.length) return unsure('the tree changed but no convex/ file is listed');
-  const on = files.filter(f => !offLandingPath(f));
-  return {
-    voids: on.length
-      ? [
-          `convex/ landing path changed by deploy ${x.slice(0, 12)} -> ${y.slice(0, 12)}: ${on.slice(0, 8).join(', ')}${on.length > 8 ? ` (+${on.length - 8})` : ''}`,
-        ]
-      : [],
-    files,
-  };
-}
 const diff = (a, b, keys, unpinned) =>
   keys
     .filter(([k, get]) => !(unpinned && k === 'harness.commit' && get(a) == null && get(b) == null))
@@ -295,19 +225,6 @@ export function differences(a, b, { liveMain = false, unpinned = false } = {}) {
     unpinned,
   );
 }
-/** Everything that voids between two snapshots: `differences`, plus a deployed convex/ change
- * on the landing path (`landingPathChanges`; waived with the other main readings when
- * `liveMain`). `convexFiles`: the changed convex/ files (null when unreadable), recorded. */
-export async function voidingChanges(a, b, { liveMain = false, unpinned = false, exec = out } = {}) {
-  const changes = differences(a, b, { liveMain, unpinned });
-  const convex = await landingPathChanges(a, b, exec);
-  return {
-    changes: liveMain ? changes : [...changes, ...convex.voids],
-    convexFiles: convex.files,
-    waived: liveMain ? convex.voids : [],
-  };
-}
-
 /** The recorded main readings that moved between two snapshots (reported, not voids). */
 export const moved = (a, b) =>
   diff(
@@ -319,8 +236,7 @@ export const moved = (a, b) =>
 
 /** Problems with one snapshot by itself (the GO rules that need no second reading). */
 /** `inBatch`: a cell inside a batch whose start already brought the held CLI to main and
- * matched the deployed convex/; main and the deploy may have moved since (recorded; the gate
- * classifies a convex/ change against the batch pin with `landingPathChanges`). */
+ * matched the deployed convex/; main may move since, while the deployment stays pinned. */
 export function snapshotProblems(s, { requireFreeze, liveMain = false, inBatch = false }) {
   const p = [];
   if (!s.cli.commit) p.push('CLI commit unreadable');
@@ -335,80 +251,4 @@ export function snapshotProblems(s, { requireFreeze, liveMain = false, inBatch =
   if (!s.agent) p.push('agent CLI --version unreadable');
   if (requireFreeze && !s.freeze) p.push(`freeze file (.freeze of the CLI installation) missing`);
   return p;
-}
-
-/** Runs queued or in progress on nanthai-forge; `workflow` (a workflow file, such as
- * config.forge.deployWorkflow) limits it to that workflow. 2 `gh` calls. */
-export async function forgeInFlight({ workflow = null } = {}, exec = out) {
-  const runs = [];
-  for (const status of ['queued', 'in_progress'])
-    runs.push(
-      ...JSON.parse(
-        await exec('gh', [
-          'run',
-          'list',
-          '-R',
-          FORGE,
-          ...(workflow ? ['--workflow', workflow] : []),
-          '--status',
-          status,
-          '-L',
-          '50',
-          '--json',
-          'databaseId,name,workflowName,createdAt',
-        ]),
-      ),
-    );
-  return runs;
-}
-
-/** The batch quiet rule (exit plan "Quiet rule and deploys"): only a Convex deploy in flight
- * holds a batch start; dogfood landings, Verify Forge and forge-check runs do not. */
-export const deployInFlight = (config, exec) =>
-  forgeInFlight({ workflow: config.forge.deployWorkflow }, exec);
-
-/** Deploy runs (config.forge.deployWorkflow) that overlap [from, to] (ISO times): id, head,
- * created/updated times, status and conclusion. One `gh` call of the last 30 runs; a run still
- * going at `to` counts. Unreadable: { error }. */
-export async function deploysDuring(config, from, to, exec = out) {
-  try {
-    const list = JSON.parse(
-      await exec('gh', [
-        'run',
-        'list',
-        '-R',
-        FORGE,
-        '--workflow',
-        config.forge.deployWorkflow,
-        '-L',
-        '30',
-        '--json',
-        'databaseId,headSha,createdAt,updatedAt,status,conclusion',
-      ]),
-    );
-    return overlapping(list, from, to);
-  } catch (error) {
-    return { error: String(error.message ?? error).slice(0, 200) };
-  }
-}
-
-/** Runs whose [createdAt, updatedAt] (updatedAt open while not completed) overlaps [from, to]. */
-export function overlapping(runs, from, to) {
-  const a = Date.parse(from),
-    b = Date.parse(to);
-  return runs
-    .filter(r => {
-      const s = Date.parse(r.createdAt),
-        e = r.status === 'completed' ? Date.parse(r.updatedAt) : Infinity;
-      return s <= b && e >= a;
-    })
-    .map(r => ({
-      id: r.databaseId,
-      headSha: r.headSha,
-      createdAt: r.createdAt,
-      updatedAt: r.updatedAt,
-      status: r.status,
-      conclusion: r.conclusion ?? null,
-    }))
-    .sort((x, y) => Date.parse(x.createdAt) - Date.parse(y.createdAt));
 }

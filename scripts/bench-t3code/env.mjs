@@ -826,7 +826,7 @@ export function buildSteps(ctx) {
       diskGb: 0.6,
       minutes: 5,
       networkGb: 0.35,
-      note: 'GitHub import of the public fork at the base commit (born hosted, server authority, agent-writable main): measured 2026-11-07 at 28,881 files / 333 MB in ~2:10 with 8 action calls, then `nforge clone` in ~61 s. A Git-format `nforge host` of a snapshot is NOT used: it leaves no schema-2 main (mainReady false), so agents cannot land. Dev deployment only.',
+      note: 'GitHub import of the public fork at the base commit (born hosted, server authority, agent-writable main): measured 2026-11-07 at 28,881 files / 333 MB in ~2:10 with 8 action calls, then `nforge clone` in ~61 s. A Git-format `nforge host` of a snapshot is NOT used: it leaves no schema-2 main (mainReady false), so agents cannot land. The configured bench deployment only.',
     },
     commands: () => [
       `node ${join(import.meta.dirname, 'forge-import.mjs')} ${L().importJournal} '{"url":"https://github.com/${cfgSafe().github?.repository ?? '<config.github.repository>'}","ref":"${L().baseSha ?? '<base>'}","name":"${L().forgeName}","deployment":"${L().forgeUrl ?? '<config.forge.url>'}"}'`,
@@ -928,7 +928,7 @@ export function buildSteps(ctx) {
       'agent',
       L().forgeMain,
       'check-settings',
-      '{}',
+      JSON.stringify({ url: cfgSafe().forge?.url, projectId: cfgSafe().forge?.projectId }),
     ]);
     const line = out
       ?.split('\n')
@@ -1009,11 +1009,11 @@ export function buildSteps(ctx) {
 
   step({
     id: 'dogfood',
-    title: 'Dogfood queue project in config (drain under the hold, 97c7a123)',
+    title: 'CLI mirror project in config',
     outward: false,
     cost: { ...COST0, note: 'config edit only' },
     commands: () => [
-      'set config.dogfood.projectId from --dogfood-project ID (the project whose landing queue the hold waits for)',
+      'set config.dogfood.projectId from --dogfood-project ID (the project whose mirror maps the CLI State to Git)',
     ],
     isDone: async () => ({ done: Boolean(cfgSafe().dogfood?.projectId) }),
     run: async () => {

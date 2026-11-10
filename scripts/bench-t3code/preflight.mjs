@@ -11,15 +11,7 @@ import { loadavg } from 'node:os';
 import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
 import { benchCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
-import {
-  snapshot,
-  snapshotProblems,
-  pinProblems,
-  forgeInFlight,
-  deployInFlight,
-  benchFreeze,
-} from './versions.mjs';
-import { hostedQueueEntries } from './drain.mjs';
+import { snapshot, snapshotProblems, pinProblems, benchFreeze } from './versions.mjs';
 import { usageGate, diskFreeGb, diskNeed, filesystemEventGate } from './gates.mjs';
 import { probeFilesystemEvents } from '../filesystem-event-health.mjs';
 import { pathToFileURL } from 'node:url';
@@ -168,53 +160,14 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
       config.qualifiedHarness === s.harness.commit,
       `config.qualifiedHarness ${config.qualifiedHarness?.slice?.(0, 12)} (a passing dry run of this exact harness)`,
     );
-  // Quiet rule (exit plan "Quiet rule and deploys"): only a Convex deploy in flight holds a
-  // batch start. Other nanthai-forge runs and admitted dogfood landings are reported only.
-  await tryRun('deploy in flight', async () => {
-    const f = await deployInFlight(config);
-    check(
-      'no Convex deploy in flight',
-      !f.length,
-      f.length
-        ? `${f.length} ${config.forge.deployWorkflow} run(s) queued/in progress (the driver waits for them)`
-        : `no ${config.forge.deployWorkflow} run queued or running`,
-      dry,
-    );
-  });
-  await tryRun('in-flight', async () => {
-    const f = await forgeInFlight();
-    check(
-      'other nanthai-forge runs',
-      true,
-      f.length
-        ? `${f.length} run(s) queued/in progress, not waited for: ${f.map(r => r.workflowName).join(', ')}`
-        : 'nanthai-forge has no queued or running workflow',
-    );
-  });
   check(
-    'dogfood queue',
+    'CLI mirror project',
     Boolean(config.dogfood?.projectId),
     config.dogfood?.projectId
-      ? 'config.dogfood names the dogfood project (its mirror maps the CLI commit; its queue is reported)'
+      ? 'config.dogfood names the dogfood project (its mirror maps the CLI commit)'
       : 'config.dogfood {projectId, url?} is missing: the version record cannot map the CLI commit through the mirror',
     dry,
   );
-  if (config.dogfood?.projectId)
-    await tryRun('dogfood queue read', async () => {
-      const entries = await hostedQueueEntries({
-        cli: config.forge.cli,
-        url: config.dogfood.url ?? config.forge.url,
-        projectId: config.dogfood.projectId,
-        root: join(B, '.dogfood-anchor'),
-      });
-      check(
-        'dogfood submissions',
-        true,
-        entries.length
-          ? `${entries.length} admitted, not waited for: ${entries.join(', ')}`
-          : 'the dogfood landing queue is empty',
-      );
-    });
   const disk = diskFreeGb(),
     need = diskNeed('github', 10, dry).requiredGb;
   check('disk', disk >= need, `${disk.toFixed(1)} GB free, largest cell needs ${need.toFixed(1)} GB`);

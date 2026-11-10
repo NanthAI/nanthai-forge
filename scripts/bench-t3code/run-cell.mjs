@@ -37,10 +37,6 @@ import {
   snapshotProblems,
   pinProblems,
   moved,
-  voidingChanges,
-  landingPathChanges,
-  deployInFlight,
-  deploysDuring,
   benchFreeze,
   benchHoldText,
 } from './versions.mjs';
@@ -201,7 +197,7 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'])
 
 // The cell holds the CLI installation's measurement hold for its whole run (the product updater
 // would switch `current` mid-cell); the driver may already hold it. Released on every exit. The
-// hold names the bench project, so the cell's own agents land while dogfood landings wait.
+// hold names the bench project, so its agents land; builders use a separate installation.
 const FREEZE = benchFreeze(config);
 const ownsFreeze = !existsSync(FREEZE);
 if (ownsFreeze) writeFileSync(FREEZE, benchHoldText(config, `bench cell ${cellId} pid ${process.pid}`));
@@ -222,13 +218,8 @@ const gates = await cellGates({
   pinProblems,
   snapshotProblems,
   differences,
-  landingPathChanges,
-  // In a batch the driver checked for a Convex deploy before either cell started; a cell run
-  // alone checks it itself (the quiet rule: only a deploy in flight holds a start).
-  forgeInFlight: batchDir ? async () => [] : () => deployInFlight(config),
   pinFile: flag('--pin'),
 });
-if (batchDir) gates.inFlightCheckedBy = 'batch';
 result.gates = gates;
 if (gates.refusals.length) {
   writeResult({ refused: gates.refusals.join('; ') });
@@ -692,10 +683,9 @@ const clockDriftMs =
     ? null
     : Math.abs(result.githubClock.end.skewMs - result.githubClock.start.skewMs);
 const unpinned = dry && flags.includes('--unpinned');
-const voiding = await voidingChanges(start, end, { liveMain: trial, unpinned });
-const versionChanges = voiding.changes;
+const versionChanges = differences(start, end, { liveMain: trial, unpinned });
 const waivedChanges = trial
-  ? [...differences(start, end, { unpinned }).filter(d => !versionChanges.includes(d)), ...voiding.waived]
+  ? differences(start, end, { unpinned }).filter(d => !versionChanges.includes(d))
   : [];
 const voided = [];
 if (versionChanges.length) voided.push(`versions changed during cell: ${versionChanges.join('; ')}`);
@@ -729,11 +719,8 @@ writeResult({
     end,
     changes: versionChanges,
     moved: moved(start, end),
-    convexFiles: voiding.convexFiles,
     waivedWhileMainLive: waivedChanges,
   },
-  // Convex deploy runs that overlapped this cell (exit plan "Quiet rule and deploys").
-  deploys: await deploysDuring(config, start.at, end.at),
   startedAt: new Date(cellStart).toISOString(),
   endedAt: new Date(cellEnd).toISOString(),
   ...summary,

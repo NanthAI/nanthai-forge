@@ -577,6 +577,12 @@ test('forge-check: dry reads check-settings only; live configures check, runner 
   const dry = hostedBench({ own: true, settings: fresh });
   await runSetup(dry.f.ctx, { dry: true, only: ['forge-check'] });
   assert.deepEqual(dry.writes, []);
+  const probe = dry.f.calls.find(call => call.includes('check-settings'));
+  const config = JSON.parse(readFileSync(join(dry.B, 'config.json'), 'utf8'));
+  assert.ok(
+    probe.includes(JSON.stringify({ url: config.forge.url, projectId: config.forge.projectId })),
+    'setup reads the configured deployment even when a retained clone points elsewhere',
+  );
   assert.match(dry.f.lines.join('\n'), /to configure: check, runner, acceptance/);
   assert.match(dry.f.lines.join('\n'), /bash \.bench\/ci\.sh/);
   const live = hostedBench({ own: true, settings: fresh });

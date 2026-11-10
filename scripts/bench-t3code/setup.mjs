@@ -7,7 +7,7 @@
 //        --new-base           the source holds a NEW base (different commit id): a new base, see the plan
 //        --installer-sha256 H  sha256 of the reviewed Vite+ installer (setup stops and prints it first)
 //        --replace-forge-project  host a NEW Forge project though config names one that does not answer
-//        --dogfood-project ID  the project whose landing queue the benchmark hold waits for
+//        --dogfood-project ID  the project whose mirror maps the CLI State to Git
 //        --only a,b            run only these steps (ids as printed by --dry)
 // BENCH_ROOT (required, absolute; bench-root.mjs) is the bench folder. --live needs it to hold
 // the owner's config.json and tasks.json. Creates only what the manifest records: see teardown.

@@ -152,20 +152,6 @@ console.log(
             return [`N=${N}`, { run: d.run, reasons: d.reasons }];
           }),
       ),
-      // Every Convex deploy recorded during a cell that did not void it, with the convex/ files
-      // changed over the cell (exit plan "Quiet rule and deploys", lead c75ed83f): a reader can
-      // check each call. `voidedByDeploy` marks the cells a landing-path deploy did void.
-      recordedDeploys: cells
-        .filter(r => (Array.isArray(r.deploys) ? r.deploys.length : r.deploys?.error))
-        .map(r => ({
-          cellId: r.cellId,
-          key: r.key,
-          arm: r.arm,
-          deploys: r.deploys,
-          convexFiles: r.versions?.convexFiles ?? null,
-          voidedByDeploy: (r.voided ?? []).some(v => /convex\/ landing path|convexTree\.deploy/.test(v)),
-          voided: r.voided ?? [],
-        })),
       cells: cells.map(r => ({
         cellId: r.cellId,
         key: r.key,

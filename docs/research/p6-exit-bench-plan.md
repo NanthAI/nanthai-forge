@@ -67,56 +67,24 @@ once, whole (`DESIGN.maxAttempts = 2`). A batch whose every cell crashed in setu
 agent ran is not an attempt; it is re-run up to `DESIGN.maxSetupRetries = 2` times and
 disclosed as setup-only in its `batch.json`.
 
-## Quiet rule and deploys (lead 2026-11-09, before the first scored cell)
+## Separate bench deployment and versions
 
-This replaces two sentences of B1.5d's "Versions" section: "A batch does not start while
-nanthai-forge has any workflow queued or running" and "Any difference between a batch's start
-and end (a landing, a deploy, a CLI swap) voids the batch". Builders keep landing while the bench
-runs; the bench project has its own queue, and dogfood checks run on another repository.
+The bench uses its own Convex deployment, configured by `config.forge.url` and
+`config.forge.deployment`, deployed deliberately from the pinned harness commit through
+`config.forge.deployWorkflow` (`convex-bench-deploy.yml`). Setup and the meter target that
+deployment. Builders keep landing and deploying dev independently; no dev queue or deploy
+drain runs before a bench batch.
 
-- **Batch start:** under the hold, a batch starts once no Convex deploy run
-  (`config.forge.deployWorkflow`, Deploy dev Convex) is queued or running on nanthai-forge. The
-  dogfood landing queue, Verify Forge and forge-check runs are not waited for. The 45 min drain
-  timeout stays: a deploy still in flight then releases the hold and retries. The driver still
-  brings the held CLI to main first, and the start record must still have the CLI at main and the
-  deployed `convex/` equal to the CLI commit's.
-- **Batch start, queued landing-path landings (lead acdbee8b, after batch n10-r1 a1 voided):**
-  the hold keeps out only new submissions. A landing already queued at the start still lands
-  during the batch, and its deploy follows. So a batch also waits while any queued or checking
-  nanthai-forge landing changes `convex/` files on the landing path (the off-path list below; a
-  landing whose changed paths cannot be read counts). The driver reads the queue once, then each
-  submission's changed paths once (`drain.mjs landingPathQueue`). It checks before taking the hold
-  and again under it. Landings that change only `src/`, `tests/`, docs or off-path `convex/` files
-  do not block. What each start waited on is recorded in `batch.json startWaits`, and the summary
-  lists it per batch.
-- **During a batch:** the CLI stays held by `.freeze`, as before. GitHub main and the deploy head
-  moving are **recorded, not voids** (`versions.moved`), with every deploy run that overlapped the
-  batch and each cell (`deploys`: id, head, start, end, status). A change in **`forge-check.yml`**
-  (the Forge arm's check) still voids the cell and its batch.
-- **Landing path (amended 2026-11-09 after the dry on 5b707970, comment 8f8e049a):** when the
-  **deployed `convex/` tree** changes during a cell or batch, the harness lists the changed files
-  between the start and end deploy heads (one GitHub compare call) and records them
-  (`versions.convexFiles`). The change voids the cell and its batch when any changed `convex/` file
-  is **on the landing path**, that is, not under one of these off-path prefixes
-  (`versions.mjs OFF_LANDING_PATH`): `convex/gitServe`, `convex/projectGithubImport`,
-  `convex/projectGithubInbound`, `convex/projectPeople`, `convex/projectPurge`,
-  `convex/projectR2Purge`, `convex/projectR2Sweep`,
-  `convex/projectArchive`, `convex/projectBackup`, `convex/projectLegacy`, `convex/legacy`,
-  `convex/archive`, `convex/backup`, `convex/account`, `convex/abuse`, `convex/sharing`,
-  `convex/team`. It also voids when the list cannot be read or classified (void when unsure).
-  Everything else is on the path, including `schema.ts`, `projectHistory*`, `projectHosted*`,
-  `projectWork*`, `projectCheck*`, `projectLanding*`, `projectFinish*`, and `projectBoard*` and
-  `projectBriefing*` (Forge-arm agents read board notices, claims and the start briefing during a
-  cell; lead c75ed83f). A change that touches only off-path files is recorded, not a void. The
-  bench report lists every deploy recorded during a scored cell that did not void it, with its
-  changed `convex/` files (`summarize.mjs recordedDeploys`), so a reader can check the call. A cell inside a batch checks this against the
-  batch's start record instead of requiring the CLI to equal main, or the deployed `convex/` to
-  equal the CLI's, at its own start.
-- **Runner actions (clarification, same comment):** "the resolved SHA for the same action
-  repository changes within that arm" compares each job's set of SHAs per action repository. A
-  job that uses one repository at two refs (a pinned SHA and a tag) in every job is not a change;
-  jobs whose sets disagree still void.
-- If more than 1 in 4 cells are voided this way, the lead names landing windows instead.
+The measurement hold (`.freeze`) lives only in the bench's CLI installation
+(`BENCH_ROOT/cli`), which refuses to share the builders' installation. The driver brings
+that CLI to main at batch start and checks that its `convex/` matches the bench deployment.
+The CLI stays held through grading. GitHub main moving is recorded, not a void; a change
+to the bench deployment, CLI, harness, agent or check workflows still voids a scored batch.
+Idle costs zero calls: the bench has no cron jobs or clients between runs. The shared
+GitHub runner pool and local CPU load remain recorded by the existing samplers.
+
+The runner action rule compares each job's set of SHAs per action repository. A job
+using one repository at two refs in every job is not a change; differing sets still void.
 
 ## Outlier rule (new, 8c9b84fc)
 
@@ -342,25 +310,9 @@ minutes billed). The driver stops when the Forge arm's Convex spend reaches its 
 Plan changes after registration. Each was made before the first scored cell; no scored result
 existed when it was decided.
 
-- 2026-11-09, lead 8eab6c1c (Issue 8c9b84fc): the quiet rule. A batch start waits only for a
-  Convex deploy in flight; GitHub main and the deploy head moving during a batch are recorded,
-  not voids. Section "Quiet rule and deploys".
-- 2026-11-09, comment 8f8e049a, approved by the lead in c75ed83f: a deployed `convex/` change
-  voids only when a changed file is on the landing path (off-path list, void when unsure). The
-  runner rule compares each job's SHA set per action repository. The lead removed
-  `convex/projectBoard` and `convex/projectBriefing` from the proposed off-path list, and asked
-  that the report list every recorded, non-voiding deploy with its files. Prompted by the dry
-  run on harness 5b707970, which voided on an off-path deploy and on one action at two refs.
 - 2026-11-09, owner decision cfe33f2c (Issue 8c9b84fc): the agent of both arms becomes GPT
   `gpt-6.1-sol`, effort high, through the Codex CLI (B1.5d's exact agent; CLI 0.166.0 against
   B1.5d's 0.164.0), replacing the 2026-11-07 Claude Sonnet choice. No scored cell was valid when
   it was decided. Section "Agent"; the B1.5d comparison becomes absolute as well as % lead.
-- 2026-11-09, lead acdbee8b on cf376b87 (amends 8eab6c1c): the batch start also waits while a
-  queued or checking dogfood landing changes landing-path `convex/` files, checked before and
-  under the hold, and the batch record logs what the start waited on. Prompted by scored batch
-  n10-r1 a1: a landing queued before its hold landed during it, and its deploy (42625208565,
-  `convex/projectHostedActionsVerdict.ts`) voided both cells. Those two cells are reported as
-  "voided, start-gate gap, fixed by" this change's receipt. They do not count toward the 1-in-4
-  void line.
 - 2026-11-10, Issue 7e2f5efe: a reported, ungated weaker-model arm (section "Weaker-model arm").
   No scored cell exists yet; it changes no cell, measure or pass/fail line above.

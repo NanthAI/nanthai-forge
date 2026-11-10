@@ -190,7 +190,7 @@ test('incident 7d98c7da: bench harness scripts do not reach the check pipeline t
   const root = new URL('..', import.meta.url).pathname;
   const files = sourceFiles(root);
   // The incident Lane's harness scripts. A script a check names directly still counts (it may spawn it).
-  const bench = ['drain', 'drive', 'gates', 'preflight', 'run-cell', 'versions']
+  const bench = ['drive', 'gates', 'preflight', 'run-cell', 'versions']
     .map(name => `scripts/bench-t3code/${name}.mjs`)
     .filter(path => files.has(path));
   assert.ok(bench.length > 0);
