@@ -10,7 +10,7 @@ import { directActions, settleDirectActions, requestDirectCancel } from './proje
 import { checkFailureKind } from '../src/hosted-landing-admission';
 import { hostedCheckTerminal } from '../src/hosted-check';
 import { actionsToken, githubAppRequest } from './githubAppToken';
-import { runnerTokenScope, type RunnerScope } from './githubBindingAccess';
+import { requireStoredRepositoryBinding, runnerTokenScope, type RunnerScope } from './githubBindingAccess';
 import { invariant } from '../src/errors';
 import { applyConclusion } from './projectHostedActionsVerdict';
 import { receiveCiStatus } from './projectCiStatus';
@@ -141,12 +141,30 @@ export const cancellation = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     const { row, run } = await writableHostedCheck(ctx, input);
-    if (!run.actions || !run.cancelRequested || !run.executionId || run.actions.cancelScheduled !== true)
+    if (run.configuration.provider === 'ci-status') {
+      if (
+        !run.cancelRequested ||
+        !run.executionId ||
+        row.ciCancel === undefined ||
+        run.configuration.ci.adapter !== 'github-actions'
+      )
+        return 'null';
+      const runnerScope = await requireStoredRepositoryBinding(
+        ctx,
+        input.projectId,
+        run.configuration.ci.repository,
+      );
+      if (row.ciCancel === 'queued') await ctx.db.patch(row._id, { ciCancel: 'attempted' });
+      return JSON.stringify({ ...run, runnerScope });
+    }
+    if (!run.actions || !run.cancelRequested || !run.executionId || run.actions.cancelScheduled === undefined)
       return 'null';
-    // Consume before IO. Replays/duplicate action deliveries never resend an
-    // unknown outcome; true = scheduled, false = attempted, absent = unscheduled.
-    run.actions.cancelScheduled = false;
-    await writeHostedCheck(ctx, row._id, run);
+    // Preserve the prepared plan on replay: its first reply may have been lost before any IO.
+    // GitHub cancellation reconciles the same immutable execution (already stopped = 409).
+    if (run.actions.cancelScheduled) {
+      run.actions.cancelScheduled = false;
+      await writeHostedCheck(ctx, row._id, run);
+    }
     const runnerScope =
       run.configuration.provider === 'github-actions'
         ? await runnerTokenScope(ctx, input.projectId, run.configuration.repository)
@@ -164,15 +182,34 @@ export const cancel = internalAction({
         input,
       ),
     ) as (import('../src/hosted-check').HostedCheckRun & { runnerScope?: RunnerScope | null }) | null;
-    if (!run || run.configuration.provider !== 'github-actions') return null;
-    const token = await actionsToken(ctx, input.projectId, run.configuration.repository, run.runnerScope);
+    if (!run) return null;
+    const repository =
+      run.configuration.provider === 'github-actions'
+        ? run.configuration.repository
+        : run.configuration.provider === 'ci-status' && run.configuration.ci.adapter === 'github-actions'
+          ? run.configuration.ci.repository
+          : null;
+    if (!repository) return null;
+    const token = await actionsToken(ctx, input.projectId, repository, run.runnerScope);
     await githubAppRequest(
-      `repos/${run.configuration.repository}/actions/runs/${run.executionId}/cancel`,
+      `repos/${repository}/actions/runs/${run.executionId}/cancel`,
       token,
       // A completed workflow is already stopped. Keep all other failures explicit.
       async (url, init) => {
-        const response = await convexFetch(url, init);
-        return response.status === 409 ? new Response(null, { status: 204 }) : response;
+        // Cancel is idempotent on this immutable provider run. Reconcile a lost reply
+        // with the same request: an already stopped workflow answers 409.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const response = await convexFetch(url, init);
+            if (response.status >= 500 && attempt < 2) {
+              await response.body?.cancel();
+              continue;
+            }
+            return response.status === 409 ? new Response(null, { status: 204 }) : response;
+          } catch (error) {
+            if (attempt >= 2) throw error;
+          }
+        }
       },
       {},
     );

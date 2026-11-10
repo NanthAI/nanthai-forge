@@ -1908,7 +1908,7 @@ test('expired pending uploads are fenced before DELETE so late commit cannot pub
 });
 
 for (const responseStatus of [202, 409])
-  test(`cancelled check schedules and sends one bound App cancellation (${responseStatus}), then ignores completed webhook`, async t => {
+  test(`cancelled check schedules one stop and reconciles replay on the same bound execution (${responseStatus})`, async t => {
     const s = await fixture(t);
     await s.bind();
     await s.prepare();
@@ -1933,9 +1933,12 @@ for (const responseStatus of [202, 409])
     await s.cancel(s.run.id);
     assert.equal(s.scheduled.filter(task => task.name === 'projectHostedActionsWebhook:cancel').length, 1);
     const ctx = { runMutation: (ref, args) => s.raw(webhooks, getFunctionName(ref).split(':')[1], args) };
+    // Lose the preparation reply after it committed: the provider has not been contacted yet.
+    await s.raw(webhooks, 'cancellation', s.id);
+    assert.equal(cancels, 0);
     await Promise.all([webhooks.cancel._handler(ctx, s.id), webhooks.cancel._handler(ctx, s.id)]);
     await webhooks.cancel._handler(ctx, s.id);
-    assert.equal(cancels, 1);
+    assert.equal(cancels, 3, 'each replay reconciles only the same run; no stop is lost after preparation');
     const before = await s.status(s.run.id),
       tasks = s.scheduled.length;
     for (let i = 0; i < 2; i++) await s.call(webhooks, 'receive', { payload: JSON.stringify(webhook(s)) });

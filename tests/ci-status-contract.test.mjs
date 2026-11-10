@@ -286,7 +286,7 @@ async function providerFixture(t, { creator, prepare = true } = {}) {
     }),
   });
   const receive = value => s.transaction('ci-receive', webhooks.receive, value);
-  return { s, run, seed, main, scheduled, configuration, event, receive };
+  return { s, run, id, seed, main, scheduled, configuration, event, receive };
 }
 
 test("ci-status: a run publishes its Candidate branch on main's mirrored commit, then GitHub's signed event passes it", async t => {
@@ -693,4 +693,112 @@ test('ci-status: a revoked mirror binding prevents cleanup IO without retracting
   const cleanup = await receive(event());
   assert.equal(cleanup, null, 'no private cleanup instruction without the current mirror binding');
   assert.equal((await s.status(run.id)).status, 'passed');
+});
+
+test('ci-status: superseding a bound run shares the Actions stop path and reconciles lost preparation and transient GitHub replies', async t => {
+  const { s, run, id, scheduled, event, receive } = await providerFixture(t);
+  await receive(event({}, 'in_progress'));
+  const cancelStore = await import(moduleUrl('../convex/projectHostedCheckCancel.ts'));
+  const cancel = () =>
+    s.transaction('cancel-ci', { _handler: ctx => cancelStore.cancelUnneededHostedCheck(ctx, id) });
+  await cancel();
+  await cancel();
+  assert.equal((await s.status(run.id)).status, 'cancelled');
+  assert.equal(scheduled.filter(job => job.name === 'projectHostedActionsWebhook:cancel').length, 1);
+  const prepared = JSON.parse(await s.transaction('lost-ci-stop-prepare', webhooks.cancellation, id));
+  assert.equal(prepared.executionId, '777');
+  assert.equal(prepared.configuration.ci.repository, 'acme/app');
+  const key = '__ciCancel_' + randomUUID().replaceAll('-', '');
+  let mints = 0,
+    requests = 0;
+  globalThis[key] = {
+    actionsToken: async () => {
+      mints++;
+      return 'synthetic-token';
+    },
+    githubAppRequest: async (path, _token, request) => {
+      assert.equal(path, 'repos/acme/app/actions/runs/777/cancel');
+      assert.equal((await request('https://api.github.com/' + path, { method: 'POST' })).status, 204);
+    },
+  };
+  t.after(() => {
+    delete globalThis[key];
+  });
+  t.mock.method(
+    globalThis,
+    'fetch',
+    async () => new Response(null, { status: ++requests === 1 ? 503 : 409 }),
+  );
+  const { moduleSource } = await import('./convex-module.mjs');
+  const source = moduleSource('../convex/projectHostedActionsWebhook.ts').replace(
+    /import \{ actionsToken, githubAppRequest \} from [^;]+;/,
+    `const { actionsToken, githubAppRequest } = globalThis.${key};`,
+  );
+  const { cancel: action } = await import(
+    'data:text/javascript;base64,' + Buffer.from(source).toString('base64')
+  );
+  await action._handler(
+    {
+      runMutation: (ref, input) => {
+        assert.equal(getFunctionName(ref), 'projectHostedActionsWebhook:cancellation');
+        return s.transaction('replay-ci-stop-prepare', webhooks.cancellation, input);
+      },
+    },
+    id,
+  );
+  assert.equal(mints, 1);
+  assert.equal(requests, 2);
+  assert.equal((await s.status(run.id)).status, 'cancelled');
+});
+
+test('ci-status: cancellation before publish acknowledgement binds a late signed execution once and never revives it', async t => {
+  const { s, run, id, scheduled } = await providerFixture(t, { prepare: false });
+  await s.transaction('prepare-before-cancel', ciStatus.prepare, id);
+  const cancelStore = await import(moduleUrl('../convex/projectHostedCheckCancel.ts'));
+  await s.transaction('cancel-before-published', { _handler: ctx => cancelStore.cancelHostedCheck(ctx, id) });
+  const cancelled = await s.status(run.id);
+  await s.transaction('late-publish', ciStatus.published, { ...id, commit });
+  assert.equal((await s.status(run.id)).status, 'cancelled');
+  const record = adapters['github-actions'].record({ ref: candidateBranch(run.id), id: 777, running: true });
+  const payload = over => ({
+    payload: JSON.stringify({ ...record.payload, workflow_run: { ...record.payload.workflow_run, ...over } }),
+  });
+  await s.transaction('forged-late-event', webhooks.receive, payload({ event: 'workflow_dispatch' }));
+  assert.equal(scheduled.filter(job => job.name === 'projectHostedActionsWebhook:cancel').length, 0);
+  for (let i = 0; i < 2; i++) await s.transaction('late-signed-event', webhooks.receive, payload({}));
+  const stopped = await s.status(run.id);
+  assert.equal(stopped.status, 'cancelled');
+  assert.equal(stopped.executionId, '777');
+  assert.equal(stopped.terminalDigest, cancelled.terminalDigest);
+  assert.equal(scheduled.filter(job => job.name === 'projectHostedActionsWebhook:cancel').length, 1);
+});
+
+test('ci-status: supersession preserves a bound run while another landing still consumes it', async t => {
+  const { s, run, id, scheduled, event, receive } = await providerFixture(t);
+  await receive(event({}, 'in_progress'));
+  const consumer = s.insert('projectHostedLandingRequests', {
+    projectId: s.projectId,
+    channel: 'main',
+    submissionId: randomUUID(),
+    operationId: randomUUID(),
+    actor: 'owner',
+    sequence: 1,
+    runnable: true,
+    phase: 'checking',
+    runId: run.id,
+    attemptId: randomUUID(),
+    value: '{}',
+  });
+  const cancelStore = await import(moduleUrl('../convex/projectHostedCheckCancel.ts'));
+  await s.transaction('preserve-ci-consumer', {
+    _handler: ctx => cancelStore.cancelUnneededHostedCheck(ctx, id),
+  });
+  assert.equal((await s.status(run.id)).status, 'running');
+  assert.equal(scheduled.filter(job => job.name === 'projectHostedActionsWebhook:cancel').length, 0);
+  s.tables.projectHostedLandingRequests.delete(consumer);
+  await s.transaction('release-ci-consumer', {
+    _handler: ctx => cancelStore.cancelUnneededHostedCheck(ctx, id),
+  });
+  assert.equal((await s.status(run.id)).status, 'cancelled');
+  assert.equal(scheduled.filter(job => job.name === 'projectHostedActionsWebhook:cancel').length, 1);
 });

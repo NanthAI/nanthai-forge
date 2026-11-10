@@ -16,6 +16,7 @@ import {
 } from '../src/ci-status';
 import type { Id } from './_generated/dataModel';
 import { requireStoredRepositoryBinding } from './githubBindingAccess';
+import { requestCiCancel } from './projectCiStatusCancel';
 import { roleOf, settleCiStatus, ciBranchCleanup } from './projectCiStatusLifecycle';
 import { invariant } from '../src/errors';
 
@@ -176,7 +177,7 @@ export const published = internalMutation({
   returns: v.null(),
   handler: async (ctx, input) => {
     const { row, run } = await writableHostedCheck(ctx, input);
-    if (!ciRun(run) || hostedCheckTerminal(run) || !run.ci) return null;
+    if (!ciRun(run) || !run.ci || (hostedCheckTerminal(run) && run.status !== 'cancelled')) return null;
     invariant(/^[a-f0-9]{40}$/.test(input.commit), 'EVIDENCE_CHANGED', 'Invalid published commit.');
     invariant(
       !run.ci.commit || run.ci.commit === input.commit,
@@ -184,8 +185,9 @@ export const published = internalMutation({
       'Another commit was published.',
     );
     run.ci.commit = input.commit;
-    run.status = 'running';
+    if (!hostedCheckTerminal(run)) run.status = 'running';
     await writeHostedCheck(ctx, row._id, run);
+    await requestCiCancel(ctx, { row, run });
     return null;
   },
 });
@@ -240,7 +242,25 @@ export async function receiveCiStatus(
     return true;
   }
   if (verdict.outcome !== 'pending' && verdict.outcome !== 'terminal') return true;
-  if (hostedCheckTerminal(run)) return verdict.outcome === 'terminal' ? ciBranchCleanup(ctx, run) : true;
+  if (hostedCheckTerminal(run)) {
+    if (run.status === 'cancelled' && verdict.outcome === 'pending') {
+      // Cancellation may precede GitHub's first run identity. Bind only its authenticated
+      // push event, retain the local terminal verdict and stop that exact execution.
+      if (!run.executionId) {
+        run.executionId = verdict.executionId;
+        await writeHostedCheck(ctx, selected.row._id, run);
+      }
+      await requestCiCancel(ctx, selected);
+    }
+    if (verdict.outcome === 'terminal') {
+      if (run.status === 'cancelled' && run.ci.link !== verdict.link) {
+        run.ci.link = verdict.link;
+        await writeHostedCheck(ctx, selected.row._id, run);
+      }
+      return ciBranchCleanup(ctx, run);
+    }
+    return true;
+  }
   const changed = run.executionId !== verdict.executionId;
   run.executionId = verdict.executionId;
   if (verdict.outcome === 'pending') {

@@ -38,10 +38,18 @@ The setting is refused while the mirror is off or points at another repository.
    attempt, counts. The first such run binds the check; every later or other run is ignored.
 4. `completed` with `success` passes the check; `failure` fails it; `cancelled` cancels it. The
    run link in the receipt points at the GitHub run.
+5. Superseding or cancelling an unneeded check requests a stop of its exact bound GitHub run,
+   using Forge's existing cancellation action. A check with another live landing consumer stays
+   running. If cancellation precedes GitHub's first event, that signed event binds the execution
+   and requests its stop; it cannot revive the cancelled check. The provider link records the
+   remote outcome. Cancellation cannot be undone; run a fresh check to execute the Candidate again.
+
 
 Calls per landing: one publish action (one prepare and one record mutation, plus one source read
 per 100 changed objects) and one webhook mutation per workflow event (requested, in progress,
-completed), so about five or six. Nothing polls; an idle project costs nothing.
+completed), so about five or six. Nothing polls; an idle project costs nothing. An unneeded run uses the same one stop action and
+one preparation mutation as Forge Actions; ordinary successful landings add neither. A transient
+stop request retries that same provider run inside the action, with no extra Convex call.
 
 ## What a pass attests
 

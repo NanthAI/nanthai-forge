@@ -7,6 +7,7 @@ import {
   completeHostedCheck,
   type CheckIdentity,
 } from './projectHostedCheckStore';
+import { requestCiCancel } from './projectCiStatusCancel';
 import { requestDirectCancel } from './projectHostedActionsDirect';
 import { notifyActionsProgress } from './projectHostedActionsWake';
 import { hostedCheckTerminal, checkPin } from '../src/hosted-check';
@@ -41,6 +42,7 @@ export async function cancelHostedCheck(
   await completeHostedCheck(ctx, run);
   await writeHostedCheck(ctx, row._id, run);
   await requestDirectCancel(ctx, run);
+  await requestCiCancel(ctx, selected);
   // Retain the existing legacy-adapter cleanup wake; direct Actions has none.
   await notifyActionsProgress(ctx, run);
   return run;

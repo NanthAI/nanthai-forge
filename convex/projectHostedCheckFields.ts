@@ -55,6 +55,8 @@ export const hostedCheckTables = {
     verdictKey: v.optional(v.string()),
     /** The exact mirror publication this CI run waits for; indexed, never polled. */
     ciMirrorJob: v.optional(v.id('projectGithubMirrorJobs')),
+    /** Private cancellation fence; it never expands the client run schema. */
+    ciCancel: v.optional(v.union(v.literal('queued'), v.literal('attempted'))),
     reportParts: v.optional(v.number()),
     reportDigest: v.optional(v.string()),
     reportFlakes: v.optional(v.string()),
