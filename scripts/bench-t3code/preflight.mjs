@@ -9,7 +9,7 @@ import { existsSync, readFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadavg } from 'node:os';
 import { benchRoot as requiredBenchRoot } from './bench-root.mjs';
-import { productCli } from './cli-install.mjs';
+import { benchCli } from './cli-install.mjs';
 import { checkPlan, DESIGN, batches, loadTasks, schedule, repNs } from './plan.mjs';
 import {
   snapshot,
@@ -122,7 +122,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
   );
   let FREEZE = null;
   await tryRun('cli install', () => {
-    const cli = productCli({ config });
+    const cli = benchCli({ config });
     FREEZE = benchFreeze(config);
     check('cli install', true, `${cli.build} (${cli.via}); measurement hold ${FREEZE}`);
   });
@@ -142,7 +142,7 @@ export async function main({ benchRoot, filesystemProbe = probeFilesystemEvents,
     // The product CLI holds land/finish and its own updates while the installation's .freeze
     // exists (src/cli-measurement-hold.ts, docs/operations/cli-update.md). The bench agents call
     // that same build, so it must let the hold's named project (the bench project) through.
-    const cli = productCli({ config });
+    const cli = benchCli({ config });
     const module = join(cli.build, 'dist', 'cli-measurement-hold.js');
     const held = Boolean(cli.installation) && existsSync(module);
     const scoped = held && readFileSync(module, 'utf8').includes('measurementHoldProjects');

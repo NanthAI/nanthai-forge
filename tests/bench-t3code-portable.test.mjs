@@ -18,6 +18,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { benchRoot } from '../scripts/bench-t3code/bench-root.mjs';
 import {
+  benchCli,
+  builderInstallations,
   freezePath,
   installationOfBuild,
   launcherInstallation,
@@ -128,6 +130,39 @@ test('FORGE_CLI_HOME and config.forge.cli select the CLI; neither is silently re
     /BENCH_CLI_NOT_INSTALLED: config\.forge\.cli/,
   );
   assert.throws(() => productCli({ explicit: join(i.home, 'nothing') }), /BENCH_CLI_NOT_INSTALLED/);
+});
+
+test("the bench hold never lands on the builders' installation (2e1f5fbd)", () => {
+  const builders = installation();
+  const bench = installation();
+  const benchConfig = { forge: { cli: join(bench.dir, 'current', 'dist', 'cli-entry.js') } };
+  const real = p => execFileSync('realpath', [p], { encoding: 'utf8' }).trim();
+  assert.deepEqual(builderInstallations({ pathEnv: builders.bin, home: builders.home }), [
+    real(builders.dir),
+  ]);
+  // Bench on its own installation: its hold is there, not in the builders'.
+  const own = benchCli({ explicit: '', config: benchConfig, pathEnv: builders.bin, home: builders.home });
+  assert.equal(freezePath(own), join(real(bench.dir), '.freeze'));
+  // config.forge.cli or FORGE_CLI_HOME on the builders' installation: refused.
+  assert.throws(
+    () =>
+      benchCli({
+        explicit: '',
+        config: { forge: { cli: join(builders.dir, 'current', 'dist', 'cli-entry.js') } },
+        pathEnv: builders.bin,
+        home: builders.home,
+      }),
+    /BENCH_CLI_SHARED: .*setup --live --only bench-cli/,
+  );
+  assert.throws(
+    () => benchCli({ explicit: builders.dir, config: null, pathEnv: builders.bin, home: builders.home }),
+    /BENCH_CLI_SHARED/,
+  );
+  // The hold and the agents' CLI must be one installation.
+  assert.throws(
+    () => benchCli({ explicit: builders.dir, config: benchConfig, pathEnv: bench.bin, home: bench.home }),
+    /BENCH_CLI_MISMATCH/,
+  );
 });
 
 test('no installation anywhere names the install command; a bare build has no measurement hold', () => {

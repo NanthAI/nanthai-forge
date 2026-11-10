@@ -26,6 +26,7 @@ import { checkPlan, planPath } from './plan.mjs';
 import { sharedDeps, buildSharedDeps } from './deps.mjs';
 import { repository, rulesetName } from './github-arm.mjs';
 import { pinHarness, existingPin, cliDonor, cliCommit, parseMirror } from './pin.mjs';
+import { benchCli, builderInstallations } from './cli-install.mjs';
 
 export const UPSTREAM = 'pingdotgg/t3code';
 export const MANIFEST = 'setup-manifest.json';
@@ -424,6 +425,58 @@ export function buildSteps(ctx) {
       }
     },
     blocking: true,
+  });
+
+  // The bench's own CLI installation (Issue 2e1f5fbd): its measurement hold and updates stay
+  // there, so the bench never holds builders' landings, launcher or hooks.
+  const benchCliDir = join(B, 'cli');
+  step({
+    id: 'bench-cli',
+    title: "The bench's own Forge CLI installation (BENCH_ROOT/cli)",
+    outward: false,
+    cost: {
+      ...COST0,
+      convexCalls: 3,
+      diskGb: 1,
+      networkGb: 0.2,
+      minutes: 2,
+      note: "one product CLI install from Forge main (release and signature read, paged source download); the builders' installation, launcher and hooks are not changed",
+    },
+    commands: () => [
+      `copy <builders' installation>/source.json -> ${benchCliDir}/source.json (the Forge source project's url and id; no secret)`,
+      `node <builders' installation>/launcher.mjs update --directory ${benchCliDir} --bin ${join(benchCliDir, 'bin', 'nforge')}`,
+      `patch config.forge.cli -> ${join(benchCliDir, 'current', 'dist', 'cli-entry.js')}`,
+    ],
+    isDone: async () => {
+      try {
+        benchCli({ config: cfgSafe() });
+        return { done: true };
+      } catch (error) {
+        return { done: false, detail: String(error.message).slice(0, 300) };
+      }
+    },
+    run: async () => {
+      const from = builderInstallations().find(dir => existsSync(join(dir, 'source.json')));
+      if (!from)
+        throw Error(
+          'BENCH_SETUP_NO_CLI_SOURCE: no installed Forge CLI with a configured source to copy (nforge update FORGE_CHECKOUT, docs/operations/cli-update.md)',
+        );
+      if (!existsSync(benchCliDir)) {
+        record(B, { step: 'bench-cli', kind: 'path', ref: benchCliDir, at: ctx.now() });
+        mkdirSync(benchCliDir, { recursive: true, mode: 0o700 });
+      }
+      if (!existsSync(join(benchCliDir, 'source.json')))
+        copyFileSync(join(from, 'source.json'), join(benchCliDir, 'source.json'));
+      ctx.sh('/usr/local/bin/node', [
+        join(from, 'launcher.mjs'),
+        'update',
+        '--directory',
+        benchCliDir,
+        '--bin',
+        join(benchCliDir, 'bin', 'nforge'),
+      ]);
+      patchConfig(ctx, 'bench-cli', { 'forge.cli': join(benchCliDir, 'current', 'dist', 'cli-entry.js') });
+    },
   });
 
   step({

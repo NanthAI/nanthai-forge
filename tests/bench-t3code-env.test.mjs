@@ -121,7 +121,7 @@ function fakeContext(B, flags = {}, world = {}) {
   return { ctx, calls, lines, world: w };
 }
 const MUTATING =
-  /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node .* host |\S*node \S*forge-import\.mjs|\S*node \S+ clone |\S*node .* x .* (configure-check|configure-runner|set-policy) )/;
+  /^(gh (repo|api -X)|git .*(push|clone|fetch|remote add)|\S*node \S*launcher\.mjs update |\S*node .* host |\S*node \S*forge-import\.mjs|\S*node \S+ clone |\S*node .* x .* (configure-check|configure-runner|set-policy) )/;
 
 test('versionAtLeast compares left to right', () => {
   assert.ok(versionAtLeast('v24.22.1', [24, 22, 1]));
@@ -175,6 +175,7 @@ test('dry run: prints every step with its cost, creates nothing, makes no mutati
   for (const id of [
     'prereqs',
     'inputs',
+    'bench-cli',
     'pin',
     'meta',
     'base',

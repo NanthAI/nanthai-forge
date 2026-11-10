@@ -3,7 +3,8 @@
 // docs/operations/cli-update.md): an installation DIR whose `current` selects one build
 // (DIR/builds/HEAD), entered by the PATH launcher `nforge` (`exec NODE 'DIR/launcher.mjs'`).
 // The bench links the pinned harness's node_modules to that build and holds landings with the
-// product's measurement hold, DIR/.freeze. Reads only; no network.
+// product's measurement hold, DIR/.freeze. The bench runs on an installation of its own
+// (`benchCli`, setup step bench-cli), never on the builders'. Reads only; no network.
 //   1. FORGE_CLI_HOME: an installation DIR (has `current`) or one build (has dist/cli-entry.js)
 //   2. config.forge.cli: .../dist/cli-entry.js of a build
 //   3. the `nforge` launcher on PATH
@@ -107,6 +108,54 @@ export function productCli({
       code: 'BENCH_CLI_NOT_INSTALLED',
     },
   );
+}
+
+const realOrNull = path => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+};
+
+/** The installations builders use: the one the `nforge` on PATH enters, the one the default
+ * launcher (~/.local/bin/nforge) enters, and the product default. Real paths of those that exist. */
+export function builderInstallations({ pathEnv = process.env.PATH ?? '', home = homedir() } = {}) {
+  const launcher = join(home, '.local', 'bin', 'nforge');
+  const named = [
+    pathInstallation(pathEnv),
+    existsSync(launcher) ? pathInstallation(dirname(launcher)) : null,
+    join(home, '.local', 'share', 'forge-cli'),
+  ];
+  return [...new Set(named.filter(Boolean).map(realOrNull).filter(Boolean))];
+}
+
+/**
+ * The bench's own CLI (Issue 2e1f5fbd): config.forge.cli (or FORGE_CLI_HOME, which must then
+ * name the same installation) in an installation of its own, so its measurement hold (.freeze)
+ * and its updates never reach builders. Throws BENCH_CLI_SHARED when it is a builders'
+ * installation and BENCH_CLI_MISMATCH when FORGE_CLI_HOME and config.forge.cli disagree.
+ */
+export function benchCli({ config, explicit = process.env.FORGE_CLI_HOME, pathEnv, home } = {}) {
+  const cli = productCli({ explicit, config, pathEnv, home });
+  if (explicit && config?.forge?.cli) {
+    const configured = productCli({ explicit: '', config, pathEnv, home });
+    if (configured.installation !== cli.installation)
+      throw Object.assign(
+        Error(
+          `BENCH_CLI_MISMATCH: FORGE_CLI_HOME selects ${cli.installation ?? cli.build}, config.forge.cli ${configured.installation ?? configured.build}; the hold and the agents' CLI must be one installation`,
+        ),
+        { code: 'BENCH_CLI_MISMATCH' },
+      );
+  }
+  if (cli.installation && builderInstallations({ pathEnv, home }).includes(cli.installation))
+    throw Object.assign(
+      Error(
+        `BENCH_CLI_SHARED: ${cli.installation} is the builders' CLI installation, so the bench's hold would stop their landings; run \`scripts/bench-t3code/setup --live --only bench-cli\` (the bench's own installation, BENCH_ROOT/cli)`,
+      ),
+      { code: 'BENCH_CLI_SHARED' },
+    );
+  return cli;
 }
 
 /** The product's measurement hold for that installation: landings and updates wait while it exists. */

@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -342,6 +343,30 @@ export async function updateCli(
     rmSync(lock, { recursive: true, force: true });
   }
 }
+/** The other, still existing installation a product launcher file enters, or null when the
+ * file is absent, unreadable, not a product launcher, or enters `installation` itself. */
+export function launcherElsewhere(bin: string, installation: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(bin, 'utf8');
+  } catch {
+    return null;
+  }
+  const entered = text.match(/^exec\s+'(?:[^']|'\\'')*'\s+'((?:[^']|'\\'')*)\/launcher\.mjs'/m)?.[1];
+  if (!entered) return null;
+  const dir = entered.replaceAll("'\\''", "'");
+  const real = (path: string) => {
+    try {
+      return realpathSync(path);
+    } catch {
+      return null;
+    }
+  };
+  const target = real(dir);
+  return target && existsSync(join(target, 'launcher.mjs')) && target !== (real(installation) ?? installation)
+    ? dir
+    : null;
+}
 export async function cliUpdateCli(args: string[]) {
   if (args.includes('--help'))
     return {
@@ -353,6 +378,7 @@ export async function cliUpdateCli(args: string[]) {
     installation = cliInstallation() ?? defaultCliInstallation(),
     state: string | undefined,
     bin = join(homedir(), '.local', 'bin', 'nforge'),
+    binGiven = false,
     login = false,
     background = false,
     expected: string | undefined;
@@ -371,6 +397,7 @@ export async function cliUpdateCli(args: string[]) {
       const value = flags.shift();
       invariant(value, 'BAD_ARGUMENT', 'Supply --bin FILE.');
       bin = resolve(value);
+      binGiven = true;
     } else if (flag === '--state') {
       state = flags.shift();
       invariant(state && /^[a-f0-9]{64}$/.test(state), 'BAD_ARGUMENT', 'Use a full Forge State hash.');
@@ -449,18 +476,27 @@ export async function cliUpdateCli(args: string[]) {
     undefined,
     { expectedCurrent, rollback: !!state, lockWaitMs: CLI_UPDATE_WAIT_MS },
   );
-  mkdirSync(resolve(bin, '..'), { recursive: true, mode: 0o700 });
-  durableReplace(
-    bin,
-    `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(join(installation, 'launcher.mjs'))} \"$@\"\n`,
-    0o755,
-  );
+  // The default launcher belongs to one installation: an update of another one (a bench's own
+  // CLI home) keeps it unless --bin names it, so it never repoints the user's `nforge`.
+  const other = binGiven ? null : launcherElsewhere(bin, installation);
+  if (other)
+    process.stderr.write(
+      `Kept ${bin}: it enters ${other}. Pass --bin FILE to write a launcher for ${installation}.\n`,
+    );
+  else {
+    mkdirSync(resolve(bin, '..'), { recursive: true, mode: 0o700 });
+    durableReplace(
+      bin,
+      `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(join(installation, 'launcher.mjs'))} \"$@\"\n`,
+      0o755,
+    );
+  }
   const packageRoot = cliPackageRoot();
   if (!cliInstallation(packageRoot) && !existsSync(join(packageRoot, 'src', 'cli-entry.ts')))
     durableReplace(join(packageRoot, '.cli-installation'), installation);
   return {
     ...result,
-    bin,
+    bin: other ? null : bin,
     run: `${shellQuote(process.execPath)} ${shellQuote(join(installation, 'launcher.mjs'))}`,
     ...(state
       ? { notice: 'Explicit rollback selected. The next ordinary invocation checks main again.' }

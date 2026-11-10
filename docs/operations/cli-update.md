@@ -16,6 +16,12 @@ checks cannot become an unguarded PATH entry. The next ordinary invocation resto
 verified main before dispatch; the controller and current then share one build again.
 There is no second user-selectable CLI.
 
+A separate installation (`--directory DIR`, for example a benchmark's own CLI home whose
+measurement hold must not reach anyone else) stays separate. Its update keeps the default
+launcher `~/.local/bin/nforge` when that launcher enters another existing installation (one
+stderr line names it; `--bin FILE` writes a launcher for DIR instead), and its hook migration
+leaves Claude and Codex hooks whose runner lives in another existing installation alone.
+
 Managed commands check configured Forge main before hooks or execution.
 `--version`, help, heavy status and local agent/heavy/pull/clone argument errors make zero
 network calls. `--version` and help only print: they also install no hooks, sweep no

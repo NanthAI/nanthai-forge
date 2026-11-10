@@ -24,7 +24,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { removeInstall } from '../dist/dependency-seal.js';
 import { withCliRuntimeLock, cliProcessIdentity } from '../dist/cli-launcher.js';
-import { cliUpdateRunning } from '../dist/cli-update.js';
+import { cliUpdateRunning, launcherElsewhere } from '../dist/cli-update.js';
 import { cliStartup, cliVersionCheck } from '../dist/cli-version.js';
 import { updateCli as updateCliChecked } from '../dist/cli-update.js';
 import { testReleaseSigner, trustedDist, withSignedReleases } from './release-trust-fixture.mjs';
@@ -150,6 +150,34 @@ test('update then prune keeps both installed hook paths valid and preserves othe
     assert.ok(hooks[0].command.includes(join(f.installation, 'current', 'dist', 'agent-edit-hook.js')));
     assert.ok(existsSync(join(f.installation, 'current', 'dist', 'agent-edit-hook.js')));
   }
+});
+
+test("a second installation (a bench CLI home) never takes over the first one's hooks or launcher (2e1f5fbd)", t => {
+  const f = fixture(t);
+  const second = join(f.directory, 'bench-cli');
+  const benchBuild = join(second, 'builds', b);
+  mkdirSync(join(benchBuild, 'dist'), { recursive: true });
+  writeFileSync(join(benchBuild, '.commit'), b);
+  writeFileSync(join(benchBuild, 'dist', 'agent-edit-hook.js'), '// complete');
+  selectCliBuild(second, benchBuild);
+  const before = ['.claude/settings.json', '.codex/hooks.json'].map(file =>
+    readFileSync(join(f.home, file), 'utf8'),
+  );
+  assert.deepEqual(migrateEditHookRunner(join(second, 'current', 'dist', 'agent-edit-hook.js'), f.home), []);
+  assert.deepEqual(
+    ['.claude/settings.json', '.codex/hooks.json'].map(file => readFileSync(join(f.home, file), 'utf8')),
+    before,
+  );
+  // The default launcher enters the first installation: an update of the second keeps it.
+  for (const dir of [f.installation, second]) writeFileSync(join(dir, 'launcher.mjs'), '');
+  const bin = join(f.directory, 'bin', 'nforge');
+  mkdirSync(join(f.directory, 'bin'));
+  writeFileSync(bin, `#!/bin/sh\nexec '/usr/local/bin/node' '${f.installation}/launcher.mjs' "$@"\n`);
+  assert.equal(launcherElsewhere(bin, second), f.installation);
+  assert.equal(launcherElsewhere(bin, f.installation), null, 'its own launcher is rewritten');
+  assert.equal(launcherElsewhere(join(f.directory, 'bin', 'absent'), second), null, 'no launcher yet');
+  rmSync(join(f.installation, 'launcher.mjs'));
+  assert.equal(launcherElsewhere(bin, second), null, 'a launcher of a removed installation is replaced');
 });
 
 test('a live process retains lazy-load bytes; only a dead lease permits retirement', t => {

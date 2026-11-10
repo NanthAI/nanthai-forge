@@ -10,6 +10,7 @@ import { editHooksEnabled, setEditHooksEnabled } from './agent-hook-settings.js'
 import { editTarget, readEditMarkerIdentity } from './agent-edit-target.js';
 import { refuseRealUserState } from './test-isolation.js';
 import { invariant } from './errors.js';
+import { cliInstallation } from './cli-installation.js';
 import {
   forgeHookRunner,
   hookHealth,
@@ -195,12 +196,27 @@ export function ensureEditHooks() {
   }
 }
 
+/** The product installation a hook runner file belongs to, or null (Lane, temp, dev build). */
+function runnerInstallation(runner: string | null) {
+  try {
+    return runner && existsSync(runner) ? cliInstallation(dirname(dirname(runner))) : null;
+  } catch {
+    return null;
+  }
+}
 /** Migrate only existing Forge hooks. Opt-outs and unrelated settings are preserved.
  * Validate both files first; each durable replacement is atomic. The updater keeps
- * old builds until every replacement succeeds, so interrupted migrations stay valid. */
+ * old builds until every replacement succeeds, so interrupted migrations stay valid.
+ * A hook whose runner lives in another existing installation stays with it: updating a
+ * second installation (a bench's own CLI home) never takes over the user's hooks. */
 export function migrateEditHookRunner(runner: string, home = homedir()) {
   const command = hookCommand(runner),
     stopCommand = turnEndCommand(turnEndRunner(runner));
+  const own = runnerInstallation(runner);
+  const elsewhere = (hookCommandText: string | undefined) => {
+    const other = own ? runnerInstallation(forgeHookRunner(hookCommandText)) : null;
+    return Boolean(other && other !== own);
+  };
   const updates = ['.claude/settings.json', '.codex/hooks.json'].flatMap(name => {
     const path = join(home, name);
     refuseRealUserState(path, 'agent hook config');
@@ -221,7 +237,8 @@ export function migrateEditHookRunner(runner: string, home = homedir()) {
           'Client hook group must contain hooks.',
         );
         for (const hook of group.hooks)
-          if (isTurnEndHook(hook.command)) hook.command = stopCommand;
+          if (elsewhere(hook.command)) continue;
+          else if (isTurnEndHook(hook.command)) hook.command = stopCommand;
           else if (isForgeHook(hook.command, runner)) hook.command = command;
       }
     }

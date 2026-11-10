@@ -12,14 +12,15 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentOf, CLAUDE, CODEX } from './agent.mjs';
 import { parseMirror } from './pin.mjs';
-import { freezePath, productCli } from './cli-install.mjs';
+import { benchCli, freezePath } from './cli-install.mjs';
 
 const run = promisify(execFile);
 const FORGE = 'NanthAI/nanthai-forge';
 export const HARNESS_DIR = import.meta.dirname;
-/** The measurement hold of the CLI installation config.forge.cli belongs to (cli-install.mjs):
- * while it exists the product CLI holds land/finish and does not update itself. */
-export const benchFreeze = config => freezePath(productCli({ config }));
+/** The measurement hold of the bench's own CLI installation (config.forge.cli; cli-install.mjs
+ * benchCli refuses the builders' one): while it exists that CLI holds land/finish and does not
+ * update itself. */
+export const benchFreeze = config => freezePath(benchCli({ config }));
 /** Hold text: the owner line (stale detection reads its pid), then the measured bench project, so
  * the bench's own landings run on the held build while every other project's landings wait
  * (src/cli-measurement-hold.ts). */

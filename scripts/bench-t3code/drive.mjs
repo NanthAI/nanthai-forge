@@ -59,7 +59,7 @@ import {
   benchHoldText,
 } from './versions.mjs';
 import { benchRootOrExit } from './bench-root.mjs';
-import { productCli } from './cli-install.mjs';
+import { benchCli } from './cli-install.mjs';
 import { drainBatch, landingPathQueue } from './drain.mjs';
 import { usageGate, usageProblems, diskFreeGb, diskNeed } from './gates.mjs';
 import { agentOf } from './agent.mjs';
@@ -128,7 +128,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) await main();
 async function main() {
   B = benchRootOrExit();
   const config = readJson(join(B, 'config.json'));
-  const cli = productCli({ config });
+  const cli = benchCli({ config });
   FREEZE = benchFreeze(config);
   const problems = checkPlan(B);
   if (problems.length) {
@@ -373,6 +373,9 @@ async function main() {
           'update',
           '--directory',
           cli.installation,
+          // The bench installation's own launcher: the builders' `nforge` is never repointed.
+          '--bin',
+          join(cli.installation, 'bin', 'nforge'),
         ]).catch(() => {});
         renameSync(`${FREEZE}.batch`, FREEZE);
         if (!(await drain(b.key, sayWait))) {
