@@ -513,11 +513,28 @@ repository minutes and other configured providers follow their own billing.
 ## Hosted culprit recovery and fix notices
 
 A failed hosted audit schedules classification after its red state commits. The
-recovery journal reads the accepted range in one indexed page, probes the failed
+recovery journal is keyed by `red.since`, the whole red episode, rather than the
+latest failed audit run. Later failures add evidence to the same journal and do
+not restart classification or abandon a pending reverse. The journal reads the accepted range in one indexed page, probes the failed
 tests on the audited head to distinguish a flake, then bisects comparable
 passing/failing evidence. A range of k landings uses at most
 `1 + ceil(log2(k + 1))` probes. Missing, mixed or incomparable evidence opens
-fix-forward work. A passing flake probe records a flake and clears that episode.
+fix-forward work. When the failing test files have no reports at the last green,
+the existing recipe-aware source reader verifies their absence in that State and
+finds the acceptance that first added them. Later edits to those files do not
+change that attribution. After the flake guard reproduces the failure, that
+acceptance follows the ordinary full-gated reverse path. Missing reports for a
+file already present at green still mean incomplete evidence.
+
+Source attribution runs only on red: one scheduled action, one plan query,
+`ceil((k + 1) / 100)` descriptor queries for raw State manifests and one result
+mutation (four extra invocations for k <= 99; five for k = 100), plus descriptor
+windows needed by existing recipes. It reads k + 1 exact State manifests, no file
+blobs or backup exports, in windows of 100 descriptors. Memory holds one parsed
+manifest plus the failing-file presence lists. Green landings and idle clients
+add zero calls, reads or writes. Existing range bounds and owner gates stay in
+force. A passing flake probe clears the episode only when later audits have not
+added failure or source evidence outside that probe's coverage.
 Newer counted landings remain pending: recovery uses the audit's pinned coverage
 count, rather than counting docs receipts, and schedules remaining audit debt
 through the existing cadence.

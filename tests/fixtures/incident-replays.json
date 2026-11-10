@@ -145,6 +145,12 @@
       "what": "Core claim: past the diff cap every main edit to a hot file conflicted with a whole-file draft; an edit inside a removed region is now one local diff3 hunk with a suggestion",
       "file": "tests/hosted-landing-starvation.test.mjs",
       "test": "the incident shape: a 600-line cut and a main edit elsewhere in the file merge; an edit inside the cut is one local diff3 hunk that offers the deletion"
+    },
+    {
+      "incident": "27865bc4",
+      "what": "A newly added failing test had no culprit; later failed audits restarted recovery in the same red episode and main needed a manual fix.",
+      "file": "tests/hosted-culprit.test.mjs",
+      "test": "incident 27865bc4: a new failing test and later failed audits recover in one automatic reverse"
     }
   ]
 }

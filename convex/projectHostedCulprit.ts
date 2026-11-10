@@ -4,7 +4,7 @@ import { convexFetch, networkTimeout } from './networkFetch';
 import { noteTrustCulprit } from './projectHostedTrust';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { internalMutation, internalAction, type MutationCtx, type QueryCtx } from './server';
+import { internalMutation, internalAction, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';
@@ -41,10 +41,16 @@ import { presignPut, r2Config, r2Key } from './r2';
 import { verifyArchiveUpload } from './archiveUpload';
 import { ForgeError, invariant } from '../src/errors';
 import { findObject, objectRow } from './projectObjectFind';
+import { resolveObjects } from './projectGithubMirrorObjects';
 
 type Identity = { projectId: Id<'hostedProjects'>; runId: string };
 type Recovery = {
   audit: HostedCheckRun;
+  episode?: string;
+  recoveryId?: string;
+  evidence?: NeedsFix['failed'];
+  missing?: string[];
+  addition?: number;
   range: { sequence: number; receipt: HostedAcceptance }[];
   failed: NeedsFix['failed'];
   low: number;
@@ -65,6 +71,10 @@ type Recovery = {
   uploads?: { value: string; pin: { sha256: string; size: number } }[];
 };
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
+const episodeId = (since: string) => culpritId({ redEpisode: since });
+const recoveryKey = (state: Recovery) => state.recoveryId ?? state.audit.id;
+const sameEpisode = (red: { since: string; runId: string } | undefined, state: Recovery) =>
+  !!red && (state.episode ? red.since === state.episode : red.runId === state.audit.id);
 const recoveryOperation = (runId: string) => culpritId({ recovery: runId });
 async function recoveryRow(ctx: MutationCtx | QueryCtx, input: Identity, owner: string) {
   return hostedOperationRow(ctx, input.projectId, owner, recoveryOperation(input.runId));
@@ -87,6 +97,8 @@ async function retain(ctx: MutationCtx, row: Doc<'projectHostedOperations'>, sta
             reason: state.reason,
             culprit: state.target?.id ?? null,
             failed: state.failed,
+            evidence: state.evidence ?? state.failed,
+            ...(state.addition ? { addedBy: state.range[state.addition - 1]!.receipt.id } : {}),
             proof: { passed: state.pass, failed: state.fail },
             undo:
               state.undo ??
@@ -279,7 +291,7 @@ async function fixForward(
         version: 0,
         at: state.audit.endedAt!,
         outcome: 'Fix main after failed audit',
-        recoveryRunId: state.audit.id,
+        recoveryRunId: recoveryKey(state),
         constraints: constraints.slice(0, 4000),
         creatorAccountId: project.owner,
         assigneeAccountIds: [],
@@ -333,7 +345,7 @@ async function probe(
     environment: state.audit.request.expectedEnvironment,
     epoch: state.audit.request.authorityEpoch,
   });
-  const gate = { mode: 'probe' as const, tests, reason: `culprit:${state.audit.id}` };
+  const gate = { mode: 'probe' as const, tests, reason: `culprit:${recoveryKey(state)}` };
   const request = {
     ...state.audit.request,
     operationId,
@@ -359,11 +371,10 @@ async function probe(
   if (prepared.replayed) {
     const prior = (await loadHostedCheck(ctx, { projectId: project._id, runId: id })).run;
     if (hostedCheckTerminal(prior))
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'mutation'>('projectHostedCulprit:startRedClassification'),
-        { projectId: project._id, runId: state.audit.id },
-      );
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'mutation'>('projectHostedCulprit:terminal'), {
+        projectId: project._id,
+        runId: id,
+      });
     return prior;
   }
   return insertHostedCheckRun(
@@ -425,7 +436,7 @@ export async function onCulpritRunTerminal(ctx: MutationCtx, run: HostedCheckRun
             .query('projectHostedMainAudits')
             .withIndex('by_project', q => q.eq('projectId', project._id))
             .unique();
-          if (audit?.red?.runId !== state.audit.id) {
+          if (!sameEpisode(audit?.red, state)) {
             state.stage = 'done';
             state.reason = 'The red audit was superseded; no automatic reverse was landed.';
             await retain(ctx, row, state);
@@ -453,14 +464,32 @@ export async function onCulpritRunTerminal(ctx: MutationCtx, run: HostedCheckRun
     .unique();
   // A content-identical pending probe can be shared by a newer red episode.
   // Its immutable original gate reason must not strand the newer waiter.
-  if (current?.red && current.red.runId !== origin)
-    await classify(ctx, { projectId, runId: current.red.runId }, run);
+  if (current?.red && episodeId(current.red.since) !== origin)
+    await classify(ctx, { projectId, runId: episodeId(current.red.since) }, run);
 }
 export const startRedClassification = internalMutation({
   args: identity,
   returns: v.null(),
   handler: async (ctx, input) => {
-    await classify(ctx, input);
+    const audit = await ctx.db
+      .query('projectHostedMainAudits')
+      .withIndex('by_project', q => q.eq('projectId', input.projectId))
+      .unique();
+    if (!audit?.red || audit.red.runId !== input.runId) return null;
+    const selected = { ...input, runId: episodeId(audit.red.since) };
+    const project = await ctx.db.get(input.projectId);
+    const row = project ? await recoveryRow(ctx, selected, project.owner) : null;
+    if (row?.recovery) {
+      const state: Recovery = JSON.parse(row.recovery);
+      if (state.audit.id !== input.runId) {
+        const { run } = await loadHostedCheck(ctx, input);
+        const evidence = new Map((state.evidence ?? state.failed).map(f => [canonicalPayload(f), f]));
+        for (const f of culpritFailures(run)) evidence.set(canonicalPayload(f), f);
+        state.evidence = [...evidence.values()];
+        await retain(ctx, row, state);
+      }
+    }
+    await classify(ctx, selected);
     return null;
   },
 });
@@ -475,8 +504,13 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       .query('projectHostedMainAudits')
       .withIndex('by_project', q => q.eq('projectId', input.projectId))
       .unique();
-    if (!auditRow?.red || auditRow.red.runId !== input.runId || auditRow.audit?.runId !== input.runId) return;
-    const { run: audit } = await loadHostedCheck(ctx, input);
+    if (
+      !auditRow?.red ||
+      episodeId(auditRow.red.since) !== input.runId ||
+      auditRow.audit?.runId !== auditRow.red.runId
+    )
+      return;
+    const { run: audit } = await loadHostedCheck(ctx, { ...input, runId: auditRow.red.runId });
     if (audit.status !== 'failed' || audit.gate?.mode !== 'audit' || !audit.endedAt || !audit.terminalDigest)
       return;
     await hostedWriteProject(ctx, input.projectId, project.owner, audit.request.authorityEpoch);
@@ -496,6 +530,8 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     }));
     state = {
       audit,
+      episode: auditRow.red.since,
+      recoveryId: input.runId,
       range,
       failed: culpritFailures(audit),
       low: 0,
@@ -538,14 +574,11 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     const green = greenRow ? hostedCheckRunSchema.parse(JSON.parse(greenRow.value)) : null;
     if (
       !green ||
+      green.status !== 'passed' ||
       green.request.expectedHead !== state.pass.head ||
       green.check.definition !== audit.check.definition ||
       green.request.expectedConfiguration !== audit.request.expectedConfiguration ||
-      green.request.expectedEnvironment !== audit.request.expectedEnvironment ||
-      probeVerdict(
-        green,
-        state.failed.map(f => f.file),
-      ) !== 'pass'
+      green.request.expectedEnvironment !== audit.request.expectedEnvironment
     )
       return fixForward(
         ctx,
@@ -562,6 +595,30 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
         state,
         'Automatic probes require the configured free Actions runner.',
       );
+    if (
+      probeVerdict(
+        green,
+        state.failed.map(f => f.file),
+      ) !== 'pass'
+    ) {
+      // Missing reports alone do not prove absence: inspect exact source manifests.
+      if (state.failed.some(f => green.contractReports?.[f.file]))
+        return fixForward(
+          ctx,
+          project,
+          row,
+          state,
+          'The passing predecessor does not retain comparable test evidence.',
+        );
+      state.missing = state.failed.map(f => f.file);
+      await retain(ctx, row, state);
+      await ctx.scheduler.runAfter(
+        0,
+        makeFunctionReference<'action'>('projectHostedCulpritSource:inspect'),
+        input,
+      );
+      return;
+    }
     await probe(ctx, project, state, range.length, true);
     return retain(ctx, row, state);
   }
@@ -574,11 +631,12 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     .query('projectHostedMainAudits')
     .withIndex('by_project', q => q.eq('projectId', input.projectId))
     .unique();
-  if (currentAudit?.red?.runId !== state.audit.id) {
+  if (!sameEpisode(currentAudit?.red, state)) {
     state.stage = 'done';
     state.reason = 'The red audit was superseded; no automatic reverse was landed.';
     return retain(ctx, row!, state);
   }
+  if (state.missing) return;
   const pending = state.probe;
   if (!pending) return;
   const run =
@@ -592,6 +650,23 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
   );
   if (verdict === 'unclear')
     return fixForward(ctx, project, row!, state, 'Probe evidence is mixed, missing, static, or unavailable.');
+  if (
+    pending.flake &&
+    verdict === 'pass' &&
+    (currentAudit?.red?.head !== state.audit.request.expectedHead ||
+      state.evidence?.some(
+        f => !state.failed.some(original => canonicalPayload(original) === canonicalPayload(f)),
+      ))
+  ) {
+    state.failed = state.evidence ?? state.failed;
+    return fixForward(
+      ctx,
+      project,
+      row!,
+      state,
+      'The original failure is a flake; later failed audits retain different failure or source evidence in this red episode.',
+    );
+  }
   if (pending.flake && verdict === 'pass') {
     const auditRow = await ctx.db
       .query('projectHostedMainAudits')
@@ -606,7 +681,7 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       sequence: state.range.at(-1)!.sequence,
     });
     // B2.3 consumes this proven-green probe, including debt/held-row bookkeeping.
-    if (auditRow?.red?.runId === state.audit.id) {
+    if (auditRow?.red && sameEpisode(auditRow.red, state)) {
       // A receipt range can include uncounted docs landings. B2.3 retains the
       // covered counted total in its audit reason and the newer work's clock.
       const covered = state.audit.gate?.reason?.startsWith('Main audit ')
@@ -658,17 +733,19 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       state.fail = { head: run.request.expectedHead, runId: run.id };
     }
   } else state.fail = { head: run.request.expectedHead, runId: run.id };
-  const next = bisectStep(state.low, state.high);
+  if (state.addition) state.high = state.addition;
+  const next = state.addition ? null : bisectStep(state.low, state.high);
   if (next !== null) {
     await probe(ctx, project, state, next, false);
     return retain(ctx, row!, state);
   }
   const boundary = state.range[state.high - 1]!.receipt;
   if (
-    !state.pass ||
-    state.pass.head === state.fail.head ||
-    state.pass.head !== boundary.previous.head ||
-    state.fail.head !== boundary.candidate.head
+    !state.addition &&
+    (!state.pass ||
+      state.pass.head === state.fail.head ||
+      state.pass.head !== boundary.previous.head ||
+      state.fail.head !== boundary.candidate.head)
   )
     return fixForward(
       ctx,
@@ -682,7 +759,7 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     .query('projectHostedMainAudits')
     .withIndex('by_project', q => q.eq('projectId', input.projectId))
     .unique();
-  if (auditRow?.red?.runId !== state.audit.id) {
+  if (!auditRow?.red || !sameEpisode(auditRow.red, state)) {
     state.stage = 'done';
     return retain(ctx, row!, state);
   }
@@ -696,7 +773,9 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
     sequence: state.range[state.high - 1]!.sequence,
     culprit: state.target.id,
   });
-  state.reason = 'A single failing boundary was proven; reverse only this accepted change.';
+  state.reason = state.addition
+    ? 'The failing test files were added by this acceptance; reverse it through the full gate.'
+    : 'A single failing boundary was proven; reverse only this accepted change.';
   await prepareSystemRevert(ctx, project, row!, state);
 }
 async function prepareSystemRevert(
@@ -739,7 +818,7 @@ async function prepareSystemRevert(
     actor: project.owner,
     authorityEpoch: request.authorityEpoch,
     expectedVersion: reverse.version,
-    record: { ...reverse, version: reverse.version + 1, recoveryRunId: state.audit.id },
+    record: { ...reverse, version: reverse.version + 1, recoveryRunId: recoveryKey(state) },
   });
   const sync: SyncState = {
     request,
@@ -757,7 +836,7 @@ async function prepareSystemRevert(
     actor: project.owner,
     operationId,
     jobId: operation.firstAttempt.ids.job!,
-    culpritRunId: state.audit.id,
+    culpritRunId: recoveryKey(state),
     value: canonicalPayload(sync),
   });
   state.intentId = intentId;
@@ -768,7 +847,7 @@ async function prepareSystemRevert(
   const original = await candidateIntent(ctx, project, target);
   if (original) await notice(ctx, project, original, report(state, target, 'needs-fix'));
   await retain(ctx, row, state);
-  await wake(ctx, { projectId: project._id, runId: state.audit.id });
+  await wake(ctx, { projectId: project._id, runId: recoveryKey(state) });
 }
 async function prepareSystemCompose(
   ctx: MutationCtx,
@@ -839,7 +918,7 @@ async function prepareSystemCompose(
     actor: project.owner,
     operationId,
     jobId: operation.firstAttempt.ids.job!,
-    culpritRunId: state.audit.id,
+    culpritRunId: recoveryKey(state),
     value: canonicalPayload(compose),
   });
   await ctx.db.insert('projectHostedComposeSelections', {
@@ -858,7 +937,7 @@ async function prepareSystemCompose(
   const value = canonicalPayload(hostedComposeInput(compose, operation.firstAttempt.at));
   state.uploads.push({ value, pin: savePin(JSON.parse(value)) });
   await retain(ctx, row, state);
-  await wake(ctx, { projectId: project._id, runId: state.audit.id });
+  await wake(ctx, { projectId: project._id, runId: recoveryKey(state) });
 }
 async function finishSystemRevert(
   ctx: MutationCtx,
@@ -914,7 +993,7 @@ async function finishSystemRevert(
     await retain(ctx, row, state);
     return;
   }
-  const gate = { mode: 'full' as const, reason: `culprit-revert:${state.audit.id}` };
+  const gate = { mode: 'full' as const, reason: `culprit-revert:${recoveryKey(state)}` };
   const operationId = culpritId({ fullRevertCheck: state.audit.id });
   const request = {
     ...state.audit.request,
@@ -1014,7 +1093,7 @@ export const advance = internalMutation({
       .query('projectHostedMainAudits')
       .withIndex('by_project', q => q.eq('projectId', input.projectId))
       .unique();
-    if (state.stage !== 'done' && audit?.red?.runId !== state.audit.id) {
+    if (state.stage !== 'done' && !sameEpisode(audit?.red, state)) {
       if (state.stage === 'landing') {
         const landingOperation = state.landingOperationId
           ? await hostedOperationRow(ctx, input.projectId, project.owner, state.landingOperationId)
@@ -1046,6 +1125,78 @@ export const advance = internalMutation({
     return null;
   },
 });
+/** Exact manifests only; one bounded descriptor window, never a source-tree scan in Convex. */
+export const source = internalQuery({
+  args: { ...identity, digests: v.optional(v.array(v.string())) },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    if (!project || project.removal || project.sourceAuthority?.mode !== 'server') return '{}';
+    const row = await recoveryRow(ctx, input, project.owner);
+    if (!row?.recovery) return '{}';
+    const state: Recovery = JSON.parse(row.recovery);
+    const audit = await ctx.db
+      .query('projectHostedMainAudits')
+      .withIndex('by_project', q => q.eq('projectId', input.projectId))
+      .unique();
+    if (
+      !state.missing ||
+      !sameEpisode(audit?.red, state) ||
+      project.sourceAuthority.epoch !== state.audit.request.authorityEpoch
+    )
+      return '{}';
+    return input.digests
+      ? resolveObjects(ctx, input.projectId, input.digests)
+      : canonicalPayload({
+          heads: [state.pass!.head, ...state.range.map(r => r.receipt.candidate.head)],
+          files: state.missing,
+        });
+  },
+});
+export const sourceEvidence = internalMutation({
+  args: { ...identity, presence: v.optional(v.array(v.array(v.string()))), error: v.optional(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    if (!project) return null;
+    const row = await recoveryRow(ctx, input, project.owner);
+    if (!row?.recovery) return null;
+    const state: Recovery = JSON.parse(row.recovery);
+    if (!state.missing || state.stage !== 'classify') return null;
+    await hostedWriteProject(ctx, input.projectId, project.owner, state.audit.request.authorityEpoch);
+    const audit = await ctx.db
+      .query('projectHostedMainAudits')
+      .withIndex('by_project', q => q.eq('projectId', input.projectId))
+      .unique();
+    if (!sameEpisode(audit?.red, state)) {
+      state.stage = 'done';
+      state.reason = 'The red episode ended; no automatic reverse was landed.';
+      await retain(ctx, row, state);
+      return null;
+    }
+    const presence = input.presence;
+    let addition: number | undefined;
+    if (presence && presence.length === state.range.length + 1 && !presence[0]!.length) {
+      const indices = state.missing.map(file => presence.findIndex(files => files.includes(file)));
+      if (indices[0]! > 0 && indices.every(index => index === indices[0])) addition = indices[0];
+    }
+    if (!addition) {
+      await fixForward(
+        ctx,
+        project,
+        row,
+        state,
+        input.error ?? 'Source evidence does not prove one acceptance added the failing test files.',
+      );
+      return null;
+    }
+    state.addition = addition;
+    delete state.missing;
+    await probe(ctx, project, state, state.range.length, true);
+    await retain(ctx, row, state);
+    return null;
+  },
+});
 /** Reserve only small metadata objects; the drive action never loads a source tree. */
 export const transfer = internalMutation({
   args: { ...identity, committed: v.optional(v.boolean()), token: v.optional(v.string()) },
@@ -1062,7 +1213,7 @@ export const transfer = internalMutation({
       .query('projectHostedMainAudits')
       .withIndex('by_project', q => q.eq('projectId', input.projectId))
       .unique();
-    if (audit?.red?.runId !== state.audit.id) {
+    if (!sameEpisode(audit?.red, state)) {
       state.stage = 'done';
       state.reason = 'The red audit was superseded; no automatic reverse was landed.';
       delete state.uploads;

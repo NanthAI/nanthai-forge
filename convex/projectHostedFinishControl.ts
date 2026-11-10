@@ -29,6 +29,7 @@ import { canonicalPayload } from '../src/hosted-source-operation';
 import { savePin } from '../src/hosted-save';
 import { landingObservation } from '../src/hosted-landing';
 import type { FinishCommand } from '../src/hosted-finish';
+import { culpritId } from '../src/culprit-bisect';
 import { ForgeError, invariant } from '../src/errors';
 import { reuseDecision } from './projectHostedReuseStore';
 import { findObject, objectRow } from './projectObjectFind';
@@ -52,7 +53,11 @@ export async function finishStep(ctx: MutationCtx, input: FinishIdentity): Promi
         .query('projectHostedMainAudits')
         .withIndex('by_project', q => q.eq('projectId', input.projectId))
         .unique();
-      if (audit?.red?.runId !== value.recoveryRunId) {
+      if (
+        !audit?.red ||
+        (culpritId({ redEpisode: audit.red.since }) !== value.recoveryRunId &&
+          audit.red.runId !== value.recoveryRunId)
+      ) {
         await failFinish(
           ctx,
           input,

@@ -73,5 +73,7 @@ removed, skipped or moved out of `tests/*.test.mjs`, or when this page stops nam
 | `f233bf1c` | Core claim: a batch mirror commit (normal Lane + resolution Lane) kept one member's message; the resolution landing named none (2026-11-07) |
 | `10d253c6` | Core claim: a 130-path Lane on hot files starved in a composition-conflict loop (10 land operations, about 2.5 h; 2026-11-10) |
 
+| `27865bc4` | Red main: a new failing test has no predecessor report; later failed audits must retain one recovery and complete its automatic reverse |
+
 A new core-claim incident adds its replay to the registry and a row here in the Lane that fixes
 it.
