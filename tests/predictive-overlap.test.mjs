@@ -1,19 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+
+import { join } from 'node:path';
+
 import { randomUUID } from 'node:crypto';
 import { digest } from '../dist/hash.js';
 import { regionSummary, alignRegions } from '../dist/agent-region-summary.js';
 import { regionsNear, predictiveOverlaps, overlapLines } from '../dist/agent-predictive-overlap.js';
-import { agentPeers, boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
-import { PeersCache } from '../dist/agent-peers-cache.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { initNative } from '../dist/native-work.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+import { boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
 
 function memory() {
   const entries = new Map(),
@@ -169,130 +164,6 @@ test('immutable head cache performs no source reads on a hit; new checkpoint inv
     [m.file('a.txt', change(80, 'next'))],
   ]);
   assert.equal(next.files[0].regions[0].start, 80);
-});
-
-async function fixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-predictive-'));
-  t.after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  mkdirSync(join(root, 'src'));
-  writeFileSync(join(root, 'src/a.txt'), text);
-  initNative(root);
-  const agent = new AgentWorkflow(root);
-  // Synthetic accepted initial main; no publication or real check backend.
-  agent.work.store.locked(() => {
-    const tx = agent.work.store.records();
-    tx.append('channelMoves', {
-      id: randomUUID(),
-      channel: 'main',
-      viewId: randomUUID(),
-      head: tx.data().nativeHead,
-      previous: null,
-      at: new Date().toISOString(),
-      status: 'accepted',
-      provenance: 'user-declared-local',
-    });
-    agent.work.store.commitRecords(tx);
-  });
-  const start = async outcome => (await agent.dispatch({ action: 'start', outcome })).result;
-  const save = async lane =>
-    (await agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Fixture checkpoint' }))
-      .result;
-  return { root, agent, start, save };
-}
-
-test('checkpoint, sync, status and MCP report latest peer checkpoint; dirty peers do not invalidate it', async t => {
-  const { root, agent, start, save } = await fixture(t);
-  const mine = await start('Change first region'),
-    peer = await start('Change peer region');
-  writeFileSync(join(mine.path, 'src/a.txt'), change(10, 'mine'));
-  writeFileSync(join(peer.path, 'src/a.txt'), change(90, 'peer'));
-  const savedPeer = await save(peer);
-  const cp = await save(mine);
-  assert.equal(cp.peers.predictive, undefined);
-  const detailed = agentPeers(agent.work.store, { laneId: mine.laneId, detail: true });
-  assert.equal(detailed.predictive[0].risk, 'low');
-  assert.equal(detailed.predictive[0].head, savedPeer.head);
-  writeFileSync(join(peer.path, 'src/a.txt'), change(11, 'peer'));
-  assert.equal(agentPeers(agent.work.store, { laneId: mine.laneId, detail: true }).predictive[0].risk, 'low');
-  const nextPeer = await save(peer);
-  const next = await save(mine);
-  assert.equal(next.peers.predictive[0].risk, 'high');
-  assert.equal(next.peers.predictive[0].head, nextPeer.head);
-  assert.equal(next.peers.predictive[0].intent, 'Change peer region');
-  const before = readFileSync(join(root, '.forge/work/work.json'));
-  const status = await agent.dispatch({ action: 'status', laneId: mine.laneId });
-  assert.equal(status.result.peers.predictive[0].risk, 'high');
-  assert.deepEqual(readFileSync(join(root, '.forge/work/work.json')), before);
-  const synced = await agent.dispatch({ action: 'sync', laneId: mine.laneId });
-  assert.equal(synced.result.peers.predictive[0].risk, 'high');
-  const tools = new Map();
-  registerAgentWorkflow({ registerTool: (name, _spec, handler) => tools.set(name, handler) }, root);
-  const result = JSON.parse((await tools.get('forge_peers')({ laneId: mine.laneId })).content[0].text);
-  assert.equal(result.predictive[0].risk, 'high');
-  const cache = new PeersCache(agent.work.store.root),
-    retained = agent.work.store.select('lanes', peer.laneId);
-  assert.ok(cache.read(`regions-v1:${retained.base}:${retained.head}`));
-  const cli = spawnSync(
-    process.execPath,
-    [resolve('dist/cli.js'), 'agent', root, 'status', JSON.stringify({ laneId: mine.laneId })],
-    { encoding: 'utf8' },
-  );
-  assert.equal(cli.status, 0, cli.stderr);
-  assert.equal(JSON.parse(cli.stdout).result.peers.predictive[0].risk, 'high');
-  assert.equal(
-    cli.stderr
-      .trim()
-      .split('\n')
-      .filter(line => line.startsWith('Overlap ')).length,
-    1,
-  );
-});
-
-test('finish advises without blocking on adjacent checkpoint regions in a synthetic owner', async t => {
-  const { root, agent, start, save } = await fixture(t);
-  const mine = await start('Mine'),
-    peer = await start('Peer');
-  writeFileSync(join(mine.path, 'src/a.txt'), change(10, 'mine'));
-  writeFileSync(join(peer.path, 'src/a.txt'), change(11, 'peer'));
-  await save(peer);
-  const check = (
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'verify',
-      executable: process.execPath,
-      args: ['-e', '0'],
-    })
-  ).result;
-  const result = (
-    await agent.dispatch({
-      action: 'finish',
-      laneId: mine.laneId,
-      message: 'Synthetic finish',
-      checkId: check.checkId,
-    })
-  ).result;
-  assert.equal(result.peers.predictive[0].risk, 'high');
-  assert.equal(result.status, 'passed');
-  // Exercise the CLI parser/output without starting its detached presence daemon.
-  const replay = spawnSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      `import {agentCli} from ${JSON.stringify(new URL('../dist/agent-cli.js', import.meta.url).href)};
-       console.log(JSON.stringify(await agentCli(process.argv.slice(1))));`,
-      root,
-      'finish',
-      JSON.stringify({ operationId: result.operationId }),
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(replay.status, 0, replay.stderr);
-  const retained = JSON.parse(replay.stdout).result;
-  assert.equal(retained.status, 'passed');
-  assert.equal(retained.view.viewId, result.view.viewId);
-  assert.equal(retained.peers.predictive[0].risk, 'high');
-  assert.match(replay.stderr, /^Overlap /m);
 });
 
 test('50 peer predictions stay within compact receipt and human output budgets; detail retains all', () => {

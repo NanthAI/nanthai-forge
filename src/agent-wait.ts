@@ -173,21 +173,3 @@ export function waitText(event: WaitEvent | WaitSummary): string {
     .replaceAll('\n', '\\n')
     .replaceAll('\r', '\\r');
 }
-export async function agentWaitCli(root: string, input: unknown, text: boolean) {
-  const controller = new AbortController(),
-    stop = () => controller.abort();
-  process.once('SIGINT', stop);
-  process.once('SIGTERM', stop);
-  try {
-    const result = await agentWait(
-      new WorkStore(root),
-      input,
-      event => process.stdout.write(`${text ? waitText(event) : JSON.stringify(event)}\n`),
-      controller.signal,
-    );
-    process.exitCode = result.exitCode;
-  } finally {
-    process.removeListener('SIGINT', stop);
-    process.removeListener('SIGTERM', stop);
-  }
-}

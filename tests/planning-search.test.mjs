@@ -251,8 +251,9 @@ test('CLI/MCP share search schema and briefings require it; validation names id 
     hostedAgentCommandSchemas.planning.safeParse({ search: 'sync', id: randomUUID() }).success,
     false,
   );
+  // The checkout CLI help is generated from the hosted contract (one client mode).
   for (const path of [
-    'src/agent-cli.ts',
+    'src/hosted-agent-contract.ts',
     'src/mcp-hosted-agent.ts',
     'docs/agents/briefings.md',
     'AGENTS.md',

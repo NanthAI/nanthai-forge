@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { readWorkBytes } from './work-store-fixture.mjs';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -11,13 +11,12 @@ import {
   unlinkSync,
   linkSync,
   statSync,
-  chmodSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { WorkService } from '../dist/work.js';
-import { readSource } from '../dist/files.js';
+
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -165,188 +164,6 @@ test('optional native resource observations preserve outcomes, original definiti
   assert.equal(git(root, ['rev-parse', 'HEAD']), head);
   assert.deepEqual(readFileSync(join(root, '.git/index')), index);
   assert.equal(readFileSync(join(work.store.path(lane.id), 'a.ts'), 'utf8'), 'original unfinished Lane');
-});
-
-test('private check manifests bind original runs and native log digests without execution, source changes or metadata writes', async t => {
-  const { root, work, dispatch, define, command, lane } = setup(t);
-  write(work.store.path(lane.id), 'a.ts', 'retained unfinished source');
-  const input = command(
-    define(`console.log('original <img src=x onerror=untrusted> é');console.error('stderr');`),
-  );
-  await dispatch(input);
-  await finished(work, input.operationId);
-  const before = readWorkBytes(join(work.store.directory, 'work.json')),
-    head = git(root, ['rev-parse', 'HEAD']);
-  const exportCommand = { action: 'export-check', id: input.operationId },
-    { result } = await dispatch(exportCommand, 0);
-  const manifest = JSON.parse(result.json),
-    digest = bytes => createHash('sha256').update(bytes).digest('hex');
-  assert.deepEqual(manifest.run, work.store.load().runs[0]);
-  assert.equal(manifest.kind, 'forge-local-check-evidence');
-  assert.equal(result.sha256, digest(result.json));
-  assert.equal(manifest.logs.length, 2);
-  assert.ok(!result.json.includes(work.store.directory), 'Portable manifest omits local absolute paths.');
-  for (const log of result.logs) {
-    assert.equal(log.sha256, digest(readFileSync(log.path)));
-    assert.equal(log.size, statSync(log.path).size);
-    assert.deepEqual(
-      manifest.logs.find(item => item.stream === log.stream),
-      { stream: log.stream, filename: log.filename, size: log.size, sha256: log.sha256 },
-    );
-  }
-  assert.equal((await dispatch(exportCommand)).result.json, result.json);
-
-  const body = JSON.stringify({ command: exportCommand, revision: 0 });
-
-  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  assert.equal((await response).result.json, result.json);
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', root, JSON.stringify(exportCommand), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(cli.result.json, result.json);
-  assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
-  assert.equal(git(root, ['rev-parse', 'HEAD']), head);
-  assert.equal(readFileSync(join(work.store.path(lane.id), 'a.ts'), 'utf8'), 'retained unfinished source');
-  await assert.rejects(dispatch({ ...exportCommand, id: randomUUID() }), code('NOT_FOUND'));
-  const path = result.logs[0].path;
-  chmodSync(path, 0o644);
-  await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
-  chmodSync(path, 0o600);
-  unlinkSync(path);
-  symlinkSync(join(root, 'a.ts'), path);
-  await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
-  unlinkSync(path);
-  linkSync(join(root, 'a.ts'), path);
-  await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
-  unlinkSync(path);
-  // Policy-driven retention/restoration can deliberately omit a regular log.
-  assert.equal(
-    (await dispatch(exportCommand)).result.logs.some(log => log.stream === 'stdout'),
-    false,
-  );
-  if (process.platform !== 'win32') {
-    execFileSync('mkfifo', [path]);
-    await assert.rejects(dispatch(exportCommand), code('INVALID_FILE_EXPORT'));
-    await assert.rejects(
-      dispatch({ action: 'read-check-output', operationId: input.operationId, stream: 'stdout' }),
-      code('UNSAFE_PATH'),
-    );
-    assert.equal(readSource(work.store.directory + '/check-' + input.operationId, 'stdout.log', 1024), null);
-  }
-  assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
-});
-
-test('selected build outputs survive cleanup, bind releases, report capture failures and detect changed retained bytes', async t => {
-  const { root, work, local, dispatch, lane, view, define, command } = setup(t);
-  write(work.store.path(lane.id), 'unfinished.txt', 'Original unfinished Lane');
-  const script =
-    "const fs=require('node:fs');fs.mkdirSync('dist');fs.writeFileSync('dist/app.bin',Buffer.alloc(2*1024*1024+7,123));fs.writeFileSync('dist/empty',Buffer.alloc(0));";
-  const check = define(script, { artifactPaths: ['dist/app.bin', 'dist/empty', 'dist/app.bin'] }),
-    input = command(check);
-  assert.deepEqual(check.artifactPaths, ['dist/app.bin', 'dist/empty']);
-  await dispatch(input);
-  const run = await finished(work, input.operationId),
-    dir = join(work.store.directory, 'check-' + run.id);
-  assert.equal(run.status, 'passed');
-  assert.equal(run.artifacts.length, 2);
-  assert.equal(existsSync(join(dir, 'workspace')), false);
-  const hash = bytes => createHash('sha256').update(bytes).digest('hex');
-  for (const file of run.artifacts) {
-    assert.equal(file.status, 'retained');
-    const path = join(dir, 'artifacts', file.filename);
-    assert.equal(statSync(path).mode & 0o777, 0o600);
-    assert.equal(hash(readFileSync(path)), file.sha256);
-    assert.equal(statSync(path).size, file.size);
-  }
-  const original = readWorkBytes(join(work.store.directory, 'work.json')),
-    exported = await dispatch({ action: 'export-check', id: run.id });
-  assert.equal(exported.result.artifacts.length, 2);
-  assert.equal(JSON.parse(exported.result.json).artifacts[0].filename, `check-${run.id}-artifact-0.bin`);
-  assert.deepEqual(JSON.parse(exported.result.json).run.artifacts, run.artifacts);
-  assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), original);
-
-  const body = JSON.stringify({ revision: 0, command: { action: 'export-check', id: run.id } });
-
-  const http = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  assert.deepEqual((await http).result.artifacts, exported.result.artifacts);
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', root, JSON.stringify({ action: 'export-check', id: run.id }), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.deepEqual(cli.result.artifacts, exported.result.artifacts);
-
-  const acceptance = (
-    await dispatch({
-      action: 'accept-channel',
-      operationId: randomUUID(),
-      channel: 'artifacts',
-      viewId: view.id,
-      expectedHead: view.head,
-      expectedPrevious: null,
-    })
-  ).result;
-  const releaseCommand = {
-    action: 'create-release',
-    operationId: randomUUID(),
-    acceptanceId: acceptance.id,
-    expectedHead: view.head,
-    name: 'Original build',
-    buildRunIds: [run.id],
-  };
-  const release = (await dispatch(releaseCommand)).result;
-  assert.deepEqual(release.buildRuns[0].artifacts, run.artifacts);
-  assert.equal((await dispatch(releaseCommand, 0)).result.id, release.id);
-  const releaseExport = await dispatch({ action: 'export-release', id: release.id });
-  assert.deepEqual(JSON.parse(releaseExport.result.json).release.buildRuns[0].artifacts, run.artifacts);
-  assert.equal(releaseExport.result.buildArtifacts[0].files.length, 2);
-  const nextCheck = define(
-    "require('node:fs').mkdirSync('dist');require('node:fs').writeFileSync('dist/app.bin','failed output');process.exit(1)",
-    { artifactPaths: ['dist/app.bin', 'missing'] },
-  );
-  const next = command(nextCheck);
-  await dispatch(next);
-  const failed = await finished(work, next.operationId);
-  assert.equal(failed.status, 'failed');
-  assert.deepEqual(
-    failed.artifacts.map(f => f.status),
-    ['retained', 'unavailable'],
-  );
-  assert.ok(existsSync(join(work.store.directory, 'check-' + failed.id, 'workspace')));
-  const unsafe = define(
-    "const fs=require('node:fs');fs.symlinkSync('a.ts','sym');fs.linkSync('a.ts','hard');" +
-      (process.platform === 'win32' ? '' : "require('node:child_process').execFileSync('mkfifo',['fifo']);"),
-    { artifactPaths: process.platform === 'win32' ? ['sym', 'hard'] : ['sym', 'hard', 'fifo'] },
-  );
-  const unsafeInput = command(unsafe);
-  await dispatch(unsafeInput);
-  const unsafeRun = await finished(work, unsafeInput.operationId);
-  assert.equal(unsafeRun.status, 'passed');
-  assert.ok(unsafeRun.artifacts.every(file => file.status === 'unavailable'));
-  assert.equal(unsafeRun.artifacts.length, process.platform === 'win32' ? 2 : 3);
-  for (const path of ['../outside', '/absolute', '.git/config'])
-    assert.throws(() => define('process.exit(0)', { artifactPaths: [path] }), code('BAD_ARGUMENT'));
-  await assert.rejects(
-    dispatch({ ...releaseCommand, operationId: randomUUID(), buildRunIds: [randomUUID()] }),
-    code('RELEASE_CHANGED'),
-  );
-  const retained = join(dir, 'artifacts', run.artifacts[0].filename);
-  writeFileSync(retained, 'changed');
-  await assert.rejects(dispatch({ action: 'export-check', id: run.id }), code('ARTIFACT_CHANGED'));
-  await assert.rejects(dispatch({ action: 'export-release', id: release.id }), code('ARTIFACT_CHANGED'));
-  assert.equal(
-    readFileSync(join(work.store.path(lane.id), 'unfinished.txt'), 'utf8'),
-    'Original unfinished Lane',
-  );
-  assert.equal(git(root, ['rev-parse', 'HEAD']).trim(), view.head);
 });
 
 test('exact check pins, private lossless paged logs, idempotent retries and historical reviews preserve source', async t => {

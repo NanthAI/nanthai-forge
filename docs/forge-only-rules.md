@@ -81,7 +81,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `scripts/test-import-graph.mjs` | `build-folders` | 3 | Forge's import graph resolves its built `dist/` to `src/` | the generic JS/TS import graph |
 | `scripts/test-name-watchers.mjs` | `js-extension` | 1 | Forge's selector: JS/TS modules a test names | named tests by module stem (`runnerSelection`) |
 | `scripts/test-tiebreak.mjs` | `js-extension` | 1 | Forge's preflight ranking strips JS/TS extensions from test names | changed, named and imported tests in that order |
-| `src/agent-cli.ts` | `tests-folder` | 2 | help-text examples of an explicit test list, not behavior | — |
 | `src/explicit-test-runner.ts` | `tests-folder` | 1 | an explicit test list for Forge's standard check names `tests/*.test.mjs` files | their runner's test files (`resolveTestRunner`) |
 | `src/project-test-runner.ts` | `tests-folder` | 1 | `FORGE_TEST_GLOB`, the glob of Forge's Node test layout | a declared runner or inferred vitest, jest and pytest globs |
 | `scripts/docs-readers.mjs` | `forge-folders` | 1 | Forge's tested-docs reader scan over its tests and scripts | declared `docsPaths` on their check definition |
@@ -121,7 +120,6 @@ ecosystem; rows that name an "any-ecosystem slice" Issue are live cases that sli
 | `src/package-manager.ts` | `package-json-config` | 5 | JS package managers keep `packageManager` and `workspaces` in package.json (slice H, 4ce67b9a) | non-JS repositories install with their own tooling |
 | `src/package-manager-install.ts` | `package-json-config` | 1 | reads the JS install scripts the package manager would run (slice H, 4ce67b9a) | the same for every JS package manager |
 | `src/shared-dependencies.ts` | `npm-lockfile` | 2 | Lanes share an npm install keyed by the exact lockfile | each Lane installs with its own tooling |
-| `src/agent-cli.ts` | `build-folders` | 1 | a runner-label example (`["linux","build"]`) in help text, not a folder | — |
 | `src/gh-cli-options.ts` | `build-folders` | 1 | a `gh` JSON field named `coverage`, not a folder | — |
 | `src/js-import-graph.ts` | `build-folders` | 1 | reads a JS package's built `exports` target as its `src/` source | the same for every JS/TS repository |
 | `src/maintainer-release-schema.ts` | `build-folders` | 1 | Forge's own release stage names | not used |

@@ -13,9 +13,9 @@
   },
   "counts": {
     "tables": 181,
-    "errorCodes": 501,
-    "agentActions": 89,
-    "cliCommands": 53,
+    "errorCodes": 500,
+    "agentActions": 66,
+    "cliCommands": 40,
     "glossaryTerms": 27,
     "macDependencies": 5,
     "unreferencedExports": 19

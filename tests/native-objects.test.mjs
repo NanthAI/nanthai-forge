@@ -2,10 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+
 import { syncBuiltinESMExports } from 'node:module';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
@@ -17,8 +17,6 @@ import { prepareNativeProjection, importNativeGit } from '../dist/native-git.js'
 import { digest } from '../dist/hash.js';
 import { setup as publicationFixture } from './publication-fixture.mjs';
 import { fixture, git, code } from './helpers.mjs';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 function setup(t) {
   const dir = fs.mkdtempSync(join(tmpdir(), 'forge-objects-')),
@@ -309,70 +307,4 @@ test('prepared projection survives collection before registration and publicatio
     NativeSource.prototype.put = put;
     w.store.locked = locked;
   }
-});
-
-test('WorkService and CLI expose explicit collection while schema1/2 owners remain unchanged until collect', async t => {
-  const f = setup(t);
-
-  const body = JSON.stringify({ revision: 0, command: { action: 'collect-native-objects' } });
-
-  assert.equal(f.w.store.load().schema, 24);
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', f.root, JSON.stringify({ action: 'inspect-native-objects' }), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(cli.result.format, 24);
-  const response = await new WorkService(f.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  assert.equal((await response).result.format, 24);
-  const client = new Client({ name: 'native-object-acceptance', version: '1' }),
-    transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', f.root, '--work'],
-      env: Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)),
-      stderr: 'pipe',
-    });
-  await client.connect(transport);
-  t.after(() => client.close());
-  const inspected = await client.callTool({
-    name: 'forge_work_command',
-    arguments: { revision: 0, command: { action: 'inspect-native-objects' } },
-  });
-  assert.equal(JSON.parse(inspected.content[0].text).result.format, 24);
-  const collected = await client.callTool({
-    name: 'forge_work_command',
-    arguments: { revision: 0, command: { action: 'collect-native-objects' } },
-  });
-  assert.deepEqual(JSON.parse(collected.content[0].text).result.removed, []);
-});
-
-// Supply an actual prior build for release acceptance; do not imitate its parser here.
-
-test('separate collector respects live Work lock and recovers after process death between deletions', t => {
-  const f = setup(t),
-    cli = resolve('dist/cli.js'),
-    command = JSON.stringify({ action: 'collect-native-objects' });
-  f.w.store.locked(() => {
-    const child = spawnSync(process.execPath, [cli, 'work', f.root, command, '0'], {
-      encoding: 'utf8',
-      env: { ...process.env, FORGE_WORK_LOCK_WAIT_MS: '0' },
-    });
-    assert.notEqual(child.status, 0);
-    assert.match(child.stderr, /WORK_BUSY/);
-  });
-  const ids = ['one', 'two', 'three'].map(value => f.source.put(Buffer.from('orphan ' + value)));
-  const script = `import fs from 'node:fs';import {syncBuiltinESMExports} from 'node:module';import {WorkStore} from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};import {nativeObjects} from ${JSON.stringify(new URL('../dist/native-objects.js', import.meta.url).href)};const original=fs.unlinkSync;fs.unlinkSync=function(path){original(path);if(String(path).includes('/objects/'))process.kill(process.pid,'SIGKILL');};syncBuiltinESMExports();nativeObjects(new WorkStore(process.argv[1]),{action:'collect-native-objects'});`;
-  const killed = spawnSync(process.execPath, ['--input-type=module', '-e', script, f.root], {
-    encoding: 'utf8',
-  });
-  assert.equal(killed.signal, 'SIGKILL');
-  assert.equal(ids.filter(id => fs.existsSync(join(f.source.directory, id))).length, 2);
-  assert.equal(f.collect().result.removed.length, 2);
-  assert.ok(f.source.state(f.w.store.load().nativeHead));
 });

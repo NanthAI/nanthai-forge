@@ -3,9 +3,9 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, rmSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -154,34 +154,4 @@ test('release request reconciliation survives lost saves, rejects changed pins a
   await assert.rejects(dispatch({ action: 'export-release', id: release.operationId }), code('NOT_FOUND'));
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
   await assert.rejects(dispatch({ action: 'export-release', id: randomUUID() }), code('NOT_FOUND'));
-});
-
-test('direct WorkService, CLI and actual current capabilities share local release owner and leave unauthorized writes unchanged', async t => {
-  const { root, work, dispatch, accept, release } = setup(t);
-  await dispatch(accept);
-
-  const body = JSON.stringify({ command: release, revision: work.status().revision });
-
-  assert.equal(work.status().releases.length, 0);
-  assert.equal(work.status().capabilities.releases, true);
-  const created = (
-    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
-  ).result;
-  assert.equal(created.id, release.operationId);
-  const exported = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        resolve('dist/cli.js'),
-        'work',
-        root,
-        JSON.stringify({ action: 'export-release', id: created.id }),
-        '0',
-      ],
-      { encoding: 'utf8' },
-    ),
-  ).result;
-  assert.equal(JSON.parse(exported.json).release.id, created.id);
-  assert.equal(exported.bundle.head, accept.expectedHead);
-  assert.equal(createHash('sha256').update(exported.json).digest('hex'), exported.sha256);
 });

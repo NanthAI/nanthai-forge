@@ -12,12 +12,10 @@ import {
   chmodSync,
   renameSync,
 } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { WorkService } from '../dist/work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
@@ -283,56 +281,6 @@ test('compact external PR review preserves original observation pins without new
   assert.equal((await f.w.dispatch(command, 0)).result.details, full.intents[0].externalDiff);
   await assert.rejects(f.w.dispatch({ ...command, expectedBase: head }, 0), code('VIEW_STALE'));
   await assert.rejects(f.w.dispatch({ ...command, observation: 1 }, 0), code('NOT_FOUND'));
-});
-
-test('compact Work and detail retain direct WorkService and actual CLI/MCP parity', async t => {
-  const f = setup(t, true);
-  f.edit('export const a=2;\n');
-  f.checkpoint();
-  const view = f.compose(),
-    command = {
-      action: 'read-work-detail',
-      kind: 'view',
-      id: view.id,
-      expectedHead: view.head,
-      expectedBase: view.base,
-      expectedStatus: view.status,
-    };
-
-  const compact = JSON.parse(JSON.stringify(new WorkService(f.root).status({ compact: true })));
-  assert.equal(compact.views[0].detailDeferred, true);
-  const posted = await new WorkService(f.root).dispatch(
-    { revision: 0, command }.command,
-    { revision: 0, command }.revision,
-  );
-
-  const expected = JSON.parse(JSON.stringify(posted));
-  const cli = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', f.root, '--compact'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.deepEqual(cli, compact);
-  const cliDetail = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', f.root, JSON.stringify(command), '0'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.deepEqual(cliDetail, expected);
-  const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', f.root, '--work'],
-      env: Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)),
-      stderr: 'pipe',
-    }),
-    client = new Client({ name: 'detail-acceptance', version: '1' });
-  f.resources.push(client);
-  await client.connect(transport);
-  const result = async (name, args) =>
-    JSON.parse((await client.callTool({ name, arguments: args })).content[0].text);
-  assert.deepEqual(await result('forge_work_status', { compact: true }), compact);
-  assert.deepEqual(await result('forge_work_command', { command, revision: 0 }), expected);
-  assert.ok((await result('forge_work_status', {})).views[0].details);
 });
 
 test('native compact overview does not capture unrelated source; selected detail verifies its live bytes', async t => {

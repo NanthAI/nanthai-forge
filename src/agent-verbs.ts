@@ -20,13 +20,10 @@ export const verbModes: Readonly<Record<Verb, Readonly<Record<string, string>>>>
     '--contract': 'confirm-tests',
     '--overlap-answer': 'peer-ack',
     '--overlap-answers': 'overlap-acks',
-    '--handoff': 'handoff',
-    '--report': 'report',
     '--friction': 'friction',
     '--decision': 'decide',
-    '--preview': 'integrate',
   },
-  land: { '--save': 'finish', '--resume-ready': 'land-ready', '--withdraw': 'withdraw' },
+  land: { '--save': 'finish', '--withdraw': 'withdraw' },
 };
 
 /** Hosted board (Issue 9c8490a4): `board` reads, `board --post`/`--reply` write. Client actions. */
@@ -38,25 +35,17 @@ export const boardModes: Readonly<Record<string, string>> = {
 
 /** Operator and repair actions, reached with `nforge x ROOT ACTION`. Same schemas and authority. */
 export const operatorActions = [
-  'undo-sync',
-  'accept',
   'cancel',
   'revert',
-  'undo-revert',
   'abandon',
   'complete',
   'complete-merged',
   'abandon-dormant',
   'pin',
-  'clean',
-  'take',
-  'guidance',
-  'pre-edit',
   'install-hooks',
   'uninstall-hooks',
   'friction-triage',
   'set-policy',
-  'define-check',
   'configure-check',
   'configure-runner',
   'prioritize',
@@ -73,29 +62,18 @@ export const namedReads = [
   'observe',
   'wait',
   'log',
-  'link',
   'status',
-  'records',
-  'candidate',
-  'candidates',
-  'view',
-  'views',
-  'provenance',
-  'review',
   'diff',
   'show',
   'history',
-  'brief',
   'peers',
+  'lanes',
   'queue',
   'landings',
   'lane-history',
   'overlap-answers',
   'board',
-  'handoff-read',
-  'making-of',
   'metrics',
-  'improve',
   'decisions',
   'friction-list',
   'policy',
@@ -112,6 +90,43 @@ export const namedReads = [
   'ack',
 ] as const;
 
+/** Actions of the removed native-owner mode (docs/agents/hosted-parity.md): each names the hosted
+ * command that does its job. The code stays HOSTED_ACTION_UNSUPPORTED, which scripts already read. */
+export const retiredActions: Readonly<Record<string, string>> = {
+  records: 'lanes, landings, lane-history and status {laneId} read retained work',
+  provenance:
+    'history {op:"blame",path} and lane-history {laneId} name who changed a line and where it landed',
+  candidate: "status {laneId} and observe {runId} read the Lane's Candidate and check",
+  candidates: "status {laneId} and landings read a Lane's integrations",
+  view: "status {laneId} reads the Lane's Candidate",
+  views: "status {laneId} and landings read a Lane's integrations",
+  review: 'diff {laneId} and show {laneId,path} read saved changes',
+  link: 'status, landings and board receipts carry their links',
+  brief: 'planning {id} and status {laneId} recover the task and next step',
+  handoff: 'board --post {to,text} leaves a note for the next agent',
+  'handoff-read': 'board {laneId} reads notes left on a Lane',
+  report: 'metrics reads session totals',
+  'making-of': 'lane-history {laneId} and landings trace an Intent to main',
+  improve: 'friction-list groups recorded friction',
+  integrate: 'preflight {laneId} and land --save --check-only check saved work without landing',
+  'land-ready': 'land --save with the original request (or wait {operationIds}) resumes a landing',
+  'undo-sync': 'x revert {target} or a new save undoes work; Lane undo is planned (e7812d8f)',
+  accept: 'land --save lands under project policy',
+  'undo-revert': 'x revert {target} compensates a landing',
+  clean: 'nforge prune removes local roots of landed or abandoned Lanes',
+  take: 'start --open {laneId} opens another Lane here',
+  guidance: 'repository AGENTS.md and the project guidance page hold agent instructions',
+  'pre-edit': 'the first-write hook (x install-hooks) reports overlaps on first write',
+  'define-check': 'x configure-check defines a check',
+  'pending-status': 'status reads pending work in a hosted checkout',
+};
+const retiredModes: Readonly<Record<string, string>> = {
+  'save --handoff': 'handoff',
+  'save --report': 'report',
+  'save --preview': 'integrate',
+  'land --resume-ready': 'land-ready',
+};
+
 /** Old lifecycle spellings that are now a start/save/land mode (the alias rows of the V1 table). */
 export const lifecycleAliases: Readonly<Record<string, string>> = Object.fromEntries([
   ['checkpoint', 'save'],
@@ -125,6 +140,16 @@ export type VerbForm = { verb: string; flags: string[]; operator: boolean };
 
 /** Split `VERB [--mode…] [JSON | --command-file FILE | --help]` into its form and the remainder. */
 export function parseVerbForm(verb: string, rest: string[], operator = false): [VerbForm, string[]] {
+  const retired = Object.hasOwn(retiredActions, verb)
+    ? verb
+    : rest[0] !== undefined
+      ? retiredModes[`${verb} ${rest[0]}`]
+      : undefined;
+  invariant(
+    retired === undefined,
+    'HOSTED_ACTION_UNSUPPORTED',
+    `${retired === verb ? verb : `${verb} ${rest[0]}`} was removed with native mode. Use ${retiredActions[retired!]}.`,
+  );
   const flags: string[] = [];
   const modes = operator
     ? {}
@@ -208,7 +233,6 @@ export function newForm(
     const checkOnly = hosted ? selected.accept === false : selected.accept === undefined;
     return checkOnly ? 'land --save --check-only' : 'land --save';
   }
-  if (action === 'pending-status') return 'status --pending';
   if (Object.hasOwn(lifecycleAliases, action)) return lifecycleAliases[action];
   if ((operatorActions as readonly string[]).includes(action)) return `x ${action}`;
   return undefined;

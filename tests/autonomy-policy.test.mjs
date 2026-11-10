@@ -31,7 +31,6 @@ import {
   protectedMatches,
 } from '../dist/autonomy-policy.js';
 import { syncTestHooks } from '../dist/agent-sync.js';
-import { execFileSync } from 'node:child_process';
 import { localAgent } from '../dist/work-autonomy.js';
 import { agentClean } from '../dist/agent-clean.js';
 import { allRecords } from '../dist/agent-lifecycle.js';
@@ -316,7 +315,7 @@ test('autonomous cleanup only touches eligible copies and records regeneration i
   assert.equal(readFileSync(join(lane.path, 'a.txt'), 'utf8'), 'uncaptured\n');
 });
 
-test('WorkService accepts a supervised View and exposes policy', async t => {
+test('WorkService accepts a supervised View and keeps its policy', async t => {
   const p = await project(t),
     lane = await p.start('Direct review');
   p.edit(lane, 'a.txt', 'Review\n');
@@ -333,10 +332,7 @@ test('WorkService accepts a supervised View and exposes policy', async t => {
   assert.equal(new WorkService(p.root).status().autonomyPolicy.preset, 'supervised');
   const accepted = await new WorkService(p.root).dispatch(command, p.store.revision());
   assert.equal(accepted.result.status, 'accepted');
-  const policy = JSON.parse(
-    execFileSync(process.execPath, ['dist/cli.js', 'policy', p.root], { encoding: 'utf8' }),
-  );
-  assert.equal(policy.result.preset, 'supervised');
+  assert.equal(new WorkService(p.root).status().autonomyPolicy.preset, 'supervised');
 });
 test('conflicted automatic sync reports undo and undo-sync resumes an interrupted restoration', async t => {
   const p = await project(t);

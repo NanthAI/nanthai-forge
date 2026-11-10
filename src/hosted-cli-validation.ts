@@ -4,19 +4,8 @@ import { hostedAgentAction, hostedAgentCommandSchemas } from './hosted-agent-con
 import { hostedClientReadSchemas } from './hosted-agent-reads.js';
 import { unknownActionError } from './hosted-agent-version.js';
 import { ForgeError, invariant } from './errors.js';
-import { frictionInputSchema } from './friction-types.js';
 import { describeIssues } from './argument-errors.js';
 import { actionRoot } from './agent-verbs.js';
-
-export function validateNativeFrictionCommand(input: Record<string, unknown>) {
-  const { operationId, ...parameters } = input;
-  const parsed = frictionInputSchema.omit({ operationId: true }).safeParse(parameters);
-  invariant(
-    parsed.success && (operationId === undefined || z.uuid().safeParse(operationId).success),
-    'BAD_ARGUMENT',
-    `Invalid friction parameters: ${!parsed.success ? describeIssues(parsed.error.issues, parameters) : 'operationId: expected a UUID'}. Run nforge agent ROOT friction --help and retry.`,
-  );
-}
 
 /** The same enforced schemas, before installed-CLI release discovery. Only
  * argument validation happens here; dispatch retains authority and retry checks. */

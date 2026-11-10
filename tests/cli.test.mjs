@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { join } from 'node:path';
-import { fixture, git, write } from './helpers.mjs';
+
+import { fixture, write } from './helpers.mjs';
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const cli = fileURLToPath(new URL(`../${manifest.bin.nforge}`, import.meta.url));
@@ -27,6 +29,28 @@ test('built CLI indexes a real worktree, queries, detects edits and re-indexes',
   assert.equal(JSON.parse(run('inspect', root, 'goodbye').stdout).total, 1);
 });
 
+test('one client mode: a hosted checkout without Git metadata indexes and reads source locally', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-hosted-index-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  write(
+    root,
+    '.forge/hosted-main.json',
+    JSON.stringify({ selection: { schema: 1, projectId: 'synthetic' } }),
+  );
+  write(root, 'a.ts', 'export function greet() { return "hello"; }');
+  // An empty PATH proves no Git call: the old native owner was the only Git-free source.
+  const env = { ...process.env, PATH: '' };
+  const call = (...args) =>
+    spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env, timeout: 20_000 });
+  const indexed = call('index', root);
+  assert.equal(indexed.status, 0, indexed.stderr);
+  assert.equal(JSON.parse(indexed.stdout).files, 1, 'the hosted marker is not source');
+  assert.equal(JSON.parse(indexed.stdout).gitHead, null);
+  const source = call('source', root, 'a.ts', '1', '1');
+  assert.equal(source.status, 0, source.stderr);
+  assert.match(JSON.parse(source.stdout).results[0].text, /greet/);
+});
+
 test('CLI has useful help and structured argument errors', () => {
   assert.equal(run('--help').status, 0);
   for (const args of [
@@ -39,50 +63,4 @@ test('CLI has useful help and structured argument errors', () => {
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stderr).error.code, 'BAD_ARGUMENT');
   }
-});
-
-test('Work command files preserve literal input and existing revision checks', t => {
-  const root = fixture(t, { 'a.ts': 'export const ready = true;' });
-  git(root, ['add', '.']);
-  git(root, ['commit', '-qm', 'Initial source']);
-  const command = {
-    action: 'intent',
-    outcome: 'A "quoted" outcome',
-    constraints: 'First line\nLiteral $(not-a-command) and `backticks`',
-  };
-  write(root, 'work-command.json', JSON.stringify(command));
-  const file = join(root, 'work-command.json');
-  const created = run('work', root, '--command-file', file, '0');
-  assert.equal(created.status, 0, created.stderr);
-  assert.equal(JSON.parse(created.stdout).result.constraints, command.constraints);
-  const stale = run('work', root, '--command-file', file, '0');
-  assert.equal(JSON.parse(stale.stderr).error.code, 'WORK_STALE');
-  const inline = run(
-    'work',
-    root,
-    JSON.stringify({
-      action: 'note',
-      intentId: JSON.parse(created.stdout).result.id,
-      kind: 'decision',
-      text: 'Inline still works',
-    }),
-    '1',
-  );
-  assert.equal(inline.status, 0, inline.stderr);
-  write(root, 'invalid.json', 'not JSON');
-  for (const args of [
-    ['--command-file', join(root, 'missing.json'), '2'],
-    ['--command-file', join(root, 'invalid.json'), '2'],
-    ['--unknown', file, '2'],
-  ]) {
-    const failed = run('work', root, ...args);
-    assert.equal(failed.status, 1);
-    assert.equal(JSON.parse(failed.stderr).error.code, 'BAD_ARGUMENT');
-  }
-  const status = JSON.parse(run('work', root).stdout);
-  assert.equal(status.counts.intents, 1);
-  const detail = JSON.parse(run('work', root, '--compact').stdout);
-  assert.equal(detail.intents[0].outcome, command.outcome);
-  assert.equal(detail.intents[0].notes[0].text, 'Inline still works');
-  assert.equal(status.revision, 2);
 });

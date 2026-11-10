@@ -2,11 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getFunctionName } from 'convex/server';
 import { agentFixture } from './hosted-agent-fixture.mjs';
-import { saveFixture, api, jobApi } from './hosted-saves-fixture.mjs';
+import { saveFixture, api } from './hosted-saves-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
@@ -280,52 +280,6 @@ test('stacked start keeps the hosted parent head and native dependency metadata'
   assert.equal(lane.head, parent.head);
   assert.equal(lane.stack.laneId, parent.laneId);
   assert.deepEqual(lane.after, { intentId: parent.intentId });
-});
-
-test('bound CLI and native MCP workflow start and save aliases use the cache route without explicit addressing', async t => {
-  const f = fixture(t);
-  const { ConvexExchange } = await import('../dist/exchange-client.js');
-  const { agentCli } = await import('../dist/agent-cli.js');
-  const { AgentWorkflow } = await import('../dist/agent-workflow.js');
-  for (const name of [
-    'upload',
-    'uploadFile',
-    'missing',
-    'objects',
-    'downloadBatch',
-    'downloadToFile',
-    'prepareDownloads',
-  ])
-    t.mock.method(ConvexExchange.prototype, name, (...args) => f.exchange[name](...args));
-  const prior = process.env.FORGE_AUTH_TOKEN;
-  process.env.FORGE_AUTH_TOKEN = 'synthetic-only';
-  t.after(() => {
-    if (prior === undefined) delete process.env.FORGE_AUTH_TOKEN;
-    else process.env.FORGE_AUTH_TOKEN = prior;
-  });
-  t.mock.method(globalThis, 'fetch', async (url, init) => {
-    assert(String(url).startsWith(f.address.url));
-    const { makeFunctionReference } = await import('convex/server');
-    const body = JSON.parse(init.body);
-    const value = await f.exchange.client[String(url).endsWith('/api/query') ? 'query' : 'mutation'](
-      makeFunctionReference(body.path),
-      body.args[0],
-    );
-    return new Response(JSON.stringify({ status: 'success', value }), {
-      headers: { 'content-type': 'application/json' },
-    });
-  });
-  const started = await agentCli([f.root, 'start', JSON.stringify(f.start)]);
-  assert.equal(started.result.transport, 'hosted');
-  const saved = await new AgentWorkflow(f.root, true).dispatch({
-    action: 'save',
-    operationId: randomUUID(),
-    laneId: started.result.laneId,
-    message: 'clean hosted checkpoint',
-  });
-  assert.equal(saved.result.transport, 'hosted');
-  assert.equal(saved.result.head, f.lane.head, 'a clean save returns the Lane head');
-  assert(!f.calls.some(c => /Exchange|SourceReturn/.test(c.name)));
 });
 
 test('pending hosted save leaves both old heads selected and returns without client polling', async t => {

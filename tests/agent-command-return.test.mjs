@@ -2,8 +2,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
+
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -275,55 +275,6 @@ test('corrupt retained start receipt fails explicitly without substituting diffe
   await assert.rejects(agent.dispatch(command), error => error.code === 'INVALID_WORK_STORE');
   assert.equal(store.revision(), revision);
   assert.equal(store.select('lanes', started.result.laneId, 'id', true).head, started.result.head);
-});
-
-test('CLI exits while its detached advisory child remains indefinitely busy', async t => {
-  const { root } = fixture(t);
-  const directory = mkdtempSync(join(tmpdir(), 'forge-command-child-'));
-  const pidPath = join(directory, 'pid');
-  const preload = join(directory, 'preload.mjs');
-  writeFileSync(
-    preload,
-    `
-    import {spawn} from 'node:child_process';
-    import {writeFileSync} from 'node:fs';
-    import {agentAdvisoryTestHooks} from ${JSON.stringify(new URL('../dist/agent-advisory-worker.js', import.meta.url).href)};
-    agentAdvisoryTestHooks.launch = () => {
-      const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore',env:{}});
-      writeFileSync(${JSON.stringify(pidPath)},String(child.pid));
-      return child;
-    };
-  `,
-  );
-  t.after(() => {
-    if (existsSync(pidPath)) {
-      const pid = Number(readFileSync(pidPath, 'utf8'));
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch (error) {
-        if (error.code !== 'ESRCH') throw error;
-      }
-    }
-    rmSync(directory, { recursive: true, force: true });
-  });
-  const result = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        '--import',
-        preload,
-        new URL('../dist/cli.js', import.meta.url).pathname,
-        'agent',
-        root,
-        'start',
-        JSON.stringify({ outcome: 'Detached child liveness' }),
-      ],
-      { encoding: 'utf8', timeout: 30000 },
-    ),
-  );
-  assert.equal(result.result.state, 'active');
-  const pid = Number(readFileSync(pidPath, 'utf8'));
-  process.kill(pid, 0); // Child is still alive after the CLI has returned its receipt and exited.
 });
 
 test('indexed receipt delivers cached overlaps before the next write and replays its original observation', async t => {

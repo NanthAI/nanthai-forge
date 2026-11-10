@@ -2,20 +2,19 @@
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
@@ -23,13 +22,11 @@ import { NativeSource } from '../dist/native-source.js';
 import { snapshotLane } from '../dist/lane-auto-snapshot.js';
 import { importNativeGit, exportNativeGit } from '../dist/native-git.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
-import { workGit } from '../dist/work-git.js';
+
 import { importNativeGitContribution } from '../dist/native-git-contribution.js';
 import { nativeGitContributionRequest } from '../dist/native-git-contribution.js';
 import { exportNativeSource } from '../dist/native-backup.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createServer, request as httpRequest } from 'node:http';
+
 const node = process.execPath,
   hash = b => createHash('sha256').update(b).digest('hex');
 function git(root, args, { input, fail = false } = {}) {
@@ -328,40 +325,5 @@ test(
     } finally {
       process.env.PATH = priorPath;
     }
-  },
-);
-
-test(
-  'real local MCP and CLI select native Git return and reconcile its original source after losing the input path',
-  { timeout: 120000 },
-  async t => {
-    const f = await fixture(t),
-      command = await candidate(f),
-      client = new Client({ name: 'native-git-return-proof', version: '1' });
-    const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', f.root, '--work'],
-      env: Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)),
-      stderr: 'pipe',
-    });
-    await client.connect(transport);
-    t.after(() => client.close());
-    const reply = await client.callTool({
-      name: 'forge_work_command',
-      arguments: { command, revision: f.data().revision },
-    });
-    assert.equal(reply.isError, undefined);
-    assert.equal(JSON.parse(reply.content[0].text).result.id, command.operationId);
-    const file = join(f.dir, 'original-command.json');
-    writeFileSync(file, JSON.stringify({ ...command, path: '/input-no-longer-present' }), { mode: 0o600 });
-    const output = JSON.parse(
-      execFileSync(node, [resolve('dist/cli.js'), 'work', f.root, '--command-file', file, '0'], {
-        encoding: 'utf8',
-        timeout: 30000,
-      }),
-    );
-    assert.equal(output.result.id, command.operationId);
-    assert.equal(f.data().nativeContributionReceipts.length, 1);
-    assert.equal(f.data().channelMoves.length, 1);
   },
 );

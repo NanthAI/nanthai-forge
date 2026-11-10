@@ -416,13 +416,6 @@ test('install verifies archive bytes before running a fake npm', async t => {
   assert.equal(calls, 2);
 });
 
-test('release CLI help documents resumable explicit deployment without executing providers', () => {
-  const cli = spawnSync(process.execPath, ['dist/cli.js', 'release', '--help'], { encoding: 'utf8' });
-  assert.equal(cli.status, 0);
-  assert.match(cli.stdout, /--resume UUID/);
-  assert.match(cli.stdout, /dev backend/);
-});
-
 test('resume adopts an original child receipt when the driver lost its reply', t => {
   const f = prepareStage(t, 'build');
   const stage = f.journal.stages.find(stage => stage.name === 'build');

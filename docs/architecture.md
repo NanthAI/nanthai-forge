@@ -7,11 +7,11 @@ Forge has five parts. Each owns one kind of data, and no part quietly takes over
         |
    nforge CLI, MCP    Hosted browser (Netlify)
         |                                         |
-  Native store + Work store  <-- pull/open -->  Convex + R2 (hosted)
-  (your machine; canonical only              (records and journal in Convex,
-  for native-owner projects)                  bytes in R2; sessions, access)
-        |                                              |
-  Local checks (your OS account)              Netlify worker (public analysis)
+  Clone and Lane checkouts  <-- open/save -->  Convex + R2 (hosted, canonical)
+  (your machine; regenerable                 (records and journal in Convex,
+  caches and retry journals)                  bytes in R2; sessions, access)
+                                                       |
+  CI runners (GitHub Actions or your own)     Netlify worker (public analysis)
 ```
 
 For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [concepts](concepts.md).
@@ -24,25 +24,15 @@ For the vocabulary used below (Intent, Lane, Candidate, Channel, State), see [co
 | Work store        | Mutable metadata: Intents, Lanes, notes, check runs, selections                                      | `src/work-store.ts`, `src/work.ts`, `src/native-work.ts`  |
 | Analysis          | Derived, partial code graph with exact locators                                                      | `src/snapshot.ts`, `src/analyze.ts`, `src/graph-query.ts` |
 | Local execution   | Check and Playbook processes in materialized Candidates                                              | `src/work-run.ts`, `src/work-playbook.ts`                 |
-| Agent interface   | Short commands over the same owners                                                                  | `src/agent-workflow.ts`, `src/mcp-agent-workflow.ts`      |
+| Agent interface   | Short commands over the hosted contract                                                              | `src/hosted-agent-cli.ts`, `src/mcp-hosted-agent.ts`      |
 | Convex            | Hosted records, the Work event journal, sessions, messages, current access (bytes live in R2)        | `convex/`                                                 |
 | Web               | Hosted browser UI (the only browser UI)                                                              | `web/src/`                                                |
 | Netlify worker    | Public-repository analysis in the background                                                         | `netlify/functions/`                                      |
 | Git compatibility | Import, export, projections and publication                                                          | `src/native-git*.ts`, `src/work-git*.ts`                  |
 
-A project has one source authority (`sourceAuthority.mode`, see [hosted source authority](#hosted-source-authority-and-operation-contracts)). Forge's own project has been under server authority since 2026-10-28: hosted main, Lanes and the landing queue are canonical, and the Mac holds regenerable caches and cannot accept. Standalone native compatibility still keeps local source and Work. Its agent commands await the separate disposition on Issue 657d63ee; native-owner recovery/reconnect and the local HTTP server are removed. Exchange push, source return and the `autoExchange` policy are retired. `nforge exchange` only pulls, opens, restores and migrates, and old push commands return `CLI_UPGRADE_REQUIRED`. Local activity updates presence only and starts no hosted metadata sender. See [source exchange](operations/source-exchange.md).
+Forge has one client mode: hosted. Hosted main, Lanes and the landing queue are canonical; the CLI keeps regenerable caches and retry journals and cannot accept. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`; "offline" means a Lane keeps working and lands once back online. The native-owner mode (local source authority, its landing driver and local Work store commands) is removed; the shared kernel below (State format, merge, durable writes) serves hosted clients and the server. Exchange push, source return and the `autoExchange` policy are retired. See [source exchange](operations/source-exchange.md).
 
-For a server-authoritative binding, hosted Channel and Lane records select
-source. Bound start materialises verified hosted/R2 objects into the existing
-native Lane clone cache; bound checkpoint uploads the exact captured delta and
-commits hosted head CAS before acknowledging it locally. The Mac retains
-regenerable source/Work cache and retry journals, with no exchange publication
-in that path. The two-method source object interface keeps content identity
-separate from current R2 storage keys. Reads and cache-lag observations occur on
-commands, with no additional idle polling. See the [cutover procedure](operations.md#one-authority-cutover).
-
-Standalone native compatibility retains its landing driver. Server-authority projects
-land exclusively through the [hosted landing queue](#hosted-landing-request-queue).
+Projects land exclusively through the [hosted landing queue](#hosted-landing-request-queue).
 Landing clients submit a durable goal and observe its handle. Native `land`
 returns by default; only the owner controller composes, checks and settles it.
 The read-only `landing` action reconciles no work and starts no service. Native

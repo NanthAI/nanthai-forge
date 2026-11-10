@@ -15,14 +15,14 @@ function temporary(t) {
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
-test('only the executable entry prepares hooks; direct CLI callers preserve alias-only stderr', t => {
+test('only the executable entry prepares hooks; direct CLI callers keep stderr empty', t => {
   const root = temporary(t),
     home = join(root, 'home'),
     config = join(root, 'config');
   fs.mkdirSync(home);
   fs.mkdirSync(config);
   const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: config };
-  const args = ['agent', '/unused/help-only', 'view', '--help'];
+  const args = ['agent', '/unused/help-only', 'status', '--help'];
   // A hook whose target is gone: the executable entry reports it (a dev build never rewrites it).
   const hooks = join(home, '.codex/hooks.json');
   fs.mkdirSync(join(home, '.codex'));
@@ -43,7 +43,7 @@ test('only the executable entry prepares hooks; direct CLI callers preserve alia
   fs.writeFileSync(hooks, stale);
   const direct = spawnSync(process.execPath, [resolve('dist/cli.js'), ...args], { encoding: 'utf8', env });
   assert.equal(direct.status, 0, direct.stderr);
-  assert.equal(direct.stderr, 'Deprecated: view is an alias for candidate; use candidate.\n');
+  assert.equal(direct.stderr, '');
   assert.equal(fs.readFileSync(hooks, 'utf8'), stale);
   const entry = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8', env });
   assert.equal(entry.status, 0, entry.stderr);
@@ -98,17 +98,24 @@ test('missing cwd fails before hooks with command-specific cd advice and no stac
     assert(!result.stderr.includes('ENOENT'));
   }
 });
-test('unaddressed root names the absolute path and both next steps without network or Git', async t => {
+test('a folder without a hosted marker is refused with its absolute path and nforge host, without network or Git', async t => {
+  // One client mode (Issue 657d63ee): no native fallback for a Git or plain folder.
   const root = temporary(t);
+  fs.mkdirSync(join(root, 'folder'));
   t.mock.method(globalThis, 'fetch', () => assert.fail('No argument-error network calls'));
-  await assert.rejects(
-    agentCli([root, 'planning', '{}']),
-    error =>
-      error.code === 'FORGE_ROOT_UNAVAILABLE' &&
-      error.message.includes(root) &&
-      error.message.includes('projectId') &&
-      error.message.includes('/absolute/path/to/checkout'),
-  );
+  for (const [path, action] of [
+    [root, 'planning'],
+    [join(root, 'folder'), 'status'],
+  ])
+    await assert.rejects(
+      agentCli([path, action, '{}']),
+      error =>
+        error.code === 'FORGE_ROOT_UNAVAILABLE' &&
+        error.message.includes(JSON.stringify(path)) &&
+        error.message.includes(`nforge host ${JSON.stringify(path)}`),
+    );
+  assert.equal(fs.existsSync(join(root, '.git')), false);
+  assert.equal(fs.existsSync(join(root, '.forge')), false);
 });
 test('live Lane client makes exactly one page query, no capabilities or per-Lane calls; errors are local', async t => {
   const root = temporary(t),
@@ -158,23 +165,6 @@ test('non-Git Forge clone roots address hosted planning with no local Git depend
   assert.equal(fs.existsSync(join(clone, '.git')), false);
   const { hostedAgentHelp } = await import('../dist/hosted-agent-help.js');
   assert(hostedAgentHelp('planning').includes('reconcile'));
-});
-
-test('Git-free native Forge roots and their working folders retain native routing', async t => {
-  const root = temporary(t);
-  const { initNative } = await import('../dist/native-work.js');
-  const { requireAgentRoot } = await import('../dist/agent-root.js');
-  fs.writeFileSync(join(root, 'source.txt'), 'synthetic');
-  initNative(root);
-  fs.mkdirSync(join(root, 'folder'));
-  assert.equal(requireAgentRoot(join(root, 'folder')), root);
-  const result = await agentCli([root, 'status', '{}']);
-  assert(result.result);
-  assert.equal(fs.existsSync(join(root, '.git')), false);
-  await assert.rejects(
-    agentCli([join(root, 'missing'), 'status', '{}']),
-    error => error.code === 'FORGE_ROOT_UNAVAILABLE',
-  );
 });
 
 test('live Lane transport preserves typed server errors and gives an exact read continuation', async t => {

@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
-import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
@@ -18,7 +16,7 @@ import { unacknowledgedOverlaps } from '../dist/agent-edit-notices.js';
 import { readSelfMetricJournal } from '../dist/self-metrics-journal.js';
 import { calculateOverlapMetrics } from '../dist/self-metrics-joins.js';
 import { snapshotLane, readAutoSnapshot } from '../dist/lane-auto-snapshot.js';
-import { recordEditContext, readEditContext, recordAgentTurn } from '../dist/agent-edit-context.js';
+import { recordEditContext, recordAgentTurn } from '../dist/agent-edit-context.js';
 
 const context = (sessionId = 'agent-one', turnId = 'turn-one') => ({
   agent: 'codex',
@@ -108,73 +106,6 @@ test('four-Lane docs replay alerts both agents before either overlapping write a
   t.diagnostic(
     'Synthetic incident: 36/36 pair × file × participant first-write alerts, 36/36 portable answers; no writes before acknowledgement.',
   );
-});
-
-test('unacknowledged response payload survives delivery, caps at five, and clears only the answering Lane', async t => {
-  const f = await fixture(t),
-    mine = await f.start();
-  for (let i = 0; i < 8; i++) await f.start({ scope: { paths: ['docs/status.md'] } });
-  const blocked = preEdit(f.root, mine.laneId, ['docs/status.md'], context());
-  assert.equal(blocked.count, 8);
-  assert.deepEqual(
-    readEditContext(f.store.directory, mine.laneId),
-    context(),
-    'an advisory overlap still retains the producing edit context',
-  );
-  let response = await f.agent.dispatch({ action: 'policy', laneId: mine.laneId });
-  assert.equal(response.unacknowledgedOverlaps.count, 8);
-  assert.equal(response.unacknowledgedOverlaps.items.length, 5);
-  assert.ok(Buffer.byteLength(JSON.stringify(response.unacknowledgedOverlaps)) < 4096);
-  const tools = new Map();
-  const close = registerAgentWorkflow(
-    {
-      registerTool(name, _config, handler) {
-        tools.set(name, handler);
-      },
-    },
-    f.root,
-  );
-  const revision = f.store.revision();
-  const brief = await tools.get('forge_brief')({
-    situation: 'continue-lane',
-    laneId: mine.laneId,
-    agent: 'generic',
-  });
-  assert.equal(JSON.parse(brief.content[0].text).unacknowledgedOverlaps.count, 8);
-  const queue = await tools.get('forge_queue')({ action: 'list' });
-  assert.ok(Array.isArray(JSON.parse(queue.content[0].text)));
-  assert.equal(JSON.parse(queue.content[1].text).unacknowledgedOverlaps.count, 8);
-  const failure = await tools.get('forge_queue')({ action: 'cancel' });
-  assert.equal(failure.isError, true);
-  assert.equal(JSON.parse(failure.content[0].text).unacknowledgedOverlaps.count, 8);
-  assert.equal(f.store.revision(), revision);
-  const cli = spawnSync(
-    process.execPath,
-    [
-      fileURLToPath(new URL('../dist/cli.js', import.meta.url)),
-      'agent',
-      f.root,
-      'show',
-      JSON.stringify({ laneId: mine.laneId, path: 'missing.txt' }),
-    ],
-    { encoding: 'utf8', env: { ...process.env, FORGE_LANE_ID: mine.laneId } },
-  );
-  assert.equal(cli.status, 1);
-  assert.equal(JSON.parse(cli.stderr.trim().split('\n').at(-1)).unacknowledgedOverlaps.count, 8);
-  const notice = response.unacknowledgedOverlaps.items[0];
-  const peer = notice.lanes.find(id => id !== mine.laneId);
-  await f.agent.dispatch({
-    action: 'peer-ack',
-    laneId: mine.laneId,
-    noticeId: notice.noticeId,
-    choice: 'split',
-  });
-  response = await f.agent.dispatch({ action: 'policy' });
-  assert.equal(response.unacknowledgedOverlaps.count, 7);
-  assert.equal(unacknowledgedOverlaps(f.store.directory, peer).count, 1);
-  const notes = f.store.select('intents', mine.intentId).notes;
-  assert.equal(notes.find(note => note.overlapAnswer).overlapAnswer.disposition, 'routed-around');
-  await close();
 });
 
 test('undeclared first-edit claims are bilateral and routing to another path proceeds', async t => {

@@ -136,10 +136,3 @@ export async function hostedStatusMetrics(root: string, now = new Date().toISOSt
     records.surfaceGaps!.push('Status omits pre-cutover native context; read metrics for the joined window.');
   return { period, ...metricsHeadline(metricTotals(records, period, { headline: true })) };
 }
-
-/** Async status surfaces replace the native-cache metric section after their
- * existing local status read. Native authority incurs no network calls. */
-export async function withHostedStatusMetrics<T extends object>(root: string, status: T) {
-  const metrics = await hostedStatusMetrics(root);
-  return metrics ? { ...status, metrics } : status;
-}

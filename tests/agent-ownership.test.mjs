@@ -232,36 +232,6 @@ test('ownership and stalled observations stay within the lifecycle digest budget
   assert.ok(Buffer.byteLength(JSON.stringify(escaped)) <= PEERS_MAX_BYTES);
 });
 
-test('CLI and MCP expose the same explicit take behavior', async t => {
-  const { agent, start } = fixture(t);
-  const lane = await start('original');
-  const { agentCli } = await import('../dist/agent-cli.js');
-  const stopped = await agentCli([
-    agent.work.store.root,
-    'take',
-    JSON.stringify({ laneId: lane.laneId, actor: 'replacement' }),
-  ]);
-  assert.equal(stopped.result.status, 'ownership');
-  const { registerAgentWorkflow } = await import('../dist/mcp-agent-workflow.js');
-  const { z } = await import('zod');
-  const registered = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, options, handler) {
-        registered.set(name, { options, handler });
-      },
-    },
-    agent.work.store.root,
-  );
-  const task = registered.get('forge_task');
-  const input = z
-    .object(task.options.inputSchema)
-    .parse({ command: { action: 'take', laneId: lane.laneId, actor: 'replacement', takeover: true } });
-  const response = await task.handler(input);
-  assert.equal(response.isError, undefined);
-  assert.equal(JSON.parse(response.content[0].text).result.status, 'taken');
-});
-
 test('handover includes notices and negotiation messages in its take-handoff briefing', async t => {
   const { agent, start } = fixture(t);
   const lane = await start('original', 'Original intent', ['src/a.txt']);

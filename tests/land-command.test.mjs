@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
-import { childWorker } from './landing-worker-fixture.mjs';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync, rmSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
 import { NativeSource } from '../dist/native-source.js';
 import { WorkStore } from '../dist/work-store.js';
 import { ControllerAgentWorkflow as AgentWorkflow } from './landing-controller-fixture.mjs';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
@@ -342,70 +342,6 @@ test('batch failure and source conflict return per-entry outcomes and retain suc
     before.runs.filter(run => !run.mainCheck).map(run => run.id),
   );
   assert.equal(f.store.load().channelMoves.length, before.channelMoves.length);
-});
-
-test('CLI prints replay identity before landing and accepts --message / --operation-id', async t => {
-  const f = await fixture(t),
-    a = await f.lane('a.txt'),
-    b = await f.lane('b.txt'),
-    operationId = randomUUID();
-  const args = [
-    resolve('dist/cli.js'),
-    'land',
-    f.root,
-    a.laneId,
-    b.laneId,
-    '--message',
-    'CLI selection',
-    '--operation-id',
-    operationId,
-  ];
-  const first = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  assert.equal(first.status, 0, first.stderr);
-  assert.match(first.stderr, new RegExp(`Replay: .*${operationId}`));
-  let result = JSON.parse(first.stdout).result;
-  for (let attempt = 0; transientWaiting(result) && attempt < 20; attempt++) {
-    const resumed = spawnSync(process.execPath, args, { encoding: 'utf8' });
-    assert.equal(resumed.status, 0, resumed.stderr);
-    result = JSON.parse(resumed.stdout).result;
-  }
-  assert.equal(result.durable, true);
-  assert.equal(result.complete, false);
-  await f.agent.dispatch({ ...result.replay.command, wait: true });
-  result = (await f.agent.dispatch({ ...result.replay.command, wait: true })).result;
-  assert.deepEqual(result.counts, { accepted: 2 });
-  assert.equal(result.entries[0].message, 'CLI selection');
-  const replay = spawnSync(process.execPath, args, { encoding: 'utf8' });
-  assert.equal(replay.status, 0, replay.stderr);
-  assert.equal(f.store.load().channelMoves.length, 1);
-});
-
-test('MCP forge_task exposes the selected-Lane land action and aggregate result', async t => {
-  const f = await fixture(t),
-    a = await f.lane('a.txt'),
-    b = await f.lane('b.txt'),
-    tools = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, options, handler) {
-        tools.set(name, { options, handler });
-      },
-    },
-    f.root,
-  );
-  const command = { action: 'land', operationId: randomUUID(), laneIds: [a.laneId, b.laneId] };
-  const input = tools.get('forge_task').options.inputSchema.command.parse(command);
-  let result;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const response = await tools.get('forge_task').handler({ command: input });
-    assert.equal(response.isError, undefined);
-    result = JSON.parse(response.content[0].text).result;
-    if (!transientWaiting(result)) break;
-  }
-  assert.equal(result.durable, true);
-  assert.equal(result.complete, false);
-  result = (await f.agent.dispatch(command)).result;
-  assert.deepEqual(result.counts, { accepted: 2 });
 });
 
 test('merging main as a base leaves unselected accepted keepOpen Lanes open', async t => {
@@ -769,60 +705,6 @@ for (const batching of [true, false])
     assert.equal(data.runs.filter(r => !r.mainCheck).length, 2);
     assert.equal(data.channelMoves.length, 1);
   });
-
-test('land --wait prints a per-Lane table and exits nonzero for a real failed check', async t => {
-  const f = await fixture(t),
-    bad = await f.lane('bad.txt');
-  const worker = await childWorker(f);
-  t.after(() => worker.stop());
-  const child = spawnSync(process.execPath, [resolve('dist/cli.js'), 'land', f.root, bad.laneId, '--wait'], {
-    encoding: 'utf8',
-  });
-  assert.equal(child.status, 1, child.stderr);
-  assert.equal(JSON.parse(child.stdout).result.terminal, true);
-  assert.match(child.stderr, /Lane\tHead\tResult/);
-  assert.match(child.stderr, /check-failed/);
-  assert.match(child.stderr, /: (queued|composing|dispatching|ci-running|recording-accepting)/);
-  assert.match(child.stderr, /queued=(?:unknown|\d+s)/);
-  assert.ok(JSON.parse(child.stdout).result.entries[0].phases);
-
-  const command = { ...JSON.parse(child.stdout).result.replay.command, wait: true };
-  const agent = spawnSync(
-    process.execPath,
-    [resolve('dist/cli.js'), 'agent', f.root, 'land', JSON.stringify(command)],
-    { encoding: 'utf8' },
-  );
-  assert.equal(agent.status, 1, agent.stderr);
-  assert.match(agent.stderr, /Lane\tHead\tResult/);
-  assert.equal(f.store.load().runs.filter(r => !r.mainCheck).length, 1);
-  await worker.stop();
-});
-
-test('native save infers its Lane and checkpoint replays the identical mutation', async t => {
-  const f = await fixture(t),
-    a = await f.lane('a.txt');
-  writeFileSync(join(a.path, 'a.txt'), 'Saved through alias\n');
-  const request = JSON.stringify({ operationId: randomUUID(), message: 'Alias save' });
-  const cli = (action, command = request) =>
-    spawnSync(process.execPath, [resolve('dist/cli.js'), 'agent', f.root, action, command], {
-      cwd: a.path,
-      encoding: 'utf8',
-    });
-  const saved = cli('save');
-  assert.equal(saved.status, 0, saved.stderr);
-  const head = JSON.parse(saved.stdout).result.head;
-  assert.notEqual(head, a.head);
-  const replay = cli(
-    'checkpoint',
-    JSON.stringify({
-      ...JSON.parse(request),
-      ...JSON.parse(saved.stdout).result.resolved,
-    }),
-  );
-  assert.equal(replay.status, 0, replay.stderr);
-  assert.equal(JSON.parse(replay.stdout).result.head, head);
-  assert.equal(f.store.select('lanes', a.laneId).head, head);
-});
 
 for (const batching of [true, false])
   test(`a fresh operation retries a terminal unchanged head; original replay stays terminal (batching=${batching})`, async t => {

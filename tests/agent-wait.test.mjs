@@ -9,7 +9,7 @@ import { execFile, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ControllerAgentWorkflow as AgentWorkflow } from './landing-controller-fixture.mjs';
 import { agentWait, waitText } from '../dist/agent-wait.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { initNative } from '../dist/native-work.js';
 import { drainPostAccept } from '../dist/post-accept-main.js';
 import { FinishJournal } from '../dist/agent-finish-journal.js';
@@ -280,69 +280,6 @@ test('recorded overlap notices are streamed, including one physical line in text
   const notice = events.find(e => e.type === 'notice');
   assert.ok(notice);
   assert.equal(waitText(notice).split('\n').length, 1);
-});
-
-test('CLI streams JSON and --text, returns timeout status, and rejects empty selection', async t => {
-  const { root, lane } = await fixture(t);
-  const cli = resolve('dist/cli.js');
-  for (const text of [false, true]) {
-    await assert.rejects(
-      exec(
-        process.execPath,
-        [
-          cli,
-          'agent',
-          root,
-          'wait',
-          JSON.stringify({ laneIds: [lane.laneId], timeoutSeconds: 0 }),
-          ...(text ? ['--text'] : []),
-        ],
-        { env: { ...process.env } },
-      ),
-      error => {
-        assert.equal(error.code, 2);
-        const lines = error.stdout.trim().split('\n');
-        assert.equal(lines.length, 2);
-        if (text) assert.match(lines[0], /^lane /);
-        else assert.equal(JSON.parse(lines[1]).type, 'summary');
-        return true;
-      },
-    );
-  }
-  await assert.rejects(agentWait(new AgentWorkflow(root).work.store, {}), { code: 'BAD_ARGUMENT' });
-});
-
-test('MCP exposes forge_wait and live progress notifications with cancellation', async t => {
-  const { root, lane } = await fixture(t);
-  const tools = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, definition, handler) {
-        tools.set(name, { definition, handler });
-      },
-    },
-    root,
-  );
-  const tool = tools.get('forge_wait');
-  assert.ok(tool);
-  assert.equal(tool.definition.annotations.readOnlyHint, true);
-  const controller = new AbortController(),
-    notifications = [];
-  const result = await tool.handler(
-    { laneIds: [lane.laneId], timeoutSeconds: 0 },
-    {
-      signal: controller.signal,
-      _meta: { progressToken: 'fixture' },
-      async sendNotification(n) {
-        notifications.push(n);
-      },
-    },
-  );
-  // SM-C M24 (Issue 68361cd5): a plain budget timeout is an answer, not an MCP error (the hosted tool agrees).
-  assert.notEqual(result.isError, true);
-  assert.equal(notifications.length, 2);
-  assert.equal(JSON.parse(notifications[0].params.message).type, 'lane');
-  assert.equal(JSON.parse(result.content[0].text.split('\n').at(-1)).status, 'timeout');
 });
 
 test('settled Lane stays frozen while another target is pending', async t => {

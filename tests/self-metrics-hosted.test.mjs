@@ -1,27 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+
 import { performance } from 'node:perf_hooks';
 import { spawnSync } from 'node:child_process';
 import { childEnv } from '../scripts/child-env.mjs';
 import { readHostedMetricPages } from '../dist/self-metrics-hosted-pages.js';
-import {
-  joinMetricAuthority,
-  metricAddress,
-  readMetricRecords,
-  hostedStatusMetrics,
-} from '../dist/self-metrics-source.js';
+import { joinMetricAuthority } from '../dist/self-metrics-source.js';
 import { metricsSurface } from '../dist/self-metrics-surface.js';
-import { executeHostedMetrics } from '../dist/hosted-agent-metrics.js';
-import { hostedAgentActions, hostedAgentOwnerActions } from '../dist/hosted-agent-contract.js';
-import { readMetrics, metricsCli } from '../dist/metrics-cli.js';
-import { agentCli } from '../dist/agent-cli.js';
-import { initNative } from '../dist/native-work.js';
-import { cleanupOwner } from './owner-cleanup.mjs';
+
 import { fixture, period, seam, at, empty } from './self-metrics-hosted-fixture.mjs';
 
 test('hosted queries authorize owner/maintainer, reject stranger and plain reader, enforce validators and windowed indexes', async () => {
@@ -189,107 +176,4 @@ test('old server returns METRICS_UNAVAILABLE plus coverage and never silently fa
     }, period),
     error => error.code === 'HOSTED_ACTION_FAILED',
   );
-});
-
-test('source-authority gate preserves native/native-shadow readers; hosted handler is unadvertised and uses the same surface', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-hosted-metrics-'));
-  writeFileSync(join(root, 'source.txt'), 'fixture\n');
-  initNative(root);
-  const f = fixture();
-  f.landing('hosted', at(10), at(12));
-  const binding = {
-    projectId: 'project',
-    deployment: 'https://synthetic.convex.cloud',
-    projectUrl: 'https://synthetic.test',
-    operationId: randomUUID(),
-    name: 'Synthetic',
-    visibility: 'private',
-    backupId: 'backup',
-  };
-  try {
-    for (const mode of ['native-owner', 'server-shadow', 'server']) {
-      writeFileSync(
-        join(root, '.forge/work/hosted-binding.json'),
-        JSON.stringify({ schema: 1, binding: { ...binding, sourceAuthority: { mode, epoch: 2 } } }),
-      );
-      assert.equal(Boolean(metricAddress(root).address), mode === 'server');
-      const previous = f.meter.calls;
-      const result = await readMetricRecords(root, period, { query: f.query });
-      assert.equal(result.source.kind, mode === 'server' ? 'hosted' : 'native');
-      assert.equal(
-        f.meter.calls - previous,
-        mode === 'server' ? 10 : 0,
-        'nine record reads plus one bytes-by-location page',
-      );
-    }
-    const previous = f.meter.calls;
-    const summary = await hostedStatusMetrics(root, period.to, f.query);
-    assert.equal(f.meter.calls - previous, 4);
-    assert.equal(summary.landings, 1);
-    const result = await executeHostedMetrics(
-      { root, address: { url: binding.deployment, projectId: 'project' }, query: f.query },
-      period,
-    );
-    assert.equal(result.totals['5.1'].landings, 1);
-    assert.equal(result.totals.finishToMain.p50Minutes, 2);
-    assert(!hostedAgentActions.includes('metrics'));
-    assert(hostedAgentOwnerActions.includes('metrics'));
-    const previousToken = process.env.FORGE_AUTH_TOKEN;
-    process.env.FORGE_AUTH_TOKEN = 'synthetic-metrics-credential';
-    t.after(() => {
-      if (previousToken === undefined) delete process.env.FORGE_AUTH_TOKEN;
-      else process.env.FORGE_AUTH_TOKEN = previousToken;
-    });
-    const streams = [];
-    t.mock.method(globalThis, 'fetch', async (_url, init) => {
-      const request = JSON.parse(init.body);
-      assert(['projectSelfMetrics:page', 'projectSelfMetricBills:page'].includes(request.path));
-      const { projectId, ...args } = request.args[0];
-      streams.push(`${request.path}:${args.stream ?? ''}`);
-      assert.equal(projectId, 'project');
-      return new Response(JSON.stringify({ status: 'success', value: await f.query(request.path, args) }), {
-        headers: { 'content-type': 'application/json' },
-      });
-    });
-    assert.equal((await readMetrics(root, period)).totals['5.1'].landings, 1);
-    assert.equal(
-      (await metricsCli([root, '--from', period.from, '--to', period.to, '--json'])).totals['5.1'].landings,
-      1,
-    );
-    assert.equal(
-      (await agentCli([root, 'metrics', JSON.stringify(period)])).result.totals['5.1'].landings,
-      1,
-    );
-    // Part 1 of b78ca196: the reply is boundable, and --flake-issues prints only the flake list.
-    streams.length = 0;
-    const flakeOnly = await metricsCli([root, '--from', period.from, '--to', period.to, '--flake-issues']);
-    assert(
-      streams.length > 0 && streams.every(name => name === 'projectSelfMetrics:page:runs'),
-      `${streams}`,
-    );
-    assert.deepEqual(Object.keys(flakeOnly), ['schema', 'period', 'source', 'flakes']);
-    const paged = await metricsCli([
-      root,
-      '--from',
-      period.from,
-      '--to',
-      period.to,
-      '--json',
-      '--limit',
-      '1',
-    ]);
-    assert.equal(paged.page.limit, 1);
-    assert.equal(paged.totals['5.1'].landings, 1);
-    await assert.rejects(
-      metricsCli([root, '--from', period.from, '--to', period.to, '--flake-issues', '--limit', '1']),
-      /prints only the flake list/,
-    );
-    assert.equal(
-      (await agentCli([root, 'metrics', JSON.stringify({ ...period, limit: 1 })])).result.page.limit,
-      1,
-    );
-  } finally {
-    await cleanupOwner(root);
-    rmSync(root, { recursive: true, force: true });
-  }
 });

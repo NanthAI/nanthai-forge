@@ -19,8 +19,7 @@ import { initNative } from '../dist/native-work.js';
 import { ForgeError } from '../dist/errors.js';
 import { workLocked } from '../dist/work-lock.js';
 import { checkQueueDirectory } from '../dist/check-queue.js';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 const git = (root, args) =>
   execFileSync('git', ['-C', root, ...args], {
     encoding: 'utf8',
@@ -697,54 +696,6 @@ test('finish checkpoint reconciles original parents and bounds fresh-operation c
       unlinkSync(lock);
     }
   } finally {
-    await cleanupOwner(root);
-  }
-});
-
-test('finish actual CLI and SDK MCP share original canonical receipts and discovery', async () => {
-  const { root, lane, command } = await setup(true);
-  const client = new Client({ name: 'finish-replay-test', version: '1' });
-  try {
-    const cli = join(process.cwd(), 'dist/cli.js'),
-      request = { ...command, accept: { expectedPrevious: null } };
-    const invoke = () =>
-      JSON.parse(
-        execFileSync(process.execPath, [cli, 'agent', root, 'finish', JSON.stringify(request)], {
-          encoding: 'utf8',
-        }),
-      ).result;
-    const receipt = invoke();
-    assert.equal(receipt.status, 'accepted');
-    assert.equal(receipt.complete, true);
-    assert.equal(receipt.terminal, true);
-    assert.deepEqual(canonicalReceipt(invoke()), canonicalReceipt(receipt));
-    await client.connect(
-      new StdioClientTransport({
-        command: process.execPath,
-        args: [cli, 'mcp', root, '--agent'],
-        stderr: 'pipe',
-      }),
-    );
-    const tools = (await client.listTools()).tools,
-      task = tools.find(t => t.name === 'forge_task');
-    assert.match(JSON.stringify(task.inputSchema), /finish/);
-    assert.equal(task.annotations.openWorldHint, true);
-    const response = await client.callTool({ name: 'forge_task', arguments: { command: request } });
-    assert.ok(!response.isError);
-    assert.deepEqual(
-      canonicalReceipt(JSON.parse(response.content[0].text).result),
-      canonicalReceipt(receipt),
-    );
-    writeFileSync(join(lane.path, 'file.txt'), 'later dirty bytes\n');
-    const changed = await client.callTool({
-      name: 'forge_task',
-      arguments: { command: { ...request, expectedDefinition: 'f'.repeat(64) } },
-    });
-    assert.equal(changed.isError, true);
-    assert.equal(JSON.parse(changed.content[0].text).error.code, 'WORK_OPERATION_CHANGED');
-    assert.equal(readFileSync(join(lane.path, 'file.txt'), 'utf8'), 'later dirty bytes\n');
-  } finally {
-    await client.close();
     await cleanupOwner(root);
   }
 });

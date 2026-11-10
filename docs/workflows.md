@@ -2,19 +2,13 @@
 
 Hosted projects acquire source, compose and land through the hosted backend. Your CLI and editor operate on local checkouts. Follow the [hosted GitHub-import quickstart](quickstart.md) for the development installation and entry point. Commands use `nforge`. Mutating commands take a client UUID. If a reply is lost, replay the same command and UUID to get the original result.
 
-## Native flow
+## Hosted flow
 
-```sh
-nforge init-native ./project
-nforge host ./project                  # optional: browse and review in the hosted app
-```
+Forge has one client mode: hosted. `nforge host ./project` makes a Git folder (or any directory) a hosted project, and `nforge clone` checks one out; agents and people then work in its clone and Lanes. A folder without a hosted marker is refused with `FORGE_ROOT_UNAVAILABLE` and the `nforge host` next step. Lanes keep working offline and land once back online.
 
-The browser UI is the hosted app. Locally you work through the CLI, MCP and your editor. The native flow below describes existing standalone projects; the [hosted flow](quickstart.md#work-on-a-hosted-project) needs no local owner service.
-
-1. Create an Intent (an outcome with constraints) and one or more Lanes. A Lane is a directory.
-2. Edit the Lane with your editor or agent. Checkpoint it. No Git staging is involved.
-3. Select Lanes and compose a Candidate. Independent file changes merge. If two Lanes change the same file, edit one Lane to hold the result, checkpoint, and pick it as the resolution Lane. Undo opens an earlier State in a new Lane.
-4. Run checks on the Candidate and accept it to a Channel such as `main`. A new Intent can start from an accepted Channel.
+1. Start a Lane from an Issue or an outcome (`nforge agent ROOT start`). A Lane is a directory.
+2. Edit the Lane with your editor or agent and save it. No Git staging is involved.
+3. `land --save` composes the Lane with current main into a Candidate, runs the project's check on its runner and lands it under project policy. Independent file changes merge; overlapping edits open a conflict Lane to resolve.
 
 Capture includes non-ignored regular files with executable modes. Symlinks and special files are reported, not captured. Agents use the shorter flow in [agents](agents.md).
 
@@ -224,14 +218,6 @@ claims no measured latency improvement. Idle gate work adds zero calls. Audits o
 public repositories use free runner minutes; a private repository can exceed its
 2,000 included minutes.
 
-## Git-backed flow
-
-For a Git repository with an initial commit, `nforge work /path/to/repo` gives the same Intent, Lane and Candidate model. Each Lane is a Git branch and worktree (`forge/lane/<id>`). Stage the files you want, then checkpoint those exact staged files. A Candidate is a clean merge commit of up to eight Lane heads, kept at `refs/forge/views/<id>`. Your checkout is never rewritten. Hooks are disabled and clean/smudge filters and custom merge drivers are rejected.
-
-Work metadata lives in the Git common directory under `forge-work/`. To back up, export it with `nforge work ROOT > work-export.json` and keep a bundle of the Lane branches. Untracked and unstaged files are not in bundles.
-
-Commands are JSON actions such as `intent`, `lane`, `checkpoint`, `compose`, `note`, `publish`, `import-pr`, `define-check`, `run-check` and `accept-channel`. Pass the revision from the last status. A stale revision, head or tree is rejected rather than overwritten. The full field list is in `src/work-types.ts`.
-
 ## Home and Settings
 
 The signed-in Projects page combines hosted projects, GitHub imports, shared projects and shared source in one list. Yours, Shared with you, Starred and GitHub filter that list. Existing source bookmarks appear as stars and retain their saved source locations. Hosted-project stars are stored per account in the current browser; source bookmarks remain account-backed. Removed projects remain available below the list. GitHub analysis owners can use the row’s action menu → Remove. The confirmation names the repository and explains that removal affects everyone sharing the analysis, while GitHub is untouched. The analysis disappears immediately; bounded background cleanup removes its saved views, sharing, Zones, agent grants, interests and stored artifacts. Blobs retained by another analysis are preserved. Shared readers do not get a removal action.
@@ -433,7 +419,7 @@ configured runner. Modal is retired: existing policies remain readable, but a
 new runner selection must use `local` or `github-actions`. Each terminal receipt records `backend.cost`
 with billed quantities, estimated USD and its basis; `status.checkCosts.months`
 summarizes available estimates per month and runner, marking unknown and legacy
-inputs. See [runner selection and cost basis](operations.md#native-runner-selection)
+inputs. See [runner selection and cost basis](operations.md#runner-selection)
 for commands, configurable label rates and allowance exclusions.
 
 Configured native runners batch queued code candidates as checked prefixes. `land-ready` resumes retained batches; cancellation preserves earlier passing prefixes. Batches retain the selecting driver's clean environment for resumed runs and identify incompatible entries by changed environment field. See [landing batches](operations/landing-batches.md) and [agent workflow](agents/workflow.md#landing-queue).
@@ -467,10 +453,6 @@ Local acceptance uses a **landing queue**: a crash-safe FIFO slot per owner and 
 
 Supervised projects still require a person. If main moves before a person's acceptance, it returns `CHANNEL_CHANGED` (or `CHANNEL_DIVERGED` for a Candidate missing current main) with “main moved; re-check needed”. Sync and check a new Candidate, then review and accept that Candidate; no prior approval is carried forward. Explicit person rollback to an earlier accepted Candidate remains available. This queue coordinates local writers on the same owner; upgrade all those writers. Hosted Channel selection retains its hosted authority/concurrency rules.
 
-- **Export:** each acceptance exports a full Git bundle. `git clone --branch accepted FILE.bundle copy` restores ordinary Git source.
-- **Releases:** a named source release pins an acceptance. It can include finished build runs, whose output files are kept with hashes. Export writes a manifest and a source bundle. Restoring a release gives source only, with empty Work.
-- **Contributions:** export source, edit and commit, then hand back a bundle with `import-bundle`. Import creates a separate Lane and never moves a Channel.
-- **Netlify draft:** upload selected retained build files as a draft on a site you name, using your local Netlify login. There is no build step and no production promotion. Preview environments are local pointers to retained drafts that you can move forward and back.
 
 ## Hosted project and companion
 
@@ -769,7 +751,7 @@ Two-way GitHub sync (`githubMirror.inbound: true`) brings pushes to GitHub `main
 - **Publish:** in a clean Candidate, choose a repository and optional base. Forge pushes the Candidate's Git projection to `forge/publish/<operation-id>` and opens a PR using your local `gh` login. It never merges. "Check GitHub PR" records the provider's state. Acceptance is reported only after GitHub confirms the merge.
 - **Import a PR:** paste a PR URL. This reads with your local `gh` access and writes nothing remotely. It creates an External Intent with the PR's exact head and base. "Create native Candidate" then selects that head. Later pushes appear as new observations. Nothing is absorbed silently.
 - **Mirror:** copy an accepted Channel's full history to a new branch `forge/mirror/<id>` in a repository you pick. Existing branches, PRs and `main` are untouched. An optional destination can fast-forward a named branch from an exact previous commit. It is never forced.
-- **Export to Git:** `nforge export-native-git OWNER STATE DIR` writes a repository and a mapping from States to commits. Add `--reuse PREVIOUS_EXPORT_DIR` to validate and reuse an ancestor projection, writing Git trees and commits only for new States. Object writes use long-lived Git batch processes for blobs, trees and commits, with one private reusable input file for arbitrary blob/commit bytes. Git filters are disabled so global attributes cannot rewrite exported bytes. The blob worker overrides Git's large-file threshold to keep new objects loose and visible to the persistent tree worker, including on Git 2.52. Repository and global configuration are unchanged. Only blob IDs are cached across States; source bytes are validated before their first write. The resulting commit IDs and bundle bytes match a full export. Partial exports are never published as complete destinations or reuse mappings. Reuse validates the mapping, object format, bundle digest and commit objects against native source; an unusable or unrelated projection prints a stderr note and falls back to a full export. The previous export is read-only and remains disposable. `nforge import-native-git REPO COMMIT DIR` imports with history kept.
+- **Export to Git:** a hosted project mirrors accepted main to GitHub ([automatic main mirror](#automatic-main-mirror)); `nforge clone` checks it out.
 
 ## Now, Code and Home
 
@@ -902,11 +884,8 @@ output; terminal cancelled/interrupted runs stay static. Local reruns retain the
 check definition. Cancel reports the returned outcome, including a run that finished before the
 request arrived. Hosted Review keeps connected-runner requests alongside the retained check
 record. Hosted output reads the selected object checkpoint; when the log is only on the runner
-(or in a legacy archive), the log reader provides `nforge agent ROOT log` with the exact run ID.
-Replace `ROOT` with that computer's native Work owner; this is not a hosted checkout
-command. For hosted checks, use `observe {runId}` and its CI provider link; hosted
-`log` is unavailable. Source return makes retained output available;
-it does not stream remote machine bytes. Scope labels appear only when recorded scope is available.
+(or in a legacy archive), use `nforge agent ROOT log {runId}` for its retained tail, or
+`observe {runId}` and its CI provider link. Scope labels appear only when recorded scope is available.
 
 
 ### Settings and outside contributions

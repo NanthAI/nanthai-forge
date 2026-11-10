@@ -21,14 +21,13 @@ Node 24.22.1+ (24.x):
 ```sh
 npm ci --ignore-scripts
 npm run verify                      # format, typecheck, lint, tests
-node dist/cli.js init-native ./demo # a new project; no Git needed
 ```
 
-To host a project and browse it in the web app: `nforge login DEPLOYMENT_URL`, then `nforge host ./demo`. The browser UI is the hosted app; there is no local web UI.
+Forge runs hosted projects only. To host a folder and browse it in the web app: `nforge login DEPLOYMENT_URL`, then `nforge host ./demo` (a Git folder or any directory). The browser UI is the hosted app; there is no local web UI. Lanes keep working offline and land once back online.
 
 For agents: `nforge agent ./demo start '{"outcome":"…"}'`, edit the returned Lane, then `nforge agent ./demo land --save '{"laneId":"…","message":"…"}'`. See the [agent workflow](docs/agents/workflow.md). [Parallel-work defaults](docs/parallel-work-defaults.md) lists what Forge changes in agents' default behaviour so many can work at once, and how to change it.
 
-Git repositories work too ([workflows](docs/workflows.md)), and projects can be hosted so several machines and people share them ([architecture](docs/architecture.md)). On a hosted project the server decides what lands and checks run on [GitHub Actions](docs/operations/github-actions-checks.md) runners; your machine does not accept or check. A local native project still checks on your machine.
+Git repositories work too ([workflows](docs/workflows.md)), and projects can be hosted so several machines and people share them ([architecture](docs/architecture.md)). The server decides what lands and checks run on [GitHub Actions](docs/operations/github-actions-checks.md) or your own runners; your machine does not accept.
 
 Checks use your CI provider’s full logs. Forge retains results, failure summaries, compact test evidence and provider links. Local log upload is opt-in with finite retention ([operations](docs/operations.md#check-logs-and-retention)).
 

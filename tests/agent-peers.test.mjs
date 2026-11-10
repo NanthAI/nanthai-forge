@@ -12,7 +12,7 @@ import {
   symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { AgentWorkflow } from './agent-advisory-fixture.mjs';
@@ -20,8 +20,6 @@ import { performance } from 'node:perf_hooks';
 import { PeersSource } from '../dist/agent-peers-source.js';
 import { agentPeers, boundPeers, PEERS_MAX_BYTES } from '../dist/agent-peers.js';
 import { initNative } from '../dist/native-work.js';
-import { WorkStore } from '../dist/work-store.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 
 function fixture(t, native = true) {
   const root = mkdtempSync(join(tmpdir(), 'forge-peers-'));
@@ -239,82 +237,6 @@ test('unavailable source never blocks a lifecycle receipt or claims clear; no Wo
     writeFileSync(object, original);
   }
   assert.equal(agent.work.store.load().schema, schema);
-});
-test('MCP forge_task receipts and forge_peers match CLI reads', async t => {
-  const { root, agent } = fixture(t),
-    mine = await start(agent),
-    peer = await start(agent);
-  writeFileSync(join(peer.path, 'src/a.txt'), 'peer\n');
-  const tools = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, config, handler) {
-        tools.set(name, handler);
-      },
-    },
-    root,
-  );
-  const input = { laneId: mine.laneId, scope: { paths: ['src/a.txt'] } };
-  const expected = agentPeers(new WorkStore(root), input);
-  const mcp = JSON.parse((await tools.get('forge_peers')(input)).content[0].text);
-  const { unacknowledgedOverlaps, ...digest } = mcp;
-  assert.deepEqual(unacknowledgedOverlaps, { count: 0, items: [] });
-  assert.deepEqual(digest, expected);
-  const cli = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'agent', root, 'peers', JSON.stringify(input)], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.deepEqual(cli.result, expected);
-  const cp = JSON.parse(
-    (
-      await tools.get('forge_task')({
-        command: { action: 'checkpoint', ...input, message: 'Clean MCP checkpoint' },
-      })
-    ).content[0].text,
-  );
-  assert.equal(cp.result.peers.coverage, 'local-incomplete');
-  assert.equal(cp.result.peers.clear, undefined);
-  assert.deepEqual(agentPeers(new WorkStore(root), input), expected);
-  const started = JSON.parse(
-    (
-      await tools.get('forge_task')({
-        command: { action: 'start', outcome: 'MCP declared scope', scope: input.scope },
-      })
-    ).content[0].text,
-  );
-  assert.equal(started.result.peers.coverage, 'local-incomplete');
-  assert.equal(started.result.peers.clear, undefined);
-  assert.equal(
-    agentPeers(new WorkStore(root), { laneId: started.result.laneId }).overlaps[0].lane,
-    peer.laneId,
-  );
-  const check = (
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'verify',
-      executable: process.execPath,
-      args: ['-e', '0'],
-    })
-  ).result;
-  const finished = JSON.parse(
-    (
-      await tools.get('forge_task')({
-        command: {
-          action: 'finish',
-          laneId: mine.laneId,
-          message: 'MCP finish',
-          checkId: check.checkId,
-          scope: input.scope,
-        },
-      })
-    ).content[0].text,
-  );
-  assert.ok(finished.result.peers.overlaps.some(item => item.lane === peer.laneId));
-  assert.equal(
-    finished.result.peers.overlaps.find(item => item.lane === started.result.laneId).claim,
-    'planned',
-  );
 });
 
 test('caps landed entries and long escaped paths within the byte budget', () => {

@@ -5,7 +5,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+
 import { AgentWorkflow } from './agent-advisory-fixture.mjs';
 import { initNative } from '../dist/native-work.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
@@ -13,7 +13,7 @@ import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { localBrief } from '../dist/agent-brief-local.js';
 import { CoordinationJournal } from '../dist/agent-coordination-journal.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { briefingContext } from '../dist/agent-brief-context.js';
 import { records, ids, states, guidance } from './agent-brief-fixture.mjs';
 const cli = resolve('dist/cli.js');
@@ -40,19 +40,6 @@ const command = (lane, extra = {}) => ({
 });
 const read = async (agent, lane) =>
   (await agent.dispatch({ action: 'handoff-read', laneId: lane.laneId })).result.handoff;
-function invoke(root, input) {
-  return new Promise((accept, reject) => {
-    const child = spawn(process.execPath, [cli, 'agent', root, 'handoff', JSON.stringify(input)], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let out = '',
-      err = '';
-    child.stdout.on('data', chunk => (out += chunk));
-    child.stderr.on('data', chunk => (err += chunk));
-    child.on('error', reject);
-    child.on('close', code => (code === 0 ? accept(JSON.parse(out)) : reject(new Error(err))));
-  });
-}
 test('handoff round trip separates optional self reports from check evidence and reads latest', async t => {
   const { agent, lane } = await fixture(t);
   assert.equal(await read(agent, lane), null);
@@ -68,52 +55,6 @@ test('handoff round trip separates optional self reports from check evidence and
   assert.equal(latest.summary, 'Next delivery');
   assert.deepEqual(latest.tests, []);
   assert.equal(agent.work.store.select('intents', lane.intentId).notes.length, 2);
-});
-test('CLI handoff delivers a peer notice created after the last checkpoint exactly once', async t => {
-  const { root, agent, lane } = await fixture(t);
-  const peer = (await agent.dispatch({ action: 'start', outcome: 'Peer edit' })).result;
-  writeFileSync(join(lane.path, 'example.txt'), 'my saved change\n');
-  const saved = (
-    await agent.dispatch({
-      action: 'checkpoint',
-      laneId: lane.laneId,
-      message: 'Last checkpoint',
-    })
-  ).result;
-  assert.equal(saved.peers.inbox, undefined);
-  writeFileSync(join(peer.path, 'example.txt'), 'peer saved change\n');
-  const reciprocal = (
-    await agent.dispatch({
-      action: 'checkpoint',
-      laneId: peer.laneId,
-      message: 'Later peer save',
-    })
-  ).result.peers.inbox;
-  assert.equal(reciprocal.length, 1);
-  const noticeId = reciprocal[0].noticeId;
-  const request = command(lane);
-  const first = (await invoke(root, request)).result;
-  assert.equal(first.handoff.head, saved.head);
-  assert.deepEqual(
-    first.peers.inbox.map(notice => notice.noticeId),
-    [noticeId],
-  );
-  assert.ok(Buffer.byteLength(JSON.stringify(first.peers)) <= 12_000);
-  assert.equal(new CoordinationJournal(agent.work.store).pendingOverlaps(lane.laneId).length, 0);
-  const replay = (await invoke(root, request)).result;
-  assert.deepEqual(replay, first);
-  const later = (await invoke(root, command(lane))).result;
-  assert.equal(later.peers?.inbox, undefined);
-  assert.equal(
-    (await agent.dispatch({ action: 'status', laneId: lane.laneId })).result.peers.inbox,
-    undefined,
-  );
-  assert.ok(
-    (await agent.dispatch({ action: 'peers', laneId: lane.laneId })).result.inbox.some(
-      notice => notice.noticeId === noticeId,
-    ),
-    'historical notices remain readable',
-  );
 });
 test('replay returns original saved source and evidence after later edits and handoffs', async t => {
   const { agent, lane } = await fixture(t),
@@ -133,31 +74,6 @@ test('replay returns original saved source and evidence after later edits and ha
   await assert.rejects(agent.dispatch({ ...request, summary: 'Changed retry' }), {
     code: 'WORK_OPERATION_CHANGED',
   });
-});
-test('two concurrent CLI writers on sibling Lanes preserve both notes without source conflicts', async t => {
-  const { root, agent, lane } = await fixture(t);
-  const sibling = (
-    await agent.dispatch({
-      action: 'start',
-      intentId: lane.intentId,
-      outcome: 'Sibling',
-    })
-  ).result;
-  const a = command(lane),
-    b = command(sibling, { summary: 'Sibling delivery' });
-  // check-runtime deliberately sets zero lock patience. A racing writer can
-  // return WORK_BUSY; reconcile its original operation after its peer completes.
-  const replies = await Promise.allSettled([invoke(root, a), invoke(root, b)]);
-  for (const [index, reply] of replies.entries()) {
-    if (reply.status === 'rejected') {
-      assert.match(reply.reason.message, /"code":"WORK_BUSY"/);
-      await invoke(root, [a, b][index]);
-    }
-  }
-  assert.equal((await read(agent, lane)).operationId, a.operationId);
-  assert.equal((await read(agent, sibling)).operationId, b.operationId);
-  assert.equal(agent.work.store.select('intents', lane.intentId).notes.length, 2);
-  assert.equal(agent.work.store.select('lanes', lane.laneId).head, lane.head);
 });
 test('matching recorded checks link automatically; prior heads and unrelated Lanes do not', async t => {
   const { agent, lane } = await fixture(t);
@@ -273,26 +189,6 @@ test('missing Lanes fail current reads and mutations; invalid counts never persi
     { code: 'BAD_ARGUMENT' },
   );
   assert.equal(agent.work.store.revision(), revision);
-});
-test('MCP task records handoffs and overview reads them using the same command contracts', async t => {
-  const { root, lane } = await fixture(t),
-    registrations = new Map();
-  registerAgentWorkflow(
-    {
-      registerTool(name, definition, handler) {
-        registrations.set(name, { definition, handler });
-      },
-    },
-    root,
-  );
-  const request = command(lane);
-  const response = await registrations.get('forge_task').handler({ command: request });
-  assert.ok(!response.isError);
-  const result = JSON.parse(response.content[0].text).result.handoff;
-  const readResponse = await registrations
-    .get('forge_work_overview')
-    .handler({ command: { action: 'handoff-read', laneId: lane.laneId } });
-  assert.deepEqual(JSON.parse(readResponse.content[0].text).result.handoff, result);
 });
 test('brief selection never returns a cached delivery for a removed Lane', () => {
   const saved = structuredClone(records);

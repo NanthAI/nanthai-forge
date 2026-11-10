@@ -22,8 +22,7 @@ import { hookHealth, hookHealthText } from '../dist/agent-hook-health.js';
 import { selectCliBuild } from '../dist/cli-installation.js';
 import { readHostedCliStatus } from '../dist/hosted-cli-status.js';
 
-const HELP_ARGS = ['agent', '/unused/help-only', 'view', '--help'];
-const ALIAS = 'Deprecated: view is an alias for candidate; use candidate.\n';
+const HELP_ARGS = ['agent', '/unused/help-only', 'status', '--help'];
 const FILES = ['.claude/settings.json', '.codex/hooks.json'];
 const DEV_RUNNER = fileURLToPath(new URL('../dist/agent-edit-hook.js', import.meta.url));
 const q = value => `'${value}'`;
@@ -105,7 +104,7 @@ test('a real dev-build CLI process with a temporary HOME leaves existing hooks b
     encoding: 'utf8',
   });
   assert.notEqual(run.signal, 'SIGKILL');
-  assert.equal(run.stderr, ALIAS, 'healthy hooks: a dev build stays silent');
+  assert.equal(run.stderr, '', 'healthy hooks: a dev build stays silent');
   assert.deepEqual(f.read(), before);
   assert.ok(!f.read().join().includes(DEV_RUNNER));
 
@@ -137,7 +136,7 @@ test('a dev build with no hooks at all is silent and writes nothing', t => {
     },
     encoding: 'utf8',
   });
-  assert.equal(run.stderr, ALIAS);
+  assert.equal(run.stderr, '');
   for (const file of FILES) assert.equal(existsSync(join(f.home, file)), false);
 });
 

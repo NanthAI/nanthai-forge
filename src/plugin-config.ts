@@ -23,9 +23,10 @@ export function pluginConfig(root: string, directory: string): object {
   const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
     version: string;
   };
+  // The packaged skill links docs relative to the repository; the plugin copy points at the installed docs.
   const skill = readFileSync(new URL('../skills/forge-agent/SKILL.md', import.meta.url), 'utf8').replace(
-    '../../docs/operations/source-exchange.md',
-    new URL('../docs/operations/source-exchange.md', import.meta.url).href,
+    /\]\(\.\.\/\.\.\/docs\/([^)#\s]+)/g,
+    (_, path: string) => `](${new URL(`../docs/${path}`, import.meta.url).href}`,
   );
   const files: Record<string, string> = {
     '.agents/plugins/marketplace.json': json({
@@ -43,7 +44,7 @@ export function pluginConfig(root: string, directory: string): object {
     [`${plugin}/.codex-plugin/plugin.json`]: json({
       name: 'nanthai-forge',
       version: manifest.version,
-      description: 'Work with Forge source, Intents, Lanes, reviews and recorded local checks.',
+      description: 'Work with hosted Forge source, Lanes, checks and landings.',
       skills: './skills/',
       mcpServers: './.mcp.json',
     }),
@@ -51,7 +52,7 @@ export function pluginConfig(root: string, directory: string): object {
       mcpServers: { forge: { ...config.mcpServers.forge, env_vars: ['FORGE_AUTH_TOKEN'] } },
     }),
     [`${plugin}/skills/forge-agent/SKILL.md`]: skill,
-    'README.md': `# Forge local agent plugin\n\nThis package connects the selected local source owner through the installed Forge runtime. It contains configuration and the Forge workflow skill, without source files or credentials.\n\nAdd this directory as a local marketplace with \`codex plugin marketplace add PATH\`, then install **nanthai-forge** from **Forge local workflow** in the desktop Plugins directory. Restart the client after installing or updating its cached plugin.\n\nThe source owner, Node executable and Forge CLI use absolute paths in \`plugins/nanthai-forge/.mcp.json\`. Keep that runtime installed; generate a new package after moving it or changing the selected source owner. The source exchange documentation links to the same installed package.\n\nUse the exposed \`forge_task\`, \`forge_check\`, \`forge_review\` and \`forge_work_overview\` tools for the recorded workflow, and the source tools for optional graph context. Checks use existing local compute and run only when requested. This package does not start a runner or install itself. Tools run under the local OS account.\n\nOptional hosted exchange uses saved \`nforge login\` credentials or the \`FORGE_AUTH_TOKEN\` process environment; no credential is embedded here. Hosted coordination is a separate MCP connection. Local source and Work need no hosted credential.\n\nRemove this marketplace or disable the plugin in the client to disconnect it. Removing this generated directory does not delete Forge source, Work or retained checks.\n`,
+    'README.md': `# Forge local agent plugin\n\nThis package connects the selected hosted Forge checkout through the installed Forge runtime. It contains configuration and the Forge workflow skill, without source files or credentials. Forge runs hosted projects only: a folder without a hosted marker is refused (\`nforge host ROOT\` makes one).\n\nAdd this directory as a local marketplace with \`codex plugin marketplace add PATH\`, then install **nanthai-forge** from **Forge local workflow** in the desktop Plugins directory. Restart the client after installing or updating its cached plugin.\n\nThe checkout, Node executable and Forge CLI use absolute paths in \`plugins/nanthai-forge/.mcp.json\`. Keep that runtime installed; generate a new package after moving it or changing the selected checkout. The skill's documentation links point at the same installed package.\n\nHosted access uses saved \`nforge login\` credentials or the \`FORGE_AUTH_TOKEN\` process environment; no credential is embedded here. Tools run under the local OS account.\n\nRemove this marketplace or disable the plugin in the client to disconnect it. Removing this generated directory does not delete Forge source or Work.\n`,
   };
   const existing = lstatSync(destination, { throwIfNoEntry: false });
   if (existing) {

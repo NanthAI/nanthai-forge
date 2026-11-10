@@ -317,30 +317,6 @@ test('sync reports up-to-date and refuses uncheckpointed edits', async () => {
   }
 });
 
-test('CLI infers laneId from a Lane working directory and shows short forms', async () => {
-  const { root, start } = await project();
-  try {
-    const lane = await start('CLI'),
-      cli = new URL('../dist/cli.js', import.meta.url).pathname;
-    writeFileSync(join(lane.path, 'a.txt'), 'cli\n');
-    const output = execFileSync(
-      process.execPath,
-      [cli, 'agent', root, 'finish', '{"message":"From cwd","accept":true}'],
-      { cwd: lane.path, encoding: 'utf8' },
-    );
-    const receipt = JSON.parse(output).result;
-    assert.equal(receipt.status, 'accepted');
-    assert.equal(receipt.checkpoint.laneId, lane.laneId);
-    const help = execFileSync(process.execPath, [cli, 'agent', root, 'finish', '--help'], {
-      encoding: 'utf8',
-    });
-    assert.match(help, /"accept":true/);
-    assert.match(execFileSync(process.execPath, [cli, 'agent', '--help'], { encoding: 'utf8' }), /sync/);
-  } finally {
-    await cleanupOwner(root);
-  }
-});
-
 // Crash points: sync writes Lane files first and records metadata second.
 async function diverged(files, editA, editB) {
   const p = await project(true, files),

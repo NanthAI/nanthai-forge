@@ -2,13 +2,12 @@
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
-import { once } from 'node:events';
+import { execFileSync } from 'node:child_process';
+
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { setup } from './publication-fixture.mjs';
 import { git, code } from './helpers.mjs';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
@@ -481,98 +480,6 @@ test(
     assert.equal(f.data().views.length, 0);
     assert.equal(f.data().channelMoves.length, 0);
     assert.ok(new NativeSource(f.root).object(incoming.external.observations[0].bundle).length);
-  },
-);
-
-test(
-  'native incoming WorkService/CLI/real opt-in MCP share exact import/check/pin behavior and current read authorization',
-  { timeout: 120000 },
-  async t => {
-    const f = await native(t);
-
-    const body = JSON.stringify({ command: input, revision: f.data().revision });
-
-    const response = await new WorkService(f.root).dispatch(
-      JSON.parse(body).command,
-      JSON.parse(body).revision,
-    );
-
-    const incoming = (await response).result;
-    const cli = JSON.parse(
-      execFileSync(process.execPath, ['dist/cli.js', 'work', f.root, JSON.stringify(input), '0'], {
-        encoding: 'utf8',
-      }),
-    );
-    assert.equal(cli.result.id, incoming.id);
-    const client = new Client({ name: 'forge-native-incoming-test', version: '1.0.0' });
-    t.after(() => client.close());
-    await client.connect(
-      new StdioClientTransport({
-        command: process.execPath,
-        args: ['dist/cli.js', 'mcp', f.root, '--work'],
-        env: process.env,
-        stderr: 'pipe',
-      }),
-    );
-    const call = async command =>
-      JSON.parse(
-        (
-          await client.callTool({
-            name: 'forge_work_command',
-            arguments: { command, revision: f.data().revision },
-          })
-        ).content[0].text,
-      );
-    const checked = (await call({ action: 'check-pr', intentId: incoming.id })).result;
-    assert.equal(checked.id, incoming.id);
-    const view = (
-      await call({ action: 'compose', intentId: f.intent.id, inputs: [], dependencies: [pin(checked)] })
-    ).result;
-    assert.equal(view.status, 'clean');
-    // Keep a real peer in writer admission while MCP reads immutable review
-    // pins. The read must return its original result shape, never WORK_BUSY.
-    const holder = spawn(
-      process.execPath,
-      [
-        '--input-type=module',
-        '-e',
-        `
-import { readSync } from 'node:fs';
-import { WorkStore } from ${JSON.stringify(new URL('../dist/work-store.js', import.meta.url).href)};
-new WorkStore(process.argv[1]).locked(() => {
-  process.stdout.write('held\\n');
-  readSync(0, Buffer.alloc(1), 0, 1, null);
-});`,
-        f.root,
-      ],
-      { stdio: ['pipe', 'pipe', 'pipe'] },
-    );
-    const closed = once(holder, 'close');
-    try {
-      await once(holder.stdout, 'data');
-      const detail = await call({
-        action: 'read-work-detail',
-        kind: 'external',
-        id: incoming.id,
-        observation: 0,
-        expectedHead: f.head,
-        expectedBase: f.base,
-      });
-      assert.equal(detail.error, undefined, JSON.stringify(detail.error));
-      assert.match(detail.result.details, /a = 2/);
-    } finally {
-      holder.stdin.end('release');
-      assert.equal((await closed)[0], 0);
-    }
-    f.change({ deniedRead: true });
-    const bytes = readWorkBytes(join(f.work.store.directory, 'work.json'));
-    assert.equal(
-      (await call({ action: 'check-pr', intentId: incoming.id })).error.code,
-      'PUBLISH_GITHUB_FAILED',
-    );
-    assert.deepEqual(readWorkBytes(join(f.work.store.directory, 'work.json')), bytes);
-    assert.equal(f.state().creates, 1);
-    await client.close();
   },
 );
 

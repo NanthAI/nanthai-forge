@@ -13,19 +13,18 @@ import {
   chmodSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { z } from 'zod';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { restoreNativeWork, exportNativeSource } from '../dist/native-backup.js';
 import { withWorkArchive, packWorkArchive } from '../dist/work-backup-archive.js';
 import { digest } from '../dist/hash.js';
-import { applyHostedEvent, parseWorkBytes, workBytes, metadataRequest } from '../dist/work-metadata.js';
+
 import { code } from './helpers.mjs';
 
 async function setup(t, binaryBytes = 0) {
@@ -397,40 +396,4 @@ test('concurrent raw Work changes during validation cannot be overwritten and or
   await assert.rejects(pending, code('WORK_STALE'));
   assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), before);
   assert.equal(f.data().schema, 24);
-});
-
-test('CLI, direct WorkService and actual SDK MCP share import and original-operation retry with Git unavailable', async t => {
-  const f = await setup(t),
-    revision = f.data().revision;
-  const expected = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', f.w.store.root, JSON.stringify(f.command), String(revision)],
-      { encoding: 'utf8' },
-    ),
-  );
-
-  const body = JSON.stringify({ command: f.command, revision: 0 });
-
-  const response = await new WorkService(f.w.store.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  assert.deepEqual(await response, expected);
-  const client = new Client({ name: 'native-contribution', version: '1' }),
-    transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', f.w.store.root, '--work'],
-      env: Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)),
-      stderr: 'pipe',
-    });
-  await client.connect(transport);
-  t.after(() => client.close());
-  const result = await client.callTool({
-    name: 'forge_work_command',
-    arguments: { command: f.command, revision: 0 },
-  });
-  assert.equal(result.isError, undefined);
-  assert.deepEqual(JSON.parse(result.content[0].text), expected);
 });

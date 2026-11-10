@@ -5,10 +5,23 @@ Issue 657d63ee-249a-44ae-94e2-55549f84eea9 owns this approved disposition:
 additional supported hosted commands. The [hosted contract](workflow.md#hosted-command-contract)
 remains the authority for availability; implementation slices keep the parent Issue open.
 
-MIGRATE adds a bounded hosted action; FOLD preserves the job in an existing
-verb, receipt or local facility. All five DROP rows are **approved for removal;
-removal is pending implementation**. Replacement jobs land before folded surfaces
-are removed. Alias removal respects the promised compatibility schedule.
+Forge has one client mode: hosted. The native-owner mode is removed, so no row is
+reachable through a native root any more. A folder without a hosted marker is refused
+with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`. Every name below
+that is not a hosted action refuses with `HOSTED_ACTION_UNSUPPORTED` and names the
+hosted command that does its job (`retiredActions` in `src/agent-verbs.ts`).
+
+- **Shipped hosted actions:** `diff`, `peers`, `log`.
+- **`records` and `provenance`** are served by existing hosted reads: `lanes`,
+  `landings`, `lane-history` and `status` for retained work; `history {op:"blame"}`
+  and `lane-history` for who changed a line and where it landed. A dedicated action
+  waits for evidence that agents need more than these (none was filed since the
+  hosted cutover). This narrows the approved MIGRATE rows and needs owner confirmation.
+- **FOLD rows** refuse and name their replacement; the replacement jobs that are
+  not built yet keep their owning Issues (`save.delivery` for handoffs, Lane undo
+  e7812d8f, session reports 40ad7abd).
+- **DROP rows** (`view`, `views`, `save --preview`, `x undo-revert`, `x guidance`)
+  are removed from the CLI, MCP and docs. Stored wire names (`viewId`) are unchanged.
 
 | Command | Agent job | Decision | Replacement or target action | Owning Issue |
 | --- | --- | --- | --- | --- |
@@ -44,27 +57,6 @@ are removed. Alias removal respects the promised compatibility schedule.
 | `x uninstall-hooks` | Undo hook installation | FOLD | Discoverable local installer/settings inverse preserving other hooks | e6f4b0a6 |
 | `x friction-triage` | Record a friction disposition | FOLD | Existing planning updates/comments with IDs, reasons and fix evidence | 88d3cfba |
 | `x define-check` | Configure an exact-source check | FOLD | `x configure-check` with existing authority and definition pins | 657d63ee; df34d40f |
-
-## Implementation order
-
-1. **Diff/peers and exact Candidate/State show** (5283a92f), then the first-write
-   hook (e6f4b0a6). Review folds after selector equivalence. The first shipped slice
-   carries the generated help/contract guard.
-2. **Failure diagnosis** (657d63ee; 58236de6): retained cause, provider link and log
-   continuation in terminal receipts first, then bounded `log` pages.
-3. **Records and compact status** (657d63ee; e34dcfe5): Candidate selection,
-   participation and pending-work continuation; saved-only land and original replay.
-4. **Delivery notes and receipt links** (657d63ee): optional `save.delivery`,
-   `status.latestDelivery` and exact links fold handoff, brief, link and take.
-   Friction discovery/triage stays with 88d3cfba.
-5. **Lane undo and small folds** (e7812d8f; 657d63ee; df34d40f): shape Lane undo
-   before folding undo-sync; fold check configuration and agent acceptance.
-   Local cleanup stays with 995c8da9/75170a57; hook setup stays with e6f4b0a6.
-6. **Selected provenance** (657d63ee): bounded contributors/rationale with exact
-   source pins and explicit partial history.
-7. **Approved removals** (657d63ee; df34d40f): implement the five DROP rows,
-   retaining historical/wire data and unrelated UI/API behavior. Optional reports
-   and making-of stay with 40ad7abd in Phase 8.
 
 Migrated actions extend existing MCP tools. One schema generates CLI help, MCP
 accepted actions and the hosted command table; a guard rejects documented hosted

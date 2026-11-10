@@ -3,22 +3,14 @@ import { effectivePolicy } from '../dist/autonomy-policy.js';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  readFileSync,
-  writeFileSync,
-  rmSync,
-  mkdirSync,
-  utimesSync,
-  readdirSync,
-} from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, mkdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+
 import { pendingStatus } from '../dist/pending-status.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -325,72 +317,6 @@ test('dependency waits, review and failed audits retain their recorded state', (
   assert.equal(status.lanes[0].status, 'waiting');
   assert.equal(status.audits[0].status, 'failed');
   assert.match(formatPendingStatus(status), /Audits: 0 pending · 1 failed/);
-});
-
-test('local read and MCP share pinned JSON without running recovery, exports or remote calls', async t => {
-  const store = fixture(t);
-  const before = readFileSync(join(store.directory, 'work.json'));
-  const files = readdirSync(store.directory).sort();
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = () => {
-    throw new Error('Status must not use the network');
-  };
-  try {
-    const status = readPendingStatus(store, () => capture, now);
-    assert.equal(status.snapshot.workRevision, store.revision());
-    assert.equal(status.hosted.recovery.captureId, 'capture');
-    let handler;
-    registerAgentWorkflow(
-      {
-        registerTool(name, options, callback) {
-          if (name === 'forge_work_overview') {
-            assert.ok(options.inputSchema.command.safeParse({ action: 'pending-status' }).success);
-            assert.ok(
-              options.inputSchema.command.safeParse({
-                action: 'pending-status',
-                detail: true,
-                offset: 0,
-                limit: 2,
-              }).success,
-            );
-            handler = callback;
-          }
-        },
-      },
-      store.root,
-    );
-    const mcp = JSON.parse((await handler({ command: { action: 'pending-status' } })).content[0].text);
-    assert.deepEqual(mcp.main, readPendingStatus(store).main);
-    assert.equal(mcp.hosted.recovery, null);
-    assert.ok(mcp.sections.skipped.includes('overlap'));
-    const detailed = JSON.parse(
-      (await handler({ command: { action: 'pending-status', detail: true } })).content[0].text,
-    );
-    assert.deepEqual(detailed.sections.skipped, []);
-    assert.deepEqual(readFileSync(join(store.directory, 'work.json')), before);
-    assert.deepEqual(readdirSync(store.directory).sort(), files);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-test('native CLI needs no graph index; paged JSON and compact text preserve existing status interfaces', t => {
-  const store = fixture(t);
-  const run = (...args) =>
-    spawnSync(process.execPath, [resolve('dist/cli.js'), 'status', store.root, ...args], {
-      encoding: 'utf8',
-    });
-  const text = run();
-  assert.equal(text.status, 0, text.stderr);
-  assert.match(text.stdout, /Pending work/);
-  assert.ok(text.stdout.trim().split('\n').length <= 15);
-  const json = run('--json');
-  assert.equal(json.status, 0, json.stderr);
-  assert.equal(JSON.parse(json.stdout).snapshot.workRevision, store.revision());
-  assert.equal(run('--pending', '--json').status, 0);
-  assert.equal(run('--pending', '--detail', '--json').status, 0);
-  assert.equal(run('--pending', '--offset', '1', '--limit', '2', '--json').status, 0);
-  assert.equal(run('--pending', '--limit', '0').status, 1);
-  assert.equal(run('--not-an-option').status, 1);
 });
 test('reader observes new log tails but leaves recorded active runs unchanged', async t => {
   const store = fixture(t),

@@ -4,10 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { join } from 'node:path';
+
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -198,43 +196,4 @@ test('invalid/partial/foreign bundles and stale requests preserve existing work;
   assert.equal(new Set(results.map(r => r.result.id)).size, 1);
   assert.equal(concurrent.w.status().lanes.filter(l => l.contribution).length, 1);
   assert.equal(git(concurrent.root, ['rev-parse', 'refs/forge/channels/main']).trim(), concurrent.view.head);
-});
-
-test('existing direct WorkService, CLI and opt-in SDK MCP import full source through the same native owner', async t => {
-  const s = await setup(t);
-
-  const body = JSON.stringify({ command: s.command, revision: s.w.status().revision });
-
-  const response = await new WorkService(s.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  assert.equal((await response).result.contribution.head, s.head);
-  const cli = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', s.root, JSON.stringify(s.command), '0'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.equal(cli.result.id, s.command.operationId);
-  const client = new Client({ name: 'contribution-check', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', s.root, '--work'],
-      stderr: 'pipe',
-    }),
-  );
-  const reply = await client.callTool({
-    name: 'forge_work_command',
-    arguments: {
-      command: { ...s.command, operationId: randomUUID(), name: 'Independent SDK contribution' },
-      revision: s.w.status().revision,
-    },
-  });
-  const result = JSON.parse(reply.content[0].text);
-  assert.equal(result.result.contribution.sha256, s.command.sha256);
-  assert.equal(result.result.head, s.head);
-  assert.equal(s.w.status().runs.length, 0);
 });

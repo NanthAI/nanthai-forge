@@ -7,8 +7,7 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
 import { NativeSource } from '../dist/native-source.js';
 import { initLegacyNative as initNative } from './autonomy-fixture.mjs';
@@ -397,69 +396,6 @@ test('Git compatibility observes exact committed bytes/mode rather than dirty fi
   assert.equal(original.inputObservations[0].sha256, sha('export const a=1;\n'));
   assert.equal((await assess(w, original, view)).applicability, 'current');
   assert.equal(readFileSync(join(w.store.path(lane.id), 'a.ts'), 'utf8'), 'dirty file remains separate');
-});
-
-test('CLI/direct WorkService/real SDK MCP retain declarations and expose same read-only assessment without repeated execution', async t => {
-  const f = setup(t),
-    cli = resolve('dist/cli.js');
-  const definition = {
-    action: 'define-check',
-    name: 'Shared observations',
-    executable: process.execPath,
-    args: ['-e', 'console.log("shared command")'],
-    declaredInputs: [{ kind: 'source', path: 'a.ts' }],
-  };
-  const check = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [cli, 'work', f.root, JSON.stringify(definition), String(f.w.store.load().revision)],
-      { encoding: 'utf8' },
-    ),
-  ).result;
-  assert.deepEqual(check.declaredInputs, definition.declaredInputs);
-  const { original } = await run(f.w, check, f.view);
-  const command = {
-      action: 'assess-check-inputs',
-      runId: original.id,
-      viewId: f.view.id,
-      expectedHead: f.view.head,
-    },
-    before = readWorkBytes(join(f.w.store.directory, 'work.json'));
-  const local = (await f.w.dispatch(command, 0)).result;
-  assert.deepEqual(
-    JSON.parse(
-      execFileSync(process.execPath, [cli, 'work', f.root, JSON.stringify(command), '0'], {
-        encoding: 'utf8',
-      }),
-    ).result,
-    local,
-  );
-
-  const body = JSON.stringify({ command, revision: 0 });
-
-  const response = await new WorkService(f.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  assert.deepEqual((await response).result, local);
-  const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [cli, 'mcp', f.root, '--work'],
-      env: f.w.status().environment.env,
-      stderr: 'pipe',
-    }),
-    client = new Client({ name: 'input-parity', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(transport);
-  const result = await client.callTool({ name: 'forge_work_command', arguments: { command, revision: 0 } });
-  assert.equal(result.isError, undefined);
-  assert.deepEqual(JSON.parse(result.content[0].text).result, local);
-  assert.deepEqual(readWorkBytes(join(f.w.store.directory, 'work.json')), before);
-  const exported = JSON.parse(
-    (await f.w.dispatch({ action: 'export-check', id: original.id }, 0)).result.json,
-  );
-  assert.deepEqual(exported.run.inputObservations, original.inputObservations);
 });
 
 test('complete fresh native format5 recovery retains observations and incompatible prior4 readers preserve bytes', async t => {

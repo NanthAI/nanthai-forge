@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { initNative } from '../dist/native-work.js';
@@ -57,34 +57,6 @@ async function checkedLane(agent, extra = {}) {
   assert.equal(result.run.status, 'passed');
   return { start, result };
 }
-
-test('two concurrent Lane processes capture independent records, replay safely and leave source untouched', async t => {
-  const { root, agent, store } = fixture(t);
-  const lanes = [await lane(agent), await lane(agent)];
-  const requests = lanes.map((item, i) => ({
-    operationId: randomUUID(),
-    laneId: item.laneId,
-    title: `Friction ${i}`,
-    detail: 'Extra work',
-    area: 'workflow',
-  }));
-  const run = request =>
-    exec(process.execPath, [cli, 'agent', root, 'friction', JSON.stringify(request)], {
-      env: { ...process.env, FORGE_WORK_LOCK_WAIT_MS: '60000' },
-    });
-  const results = await Promise.all(requests.map(run));
-  assert.ok(results.every(result => JSON.parse(result.stdout).result.kind === 'capture'));
-  assert.equal(frictionEvents(store).length, 2);
-  const saved = store.select('lanes', lanes[0].laneId);
-  assert.equal(saved.head, lanes[0].head);
-  await Promise.all(requests.map(run));
-  assert.equal(frictionEvents(store).length, 2);
-  await assert.rejects(
-    run({ ...requests[0], detail: 'Changed request' }),
-    error => JSON.parse(error.stderr).error.code === 'WORK_OPERATION_CHANGED',
-  );
-  assert.equal(frictionEvents(store).length, 2);
-});
 
 test('normalization clusters near duplicates, retains records and totals reported costs', async t => {
   const { agent, store } = fixture(t);
@@ -371,26 +343,6 @@ test('exhausted Work retries retain cost without changing the thrown error', asy
   );
   assert.equal(groups(store)[0].title, 'Work retries exhausted');
   assert.ok(groups(store)[0].cost.retries >= 1);
-});
-
-test('CLI improve JSON and text are stable; seven roadmap records import once into six groups', async t => {
-  const { root, agent, store } = fixture(t);
-  const rows = JSON.parse(readFileSync(new URL('./fixtures/friction/roadmap.json', import.meta.url), 'utf8'));
-  for (const input of rows) await agent.dispatch({ action: 'friction', ...input });
-  for (const input of rows) await agent.dispatch({ action: 'friction', ...input });
-  assert.equal(frictionEvents(store).length, 7);
-  assert.equal(groups(store).length, 6);
-  assert.deepEqual(
-    new Set(groups(store).flatMap(group => group.records.map(row => row.detail))),
-    new Set(rows.map(row => row.detail)),
-  );
-  const text = () => execFileSync(process.execPath, [cli, 'improve', root], { encoding: 'utf8' });
-  assert.equal(text(), text());
-  assert.match(text(), /2 occurrence\(s\)/);
-  const json = JSON.parse(
-    execFileSync(process.execPath, [cli, 'improve', root, '--json'], { encoding: 'utf8' }),
-  );
-  assert.deepEqual(json.result, readImprovements(store).result);
 });
 
 test('friction records survive portable export and full Work saves without backfilling past failures', async t => {

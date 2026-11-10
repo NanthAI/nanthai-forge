@@ -8,7 +8,6 @@ import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { getFunctionName } from 'convex/server';
 import { WorkService } from '../dist/work.js';
 import { restoreWork } from '../dist/work-backup.js';
@@ -267,13 +266,7 @@ test('hosted Intent authority reconciles original operations, retains concurrent
       journalPath = join(root, 'hosted-work.json');
     writeFileSync(journalPath, JSON.stringify(journal));
     const target = join(root, 'hosted-restored');
-    const restored = JSON.parse(
-      execFileSync(
-        process.execPath,
-        ['dist/cli.js', 'restore-work', exported.archive.path, target, '--journal', journalPath],
-        { encoding: 'utf8' },
-      ),
-    );
+    const restored = await restoreWork(exported.archive.path, target, journalPath);
     assert.equal(restored.restored, true);
     const recovered = new WorkService(target);
     assert.deepEqual(recovered.store.load(), snapshot.data);

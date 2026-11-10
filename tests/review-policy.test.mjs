@@ -3,11 +3,10 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { join, resolve } from 'node:path';
-import { randomUUID, createHash } from 'node:crypto';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -255,94 +254,4 @@ test('native optional Channel acceptance reobserves withdrawn decisions and reco
   assert.equal(s.calls(), count);
   await assert.rejects(s.dispatch({ ...pending, expectedHead: 'b'.repeat(40) }, 0), code('CHANNEL_CHANGED'));
   assert.equal(s.calls(), count);
-});
-
-test('pagination uncertainty and transport boundaries preserve original policy, legacy hashes and authority', async t => {
-  const s = setup(t),
-    policy = (await s.dispatch(s.define())).result;
-  const rows = Array.from({ length: 102 }, (_, n) =>
-    s.approval({ id: n + 1, user: { id: n + 100, login: `user-${n}`, type: 'User' } }),
-  );
-  rows.push(s.approval());
-  s.change({ reviews: rows });
-  assert.equal((await s.assess(policy)).result.satisfied, true);
-  s.change({ reviews: rows.slice(0, 100), repeat: true });
-  const partial = (await s.assess(policy)).result;
-  assert.equal(partial.githubReview.complete, false);
-  assert.equal(partial.satisfied, false);
-  s.change({ repeat: false, reviews: [s.approval()] });
-  for (const accountIds of [[], [0], [1.5], [Number.MAX_SAFE_INTEGER + 1]])
-    await assert.rejects(
-      s.dispatch(s.define({ githubReview: { ...policy.githubReview, accountIds } })),
-      code('BAD_ARGUMENT'),
-    );
-  await assert.rejects(
-    s.dispatch(
-      s.define({ githubReview: { target: { kind: 'publication', id: randomUUID() }, accountIds: [42] } }),
-    ),
-    code('NOT_FOUND'),
-  );
-  const legacyInput = s.define({ githubReview: undefined }),
-    legacy = (await s.dispatch(legacyInput)).result;
-  const expected = {
-    id: legacy.id,
-    version: 1,
-    intentId: s.intent.id,
-    name: legacy.name,
-    statement: legacy.statement,
-    checkIds: [],
-    reviewers: [],
-  };
-  assert.equal(legacy.definition, createHash('sha256').update(JSON.stringify(expected)).digest('hex'));
-  assert.equal(legacy.githubReview, undefined);
-
-  const command = {
-      action: 'assess-invariant',
-      id: policy.id,
-      definition: policy.definition,
-      viewId: s.view.id,
-      expectedHead: s.view.head,
-    },
-    body = JSON.stringify({ command, revision: 0 });
-
-  const response = await new WorkService(s.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  assert.equal((await response).result.satisfied, true);
-  const cli = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', s.root, JSON.stringify(command), '0'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.equal(cli.result.githubReview.reviews[0].reviewId, 201);
-  assert.equal(s.work.status().runs.length, 0);
-  const client = new Client({ name: 'review-policy-check', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', s.root, '--work'],
-      env: process.env,
-      stderr: 'pipe',
-    }),
-  );
-  const call = async (command, revision) =>
-    JSON.parse(
-      (await client.callTool({ name: 'forge_work_command', arguments: { command, revision } })).content[0]
-        .text,
-    );
-  const rpcPolicy = (await call(s.define(), s.work.status().revision)).result;
-  assert.deepEqual(rpcPolicy.githubReview.accountIds, [42]);
-  assert.equal(
-    (await call({ ...command, id: rpcPolicy.id, definition: rpcPolicy.definition }, 0)).result.githubReview
-      .reviews[0].reviewId,
-    201,
-  );
-  s.change({ denied: true });
-  assert.equal(
-    (await call({ ...command, id: rpcPolicy.id, definition: rpcPolicy.definition }, 0)).error.code,
-    'PUBLISH_GITHUB_FAILED',
-  );
 });

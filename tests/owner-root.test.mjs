@@ -129,18 +129,6 @@ test('clean acceptance refreshes tracked additions and removals; metadata and lo
   ])
     assert.equal(readFileSync(join(f.root, path), 'utf8'), text);
 });
-test('default-off acceptance leaves root alone; explicit CLI refresh catches up safely', t => {
-  const f = fixture(t, false);
-  const first = f.candidate({ 'a.txt': 'first' });
-  f.accept(first);
-  f.accept(f.candidate({ 'a.txt': 'new' }, first.expectedHead));
-  assert.equal(readFileSync(join(f.root, 'a.txt'), 'utf8'), 'base a');
-  const receipt = JSON.parse(
-    execFileSync(process.execPath, ['dist/cli.js', 'owner', 'refresh', f.root], { encoding: 'utf8' }),
-  );
-  assert.equal(receipt.status, 'updated');
-  assert.equal(readFileSync(join(f.root, 'a.txt'), 'utf8'), 'new');
-});
 test('dirty root is skipped after durable acceptance, reported, and recoverable without losing edits', t => {
   const f = fixture(t);
   writeFileSync(join(f.root, 'b.txt'), 'local edit');

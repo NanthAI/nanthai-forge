@@ -4,14 +4,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { spawnSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
+import { join } from 'node:path';
+
 import { randomUUID } from 'node:crypto';
 import { initNative } from '../dist/native-work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
-import { workSchema } from '../dist/work-types.js';
+
 import {
   compactRun,
   hydrateRun,
@@ -19,7 +18,7 @@ import {
   actionResult,
   compactDetailPage,
 } from '../dist/work-record-details.js';
-import { detailReader, detailWriter, runDetails } from '../dist/work-detail-store.js';
+import { detailReader, runDetails } from '../dist/work-detail-store.js';
 import { migrateWorkDetails } from '../dist/work-detail-migration.js';
 import { writeRecords, readWorkFile } from '../dist/work-records.js';
 import { nativeReachable } from '../dist/native-reachable.js';
@@ -284,42 +283,6 @@ test('source-object collection preserves details named by retained historical or
   const result = nativeObjects(store, { action: 'collect-native-objects' });
   assert.ok(!result.result.removed.some(item => item.id === pin.sha256));
   assert.deepEqual(runDetails(store, store.pinnedData(before).runs[0]), original);
-});
-
-test('a reader capped at format22 refuses slim Work before CLI reads or writes', t => {
-  const { store } = fixture(t),
-    data = store.load();
-  data.runs.push(runFixture(data.nativeHead));
-  store.save(data);
-  const loader = join(store.root, 'format22-loader.mjs'),
-    preload = join(store.root, 'format22-preload.mjs');
-  writeFileSync(
-    loader,
-    `export async function load(url, context, next) {
-    const result = await next(url, context);
-    if (url === ${JSON.stringify(pathToFileURL(resolve('dist/work-format.js')).href)})
-      return { ...result, source: result.source.toString().replace('latestWorkFormat = 24', 'latestWorkFormat = 22') };
-    return result;
-  }`,
-  );
-  writeFileSync(
-    preload,
-    `import { register } from 'node:module'; register(${JSON.stringify(pathToFileURL(loader).href)});`,
-  );
-  const before = store.pointer();
-  for (const [action, request] of [
-    ['status', {}],
-    ['start', { outcome: 'Must preserve old Work' }],
-  ]) {
-    const result = spawnSync(
-      process.execPath,
-      ['--import', preload, resolve('dist/cli.js'), 'agent', store.root, action, JSON.stringify(request)],
-      { encoding: 'utf8' },
-    );
-    assert.notEqual(result.status, 0);
-    assert.match(result.stdout + result.stderr, /WORK_UPGRADE_REQUIRED/);
-    assert.deepEqual(store.pointer(), before);
-  }
 });
 test('an ordinary full save can complete an interrupted migration without losing its identity', t => {
   const { store } = fixture(t),

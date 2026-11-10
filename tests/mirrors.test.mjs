@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-import { WorkService } from '../dist/work.js';
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+
 import { readdirSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { git, code } from './helpers.mjs';
 import { setup } from './publication-fixture.mjs';
 
@@ -113,48 +112,6 @@ test('native mirror journal recovery, current destination authority and immutabl
     (await s.mirror({ action: 'check-mirror', id: first.id }, 0)).result.observation.status,
     'matching',
   );
-  assert.equal(s.work.status().mirrors.length, 1);
-  assert.equal(s.state().creates, 0);
-});
-
-test('mirrors use the existing protected local WorkService, native CLI and opt-in SDK MCP transport', async t => {
-  const s = await mirrorSetup(t);
-
-  const body = JSON.stringify({ command: s.mirrorCommand, revision: s.work.status().revision });
-
-  const response = await new WorkService(s.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-
-  const mirrored = (await response).result;
-  assert.equal(mirrored.observation.status, 'matching');
-  const check = { action: 'check-mirror', id: mirrored.id };
-  const read = JSON.parse(
-    execFileSync(process.execPath, ['dist/cli.js', 'work', s.root, JSON.stringify(check), '0'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.equal(read.result.observation.status, 'matching');
-  const client = new Client({ name: 'forge-mirror-test', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: ['dist/cli.js', 'mcp', s.root, '--work'],
-      env: process.env,
-      stderr: 'pipe',
-    }),
-  );
-  const reply = JSON.parse(
-    (
-      await client.callTool({
-        name: 'forge_work_command',
-        arguments: { command: s.mirrorCommand, revision: 0 },
-      })
-    ).content[0].text,
-  );
-  assert.equal(reply.result.id, mirrored.id);
   assert.equal(s.work.status().mirrors.length, 1);
   assert.equal(s.state().creates, 0);
 });

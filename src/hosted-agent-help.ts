@@ -89,7 +89,7 @@ export function hostedAgentHelp(action?: string) {
   return [
     'Forge hosted agent workflow',
     'nforge agent ROOT ACTION [JSON | --command-file FILE]; actions listed as `x ACTION` run as nforge x ROOT ACTION [JSON | --command-file FILE].',
-    'Address: hosted checkout ROOT, retained address, or JSON url + projectId.',
+    'Address: hosted checkout ROOT, retained address, or JSON url + projectId. Guide: nforge docs agent.',
     'Parameters (? = optional; nested fields and constraints follow the command schema):',
     ...entries.map(entry => `  ${entry.command}: ${entry.parameters.join(', ') || '{}'}`),
     ...(canonical ? entries.map(entry => JSON.stringify(entry.schema, null, 2)) : []),

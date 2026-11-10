@@ -6,7 +6,6 @@ import { overlapBannerOnce, refusalOverlapBanner } from './hosted-overlap-notice
 import { exactConflictBannerOnce, type ExactConflictNotice } from './hosted-conflict-notice.js';
 import { supportedNode, nodeRequirement } from '../scripts/node-runtime.mjs';
 import { ForgeError, invariant } from './errors.js';
-import { resolve } from 'node:path';
 import { describeFailure, recordFailure } from './system-errors.js';
 import { cliTeachContext, teachReceipt } from './error-teaching.js';
 import { readFileSync } from 'node:fs';
@@ -28,14 +27,9 @@ Usage:
   nforge worker DEPLOYMENT_URL PROJECT_ID MACHINE_UUID
   nforge metrics ROOT [--from DATE] [--to DATE] [--json] [--report FILE.md] [--compare FROM..TO]
   nforge metrics record-bill ROOT --provider P --from DATE --to DATE --billed-usd N [--list-usd N] [--usage unit=qty,...] [--rate unit=usd,...] [--basis TEXT]
-  nforge improve ROOT [--json]
-  nforge release ROOT --command-file FILE | --resume UUID | --status UUID
-  nforge land ROOT LANE… [--message MESSAGE] [--operation-id UUID] [--wait]
   nforge wait ID [--budget SECONDS]   # resume this agent session's own unfinished landing or run
   nforge docs [name]
   nforge --version
-  nforge pr list|candidate|create|checks|merge|diff|checkout [LANE_ID] [--repo ROOT] [--json [fields]]
-  nforge repo candidate [ROOT] [--json [fields]]
   nforge queue list|cancel OPERATION|prioritize OPERATION
   nforge github connect|status|disconnect|resume PROJECT [--url DEPLOYMENT] [--repo OWNER/NAME] [--operation-id UUID] [--no-mirror]
   nforge github-sync ROOT [--repo OWNER/NAME] [--branch main] [--dry-run | --push] [--operation-id UUID] [--rebind] [--wait-audit] [--audit-timeout-ms MS]
@@ -57,53 +51,50 @@ Usage:
   nforge settings [KEY [VALUE | --reset]]   # client parallel-work defaults (docs/parallel-work-defaults.md)
   nforge agent <root> <read> [json | --command-file FILE]
   nforge x <root> <operator-action> [json | --command-file FILE]
-  nforge owner refresh <root>
   nforge recover NEW_RUNNER --command-file REQUEST.json
   nforge policy <root>
   nforge set-policy <root> JSON
-  nforge import-native-git <git-root> <exact-commit> <new-directory>
-  nforge export-native-git <native-root> <exact-state> <new-directory> [--reuse <previous-export-dir>]
-  nforge restore-native <backup-directory-or-archive> <new-directory> [--journal HOSTED_WORK.json]
-  nforge init-native <directory>
-  nforge work <git-worktree-root> [command-json expected-revision]
-  nforge work <git-worktree-root> --command-file <json-file> <expected-revision>
-  nforge restore-work <backup-directory-or-archive> <new-directory> [--journal HOSTED_WORK.json]
-  nforge mcp <root> [--work | --agent]
+  nforge mcp <root> [--agent]   # source tools; --agent: a hosted checkout's agent tools
   nforge mcp-agent <forge-convex-deployment-url>
   nforge mcp-config <root> [--agent]
   nforge plugin-config <root> <new-directory>
-  nforge local-checks ROOT DEPLOYMENT PROJECT_ID [--name NAME]
   nforge doctor <git-worktree-root | forge-clone-or-lane-root>
   nforge index <git-worktree-root>
-  nforge status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json]
-  nforge status <git-worktree-root>   # existing graph JSON; --pending selects owner summary
+  nforge status ROOT [--json]   # a hosted checkout's status; elsewhere the source graph status
   nforge context <git-worktree-root> [search] [--limit N]
   nforge inspect <git-worktree-root> <name-or-id> [--limit N]
   nforge refs <git-worktree-root> <name-or-id> [--limit N]
   nforge imports <git-worktree-root> <relative-file> [--limit N]
   nforge source <git-worktree-root> <relative-file> [start-line] [end-line]
 
+Forge runs hosted projects only: a Git folder becomes one with nforge host ROOT, then work
+happens in its clone or Lanes (they keep working offline and land once back online).
 Query results are JSON; mcp speaks stdio. Queries refuse stale source; run index again after edits.
-Artifacts stay in <root>/.forge/index.json. Optional work publication/PR import/check uses GitHub through local gh credentials.
-MCP defaults to source tools. --work explicitly adds local work commands and GitHub import/publish/check. --agent exposes concise recorded workflow and selected source tools; login or configured FORGE_AUTH_TOKEN also enables native exchange and scoped hosted Work reads. Use mcp-coordination for hosted activity/messages and scoped Work reads.
+Artifacts stay in <root>/.forge/index.json.
+MCP defaults to read-only source tools. --agent exposes a hosted checkout's agent tools. Use mcp-coordination for hosted activity/messages and scoped Work reads.
 MCP-agent uses FORGE_AGENT_TOKEN from the process environment for explicitly delegated hosted source reads only.
 Source/context commands do not use the network or execute target source. No inference.
-Explicit work run-check/run-playbook and selected events under enabled automations execute configured commands under your OS account; worktrees are not sandboxes.
-Work read-history/export-history reads original local commit ancestry for exact clean Candidates without fetching.
-Work compare-candidates observes advisory committed-path overlap between two exact clean Candidates against their own bases.
-Work import-discussion records a mapped PR's provider page; read-discussion/export-discussion use its private receipt.
-Work import-native-git-contribution validates an exact native base, original Git commit/ref/full-bundle digest and creates a separate native Lane; authored identity remains an unverified claim, original Work/Channels are preserved, and retries retain the original operationId/pins.
-Work import-native-contribution validates a full native archive/digest/base/candidate and creates a separate Lane, preserving current Work/Channels. Offline claim metadata remains unverified; retries retain operationId and semantic pins.
-Work import-bundle validates a selected local full Git bundle/ref/digest/head and imports original commits into an isolated Lane, without verified contributor identity.
-Work export-work creates a private committed-source/history + Work/evidence directory; restore-work materializes a new local copy without starting recorded commands. Uncommitted edits/credentials/hosted grants are excluded.
-Work accept-channel explicitly advances a local accepted pointer; export-channel creates a full pinned Git bundle.
-Work define-check may select exact artifactPaths to retain build outputs before cleanup. Export-check returns original run/log/selected-output integrity; create-release may explicitly retain exact-Candidate buildRunIds. No command is repeated by export.
-Work define-check may optionally declare source/tool/environment/external inputs; assess-check-inputs compares a retained run with a selected Candidate without executing or reusing it. External claims and undeclared coverage stay unknown.
-Work define-invariant/assess-invariant retain optional named exact-Candidate check and policy-bound review evidence; optional githubReview selects a mapped PR and immutable GitHub account IDs for current source approvals. Accept-channel may explicitly select a policy version.
-Work put-planning-item/comment-planning-item/export-planning retain private local Issues, Initiatives, Intent links and discussion without changing source or acceptance.
-Work create-release pins a named original Channel acceptance; enabled release automations execute their selected local checks. Export-release returns the original Git bundle/digest manifest.
-Semantic coverage is partial. Global/package/tsconfig path resolution is not supported.
 `;
+
+const HOSTED_ONLY =
+  'was part of the removed native mode; Forge runs hosted projects only (nforge host ROOT makes a Git folder one).';
+/** Commands of the removed native-owner mode: each names its hosted replacement. */
+const REMOVED: Record<string, string> = {
+  work: `nforge work ${HOSTED_ONLY} Use nforge agent ROOT ACTION in a hosted checkout.`,
+  'init-native': `nforge init-native ${HOSTED_ONLY}`,
+  'restore-native': `nforge restore-native ${HOSTED_ONLY}`,
+  'restore-work': `nforge restore-work ${HOSTED_ONLY}`,
+  'import-native-git': `nforge import-native-git ${HOSTED_ONLY}`,
+  'export-native-git': `nforge export-native-git ${HOSTED_ONLY} A hosted project mirrors main to GitHub (nforge github connect).`,
+  owner: `nforge owner refresh ${HOSTED_ONLY} Use nforge pull in a clone.`,
+  land: `nforge land ROOT LANE ${HOSTED_ONLY} Use nforge agent ROOT land --save in the Lane.`,
+  pr: `nforge pr ${HOSTED_ONLY} Use nforge agent ROOT status, diff and land --save.`,
+  repo: `nforge repo ${HOSTED_ONLY} Use nforge agent ROOT status.`,
+  improve: `nforge improve ${HOSTED_ONLY} Use nforge agent ROOT friction-list.`,
+  'local-checks': `nforge local-checks ${HOSTED_ONLY} Use nforge x ROOT configure-runner.`,
+  release: `nforge release ${HOSTED_ONLY} Use nforge update for the CLI.`,
+  status: `nforge status --pending ${HOSTED_ONLY} Use nforge agent ROOT status in a hosted checkout.`,
+};
 
 async function main(args: string[]): Promise<unknown> {
   const runtimeCallbacks = (await import('./cli-command-ready.js')).cliRuntimeCallbacks(args);
@@ -112,31 +103,25 @@ async function main(args: string[]): Promise<unknown> {
     process.stdout.write(HELP);
     return undefined;
   }
+  if (Object.hasOwn(REMOVED, args[0]!) && args[0] !== 'status')
+    throw new ForgeError('BAD_ARGUMENT', REMOVED[args[0]!]!);
   if (args[0] === 'worker') return (await import('./worker-cli.js')).workerCli(args.slice(1));
   if (args[0] === 'metrics') return (await import('./metrics-cli.js')).metricsCli(args.slice(1));
-  if (args[0] === 'improve') return (await import('./improve-cli.js')).improveCli(args.slice(1));
   if (args[0] === 'docs') return (await import('./docs-cli.js')).docsCli(args.slice(1));
   if (args[0] === '--version') {
-    (await import('./gh-cli.js')).forgeVersion(args);
+    invariant(args.length === 1, 'UNSUPPORTED_FLAG', `Unsupported flag: ${args[1]}`);
+    const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      version: string;
+    };
+    process.stdout.write(`nforge version ${pkg.version}\n`);
     return undefined;
   }
-  if (args[0] === 'pr' || args[0] === 'repo') return (await import('./gh-cli.js')).ghCli(args);
   if (['login', 'logout', 'auth'].includes(args[0]!))
     return (await import('./auth-cli.js')).authCli(args[0]!, args.slice(1));
   if (args[0] === 'queue') return (await import('./queue-control.js')).queueCli(args.slice(1));
   if (args[0] === 'github') return (await import('./github-connect-cli.js')).githubConnectCli(args.slice(1));
   if (args[0] === 'github-sync') return (await import('./github-sync-cli.js')).githubSyncCli(args.slice(1));
   if (args[0] === 'recover') return (await import('./recovery-cli.js')).recoveryCli(args.slice(1));
-  if (args[0] === 'owner') {
-    invariant(
-      args[1] === 'refresh' && args.length === 3 && args[2],
-      'BAD_ARGUMENT',
-      'Use owner refresh ROOT.',
-    );
-    return (await import('./owner-root.js')).refreshOwnerRoot(
-      new (await import('./work-store.js')).WorkStore(args[2]),
-    );
-  }
   if (args[0] === 'pull')
     return (await import('./hosted-pull-cli.js')).hostedPullCli(args.slice(1), beforeDispatch, beforeLocal);
   if (args[0] === 'clone')
@@ -183,9 +168,6 @@ async function main(args: string[]): Promise<unknown> {
     return undefined;
   }
   if (args[0] === 'exchange') return (await import('./exchange-cli.js')).exchangeCli(args.slice(1));
-  if (args[0] === 'land') return (await import('./land-cli.js')).landCli(args.slice(1));
-  if (args[0] === 'release')
-    return (await import('./maintainer-release-cli.js')).maintainerReleaseCli(args.slice(1));
   if (args[0] === 'agent')
     return (await import('./agent-cli.js')).agentCli(args.slice(1), { process: true, ...runtimeCallbacks });
   if (args[0] === 'x')
@@ -216,8 +198,6 @@ async function main(args: string[]): Promise<unknown> {
       }),
     );
   }
-  if (args[0] === 'local-checks')
-    return (await import('./local-checks-cli.js')).localChecksCli(args.slice(1));
   if (args[0] === 'plugin-config') {
     invariant(
       args.length === 3 && args[1] && args[2],
@@ -234,78 +214,6 @@ async function main(args: string[]): Promise<unknown> {
     invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use mcp-agent <forge-convex-deployment-url>.');
     await (await import('./agent-mcp.js')).startAgentMcp(args[1], process.env.FORGE_AGENT_TOKEN);
     return undefined;
-  }
-  if (args[0] === 'import-native-git' || args[0] === 'export-native-git') {
-    invariant(
-      (args.length === 4 ||
-        (args[0] === 'export-native-git' && args.length === 6 && args[4] === '--reuse' && args[5])) &&
-        args[1] &&
-        args[2] &&
-        args[3],
-      'BAD_ARGUMENT',
-      'Use import-native-git <git-root> <exact-commit> <new-directory> or export-native-git <native-root> <exact-state> <new-directory> [--reuse <previous-export-dir>].',
-    );
-    return args[0] === 'import-native-git'
-      ? (await import('./native-git.js')).importNativeGit(args[1], args[2], args[3])
-      : (await import('./native-git.js')).exportNativeGit(args[1], args[2], args[3], args[5]);
-  }
-  if (args[0] === 'restore-native') {
-    invariant(
-      args[1] && args[2] && (args.length === 3 || (args.length === 5 && args[3] === '--journal' && args[4])),
-      'BAD_ARGUMENT',
-      'Use restore-native <backup> <new-directory> [--journal HOSTED_WORK.json].',
-    );
-    return (await import('./native-backup.js')).restoreNativeWork(args[1], args[2], args[4]);
-  }
-  if (args[0] === 'init-native') {
-    invariant(args.length === 2 && args[1], 'BAD_ARGUMENT', 'Use init-native <directory>.');
-    return (await import('./native-work.js')).initNative(args[1]);
-  }
-  if (args[0] === 'restore-work') {
-    invariant(
-      args[1] && args[2] && (args.length === 3 || (args.length === 5 && args[3] === '--journal' && args[4])),
-      'BAD_ARGUMENT',
-      'Use restore-work <archive> <new-directory> [--journal HOSTED_WORK.json].',
-    );
-    return (await import('./work-backup.js')).restoreWork(args[1], args[2], args[4]);
-  }
-  if (args[0] === 'work') {
-    if (args[1] === '--help' || args[1] === 'help' || args[2] === '--help') {
-      process.stdout.write(
-        'nforge work ROOT [--compact | COMMAND_JSON EXPECTED_REVISION]\nnforge work ROOT --command-file FILE EXPECTED_REVISION\nWithout a command, prints revision, head and collection counts. --compact returns Work attributes with deferred diff details. Recorded actions include release, Playbooks, history and GitHub publication. For concise task delivery use nforge agent ROOT ACTION --help.\n',
-      );
-      return undefined;
-    }
-    const compact = args.length === 3 && args[2] === '--compact';
-    const fromFile = args.length === 5 && args[2] === '--command-file';
-    invariant(
-      args[1] && (args.length === 2 || args.length === 4 || fromFile || compact),
-      'BAD_ARGUMENT',
-      'Use work <root> [--compact | command-json expected-revision] or work <root> --command-file <json-file> <expected-revision>.',
-    );
-    if (args.length === 2) return (await import('./work-cli-summary.js')).workCliSummary(args[1]);
-    const work = new (await import('./work.js')).WorkService(
-      args[1],
-      (await import('./work-autonomy.js')).localAgent(),
-    );
-    if (compact) return work.status({ compact });
-    let input = args[2]!;
-    if (fromFile) {
-      try {
-        input = readFileSync(args[3]!, 'utf8');
-      } catch {
-        throw new ForgeError('BAD_ARGUMENT', 'Work command file could not be read.');
-      }
-    }
-    let command: unknown;
-    try {
-      command = JSON.parse(input);
-    } catch {
-      throw new ForgeError('BAD_ARGUMENT', 'Work command must be JSON.');
-    }
-    if (command && typeof command === 'object' && 'action' in command && typeof command.action === 'string')
-      (await import('./candidate-names.js')).noticeViewAlias(command.action);
-    return work.dispatch(command, Number(args.at(-1)));
   }
   if (args[0] === 'mcp') {
     const explicitHosted =
@@ -329,49 +237,14 @@ async function main(args: string[]): Promise<unknown> {
     );
     return undefined;
   }
-  if (
-    args[0] === 'status' &&
-    args[1] &&
-    !(await import('./native-source.js')).nativeOwner(resolve(args[1]))
-  ) {
+  if (args[0] === 'status' && args[1]) {
+    invariant(!args.includes('--pending'), 'BAD_ARGUMENT', REMOVED.status!);
     const hosted = await (await import('./hosted-cli-status.js')).readHostedCliStatus(args[1]);
     if (hosted) {
       if (args.includes('--json')) return hosted.value;
       process.stdout.write(hosted.text + '\n');
       return undefined;
     }
-  }
-  if (
-    args[0] === 'status' &&
-    args[1] &&
-    (args.includes('--pending') || !!(await import('./native-source.js')).nativeOwner(resolve(args[1])))
-  ) {
-    const options: { detail?: boolean; ignored?: boolean; offset?: number; limit?: number } = {};
-    for (let index = 2; index < args.length; index++) {
-      const arg = args[index];
-      if (arg === '--detail') options.detail = true;
-      else if (arg === '--ignored') options.ignored = true;
-      else if (arg === '--offset' || arg === '--limit') {
-        invariant(/^\d+$/.test(args[index + 1] ?? ''), 'BAD_ARGUMENT', `${arg} requires an integer.`);
-        options[arg === '--offset' ? 'offset' : 'limit'] = Number(args[++index]);
-      } else
-        invariant(
-          ['--pending', '--json'].includes(arg!),
-          'BAD_ARGUMENT',
-          'Use status ROOT [--pending] [--detail] [--ignored] [--offset N] [--limit N] [--json].',
-        );
-    }
-    const store = new (await import('./work-store.js')).WorkStore(args[1]);
-    const pendingFixes = await (await import('./hosted-agent-cache.js')).hostedFixStatus(store);
-    const status = {
-      ...(await import('./pending-status-read.js')).readPendingStatus(store, undefined, undefined, options),
-      ...(pendingFixes ?? {}),
-    };
-    const metrics = await (await import('./self-metrics-source.js')).hostedStatusMetrics(args[1]);
-    if (metrics) status.metrics = metrics;
-    if (args.includes('--json')) return status;
-    process.stdout.write((await import('./pending-status-format.js')).formatPendingStatus(status) + '\n');
-    return undefined;
   }
   const ignored = args[0] === 'status' && args.includes('--ignored');
   if (args[0] === 'status') args = args.filter(arg => arg !== '--ignored' && arg !== '--json');

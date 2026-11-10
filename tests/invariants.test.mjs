@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+
 import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
@@ -321,39 +321,4 @@ test('explicit Channel policy blocks only selected acceptance, rechecks pending 
   await assert.rejects(dispatch(racing, 0), code('INVARIANT_UNSATISFIED'));
   assert.throws(() => git(root, ['rev-parse', `refs/forge/channel-moves/${racing.operationId}`]));
   assert.throws(() => git(root, ['rev-parse', 'refs/forge/channels/policy-race']));
-});
-
-test('WorkService and CLI expose the same optional policy commands without a second metadata owner', async t => {
-  const { root, work, view, define } = setup(t);
-
-  const command = define(),
-    body = JSON.stringify({ command, revision: work.status().revision });
-
-  const policy = (
-    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
-  ).result;
-  const assessment = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        resolve('dist/cli.js'),
-        'work',
-        root,
-        JSON.stringify({
-          action: 'assess-invariant',
-          id: policy.id,
-          definition: policy.definition,
-          viewId: view.id,
-          expectedHead: view.head,
-        }),
-        '0',
-      ],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(assessment.result.satisfied, true);
-  assert.equal(assessment.result.checks.length, 0);
-  assert.match(assessment.result.coverage, /not verified identity/);
-  assert.equal(work.status().invariants.length, 1);
-  assert.equal(work.status().runs.length, 0);
 });

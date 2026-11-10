@@ -1,41 +1,22 @@
 # Agent briefings
 
-For native owners, `nforge agent ROOT brief '{"situation":"resolve-conflict","laneId":"LANE_ID","agent":"codex"}'`
-(or `forge_brief`) returns `copyText`, Markdown and structured context. Use the
-linked Intent, Lane, Candidate, run or message id; fetch fresh context before
-acting. `brief --help` lists situations and agents. Templates make no model calls
-and include no source contents. Detected repository instructions win over project
-guidance, personal guidance, then Forge steps. Copy text is at most 1,200 characters,
-Markdown 32,000; shortening is identified and structured context stays complete.
+Forge has one client mode (hosted), and the checkout CLI and MCP do not expose `brief`.
+For builder context use `planning {"id":"ISSUE_ID","reconcile":false}`,
+`status {"laneId":"LANE_ID"}` and the repository's brief and rules; fetch fresh context
+before acting. Detected repository instructions win over project guidance, then Forge steps.
 
-Set local guidance with `nforge x ROOT guidance` and
-`{operationId,scope:"project"|"personal",agentGuidance}`. Each scope preserves up to
-4,000 characters verbatim, with retry-safe writes. Local guidance stays outside
-source/exchange; personal guidance is keyed by OS user. Hosted
-`agentGuidance.read/set` uses the current account. Owners and assigned guidance
-maintainers can edit project guidance; `setMaintainer` changes only that permission.
-
-Hosted `projectBriefings.brief({projectId,...briefInput})` checks current access;
-source-only grants cannot read Work. `projectWorkIndexActions.ensure` and
-`projectBriefingActions.prepare` prepare derived paths from State manifests, not
-file blobs. API support for client preparation is not permission for builders to
+Hosted `projectBriefings.brief({projectId,...briefInput})` is a separate API surface: it
+checks current access, and source-only grants cannot read Work. It returns `copyText`
+(at most 1,200 characters), Markdown (at most 32,000) and structured context; templates
+make no model calls and include no source contents. `projectWorkIndexActions.ensure` and
+`projectBriefingActions.prepare` prepare derived paths from State manifests, not file
+blobs. API support for client preparation is not permission for builders to
 auto-trigger index repair; follow [live-operation rules](lead.md#live-work-and-cost).
-Warm reads use structured records. Archive/Git path coverage can be unavailable;
-local brief supplies paths. Budget-limited notes/events/claims report partial
-coverage. Claims are advisory; Candidate context pins input Lanes. Resolve sync
-markers in the Lane and composed conflicts through Candidate resolution, then check.
+Budget-limited notes, events and claims report partial coverage. Claims are advisory.
 
-The hosted checkout CLI does not expose `brief` or `forge_brief`; the hosted API
-described above is a separate surface. Use `planning {"id":"ISSUE_ID","reconcile":false}`,
-`status {"laneId":"LANE_ID"}` and the repo brief/rules for builder context.
-
-Native CLI/MCP access to hosted context needs private `FORGE_DEPLOYMENT`, `FORGE_PROJECT_ID` and
-`FORGE_AUTH_TOKEN`. Missing binding reports unavailable coordination; failure never
-falls back silently. Message/handoff ids need it. `forge_task` exposes guidance;
-`forge_brief` exposes briefings. Failed checks retain bounded summaries; older ones
-may lack them. `setup.machine` (the `FORGE_MACHINE` label you set, otherwise `local`; never the hostname) and `setup.mcpConfigured` report observed setup,
-not liveness; unobserved values are null/false. Inspection reveals no credentials
-or client file contents.
+Hosted `agentGuidance.read/set` uses the current account and keeps up to 4,000 characters
+per scope verbatim. Owners and assigned guidance maintainers can edit project guidance;
+`setMaintainer` changes only that permission.
 
 ## Building Forge
 
@@ -81,7 +62,7 @@ merges (or why nothing can go).
    logs, never shared fixed paths. Keep a private handoff with observation time,
    saved head, operation id and next action for interruption recovery.
 7. Read hosted start/save/status overlap advice and `presence` notices before editing
-   and coordinate shared scope; native owners can use `peers`. Read
+   and coordinate shared scope; `peers {laneId}` reads the same evidence. Read
    `unacknowledgedOverlaps` and `behindMain` from `start`, and list your owned files
    in your first save message. Saved-path windows exclude unsaved peer
    edits; missing notices never prove independence. Answer blocking notices
@@ -108,7 +89,7 @@ merges (or why nothing can go).
     wait and all dependent work: never end the turn while one runs, and never end on a
     status line. Resume a killed shell with the receipt's blocking `waitCommand`:
     `nforge agent ROOT wait '{"operationIds":["ORIGINAL_UUID"],"until":"acceptance"}'`
-    (native: `until:"terminal"`; check-only: `{"runId":"RUN_ID"}`). It blocks up to
+    (check-only: `{"runId":"RUN_ID"}`). It blocks up to
     540 s, under agent shell limits; run it in the foreground, never sleep or end on
     a background task. Exception: when land prints `SUBMITTED` with `wake.command`,
     run that one settle wait in the background and block on it with your harness

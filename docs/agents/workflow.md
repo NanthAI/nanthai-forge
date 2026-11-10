@@ -205,20 +205,15 @@ MCP `forge_review` exposes hosted `show`, `diff` and `peers`.
   is stored and reads return `HISTORY_OVER_LIMIT`. A project with no stored history
   returns `HISTORY_UNAVAILABLE` with its message (on `status` too), never `INTERNAL_ERROR`.
 
-- `review`, `candidate`/`candidates` (`view`/`views`), `provenance`, `records`,
-  `brief`, `link`, `log`, `handoff`/`handoff-read`, `report`, `making-of`,
-  `pending-status` and `improve` are native-only. Hosted alternatives are Lane
-  `status`, `planning {reconcile:false}`, `observe {runId}` with its provider link,
-  and `comment-planning-item` for delivery evidence. They do not reproduce native
-  review/provenance/portable-handoff coverage.
-- `save --preview`, `save --handoff`, `save --report`, `land --resume-ready` and
-  `x undo-sync` are native-only. Follow the hosted receipt's recovery command.
-
-The [approved hosted parity table](hosted-parity.md) records each migration, fold
-and approved removal; implementation is pending in its owning Issues.
-
-Remaining examples are native-owner commands unless explicitly marked hosted;
-check the generated contract above before using them in a hosted checkout.
+- Forge has one client mode: hosted. A folder without a hosted marker is refused
+  with `FORGE_ROOT_UNAVAILABLE` and the next step `nforge host ROOT`.
+- Commands of the removed native mode (`review`, `candidate`/`candidates`,
+  `view`/`views`, `provenance`, `records`, `brief`, `link`, `handoff`/`handoff-read`,
+  `report`, `making-of`, `pending-status`, `improve`, `save --preview`,
+  `land --resume-ready`, `x accept`, `x undo-sync`, `x undo-revert`, `x clean`,
+  `x take`, `x guidance`, `x pre-edit`, `x define-check`) refuse with
+  `HOSTED_ACTION_UNSUPPORTED` and name the hosted command that does the job. The
+  [hosted parity table](hosted-parity.md) records each migration, fold and removal.
 
 ### Agent board (hosted)
 
@@ -368,23 +363,21 @@ Issue (`issue:ISSUE_ID`), or to the whole project (`project`).
 
 ## Verbs
 
-Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`status`, `tests`, `review`, `wait`, …). Operator and repair actions run as `nforge x ROOT ACTION` with the same JSON and authority. Every mode lowers to the existing action before its request identity is computed, so receipts, replays and wire names are unchanged.
+Agents use three verbs: `start`, `save` and `land`. Reads keep their names (`status`, `tests`, `diff`, `wait`, …). Operator and repair actions run as `nforge x ROOT ACTION` with the same JSON and authority. Every mode lowers to the existing action before its request identity is computed, so receipts, replays and wire names are unchanged.
 
 | Old name | Use now |
 | --- | --- |
 | `checkpoint` | `save` |
 | `sync` | `save --sync` |
 | `compose` | `save --candidate` |
-| `run` (native), `check` (hosted) | `save --check` |
+| `run`, `check` | `save --check` |
 | `confirm-tests` | `save --contract` |
-| `handoff`, `report`, `friction`, `decide` | `save --handoff`, `save --report`, `save --friction`, `save --decision` |
+| `friction`, `decide` | `save --friction`, `save --decision` |
 | `peer-ack`, `overlap-acks` | `save --overlap-answer`, `save --overlap-answers` |
-| `integrate` | `save --preview` |
 | `open`, `reopen` | `start --open`, `start --reopen` |
-| `finish` with `accept` (native) / hosted `finish` | `land --save` |
-| `finish` without `accept` (native) / hosted `accept:false` | `land --save --check-only` |
-| `land-ready` (native only) | `land --resume-ready` (native only) |
-| `accept`, `cancel`, `revert`, `undo-revert`, `undo-sync`, `abandon`, `complete`, `complete-merged`, `abandon-dormant`, `pin`, `clean`, `take`, `guidance`, `pre-edit`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `define-check`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
+| `finish` | `land --save` |
+| `finish` with `accept:false` | `land --save --check-only` |
+| `cancel`, `revert`, `abandon`, `complete`, `complete-merged`, `abandon-dormant`, `pin`, `install-hooks`, `uninstall-hooks`, `friction-triage`, `set-policy`, `configure-check`, `configure-runner`, `prioritize`, `source-pack` | `nforge x ROOT ACTION` |
 
 Old names keep working for at least one released version and print their new form once on stderr; stdout, JSON and replay identity do not change. Later sections still name the underlying actions (for example `finish`, `checkpoint`) where they describe receipts and wire fields; those are the actions the verbs above run. MCP tools keep their current names and arguments in this release.
 
@@ -436,7 +429,7 @@ The planned hosted Intent uses the Issue UUID as its identity; an empty legacy `
 
 - Run only the tests your change affects, plus typecheck, lint and format checks on touched files. Never run the full suite locally: `land --save` runs the project's check on the project's runner for the combined work of concurrent Lanes.
 - Use `land --save --check-only` to check your saved work, then `land` to combine ready Lanes. Batching requires a passed full solo gate for the exact saved head or the same Q3 reuse key on the same base main. An unchecked entry runs alone first; a solo failure returns directly to its author with failing test files, without batch prefix diagnosis. Configured native runners batch code changes; other paths retain ordinary checks and project acceptance policy.
-- Read hosted start/save/status overlap advice before editing; standalone native clients can read peers and presence to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
+- Read start/save/status overlap advice (and `peers`) before editing to see who is working on which files. Announce your paths, hand off related work and resolve overlap before it becomes a conflict. Missing observations do not prove independence.
 - Hosted concurrent finishes: eligible owner agents in automatic-accept projects defer their check reservation until queue selection, then group by default (`acceptance.landing: "serial"` opts out). Existing automatic-accept projects need no policy edit: queued finishes share one dependency-first stacked Candidate and one full check. `acceptance.batchMaxSize` fixes the cohort size; absent, it follows the recent shared-check failure rate, at most eight. With `acceptance.admissionCheck: true` (GitHub Actions runners), each arrival first runs its own affected set; a failing test ends that finish alone and only admitted finishes join a cohort. `"full"`, the default (`false` opts out), instead runs the project's configured check on any runner before the queue and lands an admitted change on its own run when main is unchanged or the conservative-impact proof holds ([pre-queue Lane checks](../pre-queue-checks.md)). The Channel pipelines up to six groups by default (`checks.concurrency` overrides, 1–16). Once a group has fixed its checked head and final receipt, the next eligible group composes and checks on top of that exact predicted main while the first check runs. Passing successors wait for publication order and keep their checks when the predecessor lands unchanged. Failure, cancellation or a changed predecessor generation discards dependent stacks and requeues their original selections; unrelated checks remain intact. The width bounds runner work, never the number of finishes users may submit. A retained entry or cohort with no member checking holds them for at most 5 minutes after its newest compose started; then the queue drops it and moves on, so a dead compose never stops other landings. Ordinary non-batchable work, including owner review and full-gated recovery, retains its existing queue path while the cohort waits. Existing priority can replace an unstarted cohort; reserved checks continue. Non-batchable work retains the same priority and fairness ordering. Stored metadata pages are reused across recipes and R2; new bytes go only to R2. Supervised, contributor, explicit dependency and review-required selections retain individual acceptance. A member independently proven to conflict with accepted main gets its retained conflict Candidate promptly while the others continue. A conflict only against an earlier unaccepted member of the same group stays advisory until the included group settles; Forge then recomposes the original selection on actual main automatically, including after a failed shared check. A passing batch publishes exactly its checked head with one main move and an ordered receipt per member pointing at the shared run. Each member keeps its own Lane completion inputs. Reverting any batch receipt reverses the shared main transition, including every batch member; the original Lanes and source remain available. If only main changes, the intact cohort recomposes together on current main and requests one new exact shared check; its previous pass never authorizes different bytes. A stale composition detected before check reservation also recomposes without starting a check. If the shared check fails a test, or the cohort cannot compose, it splits into groups that check at once: members the failing files name check alone and the rest recheck together (two halves when nothing is named); a single lands on its admission run when that is still exact, and several singles share one serial line, likely members last. A shared check that ends without a failing test (runner unavailable, Actions error, cancelled, timeout) checks the same cohort again, at most twice, then ends its members with `CHECK_NOT_PASSED` without marking them solo, so a resubmit can batch again. If governance or membership changes before publication, members return to serial exact single-Candidate checks. Before a split or fallback, retained per-file failures and member changed paths or declared contracts name likely members; suspects run after clean members and every status names its current wait. All overlapping batch contract pairs are considered, including pairs without the leader. Both members retain likely "fails together with" evidence, including when one passes alone; shared-batch evidence does not isolate a pair. Over-budget pairs and missing contract coverage are explicit. No additional diagnostic checks run. Batch fallback or settlement releases every unlanded member as solo in the same transaction and clears its live batch ID. The retained batch origin preserves serial order without depending on the leader: any member completion can select the next member. Cancelling a leader or member releases its peers atomically. Abandoning a selected Lane or Intent finds affected batch proposals through bounded indexed continuations, cancels those proposals and releases their peers; shared source and check execution is retained. A queued stall alarm repairs retained stale batch membership and reselects work automatically, without a resume command. Check/source completion events drive progress; an idle queue schedules nothing.
 - Governance: contributors propose and cannot write source or Channels directly; the owner accepts. Protected paths and review-required policy stop at `awaiting-review` for a person; never change policy to bypass review. When your landing waits for owner review, run `nforge agent ROOT approve-link '{"operationId":"ORIGINAL_UUID"}'` (one query) and hand the printed link to the project owner; keep your `wait` running, it returns on their decision (`LANDED`, or terminal `REVIEW_DECLINED` with their reason). For an owner go on a Lane that no path rule protects, use `request-approval` (above). `policy` and `set-policy` (`nforge x ROOT set-policy`) work on hosted projects, one Convex call each; the server enforces owner authority on `set-policy`. A pinned landing attempt stays valid across edits that cannot change what it may accept (`preset` label, `notify`, `githubMirror`, `agentDefaults`, `trust` while `enabled:false`); an edit to the gate, mode, `protectedPaths`, `autoActors`, checks, lifecycle or enforced trust invalidates queued attempts (`POLICY_CHANGED`) and the reply's `invalidatedLandings` says how many were queued. A landing already held for review stays pinned to the policy its attempt was prepared under. approve-link `policy`/`policyNote` names that attempt and says whether the policy changed since; after a change its held reason says so too. It re-reads the current policy only on a fresh attempt: the owner approves after main moved or the policy changed, or you withdraw and land again. That attempt holds once more if review is still required, otherwise it lands in your name without review ([governance](../operations/governance.md)). See [security](../security.md).
 - Who accepted a landing: read `submission.acceptance.acceptedBy` (in `land`, `wait`, `observe` and `landings`; `LANDED` is followed by `ACCEPTED BY A PERSON @handle: …` or `AUTO-ACCEPTED (submitted by @handle): …`), never `submission.actor`. `actor` is the submitter, and an owner's agent shares the owner's handle, so `actor` alone cannot tell a person's acceptance from an automatic one. `acceptedBy.kind` is `person` when a person accepted it (the owner on the review page or `/approve`): `actor` (their Forge handle; absent for readers who may not see people), `at` (when they accepted), `head` (the Candidate they accepted), `paths` (the protected paths in it) and `carried: true` when main moved and identical source was checked again and landed with that acceptance. The landing's Lane also gets one board note saying so. `kind: "auto"` means project policy accepted it after its check passed and no person reviewed it; `actor` is then the submitter. `note` restates it and never names anyone. Landings from before this field have none in `observe`; `landings` falls back to the receipt actor (`fromReceipt: true`; its kind is `person` or `agent`, `at` is the landing time). A landing held for review that then lands as `person` was reviewed: do not revert it as unreviewed. Agents never skip `acceptance.protectedPaths` or the owner-approval paths, on any project, the owner's own agents included; only the owner person does ([governance](../operations/governance.md)).
@@ -506,8 +499,7 @@ dispatches reconcile the original run without allocating a duplicate. A second
 request for the same saved Lane/head returns the existing landing handle, including
 its terminal outcome. The handle contains the canonical operationId and entryIds.
 Omitted wait and `wait:false` durably submit and return the current phase immediately.
-An unbound native owner's service drives native requests; bound server-authority
-projects submit to the hosted controller. Requester death does not cancel the goal.
+Requests submit to the hosted controller. Requester death does not cancel the goal.
 `nforge agent ROOT landing '{"operationId":"UUID"}'` reads its current phase and
 outcome without driving it or taking the owner writer lock.
 
@@ -623,91 +615,6 @@ Initial checks on different Lanes run in parallel through the machine-wide check
 
 Configured native runners can check queued code candidates as ordered prefixes; `land-ready` resumes retained batches and cancellation preserves earlier passing prefixes. A batch pins its selecting driver's clean environment snapshot for runs and resumed drivers. Incompatible entries report changed field names; legacy entries without a snapshot report a fingerprint mismatch. Finish skips another check/audit for already-accepted source only when every input Lane/head has recorded acceptance in the destination Channel's retained history, then applies the configured completion policy. See [landing batches](../operations/landing-batches.md).
 
-### Contract changes
-
-This contract analysis applies to native owners, not hosted overlap receipts.
-
-Sync, finish and Lane status receipts carry a compact `peers` block (see `forge_peers`). Forge compares exported functions, types, interfaces, classes, values and schema/validators (TS/JS; Convex tables and endpoint `args`/`returns`) syntactically, without running code or a type checker. Python, Java, Rust and Go get declaration headers from the same parsers as the structural analysis (Python names without a leading `_`, Java members that are not `private`, Rust items with any `pub`, every Go package-level declaration because the rest of the package sees unexported names too; a file that does not parse counts as a whole-file change). Whole files named under `contracts.interfaces` in an optional committed root `forge.json` (`{"contracts":{"interfaces":["api/**"]}}`) are contracts too; the older `.forge/contracts.json` (`{"interfaces":[…]}`) is read only when `forge.json` has no `contracts`, and only from a State that already holds it, because a save never captures `.forge/`. `numbers` and `generated` are not interpreted. A delta is `{file,export,kind:"added"|"removed"|"changed"}`; bodies, comments and formatting are not contracts.
-
-- A Lane that changes a contract sees `dependents`: open Lanes whose edited or claimed code imports it (named, namespace, dynamic or one barrel hop). Unsaved edits count. `peers` with `detail:true` adds `changes`.
-- A dependent Lane sees `contracts` after the change lands in main: the delta it uses and `next:"sync and recheck: …"`. The notice is derived from main, so it clears once the Lane has synced. Other Lanes see nothing.
-- An agent acceptance of a Candidate that lacks a landed contract change its edited code uses fails with `CONTRACT_RESYNC_REQUIRED` and the delta (`error.changes`). A Candidate containing current main with a passing check on that exact Candidate satisfies it. `finish` treats the error like `CHANNEL_CHANGED`: it syncs, rechecks and re-accepts within `maxRetries`, so agents rarely see it; on exhaustion the receipt `code` is `CONTRACT_RESYNC_REQUIRED`. A Candidate that changes a contract an open Lane uses never takes the optimistic path. The same gate covers code without import-level facts, by package: when main changed a contract in a package (a Go, Python, Java or Rust export change, or any change to a file in a language without export facts), and the Lane edited a source file in that package or in a package that depends on it, acceptance fails with `CONTRACT_RESYNC_REQUIRED` (`error.changes` lists main's changed files; the message names the package). A body-only change in a language with export facts does not fire it. A file the graph cannot place gates any non-TS/JS source edit of the Lane. Each package graph is built once per check, and only when main changed such a contract. A person accepting is not gated by this check.
-- Code without import-level facts never counts as independent. A change to a code file in a language without export facts (C#, Kotlin, Swift, C/C++ and others) is "contract unknown", and so is a Python, Java, Rust or Go export change. The manifest package graph places each such file in its package. When another open Lane changed a source file in that package or in a package that depends on it (or the other way round), the Candidate stays off the optimistic path, and the finish receipt's `view.optimisticHold` names the Lane and the files. A file the graph cannot place holds against any other source change. Test-only Go files and docs never hold.
-- Person review of contract changes is the existing opt-in `acceptance.protectedPaths` (default none): a change to a protected file, contract or not, stops at `awaiting-review`.
-
-Autonomy still applies on every attempt. `laneUpdates:"ask"` stops at `sync-required`. A supervised/protected-path finish stops at `awaiting-review` with its checked Candidate. A person accepting a Candidate whose Channel has moved receives **“main moved; re-check needed”** (using the selected Channel's name): sync, check a new Candidate, then review and accept it. Forge does not transfer that person's approval to a newly composed or rechecked Candidate. A queued finish that now requires review reports the same requirement without automatically retrying into acceptance.
-
-### Local peers and conflict notices
-
-Hosted Lanes use `peers` through `forge_review` and [start/save/status overlap advice](#hosted-overlap-advice). The wider `forge_peers` analysis below applies only to native owners.
-
-Conflict notices carry optional typed `evidence`: native `text` source conflicts,
-`contract` diagnostics, `combined-static` preview failures with their observed
-passing controls, and recorded `check` failures. Static/semantic failures have no
-text markers. Check evidence links the exact Candidate, run, definition, runtime,
-selection and stdout/stderr log operation; a prefix failure does not establish
-standalone or minimal blame. Retained landing diagnosis and existing Fix-main
-Intents appear in Lane ownership/brief context even after a lost notification.
-
-An optional `repairs:["NOTICE_ID"]` on the existing `handoff` command declares
-which retained notices the saved repair addresses. This retains the repair
-Lane/head and handoff identity in the Intent note; it starts no resolver or check.
-Notice `resolutions` link subsequent exact-input Candidates, their recorded runs
-and actual acceptance receipts with compensation guidance. A declaration is not
-proof of a successful repair. Later saves make the old repair head historical;
-a changed Candidate must obtain its own check evidence. Existing Fix-main Intents
-link their repair Lanes through the same context without creating another task.
-
-Notice `syncs` link guarded sync results, original/target heads, structured
-`undo-sync` commands and completed undo operations, including the checkpoint that
-preserves edits before a forced undo. Saving a conflict resolution retains the
-original sync operation identity for replay and undo, separately from the new
-checkpoint operation. Reading context changes no source. Automatic
-updates still obey `laneUpdates`, saved-head and dirty-work guards; `ask` remains
-an explicit sync decision. Ordinary undo refuses newer dirty work. An explicitly
-forced undo retains those bytes before restoring the working copy. Original
-base/left/right objects and old check evidence remain available as history.
-
-Native start/save/sync/finish/status receipts include an advisory `peers` digest.
-`scope.paths` adds call relevance; start retains planned claims until closure.
-Receipts use existing indexes, so skipped source/dependency work reports
-`coverage:"local-incomplete"` and `more`. For complete selected observations use
-native `peers {"laneId":"…","detail":true}` or `forge_peers`. Save before sync;
-a clean save retains its head, and sync identifies its resulting saved head.
-
-`peers.predictive` compares live changed regions with peer saves; explicit reads
-compare every open peer's latest saved regions. Entries pin the peer head,
-Intent, file and one-based `{start,lines}` base ranges (zero lines is an insertion
-before `start`). Risk is high for overlapping/nearby ranges (within three lines),
-shared changed exports and structural path changes; exact renames are delete/add.
-Disjoint same-file regions require `detail:true`. `alignedPeer` maps differing
-bases into this Lane's coordinates. Unsupported text, costly alignment and the
-syntactic contract scanner's blind spots remain unknown. Suggested order is
-ready, smaller change, then earlier start: land that Lane, then sync the other.
-This is advice, never a source lock or landing gate.
-
-Saved summaries are keyed by base/head and refreshed off the mutation path.
-Receipts rank shared saved/claimed paths, recency and Lane ID; unrelated Lanes
-cannot displace overlaps. Live contract analysis and pre-compose previews cover
-up to three peers, with at most sixteen extra ancestry States per receipt.
-Compact JSON shows ten overlapping Lanes within 12,000 bytes; stderr shows three
-high-overlap lines. `more` counts omitted Lanes, not extra regions for one pair.
-Native detailed reads rebuild missing/corrupt summaries and finish selected reads,
-returning hunks/object pins, Intent, save message, actor/workspace and known
-sessions (empty means unknown). Predictions use saved peer bytes even when newer
-unsaved edits exist; separate native path observations may include live files.
-
-Bilateral journal alerts survive unavailable fresh analysis. Only mutating
-receipts mark returned notices delivered; detached refreshes do not. Known landed
-conflicts retain their accepted Lane/Intent attribution across later acceptances.
-Source failures and omitted evidence never establish independence. Native
-`peer-ack {operationId,laneId,noticeId,choice,text?}` records `accept-order`, `swap`
-or `split` as advisory decision notes; both participants see them. Replay the
-same ID/inputs after an unknown reply. Recomposition clears changed/resolved
-notices; the receiving agent resolves source without an invoked resolver model.
-Hosted overlap records and answers use the separate [hosted advice](#hosted-overlap-advice).
-
-
 ## Overlap before the first write
 
 The first successful command of the installed CLI installs Claude Code and Codex hooks, even with
@@ -734,7 +641,7 @@ nforge x ROOT uninstall-hooks '{"scope":"project"}' # project off on this machin
 nforge x ROOT install-hooks '{"scope":"project"}'   # reverse project off
 ```
 
-Project switches use hosted project ID or native owner path, across its Lanes
+Project switches use the hosted project ID, across its Lanes
 on this machine. Both switches apply; preferences use `~/.config/forge/edit-hooks.json`.
 `PreToolUse` covers Claude `Edit`, `Write`, `MultiEdit`, `NotebookEdit` and Codex
 `apply_patch`, including move destinations. Shell writes and clients without
@@ -763,39 +670,17 @@ per Lane/path/session; repeats make zero calls and emit no cached private eviden
 A new session checks again. Idle calls, polling, per-item calls and hosted writes
 are zero. Unreachable servers, invalid responses and deadlines report incomplete
 coverage and continue. The supervisor fails open after one second, below the
-client's two-second timeout; hosted RPCs abort after 650 ms. Failures go to stderr;
-native owners also retain the existing local fail-open log. Hosted first-write
+client's two-second timeout; hosted RPCs abort after 650 ms. Failures go to stderr. Hosted first-write
 delivery telemetry remains incomplete.
 
-Native source retains opaque session/turn attribution; hosted hook observations
-add no save attribution. No transcripts or prompts are read. Delivery never
+Hook observations add no save attribution. No transcripts or prompts are read. Delivery never
 acknowledges; missing evidence never proves independence.
 See [hosted advice](#hosted-overlap-advice) for start/save/status notices.
 
 Client contracts: [Claude hooks](https://code.claude.com/docs/en/hooks) and
 [Codex hooks](https://learn.chatgpt.com/docs/hooks).
 
-Checkpoint, compose, run and accept also exist as separate actions. Checkpoint takes `laneId` and `message` (Git Lanes need staged edits; optional `expectedTree` binds a review). Compose takes `operationId`, `intentId` and `inputs:[{laneId,head}]`; it does not accept.
-
-Validation errors identify invalid field paths; use full source digests rather than abbreviated heads. Review only the needed detail. Lane parameters are `{"kind":"lane","id":"LANE_ID","expectedHead":"HEAD","paths":["src/file.ts"]}`. Candidate parameters also include `expectedBase` and `expectedStatus`. Omit paths for changed-path summaries. Review bodies default to `maxBytes:12000` (1024–48000); `context` accepts 0–10 lines and `limit` accepts 1–100 files. Continue with returned `nextOffset` and `reviewTree`; a changed live selection is detectable with `expectedReviewTree`. Git live review and staged checkpoint selection have separate pins. Legacy full review remains available.
-
-Native-only `diff {laneId}` compares base to live source; `diff {from,to}`
-compares full immutable State digests. `paths` filters exact relative paths for
-contextual hunks; omit it for summaries. Review budgets, `offset`, `limit`,
-`context` and `nextOffset` apply. Results pin `base`/`head`; `expectedHead` detects
-saved-head movement and `expectedReviewTree` detects live pagination changes.
-State comparisons read no live files.
-
-Hosted `show` uses `channel` or `laneId`, as described [above](#hosted-reads-and-coordination-limits).
-Native `show {state,path}` uses a full State digest, or `laneId` for its saved
-head; unsaved edits are excluded. CLI writes exact bytes without JSON/newline.
-Symlinks return retained link bytes, never targets; missing files fail. Binary,
-invalid UTF-8 and over-1-MiB files require `force:true`; nothing is clipped.
-Native MCP `forge_review` supports both actions; `show` returns `{revision,result}`
-with `state`, optional `laneId`, `path`, `blob`, `mode`, `size`, `encoding`, `content`.
-Encoding is `utf8` or lossless `base64`.
-
-Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored`, or `pending-status` with `ignored:true`, reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
+Local source exclusions use nested `.gitignore` and `.forgeignore` files; Forge rules follow Git rules in each directory. `nforge status ROOT --ignored` reports local excluded paths and matching rules without their contents or remote calls. Ignored working files are not stored, backed up or shared; historical States remain intact. See [source exclusions](../operations.md#source-exclusions).
 
 Coordination before the queue (hosted, Issue 1eb42254). Each pair notice names the peer's landing phase and an ETA (`peer is editing (no landing yet)`, `peer landing is checking, lands in about N min`, `peer is admitted (its Lane check passed), lands in about N min`; `peerLanding` on the item) and, from the checkout's manifests, the `package` that owns the file. A path saved by 3 or more live open Lanes (yours included) adds one advisory `hot-file` note (at most two per read, each shown at most three times per Lane on one machine; idle Lanes and `detail`/`path` reads add none): consider a per-Issue file or landing it first; nothing is held. `start '{"scope":{"paths":["src/api/","README.md"]}}'` (at most 50 entries; one ending in `/` covers everything below it) reads the saved files of live peers inside that scope before your first edit and adds one advisory `declared-scope` item per peer. When a peer that touches your files is admitted, the receipt's `overlapNotice.stack` offers `nforge agent . sync '{"laneId":"YOURS","stackOn":"PEER"}'`: the sync merges the peer's pending head (not main) and your landing then waits for the peer's. It is refused with `STACK_PEER_NOT_LANDING` when the peer has no live landing and `STACK_ALREADY` on a Lane that is already stacked. With the project setting `agentDefaults.stacking:"auto"` the next plain `sync` stacks on the offered peer by itself (and falls back to a plain sync when the peer's landing has ended). If the peer's landing fails, `land --save` refuses with `STACK_PARENT_FAILED` and the one command to run: the next `sync` re-pins the Lane to main and keeps only its own changes, then the landing checks once. Cost: no added call; the overlap read looks up the landing phase of at most 3 named peers (bounded index reads), and a Lane with no peer reads nothing new.
 
@@ -819,9 +704,8 @@ role or local autonomy policy. The error names the hosted project and an
 explicitly addressed `nforge agent ROOT finish` command for the hosted landing
 queue. Review and accept on the hosted project page, or submit a hosted Lane with
 `{"url":"DEPLOYMENT_URL","projectId":"PROJECT_ID","laneId":"HOSTED_LANE_ID","accept":true}`.
-The standalone native landing worker cannot move its Channels. There is no local override: if hosted is unavailable, landing pauses
-and editing continues. Unbound projects, and bound projects before the switch or
-after a rollback to `native-owner`, accept locally as before.
+There is no local override: if hosted is unavailable, landing pauses
+and editing continues.
 
 
 For hosted Lanes, the same `nforge mcp ROOT --agent` detects the hosted checkout or
@@ -846,34 +730,7 @@ Progress reads never schedule work or renew leases. An active source wait return
 a stopped job immediately and uses the latest observed lease at its deadline,
 so a dead job is not reported as merely submitted after sixty seconds.
 
-For native MCP source queries after start, pass the returned `laneId` on every selected call. Omission uses startup source. `nforge mcp-config ROOT --agent` emits an optional configuration fragment without editing client settings. Autonomy and reversible-action records use Work format 11; keep a capable reader for recovery. Local tools operate under your OS account, without a sandbox claim. See [milestone qualification](../status.md) for actual measurements, package/source pins and remaining acceptance.
-
-On native owners, a Forge prompt can use `nforge agent ROOT brief` (or `forge_brief`) for fresh context. On hosted checkouts, read the linked Issue with `planning {id,reconcile:false}`, Lane `status` and the repo instructions; `brief` is unavailable.
-
-## Reproduce a small installed delivery
-
-Put the installed package's `node_modules/.bin` and Node 24.22.1+ (24.x) on PATH. Use a new directory, then run:
-
-```sh
-mkdir forge-agent-demo
-printf 'one\n' > forge-agent-demo/answer.txt
-nforge init-native ./forge-agent-demo
-```
-
-Define the local check below, replacing `/absolute/node` with the supported Node executable.
-
-```sh
-nforge x ./forge-agent-demo define-check '{"name":"verify","executable":"/absolute/node","args":["-e","if(require(\"fs\").readFileSync(\"answer.txt\",\"utf8\").trim()!==\"two\")process.exit(1)"]}'
-nforge agent ./forge-agent-demo start '{"outcome":"Change answer to two"}'
-```
-
-Write `two` into `answer.txt` at the returned Lane `path`, then land:
-
-```sh
-nforge agent ./forge-agent-demo land --save '{"laneId":"LANE_ID","message":"Answer two"}'
-```
-
-A new supervised demo returns `status:"awaiting-review"`, `complete:false`, its passing run and exact Candidate/source IDs. Accept the Candidate as a person through the authenticated local server. To deliberately enable automatic acceptance, the local owner can first run `nforge x ./forge-agent-demo set-policy` with `{"operationId":"UUID","preset":"trusted"}`; `land --save` then returns `complete:true`, `status:"accepted"` and an acceptance receipt. Repeating the request plus its `resolved` values returns the original identities without repeating the check. Use `land --save --check-only` for check-only work. For a failure example, repeat in another fresh demo and write `three` before its first finish: the returned failed run remains evidence and main stays unaccepted; fix through a new checkpoint/Candidate/run, preserving the failed operation. Existing [standalone walkthrough](../workflows.md) covers hosted recovery, conflict/retry, releases and optional GitHub publication through their original owners.
+For fresh context, read the linked Issue with `planning {id,reconcile:false}`, Lane `status` and the repo instructions.
 
 ## Concurrent agents and the human cockpit
 
@@ -922,51 +779,9 @@ Close finished work with `nforge x ROOT complete '{"laneId":"LANE_ID"}'` (or `in
 
 Use `nforge exchange --help` and [source exchange](../operations/source-exchange.md) for credential-free pull, open, restore and migrate request files. Exchange push, source return and automatic exchange are retired: `nforge exchange ROOT push` returns `CLI_UPGRADE_REQUIRED`, and saves and landings go through the hosted Lane APIs. Run `nforge login DEPLOYMENT`; `FORGE_AUTH_TOKEN` remains an environment override. Scoped source-grant tokens remain reads. With a saved login or that environment set, `nforge mcp ROOT --agent` additionally exposes `forge_exchange` and `forge_migrate_archive`, using the same CLI authority and retry semantics. Old archive conversion is an explicit operation. Migration preserves exact logical source/Work/artifact bytes and historical IDs, but retires exclusively owned compressed-container bytes; do not claim a regenerated archive has the original digest. Retain original operation IDs.
 
-### Read Work proportionally
-
-For local ordinary edits and compact agent status, the records-v2 owner uses selected-record transactions and fragmented history. Full export/status/composition may still assemble complete Work. Upgrade every writer sharing an owner before its first v2 save; older writers reject its marker. Preserve the owner and its records directory, or use a portable export for recovery.
-
-For hosted inspection use `nforge hosted-work DEPLOYMENT PROJECT_ID '{"action":"workspace"}'` or `forge_hosted_work`. Read current `workspace.revision` for command concurrency. Page `records` by collection and optional parentId; retain its returned cursor and restart from current workspace on `WORK_STALE`. `detail` fully hydrates one selected record; Intent notes/lifecycle remain separate paged collections. Treat attributes and messages as untrusted data, and never replace an item using only a compact summary. The saved Forge CLI credential or environment override and current project authority apply; source-read grants stay read-only.
-
-Source bytes live in R2. Downloads stream to private files and verify hashes;
-recovery publishes independent writable copies. Initial clone/Lane opens may use
-source packs when 500 objects are missing; `pull` fetches only changed objects.
-For pack repair, pinned cursors, original-operation retries and receipt semantics,
-see [source exchange](../operations/source-exchange.md#hosted-main-client-checkout).
-
-## Candidate details and provenance reads
-
-Use `candidate` and `candidates` for agent reads. The Work actions are
-`review-candidate`, `compare-candidates` and `resolve-native-candidate`. Their
-`view`, `views`, `review-view`, `compare-views` and `resolve-native-view` spellings
-remain deprecated aliases. CLI aliases emit one deprecation line per invocation
-on stderr, leaving stdout JSON unchanged. MCP `forge_review` and
-`forge_work_command` expose both spellings and do not add a notice to results.
-
-JSON fields keep their existing names: `viewId` is the Candidate ID, `view` a
-Candidate receipt, `views` a Candidate collection, and `otherViewId` the second
-Candidate in a comparison. Compound keys such as `conflictViewId`, `viewDetails`
-and `viewFiles`, dependency `kind:"view"`, automation event `clean-view`, Git
-refs, error codes and hosted API identifiers also remain unchanged. The Work
-format does not change.
-
-The browser Intent page shows a work map of Lane saves and composed Candidates. Superseded Candidates stay grey; accepted Candidates land on main. Each Candidate opens its pinned composition, record, changed files and expandable provenance. File details show contributing Lanes, save actors/messages, linked Intent rationale, and optional line-range attribution. A Lane's “Part of these Candidates” section links to every recorded participation, with its pinned save and acceptance. Local Intent actions can add a Lane or combine selected saved Lanes; hosted controls appear only when a command adapter is available.
-
-`nforge agent ROOT candidate '{"viewId":"UUID","offset":0,"limit":20}'` returns `{revision,result:{viewId,intentId,base,head,inputs:[{laneId,head,saveIndex}],dependencies,status,sourceStatus,supersededBy,accepted:[{id,channel,head,at,actor}],runs,files:{items:[{path,status,additions,deletions}],total,nextOffset}}}`. Status is `ready`, `conflict`, `superseded` or `accepted`; accepted Candidates retain their supersession link. Input identities for supersession are the Intent and unordered Lane IDs; heads may advance. A save index of `-1` means the input has no save at that head.
-
-`provenance {viewId,offset?,limit?,file?,lines?}` returns the same pins with a file page. Each file contains `before`/`after` blob pins, `historyComplete` (whether the required saved States were retained), `contributors:[{viewId,laneId,head,intentId,outcome,saves:[{saveIndex,head,parent,message,at,actor,actorSource,laneActor,operationId,kind,before,after}]}]` and `why:[{intentId,outcome,notes:[{id,kind,excerpt,at,anchor?}]}]`. Actor-bearing saves use Work format 12 so older writers refuse rather than discard attribution. Save actors are local declarations; legacy missing actors are `null`, with the separately labelled Lane starter where available. Notes use stable `intentId:index` IDs and 500-character excerpts, never repository contents. Pinned Candidate dependencies contribute their Lanes too. `lines:true` adds `{status:"available",ranges:[{startLine,endLine,source,attributions:[{laneId,saveIndex,head}]}]}`. Ranges are one-based and inclusive; `source` distinguishes `save`, `base` and `unattributed`. The alignment cache uses exact blob pairs. Binary input, files over 1 MiB/20,000 lines or expensive diffs produce `{status:"unavailable",reason,ranges:[]}`; exact line counts can likewise be `null`. Source and saves remain readable through existing source APIs.
-
-`candidates {laneId,offset?,limit?}` returns `{revision,result:{laneId,items,total,nextOffset}}`, newest first, including each Candidate's acceptance records. Agent MCP exposes these actions through `forge_review`.
-
-Hosted UI metadata uses `projectViewReads.read({projectId,generationId?,action:"view"|"provenance"|"views",viewId?,laneId?,file?,paginationOpts:{cursor,numItems}})`. `projectViewActions.read` accepts the same input plus `lines?` and resolves exact counts and attribution from native object checkpoints. Both return JSON strings; file pages use `files.nextCursor`, Lane pages `nextCursor`. Each publication derives `viewDetails`, `viewFiles`, `laneViews`, `viewAcceptances` and blob-size records once. Queries select those indexes rather than scanning retained Work history; source actions read only selected file blobs and their changed saves. The metadata query includes blob pins for the on-demand action. Runs and rationale notes include the first 100 entries with `runsMore`/`notesMore`; `relatedRecords` identifies the existing paginated `projectWorkIndex.records` collections for all retained records. The most recent acceptance is inline; the acceptance collection retains every Channel landing. Current project authority is checked on every read/page and again after asynchronous source reads. A moving generation reports `WORK_STALE`; unavailable source coverage is explicit and never hides retained local Work.
-
 ### Unsaved edits after a crash
 
-On native owners the presence observer snapshots each open Lane about 5 seconds after its files stop changing (at most every 30 seconds, and within a minute of continuous editing). An auto-snapshot is a content-addressed State whose parent is the Lane head. It is not a save: it adds no checkpoint, moves no head, syncs nothing and is never pushed. Each open Lane keeps its latest auto-snapshot regardless of age. Completed or abandoned Lanes retain that protection for seven days after the later of the snapshot and latest closure; reopening restores protection immediately. After the window, `clean` removes the pointer/cache and native object collection can reclaim only objects unreachable from all other retained source and history. Saved checkpoints remain retained. Capture rereads only files whose metadata changed; a Lane that is busy (sync, merge, checkpoint) or has a pending merge is skipped. A Lane that matches its head has no auto-snapshot.
-
-After an agent dies, `status {"laneId":…}` returns `lane.autoSnapshot` (`state`, `at`, `changedPathCount`, up to 20 `paths`, `notice`); owner `status {"detail":true}` lists them as `unsavedEdits`, and `start` with the same `actor` warns about that actor's Lanes. The edits normally remain in the Lane folder, so `checkpoint` saves them. If the folder is gone, read them with `diff {"from":HEAD,"to":STATE}` and `show {"state":STATE,"path":…}`. Disable with `nforge set-policy ROOT '{"operationId":"UUID","autoSnapshot":false}'`.
-
-**Hosted Lanes** (Issue 7ac4e32f): this runs behind policy `autoSnapshot` and is off unless set.
+Hosted Lanes snapshot unsaved work behind policy `autoSnapshot` (Issue 7ac4e32f); it is off unless set.
 
 - **What triggers a snapshot:** each Forge command run in a Lane checkout first snapshots the checkout's working files, if they changed since the last snapshot.
 - **What it costs:** unchanged files cost no call. A changed snapshot costs `prepare`, `commit` and create-only R2 uploads of only the changed files. File bytes never go into Convex.
@@ -984,55 +799,6 @@ After an agent dies, `status {"laneId":…}` returns `lane.autoSnapshot` (`state
 The receipt records reason, actor, time and operation id. Retry with the original operation id and identical input (including returned `resolved` fields); a retry after `reopen` returns the original abandonment without closing the work again. `reopen` restores an abandoned Lane or Intent as active; reopen child Lanes separately after an Intent cascade. `clean` can reclaim abandoned Lane workspaces under its existing capture checks. Abandoned Lanes leave Now and open lists, and appear as grey **Abandoned** under Done/Closed.
 
 MCP uses `forge_task` with `command.action:"abandon"`. Hosted abandonment goes through the hosted Lane APIs; `nforge exchange ROOT push` is retired. Native abandonment records use Work format 13; upgrade readers/writers before sharing an owner with them.
-
-### Local presence and hosted activity
-
-Native lifecycle commands record local presence beside Work, including for unbound
-owners. Each Lane and actor has a separate session. Local observation retains the
-existing filesystem observer and presence display rules, but derives no source
-paths and sends no hosted metadata. Hosted lifecycle and source changes use the
-authoritative hosted APIs; explicit coordination remains available for activity.
-There is no owner acceptance listener, activity delivery queue or retry sender.
-Old listener and sender CLI switches return `CLI_UPGRADE_REQUIRED`; retain local
-edits and operation IDs when installing the matching release. Historical queue
-records remain readable for recovery and are never replayed by a background worker.
-
-
-## Making-of record
-
-`nforge agent ROOT making-of '{"intentId":"UUID"}'` (MCP `forge_work_overview`) returns how one Intent was made, derived on read from retained Work and local presence. Nothing new is stored in Work. The result lists `lanes` (state, starter, `saves` with kind `save`/`sync`/`undo-sync`, message, actor and time), `runs` (check, status, scope, `queuedAt`/`startedAt`/`endedAt`, `queuedMs`, `runningMs`, `durationMs`) and `landings` (Channel, Candidate, head, time, accepter). Derived numbers appear only when their inputs were recorded:
-
-- `wallClockMs`: first to last recorded event (Intent creation, lifecycle changes, saves, Candidates, run timestamps, landings, presence activity); omitted with fewer than two events.
-- `activeTime.ms`: the sum of gaps between consecutive events no longer than `idleThresholdMs` (15 minutes, the presence working window). It is an estimate from recorded events, not observed keyboard time.
-- `checks`: `queuedMs` is queue plus preparation before the command spawned; `runningMs` is spawn to end; `durationMs` covers finished runs; `waitingMs` is the union of finished runs' queue-to-end intervals, so parallel runs count once. Runs recorded before queue timestamps existed report only `durationMs`; runs that never spawned report no running time; unfinished runs have no end. Statuses are read as stored, without dead-run recovery.
-- `actors`, `sessions`, `reports` and `tokens`: from Lane starters, save/lifecycle actors, accepters, local presence and self-reports. A Lane's `startedAt` is known only for the Lane started with its Intent.
-
-`report` records advisory, self-declared harness, model and cumulative token totals for one Lane session: `{"laneId":"…","harness":"claude-code","model":"…","tokens":{"input":1200,"output":340}}`, with optional `actor` and `sessionId`. Token keys are `input`, `output`, `cacheRead`, `cacheWrite` and `total`; only keys you send are summed. A later report for the same Lane, actor and session replaces earlier totals. Replaying any applied `operationId` returns the current report unchanged. Reports live in the owner's local transport state beside presence, not in Work or the hosted project. Forge does not verify them.
-
-## Links in agent reports
-
-Hosted `link` is unavailable in nforge 0.3.1. Retain receipt/head/operation IDs
-and any URLs already returned by the hosted receipt; do not claim generated
-save-pinned links when none were returned.
-
-When you cite files, saves, Candidates or Lanes, give Forge URLs (from `link`), not local paths.
-
-`nforge agent ROOT link '{"laneId":"LANE_ID","path":"src/file.ts","line":42}'`
-(or MCP `forge_work_overview` with `action:"link"`) returns `hosted` and
-`preferred` URLs (both `null` when the owner is not hosted). Select exactly one of
-`laneId`, `viewId`, or `save` (an exact source head); omit `path` for the
-Lane/Candidate/save itself. File links pin the saved head. New source must be pushed
-to hosting before it can be read there.
-
-The `line` query selects, highlights and scrolls to a line; hosted links also
-carry `#L42`. Checkpoint and finish receipts add `links` without changing existing fields.
-The link action does not save, restore, index or push anything.
-
-Agent URLs use the same canonical route codec as the app. For older hosted bindings
-with a query-style project URL, `link` reads the project owner through the existing
-authenticated project query without changing the binding. The app accepts older
-`/projects/<slug>~<id>` links and canonicalizes them after loading project identity;
-`link` emits the actual owner path.
 
 ## Check scope
 
@@ -1109,49 +875,6 @@ and preserves its check, attempt and live lease. Urgent READY work takes the nex
 free acceptance lease ahead of normal READY work; an existing live lease and a
 reserved shared batch check continue unchanged. Settled submissions retain their
 recorded priority. Use another priority change with the current version to undo.
-
-### Landing wait progress
-
-`nforge land ROOT LANE… --wait` and agent/MCP `land` with `wait:true` report
-one compact stderr line per Lane when its phase, queue position or progress
-changes. Lines use ordinary newlines, including when redirected; elapsed time
-and ETA drift do not repeat unchanged lines. The existing wait callbacks supply
-observations; this adds no provider reads or polling timer.
-
-The shared `phases` object appears on each land result entry and its submissions,
-on live status submissions, and on an in-flight Lane's `status.lane.landing`.
-It contains `current`, `timeline`,
-optional `queue`, job/shard/test-file `progress`, and optional `eta`. Stages are
-`queued`, `composing`, `dispatching`, `ci-running`, `recording-accepting`, and
-`accepted`. Queue positions count retained submissions on the same Channel,
-using the existing priority/fairness order. A recorded check waiting for capacity
-says `waiting on: runner`. Live lines identify the run's recorded phase and physical
-check controller's exclusive execution lease; the submitting CLI/MCP connection and
-landing worker do not own that execution. Before lease handoff, ownership remains
-pending. A remote controller preparing/exporting source remains `dispatching` until
-a provider execution is recorded. Worker errors include the affected Lane IDs,
-operation ID and run ID when retained. These live ownership/error observations do
-not change replayed receipts. Test-file counts appear only when retained
-`__FORGE_TESTS__` completion markers are available, and count selected files once
-per latest shard attempt. Provider logs may arrive only after a job finishes.
-
-Phase boundaries use retained queue selection, run reservation, provider job,
-check-result and acceptance timestamps. Missing boundaries and durations say
-`unknown`; observation time and file modification time never substitute for a
-missing event. Re-admitted attempts keep composition start unknown when only the
-original selection timestamp survives. The final JSON and stderr table include each phase's duration.
-ETA is labelled an estimate: per-phase medians from the last 20 completed owner
-landings on that Channel, with CI scaled by remaining test shards (or the larger
-unfinished-job fraction while static checks remain). Missing
-history for any remaining phase omits ETA. It is not a completion guarantee.
-
-When recorded for the acceptance, `main-audit` and `github-mirror-push` appear as
-trailing phases in live status and wait observations. Land completes at acceptance;
-receipt entry and submission phases stop there, so later audit/mirror timings cannot
-change a replayed result. Live status still shows pending follow-up work without
-waiting for it. A push start is unknown when only the
-mirror's latest update timestamp exists. Status is a read-only observation and
-starts no audit or push.
 
 ## Disjoint fast-path landing
 
@@ -1398,54 +1121,6 @@ For an offline Git import through first supervised acceptance, run `nforge docs 
 `nforge docs agent` prints the packaged agent skill. Start records `actor` (or
 `FORGE_AGENT_NAME`, then `FORGE_ACTOR`); use distinct names for concurrent agents.
 
-See [gh-compatible commands](../gh-cli.md) for local `pr`, `repo view`, version and authentication probes over the same workflow.
-
-### Pending owner work
-
-`nforge status OWNER` shows a compact local summary for a native owner without a
-source index. `nforge status ROOT --pending` selects the same summary for a Git
-owner; plain Git `status` retains the source-graph JSON interface. Add `--json`
-to the pending summary for structured pages. Defaults read the newest five records
-per section; `--offset N --limit N` continues the pages reported in `pagination`.
-Counts describe loaded pages. JSON includes a `queue` page of retained operation,
-Candidate and run pins even when its Lanes are outside the Lane page.
-Main is selected independently of those pages, and
-active checks are selected through their status index. `--detail` reads complete
-retained sections, submission journals, handoffs, evidence-file metadata and
-overlap planning and integration-preview freshness. `sections.skipped` names omitted sections and the request for
-them. `agent status` defaults to five records per section; `detail:true` requests
-its expensive sections. `host --status` remains available.
-`forge_work_status {pending:true}` exposes the same read model in MCP `--work`;
-`forge_work_overview {command:{action:"pending-status"}}` exposes it in `--agent`.
-
-The snapshot pins the last committed Work revision and reads its immutable
-records without waiting for the owner writer lock. Local transport observations
-are separate observations and may be newer than that revision. It does not run checks, recover processes, export an archive,
-contact a provider or publish anything. Ready, waiting and checking are recorded
-states, not an acceptance eligibility decision or a claim that a process is alive.
-The summary stays within 15 lines, showing up to three example Lanes as space
-allows. Handoffs and overlap groups each share one summary line; multiple entries
-show totals and point to `--json`, `handoff-read` and `peers` for details. Detailed JSON
-includes every open Lane, its handoff and every overlap group.
-`forge_work_overview {command:{action:"pending-status",detail:true}}` and
-`forge_work_status {pending:true,detail:true}` select the same detail in MCP;
-`offset` and `limit` select summary pages. Older non-indexed Work retains its
-complete legacy validation read before projecting a page.
-
-Hosted source coverage is separate from metadata publication and GitHub's last
-successfully pushed mapping. A pending/failed push does not establish a newer
-successful capture. Unknown capture time, history coverage, evidence coverage,
-oldest unsent mutation time, owner heartbeat and installed source are explicit.
-Recovery capture integration consumes the synchronous local
-`RecoveryCaptureReader` / `RecoveryCaptureObservation` contract in
-`src/pending-status-read.ts` and `src/pending-status.ts`. Until the recovery
-inventory supplies that reader, the CLI and MCP report hosted capture pins and
-coverage as unknown. Later log metadata or run completion can disprove evidence
-coverage; unchanged source and an earlier log timestamp cannot establish it.
-Deployment pins, when recorded, are labelled as the last observation, not a live
-provider check. Capture age uses capture time rather than publication completion.
-This read model is intended to feed the hosted **Now** screen's pending work and
-recovery summary; this command does not add a hosted UI.
 
 ## Waiting for outcomes
 
@@ -1679,43 +1354,12 @@ recovery protocol. Worker errors in pending status include the affected operatio
 and Lane IDs, plus a run ID when known. An error observation remains retryable on
 the next durable change or explicit lifecycle wake.
 
-## Handoffs
-
-Hosted `handoff` and `handoff-read` are unavailable. Use
-`comment-planning-item {itemId,text}` for delivery evidence on the existing Issue;
-it is a planning comment, not the portable native handoff described below.
 The landing note and the commit message name what the change removes or merges, or why nothing can go
 ([growth guard](lint-rules.md#growth-guard)).
 
-Record an optional delivery handoff before stopping so the lead or next agent can
-read what changed, the verification performed, unrun work and next steps:
+## Stacked Lanes
 
-```sh
-nforge agent OWNER handoff '{"laneId":"LANE_ID","summary":"What changed and why","changes":["src/example.ts"],"tests":[{"command":"node --test tests/example.test.mjs","passed":3,"failed":0,"skipped":0}],"unrun":["Full suite"],"next":["Lead reviews and lands"],"evidence":["operation UUID or log path"]}'
-nforge agent OWNER handoff-read '{"laneId":"LANE_ID"}'
-```
-
-Keep the returned operation ID and original inputs to reconcile an unknown reply.
-The versioned delivery payload lives on existing private Intent notes, linked to
-the Lane and its saved head, and survives portable Work export/import. Ownership
-takeover remains a separate operation. No file is ingested automatically.
-
-Test commands and counts are labelled **self-reported**. Forge automatically links
-**Forge-recorded** check operation IDs whose Candidates include the exact saved
-Lane head, retaining each Candidate head, check definition and observed outcome.
-A combined Candidate check is evidence for that Candidate; it does not prove a
-standalone Lane passed. Supplied evidence paths/IDs remain advisory references.
-Later checks or source edits do not rewrite an earlier handoff.
-
-`forge_task` exposes `handoff`; `forge_work_overview` exposes `handoff-read`. Lane
-status, peers, Lane diff and local pending status show the latest handoff summary
-and retrieval command. Briefs include the latest structured delivery context for
-the next agent, with self-reports separate from recorded checks. Handoffs do not
-gate checks or acceptance and add no acknowledgement step or external delivery.
-
-### Stacked Lanes
-
-For native owners, `start {"outcome":"Next slice","stackOn":"PARENT_LANE_ID"}`
+`start {"outcome":"Next slice","stackOn":"PARENT_LANE_ID"}`
 materializes the parent's latest **saved** head, including its unlanded source.
 Unsaved parent files are excluded. The Lane retains its parent/head pin and a
 landing dependency; a new Intent also records `after:{intentId:parentIntentId}`.
@@ -1811,122 +1455,6 @@ or `landed`, the latest check for that saved head, and `suggestedAction`.
 The same projection decorates lifecycle peers, MCP peers and status peers without
 joining the owner writer queue. A later save never borrows a prior head's green run.
 
-## Overlap alerts and landing order
-
-This section describes native owners; hosted advice has the bounded coverage
-described [below](#hosted-overlap-advice).
-
-Checkpoint preparation indexes exact saved regions outside the owner writer lock.
-Start/checkpoint receipts compare existing saved summaries and committed contract
-changes, include retained conflict notices with their current repair/sync lineage,
-and mark missing or deferred analysis `local-incomplete`. Link resolution on this
-path uses local hosted identity; unavailable identity returns `links.error`
-without a network wait. Full peer reads retain derived advice outside the owner,
-so a later receipt can carry it without rescanning source. Refresh workers expose
-pending startup tickets and are joined on MCP shutdown and synthetic-owner teardown;
-read-only actions never schedule them.
-
-After a successful checkpoint, detached analysis ranks all open Lanes by shared saved/claimed paths and
-recency, then compares every path candidate's saved regions and changed exports
-using predictive overlap's existing high-risk rule. Unrelated Lanes never consume
-overlap slots. Source/ancestry failures remain explicitly incomplete; a detailed
-`peers` read returns full advice. A new or expanded region records one canonical pair/region notice in the
-local coordination journal for both Lanes. Heads and unrelated edits do not make
-a duplicate; changed overlapping ranges or symbols create a new notice. Notices
-retain source pins and attribution and are advisory inbox items, available on the
-next checkpoint, status, sync, handoff, finish, brief or MCP call. They name the proposed region
-owner (the first Lane), the peer, the reason for the order and “sync after X
-lands”. Historical notices remain readable; current overlap is recomputed from
-source. No background polling, heartbeat or model call is added.
-
-Advisory lifecycle receipts (including start/checkpoint) share the compact `peers.inbox` digest of undelivered notices,
-including handoff, finish (also `wait:false`), complete and abandon. Only notices
-actually included in a mutating receipt are marked delivered to that Lane in the
-local coordination journal; later operations omit them. Start, checkpoint, finish and handoff retain
-the delivered digest with the operation ID, including an empty digest: replay
-returns that original digest without consuming newer notices. Lane status includes the
-same pending digest without marking delivery or writing anything. Explicit peers
-and brief reads retain historical notices. Compact receipt display/byte bounds
-still apply; omitted notices remain pending for a later receipt.
-If delivery bookkeeping is unavailable, the receipt reports `local-incomplete`
-and returns the readable pending digest without consuming it.
-
-The existing `start.scope.paths` declaration is the early signal: planned claims
-appear as planned file overlaps before either save and never become high-risk
-saved-region evidence. No new declaration action or mandatory step is needed.
-An attached MCP transport that supports logging notifications watches local
-journal publications and emits compact notices for its selected Lane; file-system
-events wake it. Connections for one owner share one watcher helper; closing a
-connection removes its attachment, and the last attachment exits the helper.
-Stdio EOF, close and broken output pipes close the MCP connection. Idle MCP
-servers close after two hours without requests (`FORGE_MCP_IDLE_MS` can
-select another duration); an in-flight request suspends that deadline. The durable inbox
-and next result remain authoritative when notifications are unavailable.
-
-Landing uses the same ready/smaller/earlier-start ordering as predictive overlap.
-High-overlap components are shown in pending status. Compatible disjoint entries
-continue sharing batches; overlapping entries run in successive waves, and a
-later wave is composed onto actual newly accepted main before its check, never
-speculatively stacked across a high-overlap edge. Joint finish preflights genuine conflicts before partial acceptance; clean high overlaps split into compatible groups before landing composition. The saved Lane inputs remain
-pinned; composition updates the checked Candidate rather than overwriting dirty
-Lane files. Existing Markdown pure-insert resolution is retained. Genuine
-rewrites remain conflicts with the overlapping peer named. A single finish keeps
-its existing sync/check/accept behavior and shares this scheduler when queued;
-there is no wait for a peer that has not requested landing.
-
-Order is scheduling within already requested landing work, not a new gate:
-claims, ownership and “sync after” remain advice. There are no locks on regions,
-quotas, access changes, confirmations or new acceptance requirements. Existing
-dependency, check, review, retry and undo rules still apply. Missing analysis is reported as
-incomplete and does not become evidence of independence.
-
-## Automatic local integration preview
-
-Enable it for an owner with
-`nforge x ROOT set-policy '{"integrationPreview":{"auto":true}}'`
-(and disable it with `auto:false`). It is off by default. Committed saved-head and main changes
-wake a finite, debounced local worker over main and saved active Lanes. Duplicate
-saves of the same exact input tuple do not rerun commands. Newer saves coalesce
-while a preview runs; the worker drains the latest tuple and exits, with no idle
-timer or polling. Integration notices use the existing bilateral Lane inbox and
-MCP logging notification adapter; without a live session they remain available
-in the next brief/peer reply or explicit `wait`, whose cursor deduplicates events. Read its
-one-line state in `peers` or pending status; `integrate` returns exact source pins
-and diagnostics. Unsaved files are excluded and no remote runner is called.
-
-Use `define-check` with `static:true` to mark each existing fast local command
-(`name`, `executable`, `args`, and optional `environmentLabel`). Marked commands
-replace the fallback `package.json` `typecheck`/`lint` scripts. A built-in static
-check also detects duplicate literal index names per table in `convex/schema.ts`
-without loading the schema or calling Convex. Static commands still run with OS
-rights in the normal private check environment.
-
-A preview freezes main, ordered saved Lane heads, transitive Intent/Candidate and
-stack dependency heads, static definitions and the clean runtime fingerprint.
-Explicit selections name omitted saved Lanes; unsaved source and runtime behavior
-remain outside coverage. Controls compose each Lane with its dependency closure
-against the same main. A failed combined static check is an interaction only when
-base and participating standalone controls pass. A broken base is
-`baseline-failed`; standalone failures remain `failed`. Missing dependency pins,
-unavailable dependencies and interrupted/unlaunchable commands are `inconclusive`.
-Passing pairs do not disprove a three-way interaction: `interactions` retains the
-observed higher-order failing set, passing controls and incomplete minimization.
-These diagnostics do not add a landing gate or new exclusion rule.
-
-Repository commands can read external tools, files and declared passthrough values.
-Their previous verdicts are historical observations, so explicit repeated previews
-execute again even when source/configuration pins match. Only built-in source-only checks
-reuse an exact-tuple verdict. Each control receives independent dependency bytes.
-Results include `applicability:"historical"` if saved heads, dependencies, main or
-static configuration moved during execution; obsolete notices are not published
-as current advice. Retained notice history remains available.
-
-When enabled, landing previews exclude failing individuals and one member of a
-failing pair before the normal landing check. Results identify the exact saved
-inputs and diagnostic. Safe inputs in `land` continue; a grouped `finish` stops
-with `preview-excluded`. To override, submit a new `finish` or `land` operation
-with `preview:"skip"`; this preserves the ordinary check and acceptance policy.
-
 ### Desired landing and asynchronous finish
 
 `land` returns after recording the desired saved heads, with
@@ -1946,7 +1474,7 @@ a fresh operation ID creates a new submission without requiring a save or sync.
 Mixed selections reuse pending or landed entries and submit the remaining heads. `wait` is excluded from the request identity. Synchronous `finish`
 retains its existing protocol.
 
-For a bound project under either native owner or hosted source authority, a
+For a hosted project, a
 short `finish` request without an `operationId` reuses the original operation
 while its outcome is pending or unknown. After a terminal outcome, it reuses the
 operation only if its saved Lane heads and the primary Lane bytes that finish
@@ -2121,8 +1649,7 @@ sample and does not scan, poll storage or schedule work.
 ## Intent proving-test contracts
 
 `agent tests {"candidateId":"CANDIDATE_ID"}` proposes the new/changed tests
-and derived affected set for that clean Candidate. `laneId` still reads the saved
-Lane selection before composition in native-owner mode. Proposals include per-file
+and derived affected set for that clean Candidate. Proposals include per-file
 timing estimates from native timing history where available; unknown timings are
 `null`. Add `runId` to use complete measured reports from an existing run on the
 exact Candidate. Hosted mode reads the same machine reports from verified, sealed
@@ -2305,9 +1832,8 @@ assumes one its server has not advertised ([CLI update: server contract](../oper
 
 ### Hosted friction, decisions and overlap answers
 
-A hosted ROOT and a bound owner whose source authority is `server` send `friction`,
-`decide`, `decisions` and `peer-ack` to hosted records. Native owners keep native
-Work records. These commands are deliberately absent from the advertised
+A hosted ROOT sends `friction`,
+`decide`, `decisions` and `peer-ack` to hosted records. These commands are deliberately absent from the advertised
 capabilities array so released clients continue to parse it. A server without the
 record endpoints returns `HOSTED_ACTION_UNSUPPORTED`; the client retains the
 operation and never falls back to writing Mac Work.

@@ -17,7 +17,7 @@ import { transitionBoundSourceAuthority } from '../dist/source-authority-client.
 import { agentCli } from '../dist/agent-cli.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
-import { hostedRecordSchema } from '../dist/hosted-records.js';
+
 import { ConvexExchange } from '../dist/exchange-client.js';
 import { getFunctionName } from 'convex/server';
 import { ForgeError } from '../dist/errors.js';
@@ -138,19 +138,6 @@ for (const action of ['finish', 'land'])
     assert(!existsSync(join(f.store.directory, 'agent-finish', `${command.operationId}.json`)));
     assert.equal(f.store.load().channelMoves.length, 0);
   });
-
-test('CLI and the workflow used by native MCP route bound finish without explicit hosted addressing', async t => {
-  const f = fixture(t);
-  http(t, f);
-  const first = await agentCli([f.root, 'finish', JSON.stringify(f.command)]);
-  assert.equal(first.result.transport, 'hosted');
-  const second = await new AgentWorkflow(f.root, true).dispatch({
-    action: 'finish',
-    operationId: f.command.operationId,
-    wait: false,
-  });
-  assert.deepEqual(second.result, first.result);
-});
 
 test('native-owner admission keeps existing behavior and a pending native result blocks transition', async t => {
   const f = fixture(t, 'native-owner');

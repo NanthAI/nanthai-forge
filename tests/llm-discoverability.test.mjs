@@ -211,7 +211,7 @@ test('five Lanes each adding 2 KB of docs on the real files still generate llms-
     'docs/security.md',
     'docs/workflows.md',
     'docs/concepts.md',
-    'docs/gh-cli.md',
+    'docs/agents.md',
   ])
     writeFileSync(join(fixture, path), read(path) + addition);
   const combined = llmDocuments(fixture)[1].source;

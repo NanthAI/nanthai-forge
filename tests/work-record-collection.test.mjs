@@ -271,21 +271,6 @@ test('unverifiable roots stop apply before any deletion; malformed or linked orp
   assert.ok(readFileSync(pagePath(store, orphan)));
 });
 
-test('CLI exposes the same read-only default and explicit backup/apply behavior', t => {
-  const { root, store, orphan } = fixture(t);
-  const invoke = input => {
-    const result = spawnSync(process.execPath, ['dist/cli.js', 'work', root, JSON.stringify(input), '0'], {
-      cwd: new URL('..', import.meta.url),
-      encoding: 'utf8',
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return JSON.parse(result.stdout).result;
-  };
-  assert.equal(invoke({ ...command, backup: true }).dryRun, true);
-  assert.ok(readFileSync(pagePath(store, orphan)));
-  assert.ok(invoke({ ...command, apply: true, backup: true }).removed.some(page => page.id === orphan));
-});
-
 test('kept full backups retain pending-operation roots after the live journal is removed', t => {
   const { store, orphan } = fixture(t),
     directory = join(store.directory, 'agent-finish');

@@ -4,7 +4,7 @@ import { WorkStore } from '../dist/work-store.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -363,29 +363,4 @@ test('the diagnostics log rotates and stays bounded', t => {
   const files = readdirSync(directory).sort();
   assert.deepEqual(files, ['diagnostics.log', 'diagnostics.log.1', 'diagnostics.log.2']);
   assert.equal(files.length, DIAGNOSTICS_FILES);
-});
-
-test('the CLI reports a real permission failure with its path, hint and log', async t => {
-  const root = await owner(t, 'cli-eperm');
-  const lane = readdirSync(join(root, '.forge', 'work'))
-    .find(name => name.startsWith('lane-'))
-    .slice(5);
-  const queue = temp(t, 'readonly-queue');
-  chmodSync(queue, 0o500);
-  if (spawnSync('mkdir', [join(queue, 'probe')]).status === 0)
-    return t.skip('this account ignores directory permissions');
-  const result = spawnSync(
-    process.execPath,
-    [cli, 'agent', root, 'finish', JSON.stringify({ laneId: lane, message: 'x' })],
-    {
-      encoding: 'utf8',
-      env: { ...process.env, FORGE_CHECK_QUEUE_DIR: join(queue, 'q') },
-    },
-  );
-  assert.equal(result.status, 1);
-  const { error } = JSON.parse(result.stderr.trim().split('\n').at(-1));
-  assert.equal(error.code, 'SYSTEM_EACCES');
-  assert.match(error.message, new RegExp(`mkdir ${queue}`));
-  assert.match(error.hint, /FORGE_CHECK_QUEUE_DIR/);
-  assert.ok(existsSync(error.diagnostics));
 });

@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { parseAgentAction } from '../dist/agent-action-parse.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { agentCli } from '../dist/agent-cli.js';
 
 const id = '00000000-0000-4000-8000-000000000001';
 const review = { action: 'review', kind: 'lane', id };
-// Help routing walks up from ROOT looking for a hosted Lane marker. A relative ROOT resolves against the
-// cwd, so under a hosted Lane checkout it would print the hosted help. These tests exercise the native
-// help text and so use an absolute ROOT in a fresh directory outside any checkout.
-function nativeHelpRoot(t) {
-  const directory = mkdtempSync(join(tmpdir(), 'forge-test-help-root-'));
-  t.after(() => rmSync(directory, { recursive: true, force: true }));
-  return directory;
-}
 
 test('dispatch reports missing review pins and malformed full digests before reading Work', async () => {
   // Validation must complete before any store or filesystem access.
@@ -82,45 +70,11 @@ test('validation identifies nested fields and existing bounds without echoing un
   );
 });
 
-test('action help explains review budgets, link selectors, run observation and peer answers', async t => {
-  const root = nativeHelpRoot(t);
-  let output = '';
-  const original = process.stdout.write;
-  process.stdout.write = chunk => {
-    output += chunk;
-    return true;
-  };
-  try {
-    for (const action of ['review', 'link', 'observe', 'log', 'cancel', 'peer-ack'])
-      await agentCli([root, action, '--help']);
-  } finally {
-    process.stdout.write = original;
-  }
-  assert.match(output, /maxBytes 1024\.\.48000/);
-  assert.match(output, /full 40- or 64-character/);
-  assert.match(output, /exactly one laneId, viewId or save/);
-  assert.equal((output.match(/nested check run operation ID/g) ?? []).length, 3);
-  assert.match(output, /choice is accept-order, swap or split/);
-});
-
-test('save normalizes to checkpoint with identical pins and validation', async t => {
-  const root = nativeHelpRoot(t);
+test('save normalizes to checkpoint with identical pins and validation', () => {
   const command = { laneId: id, operationId: id, message: 'Saved', expectedHead: 'a'.repeat(64) };
   assert.deepEqual(
     parseAgentAction({ action: 'save', ...command }),
     parseAgentAction({ action: 'checkpoint', ...command }),
   );
   assert.throws(() => parseAgentAction({ action: 'save', laneId: id }), /message/);
-  let output = '';
-  const write = process.stdout.write;
-  process.stdout.write = chunk => {
-    output += chunk;
-    return true;
-  };
-  try {
-    await agentCli([root, 'save', '--help']);
-  } finally {
-    process.stdout.write = write;
-  }
-  assert.match(output, /^nforge agent ROOT save '/);
 });

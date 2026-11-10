@@ -2,13 +2,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { spawn } from 'node:child_process';
-import { once } from 'node:events';
+
 import { fixture } from './landing-batch-fixture.mjs';
 import { watchLandingWorker } from '../dist/landing-worker.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { FinishJournal, retainedFinishCommand, unfinishedFinishes } from '../dist/agent-finish-journal.js';
 import { pendingLands } from '../dist/land-journal.js';
 import { withQueueSlot } from '../dist/landing-queue.js';
@@ -50,68 +49,6 @@ async function input(f) {
   };
 }
 
-for (const action of ['finish', 'land']) {
-  test(`${action} durable admission survives lost response and replays terminal work`, async t => {
-    const f = await fixture(t, { remote: false });
-    const { lane, command: finish } = await input(f);
-    if (action === 'land')
-      await f.agent.dispatch({ action: 'checkpoint', laneId: lane.laneId, message: 'Save' });
-    const command =
-      action === 'finish'
-        ? finish
-        : { action, operationId: randomUUID(), laneIds: [lane.laneId], wait: false };
-    const admitted = (await f.agent.dispatch(command)).result;
-    assert.equal(admitted.durable, true);
-    if (action === 'land') assert.equal(admitted.replay.command.wait, false);
-    assert.equal(admitted.terminal, false);
-    assert.equal(admitted.next.action, 'wait');
-    assert.deepEqual(admitted.next.operationIds, [command.operationId]);
-    assert.equal(admitted.next.laneIds, undefined, 'wait follows the operation, not later Lane work');
-    assert.equal(admitted.waitCommand, admitted.command);
-    assert.deepEqual(admitted.observe.wait, admitted.next);
-    assert.equal(admitted.complete, false);
-    assert.equal(admitted.landingWorker.workers, 0);
-    assert.match(admitted.message, /not running.*remains queued/);
-    assert.equal(runs(f).length, 0, 'admission starts no check');
-    assert.equal(f.store.load().channelMoves.length, 0);
-    assert.equal(action === 'finish' ? unfinishedFinishes(f.store).length : pendingLands(f.store).length, 1);
-    const replay = (await f.agent.dispatch(command)).result;
-    const submissions = value =>
-      action === 'finish' ? value.submissions : value.entries.flatMap(entry => entry.submissions);
-    assert.deepEqual(submissions(replay), submissions(admitted));
-    // A newer unsaved edit must not be recaptured when the service adopts the request.
-    writeFileSync(join(lane.path, 'async.txt'), 'new unsaved edit\n');
-    // Acceptance moves main before a separate write settles the entry. Stopping the
-    // worker at the move can cancel that settlement while another process holds the
-    // Work lock, so drive until the queued entry itself is terminal.
-    await drive(f, () => {
-      const data = f.store.load();
-      return (
-        data.channelMoves.some(move => move.channel === 'main') &&
-        data.landingEntries.length > 0 &&
-        data.landingEntries.every(entry => entry.terminalAt)
-      );
-    });
-    const terminal = (await f.agent.dispatch(command)).result;
-    assert.equal(terminal.terminal, true);
-    assert.match(terminal.message, /terminal outcome/);
-    assert.equal(terminal.waitCommand, undefined);
-    assert.equal(terminal.inProgress, undefined);
-    assert.equal(terminal.complete, true);
-    assert.equal(runs(f).length, 1);
-    assert.equal(f.content('async.txt'), 'durable source\n');
-    assert.equal(readFileSync(join(lane.path, 'async.txt'), 'utf8'), 'new unsaved edit\n');
-    const synchronous = (await f.agent.dispatch({ ...command, wait: true })).result;
-    assert.equal(synchronous.complete, true);
-    assert.deepEqual(submissions(synchronous), submissions(terminal));
-    assert.equal(runs(f).length, 1, 'same submitted work');
-    assert.equal(f.store.load().channelMoves.length, 1);
-    await assert.rejects(f.agent.dispatch({ ...command, message: 'Changed request' }), {
-      code: 'WORK_OPERATION_CHANGED',
-    });
-  });
-}
-
 test('async finish replay reads durable admission while its driver owns the queue', async t => {
   const f = await fixture(t, { remote: false });
   const { command } = await input(f);
@@ -146,61 +83,6 @@ test('check-only async finish is recovered by the owner worker', async t => {
   assert.equal(response.complete, true);
   assert.equal(runs(f).length, 1);
   assert.equal(f.store.load().channelMoves.length, 0);
-});
-
-test('CLI exits after durable admission and owner work survives the client process', async t => {
-  const f = await fixture(t, { remote: false });
-  const { command } = await input(f);
-  const child = spawn(
-    process.execPath,
-    [resolve('dist/cli.js'), 'agent', f.root, 'finish', JSON.stringify(command)],
-    { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  let output = '',
-    errors = '';
-  child.stdout.on('data', bytes => (output += bytes));
-  child.stderr.on('data', bytes => (errors += bytes));
-  const [code] = await once(child, 'exit');
-  assert.equal(code, 0, errors);
-  const result = JSON.parse(output).result;
-  assert.equal(result.durable, true);
-  assert.equal(result.terminal, false, 'the client process only admitted the request');
-  assert.equal(result.complete, false);
-  // No run-count assertion here: the CLI starts a detached owner worker (startPresenceWorker, only for
-  // a process whose script is cli.js) that begins the check about a second after the client exits, so
-  // a count read after a scheduling stall legitimately sees it (a93bec50: 1 !== 0).
-  await drive(f, () => f.store.load().channelMoves.find(move => move.channel === 'main'));
-  assert.equal(runs(f).length, 1, 'the detached worker and this test drive one submission');
-});
-
-test('MCP existing task registration admits finish and land without running checks', async t => {
-  const f = await fixture(t, { remote: false });
-  const { lane, command } = await input(f);
-  const tools = new Map();
-  const close = registerAgentWorkflow(
-    {
-      registerTool(name, options, handler) {
-        tools.set(name, { options, handler });
-      },
-    },
-    f.root,
-  );
-  try {
-    const tool = tools.get('forge_task');
-    for (const request of [
-      command,
-      { action: 'land', operationId: randomUUID(), laneIds: [lane.laneId], wait: false },
-    ]) {
-      const parsed = tool.options.inputSchema.command.parse(request);
-      assert.equal(parsed.wait, false);
-      const response = await tool.handler({ command: parsed });
-      assert.equal(response.isError, undefined);
-      assert.equal(JSON.parse(response.content[0].text).result.durable, true);
-    }
-    assert.equal(runs(f).length, 0);
-  } finally {
-    close();
-  }
 });
 
 for (const action of ['finish', 'land']) {
@@ -258,35 +140,6 @@ for (const action of ['finish', 'land']) {
     assert.equal(f.store.load().channelMoves.length, 0);
   });
 }
-
-test('client killed before receiving its enqueue response leaves recoverable work', async t => {
-  const f = await fixture(t, { remote: false });
-  const { command } = await input(f);
-  const module = new URL('../dist/agent-workflow.js', import.meta.url).href;
-  const script = `import { AgentWorkflow } from ${JSON.stringify(module)};
-await new AgentWorkflow(process.argv[1]).dispatch(JSON.parse(process.argv[2]));
-process.send('durable');
-await new Promise(resolve=>setInterval(resolve,60000));`;
-  const child = spawn(
-    process.execPath,
-    ['--input-type=module', '-e', script, f.root, JSON.stringify(command)],
-    { env: process.env, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] },
-  );
-  try {
-    await once(child, 'message'); // No receipt is sent to the client.
-    const exit = once(child, 'exit');
-    child.kill('SIGKILL');
-    await exit;
-    const replay = (await f.agent.dispatch(command)).result;
-    assert.equal(replay.durable, true);
-    assert.equal(replay.terminal, false);
-    await drive(f, () => f.store.load().channelMoves.find(move => move.channel === 'main'));
-    assert.equal(runs(f).length, 1);
-    assert.equal((await f.agent.dispatch(command)).result.complete, true);
-  } finally {
-    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-  }
-});
 
 test('land replay reads the retained journal while the owner holds its driver slot', async t => {
   const f = await fixture(t, { remote: false });

@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+
 import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -12,10 +10,7 @@ import { z } from 'zod';
 import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
 import { lowerMcpCommand } from '../dist/mcp-verbs.js';
 import { verbModes } from '../dist/agent-verbs.js';
-import { initNative } from '../dist/native-work.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
-import { trustAgents } from './autonomy-fixture.mjs';
-import { cleanupOwner } from './owner-cleanup.mjs';
+
 import { agentFixture } from './hosted-agent-fixture.mjs';
 
 /**
@@ -32,11 +27,8 @@ const rows = [
   ['save', 'contract', 'confirm-tests', 'confirm-tests'],
   ['save', 'overlap-answer', 'peer-ack', 'peer-ack'],
   ['save', 'overlap-answers', null, 'overlap-acks'],
-  ['save', 'handoff', 'handoff', null],
-  ['save', 'report', 'report', null],
   ['save', 'friction', 'friction', 'friction'],
   ['save', 'decision', 'decide', 'decide'],
-  ['land', 'resume-ready', 'land-ready', null],
   ['land', 'withdraw', null, 'withdraw'],
 ];
 
@@ -170,144 +162,14 @@ const modesOf = tools =>
     return [...variants, ...signed];
   });
 
-async function nativeFixture(t) {
-  const root = mkdtempSync(join(tmpdir(), 'forge-mcp-verbs-'));
-  writeFileSync(join(root, 'a.txt'), 'a\n');
-  initNative(root);
-  trustAgents(root);
-  const agent = new AgentWorkflow(root);
-  await agent.dispatch({
-    action: 'define-check',
-    name: 'verify',
-    executable: process.execPath,
-    args: ['-e', '0'],
-  });
-  const connected = await connect(t, server => registerAgentWorkflow(server, root));
-  t.after(() => cleanupOwner(root)); // after the server closes
-  return { root, agent, ...connected };
-}
-
-test('native MCP: save, sync, status pending and land --save equal their old names and print no notices', async t => {
-  const { agent, call, client } = await nativeFixture(t);
-  const errors = [];
-  t.mock.method(process.stderr, 'write', (chunk, ...rest) => {
-    errors.push(String(chunk));
-    return true;
-  });
-  const lane = (await call('forge_task', { action: 'start', outcome: 'MCP verbs' })).body.result;
-  writeFileSync(join(lane.path, 'a.txt'), 'b\n');
-  // Plain save is checkpoint: the same operationId returns the same receipt through either name.
-  const saveId = randomUUID();
-  const saved = await call('forge_task', {
-    action: 'save',
-    operationId: saveId,
-    laneId: lane.laneId,
-    message: 'Verb save',
-  });
-  assert.equal(saved.isError, undefined);
-  assert.deepEqual(
-    await call('forge_task', {
-      action: 'checkpoint',
-      operationId: saveId,
-      laneId: lane.laneId,
-      message: 'Verb save',
-    }),
-    saved,
-  );
-  const syncId = randomUUID();
-  const synced = await call('forge_task', {
-    action: 'save',
-    mode: 'sync',
-    operationId: syncId,
-    laneId: lane.laneId,
-  });
-  // A fresh Lane has no accepted main to sync with; both spellings must return the same answer.
-  assert.deepEqual(
-    await call('forge_task', { action: 'sync', operationId: syncId, laneId: lane.laneId }),
-    synced,
-  );
-  // status {pending:true} is pending-status.
-  const pending = await call('forge_work_overview', { action: 'status', pending: true, limit: 1 });
-  assert.equal(pending.isError, undefined, JSON.stringify(pending.body));
-  const oldPending = await call('forge_work_overview', { action: 'pending-status', limit: 1 });
-  const unclocked = value => JSON.parse(JSON.stringify(value).replace(/\d{4}-\d\d-\d\dT[\d:.]+Z/g, 'T')); // reads stamp the clock
-  assert.deepEqual(unclocked(oldPending), unclocked(pending));
-  // land --save lands like finish {accept:true}; the old name replays the same journal.
-  const landId = randomUUID();
-  const landed = await call('forge_task', {
-    action: 'land',
-    mode: 'save',
-    operationId: landId,
-    laneId: lane.laneId,
-    message: 'Verb land',
-  });
-  assert.equal(landed.isError, undefined, JSON.stringify(landed.body));
-  assert.equal(landed.body.result.status, 'accepted');
-  const resumed = await call('forge_task', { action: 'land', mode: 'save', operationId: landId });
-  const { resolved, ...original } = landed.body.result; // only the first reply returns its filled pins
-  assert.ok(resolved);
-  assert.deepEqual(resumed.body.result, original);
-  assert.equal(
-    (await call('forge_task', { action: 'land', mode: 'save', checkOnly: true, operationId: landId })).body
-      .error.code,
-    'BAD_ARGUMENT',
-  );
-  assert.deepEqual(
-    (
-      await call('forge_task', {
-        action: 'finish',
-        operationId: landId,
-        laneId: lane.laneId,
-        message: 'Verb land',
-        accept: true,
-      })
-    ).body.result,
-    landed.body.result,
-  );
-  // check-only checks without landing.
-  const second = (await agent.dispatch({ action: 'start', outcome: 'Check only' })).result;
-  writeFileSync(join(second.path, 'a.txt'), 'c\n');
-  const checked = await call('forge_task', {
-    action: 'land',
-    mode: 'save',
-    checkOnly: true,
-    laneId: second.laneId,
-    message: 'No landing',
-  });
-  assert.equal(checked.isError, undefined, JSON.stringify(checked.body));
-  assert.notEqual(checked.body.result.status, 'accepted');
-  for (const bad of [
-    { action: 'land', mode: 'save', laneId: second.laneId, accept: false },
-    { action: 'land', mode: 'save', checkOnly: true, accept: true, laneId: second.laneId },
-  ])
-    assert.equal((await call('forge_task', bad)).body.error.code, 'BAD_ARGUMENT');
-  // Mode lists are schema-checked at the tool boundary.
-  const tools = (await client.listTools()).tools;
-  assert.ok(modesOf(tools).includes('land/save'));
-  assert.equal(
-    errors.some(line => line.startsWith('Alias:')),
-    false,
-  );
-});
-
-test('MCP accepts exactly the CLI mode forms (drift check), natively and hosted', async t => {
-  const native = await nativeFixture(t),
-    s = agentFixture(t),
+test('MCP accepts exactly the CLI mode forms (drift check)', async t => {
+  // One client mode (Issue 657d63ee): the hosted MCP is the only agent MCP, so its forms equal the CLI's.
+  const s = agentFixture(t),
     hosted = await connect(t, server => registerAgentWorkflow(server, s.root, s.transport()));
-  const accepted = new Set([
-    ...modesOf((await native.client.listTools()).tools),
-    ...modesOf((await hosted.client.listTools()).tools),
-  ]);
   const cliForms = Object.entries(verbModes).flatMap(([verb, modes]) =>
     Object.keys(modes).map(flag => `${verb}/${flag.slice(2)}`),
   );
-  // integrate (save --preview) is a CLI-only dry run with no agent dispatch action.
-  assert.deepEqual([...accepted].sort(), cliForms.filter(form => form !== 'save/preview').sort());
-  const nativeForms = new Set(modesOf((await native.client.listTools()).tools));
-  for (const form of ['start/open', 'save/overlap-answers']) assert.equal(nativeForms.has(form), false);
-  const hostedForms = new Set(modesOf((await hosted.client.listTools()).tools));
-  for (const form of ['save/handoff', 'save/report', 'land/resume-ready'])
-    assert.equal(hostedForms.has(form), false);
+  assert.deepEqual([...new Set(modesOf((await hosted.client.listTools()).tools))].sort(), cliForms.sort());
 });
 
 test('hosted MCP: each new form reaches the transport exactly like its old action, one dispatch each', async t => {

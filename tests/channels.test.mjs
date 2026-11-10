@@ -3,8 +3,8 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, rmSync, statSync, readdirSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
+
 import { randomUUID, createHash } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
@@ -255,41 +255,6 @@ test('Channel journals reconcile lost replies and preserve later pointers, notes
     text: 'Unexpected pointer does not block notes.',
   });
   assert.equal(work.status().intents[0].notes.length, 2);
-});
-
-test('real WorkService and CLI Channel commands share existing capability protection and reject changed View pins', async t => {
-  const { root, work, first, second, command, dispatch } = setup(t);
-  git(root, ['update-ref', `refs/forge/views/${first.id}`, second.head]);
-  await assert.rejects(dispatch(command(first)), code('VIEW_STALE'));
-  assert.equal(work.status().channelMoves.length, 0);
-
-  const input = command(second);
-
-  const body = JSON.stringify({ command: input, revision: work.status().revision });
-
-  const accepted = await await new WorkService(root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-  assert.equal(accepted.result.head, second.head);
-  const result = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        resolve('dist/cli.js'),
-        'work',
-        root,
-        JSON.stringify({ action: 'export-channel', id: accepted.result.id }),
-        String(work.status().revision),
-      ],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(
-    git(root, ['bundle', 'list-heads', result.result.path]).trim(),
-    `${second.head} refs/heads/accepted`,
-  );
-  assert.equal(work.status().channelMoves.length, 1);
 });
 
 test('incomplete shallow ancestry fails export without fetching or publishing an incomplete bundle', async t => {

@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
-import { currentOwnerDisplay } from './project-exchange-fixture.mjs';
+
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { LegacyWorkService as WorkService } from './autonomy-fixture.mjs';
@@ -13,16 +13,12 @@ import { NativeSource } from '../dist/native-source.js';
 import { restoreNativeWork } from '../dist/native-backup.js';
 import { restoreWork } from '../dist/work-backup.js';
 import { withWorkArchive } from '../dist/work-backup-archive.js';
-import { parseWork } from '../dist/work-unified-types.js';
-import { parseWorkBytes, workBytes } from '../dist/work-metadata.js';
+
 import { digest } from '../dist/hash.js';
 import { fixture, git, code } from './helpers.mjs';
 import { z } from 'zod';
-import { execFileSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { metadataRequest } from '../dist/work-metadata.js';
-import { readHosted } from './hosted-read.mjs';
 
 async function setup(t, runCheck = true) {
   const original = fixture(t, { '.gitignore': '.forge/\n', 'a.ts': 'export const a=1;\n' });
@@ -357,46 +353,4 @@ test('fresh Git-free native restore reads original records/evidence and exports 
   await restoreWork(exported.path, gitTarget);
   const original = new WorkService(gitTarget);
   assert.deepEqual(readWorkBytes(join(original.store.directory, 'work.json')), f.originalWork);
-});
-
-test('historical Work remains absent from ordinary current-format serialization and direct WorkService reads use the same owner', async t => {
-  const f = await setup(t, false),
-    legacy = workBytes(parseWorkBytes(f.originalWork));
-  assert.equal('historicalWork' in JSON.parse(legacy), false);
-  assert.equal(parseWork(JSON.parse(legacy)).schema, 24);
-  const record = (await f.call(f.command)).result;
-
-  const command = {
-    action: 'read-work-history-record',
-    id: record.id,
-    collection: 'intents',
-    recordId: f.intent.id,
-  };
-
-  const response = await new WorkService(f.root).dispatch(
-    { revision: 0, command }.command,
-    { revision: 0, command }.revision,
-  );
-
-  const expected = await response;
-  assert.equal(expected.result.record.id, f.intent.id);
-  assert.deepEqual(
-    JSON.parse(
-      execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', f.root, JSON.stringify(command), '0'], {
-        encoding: 'utf8',
-      }),
-    ),
-    expected,
-  );
-  const transport = new StdioClientTransport({
-      command: process.execPath,
-      args: [resolve('dist/cli.js'), 'mcp', f.root, '--work'],
-      env: Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== undefined)),
-      stderr: 'pipe',
-    }),
-    client = new Client({ name: 'historical-acceptance', version: '1' });
-  await client.connect(transport);
-  t.after(() => client.close());
-  const mcp = await client.callTool({ name: 'forge_work_command', arguments: { command, revision: 0 } });
-  assert.deepEqual(JSON.parse(mcp.content[0].text), expected);
 });

@@ -3,9 +3,9 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -223,31 +223,4 @@ test('non-UTF-8 and control-character paths match exact bytes, while missing pro
     process.env.PATH = previous;
     renameSync(held, treePath);
   }
-});
-
-test('real CLI/WorkService comparison shares private exact-pin validation and leaves work unchanged on invalid or unauthorized input', async t => {
-  const { root, work, candidate, command, compare } = setup(t);
-  const left = candidate('CLI left', path => write(path, 'a.ts', 'left')),
-    right = candidate('CLI right', path => write(path, 'a.ts', 'right'));
-  const before = readWorkBytes(join(work.store.directory, 'work.json')),
-    input = command(left.view, right.view, { limit: 1 });
-  const result = JSON.parse(
-    execFileSync(process.execPath, [resolve('dist/cli.js'), 'work', root, JSON.stringify(input), '0'], {
-      encoding: 'utf8',
-    }),
-  ).result;
-  assert.equal(result.private, true);
-  assert.equal(result.sharedPaths[0].display, 'a.ts');
-  assert.deepEqual(result.left.inputs, left.view.inputs);
-
-  const body = JSON.stringify({ command: input, revision: 0 });
-
-  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  assert.equal((await response).result.commonPathCount, 1);
-  for (const patch of [{ offset: -1 }, { limit: 101 }, { expectedHead: '--help' }])
-    await assert.rejects(compare(left.view, right.view, patch), code('BAD_ARGUMENT'));
-  for (const patch of [{ otherViewId: randomUUID() }, { otherHead: '0'.repeat(40) }])
-    await assert.rejects(compare(left.view, right.view, patch), code('VIEW_STALE'));
-  assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
 });

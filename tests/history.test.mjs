@@ -3,7 +3,7 @@ import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, existsSync, chmodSync, unlinkSync, openSync, closeSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { WorkService } from '../dist/work.js';
@@ -157,37 +157,6 @@ test('actual shallow/promisor missing parents stay unknown and never invoke a re
   assert.match(page.entries[1].reason, /No fetch/);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(readFileSync(join(copy, '.git/shallow')), shallowBefore);
-  assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
-});
-
-test('actual CLI and HTTP privately export pinned history without changing work or serving unauthorized reads', async t => {
-  const { root, head, originals } = graph(t),
-    { work, command } = candidate(root);
-  const before = readWorkBytes(join(work.store.directory, 'work.json'));
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        resolve('dist/cli.js'),
-        'work',
-        root,
-        JSON.stringify(command({ action: 'export-history', limit: 1 })),
-        '0',
-      ],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(cli.result.head, head);
-  assert.deepEqual(Buffer.from(cli.result.entries[0].raw.data, 'base64'), originals.get(head));
-
-  const body = JSON.stringify({ revision: 0, command: command({ action: 'export-history', limit: 1 }) });
-
-  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  const exported = (await response).result;
-  assert.equal(exported.private, true);
-  assert.equal(exported.entries[0].id, head);
-  assert.equal(exported.nextOffset, 1);
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
 });
 

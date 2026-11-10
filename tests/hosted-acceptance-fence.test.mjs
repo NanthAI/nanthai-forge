@@ -3,10 +3,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { initNative, nativeExecute } from '../dist/native-work.js';
 import { WorkService } from '../dist/work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
@@ -142,37 +141,6 @@ test('Work dispatch, agent accept and repeated operations preserve source and re
   assert.equal(f.store.load().channelMoves.length, 0);
   assert.equal(f.store.select('lanes', f.lane.id).state, 'active');
   // Under server authority, checkpoints go through hosted (covered by hosted-agent-bound tests).
-});
-
-test('CLI work and agent accept return structured hosted authority errors', t => {
-  const f = fixture(t);
-  bind(f.store);
-  const cli = resolve('dist/cli.js');
-  for (const args of [
-    ['work', f.root, JSON.stringify(f.command), String(f.store.revision())],
-    ['agent', f.root, 'accept', JSON.stringify({ viewId: f.command.viewId })],
-  ]) {
-    const result = spawnSync(process.execPath, [cli, ...args], { encoding: 'utf8' });
-    assert.equal(result.status, 1, result.stderr);
-    hosted(JSON.parse(result.stderr.trim().split('\n').at(-1)).error);
-  }
-  assert.equal(f.store.load().channelMoves.length, 0);
-});
-
-test('MCP accept returns HOSTED_AUTHORITY without changing main', async t => {
-  const f = fixture(t);
-  bind(f.store);
-  const handlers = new Map();
-  registerAgentWorkflow(
-    { registerTool: (name, _definition, handler) => handlers.set(name, handler) },
-    f.root,
-  );
-  const response = await handlers.get('forge_task')({
-    command: { action: 'accept', viewId: f.command.viewId },
-  });
-  assert.equal(response.isError, true);
-  hosted(JSON.parse(response.content[0].text).error);
-  assert.equal(f.store.load().channelMoves.length, 0);
 });
 
 test('native landing worker cannot accept a passing batch when the project becomes bound', async t => {

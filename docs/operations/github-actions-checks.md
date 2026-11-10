@@ -370,7 +370,7 @@ from its start/end timestamps, rounds up to whole minutes separately and applies
 the pinned per-label rate. Unknown timestamps or unpriced custom labels retain
 unknown quantities, not zero. Blacksmith Ubuntu x64 defaults to vCPU/2 ×
 $0.004/job-minute, before its shared free allowance. Override any label through
-`checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#native-runner-selection). Selected output files are currently marked unavailable;
+`checks.ratesUsdPerMinute`; see [cost basis and summaries](../operations.md#runner-selection). Selected output files are currently marked unavailable;
 remote native process resource metrics are unavailable.
 
 The result and compact test evidence are recorded before deleting a terminal run’s ref,

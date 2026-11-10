@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { cleanupOwner } from '../tests/owner-cleanup.mjs';
 import { Worker } from 'node:worker_threads';
 import { spawnSync } from 'node:child_process';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import {
   existsSync,
   copyFileSync,
@@ -234,7 +234,7 @@ try {
   };
   const unconfiguredHelp = spawnSync(process.execPath, [cli, '--help'], { env, encoding: 'utf8' });
   assert.equal(unconfiguredHelp.status, 0, unconfiguredHelp.stderr);
-  assert.match(unconfiguredHelp.stdout, /init-native/);
+  assert.match(unconfiguredHelp.stdout, /nforge host ROOT/);
   const unconfigured = spawnSync(process.execPath, [cli, '--version'], { env, encoding: 'utf8' });
   assert.equal(unconfigured.status, 1);
   assert.equal(JSON.parse(unconfigured.stderr).error.code, 'CLI_UPDATE_SOURCE_REQUIRED');
@@ -262,12 +262,15 @@ try {
   process.env.PATH = bin;
   process.env.FORGE_PACKAGE_GIT_CALLED = gitCalled;
   const command = (...argv) => JSON.parse(run(process.execPath, [cli, ...argv], { env }));
-  assert.match(run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--help'], { env }), /init-native/);
+  assert.match(run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--help'], { env }), /nforge host ROOT/);
   assert.equal(Atomics.load(releaseCalls, 0), 0, 'Installed help must make zero release reads.');
   run(join(prefix, 'node_modules', '.bin', 'nforge'), ['--version'], { env });
   assert.equal(Atomics.load(releaseCalls, 0), 1, 'Valid installed work retains one freshness read.');
   const beforeLauncher = Atomics.load(releaseCalls, 0);
-  assert.match(run(process.execPath, [join(installation, 'launcher.mjs'), '--help'], { env }), /init-native/);
+  assert.match(
+    run(process.execPath, [join(installation, 'launcher.mjs'), '--help'], { env }),
+    /nforge host ROOT/,
+  );
   assert.equal(
     Atomics.load(releaseCalls, 0) - beforeLauncher,
     0,
@@ -279,15 +282,17 @@ try {
     1,
     'Stable launcher valid work retains one per-process release read.',
   );
-  const owner = join(directory, 'native');
+  const owner = join(directory, 'project');
   mkdirSync(owner);
   writeFileSync(join(owner, 'a.ts'), 'export const answer = 1;\n');
   writeFileSync(join(owner, 'README.md'), '# Package acceptance\n');
   writeFileSync(join(owner, '.env'), 'PACKAGE_SYNTHETIC_SECRET=excluded\n', { mode: 0o600 });
-  const initial = command('init-native', owner);
-  command('set-policy', owner, JSON.stringify({ operationId: randomUUID(), preset: 'trusted' }));
-  assert.equal(initial.engine, 'forge-native');
-  assert.equal(existsSync(join(owner, '.git')), false);
+  // A hosted checkout has no Git metadata; its local code index must not need Git either.
+  mkdirSync(join(owner, '.forge'));
+  writeFileSync(
+    join(owner, '.forge', 'hosted-main.json'),
+    JSON.stringify({ selection: { schema: 1, projectId: 'package-synthetic-project', channel: 'main' } }),
+  );
   command('index', owner);
   assert.equal(command('source', owner, 'a.ts', '1', '1').results[0].text, 'export const answer = 1;');
   const resolver = createRequire(join(prefix, 'package.json'));
@@ -324,33 +329,6 @@ try {
     ],
     { cwd: prefix, env },
   );
-  const status = () => command('work', owner);
-  const act = input => command('work', owner, JSON.stringify(input), String(status().revision)).result;
-  const intent = act({ action: 'intent', outcome: 'Installed package native workflow' });
-  const lane = act({ action: 'lane', intentId: intent.id, name: 'Package Lane' });
-  const selected = () =>
-    act({ action: 'read-work-detail', kind: 'lane', id: lane.id, expectedHead: lane.head }).lane;
-  const lanePath = selected().path;
-  writeFileSync(join(lanePath, 'a.ts'), 'export const answer = 2;\n');
-  writeFileSync(join(lanePath, 'binary.bin'), Buffer.from([0, 128, 255]));
-  writeFileSync(join(lanePath, 'executable.sh'), '#!/bin/sh\nexit 0\n', { mode: 0o700 });
-  const before = selected();
-  assert.equal(before.actualHead, lane.head);
-  assert.match(before.indexTree, /^[a-f0-9]{64}$/);
-  const checkpoint = act({
-    action: 'checkpoint',
-    laneId: lane.id,
-    expectedHead: before.actualHead,
-    expectedTree: before.indexTree,
-    message: 'Installed native edit',
-  });
-  const view = act({
-    action: 'compose',
-    operationId: randomUUID(),
-    intentId: intent.id,
-    inputs: [{ laneId: lane.id, head: checkpoint.head }],
-  });
-  assert.equal(view.status, 'clean');
   const { Client } = await import(
     pathToFileURL(runtimeResolver.resolve('@modelcontextprotocol/sdk/client/index.js'))
   );
@@ -359,211 +337,42 @@ try {
   );
   client = new Client({ name: 'forge-package-acceptance', version: '1.0.0' });
   await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: [cli, 'mcp', owner, '--work'],
-      env,
-      stderr: 'pipe',
-    }),
+    new StdioClientTransport({ command: process.execPath, args: [cli, 'mcp', owner], env, stderr: 'pipe' }),
   );
   const tools = (await client.listTools()).tools;
-  for (const name of ['forge_current', 'forge_source', 'forge_work_status', 'forge_work_command'])
+  for (const name of ['forge_current', 'forge_source', 'forge_reindex'])
     assert.ok(tools.some(tool => tool.name === name));
   const call = async (name, arguments_ = {}) => {
     const result = await client.callTool({ name, arguments: arguments_ });
     assert.ok(!result.isError, `Installed MCP ${name} failed`);
     return JSON.parse(result.content[0].text);
   };
-  await call('forge_reindex', { laneId: lane.id });
   assert.equal(
-    (await call('forge_source', { laneId: lane.id, file: 'a.ts', start: 1, end: 1 })).results[0].text,
-    'export const answer = 2;',
+    (await call('forge_source', { file: 'a.ts', start: 1, end: 1 })).results[0].text,
+    'export const answer = 1;',
   );
-  assert.equal((await call('forge_current', { laneId: lane.id })).sourceContext.laneId, lane.id);
-  assert.equal((await call('forge_work_status', { compact: true })).nativeHead, initial.head);
   await client.close();
   client = undefined;
-  assert.match(run(process.execPath, [cli, 'local-checks', '--help'], { env }), /FORGE_AUTH_TOKEN/);
   const plugin = command('plugin-config', owner, join(prefix, 'forge-plugin'));
   const pluginMcp = JSON.parse(readFileSync(join(plugin.plugin, '.mcp.json'))).mcpServers.forge;
   assert.equal(pluginMcp.command, process.execPath);
   assert.equal(pluginMcp.args[0], cli);
   assert.equal(command('plugin-config', owner, plugin.directory).reused, true);
   const pluginSkill = readFileSync(join(plugin.plugin, 'skills/forge-agent/SKILL.md'), 'utf8');
-  assert.ok(readFileSync(new URL(pluginSkill.match(/\[source exchange\]\(([^)]+)\)/)[1])).length > 0);
-  client = new Client({ name: 'forge-installed-plugin', version: '1' });
-  await client.connect(
-    new StdioClientTransport({ command: pluginMcp.command, args: pluginMcp.args, env, stderr: 'pipe' }),
-  );
-  for (const name of ['forge_task', 'forge_check', 'forge_review', 'forge_work_overview'])
-    assert.ok((await client.listTools()).tools.some(tool => tool.name === name));
-  const pluginStatus = await call('forge_work_overview', {
-    command: { action: 'status', intentId: intent.id },
+  assert.ok(readFileSync(new URL(pluginSkill.match(/\[hosted parity\]\(([^)]+)\)/)[1])).length > 0);
+  // One client mode: a folder without a hosted marker is refused with the nforge host next step.
+  const plain = join(directory, 'plain');
+  mkdirSync(plain);
+  const refused = spawnSync(process.execPath, [cli, 'agent', plain, 'status', '{}'], {
+    env,
+    encoding: 'utf8',
   });
-  assert.equal(pluginStatus.result.lanes.total, 1);
-  await client.close();
-  client = undefined;
-  const installedAgent = (action, input) => command('agent', owner, action, JSON.stringify(input)).result;
-  const installedCheck = installedAgent('define-check', {
-    name: 'Installed Candidate check',
-    executable: process.execPath,
-    args: ['-e', "if(!require('fs').readFileSync('a.ts','utf8').includes('= 2;'))process.exit(1)"],
-  });
-  const installedRun = installedAgent('run', {
-    operationId: randomUUID(),
-    viewId: view.id,
-    expectedHead: view.head,
-    checkId: installedCheck.checkId,
-    expectedDefinition: installedCheck.definition,
-  });
-  assert.equal(installedRun.status, 'passed');
-  const acceptance = act({
-    action: 'accept-channel',
-    operationId: randomUUID(),
-    channel: 'main',
-    viewId: view.id,
-    expectedHead: view.head,
-    expectedPrevious: null,
-  });
-  assert.equal(acceptance.status, 'accepted');
-  const inspected = act({ action: 'inspect-native-objects' });
-  assert.equal(inspected.candidates.length, 0);
-  const collected = act({ action: 'collect-native-objects' });
-  assert.equal(collected.removed.length, 0);
-  assert.ok(collected.format >= 3);
-  const proposal = act({ action: 'export-work', archive: true });
-  const original = command('work', owner, '--compact');
-  const incoming = act({
-    action: 'import-native-contribution',
-    operationId: randomUUID(),
-    intentId: intent.id,
-    expectedBase: initial.head,
-    expectedHead: view.head,
-    archivePath: proposal.archive.path,
-    archiveSha256: proposal.archive.sha256,
-    name: 'Installed source contribution',
-  });
-  const contributed = command('work', owner, '--compact');
-  assert.equal(contributed.schema, original.schema);
-  assert.equal(contributed.channels[0].head, original.channels[0].head);
-  assert.equal(contributed.runs.length, original.runs.length);
-  assert.equal(contributed.lanes.find(item => item.id === incoming.id).head, view.head);
-  assert.equal(contributed.nativeContributionReceipts[0].archiveSha256, proposal.archive.sha256);
-  const backup = act({ action: 'export-work', archive: true });
-  const restored = join(directory, 'restored');
-  command('restore-native', backup.archive.path, restored);
-  const restoredWork = command('work', restored, '--compact');
-  assert.equal(restoredWork.schema, original.schema);
-  assert.equal(restoredWork.nativeContributionReceipts[0].archiveSha256, proposal.archive.sha256);
-  assert.equal(restoredWork.nativeHead, initial.head);
-  assert.equal(restoredWork.channels[0].head, view.head);
-  const restoredLane = restoredWork.lanes.find(item => item.id === lane.id);
-  assert.equal(readFileSync(join(restoredLane.path, 'a.ts'), 'utf8'), 'export const answer = 2;\n');
-  assert.deepEqual(readFileSync(join(restoredLane.path, 'binary.bin')), Buffer.from([0, 128, 255]));
-  assert.ok(statSync(join(restoredLane.path, 'executable.sh')).mode & 0o111);
-  assert.equal(existsSync(join(restored, '.env')), false);
-  assert.equal(existsSync(join(restored, '.git')), false);
-  command('index', restoredLane.path);
-  // The shipped skill and ergonomic CLI must work from the installed closure,
-  // including original operation recovery in the current versioned Work format.
+  assert.equal(refused.status, 1);
+  const refusal = JSON.parse(refused.stderr).error;
+  assert.equal(refusal.code, 'FORGE_ROOT_UNAVAILABLE');
+  assert.match(refusal.message, /nforge host/);
   assert.match(readFileSync(join(installed, 'skills/forge-agent/SKILL.md'), 'utf8'), /name: forge-agent/);
-  assert.match(run(process.execPath, [cli, 'agent', '--help'], { env }), /checkpoint/);
-  const agentOwner = join(directory, 'agent-native');
-  mkdirSync(agentOwner);
-  writeFileSync(join(agentOwner, 'answer.txt'), 'one\n');
-  command('init-native', agentOwner);
-  command('set-policy', agentOwner, JSON.stringify({ operationId: randomUUID(), preset: 'trusted' }));
-  const agent = (action, input = {}) => command('agent', agentOwner, action, JSON.stringify(input)).result;
-  const startRequest = { operationId: randomUUID(), outcome: 'Installed agent acceptance' };
-  const task = agent('start', startRequest);
-  writeFileSync(join(task.path, 'answer.txt'), 'two\n');
-  const agentCheckpoint = agent('checkpoint', {
-    operationId: randomUUID(),
-    laneId: task.laneId,
-    expectedHead: task.head,
-    message: 'Installed agent edit',
-  });
-  const agentView = agent('compose', {
-    operationId: randomUUID(),
-    intentId: task.intentId,
-    inputs: [{ laneId: task.laneId, head: agentCheckpoint.head }],
-  });
-  const agentCheck = agent('define-check', {
-    name: 'Installed agent check',
-    executable: process.execPath,
-    args: [
-      '-e',
-      "if(require('fs').readFileSync('answer.txt','utf8')!=='two\\n')process.exit(1);console.log('installed-agent-checked')",
-    ],
-  });
-  const runRequest = {
-    operationId: randomUUID(),
-    viewId: agentView.viewId,
-    expectedHead: agentView.head,
-    checkId: agentCheck.checkId,
-  };
-  const checked = agent('run', runRequest);
-  assert.equal(checked.status, 'passed');
-  assert.equal(checked.checkDefinition, agentCheck.definition);
-  assert.equal(checked.environmentFingerprint.length, 64);
-  assert.deepEqual(agent('run', runRequest), checked);
-  const agentAccepted = agent('accept', {
-    operationId: randomUUID(),
-    viewId: agentView.viewId,
-    expectedHead: agentView.head,
-    expectedPrevious: null,
-  });
-  assert.equal(agentAccepted.head, agentView.head);
-  const nextTask = agent('start', { operationId: randomUUID(), outcome: 'Installed agent finish' });
-  writeFileSync(join(nextTask.path, 'answer.txt'), 'three\n');
-  const finishCheck = agent('define-check', {
-    name: 'Installed finish check',
-    executable: process.execPath,
-    args: [
-      '-e',
-      "if(require('fs').readFileSync('answer.txt','utf8')!=='three\\n')process.exit(1);console.log('installed-finish-checked')",
-    ],
-  });
-  const finishRequest = {
-    operationId: randomUUID(),
-    laneId: nextTask.laneId,
-    expectedHead: nextTask.head,
-    message: 'Installed finish edit',
-    checkId: finishCheck.checkId,
-    expectedDefinition: finishCheck.definition,
-    accept: { expectedPrevious: agentView.head },
-  };
-  const finished = agent('finish', finishRequest);
-  assert.equal(finished.complete, true);
-  assert.equal(finished.status, 'accepted');
-  assert.equal(finished.run.status, 'passed');
-  assert.equal(finished.run.runId, finished.run.operationId);
-  assert.equal(finished.acceptance.acceptanceId, finished.acceptance.operationId);
-  assert.deepEqual(agent('finish', finishRequest), finished);
-  const agentWork = command('work', agentOwner, '--compact');
-  assert.equal(agentWork.schema, 24);
-  assert.equal(agentWork.runs.length, 2);
-  const agentBackup = command(
-    'work',
-    agentOwner,
-    JSON.stringify({ action: 'export-work', archive: true }),
-    String(agentWork.revision),
-  ).result;
-  const agentRestored = join(directory, 'agent-restored');
-  command('restore-native', agentBackup.archive.path, agentRestored);
-  const agentRecovered = command('work', agentRestored, '--compact');
-  assert.equal(agentRecovered.schema, agentWork.schema);
-  assert.equal(
-    command('agent', agentRestored, 'start', JSON.stringify(startRequest)).result.laneId,
-    task.laneId,
-  );
-  assert.deepEqual(command('agent', agentRestored, 'run', JSON.stringify(runRequest)).result, checked);
-  assert.equal(agentRecovered.channels[0].head, finished.view.head);
-  assert.deepEqual(command('agent', agentRestored, 'finish', JSON.stringify(finishRequest)).result, {
-    ...finished,
-    checkpoint: { ...finished.checkpoint, path: join(agentRestored, '.forge/work/lane-' + nextTask.laneId) },
-  });
-  assert.equal(existsSync(gitCalled), false, 'Native installed workflow invoked Git.');
+  assert.equal(existsSync(gitCalled), false, 'Installed source workflow invoked Git.');
   const result = {
     package: manifest.name,
     version: manifest.version,
@@ -588,33 +397,12 @@ try {
       executableRedistribution: false,
       binarySbom: false,
     },
-    sourceState: initial.head,
-    candidateState: view.head,
-    viewId: view.id,
-    acceptanceId: acceptance.id,
-    restoredSchema: restoredWork.schema,
     gitCalls: 0,
     sdk: 'passed',
     sdkTypes: 'passed',
     cli: 'passed',
     mcp: 'passed',
-    nativeRecovery: 'passed',
-    agentWorkflow: {
-      skill: 'installed byte-identical',
-      cli: 'passed without SDK scripts or indexing',
-      originalRunReplay: 'passed',
-      recordedWorkRecovery: 'passed',
-      finish: {
-        status: finished.status,
-        replay: 'passed',
-        runId: finished.run.runId,
-        acceptanceId: finished.acceptance.acceptanceId,
-        viewId: finished.view.viewId,
-        head: finished.view.head,
-      },
-      viewId: agentView.viewId,
-      head: agentView.head,
-    },
+    hostedOnlyRefusal: 'passed',
     registryPublication: 'unrun',
     retained: !!kept,
   };

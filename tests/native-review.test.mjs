@@ -2,23 +2,11 @@
 import { readWorkBytes } from './work-store-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  mkdtempSync,
-  mkdirSync,
-  writeFileSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  chmodSync,
-  symlinkSync,
-  existsSync,
-} from 'node:fs';
-import { join, resolve } from 'node:path';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, chmodSync } from 'node:fs';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { initNative } from '../dist/native-work.js';
 import { NativeSource } from '../dist/native-source.js';
 import { nativeDiff } from '../dist/native-diff.js';
@@ -145,97 +133,3 @@ test('native live review diagnoses changed captures and races without substituti
   }
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), journal);
 });
-test(
-  'opt-in SDK MCP exports and restores actual native source and Work without Git',
-  { timeout: 120000 },
-  async t => {
-    const { root, work, path, directory, act, intent, checkpoint, compose } = fixture(t);
-    writeFileSync(join(path, 'a.ts'), 'export const value = 7;\n');
-    checkpoint();
-    const view = compose();
-    act({ action: 'note', intentId: intent.id, kind: 'comment', text: 'Synthetic private Work preserved' });
-    act({
-      action: 'accept-channel',
-      operationId: randomUUID(),
-      channel: 'main',
-      viewId: view.id,
-      expectedHead: view.head,
-      expectedPrevious: null,
-    });
-    writeFileSync(join(path, 'a.ts'), 'original dirty Lane remains private\n');
-    const bin = join(directory, 'bin');
-    mkdirSync(bin);
-    const called = join(directory, 'git-called');
-    writeFileSync(join(bin, 'git'), `#!/bin/sh\n/usr/bin/touch '${called}'\nexit 91\n`);
-    chmodSync(join(bin, 'git'), 0o700);
-    for (const tool of ['tar', 'gzip']) symlinkSync(`/usr/bin/${tool}`, join(bin, tool));
-    const env = { ...process.env, PATH: bin };
-    const cli = resolve('dist/cli.js');
-    const open = async enabled => {
-      const client = new Client({ name: 'native-export-test', version: '1.0.0' });
-      const transport = new StdioClientTransport({
-        command: process.execPath,
-        args: [cli, 'mcp', root, ...(enabled ? ['--work'] : [])],
-        env,
-        stderr: 'pipe',
-      });
-      let stderr = '';
-      transport.stderr?.on('data', chunk => {
-        stderr += chunk;
-      });
-      t.after(() => client.close());
-      await client.connect(transport);
-      return { client, stderr: () => stderr };
-    };
-    const ordinary = await open(false);
-    assert.equal((await ordinary.client.listTools()).tools.length, 8);
-    await ordinary.client.close();
-    const { client, stderr } = await open(true);
-    assert.equal((await client.listTools()).tools.length, 10);
-    const call = async (name, args = {}) => {
-      const result = await client.callTool({ name, arguments: args });
-      return { result, body: JSON.parse(result.content[0].text) };
-    };
-    const status = (await call('forge_work_status')).body;
-    assert.match(status.lanes[0].diff, /original dirty Lane/);
-    assert.equal(status.views[0].details, view.details);
-    const journal = readWorkBytes(join(work.store.directory, 'work.json'));
-    const stale = await call('forge_work_command', {
-      revision: 0,
-      command: { action: 'export-work', archive: true },
-    });
-    assert.equal(stale.body.error.code, 'WORK_STALE');
-    const invalid = await client.callTool({
-      name: 'forge_work_command',
-      arguments: { revision: status.revision, command: { action: 'export-work', archive: 'true' } },
-    });
-    assert.equal(invalid.isError, true);
-    const exported = await call('forge_work_command', {
-      revision: status.revision,
-      command: { action: 'export-work', archive: true },
-    });
-    assert.equal(exported.result.isError, undefined);
-    const backup = exported.body.result;
-    assert.equal(JSON.parse(backup.json).kind, 'forge-native-work-backup');
-    assert.equal(hash(readFileSync(backup.archive.path)), backup.archive.sha256);
-    const target = join(directory, 'restored');
-    const restored = JSON.parse(
-      execFileSync(process.execPath, [cli, 'restore-native', backup.archive.path, target], {
-        env,
-        encoding: 'utf8',
-      }),
-    );
-    assert.equal(restored.restored, true);
-    const restoredWork = new WorkService(target).status();
-    assert.equal(restoredWork.channels[0].head, view.head);
-    assert.equal(restoredWork.intents[0].notes[0].text, 'Synthetic private Work preserved');
-    assert.equal(readFileSync(join(restoredWork.lanes[0].path, 'a.ts'), 'utf8'), 'export const value = 7;\n');
-    assert.equal(readFileSync(join(path, 'a.ts'), 'utf8'), 'original dirty Lane remains private\n');
-    assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), journal);
-    assert.equal(existsSync(join(target, '.git')), false);
-    assert.equal(existsSync(called), false);
-    await client.close();
-    assert.equal(stderr(), '');
-    assert.equal(ordinary.stderr(), '');
-  },
-);

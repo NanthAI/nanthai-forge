@@ -14,9 +14,9 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
+
 import { generateKeyPairSync } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+
 import { workGit } from '../dist/work-git.js';
 import { NativeSource, nativePaths } from '../dist/native-source.js';
 import { initNative } from '../dist/native-work.js';
@@ -25,7 +25,7 @@ import { PeersSource } from '../dist/agent-peers-source.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
 import { readIgnoredStatus } from '../dist/ignored-status.js';
-import { registerAgentWorkflow } from '../dist/mcp-agent-workflow.js';
+
 import { exportNativeGit, importNativeGit } from '../dist/native-git.js';
 
 // Generated per run, so no key is ever committed.
@@ -147,7 +147,7 @@ test('save, first-write path set, Lane materialization and export omit Forge-ign
   assert.equal(readFileSync(join(path, 'retained.txt'), 'utf8'), 'original');
 });
 
-test('local status, CLI JSON/list and MCP expose rules without ignored file contents or remote IO', async t => {
+test('local pending status exposes rules without ignored file contents or remote IO', async t => {
   const root = fixture(t);
   put(root, '.gitignore', '*.tmp\n');
   put(root, '.forgeignore', 'private/\n');
@@ -171,36 +171,8 @@ test('local status, CLI JSON/list and MCP expose rules without ignored file cont
   assert.match(formatPendingStatus(detailed), /Ignored: 1 .gitignore · 1 .forgeignore · 2 built-in/);
   assert.match(formatPendingStatus(detailed), /"private" · ".forgeignore":1 · "private\/"/);
   assert(!JSON.stringify(detailed).includes('SYNTHETIC_EXCLUDED_CONTENT'));
-  const cli = fileURLToPath(new URL('../dist/cli.js', import.meta.url));
-  for (const flags of [[], ['--ignored'], ['--json'], ['--ignored', '--json']]) {
-    const child = spawnSync(process.execPath, [cli, 'status', root, ...flags], { encoding: 'utf8' });
-    assert.equal(child.status, 0, child.stderr);
-    assert(!child.stdout.includes('SYNTHETIC_EXCLUDED_CONTENT'));
-    if (flags.includes('--json')) {
-      const status = JSON.parse(child.stdout);
-      assert.deepEqual(status.ignored.counts, detailed.ignored.counts);
-      assert.equal(Array.isArray(status.ignored.paths), flags.includes('--ignored'));
-    } else assert.match(child.stdout, /Ignored:/);
-  }
-  const tools = new Map();
-  const close = registerAgentWorkflow(
-    {
-      registerTool(name, spec, handler) {
-        tools.set(name, { spec, handler });
-      },
-    },
-    root,
-  );
-  try {
-    const mcp = tools.get('forge_work_overview');
-    const response = await mcp.handler({ command: { action: 'pending-status', ignored: true } });
-    const result = JSON.parse(response.content[0].text);
-    assert.deepEqual(result.ignored, detailed.ignored);
-    assert.equal(calls, 0);
-    assert.equal(work.store.revision(), revision);
-  } finally {
-    await close();
-  }
+  assert.equal(calls, 0);
+  assert.equal(work.store.revision(), revision);
 });
 
 test('original Git import retains exact history while subsequent captures honor Forge rules', async t => {

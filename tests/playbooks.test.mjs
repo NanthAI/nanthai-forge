@@ -2,13 +2,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
-import { once } from 'node:events';
+
 import { WorkService } from '../dist/work.js';
-import { processAlive } from '../dist/local-process.js';
-import { pollUntil } from './mcp-runtime.mjs';
+
 import { fixture, git, write, code } from './helpers.mjs';
 
 function setup(t) {
@@ -62,53 +60,6 @@ async function wait(work, id, done = r => !!r?.endedAt) {
   }
   assert.fail('Playbook did not reach expected state');
 }
-
-test('ordered exact checks, duplicate selected steps, retries and private portable exports preserve dirty work', async t => {
-  const { root, work, dispatch, lane, view, define, book, command, marker, append } = setup(t);
-  write(work.store.path(lane.id), 'a.ts', 'unfinished source');
-  const first = define(append('A')),
-    second = define(append('B'));
-  const playbook = await book([first, second, first]),
-    input = command(playbook);
-  await dispatch(input);
-  await dispatch(input, 0);
-  const run = await wait(work, input.operationId);
-  assert.equal(run.status, 'passed');
-  assert.equal(readFileSync(marker, 'utf8'), 'ABA');
-  assert.equal(work.status().runs.length, 3);
-  assert.deepEqual(run.inputs, view.inputs);
-  assert.equal(run.head, view.head);
-  assert.equal((await dispatch(input, 0)).result.id, run.id);
-  assert.equal(readFileSync(marker, 'utf8'), 'ABA');
-  await assert.rejects(dispatch({ ...input, onFailure: 'continue' }, 0), code('EVIDENCE_CHANGED'));
-  const exported = (await dispatch({ action: 'export-playbook', kind: 'run', id: run.id }, 0)).result;
-  assert.equal(exported.private, true);
-  assert.equal(exported.steps.length, 3);
-  assert.ok(exported.steps.every(s => s.outcome.status === 'passed' && s.outcome.playbookRunId === run.id));
-  const out = (
-    await dispatch({ action: 'read-check-output', operationId: run.steps[0].runId, stream: 'stdout' })
-  ).result;
-  assert.equal(out.text, 'export const a = 1;\n\n');
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [
-        resolve('dist/cli.js'),
-        'work',
-        root,
-        JSON.stringify({ action: 'export-playbook', kind: 'definition', id: playbook.id }),
-        '0',
-      ],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.deepEqual(
-    cli.result.checks.map(c => c.definition),
-    [first.definition, second.definition, first.definition],
-  );
-  assert.equal(readFileSync(join(work.store.path(lane.id), 'a.ts'), 'utf8'), 'unfinished source');
-  assert.equal(git(root, ['rev-parse', 'HEAD']).trim(), view.base);
-});
 
 test('stop/continue choices affect only the sequence; changing a definition never substitutes a pending command', async t => {
   const { work, dispatch, define, book, command, marker, append } = setup(t);
@@ -224,140 +175,6 @@ test('WorkService cancellation stops a live step and later launches, protects ex
   await dispatch(input, 0);
   assert.equal(work.status().runs.length, 1);
 });
-
-test(
-  'lost registration replies reconcile without launching, and actual runner death never starts remaining steps',
-  { timeout: 120_000 },
-  async t => {
-    let cleanup = () => {};
-    t.after(() => cleanup());
-    const { root, work, dispatch, define, book, command, marker, append } = setup(t);
-    const selected = command(await book([define(append('not launched'))]));
-    const save = work.store.save.bind(work.store);
-    let fail = true;
-    work.store.save = data => {
-      save(data);
-      if (fail && data.playbookRuns.length) {
-        fail = false;
-        throw new Error('Lost registration reply');
-      }
-    };
-    await assert.rejects(dispatch(selected), /Lost registration reply/);
-    work.store.save = save;
-    assert.equal((await dispatch(selected, 0)).result.status, 'interrupted');
-    assert.equal(work.status().runs.length, 0);
-    assert.equal(existsSync(marker), false);
-    const completion = command(
-      await book([define('console.log("finished once")'), define(append('not after uncertain completion'))]),
-    );
-    let lostCompletion = false;
-    const commit = work.store.commitRecords.bind(work.store);
-    work.store.commitRecords = (transaction, revision) => {
-      const runId = transaction.find('playbookRuns', completion.operationId)?.record.steps[0]?.runId;
-      const run = runId ? transaction.find('runs', runId)?.record : undefined;
-      if (!lostCompletion && run?.endedAt) {
-        lostCompletion = true;
-        throw new Error('Lost completion write');
-      }
-      return commit(transaction, revision);
-    };
-    await dispatch(completion);
-    assert.equal((await wait(work, completion.operationId)).status, 'interrupted');
-    work.store.commitRecords = commit;
-    assert.equal(lostCompletion, true);
-    assert.equal(work.status().runs.find(r => r.playbookRunId === completion.operationId).status, 'passed');
-    await dispatch(completion, 0);
-    assert.equal(work.status().runs.filter(r => r.playbookRunId === completion.operationId).length, 1);
-    assert.equal(existsSync(marker), false);
-    const input = command(
-      await book([
-        define('console.log("ready"); setInterval(()=>{},1000)'),
-        define(append('not after death')),
-      ]),
-    );
-    let ownedStep;
-    const stopStep = () => {
-      // Read the current fixture-owned step even if readiness timed out.
-      const step = ownedStep ?? work.store.load().runs.find(r => r.playbookRunId === input.operationId);
-      if (!step) return;
-      assert.notEqual(step.runner.pid, process.pid);
-      // Both identities belong to this fixture. Fence PID reuse before signalling.
-      for (const [identity, group] of [
-        [step.runner, false],
-        [{ pid: step.childPid, startTime: step.childStartTime }, true],
-      ]) {
-        if (!identity.pid || !processAlive(identity)) continue;
-        try {
-          process.kill(group && process.platform !== 'win32' ? -identity.pid : identity.pid, 'SIGKILL');
-        } catch (error) {
-          if (error.code !== 'ESRCH') throw error;
-        }
-      }
-    };
-    const child = spawn(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', root, JSON.stringify(input), String(work.status().revision)],
-      { stdio: ['ignore', 'pipe', 'pipe'] },
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stderr.on('data', bytes => {
-      stderr += bytes;
-    });
-    cleanup = () => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      stopStep();
-      child.stdout.removeAllListeners('data');
-    };
-    // CLI readiness is an actual complete response, not a five-second machine-speed assumption.
-    const launched = await new Promise((resolve, reject) => {
-      child.stdout.on('data', bytes => {
-        stdout += bytes;
-        try {
-          resolve(JSON.parse(stdout).result);
-        } catch {
-          /* The CLI emits pretty-printed JSON in multiple chunks. */
-        }
-      });
-      child.once('error', reject);
-      child.once('close', code =>
-        reject(new Error(`Synthetic CLI exited before readiness (${code}): ${stderr}`)),
-      );
-    });
-    assert.ok(launched);
-    // The CLI response acknowledges registration, not physical runner readiness.
-    // Wait for the detached controller's running journal before testing its death.
-    ownedStep = await pollUntil({
-      label: 'the detached Playbook step is running',
-      observe: () => work.store.select('runs', launched.steps[0].runId),
-      ready: step => step?.status === 'running' && !!step.childPid && step.runner.pid !== child.pid,
-      describe: step => ({ status: step?.status, runnerPid: step?.runner.pid, childPid: step?.childPid }),
-      timeout: 10_000,
-      interval: 25,
-    });
-    assert.notEqual(ownedStep.runner.pid, process.pid);
-    const closed = once(child, 'close');
-    child.kill('SIGKILL');
-    await closed;
-    stopStep();
-    await pollUntil({
-      label: 'the physical step runner exited',
-      observe: () => processAlive(ownedStep.runner),
-      ready: alive => !alive,
-      describe: alive => ({ alive }),
-      timeout: 10_000,
-      interval: 25,
-    });
-    cleanup = () => {
-      child.stdout.removeAllListeners('data');
-    };
-    const recovered = work.status().playbookRuns.find(r => r.id === input.operationId);
-    assert.equal(recovered.status, 'interrupted');
-    await dispatch(input, 0);
-    assert.equal(work.status().runs.filter(r => r.playbookRunId === recovered.id).length, 1);
-    assert.equal(existsSync(marker), false);
-  },
-);
 
 function automationInput(work, playbook, intentId, patch = {}) {
   return {

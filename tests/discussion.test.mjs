@@ -1,18 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  symlinkSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 import { WorkService } from '../dist/work.js';
 import { fixture, git, write, code } from './helpers.mjs';
 
@@ -210,49 +202,4 @@ test('unknown publication and concurrent replies reconcile durable pages after r
   assert.equal(s.work.status().githubDiscussions.length, 2);
   assert.equal(s.work.status().intents[0].notes[0].text, 'Concurrent unrelated decision');
   assert.equal((await s.read(recovered.id)).result.record.id, recovered.id);
-});
-
-test('invalid/provider-denied reads preserve history; receipts and exports share CLI/WorkService capability boundaries without GitHub writes', async t => {
-  const s = setup(t),
-    input = s.command();
-  for (const patch of [{ page: 0 }, { page: 1.5 }, { feed: 'execute' }, { operationId: '../unsafe' }])
-    await assert.rejects(s.dispatch({ ...input, ...patch }), code('BAD_ARGUMENT'));
-  await assert.rejects(s.dispatch(input, 0), code('WORK_STALE'));
-  await assert.rejects(
-    s.dispatch(s.command({ target: { kind: 'intent', id: randomUUID() } })),
-    code('NOT_FOUND'),
-  );
-  assert.equal(s.calls(), 0);
-  s.change({ badPull: true });
-  await assert.rejects(s.dispatch(input), code('PUBLICATION_CHANGED'));
-  s.change({ badPull: false, malformed: true });
-  await assert.rejects(s.dispatch(input), code('INVALID_DISCUSSION'));
-  s.change({ malformed: false, empty: true });
-  const saved = (await s.dispatch(input)).result;
-  assert.equal(saved.count, 0);
-
-  const body = JSON.stringify({ revision: 0, command: { action: 'export-discussion', id: saved.id } });
-
-  const result = await await new WorkService(s.root).dispatch(
-    JSON.parse(body).command,
-    JSON.parse(body).revision,
-  );
-  assert.equal(result.result.record.id, saved.id);
-  const cli = JSON.parse(
-    execFileSync(
-      process.execPath,
-      ['dist/cli.js', 'work', s.root, JSON.stringify({ action: 'export-discussion', id: saved.id }), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.deepEqual(cli.result, result.result);
-  const path = join(s.work.store.directory, `discussion-${saved.id}.json`),
-    original = readFileSync(path);
-  writeFileSync(path, '{');
-  await assert.rejects(s.read(saved.id), code('INVALID_DISCUSSION'));
-  writeFileSync(path, original);
-  unlinkSync(path);
-  symlinkSync(join(s.root, 'a.ts'), path);
-  await assert.rejects(s.read(saved.id), code('NOT_FOUND'));
-  assert.equal(s.work.status().githubDiscussions.length, 1);
 });

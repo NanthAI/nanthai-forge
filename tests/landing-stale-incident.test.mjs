@@ -6,21 +6,21 @@ import { mkdirSync, readFileSync, writeFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { fixture as createFixture } from './landing-batch-fixture.mjs';
 import { stopOwnerCheckControllers } from './owner-cleanup.mjs';
-import { readOnlyMcpLifetime, replayActionsLifetime } from './landing-lifetime-fixture.mjs';
+
 import { until } from './landing-worker-fixture.mjs';
 import { watchLandingWorker } from '../dist/landing-worker.js';
 import { readPendingStatus } from '../dist/pending-status-read.js';
 import { batchEdit, selectBatch, composeBatch } from '../dist/landing-batch-store.js';
 import { queuedOutcome, submissionOutcome } from '../dist/landing-submission.js';
 import { prepareRunRegistration } from '../dist/work-run-preparation.js';
-import { checkEnvironment, adoptRemoteRun } from '../dist/work-run.js';
+import { adoptRemoteRun } from '../dist/work-run.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { WorkService } from '../dist/work.js';
 import { WorkStore } from '../dist/work-store.js';
 import { ForgeError } from '../dist/errors.js';
 import { landingWorkerStates } from '../dist/landing-worker-status.js';
 import { formatPendingStatus } from '../dist/pending-status-format.js';
-import { notifyWorker } from '../dist/local-worker-notifications.js';
+
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
@@ -539,14 +539,6 @@ for (const kind of ['finish', 'land', 'legacy-land'])
       assert.notEqual(readPendingStatus(f.store).landingWorker.status, 'error');
     });
   });
-
-test(
-  'a read-only short-lived MCP connection never registers or drives a landing worker',
-  readOnlyMcpLifetime,
-);
-
-test('incident replay: CLI exits at Actions Pinned/not-sent while the leased controller keeps running', t =>
-  replayActionsLifetime(t, drive));
 
 test('an in-process controller lease permits independent Lane start and checkpoint publication', async t => {
   const f = await fixture(t, { remote: false });

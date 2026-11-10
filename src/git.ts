@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { childEnv } from '../scripts/child-env.mjs';
 import { execFileSync } from 'node:child_process';
-import { realpathSync } from 'node:fs';
-import { isAbsolute, posix } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, posix } from 'node:path';
 import { scanSourcePaths } from './source-paths.js';
 import { nativeOwner, nativePaths } from './native-source.js';
 import { ForgeError, invariant } from './errors.js';
@@ -44,8 +44,16 @@ function run(root: string, args: string[], input?: string, acceptNoMatch = false
     );
   }
 }
+/** Hosted checkouts (the one client mode) carry no Git metadata: index them with the same local walk a
+ * hosted save captures. A hosted marker beside a real .git keeps the Git listing. */
+function hostedWithoutGit(root: string): boolean {
+  return (
+    !existsSync(join(root, '.git')) &&
+    ['hosted-main.json', 'hosted-lane.json'].some(name => existsSync(join(root, '.forge', name)))
+  );
+}
 export function verifyRoot(root: string): void {
-  if (nativeOwner(root)) return;
+  if (nativeOwner(root) || hostedWithoutGit(root)) return;
   const top = run(root, ['rev-parse', '--show-toplevel']).trim();
   // Windows Git prints the long path with forward slashes while Forge may hold an 8.3 short
   // name (NAME~1): only the native resolver expands both to one spelling.
@@ -56,7 +64,7 @@ export function verifyRoot(root: string): void {
   invariant(same, 'NOT_REPOSITORY_ROOT', 'Pass the Git worktree root, not a subdirectory.');
 }
 export function gitHead(root: string): string | null {
-  if (nativeOwner(root)) return null;
+  if (nativeOwner(root) || hostedWithoutGit(root)) return null;
   try {
     return run(root, ['rev-parse', '--verify', 'HEAD']).trim();
   } catch {
@@ -65,6 +73,7 @@ export function gitHead(root: string): string | null {
 }
 export function sourcePaths(root: string): string[] {
   if (nativeOwner(root)) return nativePaths(root);
+  if (hostedWithoutGit(root)) return scanSourcePaths(root, { validate: false });
   const paths = run(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
     .split('\0')
     .filter(path => Boolean(path) && path !== '.forge' && !path.startsWith('.forge/'));
@@ -80,7 +89,8 @@ export function ignoredPaths(root: string, paths: string[]): Set<string> {
   const native = nativeOwner(root);
   const included = new Set(native ? nativePaths(root) : scanSourcePaths(root, { validate: false }));
   const ignored = new Set(paths.filter(path => !included.has(path)));
-  if (!native) for (const path of externalGitIgnores(root, paths)) ignored.add(path);
+  if (!native && !hostedWithoutGit(root))
+    for (const path of externalGitIgnores(root, paths)) ignored.add(path);
   return ignored;
 }
 /** Repository .gitignore rules use the shared matcher. Retain Git's other local

@@ -1,14 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
-// Cross-platform CLI core-loop smoke (Windows, macOS, Linux). Runs the built CLI
-// (dist/cli-entry.js) against a fresh native owner, then optionally against a
-// hosted dev project when FORGE_SMOKE_PROJECT_URL and a login are present.
-// It edits a CRLF file and a path with a space, renames a file by case only,
-// marks a file executable and adds a symlink, then checks the accepted bytes. It then runs the
-// self-hosted runner's exact-source check of one fixed commit on this OS and the runner contract
-// test on both adapters (Issue 1444471f).
+// Cross-platform CLI smoke (Windows, macOS, Linux). Forge has one client mode (hosted), so the
+// built CLI (dist/cli-entry.js) must refuse a folder without a hosted marker with one next step.
+// The shared source kernel that hosted clones and Lanes use (dist/native-source.js) then captures
+// an edited CRLF file and a path with a space, a case-only rename, an executable file and a
+// symlink into a State and materializes it into a fresh folder, checking bytes and modes. It then
+// runs the self-hosted runner's exact-source check of one fixed commit on this OS and the runner
+// contract test on both adapters (Issue 1444471f).
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   lstatSync,
@@ -26,6 +25,7 @@ import {
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NativeSource } from '../dist/native-source.js';
 
 const cli = fileURLToPath(new URL('../dist/cli-entry.js', import.meta.url));
 const report = { platform: process.platform, node: process.version, steps: [], differences: [] };
@@ -51,35 +51,6 @@ function forge(args, options = {}) {
   }
   return reply;
 }
-const json = reply => {
-  const text = reply.stdout.trim();
-  const line = text.lastIndexOf('\n{');
-  return JSON.parse(line < 0 ? text : text.slice(line + 1));
-};
-const show = (root, selector, path) =>
-  forge(['agent', root, 'show', JSON.stringify({ ...selector, path, force: true })], { encoding: 'buffer' })
-    .stdout;
-
-function git(cwd, args) {
-  const reply = spawnSync('git', args, { cwd, encoding: 'utf8', env });
-  assert.equal(reply.status, 0, `git ${args[0]}: ${reply.stderr}`);
-  return reply.stdout.trim();
-}
-const gitModes = (directory, state) =>
-  new Map(
-    git(directory, [
-      '--git-dir',
-      join(directory, 'repository.git'),
-      'ls-tree',
-      '-r',
-      `refs/heads/forge-native/${state}`,
-    ])
-      .split('\n')
-      .map(line => /^(\d+) \w+ \w+\t(.+)$/.exec(line))
-      .filter(Boolean)
-      .map(match => [match[2], match[1]]),
-  );
-
 function edit(lane) {
   writeFileSync(join(lane, 'answer.txt'), 'two\n');
   mkdirSync(join(lane, 'dir with space'), { recursive: true });
@@ -98,106 +69,69 @@ function edit(lane) {
   }
 }
 
-function native() {
+function refusal() {
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), 'forge smoke plain ')));
+  const reply = forge(['agent', plain, 'status', '{}'], { allowFailure: true });
+  assert.equal(reply.status, 1, 'a folder without a hosted marker is refused');
+  const error = JSON.parse(reply.stderr).error;
+  assert.equal(error.code, 'FORGE_ROOT_UNAVAILABLE');
+  assert.match(error.message, /nforge host/);
+  rmSync(plain, { recursive: true, force: true, maxRetries: 5 });
+}
+
+function kernel() {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'forge smoke ')));
-  // Start from Git with an executable file: Windows cannot create the bit on disk itself.
-  const source = join(base, 'git source');
-  mkdirSync(source);
-  writeFileSync(join(source, 'answer.txt'), 'one\n');
-  writeFileSync(join(source, 'Case.txt'), 'case\n');
-  writeFileSync(join(source, 'tool.sh'), '#!/bin/sh\necho tool\n');
-  git(source, ['init', '-q']);
-  git(source, ['add', '.']);
-  git(source, ['update-index', '--chmod=+x', 'tool.sh']);
-  git(source, ['-c', 'user.name=smoke', '-c', 'user.email=smoke@example.invalid', 'commit', '-qm', 'base']);
-  const root = join(base, 'owner root');
-  forge(['import-native-git', source, git(source, ['rev-parse', 'HEAD']), root]);
-  forge(['x', root, 'set-policy', JSON.stringify({ operationId: randomUUID(), preset: 'trusted' })]);
-  const check = 'const f=require("fs");process.exit(f.readFileSync("answer.txt","utf8").trim()==="two"?0:1)';
-  forge([
-    'x',
-    root,
-    'define-check',
-    JSON.stringify({ name: 'verify', executable: process.execPath, args: ['-e', check] }),
-  ]);
-  const started = json(
-    forge(['agent', root, 'start', JSON.stringify({ outcome: 'Smoke', operationId: randomUUID() })]),
-  ).result;
-  const linked = edit(started.path);
-  forge([
-    'agent',
-    root,
-    'save',
-    JSON.stringify({ laneId: started.laneId, message: 'Smoke edits', operationId: randomUUID() }),
-  ]);
-  assert.deepEqual(
-    show(root, { laneId: started.laneId }, 'dir with space/crlf file.txt'),
-    crlf,
-    'saved CRLF bytes',
+  const store = new NativeSource(base);
+  const at = new Date().toISOString();
+  const file = (path, text, mode = 'file') => ({ path, blob: store.put(Buffer.from(text)), mode });
+  // Start from a State with an executable file: Windows cannot create the bit on disk itself.
+  const start = store.writeState(
+    [
+      file('answer.txt', 'one\n'),
+      file('Case.txt', 'case\n'),
+      file('tool.sh', '#!/bin/sh\necho tool\n', 'executable'),
+    ],
+    [],
+    'base',
+    at,
   );
-  const operationId = randomUUID();
-  const landed = forge([
-    'agent',
-    root,
-    'land',
-    '--save',
-    JSON.stringify({ laneId: started.laneId, message: 'Smoke land', operationId }),
-  ]);
-  let receipt = json(landed);
-  for (let i = 0; receipt.inProgress && i < 10; i++)
-    receipt = json(
-      forge(['agent', root, 'wait', JSON.stringify({ operationIds: [operationId], until: 'terminal' })]),
-    );
-  assert.equal(
-    receipt.result?.status ?? receipt.status,
-    'accepted',
-    `native land: ${JSON.stringify(receipt).slice(0, 2000)}`,
-  );
-  const main = { channel: 'main' };
-  assert.deepEqual(show(root, main, 'dir with space/crlf file.txt'), crlf, 'accepted CRLF bytes');
-  assert.equal(show(root, main, 'answer.txt').toString(), 'two\n');
-  assert.equal(show(root, main, 'CASE.txt').toString(), 'case\n');
-  // "Pull": a new Lane materializes accepted main.
-  const next = json(
-    forge(['agent', root, 'start', JSON.stringify({ outcome: 'Pull', operationId: randomUUID() })]),
-  ).result;
-  const names = readdirSync(next.path);
+  const lane = join(base, 'lane one');
+  store.materialize(start, lane, false);
+  const linked = edit(lane);
+  const head = store.writeState(store.capture(lane, true, start), [start], 'Smoke edits', at);
+  const saved = new Map(store.state(head).files.map(entry => [entry.path, entry]));
+  assert.deepEqual(store.object(saved.get('dir with space/crlf file.txt').blob), crlf, 'saved CRLF bytes');
+  assert.equal(store.object(saved.get('answer.txt').blob).toString(), 'two\n');
+  assert.ok(saved.has('CASE.txt') && !saved.has('Case.txt'), `case rename: ${[...saved.keys()]}`);
+  assert.equal(saved.get('tool.sh').mode, 'executable', 'edited executable keeps its mode');
+  assert.equal(saved.get('dir with space/crlf file.txt').mode, 'file');
+  if (linked) assert.equal(saved.get('link.txt')?.mode, 'symlink', 'symlink recorded as a link');
+  if (process.platform === 'win32') {
+    assert.equal(saved.get('new.sh').mode, 'file', 'Windows stores no executable bit for a new file');
+    report.differences.push('a new file cannot be made executable from Windows (no executable bit on disk)');
+  } else assert.equal(saved.get('new.sh').mode, 'executable');
+  // "Pull": a fresh folder materializes the saved State.
+  const next = join(base, 'lane two');
+  store.materialize(head, next, false);
+  const names = readdirSync(next);
   assert.ok(names.includes('CASE.txt') && !names.includes('Case.txt'), `case rename: ${names}`);
-  assert.deepEqual(
-    readFileSync(join(next.path, 'dir with space', 'crlf file.txt')),
-    crlf,
-    'materialized CRLF',
-  );
+  assert.deepEqual(readFileSync(join(next, 'dir with space', 'crlf file.txt')), crlf, 'materialized CRLF');
   if (linked) {
-    const link = lstatSync(join(next.path, 'link.txt'));
-    if (link.isSymbolicLink()) assert.equal(readlinkSync(join(next.path, 'link.txt')), 'answer.txt');
+    const link = lstatSync(join(next, 'link.txt'));
+    if (link.isSymbolicLink()) assert.equal(readlinkSync(join(next, 'link.txt')), 'answer.txt');
     else report.differences.push('symlink materialized as a regular file');
   }
-  // Recorded modes of accepted main, read back through a Git export.
-  const exported = join(base, 'export');
-  forge(['export-native-git', root, next.base, exported]);
-  const modes = gitModes(exported, next.base);
-  assert.equal(modes.get('tool.sh'), '100755', 'edited executable keeps its mode');
-  assert.equal(modes.get('dir with space/crlf file.txt'), '100644');
-  if (linked) assert.equal(modes.get('link.txt'), '120000', 'symlink recorded as a link');
-  if (process.platform === 'win32') {
-    assert.equal(modes.get('new.sh'), '100644', 'Windows stores no executable bit for a new file');
-    report.differences.push('a new file cannot be made executable from Windows (no executable bit on disk)');
-  } else assert.equal(modes.get('new.sh'), '100755');
   if (linked && process.platform === 'win32') {
-    // Without link rights Windows gets the link as a file holding its target; saving it is no change.
-    rmSync(join(next.path, 'link.txt'));
-    writeFileSync(join(next.path, 'link.txt'), 'answer.txt');
-    const saved = json(
-      forge([
-        'agent',
-        root,
-        'save',
-        JSON.stringify({ laneId: next.laneId, message: 'Link fallback', operationId: randomUUID() }),
-      ]),
-    ).result;
-    assert.equal(saved.head, next.base, 'a link held as its target file saves unchanged');
+    // Without link rights Windows gets the link as a file holding its target; capturing it is no change.
+    rmSync(join(next, 'link.txt'));
+    writeFileSync(join(next, 'link.txt'), 'answer.txt');
+    assert.equal(
+      store.tree(store.capture(next, false, head)),
+      store.tree(store.state(head).files),
+      'a link held as its target file captures unchanged',
+    );
   }
+  report.steps.push({ args: ['kernel', 'capture', 'materialize'], status: 0 });
   rmSync(base, { recursive: true, force: true, maxRetries: 5 });
 }
 
@@ -238,7 +172,8 @@ function selfHostedCheck() {
 }
 
 try {
-  native();
+  refusal();
+  kernel();
   selfHostedCheck();
   report.ok = true;
 } catch (error) {

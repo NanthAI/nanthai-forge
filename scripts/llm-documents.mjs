@@ -23,7 +23,6 @@ export const llmsFullPaths = [
   'docs/parallel-work-defaults.md',
   'docs/security.md',
   'docs/workflows.md',
-  'docs/gh-cli.md',
   'docs/operations/self-hosted-runner.md',
   'docs/operations/runner-fallback.md',
   'docs/operations/github-actions-checks.md',
@@ -71,7 +70,6 @@ const agentDocs = new Set([
 
 const referenceDocs = new Set([
   'docs/workflows.md',
-  'docs/gh-cli.md',
   'docs/security.md',
   'docs/architecture.md',
   'docs/development.md',

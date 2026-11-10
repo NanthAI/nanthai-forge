@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 import { cleanupOwner } from './owner-cleanup.mjs';
 import test from 'node:test';
-import { callTool, mcpTestEnvironment, requestOptions } from './mcp-runtime.mjs';
+
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+
 import { spawnSync } from 'node:child_process';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { initNative } from '../dist/native-work.js';
 import { pluginConfig } from '../dist/plugin-config.js';
 
@@ -28,8 +35,8 @@ function fixture(t) {
   initNative(root);
   return { base, root, directory, clients };
 }
-test('generated plugin connects the selected owner and completes a real recorded check', async t => {
-  const { root, directory, clients } = fixture(t);
+test('generated plugin selects the checkout, copies no token and links installed docs from its skill', t => {
+  const { root, directory } = fixture(t);
   const generated = spawnSync(process.execPath, [resolve('dist/cli.js'), 'plugin-config', root, directory], {
     encoding: 'utf8',
     env: { ...process.env, FORGE_AUTH_TOKEN: 'synthetic-must-not-be-copied' },
@@ -48,54 +55,15 @@ test('generated plugin connects the selected owner and completes a real recorded
   assert.equal(config.command, process.execPath);
   assert.deepEqual(config.env_vars, ['FORGE_AUTH_TOKEN']);
   const skill = readFileSync(join(plugin, 'skills/forge-agent/SKILL.md'), 'utf8');
-  const doc = skill.match(/\[source exchange\]\(([^)]+)\)/)[1];
+  const doc = skill.match(/\[hosted parity\]\(([^)]+)\)/)[1];
+  assert.ok(doc.startsWith('file:'), doc);
   assert.ok(readFileSync(new URL(doc)).length > 0);
-  const client = new Client({ name: 'plugin-proof', version: '1' });
-  clients.push(client);
-  await client.connect(
-    new StdioClientTransport({
-      command: config.command,
-      args: config.args,
-      stderr: 'pipe',
-      env: mcpTestEnvironment(t),
-    }),
-    requestOptions('connect'),
+  assert.doesNotMatch(skill, /\]\(\.\.\/\.\.\/docs\//, 'every docs link points at the installed package');
+  assert.deepEqual(
+    config.args.slice(1),
+    ['mcp', realpathSync(root), '--agent'],
+    'agent MCP for the selected checkout',
   );
-  const tools = (await client.listTools(undefined, requestOptions('listTools'))).tools.map(tool => tool.name);
-  for (const name of ['forge_task', 'forge_check', 'forge_review', 'forge_work_overview', 'forge_source'])
-    assert.ok(tools.includes(name));
-  assert.ok(!tools.includes('forge_hosted_work'));
-  assert.ok(!tools.includes('forge_exchange'));
-  const call = async (name, command) => {
-    const result = await callTool(client, { name, arguments: { command } });
-    assert.ok(!result.isError, JSON.stringify(result));
-    return JSON.parse(result.content[0].text).result;
-  };
-  const lane = await call('forge_task', {
-    action: 'start',
-    operationId: randomUUID(),
-    outcome: 'Plugin changes answer',
-  });
-  writeFileSync(join(lane.path, 'answer.ts'), 'export const answer = 2;\n');
-  const check = await call('forge_check', {
-    action: 'define-check',
-    name: 'Plugin answer check',
-    executable: process.execPath,
-    args: ['-e', "if(!require('fs').readFileSync('answer.ts','utf8').includes('= 2;'))process.exit(1)"],
-  });
-  const request = {
-    action: 'finish',
-    operationId: randomUUID(),
-    laneId: lane.laneId,
-    expectedHead: lane.head,
-    message: 'Answer two',
-    checkId: check.checkId,
-    expectedDefinition: check.definition,
-  };
-  const finished = await call('forge_task', request);
-  assert.equal(finished.complete, true);
-  assert.deepEqual(await call('forge_task', request), finished);
-  assert.equal(readFileSync(join(root, 'answer.ts'), 'utf8'), 'export const answer = 1;\n');
 });
 test('plugin retries preserve identical files and refuse to overwrite changed files or follow links', t => {
   const { base, root, directory } = fixture(t);

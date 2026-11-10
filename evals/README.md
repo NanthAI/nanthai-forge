@@ -23,4 +23,4 @@ These trials used one agent harness, single observations and no billed-cost data
 
 ## Reproducing
 
-The scripts `scripts/agent-efficiency-trial-*.mjs` prepare, run and summarize trials, and `agent-efficiency-trial-report.mjs` regenerates the sanitized JSON. They need a privately installed package, a supported Node and the Codex CLI. Never reuse an operation ID for a different request.
+These trials ran against local native owners, which Forge no longer runs, so their runner scripts were removed and the trials cannot be rerun as recorded. `scripts/agent-efficiency-trial-report.mjs PRIVATE_RECEIPT_ROOT EVALS_DIR` still regenerates the sanitized JSON from retained private receipts. Current agent cost evidence comes from the hosted landing benchmark under `scripts/bench-t3code/`.

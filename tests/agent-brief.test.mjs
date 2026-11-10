@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+
 import { BRIEF_SITUATIONS, briefInputSchema } from '../dist/agent-brief-types.js';
 import { COPY_TEXT_CAP, FULL_BRIEF_CAP, renderBriefing } from '../dist/agent-brief-render.js';
 import { instructionFiles, briefingContext } from '../dist/agent-brief-context.js';
@@ -172,37 +172,6 @@ function local(t) {
   initNative(root);
   return { root, agent: new AgentWorkflow(root) };
 }
-test('local context reads checkpointed States, main changes and durable check summaries without source text', async t => {
-  const { root, agent } = local(t);
-  const started = (await agent.dispatch({ action: 'start', outcome: 'Fix the check' })).result;
-  mkdirSync(join(started.path, '.cursor', 'rules'), { recursive: true });
-  writeFileSync(join(started.path, '.cursor', 'rules', 'test.mdc'), 'ALSO_UNTRUSTED');
-  writeFileSync(join(started.path, 'a.ts'), 'SECRET_SOURCE_BYTES');
-  await agent.dispatch({ action: 'checkpoint', laneId: started.laneId, message: 'Candidate' });
-  const brief = localBrief(agent.work.store, { situation: 'continue-lane', laneId: started.laneId });
-  assert.deepEqual(brief.context.instructionFiles, ['.cursor/rules/test.mdc', 'AGENTS.md']);
-  assert.deepEqual(brief.context.paths, ['.cursor/rules/test.mdc', 'a.ts']);
-  assert.ok(!JSON.stringify(brief).includes('UNTRUSTED_REPOSITORY_TEXT'));
-  assert.ok(!JSON.stringify(brief).includes('SECRET_SOURCE_BYTES'));
-  const cli = spawnSync(
-    process.execPath,
-    [
-      resolve('dist/cli.js'),
-      'agent',
-      root,
-      'brief',
-      JSON.stringify({ situation: 'continue-lane', laneId: started.laneId, agent: 'codex' }),
-    ],
-    { encoding: 'utf8' },
-  );
-  assert.equal(cli.status, 0, cli.stderr);
-  assert.equal(JSON.parse(cli.stdout).situation, 'continue-lane');
-  assert.equal(
-    (await agent.dispatch({ action: 'brief', situation: 'continue-lane', laneId: started.laneId })).result
-      .copyText,
-    brief.copyText,
-  );
-});
 test('local project/personal guidance is verbatim, retry-safe and bound to the local user', t => {
   const { agent } = local(t),
     store = agent.work.store;

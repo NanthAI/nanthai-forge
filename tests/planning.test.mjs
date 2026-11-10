@@ -4,13 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+
 import { WorkService } from '../dist/work.js';
 import { initNative } from '../dist/native-work.js';
 import { fixture, git, write, code } from './helpers.mjs';
-import { moduleUrl } from './convex-module.mjs';
 
 function setup(t) {
   const root = fixture(t, { 'a.ts': 'export const a = 1;\n' });
@@ -220,29 +219,6 @@ test('planning links validate local identities and private exports preserve comp
   assert.match(manifest.coverage, /no source objects/);
   assert.equal('files' in manifest, false);
   assert.deepEqual(readWorkBytes(join(work.store.directory, 'work.json')), before);
-});
-
-test('direct WorkService, CLI and independent WorkService instances share planning and enforce existing capability protection', async t => {
-  const { root, work, dispatch, item } = setup(t);
-
-  const command = item(),
-    body = JSON.stringify({ command, revision: work.status().revision });
-
-  const created = (
-    await await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision)
-  ).result;
-  const other = new WorkService(root);
-  assert.equal((await other.dispatch(command, 0)).result.id, created.id);
-  const result = JSON.parse(
-    execFileSync(
-      process.execPath,
-      [resolve('dist/cli.js'), 'work', root, JSON.stringify({ action: 'export-planning' }), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(JSON.parse(result.result.json).items[0].id, created.id);
-  assert.equal((await dispatch({ action: 'export-planning' })).result.sha256, result.result.sha256);
-  assert.equal(work.status().planningItems.length, 1);
 });
 
 test('new work responses advertise actual capabilities', async t => {

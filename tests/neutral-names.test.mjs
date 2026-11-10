@@ -49,9 +49,6 @@ test('hostname() only identifies a process or hashes a runner id; it never becom
   assert.deepEqual(found, []);
   for (const file of ['src/auth-cli.ts', 'src/agent-setup.ts'])
     assert.doesNotMatch(readFileSync(join(root, file), 'utf8'), /hostname\s*[,}]|\bhostname\(\)/, file);
-  const runner = readFileSync(join(root, 'src/local-checks-cli.ts'), 'utf8').split('\n');
-  assert(runner.some(line => /const name = /.test(line)));
-  for (const line of runner.filter(line => /const name = /.test(line))) assert.doesNotMatch(line, /hostname/);
 });
 
 test('default labels are neutral and never contain the hostname', async () => {

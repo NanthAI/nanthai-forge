@@ -4,9 +4,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
 import { WorkService } from '../dist/work.js';
 import { git, write, code } from './helpers.mjs';
 
@@ -81,27 +79,6 @@ test('upstream conflict is visible without altering the selected candidate; draf
   pulls[0].head.sha = upstream;
   change({ pulls });
   await assert.rejects(publish({ ...command, draft: true }), code('PUBLICATION_CHANGED'));
-  assert.equal(state().creates, 1);
-});
-
-test('local WorkService and CLI publish through the shared owner, with normal PR default and retry reconciliation', async t => {
-  const { root, command, state, work } = setup(t);
-
-  const input = { ...command };
-  delete input.draft;
-  const body = JSON.stringify({ command: input, revision: work.status().revision });
-
-  assert.equal(state().creates, 0);
-  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  assert.equal((await response).result.number, 7);
-  assert.equal(state().pulls[0].draft, false);
-  const retry = JSON.parse(
-    execFileSync(process.execPath, ['dist/cli.js', 'work', root, JSON.stringify(input), '0'], {
-      encoding: 'utf8',
-    }),
-  );
-  assert.equal(retry.result.number, 7);
   assert.equal(state().creates, 1);
 });
 
@@ -278,49 +255,6 @@ test('a delayed GitHub check cannot overwrite a later observation or concurrent 
   assert.equal(work.status().intents[0].notes.length, 1);
 });
 
-test('PR import/check share the protected local WorkService and CLI boundary; invalid input and unknown outcomes preserve work', async t => {
-  const { root, work, state, change, publish, command, remote } = setup(t);
-  await publish();
-
-  const input = { action: 'import-pr', url: 'https://github.com/tests/example/pull/7' };
-  const body = JSON.stringify({ command: input, revision: work.status().revision });
-
-  const response = await new WorkService(root).dispatch(JSON.parse(body).command, JSON.parse(body).revision);
-
-  const imported = (await response).result;
-  const checked = JSON.parse(
-    execFileSync(
-      process.execPath,
-      ['dist/cli.js', 'work', root, JSON.stringify({ action: 'check-pr', intentId: imported.id }), '0'],
-      { encoding: 'utf8' },
-    ),
-  );
-  assert.equal(checked.result.id, imported.id);
-  assert.equal(work.status().intents.length, 2);
-  await assert.rejects(
-    work.dispatch(
-      { action: 'import-pr', url: 'https://github.com.evil/tests/example/pull/7' },
-      work.status().revision,
-    ),
-    code('BAD_ARGUMENT'),
-  );
-  const revision = work.status().revision;
-  change({ deniedRead: true });
-  await assert.rejects(
-    work.dispatch({ action: 'check-publication', publicationId: command.operationId }, 0),
-    code('PUBLISH_GITHUB_FAILED'),
-  );
-  assert.equal(work.status().revision, revision);
-  change({ deniedRead: false });
-  const pulls = state().pulls;
-  pulls[0].head.sha = '0'.repeat(40);
-  change({ pulls });
-  assert.equal(git(remote, ['rev-parse', 'refs/pull/7/head']).trim(), command.expectedHead);
-  await assert.rejects(work.dispatch({ action: 'check-pr', intentId: imported.id }, 0), code('PR_CHANGED'));
-  assert.equal(work.status().revision, revision);
-  assert.equal(state().creates, 1);
-});
-
 test('a large imported diff reports a diagnostic without making unrelated local work unavailable', async t => {
   const { root, remote, work, state, change, publish } = setup(t);
   await publish();
@@ -358,81 +292,4 @@ test('a large imported diff reports a diagnostic without making unrelated local 
   assert.equal(status.lanes[0].available, true);
   assert.match(status.intents.find(i => i.id === imported.id).externalDiffError, /Git diff failed/);
   assert.equal(git(root, ['rev-parse', `refs/forge/github/${head}`]).trim(), head);
-});
-
-test('opt-in MCP publication, import, retained PR dependency and checks use current GitHub transport', async t => {
-  const { root, command, work, change, state, intent } = setup(t, { lostCreate: true });
-  const client = new Client({ name: 'forge-network-work-test', version: '1.0.0' });
-  t.after(() => client.close());
-  await client.connect(
-    new StdioClientTransport({
-      command: process.execPath,
-      args: ['dist/cli.js', 'mcp', root, '--work'],
-      env: process.env,
-      stderr: 'pipe',
-    }),
-  );
-  const call = async (command, revision = work.status().revision) =>
-    JSON.parse(
-      (await client.callTool({ name: 'forge_work_command', arguments: { command, revision } })).content[0]
-        .text,
-    );
-  const published = await call(command);
-  assert.equal(published.result.number, 7);
-  assert.equal((await call(command, 0)).result.number, 7);
-  assert.equal(state().creates, 1);
-  const imported = (await call({ action: 'import-pr', url: 'https://github.com/tests/example/pull/7' }))
-    .result;
-  const pin = {
-    kind: 'pr',
-    intentId: imported.id,
-    observation: 0,
-    head: imported.external.observations[0].head,
-  };
-  const composed = (await call({ action: 'compose', intentId: intent.id, inputs: [], dependencies: [pin] }))
-    .result;
-  assert.equal(composed.head, command.expectedHead);
-  assert.deepEqual(composed.dependencies, [pin]);
-  const basePin = { ...pin, part: 'base', head: imported.external.observations[0].base };
-  assert.equal(
-    (await call({ action: 'compose', intentId: intent.id, inputs: [], dependencies: [basePin] })).result.head,
-    intent.base,
-  );
-  assert.equal((await call({ action: 'check-pr', intentId: imported.id })).result.id, imported.id);
-  assert.equal(
-    (await call({ action: 'check-publication', publicationId: command.operationId })).result.checks.at(-1)
-      .acceptance,
-    'unconfirmed',
-  );
-  const discussionCommand = {
-    action: 'import-discussion',
-    operationId: randomUUID(),
-    target: { kind: 'intent', id: imported.id },
-    feed: 'conversation',
-    page: 1,
-  };
-  const discussion = (await call(discussionCommand)).result;
-  assert.equal(
-    (await call({ action: 'read-discussion', id: discussion.id }, 0)).result.items[0].provider_extension
-      .retained,
-    true,
-  );
-  change({ deniedRead: true });
-  const revision = work.status().revision;
-  assert.equal((await call(discussionCommand, 0)).result.id, discussion.id);
-  assert.equal(
-    (await call({ action: 'export-discussion', id: discussion.id }, 0)).result.items[0].body,
-    'Original private provider comment',
-  );
-  assert.equal(
-    (await call({ action: 'check-pr', intentId: imported.id })).error.code,
-    'PUBLISH_GITHUB_FAILED',
-  );
-  assert.equal(work.status().revision, revision);
-  assert.equal(
-    (await call({ action: 'import-pr', url: 'https://github.com.evil/tests/example/pull/7' })).error.code,
-    'BAD_ARGUMENT',
-  );
-  assert.equal(state().creates, 1);
-  await client.close();
 });

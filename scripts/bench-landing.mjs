@@ -246,6 +246,11 @@ async function setupForge(options) {
 }
 
 async function seed(options) {
+  // One client mode (Issue 657d63ee): the seed read a native owner's objects, and native owners are refused.
+  if (!options.dryRun)
+    throw new Error(
+      'bench-landing seeds from a native owner, which Forge no longer runs. Use scripts/bench-t3code (hosted), or --forge-owner source --sides forge with a hosted checkout.',
+    );
   const target = join(options.work, 'seed-git');
   const status = await agent(options.source, 'status', { limit: 50 });
   const main = status.channels.items.find(item => item.name === 'main')?.head;

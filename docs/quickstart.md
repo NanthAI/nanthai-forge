@@ -142,9 +142,7 @@ Two things can stay running, both opt-in and each with one job:
   stops with its own session. It is the harness's process, not a Forge daemon.
 
 A command may start a helper for one job, such as submitting a landing; it ends
-with that job (`tests/no-resident-process.test.mjs` lists every such child). A
-local Git or native owner project, the Mac-owner workflow, also starts owner
-helpers for landing, presence and file watching; hosted users do not. The old dogfood owner service (a launchd job on one Mac)
+with that job (`tests/no-resident-process.test.mjs` lists every such child). The old dogfood owner service (a launchd job on one Mac)
 is retired because the hosted queue lands changes
 ([retired setup](operations/landing-batches.md#owner-mac-launchd-setup-retired)).
 Its remaining code is removed under the cleanup work, not something to run.

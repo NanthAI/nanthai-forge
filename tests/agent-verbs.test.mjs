@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -12,9 +12,9 @@ import {
   newForm,
   operatorActions,
   parseVerbForm,
+  retiredActions,
 } from '../dist/agent-verbs.js';
 import { agentCli } from '../dist/agent-cli.js';
-import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { HostedAgentTransport } from '../dist/hosted-agent-transport.js';
 import {
   hostedAgentAction,
@@ -24,13 +24,11 @@ import {
   hostedAgentLandingActions,
 } from '../dist/hosted-agent-contract.js';
 import { agentActionSchema } from '../dist/agent-workflow-schema.js';
-import { initNative } from '../dist/native-work.js';
-import { trustAgents } from './autonomy-fixture.mjs';
-import { cleanupOwner } from './owner-cleanup.mjs';
 
 /**
  * The V1 agent/hosted mapping (plans/p5c-v1-vocabulary.md), one row per current action:
- * [current action, new form or null when kept, native wire action, hosted wire action].
+ * [current action, new form or null when kept or 'retired' when it left with native mode,
+ * native wire action, hosted wire action].
  */
 const rows = [
   ['start', null],
@@ -38,7 +36,7 @@ const rows = [
   ['checkpoint', 'save', 'checkpoint', 'save'],
   ['save', null],
   ['sync', 'save --sync', 'sync', 'sync'],
-  ['undo-sync', 'x undo-sync'],
+  ['undo-sync', 'retired'],
   ['compose', 'save --candidate', 'compose', 'compose'],
   ['run', 'save --check', 'run', 'check'],
   ['check', 'save --check', 'run', 'check'],
@@ -46,58 +44,58 @@ const rows = [
   ['confirm-tests', 'save --contract', 'confirm-tests', 'confirm-tests'],
   ['finish', 'land --save', 'finish', 'finish'],
   ['land', null],
-  ['land-ready', 'land --resume-ready', 'land-ready', 'land-ready'],
+  ['land-ready', 'retired'],
   ['withdraw', 'land --withdraw', 'withdraw', 'withdraw'],
-  ['accept', 'x accept'],
+  ['accept', 'retired'],
   ['landing', null],
   ['observe', null],
   ['wait', null],
   ['log', null],
   ['cancel', 'x cancel'],
   ['revert', 'x revert'],
-  ['undo-revert', 'x undo-revert'],
+  ['undo-revert', 'retired'],
   ['abandon', 'x abandon'],
   ['reopen', 'start --reopen', 'reopen', 'reopen'],
   ['complete', 'x complete'],
   ['complete-merged', 'x complete-merged'],
   ['abandon-dormant', 'x abandon-dormant'],
   ['pin', 'x pin'],
-  ['clean', 'x clean'],
-  ['take', 'x take'],
-  ['link', null],
+  ['clean', 'retired'],
+  ['take', 'retired'],
+  ['link', 'retired'],
   ['status', null],
-  ['pending-status', 'status --pending'],
-  ['records', null],
-  ['candidate', null],
-  ['view', null],
-  ['candidates', null],
-  ['views', null],
-  ['provenance', null],
-  ['review', null],
+  ['pending-status', 'retired'],
+  ['records', 'retired'],
+  ['candidate', 'retired'],
+  ['view', 'retired'],
+  ['candidates', 'retired'],
+  ['views', 'retired'],
+  ['provenance', 'retired'],
+  ['review', 'retired'],
   ['diff', null],
   ['show', null],
-  ['brief', null],
-  ['guidance', 'x guidance'],
+  ['brief', 'retired'],
+  ['guidance', 'retired'],
   ['peers', null],
-  ['pre-edit', 'x pre-edit'],
+  ['pre-edit', 'retired'],
   ['install-hooks', 'x install-hooks'],
   ['uninstall-hooks', 'x uninstall-hooks'],
   ['peer-ack', 'save --overlap-answer', 'peer-ack', 'peer-ack'],
   ['overlap-acks', 'save --overlap-answers', 'overlap-acks', 'overlap-acks'],
-  ['handoff', 'save --handoff', 'handoff', 'handoff'],
-  ['handoff-read', null],
-  ['report', 'save --report', 'report', 'report'],
-  ['making-of', null],
+  ['handoff', 'retired'],
+  ['handoff-read', 'retired'],
+  ['report', 'retired'],
+  ['making-of', 'retired'],
   ['metrics', null],
   ['friction', 'save --friction', 'friction', 'friction'],
   ['friction-triage', 'x friction-triage'],
   ['friction-list', null],
-  ['improve', null],
+  ['improve', 'retired'],
   ['decide', 'save --decision', 'decide', 'decide'],
   ['decisions', null],
   ['policy', null],
   ['set-policy', 'x set-policy'],
-  ['define-check', 'x define-check'],
+  ['define-check', 'retired'],
   ['configure-check', 'x configure-check'],
   ['configure-runner', 'x configure-runner'],
   ['prioritize', 'x prioritize'],
@@ -105,7 +103,7 @@ const rows = [
   ['snapshots', 'x snapshots'],
   ['check-settings', null],
   ['capabilities', null],
-  ['integrate', 'save --preview', 'integrate', 'integrate'],
+  ['integrate', 'retired'],
   ['resolve', null],
   ['planning', null],
   ['put-planning-item', null],
@@ -140,6 +138,17 @@ for (const [action, form, nativeWire, hostedWire] of rows)
   test(`V1 mapping row ${action} → ${form ?? 'kept'}`, async () => {
     // pending-status is MCP only; finish without accept is covered in its own test below.
     const accept = action === 'finish' ? { accept: true } : {};
+    if (form === 'retired') {
+      // One client mode (Issue 657d63ee): a native-only action is refused with its hosted replacement.
+      assert.equal(newForm(action, accept, true), undefined);
+      assert.throws(
+        () => parseVerbForm(action, ['{}']),
+        error =>
+          error.code === 'HOSTED_ACTION_UNSUPPORTED' &&
+          error.message === `${action} was removed with native mode. Use ${retiredActions[action]}.`,
+      );
+      return;
+    }
     assert.equal(newForm(action, accept, false) ?? null, form);
     if (!form) {
       assert.ok(
@@ -182,6 +191,22 @@ test('every current agent, hosted, owner and record action has exactly one V1 ho
     assert.ok(homes.has(action), `${action} needs a row in the V1 mapping`);
   assert.equal(homes.size, rows.length, 'one row per action');
   for (const action of operatorActions) assert.ok(homes.has(action));
+  for (const action of Object.keys(retiredActions)) assert.ok(homes.has(action), action);
+});
+
+test('retired native mode spellings name the typed form and its hosted replacement', () => {
+  for (const [verb, flag, action] of [
+    ['save', '--handoff', 'handoff'],
+    ['save', '--report', 'report'],
+    ['save', '--preview', 'integrate'],
+    ['land', '--resume-ready', 'land-ready'],
+  ])
+    assert.throws(
+      () => parseVerbForm(verb, [flag, '{}']),
+      error =>
+        error.code === 'HOSTED_ACTION_UNSUPPORTED' &&
+        error.message === `${verb} ${flag} was removed with native mode. Use ${retiredActions[action]}.`,
+    );
 });
 
 test('finish without accept maps to land --save --check-only natively; hosted mirrors its accept:false', () => {
@@ -287,62 +312,4 @@ test('old and new spellings send the same hosted request; only the old one print
   const failing = captured('stderr');
   await assert.rejects(agentCli([root, 'friction', JSON.stringify({ ...address, title: 'T' })]));
   assert.equal(failing(), '');
-});
-
-test('native land --save replays the original finish: same receipt, one operation', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'forge-verbs-native-'));
-  writeFileSync(join(root, 'a.txt'), 'a\n');
-  initNative(root);
-  trustAgents(root);
-  try {
-    const agent = new AgentWorkflow(root);
-    await agent.dispatch({
-      action: 'define-check',
-      name: 'verify',
-      executable: process.execPath,
-      args: ['-e', '0'],
-    });
-    const lane = (await agent.dispatch({ action: 'start', outcome: 'Verbs' })).result;
-    writeFileSync(join(lane.path, 'a.txt'), 'b\n');
-    const operationId = randomUUID();
-    let done = captured('stderr');
-    const finished = await agentCli([
-      root,
-      'finish',
-      JSON.stringify({ operationId, laneId: lane.laneId, message: 'Old spelling', accept: true }),
-    ]);
-    // Check progress lines follow on stderr; the alias notice is the single first line.
-    const notices = done()
-      .split('\n')
-      .filter(line => line.startsWith('Alias:'));
-    assert.deepEqual(notices, [
-      `Alias: finish is now nforge agent ${root} land --save (same JSON and replay identity).`,
-    ]);
-    assert.equal(finished.result.status, 'accepted');
-    done = captured('stderr');
-    const replayed = await agentCli([root, 'land', '--save', JSON.stringify({ operationId })]);
-    assert.doesNotMatch(done(), /Alias:/);
-    const { resolved, ...original } = finished.result;
-    assert.ok(resolved, 'the first reply returns its filled pins');
-    assert.deepEqual(replayed.result, original);
-    // A check-only resume of an accepting finish is refused rather than silently landing.
-    await assert.rejects(
-      agentCli([root, 'land', '--save', '--check-only', JSON.stringify({ operationId })]),
-      error => error.code === 'BAD_ARGUMENT',
-    );
-    // A fresh land --save requests acceptance like finish {accept:true}.
-    const second = (await agent.dispatch({ action: 'start', outcome: 'Verbs 2' })).result;
-    writeFileSync(join(second.path, 'a.txt'), 'c\n');
-    done = captured('stderr');
-    const landed = await agentCli([
-      root,
-      'land',
-      '--save',
-      JSON.stringify({ laneId: second.laneId, message: 'New spelling' }),
-    ]);
-    assert.doesNotMatch(done(), /Alias:/);
-    assert.equal(landed.result.status, 'accepted');
-  } finally {
-    await cleanupOwner(root);
-  }
 });

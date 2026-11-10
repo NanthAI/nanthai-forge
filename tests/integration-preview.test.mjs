@@ -6,7 +6,7 @@ import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'n
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+
 import { initNative } from '../dist/native-work.js';
 import { AgentWorkflow } from '../dist/agent-workflow.js';
 import { integrationPreview } from '../dist/integration-preview.js';
@@ -197,21 +197,6 @@ test('text composition conflicts remain distinct from semantic failures', async 
   assert.equal(result.status, 'text-conflict');
   assert.deepEqual(result.combined.errors, ['other.ts']);
   assert.equal(result.notices.length, 0);
-});
-
-test('CLI registers integrate and uses existing package static scripts without marked definitions', async t => {
-  const f = await fixture(t, { check: false, packageScript: true });
-  await f.pair();
-  const run = spawnSync(process.execPath, [resolve('dist/cli.js'), 'agent', f.root, 'integrate', '{}'], {
-    encoding: 'utf8',
-  });
-  assert.equal(run.status, 0, run.stderr);
-  const result = JSON.parse(run.stdout).result;
-  assert.equal(result.status, 'clash');
-  assert.deepEqual(
-    result.checks.map(check => check.name),
-    ['typecheck'],
-  );
 });
 
 test('missing configuration, empty selection and invalid Lane IDs are explicit', async t => {
