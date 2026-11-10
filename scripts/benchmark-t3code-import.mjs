@@ -133,13 +133,41 @@ const metricNumbers = [
   'rssBytes',
 ];
 
-const logs = spawn('npx', ['convex', 'logs', '--deployment', DEPLOYMENT, '--jsonl', '--success'], {
-  stdio: ['ignore', 'pipe', 'ignore'],
-});
-let streamFailed = false;
-logs.on('close', () => (streamFailed = !stopping));
-let stopping = false;
-createInterface({ input: logs.stdout }).on('line', line => {
+let logs,
+  streamFailed = false,
+  stopping = false;
+const logRestarts = { count: 0 };
+/** The provider log stream. A dropped stream (a dev redeploy, a network blip) is reopened
+ * with recent history up to 10 times: the guard drops events it already counted, and
+ * the deployment totals below do the same. Past that, the run stops as telemetry-lost. */
+function openLogs(history) {
+  logs = spawn(
+    'npx',
+    [
+      'convex',
+      'logs',
+      '--deployment',
+      DEPLOYMENT,
+      '--jsonl',
+      '--success',
+      ...(history ? ['--history', String(history)] : []),
+    ],
+    { stdio: ['ignore', 'pipe', 'ignore'] },
+  );
+  logs.on('close', () => {
+    if (stopping) return;
+    if (logRestarts.count >= 10) {
+      streamFailed = true;
+      return;
+    }
+    logRestarts.count++;
+    log({ event: 'logs-reopened', restarts: logRestarts.count });
+    openLogs(5000);
+  });
+  createInterface({ input: logs.stdout }).on('line', onLogLine);
+}
+const counted = new Set();
+function onLogLine(line) {
   if (!line.startsWith('{')) return;
   let event;
   try {
@@ -147,7 +175,9 @@ createInterface({ input: logs.stdout }).on('line', line => {
   } catch {
     return;
   }
-  if (event.kind === 'Completion' && !event.cachedResult) {
+  const key = `${event.requestId}:${event.executionId}:${event.executionTimestamp ?? event.timestamp}:${event.timestamp}`;
+  if (event.kind === 'Completion' && !event.cachedResult && !counted.has(key)) {
+    counted.add(key);
     deployment.completions++;
     deployment.failures += event.error ? 1 : 0;
     deployment.ioReadBytes += event.usageStats?.databaseIoReadBytes ?? 0;
@@ -195,10 +225,11 @@ createInterface({ input: logs.stdout }).on('line', line => {
     journal.projectId = guard.monitor.target.projectId;
     saveJournal();
   }
-});
+}
+openLogs();
 await wait(5_000); // let the stream attach before the workload starts
 
-const harness = { startCalls: 0, statusCalls: 0, resumes: 0 };
+const harness = { startCalls: 0, statusCalls: 0, resumes: 0, logRestarts };
 const startImport = async () => {
   harness.startCalls++;
   return owner.action(ref('projectGithubImport:start'), {

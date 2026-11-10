@@ -133,9 +133,16 @@ pack offsets in an open-addressing index, about 70 bytes an object). Publication
 that catalog in place and writes it 32 pages at a time, and a publication retry reads the
 stored State one file at a time instead of parsing it whole. Before this, 150,612 files
 (1.47 GB; `rssBytes` in the `FORGE_IMPORT_METRIC` records) read the listing at 292 MB,
-finished the archive at 448 MB and peaked at 494 MB during publication. A larger repository
-than the ceiling runs out of action memory (`Node.js action execution ran out of memory`,
-no main published).
+finished the archive at 448 MB and peaked at 494 MB during publication. Now the same
+150,612 files peak at 381 MB in the archive and 422 MB in publication (metadata; catalog
+392 MB, projection 389 MB), in 10.5 minutes instead of 13. Measured ceiling (2026-11-10,
+Firefox's 487,756 files and 3.67 GB): the start listing passes, and archive steps stayed at
+or under 418 MB through 419,111 files; publication at that size is not yet measured, so
+about 490,000 files is the tested bound for the archive and 150,612 for a full import.
+A larger repository than the ceiling runs out of action memory (`Node.js action execution
+ran out of memory`, no main published). At that size each archive step re-reads the
+tarball from its start and skips imported files for 3 to 6 minutes, so later steps make
+less progress: wall time, not memory, then limits the import.
 
 State, manifest and Work metadata use the same R2-backed object path. Catalog
 publication and source-index materialization use bounded pages. The ready
@@ -207,7 +214,9 @@ journal and observes sanitized, project-attributed provider telemetry. Set
 `FORGE_IMPORT_TEARDOWN=1` to cancel the project's scheduled work and delete the project
 after the run. The guard repeats a failed deployment-admin call (a cancellation page or a
 status read) with the same arguments and journals the cancellation cursor, so rerunning
-with the same directory resumes a teardown that stopped part way.
+with the same directory resumes a teardown that stopped part way. A dropped provider log
+stream (a dev redeploy) is reopened with recent history up to 10 times (`logRestarts` in the
+report); events already counted are dropped, so totals stay exact.
 Record the installed CLI `.commit`, repository commit, project ID and timestamps
 for every run. Numeric `FORGE_IMPORT_METRIC` records distinguish archive/listing,
 upload waits and attempts, metadata, catalog, projection and ready publication.
