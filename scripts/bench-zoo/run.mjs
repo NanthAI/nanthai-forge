@@ -69,6 +69,46 @@ const edit = (root, path, line) =>
 const tag = (root, path, label) =>
   writeFileSync(join(root, path), tagLastLine(readFileSync(join(root, path), 'utf8'), path, label));
 
+/** Follow the original source operation before the scenario can advance. The CLI's wait
+ * replays its retained request and reconciles an unknown reply without a second mutation. */
+export async function sourceCommand(io, id, root, verb, body, flags = []) {
+  const source = ['start', 'save', 'sync', 'resolve', 'open', 'land'].includes(verb);
+  if (source) body = { operationId: randomUUID(), ...body };
+  let res = await io.cli(['agent', root, verb, ...flags, JSON.stringify(body)]);
+  io.receipt(id, { verb, flags, body, code: res.code, seconds: res.seconds, receipt: res.json });
+  for (let i = 0; source && landPending(res) && i < 8; i++) {
+    const runId = flags.includes('--check-only')
+      ? findAll(res.json, 'runId').find(v => typeof v === 'string')
+      : null;
+    const w = await io.cli([
+      'agent',
+      root,
+      'wait',
+      JSON.stringify(
+        runId
+          ? { runId }
+          : {
+              operationIds: [body.operationId],
+              ...(verb === 'land' ? { until: 'acceptance' } : {}),
+            },
+      ),
+    ]);
+    io.receipt(id, {
+      verb: 'wait',
+      operationId: body.operationId,
+      code: w.code,
+      seconds: w.seconds,
+      receipt: w.json,
+    });
+    res = { ...w, seconds: res.seconds + w.seconds, stderr: res.stderr + w.stderr };
+  }
+  if (source && landPending(res))
+    throw Object.assign(Error(`ZOO_SOURCE_PENDING ${verb} ${body.operationId}`), {
+      pendingSource: { verb, operationId: body.operationId, body, flags },
+    });
+  return res;
+}
+
 /** One repository's scenario. `io` = { cli, git, log, receipt } (injectable). */
 export async function runRepo(cfg, repo, state, runDir, io) {
   const r = { id: repo.id, fork: repo.fork, upstream: repo.upstream, steps: {}, refusals: [], notes: [] };
@@ -77,9 +117,7 @@ export async function runRepo(cfg, repo, state, runDir, io) {
     r.refusals.push({ where, code, detail: detail?.slice?.(0, 300) ?? null });
   const nf = async (root, verb, body, flags = [], afterPreflight = false) => {
     // (Hosted overlap notices and their `overlapAnswer` are gone, Issue 853fcde3: nothing to answer.)
-    if (verb === 'land') body = { operationId: randomUUID(), ...body };
-    let res = await io.cli(['agent', root, verb, ...flags, JSON.stringify(body)]);
-    io.receipt(repo.id, { verb, flags, body, code: res.code, seconds: res.seconds, receipt: res.json });
+    const res = await sourceCommand(io, repo.id, root, verb, body, flags);
     // The named recovery of a PREFLIGHT_REQUIRED refusal (a change to test files must run them
     // first): run the Lane's preflight once, bounded, then submit again. Both are recorded.
     if (verb === 'land' && res.code && errorCode(res.json) === 'PREFLIGHT_REQUIRED' && !afterPreflight) {
@@ -88,28 +126,6 @@ export async function runRepo(cfg, repo, state, runDir, io) {
       r.notes.push(`preflight-required recovery on ${body.laneId?.slice(0, 8)}: preflight exit ${pf.code}`);
       const { operationId: _previous, ...again } = body;
       return nf(root, verb, again, flags, true);
-    }
-    // IN PROGRESS (exit 3), or an asynchronous land that printed SUBMITTED and exited 0 with
-    // `inProgress: true`: follow the landing with its blocking wait, bounded (8 x 540 s). Without
-    // this the land timing is the submit time and a conflict never reaches the recovery step.
-    for (let i = 0; verb === 'land' && landPending(res) && i < 8; i++) {
-      const runId = flags.includes('--check-only')
-        ? findAll(res.json, 'runId').find(v => typeof v === 'string')
-        : null;
-      const w = await io.cli([
-        'agent',
-        root,
-        'wait',
-        JSON.stringify(runId ? { runId } : { operationIds: [body.operationId], until: 'acceptance' }),
-      ]);
-      io.receipt(repo.id, {
-        verb: 'wait',
-        operationId: body.operationId,
-        code: w.code,
-        seconds: w.seconds,
-        receipt: w.json,
-      });
-      res = { ...w, seconds: res.seconds + w.seconds, stderr: res.stderr + w.stderr };
     }
     return res;
   };
@@ -405,12 +421,20 @@ export async function runRepo(cfg, repo, state, runDir, io) {
         const { action, ...params } = conflict.next;
         const res = await nf(conflict.root ?? folder.path, action, params);
         r.notes.push(`resolution step: ${action} exit ${res.code}`);
-        if (res.code)
+        if (res.code) {
           refuse(
             `resolution ${action}`,
             errorCode(res.json) ?? `exit ${res.code}`,
             res.json?.error?.message ?? res.stderr,
           );
+          r.keepCheckouts = true;
+          step('resolve', 'forge', {
+            ok: false,
+            seconds: (performance.now() - t) / 1000,
+            error: errorCode(res.json) ?? `exit ${res.code}`,
+          });
+          return r;
+        }
         laneId = params.laneId ?? laneId;
       }
       const landR = await nf(folder.path, 'land', { laneId, message: 'zoo b resolved' }, ['--save']);
@@ -609,12 +633,17 @@ async function main(argv) {
       throw Object.assign(error, { repo: repo.id });
     });
     const result = await io.metered(repo, () =>
-      runRepo(cfg, repo, state, runDir, io).catch(error => ({ id: repo.id, crash: error.stack })),
+      runRepo(cfg, repo, state, runDir, io).catch(error => ({
+        id: repo.id,
+        crash: error.stack,
+        ...(error.pendingSource ? { pendingSource: error.pendingSource, keepCheckouts: true } : {}),
+      })),
     );
     // Kept per repository as soon as it ends (an interrupted run loses only the repositories still
     // running), and its checkouts removed at once so a 25-repository run never holds them all.
     writeFileSync(join(runDir, `${repo.id}.result.json`), JSON.stringify(result, null, 1) + '\n');
-    if (!flag('--keep-checkouts')) rmSync(join(runDir, repo.id), { recursive: true, force: true });
+    if (!flag('--keep-checkouts') && !result.keepCheckouts)
+      rmSync(join(runDir, repo.id), { recursive: true, force: true });
     return result;
   });
   // The CLI follows main, so a run can straddle a release: name the CLI build before and after.

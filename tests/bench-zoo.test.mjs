@@ -19,7 +19,7 @@ import {
   thrownRefusal,
 } from '../scripts/bench-zoo/lib.mjs';
 import { lastJson } from '../scripts/bench-zoo/exec.mjs';
-import { resolutionFolder } from '../scripts/bench-zoo/run.mjs';
+import { resolutionFolder, sourceCommand } from '../scripts/bench-zoo/run.mjs';
 import { chmodSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -478,6 +478,20 @@ test('a hazard repository passes by a named clone refusal; a plain repository th
   assert.equal(summarize(atImport, {}).pass, false);
   const unnamed = { ...atImport, refusals: [{ where: 'import', code: 'IMPORT_FAILED' }] };
   assert.equal(summarize(unnamed, { hazard: true }).pass, false);
+  for (const op of ['import', 'clone'])
+    for (const code of [
+      'AUTH_REQUIRED',
+      'GITHUB_RATE_LIMIT',
+      'SOMETHING_UNKNOWN',
+      op === 'import' ? 'INVALID_NATIVE_SOURCE' : 'GITHUB_SOURCE_UNSUPPORTED',
+    ]) {
+      const unrelated = {
+        id: 'hazard',
+        steps: { [op]: { forge: { ok: false, error: { code } } } },
+        refusals: [{ where: op, code }],
+      };
+      assert.equal(summarize(unrelated, { hazard: true }).pass, false, `${op}:${code}`);
+    }
   // The refusal reaches the harness as a thrown ConvexError: its code is read, other errors are not.
   const refusal = { code: 'GITHUB_SOURCE_UNSUPPORTED', message: 'names src/caf\\uFFFD.py' };
   assert.deepEqual(
@@ -832,4 +846,60 @@ test('zoo stored-job recovery resumes its pinned import and never creates a seco
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('timed-out source resolution reconciles its original operation before returning, including all wall time', async () => {
+  const operationId = '17adac72-808e-4f79-a2c7-ce9f2ac51f06';
+  const calls = [],
+    receipts = [];
+  const replies = [
+    { code: 3, seconds: 30, stderr: 'timeout', json: { error: { code: 'EXCHANGE_REQUEST_TIMEOUT' } } },
+    { code: 0, seconds: 7, stderr: '', json: { result: { head: 'resolved' } } },
+  ];
+  const io = {
+    cli: async args => {
+      calls.push(args);
+      return replies.shift();
+    },
+    receipt: (_id, value) => receipts.push(value),
+  };
+  const result = await sourceCommand(io, 'fixture', '/synthetic/lane', 'resolve', {
+    operationId,
+    laneId: 'synthetic',
+    paths: ['a.rs'],
+  });
+  assert.equal(result.seconds, 37);
+  assert.equal(result.json.result.head, 'resolved');
+  assert.equal(calls[1][2], 'wait');
+  assert.deepEqual(JSON.parse(calls[1][3]), { operationIds: [operationId] });
+  assert.equal(receipts[0].body.operationId, operationId);
+  assert.equal(receipts[1].operationId, operationId);
+});
+
+test('unfinished source operations retain replay data and terminal source failures stay failed', async () => {
+  const body = { operationId: '17adac72-808e-4f79-a2c7-ce9f2ac51f06', laneId: 'synthetic' };
+  const pending = { code: 3, seconds: 1, stderr: '', json: { inProgress: true } };
+  await assert.rejects(
+    sourceCommand({ cli: async () => pending, receipt() {} }, 'fixture', '/synthetic/lane', 'resolve', body),
+    error => {
+      assert.deepEqual(error.pendingSource, {
+        verb: 'resolve',
+        operationId: body.operationId,
+        body,
+        flags: [],
+      });
+      return true;
+    },
+  );
+  const failure = { code: 2, seconds: 1, stderr: '', json: { error: { code: 'RESOLUTION_REQUIRED' } } };
+  assert.equal(
+    await sourceCommand(
+      { cli: async () => failure, receipt() {} },
+      'fixture',
+      '/synthetic/lane',
+      'resolve',
+      body,
+    ),
+    failure,
+  );
 });

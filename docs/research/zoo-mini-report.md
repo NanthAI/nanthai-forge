@@ -418,6 +418,14 @@ metered dev Convex cost.
 
 A named GitHub rate refusal during import setup retains its failed attempt and provider reset. The harness waits locally
 without Convex polling and resumes the same import operation and source. The import timing column and regression guard use full wall time, including each setup void and wait.
+
+Source commands also settle their original operation before the next scenario step. A timed-out resolve follows the
+CLI's blocking wait with its original operation id; all wait time remains in the operation timing. An unfinished source
+operation stops the row and retains its checkout and replay data. Terminal resolution failures never advance to land.
+Normal source commands make the same calls; only pending outcomes use the existing bounded continuation (at most eight
+wait commands). This adds no idle calls, tables or stored source bytes, and merges landing-only recovery into one source
+recovery path. Hazard rows accept only `GITHUB_SOURCE_UNSUPPORTED` at import or `INVALID_NATIVE_SOURCE` at clone;
+authentication, provider and unknown refusals fail the row.
 Raw results also retain successful-attempt seconds; unrelated errors are not retried.
 
 The saved baseline ([`baseline.json`](../../scripts/bench-zoo/baseline.json)) is the regression guard: `--baseline` exits 1

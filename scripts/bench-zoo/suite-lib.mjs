@@ -110,11 +110,14 @@ export function pathVerdicts(r, entry = {}) {
     }
     const s = forge(op);
     // A hazard repository (paths a case-insensitive or UTF-8-only volume cannot hold) passes its
-    // import or clone by a structured, named refusal: lossy silent success is the failure.
+    // import or clone by the source/path refusal for that phase. Auth and provider failures
+    // never prove that an unsupported path was recognized.
     const refusal =
       entry.hazard && (op === 'import' || op === 'clone')
         ? (r.refusals ?? []).find(
-            x => x.where === op && /^[A-Z][A-Z_]+$/.test(x.code) && x.code !== 'IMPORT_FAILED',
+            x =>
+              x.where === op &&
+              x.code === (op === 'import' ? 'GITHUB_SOURCE_UNSUPPORTED' : 'INVALID_NATIVE_SOURCE'),
           )
         : null;
     if (refusal) {
