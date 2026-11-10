@@ -5,7 +5,7 @@ import { backfillFields } from './r2BackfillFields';
 export const objectPack = v.object({ digest: v.string(), size: v.number(), offset: v.number() });
 export const stateTreePointer = v.object({ segment: v.string(), size: v.number(), root: v.string() });
 /** Operations that may read a State through its tree pointer (each switched on its own). */
-export const stateTreeReaders = ['merge', 'diff', 'checkout'] as const;
+export const stateTreeReaders = ['merge', 'diff', 'checkout', 'baseline'] as const;
 export const stateTreesFields = v.object({
   write: v.optional(v.boolean()),
   read: v.optional(v.array(v.union(...stateTreeReaders.map(name => v.literal(name))))),

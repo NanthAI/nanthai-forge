@@ -5,7 +5,7 @@ import { digest } from './portable-hash.js';
 import { dualWriteStateTree, type StateTreeDualResult } from './state-tree-dual.js';
 import type { TreeFile } from './state-tree-format.js';
 import { TreeSession, type SegmentStore, type StateTreePointer } from './state-tree-store.js';
-import { stateTreeManifest, treeChanges, treeFileAt, treeFiles } from './state-tree.js';
+import { readStateTree, stateTreeManifest, treeChanges, treeFileAt, treeFiles } from './state-tree.js';
 
 /** What a source step needs to dual-write the States it produces (projects with tree writes on).
  * The flat State stays the authority: `settled` only learns whether a pointer may be recorded. */
@@ -14,6 +14,8 @@ export type StateTreeIo = {
   write: boolean;
   /** The merge reader is switched to trees (`stateTrees.read` has `merge`). */
   read: boolean;
+  /** The save-baseline reader is switched to trees (`stateTrees.read` has `baseline`). */
+  baseline?: boolean;
   store: SegmentStore;
   /** The proven pointer of a State this step knows (from its object row, or written here). */
   pointer(state: string): StateTreePointer | undefined;
@@ -179,12 +181,18 @@ async function writeOnBase(
   };
 }
 
+const warmed = new WeakMap<SegmentStore, Set<string>>();
 /** Fetch the segments a State's tree lives in, while the step still has other work to do (the
- * merge step, as soon as it holds a State that has a pointer), so its dual-write later costs
- * CPU and one PUT instead of sequential GETs. Best effort, as `warmTreePaths`. */
+ * merge step, as soon as it knows a State it will read that has a pointer), so its dual-write
+ * later costs CPU and one PUT instead of sequential GETs. Once per State and store. Best effort,
+ * as `warmTreePaths`. */
 export function warmTreeState(io: StateTreeIo, state: string) {
   const pointer = io.pointer(state);
   if (!io.write || !pointer) return;
+  let done = warmed.get(io.store);
+  if (!done) warmed.set(io.store, (done = new Set()));
+  if (done.has(state)) return;
+  done.add(state);
   new TreeSession(io.store).prefetch(pointer).catch(() => {});
 }
 
@@ -231,6 +239,27 @@ export async function manifestFromTree(
     manifest = null;
   }
   io.derived?.(state, !!manifest);
+  return manifest;
+}
+
+/** The save-baseline reader: a save's baseline manifest from its stored tree alone (every folder;
+ * its segments then also serve the save's own dual-write). Returned only when it hashes to the
+ * State id at the pinned size, so it cannot differ from the flat manifest; null (reader off, no
+ * pointer, any failure or mismatch) means the caller reads the flat manifest as before. */
+export async function baselineFromTree(
+  io: StateTreeIo,
+  pin: { sha256: string; size: number },
+): Promise<Uint8Array | null> {
+  const pointer = io.pointer(pin.sha256);
+  if (!io.baseline || !pointer) return null;
+  let manifest: Uint8Array | null = null;
+  try {
+    const read = await readStateTree(new TreeSession(io.store), pointer);
+    if (read.record.state === pin.sha256 && read.manifest.length === pin.size) manifest = read.manifest;
+  } catch {
+    manifest = null;
+  }
+  io.derived?.(pin.sha256, !!manifest);
   return manifest;
 }
 

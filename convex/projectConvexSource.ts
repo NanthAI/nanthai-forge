@@ -68,6 +68,7 @@ export async function runConvexSourceStep(
         overlapWrites: true,
         preloaded: options.preloaded,
         trees: state.trees === true,
+        treeBaseline: state.treeBaseline === true,
         treeBase: state.treeBase ?? undefined,
       });
       let output;

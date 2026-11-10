@@ -603,6 +603,27 @@ test('dual-write wiring: a save and a merge get a pointer with no extra descript
   assert.deepEqual([...refused.writes], [...flat.writes]);
   assert.equal(bad.trees.pointer(digest(saved)), undefined);
 
+  // The save-baseline reader (its own flag, `baseline`): the baseline comes from its tree instead
+  // of a flat read and the save is the flat one byte for byte. A tree that does not give exactly
+  // the baseline (here another State's) falls back to the flat read with the same result.
+  const reader = (pointer, derived) => {
+    const wired = wiring(store, new Map([[digest(first), pointer]]));
+    return { ...wired.trees, baseline: true, derived: (_state, ok) => derived.push(ok) };
+  };
+  const derived = [],
+    fromTree = await run(reader(pointers.get(digest(first)), derived));
+  assert.deepEqual(fromTree.output, flat.output);
+  assert.deepEqual([...fromTree.writes], [...flat.writes]);
+  assert.ok(!fromTree.reads.includes(digest(first)), 'the flat baseline is not read');
+  assert.deepEqual(derived, [true]);
+  const wrong = manifest({ ...treeSample, 'x/y': 'another State\n' }, 'wrong'),
+    misread = [],
+    fallback = await run(reader((await convertStateTree(store, wrong, fileOf)).pointer, misread));
+  assert.deepEqual(misread, [false]);
+  assert.ok(fallback.reads.includes(digest(first)), 'read flat after the tree did not give it');
+  assert.deepEqual(fallback.output, flat.output);
+  assert.deepEqual([...fallback.writes], [...flat.writes]);
+
   // A merge State (two parents) published by the merge step: files it takes from the other
   // parent get their Git ids from that parent's tree, so nothing is described or read.
   const other = manifest({ ...treeSample, 'other/side.ts': 'theirs\n' }, 'other', [digest(first)]);

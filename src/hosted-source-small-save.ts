@@ -11,7 +11,7 @@ import { canonicalPayload } from './hosted-source-operation.js';
 import { invariant } from './errors.js';
 import { sourceValidation } from './hosted-source-validation.js';
 import { mapSourceOrdered } from './hosted-source-parallel.js';
-import { warmTreePaths, writeOutputTree } from './state-tree-output.js';
+import { baselineFromTree, warmTreePaths, writeOutputTree } from './state-tree-output.js';
 
 // Runtime routing bounds, not source limits: larger/recipe saves use the Node worker.
 export const smallSaveStateBytes = 4 * 1024 * 1024;
@@ -49,11 +49,18 @@ export async function runSmallSourceSave(
   verified: readonly (WorkerPin & { git?: string })[] = [],
 ): Promise<WorkerPin | null> {
   if (input.size > smallSaveInputBytes) return null;
+  // The save-baseline reader (its own flag): a State with a pointer is read from its tree, and
+  // flat when that does not give exactly the pinned bytes.
+  const trees = io.trees,
+    readState = (pin: WorkerPin) =>
+      trees?.baseline && trees.pointer(pin.sha256)
+        ? baselineFromTree(trees, pin).then(manifest => manifest ?? readExact(io, pin))
+        : readExact(io, pin);
   const early = new Map(
     hints
       .filter(pin => pin.size <= smallSaveStateBytes)
       .map(pin => {
-        const read = readExact(io, pin);
+        const read = readState(pin);
         read.catch(() => {});
         return [pin.sha256, { pin, read }] as const;
       }),
@@ -77,7 +84,7 @@ export async function runSmallSourceSave(
   // Both pins are known and prepared together: one round trip, not two (none when hinted).
   if (pending.length) await io.prepareRead?.(pending);
   const pageRead = started(plan.pages) ?? readExact(io, plan.pages),
-    baselineRead = started(plan.baseline.object) ?? readExact(io, plan.baseline.object);
+    baselineRead = started(plan.baseline.object) ?? readState(plan.baseline.object);
   baselineRead.catch(() => {});
   const pageBytes = await pageRead;
   const page = sourceValidation(

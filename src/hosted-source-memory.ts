@@ -201,11 +201,14 @@ export class MemorySourceReader extends SourceWorkerReader {
   }
   override async files(refs: WorkerObject[]) {
     for (let offset = 0; offset < refs.length; offset += 100) {
-      const window = refs.slice(offset, offset + 100);
+      const window = refs.slice(offset, offset + 100),
+        trees = this.io.trees;
+      // Dual-write: the trees of the States this window holds start downloading before their
+      // descriptors and bytes do (a State the merge holds is likely a base of the one it publishes).
+      if (trees) for (const ref of window) warmTreeState(trees, ref.object.sha256);
       await this.io.prepareRead?.(window.filter(ref => !ref.recipe).map(ref => ref.object));
       // Merge reader: the first State with a tree pointer is read flat and becomes the base the
       // others in this window are rebuilt from, so it must be in hand before they start.
-      const trees = this.io.trees;
       if (trees?.read && !this.source.treeBase) {
         const first = window.find(ref => !ref.recipe && trees.pointer(ref.object.sha256));
         if (first) await this.bytes(first);

@@ -45,6 +45,7 @@ export function convexSourceTransport(
     preloaded = [],
     trees = false,
     treeRead = false,
+    treeBaseline = false,
     treeBase,
   }: {
     overlapWrites?: boolean;
@@ -52,6 +53,8 @@ export function convexSourceTransport(
     trees?: boolean;
     /** The merge reader is switched to trees (`hostedProjects.stateTrees.read` has `merge`). */
     treeRead?: boolean;
+    /** The save-baseline reader is switched to trees (`stateTrees.read` has `baseline`). */
+    treeBaseline?: boolean;
     /** Self-heal: a State with a proven pointer that `begin` found for a save whose baseline is
      * flat (its nearest such ancestor, else main's head). */
     treeBase?: { state: string; pointer: StateTreePointer } | undefined;
@@ -86,7 +89,7 @@ export function convexSourceTransport(
     pointers = new Map<string, StateTreePointer>();
   // Dual-write: segments are read by key and written beside the State; the outcome is counted
   // here and a refusal is the step's alarm (the flat State is recorded either way).
-  const segments = trees || treeRead ? r2SegmentStore(ctx, projectId) : null,
+  const segments = trees || treeRead || treeBaseline ? r2SegmentStore(ctx, projectId) : null,
     tree = {
       written: 0,
       skipped: 0,
@@ -153,6 +156,7 @@ export function convexSourceTransport(
           trees: {
             write: trees,
             read: treeRead,
+            baseline: treeBaseline,
             derived: (state, ok) => {
               if (ok) tree.derived++;
               else tree.refused ??= { state, code: 'SOURCE_DIGEST_MISMATCH' };
