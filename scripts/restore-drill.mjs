@@ -328,6 +328,7 @@ export async function drill(command, env = process.env) {
       code: stop.signal.aborted
         ? stop.signal.reason.code
         : (error?.code ?? error?.data?.code ?? 'DRILL_FAILED'),
+      ...(error?.tables ? { tables: error.tables, next: error.next } : {}),
     };
   } finally {
     clearInterval(watch);

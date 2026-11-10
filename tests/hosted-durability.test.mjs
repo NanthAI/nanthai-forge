@@ -23,6 +23,7 @@ import {
   readRestoredRows,
   verifyProjectObjects,
 } from '../scripts/lib/restore-drill-project.mjs';
+import { importFailure } from '../scripts/lib/restore-drill-instance.mjs';
 
 function summary(tables = durabilityFixture(), fileHash = 'file-hash') {
   const result = snapshotAccumulator();
@@ -614,4 +615,23 @@ test('accepted main comes from the hosted channel row, not the hosting-time Work
   assert.equal(summary().work[0].main, mainHead);
   fixture.projectHostedChannels.push({ ...fixture.projectHostedChannels[0], _id: 'second' });
   assert.throws(() => summary(fixture), { code: 'WORK_INDEX_INVALID' });
+});
+
+test('restore drill names a backup older than the current schema instead of a bare import failure (incident 2026-11-10)', () => {
+  // A table added to the schema after the backup took a table number the backup's ids use.
+  const named = importFailure({
+    state: 'failed',
+    error_message:
+      'Hit an error while importing:\nNew table `projectSourceCutovers` has IDs that conflict with existing table `projectHostedOverlapMainLog`. To delete all existing tables, import with `npx convex import --replace-all`.',
+  });
+  assert.equal(named.code, 'BACKUP_OLDER_THAN_SCHEMA');
+  assert.deepEqual(named.tables, { backup: 'projectSourceCutovers', schema: 'projectHostedOverlapMainLog' });
+  assert.match(named.next, /new backup/);
+  // Any other cause stays the generic code, and no backend text (it can hold row data) is carried.
+  const other = importFailure({
+    state: 'failed',
+    error_message: 'Document {"secret":"x"} failed validation',
+  });
+  assert.equal(other.code, 'IMPORT_FAILED');
+  assert.doesNotMatch(JSON.stringify({ ...other, message: other.message }), /secret/);
 });

@@ -332,8 +332,9 @@ export const projectPurge = v.object({
 });
 const projectFields = {
   /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
-   * their Issue version, comment or note record in the same mutation. The journal stays the authority. */
-  workStore: v.optional(v.literal('dual')),
+   * their Issue version, comment or note record in the same mutation; records = dual, and the planning
+   * reads (Issues, versions, comments) and an Intent's notes and moves come from the store. */
+  workStore: v.optional(v.union(v.literal('dual'), v.literal('records'))),
   needsFix: v.optional(v.record(v.string(), v.string())),
   checkLogSweep: v.optional(
     v.object({

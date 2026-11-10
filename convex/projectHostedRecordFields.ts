@@ -59,6 +59,8 @@ export const hostedRecordTables = {
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     .index('by_project', ['projectId']),
   projectHostedRecordHeads: defineTable({ ...identity, ...indexed, recordId: v.id('projectHostedRecords') })
+    // Creation order within a kind: the Work store's planning list pages in the journal's append order.
+    .index('by_project_and_kind', ['projectId', 'kind'])
     .index('by_project_and_kind_and_key', ['projectId', 'kind', 'key'])
     .index('by_project_and_kind_and_parent', ['projectId', 'kind', 'parent'])
     .index('by_project_and_kind_and_status', ['projectId', 'kind', 'status'])

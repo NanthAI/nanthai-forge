@@ -165,35 +165,41 @@ test('flip 5 re-run meter: Work queries one tab re-runs per planning write', asy
       }),
   ];
   const tracking = trackReadSets(s.ctx, s.tables);
-  const dependencies = [];
-  for (const subscribe of subscriptions) dependencies.push(await tracking.subscribe(subscribe));
-  const rerun = async write => {
-    tracking.reset();
-    await write();
-    return names.filter((_, i) => tracking.invalidated([dependencies[i]]) === 1);
+  const meter = async status => {
+    const dependencies = [];
+    for (const subscribe of subscriptions) dependencies.push(await tracking.subscribe(subscribe));
+    const rerun = async write => {
+      tracking.reset();
+      await write();
+      return names.filter((_, i) => tracking.invalidated([dependencies[i]]) === 1);
+    };
+    return {
+      'new Issue': await rerun(() => s.send(s.item({ title: 'New' }))),
+      'Issue status': await rerun(() => s.send({ ...issues[4], operationId: randomUUID(), ...status })),
+      'Issue comment': await rerun(() =>
+        s.send({
+          action: 'comment-planning-item',
+          operationId: randomUUID(),
+          itemId: issues[4].itemId,
+          text: 'c',
+          authorLabel: 'Owner',
+        }),
+      ),
+      'Intent note': await rerun(() => s.send({ action: 'note', intentId, text: 'n', kind: 'comment' })),
+    };
   };
-  const measured = {
-    'new Issue': await rerun(() => s.send(s.item({ title: 'New' }))),
-    'Issue status': await rerun(() =>
-      s.send({ ...issues[4], operationId: randomUUID(), expectedVersion: 1, status: 'closed' }),
-    ),
-    'Issue comment': await rerun(() =>
-      s.send({
-        action: 'comment-planning-item',
-        operationId: randomUUID(),
-        itemId: issues[4].itemId,
-        text: 'c',
-        authorLabel: 'Owner',
-      }),
-    ),
-    'Intent note': await rerun(() => s.send({ action: 'note', intentId, text: 'n', kind: 'comment' })),
-  };
-  assert.deepEqual(measured, {
+  const measured = await meter({ expectedVersion: 1, status: 'closed' });
+  const expected = {
     'new Issue': ['intents', 'planningItems'],
     'Issue status': ['intents', 'planningItems'],
     'Issue comment': ['intents', 'planningComments'],
     'Intent note': ['intents', 'notes'],
-  });
+  };
+  assert.deepEqual(measured, expected);
+  // S4: with the store reader on, the Issue list and detail read record heads; the dual write adds no
+  // re-run (an Issue head, a comment head and an Intent version sit in separate kinds).
+  s.tables.hostedProjects.get(s.projectId).workStore = 'records';
+  assert.deepEqual(await meter({ expectedVersion: 2, status: 'open' }), expected);
   console.log(
     JSON.stringify({ perTab: Object.fromEntries(Object.entries(measured).map(([k, v]) => [k, v.length])) }),
   );

@@ -14,6 +14,8 @@ import { accessibleProject } from './projectAuthority';
 import { record, recordPartition, selectedGeneration } from './projectWorkIndexStore';
 import { invariant } from '../src/errors';
 import { report } from './errors';
+import { actorSummary } from './projectActorNames';
+import { readsStore, storeItem, storePage } from './projectWorkStoreReads';
 const selection = {
   projectId: v.id('hostedProjects'),
   generationId: v.optional(v.id('projectWorkGenerations')),
@@ -118,6 +120,26 @@ export const records = query({
         generation = await selectedGeneration(ctx, project);
       if (!generation || (input.generationId && input.generationId !== generation._id))
         return { generationId: null, revision: null, page: [], isDone: true, continueCursor: '' };
+      const numItems = Math.min(input.paginationOpts.numItems, 100);
+      if (readsStore(project, input.collection, input.parentId)) {
+        const actors = new Map<string, Promise<boolean>>();
+        const page = await storePage(ctx, project._id, {
+          ...input,
+          paginationOpts: { ...input.paginationOpts, numItems },
+        });
+        return {
+          ...page,
+          generationId: generation._id,
+          revision: generation.initialRevision,
+          page: await Promise.all(
+            page.page.map(async row => ({
+              id: row.id,
+              position: row.position,
+              value: await actorSummary(ctx, project._id, JSON.stringify(row.value), actors),
+            })),
+          ),
+        };
+      }
       const rows =
         input.parentId === undefined
           ? ctx.db
@@ -136,10 +158,9 @@ export const records = query({
       const main = await hostedMain(ctx, generation);
       const actors = new Map<string, Promise<boolean>>();
       const payloads = new Map<string, Promise<Map<string, string>>>();
-      const page = await rows.order(input.newestFirst ? 'desc' : 'asc').paginate({
-        ...input.paginationOpts,
-        numItems: Math.min(input.paginationOpts.numItems, 100),
-      });
+      const page = await rows
+        .order(input.newestFirst ? 'desc' : 'asc')
+        .paginate({ ...input.paginationOpts, numItems });
       return {
         ...page,
         generationId: generation._id,
@@ -181,6 +202,16 @@ export const detail = query({
         generation = await selectedGeneration(ctx, project);
       if (!generation || (input.generationId && input.generationId !== generation._id))
         return { generationId: null, revision: null, value: null, editable: false, intentPin: null };
+      if (input.collection === 'planningItems' && readsStore(project, input.collection)) {
+        const item = await storeItem(ctx, project._id, input.id);
+        return {
+          generationId: generation._id,
+          revision: generation.initialRevision,
+          value: item ? await actorSummary(ctx, project._id, JSON.stringify(item)) : null,
+          editable: project.owner === user.subject,
+          intentPin: null,
+        };
+      }
       const row = await record(ctx, recordPartition(generation), input.collection, input.id),
         main = await hostedMain(ctx, generation);
       let editable = project.owner === user.subject,

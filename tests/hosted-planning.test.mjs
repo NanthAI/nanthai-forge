@@ -303,6 +303,8 @@ test('the Work store copy moves every Issue version, comment and note once, and 
   stored.digest = 'f'.repeat(64);
   const changed = await run('compare-work-store');
   assert.equal(changed.planningComments.different + changed.notes.different, 1);
+  // The reader compare names it too: the store reader refuses a body that fails its digest.
+  assert.equal(changed.readComments.invalid, changed.planningComments.different);
   const kept = await run('copy-work-store');
   assert.equal(kept.planningComments.different + kept.notes.different, 1);
   assert.equal(stored.digest, 'f'.repeat(64));
@@ -498,4 +500,140 @@ test('journal Intents and lifecycle copy into the record store, the dual write k
   clean(after);
   assert.equal(after.intents.hosted, 1);
   assert.equal((await run({ action: 'copy-work-store' })).intents.hosted, 1);
+});
+
+// Flip 5 S4 (Issue 0695ab24): with `workStore: 'records'` the web and agent planning reads
+// (projectWorkIndex:records and :detail) come from the record store, and they return what the journal
+// reads returned: the same items, versions and comments in the same order, with Intent notes on the
+// same id left out of the comments.
+test('with the store reader on, planning lists, versions, comments and detail read the record store and equal the journal reads', async t => {
+  const { dispatchHostedWork } = await import('../dist/hosted-work-client.js');
+  const store = await import(moduleUrl('../convex/projectWorkStore.ts'));
+  const index = await import(moduleUrl('../convex/projectWorkIndex.ts'));
+  const s = await setup(t);
+  s.tables.hostedProjects.get(s.projectId).sourceAuthority = { mode: 'server', epoch: 1 };
+  const handlers = {
+    'projectWorkStore:copy': store.copy,
+    'projectWorkStore:compare': store.compare,
+    'projectWorkStore:setMode': store.setMode,
+  };
+  const client = {
+    query: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    mutation: (ref, args) => handlers[getFunctionName(ref)]._handler(s.ctx, args),
+    action: () => assert.fail('no action'),
+  };
+  const run = input => dispatchHostedWork(client, s.projectId, input);
+  const first = s.item({ title: 'First' });
+  await s.send(first);
+  await run({ action: 'copy-work-store' });
+  await run({ action: 'set-work-store', mode: 'dual' });
+  const second = s.item({ title: 'Second', body: 'Done when: read from the store' });
+  await s.send(second);
+  await s.send({ ...first, operationId: randomUUID(), expectedVersion: 1, status: 'closed' });
+  for (const text of ['One', 'Two'])
+    await s.send({
+      action: 'comment-planning-item',
+      operationId: randomUUID(),
+      itemId: second.itemId,
+      text,
+      authorLabel: 'Owner',
+    });
+  // A note on the Issue's own Intent is a `comment` record with the same parent; it is not a comment.
+  await s.send({ action: 'note', intentId: second.itemId, text: 'A note', kind: 'comment' });
+  const initial = await s.read(),
+    intentId = randomUUID();
+  await actions.command._handler(s.ctx, {
+    projectId: s.projectId,
+    operationId: intentId,
+    revision: initial.data.revision,
+    command: JSON.stringify({
+      action: 'intent',
+      outcome: 'Moves',
+      constraints: '',
+      base: initial.sourceHead,
+    }),
+  });
+  await s.send({ action: 'note', intentId, text: 'First note', kind: 'comment' });
+  await s.send({ action: 'note', intentId, text: 'Decided', kind: 'decision' });
+  await s.send({ action: 'intent-status', intentId, status: 'completed' });
+  const page = (collection, extra = {}) =>
+    index.records._handler(s.ctx, {
+      projectId: s.projectId,
+      collection,
+      paginationOpts: { cursor: null, numItems: 100 },
+      ...extra,
+    });
+  const reads = async () => {
+    const shown = result => result.page.map(row => [row.id, JSON.parse(row.value)]);
+    return {
+      list: shown(await page('planningItems')),
+      newest: shown(await page('planningItems', { newestFirst: true })),
+      versions: shown(await page('planningVersions', { parentId: first.itemId })),
+      comments: shown(await page('planningComments', { parentId: second.itemId, newestFirst: true })),
+      notes: shown(await page('notes', { parentId: intentId })),
+      issueNotes: shown(await page('notes', { parentId: second.itemId })),
+      moves: shown(await page('lifecycle', { parentId: intentId })),
+      detail: JSON.parse(
+        (
+          await index.detail._handler(s.ctx, {
+            projectId: s.projectId,
+            collection: 'planningItems',
+            id: second.itemId,
+          })
+        ).value,
+      ),
+    };
+  };
+  const journal = await reads();
+  assert.deepEqual(
+    [
+      journal.list.length,
+      journal.versions.length,
+      journal.comments.map(([, c]) => c.text),
+      journal.notes.map(([, n]) => n.text),
+      journal.issueNotes.length,
+      journal.moves.map(([, m]) => m.to),
+    ],
+    [2, 2, ['Two', 'One'], ['First note', 'Decided'], 1, ['completed']],
+  );
+  assert.deepEqual(await run({ action: 'set-work-store', mode: 'records' }), {
+    mode: 'records',
+    changed: true,
+  });
+  const fromStore = await reads();
+  assert.deepEqual(fromStore, journal);
+  // The reader compare checks every journal row against what the store reader returns for it.
+  const compared = (await run({ action: 'compare-work-store' })).collections;
+  for (const name of ['readItems', 'readVersions', 'readComments', 'readNotes', 'readLifecycle'])
+    assert.deepEqual(
+      [compared[name].missing, compared[name].different, compared[name].matched > 0],
+      [0, 0, true],
+      name,
+    );
+  // A bounded sample (spend freeze 2026-11-10): newest rows only, at most `newest` per collection.
+  const sample = await run({ action: 'compare-work-store', newest: 1 });
+  assert.equal(sample.newest, 1);
+  for (const [name, total] of Object.entries(sample.collections)) {
+    assert.ok(total.checked <= 1, name);
+    assert.deepEqual([total.missing, total.different, total.invalid], [0, 0, 0], name);
+  }
+  assert.equal(sample.collections.readComments.checked, 1);
+  // Writes keep both stores current while the store serves reads.
+  await s.send({
+    action: 'comment-planning-item',
+    operationId: randomUUID(),
+    itemId: second.itemId,
+    text: 'Three',
+    authorLabel: 'Owner',
+  });
+  assert.deepEqual(
+    (await reads()).comments.map(([, c]) => c.text),
+    ['Three', 'Two', 'One'],
+  );
+  await run({ action: 'set-work-store', mode: 'dual' });
+  assert.deepEqual(
+    (await reads()).comments.map(([, c]) => c.text),
+    ['Three', 'Two', 'One'],
+    'switching back reads the journal, which has every write',
+  );
 });

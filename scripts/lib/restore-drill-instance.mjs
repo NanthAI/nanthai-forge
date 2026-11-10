@@ -59,6 +59,21 @@ export async function adminClient(instance) {
 
 const importFailed = () => Object.assign(new Error('Import failed.'), { code: 'IMPORT_FAILED' });
 
+/** The failed import's cause, by name. A backup older than a table in the current schema cannot go
+ * in after the schema push: the push numbers that table first, and a backup table carries the same
+ * number in its ids. Only table names leave the backend's message; never row data. */
+export function importFailure(state) {
+  const conflict = /New table `([^`]+)` has IDs that conflict with existing table `([^`]+)`/.exec(
+    state?.error_message ?? '',
+  );
+  if (!conflict) return importFailed();
+  return Object.assign(new Error('The backup predates a table in the current schema.'), {
+    code: 'BACKUP_OLDER_THAN_SCHEMA',
+    tables: { backup: conflict[1], schema: conflict[2] },
+    next: 'Take a new backup (the hosted-backup workflow) and run the drill on it.',
+  });
+}
+
 /** The scratch import API (what `convex import` uses), fed as the ZIP is produced so the ZIP is
  * never a file. Parts respect the backend's 5 MiB minimum. Returns the import id. */
 /** Upload a snapshot ZIP as it is produced (parts of `partBytes`) and start the import. The import
@@ -122,7 +137,7 @@ export async function awaitImport(instance, upload, signal, deadline = Date.now(
     const state = row?.state.state;
     if (state === 'completed')
       return { rows: row.state.num_rows_written == null ? null : Number(row.state.num_rows_written) };
-    if (state === 'failed') throw importFailed();
+    if (state === 'failed') throw importFailure(row.state);
     if (state === 'waiting_for_confirmation' && !confirmed) {
       await upload.perform();
       confirmed = true;

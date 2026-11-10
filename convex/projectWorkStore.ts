@@ -17,13 +17,27 @@ import { recordHead, recordVersion, hostedRecordBody } from './projectHostedReco
 import { hostedRecordIndex, hostedRecordValue } from '../src/hosted-records';
 import { assembleIndexValue } from '../src/work-index-value';
 import { workStoreRecord, workStoreSources, type WorkStoreSource } from '../src/work-store-records';
+import { sameValue, storeReadOf } from './projectWorkStoreReads';
 
 /** Rows per page: a copy page writes at most 3 documents per row (body, version, head). */
 export const WORK_STORE_PAGE = 100;
 const SAMPLE = 20;
 const copySource = v.union(...workStoreSources.map(name => v.literal(name)));
-const compareSource = v.union(copySource, v.literal('planningItems'), v.literal('issueHeads'));
-type CompareSource = WorkStoreSource | 'planningItems' | 'issueHeads';
+/** S4 reader compares: each journal row against what the store reader returns for it. */
+const readCompares = {
+  readItems: 'planningItems',
+  readVersions: 'planningVersions',
+  readComments: 'planningComments',
+  readNotes: 'notes',
+  readLifecycle: 'lifecycle',
+} as const;
+const compareSource = v.union(
+  copySource,
+  v.literal('planningItems'),
+  v.literal('issueHeads'),
+  ...Object.keys(readCompares).map(name => v.literal(name as keyof typeof readCompares)),
+);
+type CompareSource = WorkStoreSource | 'planningItems' | 'issueHeads' | keyof typeof readCompares;
 
 async function ownerStore(ctx: QueryCtx | MutationCtx, projectId: Id<'hostedProjects'>) {
   const user = await ctx.auth.getUserIdentity();
@@ -50,13 +64,19 @@ async function indexPage(
   partition: Id<'projectWorkGenerations'>,
   collection: string,
   cursor: string | null,
+  newest?: number,
 ) {
   const page = await ctx.db
     .query('projectWorkRecords')
     .withIndex('by_generation_and_collection_and_position', q =>
       q.eq('generationId', partition).eq('collection', collection),
     )
-    .paginate({ cursor, numItems: WORK_STORE_PAGE, maximumBytesRead: 4 * 1024 * 1024 });
+    .order(newest ? 'desc' : 'asc')
+    .paginate({
+      cursor,
+      numItems: Math.min(newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
+      maximumBytesRead: 4 * 1024 * 1024,
+    });
   const rows: { key: string; value: unknown }[] = [];
   for (const row of page.page) {
     const header = JSON.parse(row.value);
@@ -193,14 +213,18 @@ export async function storeProjection(
 }
 
 /** Switch a project's Work store mode. Dual write starts only after a clean copy and compare; on the
- * dogfood project, only after the restore drill (Issue 7e9678c8) has passed. */
+ * dogfood project, only after the restore drill (Issue 7e9678c8) has passed. `records` keeps the dual
+ * write and also serves the planning reads from the store (S4); `dual` switches those reads back. */
 export const setMode = mutation({
-  args: { projectId: v.id('hostedProjects'), mode: v.union(v.literal('journal'), v.literal('dual')) },
+  args: {
+    projectId: v.id('hostedProjects'),
+    mode: v.union(v.literal('journal'), v.literal('dual'), v.literal('records')),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       const { project } = await ownerStore(ctx, input.projectId);
-      const workStore = input.mode === 'dual' ? ('dual' as const) : undefined;
+      const workStore = input.mode === 'journal' ? undefined : input.mode;
       if (project.workStore !== workStore) await ctx.db.patch(project._id, { workStore });
       return JSON.stringify({ mode: input.mode, changed: project.workStore !== workStore });
     } catch (error) {
@@ -260,12 +284,16 @@ export const copy = mutation({
 
 /** S2: compare one page read-only. Journal pages check each row has its record version with the same
  * digest (an Intent: its head holds the journal's current Intent, or a Lane pinned it: `hosted`); `planningItems` checks each Issue head is at the journal's latest version; `issueHeads`
- * pages the store and checks each head has its journal Issue (nothing extra). */
+ * pages the store and checks each head has its journal Issue (nothing extra). `readItems`, `readVersions`,
+ * `readComments`, `readNotes` and `readLifecycle` (S4) check that the store reader returns each journal row field for field.
+ * `newest` samples: pages run newest first with at most that many rows, so a bounded check reads the
+ * recent rows only (the client stops after its sample). */
 export const compare = query({
   args: {
     projectId: v.id('hostedProjects'),
     collection: compareSource,
     cursor: v.union(v.string(), v.null()),
+    newest: v.optional(v.number()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -281,10 +309,12 @@ export const compare = query({
       if (collection === 'issueHeads') {
         const page = await ctx.db
           .query('projectHostedRecordHeads')
-          .withIndex('by_project_and_kind_and_key', q =>
-            q.eq('projectId', input.projectId).eq('kind', 'issue'),
-          )
-          .paginate({ cursor: input.cursor, numItems: WORK_STORE_PAGE });
+          .withIndex('by_project_and_kind', q => q.eq('projectId', input.projectId).eq('kind', 'issue'))
+          .order(input.newest ? 'desc' : 'asc')
+          .paginate({
+            cursor: input.cursor,
+            numItems: Math.min(input.newest ?? WORK_STORE_PAGE, WORK_STORE_PAGE),
+          });
         for (const head of page.page) {
           checked++;
           const row = await indexRecord(ctx, partition, 'planningItems', head.key);
@@ -302,7 +332,32 @@ export const compare = query({
           cursor: page.isDone ? null : page.continueCursor,
         });
       }
-      const page = await indexPage(ctx, partition, collection, input.cursor);
+      if (
+        collection === 'readItems' ||
+        collection === 'readVersions' ||
+        collection === 'readComments' ||
+        collection === 'readNotes' ||
+        collection === 'readLifecycle'
+      ) {
+        const source = readCompares[collection];
+        const page = await indexPage(ctx, partition, source, input.cursor, input.newest);
+        for (const row of page.rows) {
+          checked++;
+          let read;
+          try {
+            read = await storeReadOf(ctx, input.projectId, source, row.value as { id?: string });
+          } catch {
+            // A stored body that fails its digest: the reader refuses it, so the compare names it.
+            note(invalid, row.key);
+            continue;
+          }
+          if (read == null) note(missing, row.key);
+          else if (!sameValue(read, row.value)) note(different, row.key);
+          else matched++;
+        }
+        return JSON.stringify({ checked, matched, missing, different, invalid, cursor: page.cursor });
+      }
+      const page = await indexPage(ctx, partition, collection, input.cursor, input.newest);
       for (const row of page.rows) {
         checked++;
         if (collection === 'intents') {

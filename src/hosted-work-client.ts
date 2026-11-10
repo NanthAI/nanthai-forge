@@ -16,8 +16,14 @@ export const hostedWorkRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('rebuild-index') }).strict(),
   z.object({ action: z.literal('migrate-record-details'), operationId: z.uuid() }).strict(),
   z.object({ action: z.literal('copy-work-store') }).strict(),
-  z.object({ action: z.literal('compare-work-store') }).strict(),
-  z.object({ action: z.literal('set-work-store'), mode: z.enum(['journal', 'dual']) }).strict(),
+  z
+    .object({
+      action: z.literal('compare-work-store'),
+      /** Check only the newest rows of each collection (a bounded sample) instead of the whole history. */
+      newest: z.number().int().min(1).max(1000).optional(),
+    })
+    .strict(),
+  z.object({ action: z.literal('set-work-store'), mode: z.enum(['journal', 'dual', 'records']) }).strict(),
   z
     .object({
       action: z.literal('records'),
@@ -146,6 +152,7 @@ async function workStorePass(
   projectId: string,
   action: 'copy-work-store' | 'compare-work-store',
   progress?: (line: string) => void,
+  newest?: number,
 ) {
   const copy = action === 'copy-work-store';
   invariant(
@@ -153,14 +160,27 @@ async function workStorePass(
     'UNSUPPORTED',
     'This transport needs hosted mutations for copy-work-store.',
   );
-  const collections = copy ? [...workStoreSources] : [...workStoreSources, 'planningItems', 'issueHeads'];
+  const collections = copy
+    ? [...workStoreSources]
+    : [
+        ...workStoreSources,
+        'planningItems',
+        'issueHeads',
+        'readItems',
+        'readVersions',
+        'readComments',
+        'readNotes',
+        'readLifecycle',
+      ];
   const totals: Record<string, Record<string, number | string[]>> = {};
   for (const collection of collections) {
     const total: Record<string, number | string[]> = {};
     let cursor: string | null = null,
       pages = 0;
     do {
-      const args = { projectId, collection, cursor };
+      // A sample asks only for the rows it still needs, newest first.
+      const left = newest === undefined ? undefined : newest - ((total.checked as number | undefined) ?? 0);
+      const args = { projectId, collection, cursor, ...(left === undefined ? {} : { newest: left }) };
       const page = JSON.parse(
         (copy
           ? await client.mutation!(makeFunctionReference<'mutation'>('projectWorkStore:copy'), args)
@@ -182,10 +202,10 @@ async function workStorePass(
       progress?.(
         `Work store ${copy ? 'copy' : 'compare'} ${collection}: page ${pages}${cursor ? '' : ', done'}.`,
       );
-    } while (cursor !== null);
+    } while (cursor !== null && (newest === undefined || ((total.checked as number) ?? 0) < newest));
     totals[collection] = { ...total, pages };
   }
-  return { action, collections: totals };
+  return { action, ...(newest === undefined ? {} : { newest }), collections: totals };
 }
 export async function dispatchHostedWork(
   client: HostedWorkTransport,
@@ -231,7 +251,13 @@ export async function dispatchHostedWork(
       );
     }
     if (request.action === 'copy-work-store' || request.action === 'compare-work-store')
-      return await workStorePass(client, projectId, request.action, progress);
+      return await workStorePass(
+        client,
+        projectId,
+        request.action,
+        progress,
+        request.action === 'compare-work-store' ? request.newest : undefined,
+      );
     if (request.action === 'policy')
       return await client.query(makeFunctionReference('projectAutonomy:read'), { projectId });
     if (request.action === 'set-policy') {
