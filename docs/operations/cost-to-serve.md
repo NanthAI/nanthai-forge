@@ -523,8 +523,9 @@ replies without repeating work. Catch-up steps batch up to sixteen existing page
 read target (plus one bounded page of overshoot), then yield one second between scheduled
 steps, pause without polling if queue depth rises or landing service time exceeds
 its starting value by 25%, and can resume on a later due expiry or explicit step.
-An explicit `resume:true` adopts the newly observed service-time baseline only
-after the landing queue is empty.
+The first step records the observed queue depth and service time, so stable
+existing landings do not prevent cleanup. An explicit `resume:true` adopts a
+newly observed baseline after a pause; subsequent growth pauses the walk again.
 Generation discovery uses the existing retirement protections. A completed walk
 schedules nothing, and later due expiries do not restart it. No idle scan, new
 index, table, worker or retention window is introduced. Operators can drive the

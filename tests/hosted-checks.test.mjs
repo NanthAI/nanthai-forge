@@ -721,7 +721,7 @@ test('legacy catch-up resumes exact steps, pauses for landings, and stops after 
     fence: 0,
     wake: null,
     lease: null,
-    status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
+    status: { total: 2, groups: 2, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
   });
   const immutableNames = [
     'projectHostedRecords',
@@ -756,23 +756,31 @@ test('legacy catch-up resumes exact steps, pauses for landings, and stops after 
       })
       .then(JSON.parse);
   let p = await call(0);
+  assert(
+    p.step === 1 && !p.paused && p.queue === 2,
+    'stable queued landings do not prevent initial catch-up',
+  );
   const first = structuredClone(p);
   assert.deepEqual(await call(0), first, 'lost response reconciles without running another step');
   s.patch('projectHostedLandingQueues', queueId, {
-    status: { total: 1, groups: 1, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
+    status: { total: 3, groups: 3, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },
   });
   const paused = await call(p.step);
   assert(paused.paused && paused.step === p.step);
   assert.deepEqual(paused.totals, p.totals, 'queue growth prevents cleanup work');
-  assert((await call(p.step, { resume: true })).paused, 'explicit resume waits for an empty landing queue');
+  p = await call(p.step, { resume: true });
+  assert(
+    !p.paused && p.queue === 3 && p.step > paused.step,
+    'explicit resume adopts the newly observed queued load',
+  );
   s.patch('projectHostedLandingQueues', queueId, {
-    status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 130 },
+    status: { total: 3, groups: 3, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 130 },
   });
   assert((await call(p.step)).paused, 'landing service-time growth also pauses');
   p = await call(p.step, { resume: true });
   assert(
     !p.paused && p.step > paused.step,
-    'an explicit resume adopts the observed baseline once the queue is clear',
+    'an explicit resume adopts the observed service baseline under stable queued load',
   );
   s.patch('projectHostedLandingQueues', queueId, {
     status: { total: 0, groups: 0, horizon: [], lastProgressAt: new Date().toISOString(), serviceMs: 100 },

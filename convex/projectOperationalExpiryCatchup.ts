@@ -254,8 +254,8 @@ export const catchup = internalMutation({
       .unique();
     const depth = queue?.status?.total ?? 0,
       serviceMs = queue?.status?.serviceMs ?? 0;
-    if (p.step === 0 || (input.resume && p.paused && depth === 0)) {
-      p.queue = 0;
+    if (p.step === 0 || (input.resume && p.paused)) {
+      p.queue = depth;
       p.serviceMs = serviceMs;
     }
     p.paused = depth > p.queue || (p.serviceMs > 0 && serviceMs > p.serviceMs * 1.25);
