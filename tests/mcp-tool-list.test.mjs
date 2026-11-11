@@ -55,7 +55,12 @@ test('the hosted tool list stays inside its context budget', async t => {
   const tools = (await client.listTools()).tools;
   assert.equal(tools.length, 8);
   const chars = JSON.stringify(tools).length;
+  const listBytes = Buffer.byteLength(JSON.stringify(tools), 'utf8');
   const descriptions = tools.reduce((n, tool) => n + tool.description.length, 0);
+  const descriptionBytes = tools.reduce((n, tool) => n + Buffer.byteLength(tool.description, 'utf8'), 0);
+  t.diagnostic(`MCP UTF-8 bytes: tools/list ${listBytes}, descriptions ${descriptionBytes}`);
+  assert.equal(listBytes, 5670, 'cost fixes preserve the tool schemas and their description bytes');
+  assert.equal(descriptionBytes, 675, 'cost fixes preserve the per-session MCP description bytes');
   t.diagnostic(`tools/list ${chars} chars (~${Math.ceil(chars / 4)} tokens); descriptions ${descriptions}`);
   assert(chars <= LIST_CHARS, `tool list characters: ${chars}`);
   // Codex sends each tool as a function definition under a server-prefixed name: same budget.

@@ -306,6 +306,75 @@ test('a saving of 10% or more asks the author to lower the ledger value, so it r
   assert.equal(judgeCost({ ...entry, value: 2, floor: 0.5 }, null, costGuard).status, 'fail');
 });
 
+function fixedClock(t) {
+  // Keep ISO stamps and the scheduler on the same controlled clock.
+  const OriginalDate = Date;
+  class FixtureDate extends OriginalDate {
+    constructor(...args) {
+      if (args.length) super(...args);
+      else super(FixtureDate.now());
+    }
+    static now() {
+      return OriginalDate.UTC(2026, 10, 10, 12);
+    }
+  }
+  globalThis.Date = FixtureDate;
+  t.after(() => {
+    globalThis.Date = OriginalDate;
+  });
+}
+
+for (const mainRace of [false, true])
+  test(`cost 298f9675: ${mainRace ? 'main-race' : 'solo'} landing preserves check wall, acceptance delay and zero idle calls`, async t => {
+    fixedClock(t);
+    const f = await finishFixture(t);
+    const state = await f.enqueue(f.request());
+    const checkWorkMs = 60_000;
+    let completed = 0;
+    const current = () =>
+      JSON.parse(
+        [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === state.id).value,
+      );
+    for (let step = 0; current().phase !== 'landed'; step++) {
+      assert(step < 100, 'finite event-driven landing');
+      const queued = runs(f).filter(run => run.status === 'queued');
+      if (queued.length) {
+        for (const run of queued) {
+          const active = await f.rawChecks.activate(run.id);
+          if (mainRace && completed === 0) f.moveMain();
+          // The fixture owns Date.now: model runner work without sleeping or timing the host.
+          f.advanceClock(checkWorkMs);
+          await f.rawChecks.pass(active);
+          completed++;
+        }
+      } else await f.execute();
+    }
+    await f.drain();
+    const timing = current().timing;
+    const measured = {
+      timeToMainMs: Date.parse(timing.committedAt) - Date.parse(timing.submittedAt),
+      checkWallMs: runs(f).reduce((sum, run) => sum + Date.parse(run.endedAt) - Date.parse(run.at), 0),
+      checks: completed,
+    };
+    t.diagnostic(JSON.stringify({ mainRace, ...measured }));
+    assert.equal(completed, mainRace ? 2 : 1, 'only the necessary exact-source checks run');
+    assert.equal(measured.checkWallMs, checkWorkMs * completed);
+    assert.equal(
+      measured.timeToMainMs,
+      measured.checkWallMs + (mainRace ? 250 : 0),
+      'only the existing main-race publication debounce delays acceptance',
+    );
+    assert.equal(f.pending().length, 0, 'terminal landing has no live scheduled work');
+    const idle = { calls: f.counts.length, sourceCalls: f.metrics.convexSourceCalls.length };
+    f.advanceClock(24 * 60 * 60_000);
+    await f.drain();
+    assert.deepEqual(
+      { calls: f.counts.length, sourceCalls: f.metrics.convexSourceCalls.length },
+      idle,
+      'a day idle adds no Convex execution',
+    );
+  });
+
 test('live R2 stamp: a recomposed landing carries the requests its compose signed, never more than the meter saw; a landing with no compose of its own stays unknown', () => {
   assert(baseline, 'runs after the guard measurement');
   const { solo, mainMoved, batchOfFour } = baseline.scenarios;
@@ -706,20 +775,7 @@ async function landingStorage(t, dogfood) {
 }
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
-  const OriginalDate = Date;
-  class StorageDate extends OriginalDate {
-    constructor(...args) {
-      if (args.length) super(...args);
-      else super(StorageDate.now());
-    }
-    static now() {
-      return OriginalDate.UTC(2026, 10, 10, 12);
-    }
-  }
-  globalThis.Date = StorageDate;
-  t.after(() => {
-    globalThis.Date = OriginalDate;
-  });
+  fixedClock(t);
   const scenarios = { fresh: await landingStorage(t, false), dogfood: await landingStorage(t, true) };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
   const budgets = JSON.parse(
