@@ -104,6 +104,10 @@ configured check (no `configure-check`) skips it and queues as before.
      If the entire recomposed file tree equals the checked tree, the existing
      `exact-tree-v1` proof carries the full pass, including for ancestry-only main
      moves outside the pipeline path. All current policy, check and audit gates remain.
+     A docs-only landing after a full green run advances that run's coverage frontier,
+     while retaining the exact source head its full run checked. Consecutive docs-only
+     landings therefore preserve a usable full audit baseline. They cannot cover an
+     intervening unaudited code landing, clear red main or erase audit debt.
    - Otherwise (any doubt: overlap, global-risk file, text conflict, a scoped
      first run, red main or audit debt, unreadable evidence) the proof is refused,
      the change re-enters the queue as a new entry and joins a cohort for one

@@ -24,7 +24,15 @@ export const drillRecord = v.object({
 });
 export const mainAuditFields = {
   projectId: v.id('hostedProjects'),
-  lastGreen: v.optional(v.object({ sequence: v.number(), head: v.string(), runId: v.string() })),
+  lastGreen: v.optional(
+    v.object({
+      sequence: v.number(),
+      /** Exact source checked by runId; docs-only coverage never changes this pin. */
+      head: v.string(),
+      runId: v.string(),
+      coveredHead: v.optional(v.string()),
+    }),
+  ),
   unaudited: v.optional(v.object({ count: v.number(), firstAt: v.union(v.string(), v.null()) })),
   audit: v.optional(
     v.object({

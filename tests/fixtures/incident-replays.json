@@ -169,6 +169,12 @@
       "what": "A passed three-Lane cohort was stranded behind an obsolete reservation-expiry wake after its holder ended.",
       "file": "tests/hosted-landing-order-release.test.mjs",
       "test": "incident stucktrain: ending a reservation accepts a passed three-Lane cohort before its expiry timer (${ending})"
+    },
+    {
+      "incident": "5d690345",
+      "what": "Core claim: docs-only main advanced the green head without its full run, discarding a passed check with audit-baseline",
+      "file": "tests/hosted-first-check-landing.test.mjs",
+      "test": "Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed runner minutes"
     }
   ]
 }

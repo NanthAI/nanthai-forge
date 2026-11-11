@@ -76,6 +76,8 @@ Per-landing [speed and cost budgets](agents/speed-budgets.md) cover submit-to-ma
 
 The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
 
+Docs-only coverage preserves the full audit run's exact source pin, so it cannot create a false audit-baseline refusal on the next race.
+
 Strict disjoint global-risk followers can use a pending full admission as an
 exact predicted-head predecessor in the existing landing pipeline, replacing a
 solo run followed by a serial recheck. Publication remains fenced by the exact

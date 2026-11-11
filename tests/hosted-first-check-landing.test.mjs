@@ -235,6 +235,77 @@ test('an identical complete tree carries the full admission pass outside pipelin
   assert.equal(runCount(f), 2);
 });
 
+test('Issue 1018d0f8 / 5d690345: a docs-covered main keeps zero discarded passed runner minutes', async t => {
+  const scenario = async crossHeadReuse => {
+    const f = await wave(t, {
+      count: 0,
+      crossHeadReuse,
+      memberPaths: ['src/first.ts', 'docs/one.md', 'src/racing.ts'],
+      fileCount: 2,
+      runnerSeconds: 3000,
+    });
+    // The fixture bypasses the provider planner. Retain its real full/docs scope stamps,
+    // as Actions does before reporting a terminal run (the incident used both scopes).
+    const pass = f.rawChecks.pass;
+    f.rawChecks.pass = async run => {
+      const selection = JSON.parse(f.rawChecks.objectBytes.get(run.plan.selection.sha256));
+      run.gate = { mode: 'full', effective: selection.scope === 'docs' ? 'docs' : 'full' };
+      const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+      f.patch('projectHostedCheckRuns', row._id, { value: JSON.stringify(run) });
+      return pass(run);
+    };
+    await f.add(0);
+    await drive(f);
+    f.rawChecks.setPlanSelection(
+      JSON.stringify({ scope: 'docs', tests: [], testedDocs: { rule: 'name-mention-v1', paths: [] } }),
+    );
+    await f.add(1);
+    await drive(f, { until: () => states(f)[1]?.phase === 'ready' });
+    f.rawChecks.setPlanSelection(full);
+    await f.add(2);
+    await drive(f);
+    assert.deepEqual(
+      states(f).map(s => s.phase),
+      ['landed', 'landed', 'landed'],
+    );
+    return f;
+  };
+  const f = await scenario(true);
+  const landed = receipts(f);
+  const discardedSeconds = f
+    .runs()
+    .filter(run => run.status === 'passed' && !landed.some(receipt => receipt.check.runId === run.id))
+    .reduce(
+      (seconds, run) =>
+        seconds +
+        [...f.tables.projectHostedCheckShards.values()]
+          .filter(row => row.runId === run.id)
+          .reduce((sum, row) => sum + JSON.parse(row.value).execution.seconds, 0),
+      0,
+    );
+  t.diagnostic(
+    `docs-covered main: ${discardedSeconds / 60 / landed.length} discarded runner min/landing; refusals ${JSON.stringify(raceReasons(f))}`,
+  );
+  assert.equal(
+    discardedSeconds / 60 / landed.length,
+    0,
+    'ratchet: no passed run discarded after a docs-only main advance',
+  );
+  assert.equal(landed[2].check.runId, f.runs()[2].id);
+  assert.equal(landed[2].crossHeadProof.audit.head, landed[0].candidate.head);
+  assert.equal(runCount(f), 3, 'three admissions, no replacement check');
+  const exact = await scenario(false);
+  assert.equal(runCount(exact), 4, 'the control retains the real replacement run');
+  const meter = fixture => ({
+    ...budget(fixture),
+    readBytes: fixture.counts.reduce((n, c) => n + c.readBytes, 0),
+    writeBytes: fixture.counts.reduce((n, c) => n + c.writeBytes, 0),
+  });
+  const [reused, rechecked] = [meter(f), meter(exact)];
+  for (const key of Object.keys(reused)) assert(reused[key] <= rechecked[key], key);
+  t.diagnostic(`docs-covered reuse ${JSON.stringify(reused)}; exact recheck ${JSON.stringify(rechecked)}`);
+});
+
 for (const [path, reason] of [
   ['package.json', 'global-risk'],
   ['fixture/0', 'order-sensitive'],

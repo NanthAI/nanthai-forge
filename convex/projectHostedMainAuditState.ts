@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { makeFunctionReference } from 'convex/server';
 import type { Doc, Id } from './_generated/dataModel';
-import type { MutationCtx, QueryCtx } from './_generated/server';
+import type { MutationCtx, QueryCtx } from './server';
 import type { HostedAcceptance } from '../src/hosted-acceptance';
 import { hostedCheckTerminal, hostedCheckRunSchema, type HostedCheckRun } from '../src/hosted-check';
 import { mainGateSchema, type MainGate } from '../src/bet2-gate';
@@ -330,12 +330,18 @@ export async function noteMainLanding(
   if (
     !receipt.crossHeadProof &&
     docsGate(run) &&
-    row.lastGreen?.head === receipt.previous.head &&
+    (row.lastGreen?.coveredHead ?? row.lastGreen?.head) === receipt.previous.head &&
     !row.red &&
     !row.unaudited?.count
   ) {
     await ctx.db.patch(row._id, {
-      lastGreen: { ...row.lastGreen, sequence: receipt.snapshot.revision, head: receipt.candidate.head },
+      // Keep the full run's exact head for reuse, timing evidence and culprit recovery.
+      // Only the coverage frontier advances through the already-approved docs-only pass.
+      lastGreen: {
+        ...row.lastGreen!,
+        sequence: receipt.snapshot.revision,
+        coveredHead: receipt.candidate.head,
+      },
     });
     return;
   }
@@ -529,7 +535,7 @@ export async function mainAuditStatus(ctx: QueryCtx | MutationCtx, projectId: Id
       ? row.startFailure
       : null;
   return {
-    head: green ? row!.lastGreen!.head : (row?.audit?.head ?? null),
+    head: green ? (row!.lastGreen!.coveredHead ?? row!.lastGreen!.head) : (row?.audit?.head ?? null),
     result: green ? 'passed' : (active?.status ?? row?.audit?.status ?? null),
     redSince: row?.red?.since ?? null,
     redMinutes: row?.red ? Math.max(0, Date.now() - Date.parse(row.red.since)) / 60_000 : 0,

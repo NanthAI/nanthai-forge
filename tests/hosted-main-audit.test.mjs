@@ -8,6 +8,34 @@ import { checkArgs } from './convex-args.mjs';
 const readGate = f => f.run('mainGate', ctx => state.mainGate(ctx, f.projectId));
 const readStatus = f => f.call('auditStatus', audit.status, { projectId: f.projectId }).then(JSON.parse);
 
+test('Issue 1018d0f8: consecutive docs passes extend coverage without changing the full run source pin', async () => {
+  const f = await auditFixture();
+  const full = await f.land('full');
+  await f.land('docs');
+  const latest = await f.land('docs');
+  assert.equal(f.row().lastGreen.head, full.run.request.expectedHead);
+  assert.equal(f.row().lastGreen.runId, full.run.id);
+  assert.equal(f.row().lastGreen.coveredHead, latest.receipt.candidate.head);
+  assert.equal(f.row().lastGreen.sequence, latest.receipt.snapshot.revision);
+  assert.equal((await readStatus(f)).head, latest.receipt.candidate.head);
+  assert.equal(f.row().unaudited.count, 0);
+  assert.equal(f.pending().length, 0);
+  const next = await f.land('full');
+  assert.equal(f.row().lastGreen.head, next.run.request.expectedHead);
+  assert.equal(f.row().lastGreen.coveredHead, undefined, 'a new full pass replaces docs coverage');
+});
+
+test('docs coverage cannot bridge an unaudited code landing', async () => {
+  const f = await auditFixture();
+  await f.land('full');
+  await f.land('docs');
+  const green = f.row().lastGreen;
+  await f.land('contract');
+  await f.land('docs');
+  assert.deepEqual(f.row().lastGreen, green);
+  assert.equal(f.row().unaudited.count, 1);
+});
+
 for (const effective of ['docs', 'contract'])
   test(`a passed ${effective} audit cannot re-green main or erase its unaudited clock`, async () => {
     const f = await auditFixture();
