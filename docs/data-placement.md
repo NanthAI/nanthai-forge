@@ -559,4 +559,11 @@ header and body live in a range segment. Lane receipts carry only source and
 metric facts. This keeps metric paging exact even when an old Lane version becomes
 superseded long after other projects' history was archived; metrics do not depend
 on a bounded guess about overlapping segment time ranges. These are receipt
-bytes in the storage ledger, separate from the one index per physical segment.
+bytes in the storage ledger, separate from the one index per physical segment. A
+compact header can point to its exact private segment index by content pin, so
+one segment can contain versions of several resources. Header indexes still
+provide exact point and history paging; no per-resource duplicate archive index
+is required.
+
+Work projection replay uses the same verified compact command facts as ordinary
+retries and remains query-readable when the full original provenance is archived.

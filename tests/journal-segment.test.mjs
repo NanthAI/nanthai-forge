@@ -17,7 +17,7 @@ const internalReads = await import(moduleUrl('../convex/projectJournalRead.ts'))
 const actions = await import(moduleUrl('../convex/projectJournalActions.ts'));
 const people = await import(moduleUrl('../convex/publicPeople.ts'));
 const code = expected => error => (error.code ?? error.data?.code) === expected;
-async function fixture(t, { inline = false, lane = false } = {}) {
+async function fixture(t, { inline = false, lane = false, shared = false } = {}) {
   const f = recordsFixture(),
     auth = await f.setup();
   let actor = 'owner';
@@ -80,7 +80,7 @@ async function fixture(t, { inline = false, lane = false } = {}) {
     protocol: 1,
     kind: 'forge-journal-segment',
     projectId: auth.projectId,
-    scope: store.journalScope(old.kind, old.id),
+    scope: shared ? 'records' : store.journalScope(old.kind, old.id),
     from: 0,
     through: 0,
     tables: {
@@ -118,7 +118,7 @@ async function fixture(t, { inline = false, lane = false } = {}) {
       recordKind: old.kind,
       firstPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
       lastPosition: `${auth.projectId}:${header._creationTime.toFixed(6).padStart(23, '0')}:${header._id}`,
-      key: store.journalIndexKey(auth.projectId, index.scope, 0),
+      key: shared ? encoded.pointer.sha256 : store.journalIndexKey(auth.projectId, index.scope, 0),
       projectId: auth.projectId,
       value: canonicalPayload(
         receipts ? Object.fromEntries(Object.entries(index).filter(([key]) => key !== 'records')) : index,
@@ -608,4 +608,32 @@ test('compact version receipts preserve exact reads, source pins and complete me
   assert.equal(h.gets.length, gets);
   const { journalSourceRow } = await import(moduleUrl('../convex/projectJournalCanonical.ts'));
   assert(!('journalLane' in journalSourceRow(row)));
+});
+
+// Point/page enumeration stays in immutable headers; one private segment can serve several resources.
+test('a compact header resolves its exact private segment by content pin without a per-resource range index', async t => {
+  const h = await fixture(t, { lane: true, shared: true });
+  await h.relocate({ receipts: true });
+  assert.equal(
+    await store.journalIndexAt(h.ctx, h.auth.projectId, store.journalScope('lane', h.old.id), 0),
+    null,
+  );
+  assert.deepEqual(JSON.parse(await h.read()), JSON.parse(h.before));
+  assert.equal(h.gets.length, 1);
+  assert(!JSON.stringify(JSON.parse(await h.read())).includes('journal-segments'));
+  const { journalLaneMetricsPage } = await import(moduleUrl('../convex/projectJournalLaneMetrics.ts'));
+  assert.deepEqual(
+    (await journalLaneMetricsPage(h.ctx, h.auth.projectId, 0, Date.now() + 1000, null, true)).page.map(
+      row => row.version,
+    ),
+    [1, 0],
+  );
+});
+
+test('a compact content pin cannot silently substitute another retained resource segment', async t => {
+  const h = await fixture(t, { lane: true });
+  await h.relocate({ receipts: true });
+  await h.ctx.db.patch(h.first._id, { journalSegment: 'f'.repeat(64) });
+  await assert.rejects(h.read(), code('SOURCE_UNAVAILABLE'));
+  assert.equal(h.gets.length, 0);
 });

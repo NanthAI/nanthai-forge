@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { workRecordTable } from './projectWorkRecordTables';
-import { eventDocument, type WorkProvenance, type StoredWorkEvent } from './projectWorkEventStore';
+import {
+  eventDocument,
+  findWorkEvent,
+  type WorkProvenance,
+  type StoredWorkEvent,
+} from './projectWorkEventStore';
 // Flip 5 S1 and S2 (Issue 0695ab24): copy the journal index's Issues, comments and notes into the hosted
 // record store in pages, compare them read-only and choose primary writers per command.
 // Reader and writer flags are independent; retained versions own provenance when a writer freezes its journal.
@@ -323,6 +328,8 @@ export async function storeProjection(
     )
     .unique();
   invariant(body, 'SOURCE_UNAVAILABLE', 'The primary Work version must retain its operation provenance.');
+  if (body.journalSegment)
+    return findWorkEvent(ctx, projectId, provenance.operationId, { command: provenance.command });
   return eventDocument(body);
 }
 

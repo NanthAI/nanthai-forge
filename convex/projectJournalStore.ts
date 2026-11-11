@@ -160,8 +160,22 @@ export async function journalRecord(
 }
 
 export async function journalBody(ctx: Context, row: Doc<'projectHostedRecords'>) {
-  const index = await journalIndexAt(ctx, row.projectId, journalScope(row.kind, row.key), row.version);
-  invariant(index, 'SOURCE_UNAVAILABLE', 'Exact journal record is unavailable.');
+  const pointer = row.journalSegment;
+  const indexed =
+    pointer && /^[a-f0-9]{64}$/.test(pointer)
+      ? await ctx.db
+          .query('projectJournalSegments')
+          .withIndex('by_project_and_key', q => q.eq('projectId', row.projectId).eq('key', pointer))
+          .unique()
+      : null;
+  const index = indexed
+    ? (JSON.parse(indexed.value) as JournalIndex)
+    : await journalIndexAt(ctx, row.projectId, journalScope(row.kind, row.key), row.version);
+  invariant(
+    index && (!pointer || !/^[a-f0-9]{64}$/.test(pointer) || index.pointer.sha256 === pointer),
+    'SOURCE_UNAVAILABLE',
+    'Exact journal record is unavailable.',
+  );
   requireJournal(ctx, index);
   const original = loadedJournalRows(ctx, 'projectHostedRecords').find(item => item._id === row._id);
   if (original?.inline !== undefined) return original.inline;
