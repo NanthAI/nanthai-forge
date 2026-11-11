@@ -331,6 +331,8 @@ export const projectPurge = v.object({
   completedAt: v.optional(v.number()),
 });
 const projectFields = {
+  /** Physical history relocation fence, independent of logical Work revision. */
+  journalRevision: v.optional(v.number()),
   /** Flip 5 Work store mode (Issue 0695ab24): absent = journal only; dual = planning writes also store
    * their Issue version, comment or note record in the same mutation; records = dual, and the planning
    * reads (Issues, versions, comments) and an Intent's notes and moves come from the store. */

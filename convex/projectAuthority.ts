@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalProject } from './projectJournalStore';
 import type { QueryCtx, MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
 import { invariant } from '../src/errors';
@@ -14,6 +15,7 @@ export async function ownedProject(ctx: QueryCtx | MutationCtx, id: Id<'hostedPr
       'This Forge project is unavailable with the current account.',
     );
     authorized = true;
+    journalProject(ctx, project);
     return project;
   } finally {
     projectExecution(ctx, id, authorized ? project?.name : undefined, authorized ? project?.key : undefined);
@@ -63,6 +65,7 @@ export async function accessibleProject(
       );
     }
     authorized = true;
+    journalProject(ctx, project);
     return project;
   } finally {
     projectExecution(

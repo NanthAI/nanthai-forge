@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { readJournalEvents } from './projectJournalEvents';
 import type { StoredWorkEvent } from './projectWorkEventStore';
 import { archiveRef } from './r2ArchiveSource';
 import { migratedWork } from './projectWorkDetailLoad';
@@ -166,16 +167,14 @@ export async function load(
     );
     // ponytail: replay the existing bounded Work journal; materialize snapshots if measured journal latency warrants it.
     while (true) {
-      const page: { page: StoredWorkEvent[]; isDone: boolean; continueCursor: string } = await ctx.runQuery(
-        internal.projectWork.events,
-        {
+      const page: { page: StoredWorkEvent[]; isDone: boolean; continueCursor: string } =
+        await readJournalEvents(ctx, {
           projectId,
           owner,
           initialRevision: project.work.initialRevision,
           revision: project.work.revision,
           paginationOpts: { cursor, numItems: 100, maximumBytesRead: 500000, maximumRowsRead: 100 },
-        },
-      );
+        });
       for (const item of page.page) {
         const operation = journalEvent(project.key, snapshot.backup.digest, item);
         if (item.previousRevision >= migratedRevision) {

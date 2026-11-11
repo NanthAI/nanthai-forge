@@ -17,14 +17,19 @@ import { LANDING_CAPSULE_TABLES } from '../src/hosted-landing';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { invariant } from '../src/errors';
 const prefix = 'recovery-capsules-v1:';
-type Cursor = { table: string; phase: 'live' | 'capsules'; cursor: string | null; offset?: number };
+type Cursor = {
+  table: string;
+  phase: 'live' | 'capsules' | 'journal';
+  cursor: string | null;
+  offset?: number;
+};
 export const recoveryCapsuleCursor = (value: Cursor) => prefix + canonicalPayload(value);
 export function readRecoveryCapsuleCursor(table: string, cursor: string | null): Cursor {
   if (!cursor?.startsWith(prefix)) return { table, phase: 'live', cursor };
   const value = JSON.parse(cursor.slice(prefix.length)) as Cursor;
   invariant(
     value.table === table &&
-      ['live', 'capsules'].includes(value.phase) &&
+      ['live', 'capsules', 'journal'].includes(value.phase) &&
       (value.cursor === null || typeof value.cursor === 'string') &&
       (value.offset === undefined || (Number.isSafeInteger(value.offset) && value.offset >= 0)),
     'EVIDENCE_CHANGED',
@@ -101,7 +106,14 @@ export async function recoveryCapsulePage(
 ) {
   invariant(cursor.phase === 'capsules', 'EVIDENCE_CHANGED', 'Select the capsule recovery phase.');
   if (!LANDING_CAPSULE_TABLES.includes(table as never))
-    return canonicalPayload({ table, rows: [], cursor: null, done: true });
+    return canonicalPayload({
+      table,
+      rows: [],
+      cursor: project.journalRevision
+        ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null })
+        : null,
+      done: !project.journalRevision,
+    });
   const query = ctx.db.query('projectFinishReadRows').withIndex('by_kind_and_project_and_submission', q => {
     const selected = q.eq('kind', capsuleKind).eq('projectId', project._id);
     return cursor.cursor === null
@@ -111,7 +123,15 @@ export async function recoveryCapsulePage(
         : selected.gte('submissionId', cursor.cursor);
   });
   const row = await query.first();
-  if (!row) return canonicalPayload({ table, rows: [], cursor: null, done: true });
+  if (!row)
+    return canonicalPayload({
+      table,
+      rows: [],
+      cursor: project.journalRevision
+        ? recoveryCapsuleCursor({ table, phase: 'journal', cursor: null })
+        : null,
+      done: !project.journalRevision,
+    });
   const pointer = JSON.parse(row.value),
     submissionId = row.submissionId!;
   const offset = cursor.offset ?? 0;

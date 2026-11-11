@@ -12,15 +12,23 @@ import { digest } from './state/hash.js';
 import { ForgeError, invariant } from './errors.js';
 
 export function encodeLandingCapsule(value: LandingCapsule) {
-  const text = landingCapsuleText(value),
-    body = gzipSync(text, { level: 9 });
+  return encodeArchiveBytes(
+    landingCapsuleText(value),
+    value.anchor.version,
+    landingCapsuleTablePins(value.tables),
+  );
+}
+
+/** Shared complete-object codec for landing capsules and journal segments. */
+export function encodeArchiveBytes(text: string, version: number, tables: unknown) {
+  const body = gzipSync(text, { level: 9 });
   const pointer: LandingCapsulePointer = {
     protocol: 1,
     sha256: digest(body),
     size: body.length,
     rawSize: Buffer.byteLength(text),
-    version: value.anchor.version,
-    tables: canonicalPayload(landingCapsuleTablePins(value.tables)),
+    version,
+    tables: canonicalPayload(tables),
   };
   return { body, pointer, logicalBytes: Buffer.byteLength(text) };
 }
@@ -31,6 +39,10 @@ export function decodeLandingCapsule(
   projectId: string,
   submissionId: string,
 ) {
+  return readLandingCapsule(decodeArchiveBytes(body, pointer), pointer, projectId, submissionId);
+}
+
+export function decodeArchiveBytes(body: Uint8Array, pointer: LandingCapsulePointer) {
   invariant(
     body.length === pointer.size && digest(body) === pointer.sha256,
     'EVIDENCE_CHANGED',
@@ -51,5 +63,5 @@ export function decodeLandingCapsule(
     );
   }
   invariant(plain.length === pointer.rawSize, 'EVIDENCE_CHANGED', 'Landing capsule decoded size differs.');
-  return readLandingCapsule(plain.toString('utf8'), pointer, projectId, submissionId);
+  return plain.toString('utf8');
 }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { readJournalEvents } from './projectJournalEvents';
 import type { StoredWorkEvent } from './projectWorkEventStore';
 import type { ActionCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
-import { internal } from './_generated/api';
 import { type Selected, type Exchange, type Cursor } from './projectWorkIndexBuildTypes';
 import { indexedRecord, type IndexEntry } from '../src/work-hosted-index';
 import { journalEvent } from './projectWorkLoad';
@@ -23,8 +23,8 @@ export async function replayStep(
   project: Doc<'hostedProjects'>,
   c: Cursor,
 ): Promise<{ entries: IndexEntry[]; metadata?: string }> {
-  const page: { page: StoredWorkEvent[]; isDone: boolean; continueCursor: string } = await ctx.runQuery(
-    internal.projectWork.events,
+  const page: { page: StoredWorkEvent[]; isDone: boolean; continueCursor: string } = await readJournalEvents(
+    ctx,
     {
       projectId: selected.projectId,
       owner: selected.owner,

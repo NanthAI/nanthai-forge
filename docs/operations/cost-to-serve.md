@@ -985,26 +985,34 @@ The inventory before any move is:
 | Coordination detail | `coordinationFeed.feedRows` uses creation-time/id positions and scoped indexes; `projectCoordinationReads.related` scans the same feed. `coordinationWrite.eventByOperation` and emit paths use event identity for deduplication; `projectCoordination:publish` also replays it. Messages, handoffs and acknowledgements have inbox/receipt readers. | Archive only activity/change/claim/release older than fourteen days, through current-access server actions with the same feed boundaries. Keep messages/handoffs/acks in Convex. No existing recovery-hosted table branch exports coordination events, so complete archive export needs explicit coverage rather than assuming S1 already includes them. |
 | Export, restore and administration | `projectRecoveryHosted` exports records/bodies/operations/save pages; S1 merges its nine capsule families using `projectLandingCapsuleRecovery` and fences relocation with a revision. Generic purge inventory and legacy storage accounting read physical tables. | Reuse S1's verified codec and recovery merge, with a journal range identity and recovery fence. Extend the full export/drill for snapshots and coordination, which are absent from `recoveryTables` today. Keep physical accounting honest during partial removal. |
 
-Under the builder stop-at-evidence rule, S2's archive reader/writer work is paused
-for that lead review; no new stored format, flag, table, policy or automatic
-relocation is installed. No table or runtime row can be removed by this
-measurement-only change. The superseded-history classes remain identified for a
-reader-first implementation once placement is settled. The default-off writer,
-compact replay, fourteen-day hot-table bound, complete archive recovery and
-speed qualification all remain open. The weekly-export line explicitly **needs
-two dev exports after the setting is on**; a fixture normalization does not close it.
+The continuation's server-only reader expansion accepts exact old record versions,
+bounded Lane provenance and contiguous Work event pages from verified journal
+segments. It reuses S1's complete gzip codec and private GET/PUT transport; no
+second packer or client object grant exists. Immutable version digest/identity
+pins remain transaction-readable. A replay of the same version compares those
+pins before returning its supplied exact bytes; it cannot rewrite history.
+Recovery extends S1's live/capsule merge into journal segments and includes
+coordination and snapshot/display tables. A physical journal-revision fence
+invalidates an export that crosses relocation. No writer or automatic relocation
+is installed by this reader expansion; planning-history and coordination-feed
+reader expansion, compact operation receipts and the writer follow separately.
 
-Runtime cost delta for this instrumentation is zero Convex calls, zero DB I/O,
-zero R2 requests, zero idle work and no change to landing wall time. No S2 archive
-action exists to measure. The two in-process inventory samples took 175.9 / 283.9
-ms for the complete landing/storage fixture and process peak RSS was
-409,747,456 / 489,209,856 B, including module imports, DB fake and S1 action;
-these are not isolated action memory, latency distributions or provider billing.
-The future archive budget remains one action and at most two mutations per
+The reader fixture proves exact old-version parity, current-version access,
+immutable retry, access revocation during GET, corruption rejection, contiguous
+archived/live event pages and exact journal recovery rows. Existing S1 capsule
+round trips and recovery drills remain covered. Reader expansion changes no
+retained rows; storage ratchets are not lowered until the writer is measured.
+The measured-floor restatement is 25,290 / 128,244 B plus the actual segment-index
+and compact-receipt overhead, as settled on the Issue. A fixture result does not
+qualify live billing, provider memory or speed distributions. The weekly-export
+line **needs two dev exports after the setting is on**.
+
+The archive budget remains one action and at most two mutations per
 100-row/500-KiB page, one PUT per segment, one server action and one GET per
-segment read, zero added landing hot-path calls and zero idle calls. Live billed
-usage, actual byte placement, provider memory and a complete Issue-month workload
-remain unverified.
+segment read, zero added landing hot-path calls and zero idle calls. Live pages
+retain their original query path when no segment is needed. A cold action
+reauthorizes in its projection query after every GET. Fixture and live usage
+measurements accompany the implementation evidence on the Issue.
 
 Controller-only test budgets report delayed retention allocations separately,
 keeping their original source/controller ceilings. The raw fixture counters and

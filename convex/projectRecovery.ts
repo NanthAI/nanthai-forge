@@ -45,6 +45,7 @@ export async function recoverySelection(ctx: QueryCtx | MutationCtx, original: D
     manifestSha256: backup.preview.manifestDigest,
     revision: project.work!.revision,
     ...(capsuleRevision ? { capsuleRevision } : {}),
+    ...(project.journalRevision ? { journalRevision: project.journalRevision } : {}),
     authority,
     ...(hostedMain ? { hostedMain } : {}),
     transport: backup.transport ?? 'archive',
@@ -73,7 +74,7 @@ export const prepare = query({
           : await find(ctx, input.projectId, input.operationId);
       const selection = old ? null : await recoverySelection(ctx, project);
       invariant(
-        !selection?.capsuleRevision || input.capsuleProtocol === 1,
+        (!selection?.capsuleRevision && !selection?.journalRevision) || input.capsuleProtocol === 1,
         'CLI_UPGRADE_REQUIRED',
         'This recovery includes landing capsules. Run nforge update and retry.',
       );

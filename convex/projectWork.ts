@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
+import { JournalNeeded } from './projectJournalStore';
+import type { QueryCtx } from './_generated/server';
+import { canonicalPayload } from '../src/hosted-source-operation';
 import { findWorkEvent, type StoredWorkEvent } from './projectWorkEventStore';
 import { retainedEventPage } from './projectWorkEventPage';
 import { requireSourceAuthority } from '../src/hosted-source-authority';
@@ -130,23 +133,11 @@ export const events = internalQuery({
     revision: v.number(),
     paginationOpts: paginationOptsValidator,
   },
-  returns: paginationResultValidator(hostedWorkEventDocument),
-  handler: async (ctx, { projectId, owner, initialRevision, revision, paginationOpts }) => {
-    try {
-      const project = await accessibleProject(ctx, projectId, owner);
-      if (project.workStoreCutoverRevision !== undefined && revision > project.workStoreCutoverRevision)
-        return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
-      return await ctx.db
-        .query('projectWorkEvents')
-        .withIndex('by_project_and_revision', q =>
-          q.eq('projectId', projectId).gt('revision', initialRevision).lte('revision', revision),
-        )
-        .order('asc')
-        .paginate(paginationOpts);
-    } catch (error) {
-      return report(error);
-    }
-  },
+  returns: v.union(
+    paginationResultValidator(hostedWorkEventDocument),
+    v.object({ journalHistory: v.literal(true), index: v.string() }),
+  ),
+  handler: journalWorkEvents,
 });
 export const initialize = internalMutation({
   args: {
@@ -440,6 +431,45 @@ export async function appendWork(
     }
     return saved;
   } catch (error) {
+    return report(error);
+  }
+}
+
+export async function journalWorkEvents(
+  ctx: QueryCtx,
+  {
+    projectId,
+    owner,
+    initialRevision,
+    revision,
+    paginationOpts,
+  }: {
+    projectId: Id<'hostedProjects'>;
+    owner: string;
+    initialRevision: number;
+    revision: number;
+    paginationOpts: {
+      cursor: string | null;
+      numItems: number;
+      maximumBytesRead?: number;
+      maximumRowsRead?: number;
+    };
+  },
+) {
+  try {
+    const project = await accessibleProject(ctx, projectId, owner);
+    if (project.workStoreCutoverRevision !== undefined && revision > project.workStoreCutoverRevision)
+      return await retainedEventPage(ctx, project, { initialRevision, revision, paginationOpts });
+    return await ctx.db
+      .query('projectWorkEvents')
+      .withIndex('by_project_and_revision', q =>
+        q.eq('projectId', projectId).gt('revision', initialRevision).lte('revision', revision),
+      )
+      .order('asc')
+      .paginate(paginationOpts);
+  } catch (error) {
+    if (error instanceof JournalNeeded)
+      return { journalHistory: true as const, index: canonicalPayload(error.index) };
     return report(error);
   }
 }

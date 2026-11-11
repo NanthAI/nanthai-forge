@@ -40,14 +40,15 @@ export async function getLandingCapsule(
   pointer: LandingCapsulePointer,
   optional = false,
 ) {
-  invariant(
-    /^[a-f0-9]{64}$/.test(pointer.sha256),
-    'EVIDENCE_CHANGED',
-    'Landing capsule content pin is invalid.',
-  );
-  const url = await presignGet(r2Config(), key(projectId, pointer));
+  const body = await getArchiveObject(key(projectId, pointer), pointer, optional);
+  return body === null ? null : decodeLandingCapsule(body, pointer, projectId, submissionId);
+}
+/** Shared private transport; a caller must verify its envelope after byte verification. */
+export async function getArchiveObject(objectKey: string, pointer: LandingCapsulePointer, optional = false) {
+  invariant(/^[a-f0-9]{64}$/.test(pointer.sha256), 'EVIDENCE_CHANGED', 'Archive content pin is invalid.');
+  const url = await presignGet(r2Config(), objectKey);
   const body = await exchangeRequest(
-    'Landing capsule read',
+    'Archive read',
     url,
     { headers: { 'accept-encoding': 'identity' } },
     (response, progressed) =>
@@ -55,7 +56,35 @@ export async function getLandingCapsule(
         ? Promise.resolve(null)
         : readObject(response, pointer.size, progressed),
   );
-  return body === null ? null : decodeLandingCapsule(body, pointer, projectId, submissionId);
+  return body;
+}
+export async function putArchiveObject(
+  objectKey: string,
+  encoded: { body: Uint8Array; pointer: LandingCapsulePointer },
+) {
+  let stored = await getArchiveObject(objectKey, encoded.pointer, true);
+  if (!stored) {
+    const target = await presignPut(r2Config(), objectKey, {
+      digest: encoded.pointer.sha256,
+      size: encoded.pointer.size,
+    });
+    await exchangeRequest(
+      'Archive write',
+      target.url,
+      { method: 'PUT', headers: target.headers, body: new Uint8Array(encoded.body) },
+      async response => {
+        invariant(
+          response.ok || response.status === 412,
+          'SOURCE_UNAVAILABLE',
+          'Archive write is unavailable.',
+        );
+      },
+      { retries: 0 },
+    );
+    stored = await getArchiveObject(objectKey, encoded.pointer);
+  }
+  invariant(stored !== null, 'SOURCE_UNAVAILABLE', 'Verified archive bytes are unavailable.');
+  return stored;
 }
 /** An unknown PUT outcome first reconciles by content pin. Healthy packing writes one complete object. */
 export async function putLandingCapsule(
@@ -64,27 +93,8 @@ export async function putLandingCapsule(
   encoded: { body: Uint8Array; pointer: LandingCapsulePointer },
   expected: LandingCapsule,
 ) {
-  let stored = await getLandingCapsule(projectId, submissionId, encoded.pointer, true);
-  if (!stored) {
-    const target = await presignPut(r2Config(), key(projectId, encoded.pointer), {
-      digest: encoded.pointer.sha256,
-      size: encoded.pointer.size,
-    });
-    await exchangeRequest(
-      'Landing capsule write',
-      target.url,
-      { method: 'PUT', headers: target.headers, body: new Uint8Array(encoded.body) },
-      async response => {
-        invariant(
-          response.ok || response.status === 412,
-          'SOURCE_UNAVAILABLE',
-          'Landing capsule write is unavailable.',
-        );
-      },
-      { retries: 0 },
-    );
-    stored = await getLandingCapsule(projectId, submissionId, encoded.pointer);
-  }
+  const body = await putArchiveObject(key(projectId, encoded.pointer), encoded);
+  const stored = decodeLandingCapsule(body, encoded.pointer, projectId, submissionId);
   invariant(
     canonicalPayload(stored) === canonicalPayload(expected),
     'EVIDENCE_CHANGED',

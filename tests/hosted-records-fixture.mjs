@@ -155,6 +155,11 @@ export function recordsFixture() {
                 equalities.push(value);
                 return bounds;
               },
+              gte: (field, value) => {
+                assert.equal(field, definition.fields[equalities.length], 'index range follows equalities');
+                lower = { field, value, inclusive: true };
+                return bounds;
+              },
               gt: (field, value) => {
                 assert.equal(field, definition.fields[equalities.length], 'index range follows equalities');
                 lower = { field, value };
@@ -202,7 +207,10 @@ export function recordsFixture() {
               });
             }
             selected = indexes.get(cacheKey).groups.get(JSON.stringify(equalities)) ?? [];
-            if (lower) selected = selected.filter(row => row[lower.field] > lower.value);
+            if (lower)
+              selected = selected.filter(row =>
+                lower.inclusive ? row[lower.field] >= lower.value : row[lower.field] > lower.value,
+              );
             if (upper) selected = selected.filter(row => row[upper.field] <= upper.value);
             if (before !== null) selected = selected.filter(row => row._creationTime < before);
             return q;
@@ -211,6 +219,10 @@ export function recordsFixture() {
             direction = order === 'desc' ? -1 : 1;
             return q;
           },
+          [Symbol.asyncIterator]: async function* () {
+            for (const row of direction === 1 ? selected : selected.toReversed()) yield read([row])[0];
+          },
+          first: async () => read([(direction === 1 ? selected : selected.toReversed())[0] ?? null])[0],
           unique: async () => {
             assert(selected, 'indexed reads only');
             assert(selected.length <= 1);

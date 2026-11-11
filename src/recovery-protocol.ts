@@ -13,6 +13,7 @@ export const recoverySelectionSchema = z
     checkpointSize: z.number().safe().nonnegative(),
     manifestSha256: sha256,
     revision: z.number().safe().nonnegative(),
+    journalRevision: z.number().safe().nonnegative().optional(),
     capsuleRevision: z.number().safe().nonnegative().optional(),
     authority: sourceAuthoritySchema,
     transport: z.enum(['objects', 'archive']),

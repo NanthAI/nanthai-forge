@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalIndexAfter, requireJournal, loadedJournalRows } from './projectJournalStore';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { eventDocument, type StoredWorkEvent } from './projectWorkEventStore';
@@ -74,6 +75,22 @@ export async function retainedEventPage(
       }
       batch.push(...(await stored().take(remaining)).map(eventDocument));
     }
+    if (project.journalRevision) {
+      let selected = after;
+      while (selected < end) {
+        const index = await journalIndexAfter(ctx, project._id, 'events', selected, end);
+        if (!index) break;
+        requireJournal(ctx, index);
+        selected = index.through;
+      }
+      batch.push(
+        ...loadedJournalRows(ctx, 'projectHostedRecordBodies')
+          .filter(row => row.revision !== undefined && row.revision > after && row.revision <= end)
+          .map(eventDocument),
+      );
+    }
+    const unique = [...new Map(batch.map(row => [row.revision, row])).values()];
+    batch.splice(0, batch.length, ...unique);
     batch.sort((a, b) => a.revision - b.revision);
     invariant(
       batch.length === end - after && batch.every((event, i) => event.revision === after + i + 1),

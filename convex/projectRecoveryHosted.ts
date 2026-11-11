@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalRecoveryPage } from './projectJournalRecovery';
+import { JournalNeeded, journalReadReply } from './projectJournalStore';
 import { v } from 'convex/values';
 import { query, type QueryCtx } from './cliServer';
 import type { Id } from './_generated/dataModel';
@@ -34,6 +36,31 @@ async function readPage(
     maximumBytesRead: RECOVERY_PAGE_BYTES,
   };
   switch (table) {
+    case 'projectCoordinationEvents':
+      return ctx.db
+        .query('projectCoordinationEvents')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .paginate(options);
+    case 'projectHostedSnapshots':
+      return ctx.db
+        .query('projectHostedSnapshots')
+        .withIndex('by_project_and_snapshot', q => q.eq('projectId', projectId))
+        .paginate(options);
+    case 'projectHostedSnapshotHeads':
+      return ctx.db
+        .query('projectHostedSnapshotHeads')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .paginate(options);
+    case 'projectHostedSnapshotPages':
+      return ctx.db
+        .query('projectHostedSnapshotPages')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .paginate(options);
+    case 'projectHostedDisplayRecords':
+      return ctx.db
+        .query('projectHostedDisplayRecords')
+        .withIndex('by_project', q => q.eq('projectId', projectId))
+        .paginate(options);
     case 'projectSourceCutovers':
       return ctx.db
         .query('projectSourceCutovers')
@@ -197,42 +224,59 @@ export const page = query({
     cursor: v.union(v.string(), v.null()),
   },
   returns: v.string(),
-  handler: async (ctx, input) => {
-    try {
-      const project = await recoveryOwned(ctx, input.projectId);
-      const expected = recoverySelectionSchema.parse(JSON.parse(input.selection));
-      invariant(
-        expected.projectId === input.projectId &&
-          sameRecoveryPins(await recoverySelection(ctx, project), expected),
-        'WORK_STALE',
-        'Hosted recovery pins changed; retain the original staging and request.',
-      );
-      invariant(
-        !expected.capsuleRevision || input.capsuleProtocol === 1,
-        'CLI_UPGRADE_REQUIRED',
-        'This recovery includes landing capsules. Run nforge update and retry.',
-      );
-      const table = recoveryTableSchema.parse(input.table);
-      const selected = readRecoveryCapsuleCursor(table, input.cursor);
-      if (selected.phase === 'capsules')
-        return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
-      const result = await readPage(ctx, input.projectId, table, selected.cursor);
-      const rows = [];
-      for (const row of result.page)
-        if (!expected.capsuleRevision || !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
-          rows.push(canonicalPayload(row));
-      return canonicalPayload({
-        table,
-        rows,
-        cursor: !result.isDone
-          ? result.continueCursor
-          : expected.capsuleRevision
-            ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
-            : null,
-        done: result.isDone && !expected.capsuleRevision,
-      });
-    } catch (error) {
-      return report(error);
-    }
-  },
+  handler: journalRecoveryRead,
 });
+
+export async function journalRecoveryRead(
+  ctx: QueryCtx,
+  input: {
+    projectId: Id<'hostedProjects'>;
+    selection: string;
+    capsuleProtocol?: 1;
+    table: string;
+    cursor: string | null;
+  },
+) {
+  try {
+    const project = await recoveryOwned(ctx, input.projectId);
+    const expected = recoverySelectionSchema.parse(JSON.parse(input.selection));
+    invariant(
+      expected.projectId === input.projectId &&
+        sameRecoveryPins(await recoverySelection(ctx, project), expected),
+      'WORK_STALE',
+      'Hosted recovery pins changed; retain the original staging and request.',
+    );
+    invariant(
+      (!expected.capsuleRevision && !expected.journalRevision) || input.capsuleProtocol === 1,
+      'CLI_UPGRADE_REQUIRED',
+      'This recovery includes landing capsules. Run nforge update and retry.',
+    );
+    const table = recoveryTableSchema.parse(input.table);
+    const selected = readRecoveryCapsuleCursor(table, input.cursor);
+    if (selected.phase === 'journal') return journalRecoveryPage(ctx, project, table, selected);
+    if (selected.phase === 'capsules')
+      return recoveryCapsulePage(ctx, project, table, selected, input.capsuleProtocol);
+    const result = await readPage(ctx, input.projectId, table, selected.cursor);
+    const rows = [];
+    for (const row of result.page)
+      if (
+        !(table === 'projectHostedOperations' && 'journalSegment' in row) &&
+        ((!expected.capsuleRevision && !expected.journalRevision) ||
+          !(await capsuleOwnsRecoveryRow(ctx, input.projectId, table, row)))
+      )
+        rows.push(canonicalPayload(row));
+    return canonicalPayload({
+      table,
+      rows,
+      cursor: !result.isDone
+        ? result.continueCursor
+        : expected.capsuleRevision || expected.journalRevision
+          ? recoveryCapsuleCursor({ table, phase: 'capsules', cursor: null })
+          : null,
+      done: result.isDone && !expected.capsuleRevision && !expected.journalRevision,
+    });
+  } catch (error) {
+    if (error instanceof JournalNeeded) return journalReadReply(ctx, error);
+    return report(error);
+  }
+}

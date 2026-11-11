@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { journalRecord, loadedJournalRows, journalBody } from './projectJournalStore';
 import { fingerprintHostedIntent } from './projectWorkStoreFingerprintWrites';
 import { trackHostedOverlapLane } from './projectHostedOverlapStore';
 import type { OverlapChange } from '../src/hosted-overlap';
@@ -62,7 +63,9 @@ export async function recordVersion(
         .eq('lifecyclePlanId', undefined),
     )
     .unique();
-  if (row || kind !== 'lane') return row;
+  if (row) return row;
+  const archived = await journalRecord(ctx, projectId, kind, key, version);
+  if (archived || kind !== 'lane') return archived;
   const overlay = await visibleLifecycleRecord(ctx, projectId, key);
   return overlay?.row.version === version ? overlay.row : null;
 }
@@ -77,16 +80,19 @@ export async function hostedRecordBody(ctx: QueryCtx | MutationCtx, row: Doc<'pr
     );
     return row.inline;
   }
-  const body = await ctx.db.get(row.bodyId);
+  const body =
+    (await ctx.db.get(row.bodyId)) ??
+    loadedJournalRows(ctx, 'projectHostedRecordBodies').find(body => body._id === row.bodyId);
+  const value = body?.value ?? (await journalBody(ctx, row));
   invariant(
-    body?.projectId === row.projectId &&
-      body.value !== undefined &&
-      digest(body.value) === row.digest &&
-      new TextEncoder().encode(body.value).length === row.bytes,
+    (!body || body.projectId === row.projectId) &&
+      value !== undefined &&
+      digest(value) === row.digest &&
+      new TextEncoder().encode(value).length === row.bytes,
     'SOURCE_UNAVAILABLE',
     'Exact canonical record bytes are unavailable.',
   );
-  return body.value;
+  return value;
 }
 
 /** Internal transaction primitive, not a source-write API. The source operation
@@ -124,17 +130,20 @@ export async function writeHostedRecord(
     ({ record, ref, value } = hostedRecordValue(closed));
   }
   if (record.kind === 'lane') await materializeLifecycleLane(ctx, input.projectId, record.id);
-  const old = await recordVersion(ctx, input.projectId, record.kind, record.id, record.version);
+  const head = await recordHead(ctx, input.projectId, record.kind, record.id);
+  const old =
+    head && record.version <= head.version
+      ? await recordVersion(ctx, input.projectId, record.kind, record.id, record.version)
+      : null;
   if (old) {
     invariant(
       old.digest === ref.digest && old.bytes === ref.bytes,
       'WORK_OPERATION_CHANGED',
       'A canonical record version is immutable.',
     );
-    return { ...old, value: await hostedRecordBody(ctx, old) };
+    return { ...old, value };
   }
   await hostedWriteProject(ctx, input.projectId, input.actor, input.authorityEpoch);
-  const head = await recordHead(ctx, input.projectId, record.kind, record.id);
   invariant(
     (head?.version ?? null) === input.expectedVersion &&
       record.version === (input.expectedVersion === null ? 0 : input.expectedVersion + 1),
