@@ -65,6 +65,52 @@ the existing output commit; legacy recipes retain their reader. This addresses
 sequential descriptor calls at this scale. It does not solve the 190k-file flat
 manifest memory failure or authorize a State identity change.
 
+## Decisions from 11 November
+
+### 2026-11-11: placement slices and the Worker adoption bar
+
+The owner adopts the [placement review](research/placement-review.md)'s rule:
+Convex grows with open work, never with repository size or history length
+(rules 2–4). History moves to verified R2 objects; nothing is deleted from
+retained history. Option A proceeds now in the review's order: S0 first; S1,
+S3 and S7 in parallel; then S2 and S4; then S5 and conditional S6. S8a runs
+**now, in parallel with A**, independently of S0. These are agreed implementation
+Issues, not a claim that the placement changes have landed.
+
+- [S0](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=886a4694-b2eb-4e58-881f-787376038698): measure missing cost and placement data.
+- [S1](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=bea7868d-a5da-4d65-ae30-2e9fb524d9a9): terminal landing capsules.
+- [S2](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=27d4c1fd-ec6c-4a48-9a8c-bffbbc6273f2): superseded Work journal segments (existing Issue reused and moved to P6).
+- [S3](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=324f1d97-47a4-40c4-a8a5-058bad9449d9): hot rows as headers.
+- [S4](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=91df7eda-ac01-40c9-b583-32311403846c): file lists without per-file Convex projections.
+- [S5](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=e7e35328-7730-436a-b229-ba11d6362987): State-bound physical manifests.
+- [S6](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=062b48cc-3043-4fe9-9627-3f7e533ba45f): fused source jobs, only if S0 shows separate save/sync/compose actions for most landings.
+- [S7](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=b99d1ea1-3ba7-4708-8506-59800960c354): R2 request budget and batched check results.
+- [S8a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=9e4ba8c6-be09-4ccd-bee3-2ed359f56b27): Workers source-step spike.
+- [S8b](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=80f9bfe4-8f57-488d-bf7b-2a32b746eb48): optional Worker byte-plane provider after the spike and owner check.
+
+S8b is adopted if measurements on the smoke shape and the spike fixtures show
+no meaningful regression in time to main, check wall and notification latency:
+each metric is within the [measurement-noise rule](agents/perf-claims.md) and
+at most +5% on the median, and Convex+R2 cost per 1,000 landings is lower. The
+lead takes the measured result to the owner before the provider becomes the
+default. S8a retains the review's pin-equality and memory kill rule. Option C
+is not now; reconsider it if the Convex serving bill passes about $2,000/month
+after A and B, Convex changes price or a concurrency limit binds, or a second
+client platform makes the Convex SDK irrelevant.
+
+Within the P6 mandate, packing grace is **seven days after terminal**, matching
+the callback window. The **$2 per 1,000 landings** target covers Convex operations,
+R2 operations and amortized recurring maintenance; retained storage is reported
+beside it. Still open with the owner: the **$5/month Workers Paid service** when
+a deployed spike needs it or S8b ships, advisory-log windows (S0 sizes them
+first), and the account-dashboard R2 metrics reading. This decision approves
+none of those open items.
+
+The slices replace retained Convex history copies, per-file projections and
+repeated byte-plane work; this entry removes no runtime code. Source: review
+Issue [4c8dfe6a](https://nanthai-forge-dev.netlify.app/?project=mh7aafndrxmj8c2q0931zbjk2n8h4ffs&projectTab=planning&planningItem=4c8dfe6a-3511-4d01-a36b-1158c4e42c69)
+and the owner's decision to proceed with A and spike B alongside it.
+
 ## Decisions from 10 November
 
 These decisions record owner-approved scope and the landed implementation. They
