@@ -24,7 +24,6 @@
       "projectCheckLogCleanups": 0,
       "projectHostedSeeds": 0,
       "projectHostedSeedPages": 0,
-      "projectHostedChannels": 100,
       "projectReleaseSignatures": 0,
       "projectReturnSupersessions": 0,
       "forgeAccounts": 0,
@@ -88,7 +87,6 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 15145,
       "projectHostedLandingCheckWakes": 163,
-      "projectHostedLandingQueues": 279,
       "projectHostedLandingRequests": 3092,
       "projectHostedLandingAttempts": 3299,
       "projectLandingSpeed": 233,
@@ -160,7 +158,6 @@
       "projectHostedStackDependents": 0,
       "projectHostedPresence": 0,
       "projectHostedConflictNotices": 0,
-      "projectHostedOverlapMain": 153,
       "projectHostedOverlapMainLog": 190,
       "projectBoardMessages": 0,
       "projectBoardClaims": 0,
@@ -208,7 +205,6 @@
       "projectCheckLogCleanups": 0,
       "projectHostedSeeds": 0,
       "projectHostedSeedPages": 0,
-      "projectHostedChannels": 100,
       "projectReleaseSignatures": 0,
       "projectReturnSupersessions": 0,
       "forgeAccounts": 0,
@@ -272,7 +268,6 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 15145,
       "projectHostedLandingCheckWakes": 163,
-      "projectHostedLandingQueues": 279,
       "projectHostedLandingRequests": 3092,
       "projectHostedLandingAttempts": 3299,
       "projectLandingSpeed": 233,
@@ -344,7 +339,6 @@
       "projectHostedStackDependents": 0,
       "projectHostedPresence": 0,
       "projectHostedConflictNotices": 0,
-      "projectHostedOverlapMain": 153,
       "projectHostedOverlapMainLog": 190,
       "projectBoardMessages": 0,
       "projectBoardClaims": 0,
@@ -367,6 +361,36 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0
+    },
+    "perProject": {
+      "immediate": {
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 638
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 279
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 153
+        }
+      },
+      "retained": {
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 638
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 279
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 153
+        }
+      }
     }
   },
   "dogfood": {
@@ -394,7 +418,6 @@
       "projectCheckLogCleanups": 0,
       "projectHostedSeeds": 0,
       "projectHostedSeedPages": 0,
-      "projectHostedChannels": 130,
       "projectReleaseSignatures": 0,
       "projectReturnSupersessions": 0,
       "forgeAccounts": 0,
@@ -458,7 +481,6 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 30998,
       "projectHostedLandingCheckWakes": 330,
-      "projectHostedLandingQueues": 281,
       "projectHostedLandingRequests": 3206,
       "projectHostedLandingAttempts": 6975,
       "projectLandingSpeed": 231,
@@ -530,7 +552,6 @@
       "projectHostedStackDependents": 0,
       "projectHostedPresence": 0,
       "projectHostedConflictNotices": 0,
-      "projectHostedOverlapMain": 96767,
       "projectHostedOverlapMainLog": 175,
       "projectBoardMessages": 0,
       "projectBoardClaims": 0,
@@ -578,7 +599,6 @@
       "projectCheckLogCleanups": 0,
       "projectHostedSeeds": 0,
       "projectHostedSeedPages": 0,
-      "projectHostedChannels": 130,
       "projectReleaseSignatures": 0,
       "projectReturnSupersessions": 0,
       "forgeAccounts": 0,
@@ -642,7 +662,6 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 30998,
       "projectHostedLandingCheckWakes": 330,
-      "projectHostedLandingQueues": 281,
       "projectHostedLandingRequests": 3206,
       "projectHostedLandingAttempts": 6975,
       "projectLandingSpeed": 231,
@@ -714,7 +733,6 @@
       "projectHostedStackDependents": 0,
       "projectHostedPresence": 0,
       "projectHostedConflictNotices": 0,
-      "projectHostedOverlapMain": 96767,
       "projectHostedOverlapMainLog": 175,
       "projectBoardMessages": 0,
       "projectBoardClaims": 0,
@@ -737,6 +755,36 @@
       "importReaders": 0,
       "githubDeliveries": 0,
       "projectObjectReceipts": 0
+    },
+    "perProject": {
+      "immediate": {
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 668
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 281
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 96767
+        }
+      },
+      "retained": {
+        "projectHostedChannels": {
+          "rows": 1,
+          "bytes": 668
+        },
+        "projectHostedLandingQueues": {
+          "rows": 1,
+          "bytes": 281
+        },
+        "projectHostedOverlapMain": {
+          "rows": 1,
+          "bytes": 96767
+        }
+      }
     }
   }
 }

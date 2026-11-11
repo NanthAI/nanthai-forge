@@ -797,14 +797,32 @@ recomposition and two checks with 1,000 reports/ten completed shards each. It co
 immediate storage with the same landing after both retention windows. Its
 `tests/fixtures/landing-storage-budget.json` records every application table,
 including zero-growth tables; new tables and a per-table rise fail the check.
+The `immediate` and `retained` maps count per-landing deltas. A separate
+`perProject` map ratchets full stored bytes and row counts for the three
+singletons this fixture writes: `projectHostedChannels` (main),
+`projectHostedLandingQueues` (main) and `projectHostedOverlapMain`. Each stays at
+one row per project. Reading full rows here includes the seeded Channel bytes,
+which a delta would miss. Mixed tables, including shared finish projections and
+the bounded overlap history log, remain in the per-landing map. The history guard
+advances the same paths through 128 more accepted sequences and rejects both a
+duplicate singleton and history appended inside its row.
 This is a fixture measurement, not billed physical storage: indexes, Convex
 system-job retention and R2 objects are excluded. Source bytes remain in R2.
 The fixtures do not model every save, large source fan-out or a whole user month.
 
-| Fixture (one landing) | Immediate JSON bytes | After expiry, including page receipts |
-| --- | ---: | ---: |
-| Fresh project, two test shards | 53,279 | 50,417 |
-| Dogfood-shaped, main race / two large checks | 931,822 | 360,486 |
+| Fixture | Per-landing immediate ceiling | Per-landing retained ceiling, including page receipts | Fixed per-project full rows, each phase |
+| --- | ---: | ---: | ---: |
+| Fresh project, two test shards | 49,453 B | 49,885 B | 1,070 B / 3 rows |
+| Dogfood-shaped, main race / two large checks | 828,056 B | 263,308 B | 97,716 B / 3 rows |
+
+These are the committed fixture ceilings, not an observed saving. The fixed
+rows' respective byte ceilings are 638 / 279 / 153 B (fresh) and
+668 / 281 / 96,767 B (dogfood). The former combined retained ceilings of
+50,417 / 360,486 B included their *deltas* (532 / 97,178 B), which must not be
+charged again for every landing. The joint S1/S2 retained targets of
+15,000 / 60,000 B apply to per-landing rows; the fixed rows keep their own
+ratchets. This split changes accounting only: runtime calls, DB I/O, byte
+placement and retention are unchanged.
 
 The retained totals include 1,368 / 3,176 bytes of maintenance audit receipts in
 `legacyStorageCleanupPages`; these remain durable. The dominant reclaimed table

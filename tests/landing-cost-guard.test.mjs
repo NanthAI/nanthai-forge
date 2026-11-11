@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { inboundCostFixture } from './hosted-github-inbound-cost-fixture.mjs';
 import { finishFixture } from './hosted-finish-fixture.mjs';
+import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -740,6 +741,31 @@ function storedBytes(f) {
       ]),
   );
 }
+// These writers replace one current row per project; their whole rows (not deltas) and
+// cardinality are ratcheted separately. Shared/mixed tables stay in the per-landing ledger.
+const fixedProjectTables = new Set([
+  'projectHostedChannels',
+  'projectHostedLandingQueues',
+  'projectHostedOverlapMain',
+]);
+const storageBudgets = JSON.parse(
+  readFileSync(new URL('./fixtures/landing-storage-budget.json', import.meta.url), 'utf8'),
+);
+function fixedProjectStorage(f) {
+  const bytes = storedBytes(f);
+  return Object.fromEntries(
+    [...fixedProjectTables].map(table => [table, { rows: f.tables[table].size, bytes: bytes[table] }]),
+  );
+}
+function assertFixedProjectStorage(actual, budget, label) {
+  assert.deepEqual(Object.keys(actual).sort(), Object.keys(budget).sort(), `${label}: fixed tables`);
+  for (const [table, stored] of Object.entries(actual))
+    for (const metric of ['rows', 'bytes'])
+      assert(
+        stored[metric] <= budget[table][metric],
+        `${label}/${table}: ${stored[metric]} > ${budget[table][metric]} ${metric} per project; fixed rows must not grow with landing history`,
+      );
+}
 async function landingStorage(t, dogfood) {
   const f = await finishFixture(
     t,
@@ -775,9 +801,12 @@ async function landingStorage(t, dogfood) {
   assert.equal((await f.current(state.id)).submission.phase, 'landed');
   const delta = () =>
     Object.fromEntries(
-      Object.entries(storedBytes(f)).map(([table, size]) => [table, Math.max(0, size - before[table])]),
+      Object.entries(storedBytes(f))
+        .filter(([table]) => !fixedProjectTables.has(table))
+        .map(([table, size]) => [table, Math.max(0, size - before[table])]),
     );
   const immediate = delta();
+  const fixedImmediate = fixedProjectStorage(f);
   const expiry = await import(moduleUrl('../convex/projectOperationalExpiry.ts'));
   const checks = [...f.tables.projectHostedCheckRuns.values()];
   // Controlled clock, no sleeps: maintenance is due after the landing has completed.
@@ -820,27 +849,80 @@ async function landingStorage(t, dogfood) {
     Date.now = realNow;
   }
   const retained = delta();
-  return { immediate, retained };
+  return {
+    perLanding: { immediate, retained },
+    perProject: { immediate: fixedImmediate, retained: fixedProjectStorage(f) },
+  };
 }
 
 test('storage per landing ratchets every table on fresh and dogfood-shaped checks before and after exhaust expiry', async t => {
   fixedClock(t);
   const scenarios = { fresh: await landingStorage(t, false), dogfood: await landingStorage(t, true) };
   t.diagnostic(`storagePerLanding ${JSON.stringify(scenarios)}`);
-  const budgets = JSON.parse(
-    readFileSync(new URL('./fixtures/landing-storage-budget.json', import.meta.url), 'utf8'),
-  );
-  for (const [name, scenario] of Object.entries(scenarios))
-    for (const [phase, tables] of Object.entries(scenario)) {
+  for (const [name, scenario] of Object.entries(scenarios)) {
+    for (const [phase, tables] of Object.entries(scenario.perProject))
+      assertFixedProjectStorage(tables, storageBudgets[name].perProject[phase], `${name}/${phase}`);
+    for (const [phase, tables] of Object.entries(scenario.perLanding)) {
       for (const [table, stored] of Object.entries(tables)) {
         assert(
-          table in budgets[name][phase],
+          table in storageBudgets[name][phase],
           `${name}/${phase}/${table}: record the new table's storage decision`,
         );
         assert(
-          stored <= budgets[name][phase][table],
-          `${name}/${phase}/${table}: ${stored} > ${budgets[name][phase][table]} bytes per landing; fix growth or record the Issue's reason and ratchet`,
+          stored <= storageBudgets[name][phase][table],
+          `${name}/${phase}/${table}: ${stored} > ${storageBudgets[name][phase][table]} bytes per landing; fix growth or record the Issue's reason and ratchet`,
         );
       }
     }
+  }
+});
+
+test('fixed per-project storage cannot hide duplicate rows or landing history behind the accounting split', async () => {
+  const f = await acceptanceFixture();
+  const { trackHostedOverlapMain } = await import(moduleUrl('../convex/projectHostedOverlapStore.ts'));
+  const paths = Array.from({ length: 128 }, (_, i) => `src/file-${i}.ts`);
+  const advance = sequence =>
+    f.transaction(
+      'fixedStorageHistory',
+      {
+        _handler: ctx => trackHostedOverlapMain(ctx, f.projectId, sequence, paths),
+      },
+      {},
+    );
+  await advance(1000);
+  const baseline = fixedProjectStorage(f);
+  // More than the 64-entry log window, with fixed-width sequence numbers: updating latest
+  // touches must not retain another main row or append history inside the singleton.
+  for (let sequence = 1001; sequence <= 1128; sequence++) {
+    await advance(sequence);
+    const current = fixedProjectStorage(f);
+    assertFixedProjectStorage(current, storageBudgets.dogfood.perProject.retained, 'history');
+    assert.deepEqual(current, baseline, 'the same paths and project retain no per-landing history');
+  }
+  assert.equal(f.tables.projectHostedOverlapMainLog.size, 64, 'the separate history log stays bounded');
+  const row = [...f.tables.projectHostedOverlapMain.values()][0];
+  f.patch('projectHostedOverlapMain', row._id, { changes: row.changes + ' '.repeat(100_000) });
+  assert.throws(
+    () =>
+      assertFixedProjectStorage(
+        fixedProjectStorage(f),
+        storageBudgets.dogfood.perProject.retained,
+        'history',
+      ),
+    /bytes per project/,
+    'history appended inside the existing row must fail the byte ratchet',
+  );
+  f.patch('projectHostedOverlapMain', row._id, { changes: row.changes });
+  const { _id, _creationTime, ...duplicate } = row;
+  f.insert('projectHostedOverlapMain', duplicate);
+  assert.throws(
+    () =>
+      assertFixedProjectStorage(
+        fixedProjectStorage(f),
+        storageBudgets.dogfood.perProject.retained,
+        'history',
+      ),
+    /rows per project/,
+    'another singleton copy must fail even when both rows fit the byte budget',
+  );
 });
