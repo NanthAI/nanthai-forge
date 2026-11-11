@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -17,7 +18,7 @@ import { getFunctionName, makeFunctionReference } from 'convex/server';
 import { setup } from './host-cli-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { hostCli, hostProject } from '../dist/host-cli.js';
-import { cloneHostedProject } from '../dist/hosted-clone-cli.js';
+import { hostedCloneCli } from '../dist/hosted-clone-cli.js';
 import { HostedCheckoutDownloads } from '../dist/hosted-checkout-downloads.js';
 import { checkoutHostedLane } from '../dist/hosted-lane-checkout.js';
 import { ConvexLaneTransport } from '../dist/hosted-lane-transport.js';
@@ -104,10 +105,23 @@ test('plain-directory host without Git clones exact paths, modes, empty/binary b
   assert.deepEqual(hosted.sourceAuthority, { mode: 'server', epoch: 1 });
   const exchange = f.dependencies.exchange(hosted.projectId, randomUUID());
   const clone = join(f.directory, 'clone');
-  await cloneHostedProject(
-    clone,
-    { url: hosted.deployment, projectId: hosted.projectId },
-    mainTransport(exchange),
+  const next = hosted.nextSteps.find(step => step.startsWith('nforge clone '));
+  assert(next, 'a fresh host directs its next action to a hosted clone');
+  // Read the printed shell arguments with builtins only, then execute the real
+  // clone handler against the fixture. This guards a usable next step, not copy.
+  const words = execFileSync('/bin/sh', ['-c', `set -- ${next}; printf '%s\\0' "$@"`], {
+    encoding: 'utf8',
+  })
+    .split('\0')
+    .filter(Boolean);
+  assert.equal(words.shift(), 'nforge');
+  assert.equal(words.shift(), 'clone');
+  await hostedCloneCli(
+    words.map(word => (word === 'DIR' ? clone : word)),
+    {
+      client: exchange.client,
+      transport: () => mainTransport(exchange),
+    },
   );
   assert.deepEqual(inventory(clone), expected);
   const main = await exchange.current();

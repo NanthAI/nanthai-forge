@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { existsSync, realpathSync } from 'node:fs';
 import { initNative } from './native-work.js';
 import { nativeOwner } from './native-source.js';
+import { shellQuote } from './shell-quote.js';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -249,11 +250,18 @@ export async function hostProject(
             undo: 'The original directory is preserved. Recover an independent owner from the hosted backup if needed.',
           }
         : {}),
-      nextSteps: [
-        'nforge host ROOT --status',
-        'nforge agent ROOT start',
-        'nforge coordination ROOT \'{"action":"sessions"}\'',
-      ],
+      nextSteps: pending.serverAuthority
+        ? [
+            'nforge host ROOT --status',
+            `nforge clone ${shellQuote(binding.projectUrl)} DIR --deployment ${shellQuote(deployment)}`,
+            'nforge agent DIR start',
+            'nforge coordination DIR \'{"action":"sessions"}\'',
+          ]
+        : [
+            'nforge host ROOT --status',
+            'nforge agent ROOT start',
+            'nforge coordination ROOT \'{"action":"sessions"}\'',
+          ],
     };
   } catch (error) {
     // Normalize before retaining the failure so status and stderr agree. Convex
