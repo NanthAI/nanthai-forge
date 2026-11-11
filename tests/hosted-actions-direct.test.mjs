@@ -1033,9 +1033,9 @@ test('Actions signed recipe leaves yield a bounded prefix before the response va
   assert(rows.every(row => row.closure.length === 100));
 });
 
-test('CI raw descriptor DB byte ratchet at 6k and 29k includes State and current-session reads (298f9675, 8c4f126b)', async t => {
+test('CI cold descriptor and exact-key grant budgets at 4k, 6k and 29k include both States (298f9675, e7e35328)', async t => {
   for (const catalogued of [false, true])
-    for (const files of [6000, 29000]) {
+    for (const files of [4000, 6000, 29000]) {
       const s = await fixture(t);
       await s.bind();
       await s.call(sessions, 'session', s.input());
@@ -1117,20 +1117,43 @@ test('CI raw descriptor DB byte ratchet at 6k and 29k includes State and current
         const baseline = s.counts.length,
           bytes = objectBytes,
           reads = objectReads;
-        await s.call(source, 'resolve', {
-          ...s.input(),
-          batch: true,
-          digests: heads,
-          ...(closures ? { closures: true } : {}),
-        });
-        let calls = 1;
-        for (let at = 0; at < digests.length;) {
-          const rows = await s.call(source, 'resolve', {
+        let replyBytes = 0,
+          maxReplyBytes = 0,
+          getGrants = 0,
+          grantBytes = 0;
+        const account = rows => {
+          // Parsed logical payload bytes, before Convex/HTTP envelope encoding;
+          // never emit signed URLs or infer executed R2 GETs from issued grants.
+          const size = Buffer.byteLength(JSON.stringify(rows));
+          replyBytes += size;
+          maxReplyBytes = Math.max(maxReplyBytes, size);
+          for (const row of rows) {
+            for (const url of [row.url, ...(row.closure ?? []).map(leaf => leaf.url)]) {
+              if (!url) continue;
+              getGrants++;
+              grantBytes += Buffer.byteLength(url);
+            }
+          }
+          return rows;
+        };
+        account(
+          await s.call(source, 'resolve', {
             ...s.input(),
             batch: true,
-            digests: digests.slice(at, at + 3200),
+            digests: heads,
             ...(closures ? { closures: true } : {}),
-          });
+          }),
+        );
+        let calls = 1;
+        for (let at = 0; at < digests.length;) {
+          const rows = account(
+            await s.call(source, 'resolve', {
+              ...s.input(),
+              batch: true,
+              digests: digests.slice(at, at + 3200),
+              ...(closures ? { closures: true } : {}),
+            }),
+          );
           assert(rows.length > 0);
           for (const [index, row] of rows.entries()) {
             assert.equal(row.descriptor.object.sha256, digests[at + index]);
@@ -1152,6 +1175,10 @@ test('CI raw descriptor DB byte ratchet at 6k and 29k includes State and current
           bytes: Object.values(byTable).reduce((a, b) => a + b, 0),
           objectReads: objectReads - reads,
           byTable,
+          replyBytes,
+          maxReplyBytes,
+          getGrants,
+          grantBytes,
         };
       };
       const scheduled = s.scheduled.length,
@@ -1171,23 +1198,36 @@ test('CI raw descriptor DB byte ratchet at 6k and 29k includes State and current
         objects.clear();
       }
       const after = await measure(true);
-      assert.equal(after.calls, files === 6000 ? 3 : 11);
+      assert.equal(after.calls, files <= 6000 ? 3 : 11);
       if (catalogued) {
         assert.equal(after.objectReads, 0, 'catalog-backed blobs read no full per-object documents');
         assert.equal(after.calls, before.calls, 'page compaction adds no source RPC');
         assert(
-          after.bytes < before.bytes * 0.21,
-          'the whole cold job reads under21%of the raw descriptor reference',
+          after.bytes < before.bytes * (files === 4000 ? 0.24 : 0.21),
+          'catalog DB budget includes whole boundary pages and current-session reads',
         );
         assert(
-          after.bytes <= (files === 6000 ? 450_000 : 2_120_000),
+          after.bytes <= (files === 4000 ? 325_000 : files === 6000 ? 450_000 : 2_120_000),
           `${files}: ${after.bytes} catalog DB bytes`,
         );
       } else {
         assert.equal(after.objectReads, files, 'raw row fallback reads one full metadata document per blob');
         assert.deepEqual(after, before, 'closure negotiation adds no raw-object DB reads');
       }
-      assert(after.bytes <= (files === 6000 ? 2_120_000 : 10_300_000), `${files}: ${after.bytes} DB bytes`);
+      assert(after.bytes <= (files <= 6000 ? 2_120_000 : 10_300_000), `${files}: ${after.bytes} DB bytes`);
+      assert.equal(
+        after.getGrants,
+        files + 2,
+        'each cold raw object and both States need an exact-key grant',
+      );
+      assert(
+        after.maxReplyBytes <= 4 * 1024 * 1024,
+        'each parsed descriptor reply stays inside its existing byte budget',
+      );
+      assert(
+        after.replyBytes <= (files <= 6000 ? 4_300_000 : 21_000_000),
+        'cold descriptor reply byte ratchet',
+      );
       assert.equal(s.scheduled.length, scheduled, 'zero idle/background work');
       t.diagnostic(
         JSON.stringify({

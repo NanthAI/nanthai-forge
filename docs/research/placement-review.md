@@ -374,6 +374,87 @@ The source step that writes a State also writes its physical manifest: digest to
 
 Done when: a cold 29k-file CI job reads under 100 KB from Convex in at most 3 calls (2,105,060 B and 11 today); source-worker descriptor calls per landing fall from about 41 to at most 5; no State write scans descriptors (reads are O(changed files), asserted); every object is still verified by hash and size; a missing or invalid manifest falls back to the catalog and says so; a point lookup of one digest, stored or not, reads at most about 1 KB on the guard's 402- and 1,387-descriptor fixtures once bulk readers use the manifest. Removes: descriptor rows for new blobs; the dense catalog pages for manifest-bound projects later. Risk: medium; this is the trusted incremental writer Issue 298f9675 left open.
 
+#### S5 delivery boundary: bindings and download authority
+
+The existing bulk source readers still use the catalog. Moving the bindings to R2
+is only part of this slice: CI and clone clients also need authority to download
+the referenced bodies. `convex/r2.ts:presignGet` signs one exact object path through
+`src/r2-presign.ts`. A manifest GET signature cannot be reused for its raw objects,
+packed objects or recipe leaves. The existing presigner guard checks that changing
+the key changes the signature. Recipe closures reduce descriptor rounds by signing
+each leaf in the enclosing reply; they do not provide a multi-key grant.
+
+The registered cold-job fixture in `tests/hosted-actions-direct.test.mjs` accounts
+for both State descriptors and every unique raw blob, without a source pack. Its
+logical reply counters include the returned GET URLs but exclude the Convex/HTTP
+encoding envelope. These are synthetic serialized DB/read-reply sizes and issued
+grants, **not billed usage, executed GETs or a latency benchmark**.
+
+| Files | Catalog DB read B | Resolver calls | Issued GET grants | URL B | Parsed reply B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 4,000 | 301,280 | 3 | 4,002 | 1,652,798 | 2,201,077 |
+| 6,000 | 437,952 | 3 | 6,002 | 2,478,798 | 3,301,077 |
+| 29,000 | 2,105,060 | 11 | 29,002 | 11,977,798 | 15,951,085 |
+
+At 29k, raw descriptor rows instead read 10,226,466 DB B in the same 11 calls;
+compaction does not remove the key-specific GET grants. The largest catalog reply
+is 1,760,001 parsed bytes. Even removing descriptor DB reads cannot fit the current
+15,951,085-byte reply into three existing 4 MiB reply windows (12,582,912 bytes).
+This is a bound on the **current reply representation**, not proof that another
+approved grant design cannot meet S5. Increasing a batch size alone does not solve
+it. Putting expiring GET URLs in the retained immutable State manifest would also
+leave old States with expired authority after the current five-minute GET window.
+
+The fresh-action source observations below use accepted State
+`8f1deae132369ae9396c6853371d1479352128f32eebc54417134f46b3c875da`,
+before subsequent source-worker changes were synced into this diagnostic Lane.
+They come from `tests/convex-source-scale.test.mjs`:
+
+| 29k operation | Samples | Convex function calls / operation | Peak action RSS B | R2 PUT body B / operation |
+| --- | ---: | ---: | ---: | ---: |
+| Sequential one-file save | 10 | 6 | 189,104,128 maximum | at most 737,549 |
+| Sibling compose | 1 | 8 | 293,896,192 | 737,706 |
+| Sync | 1 | 6 | 245,137,408 | 737,622 |
+
+These function counts are whole source-job counts, not descriptor-only counts or
+a complete landing. The save fixture shares one original blob across 29k paths,
+whereas the cold CI fixture has distinct blobs; neither substitutes for the
+other's memory or descriptor shape. The ten save observations have 380.5–579.1 ms
+fixture wall; compose and sync have 580.1 and 534.3 ms. There is no before/after
+runtime change, paired timing comparison or new memory-saving claim. Existing
+sparse packed-descriptor guards still read 48,542/48,919 B for a stored full-page
+lookup at 402/1,387 descriptors, against raw rows of 470/471 B. The S5 sparse target
+is therefore still unmet; dense pages must remain until bulk-reader cutover.
+
+**Implementation stops at this delivery-design evidence under the builder decision
+rules.** No reader format, default-off writer, capability gate, data migration or
+source access change is introduced. All six S5 acceptance lines remain open.
+The trusted source action already has server-side signing authority and can use
+R2 bindings without descriptor windows; external CI/clone readers cannot inherit
+that credential. The lead design review needs to select their delivery mechanism
+before the shared stored format is implemented. The cheapest alternative to
+investigate within the existing stack is an authorized per-job signed binding
+bundle in R2, generated after current access checks. It must account for O(files)
+signing, an additional job object and roughly the measured URL/reply bytes per
+cold job. Its creation, refresh and lifecycle are additional design work beyond
+the specified State manifest; their budget and retention treatment need lead
+review, rather than an assumption that the extra object is allowed or forbidden.
+The first parent without a physical manifest also needs a seeding decision:
+its flat State contains logical hashes, not the catalog's pack ranges or recipe
+bindings. Scanning those descriptors inside an ordinary one-file State write
+would fail the O(changed-files) requirement; skipping the manifest would leave
+that writer path incomplete. This diagnostic adds neither a scan nor a seed job.
+A scoped multi-key credential needs a separate authority design; a byte proxy
+adds a request path per body; requiring an existing source pack only covers warm
+jobs. None of these alternatives is enabled or accepted by this evidence.
+
+This diagnostic change merges grant/reply accounting into the existing CI cost
+guard; it adds no runtime module, table, setting, service or idle work and removes
+no catalog fallback. Further runtime work still needs reader-first expansion,
+a separately landed default-off writer, capability fencing, O(changed-file)
+descriptor-read guards, exact hash/size verification, explicit fallback evidence,
+unchanged peak memory and real billed/byte-placement measurements.
+
 ### S6. One source job per landing attempt
 
 Only if S0 shows save, sync and compose run as separate Node actions for most landings. Fuse them into one job that reads the base once and uploads each new chunk once.
