@@ -110,10 +110,12 @@ client platform makes the Convex SDK irrelevant.
 Within the P6 mandate, packing grace is **seven days after terminal**, matching
 the callback window. The **$2 per 1,000 landings** target covers Convex operations,
 R2 operations and amortized recurring maintenance; retained storage is reported
-beside it. Still open with the owner: the **$5/month Workers Paid service** when
-a deployed spike needs it or S8b ships, advisory-log windows (S0 sizes them
-first), and the account-dashboard R2 metrics reading. This decision approves
-none of those open items.
+beside it. On 11 November the owner approved **$5/month Workers Paid only if
+S8a passes its kill rule locally**. S8a stopped Option B at 102.74 MB against
+the 100 MB gate; the Fable verdict on whether that stands is pending on
+S8a (9e4ba8c6). [Advisory windows](#advisory-windows) are decided. The R2
+metrics read was approved through a read-only analytics credential and
+performed (S0 comment 1eb0c8dc).
 
 The slices replace retained Convex history copies, per-file projections and
 repeated byte-plane work; this entry removes no runtime code. Source: review

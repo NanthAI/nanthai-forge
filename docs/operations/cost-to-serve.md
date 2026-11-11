@@ -97,11 +97,11 @@ also comes from the retained receipts, not an invented zero.
 | Cost per 1,000 task landings | Before `a1` | After `a2` | Basis / coverage |
 | --- | ---: | ---: | --- |
 | Convex serving | $8.936 | $6.253 | Measured driver usage, original driver rates |
-| R2 compose requests | $0.0251 | $0.0256 | Model from signed requests; incomplete provider coverage |
+| R2 operations | $0.0251 | ~$0.184 | Before: signer model; after: bucket-wide executed counts, 31.9 A / 112.0 B per landing, 54 free deletes and 60 userError requests total; see [reconciliation](#r2-counters-and-executed-bucket-operations) |
 | Weekly backup I/O allocation | $0.415 | $0.399 | Model below; recurring expiry is unmeasured |
-| Covered serving + R2 + maintenance subtotal | $9.376 | $6.677 | Partial model, not the complete invoice total |
-| Covered subtotal / ~$2 target | 468.8% | 333.9% | Unmeasured components are not zero |
-| Complete serving + R2 + maintenance total | Unknown | Unknown | Net retained bytes, full operation counts and recurring expiry missing |
+| Covered serving + R2 + maintenance subtotal | $9.376 | ~$6.836 | Mixed measured usage and maintenance model, not the complete invoice total |
+| Covered subtotal / ~$2 target | 468.8% | ~341.8% | Unmeasured components are not zero |
+| Complete serving + R2 + maintenance total | Unknown | Unknown | Net retained bytes and recurring expiry missing; before full operation counts missing |
 
 Repricing the driver's identical usage at Professional rates gives $8.366 →
 $5.868 per 1,000 before R2 and maintenance. The configured Professional plan's
@@ -1002,7 +1002,7 @@ Do not extrapolate the tail or subtract overlapping refused bytes again.
 The smoke meter reads usage and project markers but discards these structured
 step lines; `attribution.mjs` assigns oracle test cases, not source-byte costs.
 
-### R2 counters and the outstanding owner read
+### R2 counters and executed bucket operations
 
 These are signed requests counted by `presign`, not a reconciled count of
 executed bucket operations. Reusing a signed URL, retrying it, or signing in a
@@ -1023,14 +1023,32 @@ requests are not zero, and source/compose copies of the same counters must not
 be added twice. The old 1,060 requests/landing was a different, whole-dev-bucket
 window; neither its scope nor the fixture ledger's A/B ratio supplies this cell.
 
-**Lead's exact owner question:** approve one read of the bench bucket's aggregate
-operation metrics for 11 November 07:29:13.891–07:50:49.416 UTC (or the provider's
-smallest enclosing buckets, stated explicitly), separated into Class A and B,
-method and status, including failed/retried requests and deletes separately.
-This is a read only: no objects, settings, credentials or retention change.
-Reconcile its bucket-wide counts against the ten-landings window and identify
-other traffic; the dashboard cannot invent caller attribution it does not expose.
-The account-dashboard read remains unapproved and unperformed; S0 line 3 stays open.
+The owner approved the read-only analytics credential on 11 November, and the
+lead performed the aggregate read through `r2OperationsAdaptiveGroups` (S0
+comment 1eb0c8dc). For the ten-landing window, **07:29:13–07:50:50Z**, the
+bucket-wide executed counts are:
+
+| Action | Success | userError |
+| --- | ---: | ---: |
+| GetObject | 973 | 0 |
+| PutObject | 297 | 4 |
+| HeadObject | 109 | 38 |
+| ListObjects | 18 | 0 |
+| DeleteObject | 36 | 18 |
+
+This is **319 Class A (31.9/landing), 1,120 Class B (112.0/landing),
+54 free deletes and 60 userError requests**. At list rates of $4.50/million A
+and $0.36/million B, operations price to **about $0.184 per 1,000 landings**,
+versus $0.026 modelled. Dogfood volume is within the monthly free tier; this
+is list-rate marginal pricing, not a billed overage.
+
+The bucket executes about 2.7 times the source signer's Class A and 30 times
+its Class B counts. Reused descriptor URLs execute multiple GETs, and other
+callers (CLI, CI source/results and reuse) are outside the signer ledger, so
+that table under-counts executed operations. The analytics dataset exposes no
+caller split. Setup/reset or other non-landing traffic in this bucket-wide
+window is included; no caller attribution or retry split is inferred. The
+approved read is complete; no objects, settings or retention changed.
 
 ### Indexed patch experiment: billing evidence still missing
 
