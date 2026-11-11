@@ -41,6 +41,13 @@ Things we built, measured and removed. Each entry says what the numbers were, so
 
 ### Chunked flat States (Issue 2f4e04ad)
 
+The follow-up [source-step memory spike](research/source-step-memory.md) measures
+the current provider by phase at 4k–190k files and a test-only streaming sync.
+It distinguishes flat State identity from the implementation's whole-manifest
+heap: incremental hashing preserves the identity, while the unchanged upload
+transport still buffers and parses the complete output. The rewrite verdict
+remains with the lead and owner.
+
 **What we tried.** Keep the flat manifest and its SHA-256 identity, but upload States over 4 MiB as a recipe: content-defined chunks (64 KiB to 1 MiB, the existing object recipe format), with forced cuts around the file list so the parents and message at each end stay out of the stable chunks. A save sent only the chunks its base did not have; a merge read its inputs back part by part.
 
 **The numbers that ended it.** Built code, interleaved paired runs, Kubernetes (31.7k files) and LLVM (190k files) paths with synthetic contents; network model 100 ms per request and 50 MB/s.

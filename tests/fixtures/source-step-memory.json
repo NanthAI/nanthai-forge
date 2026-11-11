@@ -1,0 +1,5371 @@
+{
+  "schema": 1,
+  "node": "v24.22.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "startedAt": "2026-11-11T16:31:58.712Z",
+  "pairs": 3,
+  "sizes": [
+    4000,
+    29000,
+    60000,
+    100000,
+    190000
+  ],
+  "voids": [],
+  "runs": [
+    {
+      "files": 4000,
+      "phase": "save",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:58.928Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 194.19491599999992,
+      "steps": 1,
+      "maxStepMs": 136.193292,
+      "maxRssBytes": 132218880,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 63860,
+      "cpuMicros": 173055,
+      "actionMs": 136.193292,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 648927,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648423
+      },
+      "dbReadBytes": 37393,
+      "dbWriteBytes": 17279,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0a68fac163fb16a193c91feb51674da2a34e55c886ee8d4d3b016769cb69f2e9",
+          "size": 349
+        },
+        "state": {
+          "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+          "size": 648178
+        }
+      },
+      "state": {
+        "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 136.193292,
+          "maxRssBytes": 132218880
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:59.107Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 172.22987499999988,
+      "steps": 1,
+      "maxStepMs": 138.5625,
+      "maxRssBytes": 151601152,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 86841,
+      "cpuMicros": 199532,
+      "actionMs": 138.5625,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37667,
+      "dbWriteBytes": 17587,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 138.5625,
+          "maxRssBytes": 151601152
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "stream",
+      "at": "2026-11-11T16:31:59.269Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 154.97862499999997,
+      "steps": 1,
+      "maxStepMs": 121.514542,
+      "maxRssBytes": 131203072,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 88345,
+      "cpuMicros": 182373,
+      "actionMs": 121.514542,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37688,
+      "dbWriteBytes": 17555,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 121.514542,
+          "maxRssBytes": 131203072
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "compose",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:59.439Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 161.84804099999997,
+      "steps": 1,
+      "maxStepMs": 128.04166700000002,
+      "maxRssBytes": 139952128,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 87799,
+      "cpuMicros": 184853,
+      "actionMs": 128.04166700000002,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 109,
+      "documentsWritten": 35,
+      "calls": 8,
+      "functionCalls": 8,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 1945535,
+      "r2": {
+        "get": 6,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648635
+      },
+      "dbReadBytes": 44857,
+      "dbWriteBytes": 18569,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "41da514c7a9b267e0a50139234c630a5dd33a75fe5631f68365973c80390f0e5",
+          "size": 623
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+            "size": 648248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+        "size": 648248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 128.04166700000002,
+          "maxRssBytes": 139952128
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "conflict-sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:59.641Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 195.86754199999996,
+      "steps": 1,
+      "maxStepMs": 163.611959,
+      "maxRssBytes": 186515456,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 137548,
+      "cpuMicros": 236997,
+      "actionMs": 163.611959,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 108,
+      "documentsWritten": 37,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 7,
+      "readBytes": 1944890,
+      "r2": {
+        "get": 7,
+        "head": 5,
+        "put": 4,
+        "putBytes": 649611
+      },
+      "dbReadBytes": 41906,
+      "dbWriteBytes": 19518,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "810a5bd536744329f02838719bbd214d55fea87798e87f81839651922d5a404e",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "b1d2135e19580556844614f82b62996f50edb4d3139e5fab7831cef6aa6fe3fb",
+            "size": 805
+          },
+          "left": "1f67111e9d784b4e79d957a92f411acd39913e134631beadc310c3be2002d157",
+          "right": "006a4558d9a308c16cf9f322e370e463138c21d934efb615c95b1a112bbc4b01",
+          "state": {
+            "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+            "size": 648178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 163.611959,
+          "maxRssBytes": 186515456
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "save",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:59.791Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 144.05991599999993,
+      "steps": 1,
+      "maxStepMs": 109.828334,
+      "maxRssBytes": 133087232,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 61477,
+      "cpuMicros": 161304,
+      "actionMs": 109.828334,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 648927,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648423
+      },
+      "dbReadBytes": 37474,
+      "dbWriteBytes": 17311,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0a68fac163fb16a193c91feb51674da2a34e55c886ee8d4d3b016769cb69f2e9",
+          "size": 349
+        },
+        "state": {
+          "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+          "size": 648178
+        }
+      },
+      "state": {
+        "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 109.828334,
+          "maxRssBytes": 133087232
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:31:59.963Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 162.90216699999996,
+      "steps": 1,
+      "maxStepMs": 129.56983400000001,
+      "maxRssBytes": 152174592,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 90191,
+      "cpuMicros": 190788,
+      "actionMs": 129.56983400000001,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37682,
+      "dbWriteBytes": 17586,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 129.56983400000001,
+          "maxRssBytes": 152174592
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:00.111Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 141.58066699999972,
+      "steps": 1,
+      "maxStepMs": 109.554416,
+      "maxRssBytes": 131874816,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 82072,
+      "cpuMicros": 167682,
+      "actionMs": 109.554416,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37679,
+      "dbWriteBytes": 17558,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 109.554416,
+          "maxRssBytes": 131874816
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "compose",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:00.283Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 165.120042,
+      "steps": 1,
+      "maxStepMs": 130.61,
+      "maxRssBytes": 139149312,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 89459,
+      "cpuMicros": 189698,
+      "actionMs": 130.61,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 109,
+      "documentsWritten": 35,
+      "calls": 8,
+      "functionCalls": 8,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 1945535,
+      "r2": {
+        "get": 6,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648635
+      },
+      "dbReadBytes": 44878,
+      "dbWriteBytes": 18572,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "41da514c7a9b267e0a50139234c630a5dd33a75fe5631f68365973c80390f0e5",
+          "size": 623
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+            "size": 648248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+        "size": 648248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 130.61,
+          "maxRssBytes": 139149312
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "conflict-sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:00.484Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 194.8788330000002,
+      "steps": 1,
+      "maxStepMs": 161.3435,
+      "maxRssBytes": 165986304,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 151350,
+      "cpuMicros": 249869,
+      "actionMs": 161.3435,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 108,
+      "documentsWritten": 37,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 7,
+      "readBytes": 1944890,
+      "r2": {
+        "get": 7,
+        "head": 5,
+        "put": 4,
+        "putBytes": 649611
+      },
+      "dbReadBytes": 41903,
+      "dbWriteBytes": 19524,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "810a5bd536744329f02838719bbd214d55fea87798e87f81839651922d5a404e",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "b1d2135e19580556844614f82b62996f50edb4d3139e5fab7831cef6aa6fe3fb",
+            "size": 805
+          },
+          "left": "1f67111e9d784b4e79d957a92f411acd39913e134631beadc310c3be2002d157",
+          "right": "006a4558d9a308c16cf9f322e370e463138c21d934efb615c95b1a112bbc4b01",
+          "state": {
+            "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+            "size": 648178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 161.3435,
+          "maxRssBytes": 165986304
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "save",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:00.633Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 141.6621250000003,
+      "steps": 1,
+      "maxStepMs": 108.79083299999999,
+      "maxRssBytes": 133054464,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 62048,
+      "cpuMicros": 160675,
+      "actionMs": 108.79083299999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 648927,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648423
+      },
+      "dbReadBytes": 37469,
+      "dbWriteBytes": 17305,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0a68fac163fb16a193c91feb51674da2a34e55c886ee8d4d3b016769cb69f2e9",
+          "size": 349
+        },
+        "state": {
+          "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+          "size": 648178
+        }
+      },
+      "state": {
+        "sha256": "6a41e32fa769e5bf0a3c702ff450d68c0f189fc06200cab039830ff0b1292c43",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 108.79083299999999,
+          "maxRssBytes": 133054464
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:00.797Z",
+      "load": [
+        1.96728515625,
+        3.92724609375,
+        4.07275390625
+      ],
+      "stateBytes": 648112,
+      "wallMs": 157.29845799999975,
+      "steps": 1,
+      "maxStepMs": 126.140667,
+      "maxRssBytes": 152862720,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 87645,
+      "cpuMicros": 186534,
+      "actionMs": 126.140667,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37688,
+      "dbWriteBytes": 17590,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 126.140667,
+          "maxRssBytes": 152862720
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:00.943Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 648112,
+      "wallMs": 138.958083,
+      "steps": 1,
+      "maxStepMs": 106.56600000000002,
+      "maxRssBytes": 132071424,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 82416,
+      "cpuMicros": 165145,
+      "actionMs": 106.56600000000002,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 1944870,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648552
+      },
+      "dbReadBytes": 37688,
+      "dbWriteBytes": 17561,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79406bfe0bb88550567839e776e28aa14750f169d602695d564945d90e629c0c",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+            "size": 648245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "7743b91fbc7550b343330141669160d367a5c84e040bcf6080fbf1450e2e49c0",
+        "size": 648245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 106.56600000000002,
+          "maxRssBytes": 132071424
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "compose",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:01.113Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 648112,
+      "wallMs": 163.89437499999985,
+      "steps": 1,
+      "maxStepMs": 130.924292,
+      "maxRssBytes": 141656064,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 87867,
+      "cpuMicros": 189951,
+      "actionMs": 130.924292,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 109,
+      "documentsWritten": 35,
+      "calls": 8,
+      "functionCalls": 8,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 1945535,
+      "r2": {
+        "get": 6,
+        "head": 3,
+        "put": 2,
+        "putBytes": 648635
+      },
+      "dbReadBytes": 44854,
+      "dbWriteBytes": 18575,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "41da514c7a9b267e0a50139234c630a5dd33a75fe5631f68365973c80390f0e5",
+          "size": 623
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+            "size": 648248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "5a79acb1b693ea382ba3c9b6410414e1fddd14b214d97a31a7ffb52b050c0754",
+        "size": 648248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 130.924292,
+          "maxRssBytes": 141656064
+        }
+      ]
+    },
+    {
+      "files": 4000,
+      "phase": "conflict-sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:01.319Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 648112,
+      "wallMs": 196.4107079999999,
+      "steps": 1,
+      "maxStepMs": 161.101125,
+      "maxRssBytes": 170409984,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 136876,
+      "cpuMicros": 236630,
+      "actionMs": 161.101125,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 108,
+      "documentsWritten": 37,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 7,
+      "readBytes": 1944890,
+      "r2": {
+        "get": 7,
+        "head": 5,
+        "put": 4,
+        "putBytes": 649611
+      },
+      "dbReadBytes": 41921,
+      "dbWriteBytes": 19519,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "810a5bd536744329f02838719bbd214d55fea87798e87f81839651922d5a404e",
+          "size": 401
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "b1d2135e19580556844614f82b62996f50edb4d3139e5fab7831cef6aa6fe3fb",
+            "size": 805
+          },
+          "left": "1f67111e9d784b4e79d957a92f411acd39913e134631beadc310c3be2002d157",
+          "right": "006a4558d9a308c16cf9f322e370e463138c21d934efb615c95b1a112bbc4b01",
+          "state": {
+            "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+            "size": 648178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "cc9db14900409f2306363d3fb3a73250e9f54e8e030c7ecc8b6d3c2bd8386351",
+        "size": 648178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 161.101125,
+          "maxRssBytes": 170409984
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "save",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:01.613Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 262.307542,
+      "steps": 1,
+      "maxStepMs": 226.61399999999998,
+      "maxRssBytes": 220987392,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 175543,
+      "cpuMicros": 310935,
+      "actionMs": 226.61399999999998,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 4698928,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698424
+      },
+      "dbReadBytes": 37478,
+      "dbWriteBytes": 17314,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0af251e3e803c8ac7373c8f1bd86ac71b04d5ce031ced536209bdecdd708c49b",
+          "size": 350
+        },
+        "state": {
+          "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+          "size": 4698178
+        }
+      },
+      "state": {
+        "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 226.61399999999998,
+          "maxRssBytes": 220987392
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:01.961Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 312.104292,
+      "steps": 1,
+      "maxStepMs": 278.89129199999996,
+      "maxRssBytes": 354942976,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 290070,
+      "cpuMicros": 389716,
+      "actionMs": 278.89129199999996,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41389,
+      "dbWriteBytes": 17747,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 278.89129199999996,
+          "maxRssBytes": 354942976
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:02.261Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 268.15570800000023,
+      "steps": 1,
+      "maxStepMs": 233.770125,
+      "maxRssBytes": 160628736,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 222285,
+      "cpuMicros": 304665,
+      "actionMs": 233.770125,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41383,
+      "dbWriteBytes": 17713,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 233.770125,
+          "maxRssBytes": 160628736
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "compose",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:02.757Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 461.6800000000003,
+      "steps": 2,
+      "maxStepMs": 233.586666,
+      "maxRssBytes": 287604736,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 381098,
+      "cpuMicros": 575845,
+      "actionMs": 394.585291,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 23494352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 4701094
+      },
+      "dbReadBytes": 66969,
+      "dbWriteBytes": 23313,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "e18920c044921b102679d3b0acb75a408c85337f2407d2297f31128f0e1b62e2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+            "size": 4698248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+        "size": 4698248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 160.998625,
+          "maxRssBytes": 234864640
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 233.586666,
+          "maxRssBytes": 287604736
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "conflict-sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:03.486Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 693.3814590000002,
+      "steps": 2,
+      "maxStepMs": 339.83183399999996,
+      "maxRssBytes": 348798976,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 680668,
+      "cpuMicros": 876663,
+      "actionMs": 627.5493759999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 28194306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 4704557
+      },
+      "dbReadBytes": 67679,
+      "dbWriteBytes": 24418,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "4533867e8867005e2b67ba45cffb7bd5231c57edec09cd653708b0ca32f78a07",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "4a8da751c2103b9108519a1c8faa1de53a813a044a07ffc1d44c686da8552cd2",
+            "size": 805
+          },
+          "left": "b31ef8b1cc12c1ed04f7f20451135134d36d7d7c6482ed7d7ee903d0808f6da1",
+          "right": "90b18d1418500b885e413289c22602c881f2403373d72eef7ba094342ae47d5a",
+          "state": {
+            "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+            "size": 4698178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 287.71754200000004,
+          "maxRssBytes": 348798976
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 339.83183399999996,
+          "maxRssBytes": 344162304
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "save",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:03.715Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 199.6157920000005,
+      "steps": 1,
+      "maxStepMs": 166.8725,
+      "maxRssBytes": 223707136,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 151491,
+      "cpuMicros": 250847,
+      "actionMs": 166.8725,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 4698928,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698424
+      },
+      "dbReadBytes": 37475,
+      "dbWriteBytes": 17315,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0af251e3e803c8ac7373c8f1bd86ac71b04d5ce031ced536209bdecdd708c49b",
+          "size": 350
+        },
+        "state": {
+          "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+          "size": 4698178
+        }
+      },
+      "state": {
+        "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 166.8725,
+          "maxRssBytes": 223707136
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:04.071Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 324.7340000000004,
+      "steps": 1,
+      "maxStepMs": 291.305,
+      "maxRssBytes": 375029760,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 318253,
+      "cpuMicros": 417384,
+      "actionMs": 291.305,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41385,
+      "dbWriteBytes": 17740,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 291.305,
+          "maxRssBytes": 375029760
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:04.373Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 266.07820900000024,
+      "steps": 1,
+      "maxStepMs": 232.068958,
+      "maxRssBytes": 160890880,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 222678,
+      "cpuMicros": 305061,
+      "actionMs": 232.068958,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41383,
+      "dbWriteBytes": 17713,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 232.068958,
+          "maxRssBytes": 160890880
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "compose",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:04.862Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 458.90408300000036,
+      "steps": 2,
+      "maxStepMs": 239.06970900000002,
+      "maxRssBytes": 277839872,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 367651,
+      "cpuMicros": 562910,
+      "actionMs": 396.666959,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 23494352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 4701094
+      },
+      "dbReadBytes": 66973,
+      "dbWriteBytes": 23314,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "e18920c044921b102679d3b0acb75a408c85337f2407d2297f31128f0e1b62e2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+            "size": 4698248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+        "size": 4698248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 157.59725,
+          "maxRssBytes": 222953472
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 239.06970900000002,
+          "maxRssBytes": 277839872
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "conflict-sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:05.591Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 697.6412090000003,
+      "steps": 2,
+      "maxStepMs": 344.942292,
+      "maxRssBytes": 398409728,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 730789,
+      "cpuMicros": 926600,
+      "actionMs": 633.4489590000001,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 28194306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 4704557
+      },
+      "dbReadBytes": 67668,
+      "dbWriteBytes": 24408,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "4533867e8867005e2b67ba45cffb7bd5231c57edec09cd653708b0ca32f78a07",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "4a8da751c2103b9108519a1c8faa1de53a813a044a07ffc1d44c686da8552cd2",
+            "size": 805
+          },
+          "left": "b31ef8b1cc12c1ed04f7f20451135134d36d7d7c6482ed7d7ee903d0808f6da1",
+          "right": "90b18d1418500b885e413289c22602c881f2403373d72eef7ba094342ae47d5a",
+          "state": {
+            "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+            "size": 4698178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 288.506667,
+          "maxRssBytes": 391233536
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 344.942292,
+          "maxRssBytes": 398409728
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "save",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:05.834Z",
+      "load": [
+        1.8896484375,
+        3.87841796875,
+        4.0546875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 201.92483300000004,
+      "steps": 1,
+      "maxStepMs": 169.17666599999998,
+      "maxRssBytes": 223936512,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 155373,
+      "cpuMicros": 254304,
+      "actionMs": 169.17666599999998,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 95,
+      "documentsWritten": 31,
+      "calls": 6,
+      "functionCalls": 6,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 4698928,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698424
+      },
+      "dbReadBytes": 37466,
+      "dbWriteBytes": 17310,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "0af251e3e803c8ac7373c8f1bd86ac71b04d5ce031ced536209bdecdd708c49b",
+          "size": 350
+        },
+        "state": {
+          "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+          "size": 4698178
+        }
+      },
+      "state": {
+        "sha256": "2e8df058ac9ad0c7f618d04aabbd3482d562ac5b2f847a3728297cb071cd93b2",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 169.17666599999998,
+          "maxRssBytes": 223936512
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:06.184Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 320.48762499999975,
+      "steps": 1,
+      "maxStepMs": 288.24350000000004,
+      "maxRssBytes": 397918208,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 311320,
+      "cpuMicros": 411589,
+      "actionMs": 288.24350000000004,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41392,
+      "dbWriteBytes": 17747,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 288.24350000000004,
+          "maxRssBytes": 397918208
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:06.480Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 264.62112499999967,
+      "steps": 1,
+      "maxStepMs": 232.21920799999998,
+      "maxRssBytes": 160907264,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 221073,
+      "cpuMicros": 304646,
+      "actionMs": 232.21920799999998,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 14094872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 4698553
+      },
+      "dbReadBytes": 41385,
+      "dbWriteBytes": 17712,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "ddc63e5b9eda5358611c86604d167fd6f150152822b902045dbe96f9d162c201",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+            "size": 4698245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "eaddb1f9fabfaa490d436087246124cc4b19da2a8ebcfd9f8d823f8b9bf68350",
+        "size": 4698245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 232.21920799999998,
+          "maxRssBytes": 160907264
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "compose",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:06.972Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 457.2065829999992,
+      "steps": 2,
+      "maxStepMs": 236.932541,
+      "maxRssBytes": 277839872,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 361974,
+      "cpuMicros": 558645,
+      "actionMs": 394.1585,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 23494352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 4701094
+      },
+      "dbReadBytes": 66973,
+      "dbWriteBytes": 23312,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "e18920c044921b102679d3b0acb75a408c85337f2407d2297f31128f0e1b62e2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+            "size": 4698248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "735f8a5e8f29886db6e7c23ea5a0502328aa39cdb3a53a5d743c862eb253e9b9",
+        "size": 4698248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 157.225959,
+          "maxRssBytes": 223297536
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 236.932541,
+          "maxRssBytes": 277839872
+        }
+      ]
+    },
+    {
+      "files": 29000,
+      "phase": "conflict-sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:07.694Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 4698112,
+      "wallMs": 690.0153750000009,
+      "steps": 2,
+      "maxStepMs": 339.923584,
+      "maxRssBytes": 382369792,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 669927,
+      "cpuMicros": 866788,
+      "actionMs": 625.741167,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 28194306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 4704557
+      },
+      "dbReadBytes": 67715,
+      "dbWriteBytes": 24429,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "4533867e8867005e2b67ba45cffb7bd5231c57edec09cd653708b0ca32f78a07",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "4a8da751c2103b9108519a1c8faa1de53a813a044a07ffc1d44c686da8552cd2",
+            "size": 805
+          },
+          "left": "b31ef8b1cc12c1ed04f7f20451135134d36d7d7c6482ed7d7ee903d0808f6da1",
+          "right": "90b18d1418500b885e413289c22602c881f2403373d72eef7ba094342ae47d5a",
+          "state": {
+            "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+            "size": 4698178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4a7173493ca9ffb4c8b7e2b1a55b1bf4ece8850171ca5d6dd69ea196f66af066",
+        "size": 4698178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 285.817583,
+          "maxRssBytes": 349552640
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 339.923584,
+          "maxRssBytes": 382369792
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "save",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:08.246Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 481.8255420000005,
+      "steps": 2,
+      "maxStepMs": 240.066834,
+      "maxRssBytes": 275808256,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 395641,
+      "cpuMicros": 594250,
+      "actionMs": 418.489501,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 9902640,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 9902136
+      },
+      "dbReadBytes": 54917,
+      "dbWriteBytes": 22046,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "1526c16da507586fe7e2c34ec9e06c9b039fb069d89ee51e2541de4aa213d53e",
+          "size": 350
+        },
+        "state": {
+          "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+          "size": 9720178
+        }
+      },
+      "state": {
+        "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 178.422667,
+          "maxRssBytes": 246415360
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 240.066834,
+          "maxRssBytes": 275808256
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:08.885Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 568.5631659999999,
+      "steps": 1,
+      "maxStepMs": 532.352708,
+      "maxRssBytes": 446660608,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 606493,
+      "cpuMicros": 707168,
+      "actionMs": 532.352708,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41365,
+      "dbWriteBytes": 17733,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 532.352708,
+          "maxRssBytes": 446660608
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:09.382Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 435.01179199999933,
+      "steps": 1,
+      "maxStepMs": 395.841958,
+      "maxRssBytes": 224051200,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 404563,
+      "cpuMicros": 492133,
+      "actionMs": 395.841958,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41374,
+      "dbWriteBytes": 17714,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 395.841958,
+          "maxRssBytes": 224051200
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "compose",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:10.131Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 681.1055420000012,
+      "steps": 2,
+      "maxStepMs": 399.334167,
+      "maxRssBytes": 427229184,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 658480,
+      "cpuMicros": 853927,
+      "actionMs": 615.994584,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 48604352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 9723094
+      },
+      "dbReadBytes": 66939,
+      "dbWriteBytes": 23303,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "8c05e21bc5823d999af110868f8b453ab2607b6b7fef599e2203f7cf98c247c2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+            "size": 9720248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+        "size": 9720248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 216.660417,
+          "maxRssBytes": 256933888
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 399.334167,
+          "maxRssBytes": 427229184
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "conflict-sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:11.328Z",
+      "load": [
+        1.8984375,
+        3.84716796875,
+        4.04248046875
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 1138.5838330000006,
+      "steps": 2,
+      "maxStepMs": 605.50125,
+      "maxRssBytes": 464977920,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1242573,
+      "cpuMicros": 1439987,
+      "actionMs": 1073.816625,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 58326306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 9726557
+      },
+      "dbReadBytes": 67721,
+      "dbWriteBytes": 24428,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "b1d3a9a56ba8e4dc21ac9595a8602568937e76d313cf6f7d5be0a73ea7cd3516",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "28d465949d20d97d7411fdb4f6393a82e099fff30ffcd66064c5bed64d6ddf31",
+            "size": 805
+          },
+          "left": "24a0fbddd0cce052fd97472d2f17026e176200106a3a4e25eae32fe7c4f67680",
+          "right": "0e08906029fedd23badfc9b47f151352d81dbdb43f712de98430c8153d0049d0",
+          "state": {
+            "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+            "size": 9720178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 468.31537499999996,
+          "maxRssBytes": 464977920
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 605.50125,
+          "maxRssBytes": 459669504
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "save",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:11.874Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 476.84320800000023,
+      "steps": 2,
+      "maxStepMs": 235.737792,
+      "maxRssBytes": 292929536,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 388454,
+      "cpuMicros": 582650,
+      "actionMs": 411.626083,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 9902640,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 9902136
+      },
+      "dbReadBytes": 54908,
+      "dbWriteBytes": 22042,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "1526c16da507586fe7e2c34ec9e06c9b039fb069d89ee51e2541de4aa213d53e",
+          "size": 350
+        },
+        "state": {
+          "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+          "size": 9720178
+        }
+      },
+      "state": {
+        "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 175.88829099999998,
+          "maxRssBytes": 246087680
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 235.737792,
+          "maxRssBytes": 292929536
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:12.444Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 512.3019999999997,
+      "steps": 1,
+      "maxStepMs": 477.500583,
+      "maxRssBytes": 445005824,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 543210,
+      "cpuMicros": 642100,
+      "actionMs": 477.500583,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41392,
+      "dbWriteBytes": 17745,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 477.500583,
+          "maxRssBytes": 445005824
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:12.931Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 422.5903329999983,
+      "steps": 1,
+      "maxStepMs": 388.3655,
+      "maxRssBytes": 233553920,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 406292,
+      "cpuMicros": 489014,
+      "actionMs": 388.3655,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41392,
+      "dbWriteBytes": 17717,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 388.3655,
+          "maxRssBytes": 233553920
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "compose",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:13.696Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 701.4481670000005,
+      "steps": 2,
+      "maxStepMs": 415.22575,
+      "maxRssBytes": 428851200,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 676256,
+      "cpuMicros": 878573,
+      "actionMs": 635.532625,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 48604352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 9723094
+      },
+      "dbReadBytes": 66960,
+      "dbWriteBytes": 23315,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "8c05e21bc5823d999af110868f8b453ab2607b6b7fef599e2203f7cf98c247c2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+            "size": 9720248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+        "size": 9720248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 220.30687500000002,
+          "maxRssBytes": 268386304
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 415.22575,
+          "maxRssBytes": 428851200
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "conflict-sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:14.908Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 1140.8148340000025,
+      "steps": 2,
+      "maxStepMs": 603.631125,
+      "maxRssBytes": 473841664,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1232239,
+      "cpuMicros": 1435905,
+      "actionMs": 1074.103708,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 58326306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 9726557
+      },
+      "dbReadBytes": 67712,
+      "dbWriteBytes": 24422,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "b1d3a9a56ba8e4dc21ac9595a8602568937e76d313cf6f7d5be0a73ea7cd3516",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "28d465949d20d97d7411fdb4f6393a82e099fff30ffcd66064c5bed64d6ddf31",
+            "size": 805
+          },
+          "left": "24a0fbddd0cce052fd97472d2f17026e176200106a3a4e25eae32fe7c4f67680",
+          "right": "0e08906029fedd23badfc9b47f151352d81dbdb43f712de98430c8153d0049d0",
+          "state": {
+            "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+            "size": 9720178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 470.472583,
+          "maxRssBytes": 465043456
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 603.631125,
+          "maxRssBytes": 473841664
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "save",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:15.540Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 574.0422090000029,
+      "steps": 2,
+      "maxStepMs": 334.836583,
+      "maxRssBytes": 278839296,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 462762,
+      "cpuMicros": 659385,
+      "actionMs": 509.548666,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 9902640,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 9902136
+      },
+      "dbReadBytes": 54905,
+      "dbWriteBytes": 22046,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "1526c16da507586fe7e2c34ec9e06c9b039fb069d89ee51e2541de4aa213d53e",
+          "size": 350
+        },
+        "state": {
+          "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+          "size": 9720178
+        }
+      },
+      "state": {
+        "sha256": "e76bb457dc8dc864338066d9079174b6b52fafac399d07408159a691540f443a",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 174.712083,
+          "maxRssBytes": 246169600
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 334.836583,
+          "maxRssBytes": 278839296
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:16.108Z",
+      "load": [
+        1.826171875,
+        3.7998046875,
+        4.0244140625
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 504.04337499999747,
+      "steps": 1,
+      "maxStepMs": 471.90891700000003,
+      "maxRssBytes": 444465152,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 542199,
+      "cpuMicros": 642064,
+      "actionMs": 471.90891700000003,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41392,
+      "dbWriteBytes": 17745,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 471.90891700000003,
+          "maxRssBytes": 444465152
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:16.616Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 445.4334170000002,
+      "steps": 1,
+      "maxStepMs": 412.123625,
+      "maxRssBytes": 232882176,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 428503,
+      "cpuMicros": 513029,
+      "actionMs": 412.123625,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 29160872,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 9720553
+      },
+      "dbReadBytes": 41383,
+      "dbWriteBytes": 17714,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "8cd3bf4391cfa253bc5b571dfcff5a37f12ca0e58d0b960d7599c0a45ea39aff",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+            "size": 9720245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "060ab5898fe67013d59aaa10ce96c424347f0e492c5ad2a72eb567bd55519bf7",
+        "size": 9720245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 412.123625,
+          "maxRssBytes": 232882176
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "compose",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:17.370Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 688.3400829999991,
+      "steps": 2,
+      "maxStepMs": 402.931166,
+      "maxRssBytes": 436158464,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 661245,
+      "cpuMicros": 865655,
+      "actionMs": 619.7842909999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 48604352,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 9723094
+      },
+      "dbReadBytes": 66951,
+      "dbWriteBytes": 23309,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "8c05e21bc5823d999af110868f8b453ab2607b6b7fef599e2203f7cf98c247c2",
+          "size": 624
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+            "size": 9720248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "e138bcac393e62be678b07af0a475413de2231a10385e959b8a6b15e7c97d1a7",
+        "size": 9720248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 216.85312499999998,
+          "maxRssBytes": 264552448
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 402.931166,
+          "maxRssBytes": 436158464
+        }
+      ]
+    },
+    {
+      "files": 60000,
+      "phase": "conflict-sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:18.565Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 9720112,
+      "wallMs": 1135.2264159999977,
+      "steps": 2,
+      "maxStepMs": 599.272833,
+      "maxRssBytes": 479723520,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1235701,
+      "cpuMicros": 1435013,
+      "actionMs": 1069.814916,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 58326306,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 9726557
+      },
+      "dbReadBytes": 67697,
+      "dbWriteBytes": 24425,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "b1d3a9a56ba8e4dc21ac9595a8602568937e76d313cf6f7d5be0a73ea7cd3516",
+          "size": 403
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "28d465949d20d97d7411fdb4f6393a82e099fff30ffcd66064c5bed64d6ddf31",
+            "size": 805
+          },
+          "left": "24a0fbddd0cce052fd97472d2f17026e176200106a3a4e25eae32fe7c4f67680",
+          "right": "0e08906029fedd23badfc9b47f151352d81dbdb43f712de98430c8153d0049d0",
+          "state": {
+            "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+            "size": 9720178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "df45dc42e7fc7924281154e1f65eeafcd8a5f162f74f9a4507e0986b233c4817",
+        "size": 9720178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 470.542083,
+          "maxRssBytes": 465141760
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 599.272833,
+          "maxRssBytes": 479723520
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "save",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:19.294Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 628.7928339999999,
+      "steps": 2,
+      "maxStepMs": 329.919416,
+      "maxRssBytes": 388530176,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 597730,
+      "cpuMicros": 795410,
+      "actionMs": 565.585375,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 16502988,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 16502484
+      },
+      "dbReadBytes": 54918,
+      "dbWriteBytes": 22049,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "97da7fc0ec59b2e9d64dbbfdbabcabb7bb0ac42ff71a1daaae5b700f4d7141b8",
+          "size": 351
+        },
+        "state": {
+          "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+          "size": 16200178
+        }
+      },
+      "state": {
+        "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 235.66595900000002,
+          "maxRssBytes": 315342848
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 329.919416,
+          "maxRssBytes": 388530176
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:20.156Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 762.4882080000025,
+      "steps": 1,
+      "maxStepMs": 729.8499159999999,
+      "maxRssBytes": 669220864,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 865408,
+      "cpuMicros": 964643,
+      "actionMs": 729.8499159999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41396,
+      "dbWriteBytes": 17753,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 729.8499159999999,
+          "maxRssBytes": 669220864
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:20.880Z",
+      "load": [
+        1.83984375,
+        3.76953125,
+        4.01220703125
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 624.2547080000004,
+      "steps": 1,
+      "maxStepMs": 589.2054589999999,
+      "maxRssBytes": 300089344,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 635210,
+      "cpuMicros": 718731,
+      "actionMs": 589.2054589999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41375,
+      "dbWriteBytes": 17719,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 589.2054589999999,
+          "maxRssBytes": 300089344
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "compose",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:21.959Z",
+      "load": [
+        1.7724609375,
+        3.72314453125,
+        3.994140625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 977.1212080000005,
+      "steps": 2,
+      "maxStepMs": 613.318333,
+      "maxRssBytes": 666435584,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1057761,
+      "cpuMicros": 1256286,
+      "actionMs": 912.16875,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 81004358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 16203099
+      },
+      "dbReadBytes": 66990,
+      "dbWriteBytes": 23323,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "83500f7ecbd5c5c73c95ceaf1ee48b534eabc9f6baa10c6a74d10d8b7d206635",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+            "size": 16200248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+        "size": 16200248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 298.850417,
+          "maxRssBytes": 364625920
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 613.318333,
+          "maxRssBytes": 666435584
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "conflict-sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:23.835Z",
+      "load": [
+        1.7724609375,
+        3.72314453125,
+        3.994140625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 1775.5990410000013,
+      "steps": 2,
+      "maxStepMs": 959.515625,
+      "maxRssBytes": 677380096,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 2007551,
+      "cpuMicros": 2202331,
+      "actionMs": 1710.832167,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 97206312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 16206562
+      },
+      "dbReadBytes": 67678,
+      "dbWriteBytes": 24412,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "7968a81cea4a0b32a76c81f4911d2a570d9eb38b20b958c3bd56894d8b0d47af",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "c0e4e6df4b330fcabf7b4218602483599147a5603a05c4ba1c7409c70d78dec0",
+            "size": 805
+          },
+          "left": "356fd498e6ef63b46e48110ef4cd895cc6a04f572c6e4c042e49fc62ceba0082",
+          "right": "294191f7f934a885d4e87f60502a3e7d9dd1e9c752cfda7e514993dc8f24b253",
+          "state": {
+            "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+            "size": 16200178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 751.316542,
+          "maxRssBytes": 677068800
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 959.515625,
+          "maxRssBytes": 677380096
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "save",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:24.564Z",
+      "load": [
+        1.7724609375,
+        3.72314453125,
+        3.994140625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 630.4404170000016,
+      "steps": 2,
+      "maxStepMs": 328.123292,
+      "maxRssBytes": 388857856,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 586660,
+      "cpuMicros": 783824,
+      "actionMs": 565.444583,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 16502988,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 16502484
+      },
+      "dbReadBytes": 54924,
+      "dbWriteBytes": 22046,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "97da7fc0ec59b2e9d64dbbfdbabcabb7bb0ac42ff71a1daaae5b700f4d7141b8",
+          "size": 351
+        },
+        "state": {
+          "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+          "size": 16200178
+        }
+      },
+      "state": {
+        "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 237.32129100000003,
+          "maxRssBytes": 307970048
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 328.123292,
+          "maxRssBytes": 388857856
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:25.464Z",
+      "load": [
+        1.7724609375,
+        3.72314453125,
+        3.994140625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 801.1157920000005,
+      "steps": 1,
+      "maxStepMs": 768.3842089999999,
+      "maxRssBytes": 662306816,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 914649,
+      "cpuMicros": 1014617,
+      "actionMs": 768.3842089999999,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41396,
+      "dbWriteBytes": 17750,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 768.3842089999999,
+          "maxRssBytes": 662306816
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:26.183Z",
+      "load": [
+        1.7724609375,
+        3.72314453125,
+        3.994140625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 619.3963750000003,
+      "steps": 1,
+      "maxStepMs": 586.316375,
+      "maxRssBytes": 301694976,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 631147,
+      "cpuMicros": 719245,
+      "actionMs": 586.316375,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41387,
+      "dbWriteBytes": 17722,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 586.316375,
+          "maxRssBytes": 301694976
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "compose",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:27.276Z",
+      "load": [
+        1.71044921875,
+        3.677734375,
+        3.9765625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 991.6555840000001,
+      "steps": 2,
+      "maxStepMs": 631.637875,
+      "maxRssBytes": 667615232,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1084845,
+      "cpuMicros": 1282510,
+      "actionMs": 925.834958,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 81004358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 16203099
+      },
+      "dbReadBytes": 66969,
+      "dbWriteBytes": 23322,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "83500f7ecbd5c5c73c95ceaf1ee48b534eabc9f6baa10c6a74d10d8b7d206635",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+            "size": 16200248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+        "size": 16200248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 294.197083,
+          "maxRssBytes": 365789184
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 631.637875,
+          "maxRssBytes": 667615232
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "conflict-sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:29.133Z",
+      "load": [
+        1.71044921875,
+        3.677734375,
+        3.9765625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 1757.9671659999985,
+      "steps": 2,
+      "maxStepMs": 952.3118330000001,
+      "maxRssBytes": 677511168,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1982650,
+      "cpuMicros": 2176230,
+      "actionMs": 1692.5225410000003,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 97206312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 16206562
+      },
+      "dbReadBytes": 67726,
+      "dbWriteBytes": 24432,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "7968a81cea4a0b32a76c81f4911d2a570d9eb38b20b958c3bd56894d8b0d47af",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "c0e4e6df4b330fcabf7b4218602483599147a5603a05c4ba1c7409c70d78dec0",
+            "size": 805
+          },
+          "left": "356fd498e6ef63b46e48110ef4cd895cc6a04f572c6e4c042e49fc62ceba0082",
+          "right": "294191f7f934a885d4e87f60502a3e7d9dd1e9c752cfda7e514993dc8f24b253",
+          "state": {
+            "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+            "size": 16200178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 740.2107080000001,
+          "maxRssBytes": 672038912
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 952.3118330000001,
+          "maxRssBytes": 677511168
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "save",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:29.876Z",
+      "load": [
+        1.71044921875,
+        3.677734375,
+        3.9765625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 644.3151660000003,
+      "steps": 2,
+      "maxStepMs": 342.955583,
+      "maxRssBytes": 405749760,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 655935,
+      "cpuMicros": 852685,
+      "actionMs": 578.71875,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 16502988,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 16502484
+      },
+      "dbReadBytes": 54918,
+      "dbWriteBytes": 22049,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "97da7fc0ec59b2e9d64dbbfdbabcabb7bb0ac42ff71a1daaae5b700f4d7141b8",
+          "size": 351
+        },
+        "state": {
+          "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+          "size": 16200178
+        }
+      },
+      "state": {
+        "sha256": "c37aabf0e7aa1618585e70c592c8f07dac79f6b1068dd999e8375cf8cf7c596a",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 235.76316699999998,
+          "maxRssBytes": 315031552
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 342.955583,
+          "maxRssBytes": 405749760
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:30.775Z",
+      "load": [
+        1.71044921875,
+        3.677734375,
+        3.9765625
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 798.4552499999991,
+      "steps": 1,
+      "maxStepMs": 765.8423750000001,
+      "maxRssBytes": 665665536,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 916292,
+      "cpuMicros": 1016893,
+      "actionMs": 765.8423750000001,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41389,
+      "dbWriteBytes": 17749,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 765.8423750000001,
+          "maxRssBytes": 665665536
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:31.491Z",
+      "load": [
+        1.7333984375,
+        3.6494140625,
+        3.96484375
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 616.9947089999987,
+      "steps": 1,
+      "maxStepMs": 581.84875,
+      "maxRssBytes": 298844160,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 627867,
+      "cpuMicros": 710576,
+      "actionMs": 581.84875,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 48600874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 16200554
+      },
+      "dbReadBytes": 41378,
+      "dbWriteBytes": 17719,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "cf110637ca990ff328f0be2eb662083eed436122ddd30c10b74f5452b5afb59d",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+            "size": 16200245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "4dead2e722188c762d771d1b98d5bd5a107bf778eaef84e128e56432da9732b5",
+        "size": 16200245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 581.84875,
+          "maxRssBytes": 298844160
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "compose",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:32.569Z",
+      "load": [
+        1.7333984375,
+        3.6494140625,
+        3.96484375
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 975.4239170000001,
+      "steps": 2,
+      "maxStepMs": 615.7113330000001,
+      "maxRssBytes": 669155328,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1068127,
+      "cpuMicros": 1261183,
+      "actionMs": 910.1310410000001,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 81004358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 16203099
+      },
+      "dbReadBytes": 66963,
+      "dbWriteBytes": 23319,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "83500f7ecbd5c5c73c95ceaf1ee48b534eabc9f6baa10c6a74d10d8b7d206635",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+            "size": 16200248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "98811205cc64c90e8de8e7b63ce1516311b7e7671df706ef9e740fee9a69ec5f",
+        "size": 16200248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 294.419708,
+          "maxRssBytes": 365330432
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 615.7113330000001,
+          "maxRssBytes": 669155328
+        }
+      ]
+    },
+    {
+      "files": 100000,
+      "phase": "conflict-sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:34.420Z",
+      "load": [
+        1.7333984375,
+        3.6494140625,
+        3.96484375
+      ],
+      "stateBytes": 16200112,
+      "wallMs": 1745.0031669999953,
+      "steps": 2,
+      "maxStepMs": 948.7358330000001,
+      "maxRssBytes": 674217984,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1972016,
+      "cpuMicros": 2168124,
+      "actionMs": 1680.818667,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 97206312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 16206562
+      },
+      "dbReadBytes": 67708,
+      "dbWriteBytes": 24429,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "7968a81cea4a0b32a76c81f4911d2a570d9eb38b20b958c3bd56894d8b0d47af",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "c0e4e6df4b330fcabf7b4218602483599147a5603a05c4ba1c7409c70d78dec0",
+            "size": 805
+          },
+          "left": "356fd498e6ef63b46e48110ef4cd895cc6a04f572c6e4c042e49fc62ceba0082",
+          "right": "294191f7f934a885d4e87f60502a3e7d9dd1e9c752cfda7e514993dc8f24b253",
+          "state": {
+            "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+            "size": 16200178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "f060dfbc5a55073b412344d2e36fb79028153ccfac3d9b70e669ecc71b974404",
+        "size": 16200178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 732.082834,
+          "maxRssBytes": 671399936
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 948.7358330000001,
+          "maxRssBytes": 674217984
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "save",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:35.589Z",
+      "load": [
+        1.7333984375,
+        3.6494140625,
+        3.96484375
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 963.5039170000018,
+      "steps": 2,
+      "maxStepMs": 541.031792,
+      "maxRssBytes": 625950720,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1011279,
+      "cpuMicros": 1207552,
+      "actionMs": 897.6255,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 31353912,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 31353408
+      },
+      "dbReadBytes": 54909,
+      "dbWriteBytes": 22046,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "68c6d2bfe9aca3eabbcd6c8cb411f1a338f6a46301307a057e2b52c6a71b0d64",
+          "size": 351
+        },
+        "state": {
+          "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+          "size": 30780178
+        }
+      },
+      "state": {
+        "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 356.593708,
+          "maxRssBytes": 461635584
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 541.031792,
+          "maxRssBytes": 625950720
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:37.257Z",
+      "load": [
+        1.7333984375,
+        3.6494140625,
+        3.96484375
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1470.099666000002,
+      "steps": 1,
+      "maxStepMs": 1433.361083,
+      "maxRssBytes": 1005191168,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1789484,
+      "cpuMicros": 1888539,
+      "actionMs": 1433.361083,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41378,
+      "dbWriteBytes": 17745,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1433.361083,
+          "maxRssBytes": 1005191168
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 1,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:38.543Z",
+      "load": [
+        1.75439453125,
+        3.62158203125,
+        3.953125
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1081.8277919999964,
+      "steps": 1,
+      "maxStepMs": 1048.286292,
+      "maxRssBytes": 435863552,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1125407,
+      "cpuMicros": 1207749,
+      "actionMs": 1048.286292,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41378,
+      "dbWriteBytes": 17719,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1048.286292,
+          "maxRssBytes": 435863552
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "compose",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:40.524Z",
+      "load": [
+        1.75439453125,
+        3.62158203125,
+        3.953125
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1720.2357499999998,
+      "steps": 2,
+      "maxStepMs": 1155.751708,
+      "maxRssBytes": 956006400,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 2068230,
+      "cpuMicros": 2264545,
+      "actionMs": 1656.076667,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 153904358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 30783099
+      },
+      "dbReadBytes": 66984,
+      "dbWriteBytes": 23324,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "2ddbb199e25e804494ecfae7f62abc55c43e8802e6cb3490c8cf81b4cc9ead7e",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+            "size": 30780248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+        "size": 30780248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 500.32495900000004,
+          "maxRssBytes": 595083264
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1155.751708,
+          "maxRssBytes": 956006400
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "conflict-sync",
+      "pair": 1,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:44.374Z",
+      "load": [
+        1.75439453125,
+        3.62158203125,
+        3.953125
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 3575.8307910000003,
+      "steps": 2,
+      "maxStepMs": 1960.796791,
+      "maxRssBytes": 1121894400,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 4319099,
+      "cpuMicros": 4521463,
+      "actionMs": 3507.7581659999996,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 184686312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 30786562
+      },
+      "dbReadBytes": 67704,
+      "dbWriteBytes": 24431,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "f2e9bb42135d59bc7b89689d55463a69f4d165aa97348d1900c4b94cdaedb670",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "24b93e9ef2f12ca7c0e283597015e6ca22c46c395ece7a10067c9e334d40b773",
+            "size": 805
+          },
+          "left": "c5678310237748a515ddcbfd0fbf3b75bc740e536c19f85e1210ef79c6210d90",
+          "right": "93bed281dd51b8a0ce769ea8517a33697df81f6cd86432509062cfef6f516417",
+          "state": {
+            "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+            "size": 30780178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1546.9613749999999,
+          "maxRssBytes": 1117323264
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1960.796791,
+          "maxRssBytes": 1121894400
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "save",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:45.572Z",
+      "load": [
+        1.69384765625,
+        3.57763671875,
+        3.935546875
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 971.1202919999996,
+      "steps": 2,
+      "maxStepMs": 548.9746250000001,
+      "maxRssBytes": 639025152,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1031864,
+      "cpuMicros": 1229857,
+      "actionMs": 906.613417,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 31353912,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 31353408
+      },
+      "dbReadBytes": 54900,
+      "dbWriteBytes": 22040,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "68c6d2bfe9aca3eabbcd6c8cb411f1a338f6a46301307a057e2b52c6a71b0d64",
+          "size": 351
+        },
+        "state": {
+          "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+          "size": 30780178
+        }
+      },
+      "state": {
+        "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 357.63879199999997,
+          "maxRssBytes": 461225984
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 548.9746250000001,
+          "maxRssBytes": 639025152
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:47.324Z",
+      "load": [
+        1.69384765625,
+        3.57763671875,
+        3.935546875
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1516.7169170000052,
+      "steps": 1,
+      "maxStepMs": 1481.335667,
+      "maxRssBytes": 1007435776,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1878142,
+      "cpuMicros": 1978159,
+      "actionMs": 1481.335667,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41366,
+      "dbWriteBytes": 17742,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1481.335667,
+          "maxRssBytes": 1007435776
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 2,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:48.625Z",
+      "load": [
+        1.63818359375,
+        3.53466796875,
+        3.91796875
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1098.8780830000032,
+      "steps": 1,
+      "maxStepMs": 1063.87725,
+      "maxRssBytes": 435912704,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1149180,
+      "cpuMicros": 1237146,
+      "actionMs": 1063.87725,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41375,
+      "dbWriteBytes": 17717,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1063.87725,
+          "maxRssBytes": 435912704
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "compose",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:50.532Z",
+      "load": [
+        1.63818359375,
+        3.53466796875,
+        3.91796875
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1716.6208750000005,
+      "steps": 2,
+      "maxStepMs": 1150.210666,
+      "maxRssBytes": 957448192,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 2053612,
+      "cpuMicros": 2255932,
+      "actionMs": 1652.782958,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 153904358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 30783099
+      },
+      "dbReadBytes": 66981,
+      "dbWriteBytes": 23325,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "2ddbb199e25e804494ecfae7f62abc55c43e8802e6cb3490c8cf81b4cc9ead7e",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+            "size": 30780248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+        "size": 30780248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 502.57229200000006,
+          "maxRssBytes": 580616192
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1150.210666,
+          "maxRssBytes": 957448192
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "conflict-sync",
+      "pair": 2,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:54.294Z",
+      "load": [
+        1.63818359375,
+        3.53466796875,
+        3.91796875
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 3561.3430420000004,
+      "steps": 2,
+      "maxStepMs": 1980.403125,
+      "maxRssBytes": 1125580800,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 4255735,
+      "cpuMicros": 4453017,
+      "actionMs": 3496.108917,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 184686312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 30786562
+      },
+      "dbReadBytes": 67710,
+      "dbWriteBytes": 24437,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "f2e9bb42135d59bc7b89689d55463a69f4d165aa97348d1900c4b94cdaedb670",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "24b93e9ef2f12ca7c0e283597015e6ca22c46c395ece7a10067c9e334d40b773",
+            "size": 805
+          },
+          "left": "c5678310237748a515ddcbfd0fbf3b75bc740e536c19f85e1210ef79c6210d90",
+          "right": "93bed281dd51b8a0ce769ea8517a33697df81f6cd86432509062cfef6f516417",
+          "state": {
+            "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+            "size": 30780178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1515.705792,
+          "maxRssBytes": 1117880320
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1980.403125,
+          "maxRssBytes": 1125580800
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "save",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:55.456Z",
+      "load": [
+        1.6669921875,
+        3.5087890625,
+        3.90625
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 971.6159999999945,
+      "steps": 2,
+      "maxStepMs": 549.39675,
+      "maxRssBytes": 691372032,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1019288,
+      "cpuMicros": 1215392,
+      "actionMs": 907.143875,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 128,
+      "documentsWritten": 37,
+      "calls": 11,
+      "functionCalls": 11,
+      "storageCalls": 0,
+      "readObjects": 6,
+      "readBytes": 31353912,
+      "r2": {
+        "get": 6,
+        "head": 5,
+        "put": 4,
+        "putBytes": 31353408
+      },
+      "dbReadBytes": 54912,
+      "dbWriteBytes": 22036,
+      "result": {
+        "schema": 1,
+        "kind": "forge-source-worker-result",
+        "input": {
+          "sha256": "68c6d2bfe9aca3eabbcd6c8cb411f1a338f6a46301307a057e2b52c6a71b0d64",
+          "size": 351
+        },
+        "state": {
+          "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+          "size": 30780178
+        }
+      },
+      "state": {
+        "sha256": "2ef2eb4686cf95d5d617a4e71396b88faf15c78782629328baf9f36c026aa7c7",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 357.74712500000004,
+          "maxRssBytes": 461651968
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 549.39675,
+          "maxRssBytes": 691372032
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:32:57.101Z",
+      "load": [
+        1.6669921875,
+        3.5087890625,
+        3.90625
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1442.0184999999983,
+      "steps": 1,
+      "maxStepMs": 1408.077083,
+      "maxRssBytes": 946044928,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1707862,
+      "cpuMicros": 1805681,
+      "actionMs": 1408.077083,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41375,
+      "dbWriteBytes": 17742,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1408.077083,
+          "maxRssBytes": 946044928
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "sync",
+      "pair": 3,
+      "implementation": "stream",
+      "at": "2026-11-11T16:32:58.373Z",
+      "load": [
+        1.7734375,
+        3.5,
+        3.90087890625
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1074.5232499999984,
+      "steps": 1,
+      "maxStepMs": 1040.005542,
+      "maxRssBytes": 439664640,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 1122953,
+      "cpuMicros": 1205462,
+      "actionMs": 1040.005542,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 102,
+      "documentsWritten": 32,
+      "calls": 7,
+      "functionCalls": 7,
+      "storageCalls": 0,
+      "readObjects": 4,
+      "readBytes": 92340874,
+      "r2": {
+        "get": 4,
+        "head": 3,
+        "put": 2,
+        "putBytes": 30780554
+      },
+      "dbReadBytes": 41366,
+      "dbWriteBytes": 17716,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "79080f530533486cd50d82610de17fe5ae17b012f9fecd818dc486206284f4d4",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "state": {
+            "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+            "size": 30780245
+          },
+          "status": "merged"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "a2ad46bd85199391d60df99de01b668a184361cc07dbb7abaf590cc3467db501",
+        "size": 30780245
+      },
+      "stateByteEquality": true,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1040.005542,
+          "maxRssBytes": 439664640
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "compose",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:33:00.366Z",
+      "load": [
+        1.7734375,
+        3.5,
+        3.90087890625
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 1794.8822079999954,
+      "steps": 2,
+      "maxStepMs": 1229.249959,
+      "maxRssBytes": 951926784,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 2155029,
+      "cpuMicros": 2350138,
+      "actionMs": 1729.479584,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 150,
+      "documentsWritten": 41,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 9,
+      "readBytes": 153904358,
+      "r2": {
+        "get": 9,
+        "head": 4,
+        "put": 3,
+        "putBytes": 30783099
+      },
+      "dbReadBytes": 66984,
+      "dbWriteBytes": 23327,
+      "result": {
+        "algorithm": "forge-native-compose-v1",
+        "input": {
+          "sha256": "2ddbb199e25e804494ecfae7f62abc55c43e8802e6cb3490c8cf81b4cc9ead7e",
+          "size": 625
+        },
+        "kind": "forge-hosted-compose-result",
+        "result": {
+          "paths": [
+            "src/deep/shared/components/features/generated/module-000000.ts"
+          ],
+          "state": {
+            "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+            "size": 30780248
+          },
+          "status": "clean"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "8a8a9aabd8f337e4236dbc4abe71dcdb64df3a109aa6c023766705d727860350",
+        "size": 30780248
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 500.22962499999994,
+          "maxRssBytes": 637206528
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1229.249959,
+          "maxRssBytes": 951926784
+        }
+      ]
+    },
+    {
+      "files": 190000,
+      "phase": "conflict-sync",
+      "pair": 3,
+      "implementation": "current",
+      "at": "2026-11-11T16:33:04.129Z",
+      "load": [
+        1.7734375,
+        3.5,
+        3.90087890625
+      ],
+      "stateBytes": 30780112,
+      "wallMs": 3559.8977499999964,
+      "steps": 2,
+      "maxStepMs": 1948.0972499999998,
+      "maxRssBytes": 1143291904,
+      "failedActions": 0,
+      "maxFailedRssBytes": 0,
+      "maxFailedStepMs": 0,
+      "workCpuMicros": 4222807,
+      "cpuMicros": 4419755,
+      "actionMs": 3494.780708,
+      "peakActive": 1,
+      "peakWork": 0,
+      "documentsRead": 156,
+      "documentsWritten": 44,
+      "calls": 14,
+      "functionCalls": 14,
+      "storageCalls": 0,
+      "readObjects": 11,
+      "readBytes": 184686312,
+      "r2": {
+        "get": 11,
+        "head": 6,
+        "put": 5,
+        "putBytes": 30786562
+      },
+      "dbReadBytes": 67728,
+      "dbWriteBytes": 24437,
+      "result": {
+        "algorithm": "forge-native-sync-v1",
+        "input": {
+          "sha256": "f2e9bb42135d59bc7b89689d55463a69f4d165aa97348d1900c4b94cdaedb670",
+          "size": 405
+        },
+        "kind": "forge-hosted-sync-result",
+        "result": {
+          "conflicts": {
+            "sha256": "24b93e9ef2f12ca7c0e283597015e6ca22c46c395ece7a10067c9e334d40b773",
+            "size": 805
+          },
+          "left": "c5678310237748a515ddcbfd0fbf3b75bc740e536c19f85e1210ef79c6210d90",
+          "right": "93bed281dd51b8a0ce769ea8517a33697df81f6cd86432509062cfef6f516417",
+          "state": {
+            "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+            "size": 30780178
+          },
+          "status": "conflict"
+        },
+        "schema": 1
+      },
+      "state": {
+        "sha256": "965fa4870a09a08e4fb5de332a468c26d5e392a6430d77fcda8c43d62852804a",
+        "size": 30780178
+      },
+      "stateByteEquality": null,
+      "actions": [
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1546.683458,
+          "maxRssBytes": 1116160000
+        },
+        {
+          "name": "projectConvexSourceNode:step",
+          "elapsedMs": 1948.0972499999998,
+          "maxRssBytes": 1143291904
+        }
+      ]
+    }
+  ],
+  "sourceHashes": {
+    "convex/projectConvexSourceNode.ts": "bc4f3f260c84d38245bca3f7906bff4babf01f535b13b483685139395fd4f3c0",
+    "convex/projectConvexSourceTransport.ts": "b035c2e2a28ae468c03be96499b48cc006d80ebfcf43754278578b4be1abeaa3",
+    "src/hosted-source-step.ts": "ec89997d2e30080796515435e825747247ad08dc09c376f6274fbbda2d79ce72",
+    "src/hosted-source-step-merge.ts": "4055d07f96e8cf2d58b37c6a5d7fc1485d4d5ea83fbdd2e705dd3a60a98bb332",
+    "src/native-source.ts": "28e7a75e796702bffa5a07d0be2d82e71bfaedb203c5b1d8b701f5231695cd43",
+    "tests/source-stream-sync.mjs": "c2e227713d7fbfece19dc7a734938272e3dd369a6998c9076c322594f1494411",
+    "tests/source-stream-manifest.mjs": "c1e16714184412795d2b3770a126f13f7289fac1c854fea457115b5f058a2679",
+    "tests/source-stream-provider.mjs": "beebb8dcb775e4ba69bc949f1278f2847ab7e31edcc26e37b101b33eccd5d4cd",
+    "tests/source-memory-fixture.mjs": "5e500f7cf9c6d986861d999fa5771438ffc53224f7de9ad4c6e2691d9057b4b1",
+    "tests/measure-source-memory.mjs": "b054733f679081e01b0d4b4af84a6fe568c33b9cffc1739a820e61dd0fca9289"
+  },
+  "finishedAt": "2026-11-11T16:33:04.135Z"
+}
