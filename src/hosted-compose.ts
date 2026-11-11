@@ -8,7 +8,7 @@ import {
   saveBytes,
   savePin,
 } from './hosted-save.js';
-import { stateSchema } from './state/format.js';
+import { stateSchema, type NativeFile } from './state/format.js';
 import { invariant } from './errors.js';
 import { docsMergeSchema } from './docs-resolution.js';
 export const COMPOSE_ALGORITHM = 'forge-native-compose-v1';
@@ -62,10 +62,48 @@ export const candidateFileListSchema = z
     ),
   })
   .strict();
+/** One source-only listing, derived from the exact manifests already used by the merge. */
+export function candidateFileList(
+  base: string,
+  head: string,
+  bases: Map<string, Pick<NativeFile, 'blob' | 'mode'> | null>,
+  after: NativeFile[],
+  selections: unknown[],
+) {
+  const selected = new Map(after.map(file => [file.path, file]));
+  const files = [...bases]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .flatMap(([path, original]) => {
+      const before = original ? { path, ...original } : null,
+        next = selected.get(path) ?? null;
+      if (before?.blob === next?.blob && before?.mode === next?.mode) return [];
+      return [{ path, before, after: next, status: !before ? 'added' : !next ? 'deleted' : 'modified' }];
+    });
+  const inputs = [],
+    dependencies = [];
+  for (const selection of selections) {
+    const lane = composeLaneSchema.safeParse(selection);
+    if (lane.success) inputs.push({ laneId: lane.data.laneId, head: lane.data.head });
+    else {
+      const dependency = composeDependencySchema.parse(selection);
+      dependencies.push({ candidateId: dependency.candidateId, head: dependency.head });
+    }
+  }
+  return candidateFileListSchema.parse({
+    schema: 1,
+    kind: 'forge-candidate-files',
+    base,
+    head,
+    inputs,
+    dependencies,
+    files,
+  });
+}
 export const composeInputSchema = z
   .object({
     schema: z.literal(1),
     kind: z.literal('forge-hosted-compose-input'),
+    candidateFiles: z.literal(true).optional(),
     restoreBases: z.record(z.uuid(), saveWorkerObjectSchema).optional(),
     batch: batchComposeSchema.optional(),
     base: main,
@@ -89,6 +127,7 @@ export const composeResultSchema = z
         .object({
           status: z.literal('clean'),
           state: object,
+          candidateFiles: object.optional(),
           paths: z.array(z.string()).optional(),
           /** Markdown-only conflicts merged with native finish's docs rule. */
           docs: docsMergeSchema.optional(),

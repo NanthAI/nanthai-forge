@@ -7,6 +7,7 @@ import { invariant } from './errors.js';
 import { canonicalPayload } from './hosted-source-operation.js';
 import { savePin, saveBytes } from './hosted-save.js';
 import {
+  candidateFileList,
   composeInputSchema,
   composeResultSchema,
   composeConflictPageSchema,
@@ -46,6 +47,7 @@ export async function buildHostedComposeState(
   progress: () => Promise<void>,
   /** Base entries of every path changed so far; null when that coverage is unknown. */
   bases: ComposeBases | null = new Map(),
+  fileListContext?: { base: string; selections: unknown[] },
 ) {
   const plan = composeInputSchema.parse(value),
     source = original instanceof LazyMergeSource ? original : new LazyMergeSource(original.owner);
@@ -58,6 +60,8 @@ export async function buildHostedComposeState(
     pageCount = 0,
     selected = 0;
   const dropped: BatchDropped = [];
+  const selections: unknown[] = [];
+  let listing: Buffer | undefined;
   const mergedMembers: string[] = [];
   // Paths merged with native finish's Markdown docs rule, recorded on the clean result.
   const docsPaths: string[] = [];
@@ -84,6 +88,7 @@ export async function buildHostedComposeState(
       );
       pages++;
       entries += page.entries.length;
+      selections.push(...page.entries);
       pageCount++;
       invariant(
         pages <= manifest.pages && entries <= manifest.count,
@@ -236,14 +241,28 @@ export async function buildHostedComposeState(
     // source scans, graph queries or provider calls are needed for changed paths.
     const paths = bases && changedPaths(bases, source.state(plan.base.head).files, source.state(head).files);
     const docs = docsMerge(docsPaths);
+    if (plan.candidateFiles && bases)
+      listing = Buffer.from(
+        saveBytes(
+          candidateFileList(
+            fileListContext?.base ?? plan.base.head,
+            head,
+            bases,
+            source.state(head).files,
+            fileListContext?.selections ?? selections,
+          ),
+        ),
+      );
     result = {
       status: 'clean',
+      ...(listing ? { candidateFiles: savePin(JSON.parse(listing.toString('utf8'))) } : {}),
       state: { sha256: head, size: source.object(head).length },
       ...(paths ? { paths } : {}),
       ...(docs ? { docs } : {}),
     };
   }
-  const output = await reader.publish(
+  const outputs = await reader.publishMany([
+    ...(listing ? [listing] : []),
     Buffer.from(
       saveBytes(
         composeResultSchema.parse({
@@ -256,7 +275,8 @@ export async function buildHostedComposeState(
         }),
       ),
     ),
-  );
+  ]);
+  const output = outputs.at(-1)!;
   return {
     head: result.status === 'clean' ? result.state.sha256 : null,
     state: result.status === 'clean' ? result.state : null,

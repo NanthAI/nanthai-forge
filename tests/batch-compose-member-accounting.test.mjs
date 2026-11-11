@@ -104,7 +104,7 @@ const lines = edits => {
   return out.join('\n') + '\n';
 };
 
-function incident() {
+function incident(candidateFiles = false) {
   const x = committedFixture(),
     file = (path, text) => ({ path, mode: 'file', blob: x.put(text).sha256 });
   const root = x.state([file('shared.txt', lines({}))]);
@@ -128,6 +128,7 @@ function incident() {
   const input = x.json({
     schema: 1,
     kind: 'forge-hosted-compose-input',
+    ...(candidateFiles ? { candidateFiles: true } : {}),
     batch: { members: members.map(m => m.candidateId) },
     base: { head: main.sha256, receiptId: randomUUID() },
     main: { object: main, recipe: null },
@@ -163,6 +164,37 @@ test('incident replay: a member whose on-main probe needs a fresh merge is dropp
     [members[2].candidateId],
   );
   assert.equal(expected.result.state.sha256, output.result.state.sha256);
+});
+
+test('a batch publishes one exact file listing even when its last member is dropped after a resumed merge', async () => {
+  const { x, members, input } = incident(true);
+  const cursor = await drainCommitted(x, input);
+  const output = JSON.parse(x.committed.get(cursor.output.sha256));
+  const listing = JSON.parse(x.committed.get(output.result.candidateFiles.sha256));
+  assert.equal(listing.base, JSON.parse(x.committed.get(input.sha256)).base.head);
+  assert.equal(listing.head, output.result.state.sha256);
+  assert.deepEqual(
+    listing.files.map(file => file.path),
+    ['shared.txt', 'two.txt'],
+  );
+  assert.deepEqual(
+    listing.dependencies,
+    members.map(({ candidateId, head }) => ({ candidateId, head })),
+  );
+  assert.equal(
+    [...x.committed.values()].filter(bytes => {
+      try {
+        return JSON.parse(bytes).kind === 'forge-candidate-files';
+      } catch {
+        return false;
+      }
+    }).length,
+    1,
+  );
+  const fixed = await buildHostedSourceState(input, x.io);
+  x.commit();
+  const expected = JSON.parse(x.committed.get(fixed.output.sha256));
+  assert.deepEqual(expected.result.candidateFiles, output.result.candidateFiles);
 });
 
 test('a batch result that neither merges nor drops a member is refused', () => {

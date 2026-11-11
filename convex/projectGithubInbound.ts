@@ -257,6 +257,7 @@ export const submit = internalMutation({
       firstAttempt: first,
     });
     const compose: ComposeState = {
+      ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
       request,
       ownerInputs: false,
       main: await saveObject(ctx, project._id, { sha256: main.head }),

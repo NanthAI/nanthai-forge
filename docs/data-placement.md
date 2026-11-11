@@ -89,10 +89,17 @@ Canonical Candidate file readers negotiate `candidate-source-files`. Their
 source-only R2 listing, when a trusted producer supplies it, pins the exact base
 and head and contains changed paths, modes and blob identities, with no people
 or Work payloads. The browser otherwise compares the two exact State manifests;
-CLI provenance retains its canonical history reader. The source-file-list
-writer and removal of legacy data projections remain pending on S4. Existing
-`projectWorkDataRecords` rows are unchanged; the reader landing performs no
-migration or deletion. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
+CLI provenance retains its canonical history reader. The source writer captures default-off
+`FORGE_CANDIDATE_FILES=1` in the original compose plan. All compose producers
+(public, finish, batch, GitHub inbound and culprit) use that server environment
+mechanism, as S1 does for capsules. Small, stepped and fixed workers build one
+listing from their already verified manifests; publication pins its digest/size
+as server metadata on the immutable Candidate, with no new landing RPC. Old
+indexed readers of a Candidate carrying that pointer return `CLI_UPGRADE_REQUIRED`.
+Compatible canonical Candidate header reads keep their original shape.
+
+Legacy projection writers remain unchanged. Existing `projectWorkDataRecords`
+rows are unchanged; no migration, deletion or flag enablement runs implicitly. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
 
 ## Planning search
 

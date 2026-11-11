@@ -260,3 +260,34 @@ for (const kind of ['save', 'candidate'])
     await assert.rejects(recoverSnapshot(f.target, f.request, f.transport), { code: 'INVALID_WORK_BACKUP' });
     assert(!existsSync(f.target));
   });
+
+test('a Candidate file-list metadata pin survives independent portable export and restore', async t => {
+  const f = await hostedRecoveryFixture(t);
+  const original = new NativeSource(f.root);
+  const bytes = Buffer.from(
+    JSON.stringify({
+      schema: 1,
+      kind: 'forge-candidate-files',
+      base: f.main.head,
+      head: f.head,
+      inputs: [],
+      dependencies: [],
+      files: [],
+    }),
+  );
+  const sha256 = original.put(bytes);
+  const row = f.tables.projectHostedRecords.find(row => row.kind === 'candidate');
+  row.candidateFiles = { sha256, size: bytes.length };
+  await recoverSnapshot(f.target, f.request, f.transport);
+  const source = new NativeSource(f.target);
+  assert.deepEqual(source.object(sha256), bytes);
+  const recovered = f.store().load().hostedRecovery;
+  const restoredRow = [...hostedRecoveryRows(source, recovered, 'projectHostedRecords')].find(
+    row => row.kind === 'candidate',
+  );
+  assert.deepEqual(restoredRow.candidateFiles, row.candidateFiles);
+  const exported = (await exportNativeWork(f.store(), f.store().revision(), true)).result;
+  const target = join(f.directory, 'listing-independent');
+  await restoreNativeWork(exported.archive.path, target);
+  assert.deepEqual(new NativeSource(target).object(sha256), bytes);
+});

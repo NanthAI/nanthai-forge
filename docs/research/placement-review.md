@@ -325,9 +325,25 @@ Done when: a landing writes zero rows to `projectWorkDataRecords`; the Candidate
 
 S4 readers negotiate `candidate-source-files` using the existing contract-feature
 mechanism. Canonical web Candidates do not require a legacy Work generation;
-legacy indexed Views remain readable. The planned writer uses a default-off
-server environment setting, like S1's capsule writer, after the readers deploy.
-There is no new settings table or user step.
+legacy indexed Views remain readable. After the readers deployed, a source-only file-list writer was added behind
+`FORGE_CANDIDATE_FILES=1`, default off, using S1's server-environment mechanism.
+The original operation captures the choice for retries. The small-compose,
+fixed-worker and stepped paths publish at most one listing with exact final
+base/head and all selected input identities. Batch intermediates do not each
+publish a listing. Existing recovery includes the server metadata pin. There is
+no new settings table or user step. Old indexed Candidate readers receive
+`CLI_UPGRADE_REQUIRED` when the selected Candidate uses this protocol.
+
+This does not yet remove legacy data-projection writes. Their active writer
+families remain generation publication (`projectWorkIndexStore`), paged Work
+rebuild (`projectWorkIndexBuildStore`), indexed command projection (`projectWork`),
+GitHub import publication/fallback, native bootstrap, Work-store migration
+fingerprints/comparisons and explicit record-partition migration. Routing also
+includes planning payload collections, not just source and View data. Do not
+suppress those rows before their exact attributes, mutation-critical overlays,
+identity mapping and recovery replacements are implemented. Canonical compose
+already wrote zero data rows before this change; it does not prove all-path
+elimination or the modelled storage saving.
 
 The remaining data-projection readers have these replacement boundaries. These
 are the migration contract, not a claim that the writer has switched:

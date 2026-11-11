@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
+  candidateFileList,
   composeInputSchema,
   composeLaneSchema,
   composeDependencySchema,
@@ -164,6 +165,51 @@ export async function prepareMergeStep(
           changedPaths(bases, files.get(left)!, files.get(right)!);
           c.composeBases = [...bases];
         } else delete c.composeBases;
+      }
+      if (plan.candidateFiles && c.composeBases && files.has(c.head)) {
+        const listing = candidateFileList(
+          plan.base.head,
+          c.head,
+          new Map(c.composeBases),
+          files.get(c.head)!,
+          c.selections,
+        );
+        if (plan.batch)
+          assertBatchAccounted(
+            plan.batch.members,
+            c.selections.flatMap(selection => {
+              const dependency = composeDependencySchema.safeParse(selection);
+              return dependency.success && plan.batch!.members.includes(dependency.data.candidateId)
+                ? [dependency.data.candidateId]
+                : [];
+            }),
+            [],
+          );
+        const pin = savePin(listing);
+        const outputs = await new MemorySourceReader(source, io).publishMany([
+          Buffer.from(saveBytes(listing)),
+          Buffer.from(
+            saveBytes(
+              composeResultSchema.parse({
+                schema: 1,
+                kind: 'forge-hosted-compose-result',
+                input: c.input,
+                algorithm: plan.algorithm,
+                ...(plan.batch ? { dropped: [] } : {}),
+                result: {
+                  status: 'clean',
+                  state: c.inventory[c.head]!.object,
+                  candidateFiles: pin,
+                  paths: listing.files.map(file => file.path),
+                },
+              }),
+            ),
+          ),
+        ]);
+        c.output = outputs[1]!;
+        c.index = 1;
+        c.phase = 'done';
+        return;
       }
       c.index = 1;
       c.phase = 'compute';
@@ -387,7 +433,13 @@ export async function computeMergeStep(
     }
     const reader = new MemorySourceReader(source, io);
     const docs = docsMerge(c.docsPaths ?? []);
-    c.output = await reader.publish(
+    const listing =
+      plan.candidateFiles && !c.candidateFiles && c.composeBases && c.head === plan.base.head
+        ? candidateFileList(plan.base.head, c.head, new Map(), [], c.selections)
+        : null;
+    const listingPin = listing ? savePin(listing) : c.candidateFiles;
+    const outputs = await reader.publishMany([
+      ...(listing ? [Buffer.from(saveBytes(listing))] : []),
       Buffer.from(
         saveBytes(
           composeResultSchema.parse({
@@ -400,13 +452,15 @@ export async function computeMergeStep(
             result: {
               status: 'clean',
               state,
+              ...(listingPin ? { candidateFiles: listingPin } : {}),
               ...(c.composeBases ? { paths: c.composeBases.map(([path]) => path).sort() } : {}),
               ...(docs ? { docs } : {}),
             },
           }),
         ),
       ),
-    );
+    ]);
+    c.output = outputs.at(-1)!;
     c.phase = 'done';
     return;
   }
@@ -438,6 +492,8 @@ export async function computeMergeStep(
     {
       ...plan,
       batch: undefined, // This quantum retains its own member-conflict result.
+      candidateFiles:
+        plan.candidateFiles && c.index + 1 === c.selections.length && !plan.batch ? true : undefined,
       base: { ...plan.base, head: c.head },
       main,
       inputs: inputs.manifest,
@@ -447,6 +503,7 @@ export async function computeMergeStep(
     source,
     async () => {},
     bases,
+    { base: plan.base.head, selections: c.selections },
   );
   let manifest = composeResultSchema.parse(JSON.parse(source.object(result.output.sha256).toString('utf8')));
   const member =
@@ -458,7 +515,13 @@ export async function computeMergeStep(
   if (member && !againstMain) {
     const onMain = await buildHostedComposeState(
       c.input,
-      { ...plan, batch: undefined, inputs: inputs.manifest, dependencies: dependencies.manifest },
+      {
+        ...plan,
+        batch: undefined,
+        candidateFiles: undefined,
+        inputs: inputs.manifest,
+        dependencies: dependencies.manifest,
+      },
       reader,
       source,
       async () => {},
@@ -493,11 +556,42 @@ export async function computeMergeStep(
         ),
       ),
     );
+  // Publish exactly one listing in the last batch quantum while the final State is resident.
+  // The later terminal quantum only references this pin; it never re-reads a whole State.
+  let candidateFiles = c.candidateFiles;
+  if (
+    plan.candidateFiles &&
+    plan.batch &&
+    c.index + 1 === c.selections.length &&
+    (member || manifest.result.status === 'clean')
+  ) {
+    const finalHead = member
+      ? c.head!
+      : manifest.result.status === 'clean'
+        ? manifest.result.state.sha256
+        : c.head!;
+    const finalBases = member ? (c.composeBases ? new Map(c.composeBases) : null) : bases;
+    if (finalBases)
+      candidateFiles = await reader.publish(
+        Buffer.from(
+          saveBytes(
+            candidateFileList(
+              plan.base.head,
+              finalHead,
+              finalBases,
+              source.state(finalHead).files,
+              c.selections,
+            ),
+          ),
+        ),
+      );
+  }
   // The quantum commits below, after its last await. Any await above can throw
   // SourceCalculationsPending, and the step re-runs this same index; moving the
   // cursor first skipped a batch member without merging or dropping it (Issue 55bcad06).
   if (bases && !(plan.batch && manifestConflict(result, source))) c.composeBases = [...bases];
   if (docsPaths.length) c.docsPaths = docsPaths;
+  if (candidateFiles) c.candidateFiles = candidateFiles;
   c.index++;
   if (member && 'candidateId' in value) {
     invariant(manifest.result.status === 'conflict', 'SOURCE_JOB_INVALID', 'Retain the rejected merge.');

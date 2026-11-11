@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { recordHead } from './projectHostedRecords';
 import { canonicalView } from './projectCanonicalView';
 import { workRecordTable } from './projectWorkRecordTables';
 import { hostedPaths, hostedJson } from '../src/hosted-paths';
@@ -76,7 +77,18 @@ export const read = query({
         const canonical = await canonicalView(ctx, input.projectId, input.viewId);
         if (canonical) return hostedJson(canonical);
       }
+      const requireCurrentReader = async () => {
+        if (!input.viewId || input.features?.includes('candidate-source-files')) return;
+        const head = await recordHead(ctx, input.projectId, 'candidate', input.viewId);
+        const row = head ? await ctx.db.get(head.recordId) : null;
+        invariant(
+          !row?.candidateFiles,
+          'CLI_UPGRADE_REQUIRED',
+          'This Candidate requires source file-list support. Run nforge update or reload the web app and retry.',
+        );
+      };
       const generation = await selectedGeneration(ctx, project);
+      if (!generation) await requireCurrentReader();
       invariant(
         generation && (!input.generationId || generation._id === input.generationId),
         'WORK_STALE',
@@ -124,6 +136,7 @@ export const read = query({
       }
       invariant(input.viewId, 'BAD_ARGUMENT', 'Select a View.');
       const model = await value(ctx, partition, 'viewDetails', input.viewId);
+      if (!model) await requireCurrentReader();
       invariant(model, 'NOT_FOUND', 'View not found.');
       const stats = model.head
         ? await value(ctx, partition, 'diffstats', `${model.base}:${model.head}`)

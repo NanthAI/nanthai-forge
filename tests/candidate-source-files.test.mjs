@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { bootstrapInterval } from '../scripts/bootstrap-interval.mjs';
 import { performance } from 'node:perf_hooks';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -9,6 +10,8 @@ import { reviewPaths } from '../dist/source-review-format.js';
 import { saveBytes } from '../dist/hosted-save.js';
 import { candidateFileListSchema } from '../dist/hosted-compose.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
+import { runSmallSourceCompose } from '../dist/hosted-source-small-compose.js';
+import { initialSourceStep, runSourceStep } from '../dist/hosted-source-step.js';
 const views = await import(moduleUrl('../convex/projectViewReads.ts'));
 const { canonicalViewFiles } = await import(moduleUrl('../web/src/views/canonical-source.ts'));
 const compose = await import(moduleUrl('../convex/projectHostedCompose.ts'));
@@ -159,7 +162,7 @@ for (const count of [4000, 29000]) {
     } catch (e) {
       withoutGeneration = e.data?.code ?? e.code;
     }
-    assert.equal(withoutGeneration, 'WORK_STALE');
+    assert.equal(withoutGeneration, 'CLI_UPGRADE_REQUIRED');
     const backupId = c.insert('projectBackups', {
       projectId: c.projectId,
       operationId: 'synthetic-backup',
@@ -204,7 +207,7 @@ for (const count of [4000, 29000]) {
     } catch (e) {
       withGeneration = e.data?.code ?? e.code;
     }
-    assert.equal(withGeneration, 'NOT_FOUND');
+    assert.equal(withGeneration, 'CLI_UPGRADE_REQUIRED');
     const seed = (collection, key, parent, value) =>
       c.insert(
         collection === 'viewFiles' || collection.startsWith('source')
@@ -221,13 +224,15 @@ for (const count of [4000, 29000]) {
         },
       );
     const { canonicalSource: _source, ...legacyModel } = model;
-    seed('viewDetails', candidate.id, candidate.intentId, {
+    const legacyId = 'legacy-' + candidate.id;
+    seed('viewDetails', legacyId, candidate.intentId, {
       ...legacyModel,
+      viewId: legacyId,
       inputs: result.inputs,
       fileCount: 1,
       provenanceAvailable: true,
     });
-    seed('viewFiles', candidate.id + ':' + changed.path, candidate.id, {
+    seed('viewFiles', legacyId + ':' + changed.path, legacyId, {
       ...listing.files[0],
       contributors: [],
       historyComplete: false,
@@ -239,9 +244,16 @@ for (const count of [4000, 29000]) {
     // Diagnostic only: in-process query + codec, excluding descriptor RPCs and network latency.
     const legacySamples = [],
       compactSamples = [];
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 13; i++) {
       let start = performance.now();
-      const legacy = JSON.parse(await query());
+      const legacy = JSON.parse(
+        await c.transaction('legacyBaseline', views.read, {
+          projectId: c.projectId,
+          action: 'view',
+          viewId: legacyId,
+          paginationOpts: { cursor: null, numItems: 30 },
+        }),
+      );
       assert.equal(legacy.files.items[0].path, changed.path);
       if (i > 1) legacySamples.push(performance.now() - start);
       start = performance.now();
@@ -259,6 +271,8 @@ for (const count of [4000, 29000]) {
       );
       if (i > 1) compactSamples.push(performance.now() - start);
     }
+    const pairs = legacySamples.map((a, index) => [a, compactSamples[index]]);
+    const interval = bootstrapInterval(pairs);
     legacySamples.sort((a, b) => a - b);
     compactSamples.sort((a, b) => a - b);
 
@@ -287,8 +301,9 @@ for (const count of [4000, 29000]) {
         webWithGeneration: withGeneration,
         manifestDiffMedianMs: samples[3],
         listingReadBytes,
-        legacyQueryMedianMs: legacySamples[3],
-        compactProjectionAndDecodeMedianMs: compactSamples[3],
+        legacyQueryMedianMs: legacySamples[5],
+        compactProjectionAndDecodeMedianMs: compactSamples[5],
+        queryCodecTiming: { pairs, ...interval },
         rssKiB: process.memoryUsage().rss / 1024,
         maxRssKiB: process.resourceUsage().maxRSS,
       }),
@@ -366,4 +381,197 @@ test('Candidate file bytes refuse access revoked during IO and on an immutable c
   allowed = false;
   await assert.rejects(read(), e => e.code === 'PROJECT_UNAVAILABLE');
   assert.equal(gets, warmGets, 'a cached object does not bypass current authority');
+});
+
+for (const count of [4000, 29000]) {
+  test(`source-built ${count}-file Candidate pins one listing, survives stepped execution, and changes no client call count`, async t => {
+    const c = await composeFixture({
+      baselineFiles: Array.from({ length: count - 2 }, (_, i) => [
+        `src/${String(i).padStart(6, '0')}.ts`,
+        'same\n',
+      ]),
+    });
+    const before = parseNativeState(c.objects.get(c.baseline.sha256)).files;
+    const changed = c.file(before[2].path, 'changed\n');
+    const head = c.state(
+      before.map((f, i) => (i === 2 ? changed : f)),
+      [c.baseline.sha256],
+    );
+    const lane = await c.lane(head);
+    const measurements = [];
+    for (const enabled of [false, true]) {
+      const selected = c.selection([lane]);
+      const prior = process.env.FORGE_CANDIDATE_FILES;
+      if (enabled) process.env.FORGE_CANDIDATE_FILES = '1';
+      else delete process.env.FORGE_CANDIDATE_FILES;
+      const start = c.counts.length;
+      try {
+        await c.prepare(selected);
+      } finally {
+        if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
+        else process.env.FORGE_CANDIDATE_FILES = prior;
+      }
+      await c.stage(selected);
+      const plan = (await c.progress(selected)).input;
+      assert.equal(plan.candidateFiles, enabled ? true : undefined, 'flag is captured before retries');
+      await c.submit(selected);
+      const objectStart = new Set(c.objects.keys());
+      const work = await c.work(selected);
+      const published = await c.publish(work);
+      const calls = c.counts.slice(start).map(row => row.name);
+      const candidate = published.outcome.result;
+      const row = [...c.tables.projectHostedRecords.values()].find(
+        row => row.key === candidate.id && row.kind === 'candidate',
+      );
+      assert.equal(Boolean(row.candidateFiles), enabled);
+      assert.equal(c.tables.projectWorkDataRecords.size, 0);
+      assert.deepEqual(await c.publish(work), published, 'publication replay keeps the original pointer');
+      const created = [...c.objects].filter(([id]) => !objectStart.has(id));
+      const listings = created.filter(([, bytes]) => {
+        try {
+          return JSON.parse(bytes).kind === 'forge-candidate-files';
+        } catch {
+          return false;
+        }
+      });
+      assert.equal(listings.length, enabled ? 1 : 0, 'only one extra source listing is written');
+      measurements.push({ enabled, calls, objects: created.length });
+      if (!enabled) continue;
+      const listing = candidateFileListSchema.parse(JSON.parse(c.objects.get(row.candidateFiles.sha256)));
+      assert.deepEqual(
+        listing.files,
+        reviewPaths(before, parseNativeState(c.objects.get(head.sha256)).files).filter(
+          f => f.status !== 'unchanged',
+        ),
+      );
+      assert.deepEqual(listing.inputs, [{ laneId: lane.laneId, head: head.sha256 }]);
+      assert.deepEqual(listing.dependencies, []);
+      const model = JSON.parse(
+        await c.transaction('pinnedView', views.read, {
+          projectId: c.projectId,
+          action: 'view',
+          viewId: candidate.id,
+          features: ['candidate-source-files'],
+          paginationOpts: { cursor: null, numItems: 30 },
+        }),
+      );
+      let readBytes = 0;
+      const page = await canonicalViewFiles(
+        model,
+        { paginationOpts: { cursor: null, numItems: 30 } },
+        async pins => {
+          assert(pins.every(pin => pin.sha256 === row.candidateFiles.sha256));
+          readBytes += pins.reduce((sum, pin) => sum + pin.size, 0);
+          return pins.map(pin => c.objects.get(pin.sha256));
+        },
+      );
+      assert.equal(page.files.total, 1);
+      assert(readBytes < 2048, 'page bytes depend on changed files, not repository file count');
+      // The Convex provider uses durable cursors rather than the fixed worker. Read only
+      // committed objects and round-trip every continuation through its schema.
+      const { parseSourceCursor } = await import('../dist/hosted-source-cursor-schema.js');
+      const input = c.put(saveBytes(plan));
+      let cursor = initialSourceStep(input),
+        steps = 0;
+      const uploaded = new Map();
+      const io = {
+        async describeBatch(ids) {
+          return ids.map(id => ({ object: { sha256: id, size: c.objects.get(id).length }, recipe: null }));
+        },
+        async read(pin) {
+          return [c.objects.get(pin.sha256)];
+        },
+        async upload(pin, stream) {
+          const parts = [];
+          for await (const part of stream) parts.push(part);
+          const bytes = Buffer.concat(parts);
+          assert.deepEqual(c.put(bytes), pin);
+          uploaded.set(pin.sha256, bytes);
+        },
+      };
+      while (cursor.phase !== 'done') {
+        assert(++steps < 50, 'bounded source continuations');
+        cursor = parseSourceCursor(JSON.parse(JSON.stringify((await runSourceStep(cursor, io)).cursor)));
+      }
+      const stepped = JSON.parse(c.objects.get(cursor.output.sha256));
+      assert.deepEqual(
+        stepped.result.candidateFiles,
+        row.candidateFiles,
+        'fast-forward and fixed worker derive the same bytes',
+      );
+      assert.equal(
+        [...uploaded.values()].filter(bytes => {
+          try {
+            return JSON.parse(bytes).kind === 'forge-candidate-files';
+          } catch {
+            return false;
+          }
+        }).length,
+        1,
+      );
+      const small = await runSmallSourceCompose(input, io);
+      if (count === 4000) {
+        assert(small, '4k fast path stays eligible');
+        assert.deepEqual(JSON.parse(c.objects.get(small.sha256)).result.candidateFiles, row.candidateFiles);
+      } else assert.equal(small, null, '29k retains the stepped provider');
+      t.diagnostic(
+        JSON.stringify({
+          count,
+          listingReadBytes: readBytes,
+          steppedSourceActions: steps,
+          canonicalDataRows: c.tables.projectWorkDataRecords.size,
+        }),
+      );
+    }
+    assert.deepEqual(
+      measurements[1].calls,
+      measurements[0].calls,
+      'same registered control calls with the setting on',
+    );
+    assert.equal(measurements[1].objects, measurements[0].objects + 1, 'exactly one additional R2 object');
+  });
+}
+
+test('an unchanged Lane publishes an exact empty listing in both source execution paths', async () => {
+  const c = await composeFixture();
+  const selected = c.selection([await c.lane(c.baseline)]);
+  const prior = process.env.FORGE_CANDIDATE_FILES;
+  process.env.FORGE_CANDIDATE_FILES = '1';
+  try {
+    await c.prepare(selected);
+  } finally {
+    if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
+    else process.env.FORGE_CANDIDATE_FILES = prior;
+  }
+  await c.stage(selected);
+  await c.submit(selected);
+  const work = await c.work(selected);
+  const raw = JSON.parse(work.manifest);
+  const plan = (await c.progress(selected)).input;
+  const input = c.put(saveBytes(plan));
+  let cursor = initialSourceStep(input),
+    steps = 0;
+  while (cursor.phase !== 'done') {
+    assert(++steps < 20);
+    cursor = (
+      await runSourceStep(cursor, {
+        async describeBatch(ids) {
+          return ids.map(id => ({ object: { sha256: id, size: c.objects.get(id).length }, recipe: null }));
+        },
+        async read(pin) {
+          return [c.objects.get(pin.sha256)];
+        },
+        async upload(pin, stream) {
+          const parts = [];
+          for await (const part of stream) parts.push(part);
+          assert.deepEqual(c.put(Buffer.concat(parts)), pin);
+        },
+      })
+    ).cursor;
+  }
+  const stepped = JSON.parse(c.objects.get(cursor.output.sha256));
+  assert.deepEqual(stepped.result.candidateFiles, raw.result.candidateFiles);
+  const listing = JSON.parse(c.objects.get(stepped.result.candidateFiles.sha256));
+  assert.equal(listing.base, listing.head);
+  assert.deepEqual(listing.files, []);
 });

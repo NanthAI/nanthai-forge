@@ -1042,6 +1042,7 @@ async function prepareSystemCompose(
     jobOperation: culpritId({ composeJobOperation: operationId }),
   });
   const compose: ComposeState = {
+    ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
     request,
     ownerInputs: true,
     main: await saveObject(ctx, project._id, { sha256: main.head }),

@@ -71,6 +71,7 @@ const cursorSchema = z
         z.tuple([z.string(), stateSchema.shape.files.element.pick({ blob: true, mode: true }).nullable()]),
       )
       .optional(),
+    candidateFiles: jobObject.optional(),
     docsPaths: z.array(z.string()).optional(),
   })
   .strict();

@@ -22,6 +22,7 @@ const progress = z
   .strict();
 export const composeStateSchema = z
   .object({
+    candidateFiles: z.literal(true).optional(),
     retryUntil: z.number().int().nonnegative().optional(),
     semanticPlan: semanticPlanSchema.optional(),
     ownerInputs: z.boolean().optional(),
@@ -97,6 +98,7 @@ export function hostedComposeInput(state: ComposeState, at: string) {
     schema: 1,
     ...(state.batch ? { batch: state.batch } : {}),
     kind: 'forge-hosted-compose-input',
+    ...(state.candidateFiles ? { candidateFiles: true } : {}),
     ...(state.restoreBases ? { restoreBases: state.restoreBases } : {}),
     base: state.request.expectedMain,
     main: state.main,

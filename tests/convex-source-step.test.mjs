@@ -557,6 +557,7 @@ test('changed paths span every composition step and action; old cursors sign no 
   const plan = {
     schema: 1,
     kind: 'forge-hosted-compose-input',
+    candidateFiles: true,
     base: { head: base.sha256, receiptId: 'main' },
     main: { object: base, recipe: null },
     inputs: inputs.manifest,
@@ -574,6 +575,15 @@ test('changed paths span every composition step and action; old cursors sign no 
   assert.equal(paths[0], '.github/workflows/deploy.yml');
   assert(!paths.includes('tmp') && !paths.includes('shared'));
   assert.equal(paths.length, 61);
+  const listingPin = JSON.parse(x.objects.get(actual.cursor.output.sha256)).result.candidateFiles;
+  const listing = JSON.parse(x.objects.get(listingPin.sha256));
+  assert.equal(listing.base, base.sha256);
+  assert.deepEqual(
+    listing.files.map(file => file.path),
+    paths,
+  );
+  assert.equal(listing.inputs.length, 61);
+  assert.equal(listing.dependencies.length, 1);
   const single = buildComposePages([lanes[1]]),
     fastForward = x.json({ ...plan, inputs: single.manifest, dependencies: buildComposePages([]).manifest });
   for (const page of [...single.pages, ...buildComposePages([]).pages]) x.json(page.value);
@@ -584,6 +594,7 @@ test('changed paths span every composition step and action; old cursors sign no 
     const result = JSON.parse(x.objects.get(c.output.sha256)).result;
     assert.equal(result.status, 'clean');
     assert(!('paths' in result), 'unknown coverage is never signed as complete');
+    assert(!('candidateFiles' in result), 'unknown coverage never produces a partial listing');
   }
 });
 test('dogfood-size changed-path bases stay compact in durable progress', async t => {
@@ -906,64 +917,66 @@ test('forge.json merge lists compose without a conflict and keep both entries in
 });
 
 test('V8 manifest-only composition is byte-identical to the fixed worker for fast-forwards, contained tips and sibling metadata merges on 4k files', async () => {
-  for (const kind of ['forward', 'contained', 'sibling', 'content', 'overlap', 'mode']) {
-    const x = fixture(),
-      blob = x.put('base'),
-      changed = x.put('changed'),
-      other = x.put('other');
-    const files = Array.from({ length: 4000 }, (_, i) => ({
-      path: `src/${String(i).padStart(6, '0')}.txt`,
-      mode: 'file',
-      blob: blob.sha256,
-    }));
-    const base = x.state(files);
-    const leftFiles = files.map((f, i) => (i === 0 ? { ...f, blob: changed.sha256 } : f));
-    const rightFiles = files.map((f, i) =>
-      i === (kind === 'content' || kind === 'mode' ? 0 : 1)
-        ? { ...f, ...(kind === 'mode' ? { mode: 'executable' } : { blob: other.sha256 }) }
-        : f,
-    );
-    if (kind === 'overlap') {
-      leftFiles.push({ path: 'new', mode: 'file', blob: blob.sha256 });
-      rightFiles.push({ path: 'new/child', mode: 'file', blob: blob.sha256 });
+  for (const candidateFiles of [false, true])
+    for (const kind of ['forward', 'contained', 'sibling', 'content', 'overlap', 'mode']) {
+      const x = fixture(),
+        blob = x.put('base'),
+        changed = x.put('changed'),
+        other = x.put('other');
+      const files = Array.from({ length: 4000 }, (_, i) => ({
+        path: `src/${String(i).padStart(6, '0')}.txt`,
+        mode: 'file',
+        blob: blob.sha256,
+      }));
+      const base = x.state(files);
+      const leftFiles = files.map((f, i) => (i === 0 ? { ...f, blob: changed.sha256 } : f));
+      const rightFiles = files.map((f, i) =>
+        i === (kind === 'content' || kind === 'mode' ? 0 : 1)
+          ? { ...f, ...(kind === 'mode' ? { mode: 'executable' } : { blob: other.sha256 }) }
+          : f,
+      );
+      if (kind === 'overlap') {
+        leftFiles.push({ path: 'new', mode: 'file', blob: blob.sha256 });
+        rightFiles.push({ path: 'new/child', mode: 'file', blob: blob.sha256 });
+      }
+      let left = x.state(leftFiles, [base.sha256]),
+        right = x.state(rightFiles, [base.sha256]);
+      if (kind === 'forward') right = x.state(rightFiles, [left.sha256]);
+      if (kind === 'contained') left = x.state(leftFiles, [right.sha256]);
+      const inputs = buildComposePages([
+          {
+            laneId: randomUUID(),
+            head: right.sha256,
+            version: 0,
+            sourceVersion: 0,
+            lifecycleVersion: 0,
+            state: { object: right, recipe: null },
+          },
+        ]),
+        dependencies = buildComposePages([]);
+      for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
+      const input = x.json({
+        schema: 1,
+        kind: 'forge-hosted-compose-input',
+        ...(candidateFiles ? { candidateFiles: true } : {}),
+        base: { head: left.sha256, receiptId: 'main' },
+        main: { object: left, recipe: null },
+        inputs: inputs.manifest,
+        dependencies: dependencies.manifest,
+        algorithm: 'forge-native-compose-v1',
+        message: 'merge',
+        at,
+      });
+      const before = x.uploads.length,
+        actual = await runSmallSourceCompose(input, x.io);
+      if (['content', 'overlap'].includes(kind)) {
+        assert.equal(actual, null, kind);
+        assert.equal(x.uploads.length, before, 'fallback writes no speculative result');
+      } else {
+        const expected = await buildHostedSourceState(input, x.io);
+        assert.deepEqual(actual, expected.output, kind);
+      }
     }
-    let left = x.state(leftFiles, [base.sha256]),
-      right = x.state(rightFiles, [base.sha256]);
-    if (kind === 'forward') right = x.state(rightFiles, [left.sha256]);
-    if (kind === 'contained') left = x.state(leftFiles, [right.sha256]);
-    const inputs = buildComposePages([
-        {
-          laneId: randomUUID(),
-          head: right.sha256,
-          version: 0,
-          sourceVersion: 0,
-          lifecycleVersion: 0,
-          state: { object: right, recipe: null },
-        },
-      ]),
-      dependencies = buildComposePages([]);
-    for (const page of [...inputs.pages, ...dependencies.pages]) x.json(page.value);
-    const input = x.json({
-      schema: 1,
-      kind: 'forge-hosted-compose-input',
-      base: { head: left.sha256, receiptId: 'main' },
-      main: { object: left, recipe: null },
-      inputs: inputs.manifest,
-      dependencies: dependencies.manifest,
-      algorithm: 'forge-native-compose-v1',
-      message: 'merge',
-      at,
-    });
-    const before = x.uploads.length,
-      actual = await runSmallSourceCompose(input, x.io);
-    if (['content', 'overlap'].includes(kind)) {
-      assert.equal(actual, null, kind);
-      assert.equal(x.uploads.length, before, 'fallback writes no speculative result');
-    } else {
-      const expected = await buildHostedSourceState(input, x.io);
-      assert.deepEqual(actual, expected.output, kind);
-    }
-  }
 });
 
 test('inline merge recomputation retains completed calculations but yields at the time boundary', async t => {

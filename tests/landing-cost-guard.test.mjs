@@ -97,6 +97,7 @@ function meter(f, { extraShard = false, extraSetupSeconds = 0 } = {}) {
       ];
       const runtimes = await Promise.all(actions.map(kind));
       return {
+        dataRecordCalls: counts.filter(c => c.touched.includes('projectWorkDataRecords')).length,
         queries: counts.filter(c => c.query && c.name !== 'observerBudgetPage').length,
         observerQueries: observers.length,
         observerReadBytes: observers.reduce((n, c) => n + c.readBytes, 0),
@@ -315,6 +316,33 @@ test('cost guard: the scripted landing mix stays within its per-landing cost led
     verdicts.filter(v => v.status === 'fail').map(v => v.message),
     [],
     'a per-landing cost rose past its ledger threshold',
+  );
+});
+
+test('Candidate file-list rollout adds no Convex executions or data-table access to the complete landing mix', async t => {
+  const prior = process.env.FORGE_CANDIDATE_FILES;
+  process.env.FORGE_CANDIDATE_FILES = '1';
+  let selected;
+  try {
+    selected = await measureLandingCosts(t);
+  } finally {
+    if (prior === undefined) delete process.env.FORGE_CANDIDATE_FILES;
+    else process.env.FORGE_CANDIDATE_FILES = prior;
+  }
+  for (const metric of ['queries', 'observerQueries', 'mutations', 'v8Actions', 'nodeActions'])
+    assert.equal(
+      selected.measured[metric],
+      baseline.measured[metric],
+      `file-list publication shares existing ${metric}`,
+    );
+  for (const scenario of Object.values(selected.scenarios))
+    assert.equal(
+      scenario.dataRecordCalls,
+      0,
+      'canonical landings never access the legacy per-file data table',
+    );
+  t.diagnostic(
+    JSON.stringify({ enabled: selected.measured, baseline: baseline.measured, landings: selected.landings }),
   );
 });
 

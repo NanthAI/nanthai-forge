@@ -126,6 +126,8 @@ export async function foldHostedRecovery(
       hash = rowHash(hash, text);
       if (state.phase !== 'capture') continue;
       let metadata: unknown;
+      if (table === 'projectHostedRecords' && row.candidateFiles)
+        metadata = { candidateFiles: row.candidateFiles };
       if (table === 'projectHostedRecordBodies') {
         metadata = JSON.parse(String(row.value));
         const saved = inlineSave.safeParse(metadata);

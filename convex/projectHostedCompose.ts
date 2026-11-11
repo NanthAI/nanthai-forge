@@ -103,6 +103,7 @@ export const prepare = mutation({
           ? await semanticBaseSequence(ctx, input.projectId, ownIntent.base.receiptId)
           : 0;
       const state: ComposeState = {
+        ...(process.env.FORGE_CANDIDATE_FILES === '1' ? { candidateFiles: true } : {}),
         ...(peers.length
           ? { semanticPlan: { primaryIntentId: request.intentId, afterSequence, members: peers } }
           : {}),
