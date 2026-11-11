@@ -4,6 +4,8 @@ Read this plan, the [lead rules](agents/lead.md), [Phase 5 close](phase5-close.m
 
 ## P6 close order (owner, 2026-11-10)
 
+Use [Baseline to beat](research/p6-baseline.md) for B1.5d's reference figures, partial P6 re-measurements and the remaining evidence gaps.
+
 This order supersedes earlier close/start sequencing below. P6.8 starts from the
 repo evidence in [data placement](data-placement.md#where-the-bytes-and-io-go-2026-11-10),
 [cost to serve](operations/cost-to-serve.md#pre-bench-smoke-and-subsequent-fixes-2026-11-10)

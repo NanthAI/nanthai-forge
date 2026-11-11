@@ -207,6 +207,8 @@ plan, not an unapproved side effect of a task.
 
 ## Benchmark discipline
 
+Use [Baseline to beat](../research/p6-baseline.md) for the current real-agent reference, historical results and partial P6 evidence before comparing a new run.
+
 Separate exploratory dry runs from scored results. Write the acceptance bar,
 repeat count, noise rule, fair baseline, compute, prompts, cost coverage and void
 criteria before measuring. Run dry qualification on the exact landed, reviewed
