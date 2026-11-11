@@ -250,7 +250,7 @@ function report(root, argv, catalog) {
   return regressions.length ? 1 : 0;
 }
 
-async function main(argv) {
+export async function main(argv, { run = exec } = {}) {
   const [verb, root] = argv;
   if (!verb || !root || root.startsWith('--')) {
     console.error('usage: suite.mjs provision|verify|run|report|teardown ZOO_ROOT [--repos a,b] ...');
@@ -293,9 +293,11 @@ async function main(argv) {
     const state = existsSync(join(root, 'state.json'))
       ? JSON.parse(readFileSync(join(root, 'state.json'), 'utf8'))
       : { repos: {} };
-    const unprepared = repos.filter(r => !state.repos[r.id]?.projectId).map(r => r.id);
+    const reimport = argv.includes('--reimport');
+    const unprepared = repos.filter(r => reimport || !state.repos[r.id]?.projectId).map(r => r.id);
+    const settledHazards = new Set();
     if (unprepared.length) {
-      const prep = await exec(
+      const prep = await run(
         process.execPath,
         [
           join(HERE, 'run.mjs'),
@@ -303,20 +305,53 @@ async function main(argv) {
           '--repos',
           unprepared.join(','),
           '--prepare-only',
+          ...(reimport ? ['--reimport'] : []),
           '--concurrency',
           flag(argv, '--concurrency') ?? '2',
         ],
         { timeoutMs: 3600_000 },
       );
       process.stderr.write(prep.stderr.slice(-1000));
+      const prepared = prep.json?.repos ?? [];
+      for (const r of prepared)
+        if (
+          repos.find(e => e.id === r.id)?.hazard &&
+          r.refusals?.length &&
+          r.refusals.every(code =>
+            ['import:GITHUB_SOURCE_UNSUPPORTED', 'clone:INVALID_NATIVE_SOURCE'].includes(code),
+          )
+        )
+          settledHazards.add(r.id);
+      const ready = existsSync(join(root, 'state.json'))
+        ? JSON.parse(readFileSync(join(root, 'state.json'), 'utf8')).repos
+        : {};
+      if (
+        prep.code !== 0 ||
+        unprepared.some(
+          id =>
+            !prepared.some(r => r.id === id && !r.crash && (!r.refusals?.length || settledHazards.has(id))) ||
+            (!settledHazards.has(id) && !ready[id]?.projectId),
+        )
+      ) {
+        process.stderr.write(`Preparation unfinished; retain results and replay journals in ${root}.\n`);
+        return Number.isInteger(prep.code) && prep.code > 0 ? prep.code : 1;
+      }
     }
-    const pass = ['--repos', '--concurrency', '--reimport', '--no-github-run', '--keep-checkouts'].flatMap(
-      f => (argv.includes(f) ? (f === '--repos' || f === '--concurrency' ? [f, flag(argv, f)] : [f]) : []),
-    );
-    const run = exec(process.execPath, [join(HERE, 'run.mjs'), root, ...pass], { timeoutMs: 8 * 3600_000 });
-    const res = await run;
-    process.stderr.write(res.stderr.slice(-2000));
-    if (res.code > 1) return res.code;
+    const scenarioRepos = repos.filter(r => !settledHazards.has(r.id));
+    const pass = [
+      '--repos',
+      scenarioRepos.map(r => r.id).join(','),
+      ...['--concurrency', '--no-github-run', '--keep-checkouts'].flatMap(f =>
+        argv.includes(f) ? (f === '--concurrency' ? [f, flag(argv, f)] : [f]) : [],
+      ),
+    ];
+    if (scenarioRepos.length) {
+      const res = await run(process.execPath, [join(HERE, 'run.mjs'), root, ...pass], {
+        timeoutMs: 8 * 3600_000,
+      });
+      process.stderr.write(res.stderr.slice(-2000));
+      if (res.code > 1) return res.code;
+    }
     return report(
       root,
       argv.filter(a => a !== '--repos'),

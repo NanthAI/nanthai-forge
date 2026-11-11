@@ -1,14 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, globSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { posix } from 'node:path';
+import {
+  existsSync,
+  globSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { join, posix } from 'node:path';
+import { tmpdir } from 'node:os';
 import ts from 'typescript';
 
 function packagedFiles(entries) {
   const files = new Set(['package.json']);
   function walk(path) {
-    if (statSync(path).isDirectory()) {
+    const info = lstatSync(path);
+    // npm never includes symbolic links, including dangling links and directory aliases.
+    if (info.isSymbolicLink()) return;
+    if (info.isDirectory()) {
       for (const name of readdirSync(path)) walk(posix.join(path, name));
     } else files.add(path);
   }
@@ -52,6 +67,28 @@ function missingImports(files, unbuilt = unbuiltEntries(manifest.files)) {
 }
 
 const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+test('packaged file enumeration excludes dangling, external and cyclic symlinks as npm does', () => {
+  const root = mkdtempSync(join(tmpdir(), 'packaged-links-'));
+  try {
+    const dir = join(root, 'dist'),
+      outside = join(root, 'outside');
+    mkdirSync(dir);
+    mkdirSync(outside);
+    writeFileSync(join(dir, 'main.js'), 'export {};');
+    writeFileSync(join(outside, 'escape.js'), 'synthetic outside content');
+    symlinkSync(join(root, 'missing.js'), join(dir, 'dangling'), 'file');
+    symlinkSync(outside, join(dir, 'external'), 'dir');
+    symlinkSync(dir, join(dir, 'cycle'), 'dir');
+    const files = packagedFiles([dir]);
+    assert.deepEqual(
+      [...files].filter(path => path !== 'package.json').map(path => path.split(/[\\/]/).at(-1)),
+      ['main.js'],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('every relative import of every packaged script is packaged, including Actions helpers', () => {
   const files = packagedFiles(manifest.files);
   assert.ok(files.has('scripts/script-impact.mjs'));

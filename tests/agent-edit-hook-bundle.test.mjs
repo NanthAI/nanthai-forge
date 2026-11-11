@@ -6,8 +6,19 @@
 // from bytes alone and in milliseconds.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const dist = new URL('../dist/', import.meta.url).pathname;
 const chunk = name => join(dist, name);
@@ -71,4 +82,42 @@ test('the guard sees a static zod or Convex import and ignores a lazy one', () =
     'x-1.js',
   ]);
   assert.deepEqual(staticImports('import "node:fs";\nimport { b as c } from "./z.js";'), ['z.js']);
+});
+
+test('rebuilding the hook retires its old hashed chunks and preserves unrelated build output', t => {
+  const root = mkdtempSync(join(tmpdir(), 'forge-hook-rebuild-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, 'src'));
+  mkdirSync(join(root, 'dist'));
+  writeFileSync(
+    join(root, 'src/agent-edit-hook.ts'),
+    "export const hosted = () => import('./agent-edit-hosted');",
+  );
+  const hosted = join(root, 'src/agent-edit-hosted.ts');
+  const sibling = join(root, 'dist/cli-entry.js');
+  const declaration = join(root, 'dist/agent-edit-hook.d.ts');
+  writeFileSync(sibling, 'synthetic CLI output');
+  writeFileSync(declaration, 'synthetic declaration');
+  const buildScript = fileURLToPath(new URL('../scripts/build-edit-hook.mjs', import.meta.url));
+  const build = () =>
+    execFileSync(process.execPath, [buildScript], { cwd: root, stdio: 'pipe', timeout: 30_000 });
+  writeFileSync(hosted, 'export const version = 1;');
+  build();
+  const first = readdirSync(join(root, 'dist')).filter(name =>
+    name.startsWith('agent-edit-hook-agent-edit-hosted-'),
+  );
+  assert.equal(first.length, 1);
+  writeFileSync(hosted, 'export const version = 2;');
+  build();
+  const second = readdirSync(join(root, 'dist')).filter(name =>
+    name.startsWith('agent-edit-hook-agent-edit-hosted-'),
+  );
+  assert.equal(second.length, 1);
+  assert.notEqual(second[0], first[0], 'changed source emits a new chunk');
+  assert.equal(existsSync(join(root, 'dist', first[0])), false);
+  assert.equal(readFileSync(sibling, 'utf8'), 'synthetic CLI output');
+  assert.equal(readFileSync(declaration, 'utf8'), 'synthetic declaration');
+  writeFileSync(hosted, 'export const version = ;');
+  assert.throws(build, 'a failed rebuild must preserve the last successful chunk');
+  assert.equal(existsSync(join(root, 'dist', second[0])), true);
 });

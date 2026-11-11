@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Side effects of the zoo run (Issue 85d26a8b): the Forge CLI, git, GitHub reads, the import
 // actions and the Convex meter. run.mjs takes these as one injectable object.
-import { appendFileSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync, renameSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { setTimeout as wait } from 'node:timers/promises';
 import { exec } from './exec.mjs';
 import { controlCodeSource, thrownRefusal } from './lib.mjs';
 
-// The import client needs a built Forge checkout (cfg.forgeCheckout: dist/ and node_modules/),
-// so it is loaded from there; the GitHub and meter helpers use Node built-ins only.
+// Share this checkout's import client; runtime auth and network adapters come from the approved CLI.
 const fromCheckout = (checkout, path) => import(pathToFileURL(join(checkout, path)).href);
 const githubArm = () => import('../bench-t3code/github-arm.mjs');
 const meter = () => import('../bench-t3code/meter.mjs');
@@ -53,14 +52,18 @@ export function makeIo({
       ]);
       return controlCodeSource(text);
     },
-    saveState: () => writeFileSync(statePath, JSON.stringify(state, null, 1) + '\n'),
+    saveState: () => {
+      writeFileSync(statePath + '.tmp', JSON.stringify(state, null, 1) + '\n');
+      renameSync(statePath + '.tmp', statePath);
+    },
 
     /** GitHub import into a NEW project (projectGithubImport start + status), timed end to end. */
-    async importProject(repo, journalPath) {
+    async importProject(repo, journalPath, { onJournal } = {}) {
+      const prior = existsSync(journalPath) ? JSON.parse(readFileSync(journalPath, 'utf8')) : null;
       const co = cfg.forgeCheckout;
       const [{ importProject }, { resolveAuthToken }, { deadlineConvexClient }, { makeFunctionReference }] =
         await Promise.all([
-          load(co, 'scripts/bench-t3code/forge-import.mjs'),
+          import('../bench-t3code/forge-import.mjs'),
           load(co, 'dist/auth-store.js'),
           load(co, 'dist/network-convex-client.js'),
           load(co, 'node_modules/convex/dist/esm/server/index.js'),
@@ -76,7 +79,12 @@ export function makeIo({
           return client.action(...args);
         },
       };
-      const spec = { url: `https://github.com/${repo.fork}`, ref: repo.ref, name: `bench-zoo-${repo.id}` };
+      const spec = {
+        url: `https://github.com/${repo.fork}`,
+        ref: repo.ref,
+        name: `bench-zoo-${repo.id}`,
+        deployment: cfg.deployment,
+      };
       const res = await importAfterReset({
         now: importClock,
         sleep: importSleep,
@@ -92,18 +100,31 @@ export function makeIo({
           if (resume && journal.jobId)
             await tracked.action(makeFunctionReference('projectGithubImport:start'), {
               operationId: journal.operationId,
-              ...spec,
+              url: spec.url,
+              ref: spec.ref,
+              name: spec.name,
             });
           return importProject({
             client: tracked,
             ref: makeFunctionReference,
             journalPath,
             spec,
+            now: importClock,
+            onJournal,
             sleep: () => wait(IMPORT_POLL_MS),
           });
         },
       });
-      return { ...res, calls };
+      return {
+        ...res,
+        calls,
+        ...(prior?.startedAt
+          ? {
+              wallSeconds: Math.max(res.wallSeconds, (importClock() - Date.parse(prior.startedAt)) / 1000),
+              resumedImport: { operationId: prior.operationId, startedAt: prior.startedAt },
+            }
+          : {}),
+      };
     },
 
     /** This project's forge-check runs on the runner repository in the window, as job minutes. */
@@ -170,10 +191,10 @@ export function makeIo({
     /** Convex usage attributed to this repository's project while `fn` runs. */
     async metered(repo, fn) {
       const projectId = state.repos[repo.id]?.projectId;
-      if (!projectId || !cfg.meterCwd)
+      if (cfg.reimport || !projectId || !cfg.meterCwd)
         return {
           ...(await fn()),
-          meter: { valid: false, problems: ['not metered: no project yet or no meterCwd'] },
+          meter: { valid: false, problems: ['not metered: import must be prepared and meterCwd configured'] },
         };
       const { convexMeter } = await meter();
       const m = convexMeter({

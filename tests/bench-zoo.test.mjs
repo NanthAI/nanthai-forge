@@ -19,10 +19,11 @@ import {
   thrownRefusal,
 } from '../scripts/bench-zoo/lib.mjs';
 import { lastJson } from '../scripts/bench-zoo/exec.mjs';
-import { resolutionFolder, sourceCommand } from '../scripts/bench-zoo/run.mjs';
-import { chmodSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
+import { resolutionFolder, runRepo, sourceCommand } from '../scripts/bench-zoo/run.mjs';
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, symlinkSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const f = (path, size = 100, extra = {}) => ({ path, size, ...extra });
 
@@ -284,7 +285,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { compareTrees, platformLimits, walkTree } from '../scripts/bench-zoo/fidelity.mjs';
 import { buildRepository, recipes } from '../scripts/bench-zoo/shapes.mjs';
-import { latestResults } from '../scripts/bench-zoo/suite.mjs';
+import { latestResults, main as suiteMain } from '../scripts/bench-zoo/suite.mjs';
 import {
   PATHS,
   baselineOf,
@@ -429,6 +430,175 @@ const passing = () => ({
   runs: [{ runId: 'r1', endedAt: '2026-11-10T10:01:00Z', executionSeconds: 30 }],
   landings: [{ lane: 'a', checkRunIds: ['r1'], committedAt: '2026-11-10T10:01:09Z' }],
   forgeChecks: { jobs: 1, jobSeconds: 50 },
+});
+
+test('unfinished, interrupted or refused preparation never starts a second import in a new scenario', async () => {
+  for (const outcome of [
+    { code: 1, crash: true },
+    { code: null, crash: true },
+    { code: 0, refusals: ['import:AUTH_REQUIRED'] },
+    { code: 0, refusals: [] },
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'zoo-pending-preparation-'));
+    try {
+      writeFileSync(
+        join(root, 'zoo.json'),
+        JSON.stringify({
+          deployment: 'synthetic',
+          deploymentName: 'synthetic',
+          forgeCheckout: 'synthetic',
+          meterCwd: 'synthetic',
+        }),
+      );
+      const projects = new Set(['original-project']);
+      const journal = join(root, 'import-journal.json');
+      writeFileSync(journal, JSON.stringify({ operationId: 'original-operation', jobId: 'original-job' }));
+      const code = await suiteMain(['run', root, '--repos', 'go'], {
+        run: async (cmd, args) => {
+          if (args.includes('--prepare-only'))
+            return { code: outcome.code, stderr: '', json: { repos: [{ id: 'go', ...outcome }] } };
+          projects.add('duplicate-project');
+          const dir = join(root, 'runs/20261111T000001');
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(join(dir, 'RESULT.json'), JSON.stringify({ results: [{ ...passing(), id: 'go' }] }));
+          return { code: 0, stderr: '' };
+        },
+      });
+      assert.notEqual(code, 0);
+      assert.deepEqual([...projects], ['original-project'], 'the unfinished import is never replaced');
+      assert.equal(JSON.parse(readFileSync(journal)).operationId, 'original-operation');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('prepared named hazards are final results while healthy rows continue without repeating their import', async t => {
+  t.mock.method(console, 'log', () => {});
+  for (const [id, where, code] of [
+    ['shapes-nonutf8', 'import', 'GITHUB_SOURCE_UNSUPPORTED'],
+    ['shapes-collide', 'clone', 'INVALID_NATIVE_SOURCE'],
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'zoo-prepared-hazard-'));
+    try {
+      writeFileSync(
+        join(root, 'zoo.json'),
+        JSON.stringify({
+          deployment: 'synthetic',
+          deploymentName: 'synthetic',
+          forgeCheckout: 'synthetic',
+          meterCwd: 'synthetic',
+        }),
+      );
+      const state = { repos: { go: { projectId: 'original-go' } } };
+      const hazard = {
+        id,
+        steps: where === 'clone' ? { import: step({ seconds: 1 }) } : {},
+        refusals: [{ where, code }],
+      };
+      assert.equal(
+        await suiteMain(['run', root, '--repos', `go,${id}`], {
+          run: async (cmd, args) => {
+            const preparing = args.includes('--prepare-only');
+            const stamp = preparing ? '20261111T000000' : '20261111T000001';
+            const dir = join(root, 'runs', stamp);
+            mkdirSync(dir, { recursive: true });
+            if (preparing) {
+              writeFileSync(join(root, 'state.json'), JSON.stringify(state));
+              writeFileSync(join(dir, 'RESULT.json'), JSON.stringify({ results: [hazard] }));
+              return {
+                code: 0,
+                stderr: '',
+                json: {
+                  repos: [
+                    { id: 'go', refusals: [] },
+                    { id, refusals: [`${where}:${code}`] },
+                  ],
+                },
+              };
+            }
+            const selected = args[args.indexOf('--repos') + 1].split(',');
+            writeFileSync(
+              join(dir, 'RESULT.json'),
+              JSON.stringify({
+                results: selected.map(row => (row === id ? hazard : { ...passing(), id: row })),
+              }),
+            );
+            return { code: 0, stderr: '' };
+          },
+        }),
+        0,
+      );
+      assert.equal(JSON.parse(readFileSync(join(root, 'state.json'))).repos.go.projectId, 'original-go');
+      assert.equal(
+        latestResults(root).find(r => r.id === id).stamp,
+        '20261111T000000',
+        'the named refusal remains the original preparation result',
+      );
+      assert.deepEqual(
+        latestResults(root)
+          .map(r => r.id)
+          .sort(),
+        ['go', id].sort(),
+      );
+      assert.equal(
+        summarize(
+          latestResults(root).find(r => r.id === id),
+          { hazard: true },
+        ).pass,
+        true,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('suite reimport establishes the fresh project before the metered scenario instead of replacing its project inside the meter', async t => {
+  t.mock.method(console, 'log', () => {});
+  const root = mkdtempSync(join(tmpdir(), 'zoo-metered-reimport-'));
+  try {
+    writeFileSync(
+      join(root, 'zoo.json'),
+      JSON.stringify({
+        deployment: 'synthetic',
+        deploymentName: 'synthetic',
+        forgeCheckout: 'synthetic',
+        meterCwd: 'synthetic',
+      }),
+    );
+    writeFileSync(join(root, 'state.json'), JSON.stringify({ repos: { go: { projectId: 'old-project' } } }));
+    let meteredProject;
+    const projects = new Set(['old-project']);
+    assert.equal(
+      await suiteMain(['run', root, '--repos', 'go', '--reimport'], {
+        run: async (cmd, args) => {
+          const preparing = args.includes('--prepare-only');
+          let state = JSON.parse(readFileSync(join(root, 'state.json')));
+          if (!preparing) meteredProject = state.repos.go.projectId;
+          if (args.includes('--reimport')) {
+            const projectId = preparing ? 'prepared-project' : 'late-project';
+            projects.add(projectId);
+            state.repos.go = { projectId };
+            writeFileSync(join(root, 'state.json'), JSON.stringify(state));
+          }
+          const dir = join(root, 'runs', preparing ? '20261111T000000' : '20261111T000001');
+          mkdirSync(dir, { recursive: true });
+          writeFileSync(
+            join(dir, 'RESULT.json'),
+            JSON.stringify({ results: [{ ...passing(), id: 'go', projectId: state.repos.go.projectId }] }),
+          );
+          return { code: 0, stderr: '', json: { repos: [{ id: 'go', refusals: [] }] } };
+        },
+      }),
+      0,
+    );
+    assert.deepEqual([...projects], ['old-project', 'prepared-project']);
+    assert.equal(meteredProject, 'prepared-project');
+    assert.equal(latestResults(root)[0].projectId, meteredProject);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('a land that exits 0 with a terminal CHECK_FAILED is a failed path, and later paths are not reached', () => {
@@ -679,6 +849,38 @@ test('zoo teardown reconciles pending purges with the same slug and keeps state 
   }
 });
 
+test('teardown retires terminal import pointers, retains unfinished ones and still deletes the requested fork', async () => {
+  for (const status of [
+    { phase: 'failed', error: { code: 'GITHUB_SOURCE_UNSUPPORTED' } },
+    { phase: 'working' },
+    { phase: 'failed', error: { code: 'GITHUB_RATE_LIMIT' } },
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'zoo-teardown-import-'));
+    try {
+      const journalPath = join(root, 'import.json');
+      writeFileSync(journalPath, JSON.stringify({ status }));
+      writeFileSync(join(root, 'zoo.json'), '{}');
+      writeFileSync(
+        join(root, 'state.json'),
+        JSON.stringify({ repos: {}, pendingImports: { fixture: { journalPath, operationId: 'original' } } }),
+      );
+      const result = await teardown(root, [{ id: 'fixture', fork: 'example/public' }], {
+        list: async () => [],
+        run: async () => ({ code: 0 }),
+      });
+      const terminal = status.error?.code === 'GITHUB_SOURCE_UNSUPPORTED';
+      assert.equal(Boolean(JSON.parse(readFileSync(join(root, 'state.json'))).pendingImports), !terminal);
+      assert.equal(
+        result.some(r => r.project.startsWith('NOT DELETED')),
+        !terminal,
+      );
+      assert.equal(result.find(r => r.repo === 'deleted').id, 'fixture');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test('zoo teardown starts every purge before waiting for upload leases, avoiding serial lease waits', async () => {
   const root = mkdtempSync(join(tmpdir(), 'zoo-teardown-'));
   try {
@@ -780,7 +982,6 @@ test('zoo healthy imports make one attempt, and non-rate refusals and unknown er
 test('zoo stored-job recovery resumes its pinned import and never creates a second project', async () => {
   const root = mkdtempSync(join(tmpdir(), 'zoo-import-reset-'));
   try {
-    const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
     let clock = 0,
       ready = false;
     const projects = new Map();
@@ -788,6 +989,7 @@ test('zoo stored-job recovery resumes its pinned import and never creates a seco
       setAuth() {},
       async action(name, args) {
         if (name === 'projectGithubImport:start') {
+          assert.deepEqual(Object.keys(args).sort(), ['name', 'operationId', 'ref', 'url']);
           const request = JSON.stringify([args.url, args.ref, args.name]);
           if (projects.has(args.operationId)) {
             assert.equal(projects.get(args.operationId), request, 'retry keeps its original source');
@@ -804,7 +1006,6 @@ test('zoo stored-job recovery resumes its pinned import and never creates a seco
       },
     };
     const load = async (checkout, path) => {
-      if (path.includes('forge-import')) return { importProject };
       if (path.includes('auth-store')) return { resolveAuthToken: () => 'synthetic-token' };
       if (path.includes('network-convex-client')) return { deadlineConvexClient: () => backend };
       return { makeFunctionReference: name => name };
@@ -843,6 +1044,316 @@ test('zoo stored-job recovery resumes its pinned import and never creates a seco
     );
     assert.equal(row.importSetupVoids[0].waitSeconds, 70);
     assert.match(suiteMarkdown([row]), /GITHUB_RATE_LIMIT/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('shared import recovery works in an unbuilt source checkout without a local CLI SDK', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-unbuilt-import-'));
+  try {
+    const dir = join(root, 'scripts/bench-t3code');
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(
+      new URL('../scripts/bench-t3code/forge-import.mjs', import.meta.url),
+      join(dir, 'forge-import.mjs'),
+    );
+    copyFileSync(
+      new URL('../scripts/main-module.mjs', import.meta.url),
+      join(root, 'scripts/main-module.mjs'),
+    );
+    const { importProject } = await import(pathToFileURL(join(dir, 'forge-import.mjs')).href);
+    const journalPath = join(root, 'journal.json');
+    writeFileSync(journalPath, JSON.stringify({ status: { phase: 'ready', projectId: 'original-project' } }));
+    const result = await importProject({ journalPath });
+    assert.equal(result.projectId, 'original-project');
+    assert.equal(result.calls, 0, 'ready recovery needs neither SDK setup nor another server call');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('unknown import start and status replies reconcile the original operation and job', async () => {
+  const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-transport-'));
+  try {
+    const journalPath = join(root, 'journal.json'),
+      requests = [],
+      projects = new Map();
+    let clock = 0,
+      statuses = 0;
+    const result = await importProject({
+      journalPath,
+      spec: { url: 'https://github.com/example/public', ref: 'main', name: 'fixture' },
+      ref: name => name,
+      now: () => clock,
+      sleep: async ms => {
+        clock += ms;
+      },
+      client: {
+        async action(name, args) {
+          requests.push({ name, args });
+          if (name === 'projectGithubImport:start') {
+            if (!projects.has(args.operationId)) {
+              projects.set(args.operationId, args);
+              clock += 120_000;
+              throw Object.assign(Error('lost start reply'), { code: 'EXCHANGE_REQUEST_TIMEOUT' });
+            }
+            assert.deepEqual(args, projects.get(args.operationId));
+            return 'original-job';
+          }
+          assert.equal(args.id, 'original-job');
+          if (statuses++ === 0) {
+            clock += 120_000;
+            throw Object.assign(Error('lost status reply'), { code: 'EXCHANGE_REQUEST_TIMEOUT' });
+          }
+          return { phase: 'ready', projectId: 'original-project', commit: 'same-source' };
+        },
+      },
+    });
+    assert.equal(projects.size, 1);
+    assert.equal(result.projectId, 'original-project');
+    assert.equal(result.calls, 4, 'failed attempts remain in the call count');
+    assert.deepEqual(requests[0], requests[1], 'unknown start replays its exact mutation');
+    assert.deepEqual(requests[2], requests[3], 'unknown status reads the same job');
+    assert.deepEqual(
+      result.transportVoids.map(v => v.seconds),
+      [120, 120],
+    );
+    assert.equal(JSON.parse(readFileSync(journalPath, 'utf8')).status.phase, 'ready');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('unfinished import transport retains its journal and unrelated errors are never retried', async () => {
+  const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-pending-'));
+  try {
+    const journalPath = join(root, 'journal.json');
+    let calls = 0;
+    const input = {
+      journalPath,
+      spec: { url: 'https://github.com/example/public', ref: 'main' },
+      ref: name => name,
+      sleep: async () => {},
+      client: {
+        async action(name) {
+          calls++;
+          if (name === 'projectGithubImport:start') return 'retained-job';
+          throw Object.assign(Error('offline'), { code: 'EXCHANGE_REQUEST_FAILED' });
+        },
+      },
+    };
+    await assert.rejects(importProject(input), error => {
+      assert.equal(error.pendingImport.jobId, 'retained-job');
+      assert.equal(error.pendingImport.journalPath, journalPath);
+      return true;
+    });
+    assert.equal(calls, 10, 'one start and eight bounded status reconciliations after the initial read');
+    const retained = JSON.parse(readFileSync(journalPath, 'utf8'));
+    assert.equal(retained.jobId, 'retained-job');
+    assert.equal(retained.calls, 10);
+    calls = 0;
+    input.client.action = async () => {
+      calls++;
+      throw Error('unrelated failure');
+    };
+    await assert.rejects(importProject(input), /unrelated failure/);
+    assert.equal(calls, 1);
+    assert.equal(JSON.parse(readFileSync(journalPath, 'utf8')).operationId, retained.operationId);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('an import refusal retains replay data and never advances to cloning', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-refused-'));
+  try {
+    const result = await runRepo({}, { id: 'fixture', fork: 'example/public' }, { repos: {} }, root, {
+      importProject: async () => ({ phase: 'error', error: { code: 'AUTH_REQUIRED' } }),
+      git: async () => {
+        throw Error('unfinished import must not clone');
+      },
+    });
+    assert.equal(result.keepCheckouts, true);
+    assert.equal(result.steps.import.forge.ok, false);
+    assert.equal(result.refusals[0].code, 'AUTH_REQUIRED');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a later run folder recovers the original import identity and wall time, then permits an explicit fresh import after completion', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-restart-'));
+  try {
+    let clock = 0,
+      ready = false;
+    const projects = new Map();
+    const backend = {
+      setAuth() {},
+      async action(name, args) {
+        clock++;
+        if (name === 'projectGithubImport:start') {
+          if (!projects.has(args.operationId)) projects.set(args.operationId, `project-${projects.size + 1}`);
+          return args.operationId;
+        }
+        if (!ready) {
+          clock += 30 * 60_000;
+          return { phase: 'working' };
+        }
+        return {
+          phase: 'ready',
+          projectId: projects.get(args.id),
+          commit: 'pinned-source',
+          total: 1,
+          totalBytes: 1,
+        };
+      },
+    };
+    const statePath = join(root, 'state.json');
+    const ioFor = (state, runDir) => {
+      mkdirSync(runDir, { recursive: true });
+      const io = makeIo({
+        cfg: { forgeCheckout: 'synthetic', deployment: 'https://example.invalid' },
+        root,
+        runDir,
+        state,
+        statePath,
+        importClock: () => clock,
+        load: async (checkout, path) =>
+          path.includes('auth-store')
+            ? { resolveAuthToken: () => 'synthetic-token' }
+            : path.includes('network-convex-client')
+              ? { deadlineConvexClient: () => backend }
+              : { makeFunctionReference: name => name },
+      });
+      io.git = async () => ({ code: 0, seconds: 0 });
+      io.cli = async () => ({ code: 1, seconds: 0, json: { error: { code: 'INVALID_NATIVE_SOURCE' } } });
+      return io;
+    };
+    const repo = { id: 'fixture', fork: 'example/public', ref: 'main' },
+      state = { repos: {} },
+      first = join(root, 'first');
+    await assert.rejects(runRepo({}, repo, state, first, ioFor(state, first)), /ZOO_IMPORT_PENDING/);
+    const retained = JSON.parse(readFileSync(statePath)).pendingImports.fixture;
+    assert.equal(projects.size, 1);
+    rmSync(retained.journalPath); // The state pointer can rebuild a lost per-run journal with the same operation.
+    ready = true;
+    clock += 60_000;
+    const resumed = JSON.parse(readFileSync(statePath)),
+      second = join(root, 'second');
+    const result = await runRepo({}, repo, resumed, second, ioFor(resumed, second));
+    assert.equal(projects.size, 1);
+    assert.equal(result.steps.import.forge.resumedImport.operationId, retained.operationId);
+    assert.equal(
+      result.steps.import.forge.wallSeconds,
+      clock / 1000,
+      'the injected clock includes the first attempt and recovery pause',
+    );
+    assert.equal(resumed.repos.fixture.projectId, 'project-1');
+    assert.equal(resumed.pendingImports, undefined);
+    assert.equal(JSON.parse(readFileSync(retained.journalPath)).operationId, retained.operationId);
+    resumed.pendingImports = { fixture: retained };
+    const third = join(root, 'third');
+    await runRepo({ reimport: true }, repo, resumed, third, ioFor(resumed, third));
+    assert.equal(
+      projects.size,
+      2,
+      'explicit reimport can create a fresh project once the prior outcome is terminal',
+    );
+    assert.equal(resumed.repos.fixture.projectId, 'project-2');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a retained import rejects another source or deployment before returning a ready project or making a request', async () => {
+  const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-source-pin-'));
+  try {
+    const journalPath = join(root, 'journal.json'),
+      spec = {
+        url: 'https://example.invalid/first',
+        ref: 'main',
+        name: 'fixture',
+        deployment: 'https://deployment.invalid',
+      };
+    writeFileSync(
+      journalPath,
+      JSON.stringify({
+        operationId: 'original-operation',
+        spec,
+        status: { phase: 'ready', projectId: 'original-project' },
+      }),
+    );
+    for (const changed of [
+      { ...spec, ref: 'another' },
+      { ...spec, deployment: 'https://other.invalid' },
+    ])
+      await assert.rejects(
+        importProject({
+          journalPath,
+          spec: changed,
+          client: {
+            action: () => {
+              throw Error('must not call another source');
+            },
+          },
+        }),
+        error =>
+          error.code === 'WORK_OPERATION_CHANGED' && error.pendingImport.operationId === 'original-operation',
+      );
+    assert.deepEqual(JSON.parse(readFileSync(journalPath)).spec, spec);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a source representation refusal records the pre-job rejection so teardown can finish without inventing a job status', async () => {
+  const { importProject } = await import('../scripts/bench-t3code/forge-import.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'zoo-import-rejected-'));
+  try {
+    const journalPath = join(root, 'import.json');
+    await assert.rejects(
+      importProject({
+        journalPath,
+        spec: { url: 'https://example.invalid/public', ref: 'main', name: 'fixture' },
+        ref: name => name,
+        client: {
+          action: async () => {
+            throw Object.assign(Error('unrepresentable source'), {
+              data: { code: 'GITHUB_SOURCE_UNSUPPORTED' },
+            });
+          },
+        },
+      }),
+      /unrepresentable source/,
+    );
+    const journal = JSON.parse(readFileSync(journalPath));
+    assert.equal(journal.jobId, undefined);
+    assert.equal(journal.status, undefined);
+    assert.deepEqual(journal.rejection, {
+      action: 'projectGithubImport:start',
+      code: 'GITHUB_SOURCE_UNSUPPORTED',
+    });
+    writeFileSync(join(root, 'zoo.json'), '{}');
+    writeFileSync(
+      join(root, 'state.json'),
+      JSON.stringify({
+        repos: {},
+        pendingImports: { fixture: { journalPath, operationId: journal.operationId } },
+      }),
+    );
+    const rows = await teardown(root, [{ id: 'fixture', fork: 'example/public' }], {
+      list: async () => [],
+      run: async () => ({ code: 0 }),
+    });
+    assert.equal(
+      rows.some(r => r.project.startsWith('NOT')),
+      false,
+    );
+    assert.equal(JSON.parse(readFileSync(join(root, 'state.json'))).pendingImports, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -902,4 +1413,46 @@ test('unfinished source operations retain replay data and terminal source failur
     ),
     failure,
   );
+});
+
+test('concurrent C landing timing never implies an overtake: report and baseline preserve actual order without changing the timing guard', () => {
+  const result = passing();
+  result.sourceCommit = 'f'.repeat(40);
+  result.landings = [
+    { lane: 'c', mainMoved: false, firstCheck: { landedOn: 'admission-run' }, recomposeCount: 0 },
+    {
+      lane: 'a',
+      mainMoved: true,
+      firstCheck: { landedOn: 'recheck', reason: 'global-risk' },
+      recomposeCount: 1,
+    },
+  ];
+  const first = summarize(result),
+    baseline = baselineOf([first]);
+  assert.deepEqual(first.landingClasses, [
+    { lane: 'c', mainMoved: false, landedOn: 'admission-run', reason: null, recomposeCount: 0 },
+    { lane: 'a', mainMoved: true, landedOn: 'recheck', reason: 'global-risk', recomposeCount: 1 },
+  ]);
+  assert.deepEqual(baseline.repos.x.landingClasses, first.landingClasses);
+  assert.equal(baseline.repos.x.sourceCommit, result.sourceCommit);
+  const overtaken = structuredClone(result);
+  overtaken.steps.landReuse.forge.seconds = result.steps.landReuse.forge.seconds * 2;
+  overtaken.landings.reverse();
+  overtaken.landings[0] = {
+    lane: 'a',
+    mainMoved: false,
+    firstCheck: { landedOn: 'admission-run' },
+    recomposeCount: 0,
+  };
+  overtaken.landings[1] = {
+    lane: 'c',
+    mainMoved: true,
+    firstCheck: { landedOn: 'recheck', reason: 'global-risk' },
+    recomposeCount: 1,
+  };
+  const now = summarize(overtaken);
+  assert(compareToBaseline([now], baseline).some(x => x.kind === 'seconds' && x.op === 'landReuse'));
+  const md = suiteMarkdown([first, now]);
+  assert.match(md, /\| x \| c \| no \| admission-run \|/);
+  assert.match(md, /\| x \| c \| yes \| recheck \| global-risk \| 1 \|/);
 });

@@ -202,6 +202,7 @@ export function summarize(r, entry = {}) {
   const gaps = commitGaps(r);
   return {
     id: r.id,
+    sourceCommit: r.sourceCommit ?? null,
     paths,
     // A refused hazard ends the scenario there: the paths after it are not reached and not failed.
     pass:
@@ -212,6 +213,15 @@ export function summarize(r, entry = {}) {
           : PATHS
       ).every(op => ['pass', 'refused'].includes(paths[op].v)) && !paths.crash,
     seconds: timings(r),
+    landingClasses: (r.landings ?? [])
+      .filter(l => l.lane === 'a' || l.lane === 'c')
+      .map(l => ({
+        lane: l.lane,
+        mainMoved: l.mainMoved ?? null,
+        landedOn: l.firstCheck?.landedOn ?? null,
+        reason: l.firstCheck?.reason ?? null,
+        recomposeCount: l.recomposeCount ?? null,
+      })),
     importSetupVoids: r.steps?.import?.forge?.setupVoids ?? [],
     importWallSeconds: r.steps?.import?.forge?.wallSeconds ?? null,
     gapSeconds: median(gaps.map(g => g.seconds)),
@@ -251,6 +261,21 @@ export function suiteMarkdown(rows, meta = {}) {
     );
   }
   const gaps = rows.flatMap(r => r.gaps.map(g => g.seconds));
+  const classes = rows.flatMap(r => (r.landingClasses ?? []).map(l => ({ id: r.id, ...l })));
+  if (classes.length)
+    lines.push(
+      '',
+      '## Concurrent landing order',
+      '',
+      '`land` times Lane A; the legacy `landReuse` key times Lane C. Either can land first. An overtaken Lane has `mainMoved: true`; the check outcome below distinguishes reuse from rechecking. Timing thresholds remain unchanged.',
+      '',
+      '| Repo | Lane | Overtaken | Check outcome | Reason | Recompositions |',
+      '| --- | --- | --- | --- | --- | --- |',
+      ...classes.map(
+        l =>
+          `| ${l.id} | ${l.lane} | ${l.mainMoved === null ? 'unknown' : l.mainMoved ? 'yes' : 'no'} | ${l.landedOn ?? 'unknown'} | ${l.reason ?? '–'} | ${l.recomposeCount ?? '–'} |`,
+      ),
+    );
   lines.push(
     '',
     '## Result-to-commit gap and workspace prep (seconds)',
@@ -273,7 +298,8 @@ export function suiteMarkdown(rows, meta = {}) {
   const cost = rows.map(r => r.costUsd).filter(Number.isFinite);
   lines.push(
     '',
-    `Dev Convex cost of the run: $${cost.reduce((a, b) => a + b, 0).toFixed(3)} over ${cost.length} metered repositories.`,
+    `Metered row-window Convex subtotal: $${cost.reduce((a, b) => a + b, 0).toFixed(3)} over ${cost.length} metered repositories.`,
+    'Separately prepared imports, owner-wide queries and teardown can fall outside these row windows; report their usage separately.',
   );
   const setupVoids = rows.flatMap(r =>
     (r.importSetupVoids ?? []).map(v => ({ id: r.id, ...v, wall: r.importWallSeconds })),
@@ -303,8 +329,10 @@ export const baselineOf = (rows, meta = {}) => ({
       r.id,
       {
         paths: Object.fromEntries(PATHS.map(op => [op, r.paths[op]?.v ?? 'skip'])),
+        ...(r.sourceCommit ? { sourceCommit: r.sourceCommit } : {}),
         seconds: Object.fromEntries(Object.entries(r.seconds).map(([op, s]) => [op, s.forge])),
         gapSeconds: r.gapSeconds,
+        ...(r.landingClasses?.length ? { landingClasses: r.landingClasses } : {}),
       },
     ]),
   ),

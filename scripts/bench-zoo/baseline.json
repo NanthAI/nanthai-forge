@@ -36,7 +36,23 @@
     "conflict": 14.02409195799986,
     "resolve": 61.017807082999965
    },
-   "gapSeconds": 3.074
+   "gapSeconds": 3.074,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "lfs": {
    "paths": {
@@ -61,7 +77,23 @@
     "conflict": 16.581417916999897,
     "resolve": 76.79047941699997
    },
-   "gapSeconds": 3.134
+   "gapSeconds": 3.134,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "shapes-posix": {
    "paths": {
@@ -86,7 +118,23 @@
     "conflict": 21.971122582999524,
     "resolve": 80.51610150000035
    },
-   "gapSeconds": 4.106
+   "gapSeconds": 4.106,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "go": {
    "paths": {
@@ -111,7 +159,23 @@
     "conflict": 13.18705395900004,
     "resolve": 260.40651
    },
-   "gapSeconds": 3.085
+   "gapSeconds": 3.085,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "python": {
    "paths": {
@@ -136,7 +200,23 @@
     "conflict": 16.001133625999998,
     "resolve": 79.086429833
    },
-   "gapSeconds": 2.94
+   "gapSeconds": 2.94,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "rust": {
    "paths": {
@@ -161,7 +241,23 @@
     "conflict": 15.503218458000017,
     "resolve": 82.55998504200001
    },
-   "gapSeconds": 2.888
+   "gapSeconds": 2.888,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "jvm": {
    "paths": {
@@ -186,7 +282,23 @@
     "conflict": 13.34949754199991,
     "resolve": 523.8321507500001
    },
-   "gapSeconds": 2.96
+   "gapSeconds": 2.96,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "mixed": {
    "paths": {
@@ -211,7 +323,23 @@
     "conflict": 13.097469206999987,
     "resolve": 152.38901316700003
    },
-   "gapSeconds": 3.021
+   "gapSeconds": 3.021,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "csharp": {
    "paths": {
@@ -236,7 +364,23 @@
     "conflict": 13.696524166999968,
     "resolve": 78.6933624160001
    },
-   "gapSeconds": 3.329
+   "gapSeconds": 3.329,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "electron": {
    "paths": {
@@ -261,7 +405,23 @@
     "conflict": 19.90786737500003,
     "resolve": 109.50162716699997
    },
-   "gapSeconds": 3.094
+   "gapSeconds": 3.094,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "elixir": {
    "paths": {
@@ -286,7 +446,23 @@
     "conflict": 18.63497849900002,
     "resolve": 100.71117054100003
    },
-   "gapSeconds": 3.287
+   "gapSeconds": 3.287,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "ruby": {
    "paths": {
@@ -311,7 +487,23 @@
     "conflict": 22.476252624999994,
     "resolve": 153.35864362499998
    },
-   "gapSeconds": 3.551
+   "gapSeconds": 3.551,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "php": {
    "paths": {
@@ -336,7 +528,23 @@
     "conflict": 23.94577704100008,
     "resolve": 111.89110629100003
    },
-   "gapSeconds": 4.21
+   "gapSeconds": 4.21,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "swift": {
    "paths": {
@@ -361,7 +569,23 @@
     "conflict": 15.161589250000077,
     "resolve": 156.577223291
    },
-   "gapSeconds": 2.912
+   "gapSeconds": 2.912,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "android": {
    "paths": {
@@ -386,7 +610,23 @@
     "conflict": 22.338824708000175,
     "resolve": 224.7350529169999
    },
-   "gapSeconds": 3.396
+   "gapSeconds": 3.396,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "dart": {
    "paths": {
@@ -411,7 +651,23 @@
     "conflict": 26.36032937400008,
     "resolve": 106.55163083300017
    },
-   "gapSeconds": 3.107
+   "gapSeconds": 3.107,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "flutter": {
    "paths": {
@@ -436,7 +692,23 @@
     "conflict": 21.541424791000086,
     "resolve": 202.43010116600013
    },
-   "gapSeconds": 3.213
+   "gapSeconds": 3.213,
+   "landingClasses": [
+    {
+     "lane": "c",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "a",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "cpp": {
    "paths": {
@@ -461,7 +733,23 @@
     "conflict": 20.01373691700003,
     "resolve": 178.497132917
    },
-   "gapSeconds": 3.104
+   "gapSeconds": 3.104,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "zig": {
    "paths": {
@@ -486,7 +774,23 @@
     "conflict": 16.645282125000143,
     "resolve": 141.62996962500014
    },
-   "gapSeconds": 3.025
+   "gapSeconds": 3.025,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "history": {
    "paths": {
@@ -511,7 +815,23 @@
     "conflict": 19.644081500000322,
     "resolve": 106.82533025000012
    },
-   "gapSeconds": 3.049
+   "gapSeconds": 3.049,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "binaries": {
    "paths": {
@@ -536,7 +856,23 @@
     "conflict": 14.580120833999942,
     "resolve": 91.4153702080003
    },
-   "gapSeconds": 3.143
+   "gapSeconds": 3.143,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "recheck",
+     "reason": "global-risk",
+     "recomposeCount": 1
+    }
+   ]
   },
   "shapes-bigbin": {
    "paths": {
@@ -561,7 +897,23 @@
     "conflict": 13.503063207999803,
     "resolve": 71.11837162500015
    },
-   "gapSeconds": 3.123
+   "gapSeconds": 3.123,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "shapes-case": {
    "paths": {
@@ -586,7 +938,23 @@
     "conflict": 14.622175874999723,
     "resolve": 68.88190466700028
    },
-   "gapSeconds": 3.018
+   "gapSeconds": 3.018,
+   "landingClasses": [
+    {
+     "lane": "a",
+     "mainMoved": false,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 0
+    },
+    {
+     "lane": "c",
+     "mainMoved": true,
+     "landedOn": "admission-run",
+     "reason": null,
+     "recomposeCount": 1
+    }
+   ]
   },
   "shapes-collide": {
    "paths": {

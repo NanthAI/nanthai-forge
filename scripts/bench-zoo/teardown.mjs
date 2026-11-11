@@ -110,6 +110,29 @@ export async function teardown(
     const saved = state.repos[entry.id];
     if (saved?.projectId && out.some(r => r.projectId === saved.projectId && r.project === 'deleted'))
       delete state.repos[entry.id];
+    const pendingImport = state.pendingImports?.[entry.id];
+    if (pendingImport) {
+      const retained = existsSync(pendingImport.journalPath)
+        ? JSON.parse(readFileSync(pendingImport.journalPath, 'utf8'))
+        : null;
+      const status = retained?.status;
+      const rejection = retained?.rejection ?? pendingImport.rejection;
+      const terminal =
+        (rejection?.action === 'projectGithubImport:start' &&
+          rejection.code === 'GITHUB_SOURCE_UNSUPPORTED') ||
+        (status &&
+          status.error?.code !== 'GITHUB_RATE_LIMIT' &&
+          (status.error || ['ready', 'failed', 'cancelled'].includes(status.phase)));
+      if (terminal || out.some(r => r.projectId === status?.projectId && r.project === 'deleted'))
+        delete state.pendingImports[entry.id];
+      else
+        out.push({
+          id: entry.id,
+          project: 'NOT DELETED (import outcome unfinished; original journal retained)',
+          repo: 'kept',
+        });
+      if (!Object.keys(state.pendingImports).length) delete state.pendingImports;
+    }
     save();
     if (projectsOnly) continue;
     const gone = await run('gh', ['repo', 'delete', entry.fork, '--yes']);

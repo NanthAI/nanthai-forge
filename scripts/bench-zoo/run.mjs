@@ -140,28 +140,56 @@ export async function runRepo(cfg, repo, state, runDir, io) {
   // 1. Import (born hosted). Plain git's nearest operation: a full bare clone of the fork.
   let s = state.repos[repo.id] ?? {};
   if (!s.projectId || cfg.reimport) {
+    let retained = state.pendingImports?.[repo.id];
+    if (retained && cfg.reimport && existsSync(retained.journalPath)) {
+      const status = JSON.parse(readFileSync(retained.journalPath, 'utf8')).status;
+      if (status && (status.error || ['ready', 'failed', 'cancelled'].includes(status.phase)))
+        retained = null;
+    }
+    const journalPath = retained?.journalPath ?? join(base, 'import-journal.json');
+    if (retained && !existsSync(journalPath)) {
+      mkdirSync(dirname(journalPath), { recursive: true });
+      writeFileSync(journalPath, JSON.stringify(retained, null, 1) + '\n');
+    }
     // A refused import throws its named code; record it as the import's refusal, not a crash.
-    const res = await io.importProject(repo, join(base, 'import-journal.json')).catch(error => {
-      const refusal = thrownRefusal(error);
-      if (!refusal) throw error;
-      return { phase: 'refused', error: refusal };
-    });
+    const res = await io
+      .importProject(repo, journalPath, {
+        onJournal: journal => {
+          (state.pendingImports ??= {})[repo.id] = { journalPath, ...journal };
+          io.saveState(); // Persist the original identity before its first backend request.
+        },
+      })
+      .catch(error => {
+        const refusal = thrownRefusal(error);
+        if (!refusal) throw error;
+        return { phase: 'refused', error: refusal };
+      });
+    const imported = res.phase === 'ready' && Boolean(res.projectId);
     step('import', 'forge', {
-      ok: res.phase === 'ready',
+      ok: imported,
       seconds: res.seconds,
       wallSeconds: res.wallSeconds,
       setupVoids: res.setupVoids,
+      transportVoids: res.transportVoids,
+      resumedImport: res.resumedImport,
       calls: res.calls,
       files: res.files,
       bytes: res.bytes,
       report: res.report,
       error: res.error ?? null,
     });
-    if (res.phase !== 'ready')
+    if (!imported) {
+      r.keepCheckouts = true; // The import journal owns the exact retry identity, even on refusal.
       return (refuse('import', res.error?.code ?? 'IMPORT_FAILED', JSON.stringify(res.error)), r);
+    }
     s = state.repos[repo.id] = { projectId: res.projectId, commit: res.commit };
+    if (state.pendingImports) {
+      delete state.pendingImports[repo.id];
+      if (!Object.keys(state.pendingImports).length) delete state.pendingImports;
+    }
     io.saveState();
   } else r.notes.push(`import reused: project ${s.projectId}`);
+  r.sourceCommit = s.commit ?? null;
   const bare = await io.git([
     'clone',
     '--bare',
@@ -637,6 +665,7 @@ async function main(argv) {
         id: repo.id,
         crash: error.stack,
         ...(error.pendingSource ? { pendingSource: error.pendingSource, keepCheckouts: true } : {}),
+        ...(error.pendingImport ? { pendingImport: error.pendingImport, keepCheckouts: true } : {}),
       })),
     );
     // Kept per repository as soon as it ends (an interrupted run loses only the repositories still
