@@ -213,6 +213,9 @@ export async function prepareMergeStep(
       }
       c.index = 1;
       c.phase = 'compute';
+      // The exact tip and changed paths are settled. Finishing publishes only
+      // the small result manifest; a fresh merge heap or action would do no work.
+      await computeMergeStep(c, io, source);
       return;
     }
   }

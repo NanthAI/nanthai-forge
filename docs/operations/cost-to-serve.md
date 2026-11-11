@@ -1006,6 +1006,66 @@ Do not extrapolate the tail or subtract overlapping refused bytes again.
 The smoke meter reads usage and project markers but discards these structured
 step lines; `attribution.mjs` assigns oracle test cases, not source-byte costs.
 
+### Compose and fusion qualification (S6)
+
+The S0 retained timing aggregate above is 24 composition jobs over ten landings,
+with 51 steps: 2.4 jobs per landing and 2.125 steps per job. It is not one action
+per input. Its 27 continuation steps have no retained phase/stop breakdown here;
+the eight tail log lines identify three State-sized PUT bodies, not eight State
+uploads. Those totals do not establish that the three State digests were equal.
+The source loop explains several causes: a byte/compute boundary, inline text
+calculation followed by recomputation, ordered selection quanta, and a new exact
+composition when main moves. Retries reconcile the original operation. The finish
+controller already reuses an exact-main precompose; a different main requires an
+exact new composition, not borrowing its old result or check.
+
+Two generic avoidable costs are removed. A proven one-input fast-forward finishes
+its small result immediately instead of yielding after reading its tips. State
+and State-chunk writes use the existing checksum-confirmed R2 reuse path before
+sending bytes. An identical recomposition or a lost PUT reply therefore needs no
+second State body. This adds no Convex call or DB record. A new physical State or
+chunk adds one R2 HEAD; an existing object replaces PUT plus confirmation with a
+HEAD. No savings in billed usage or time to accepted main are established here.
+`tests/source-compose-reuse.test.mjs` guards one action, zero State/progress PUT
+bytes for the three 29k fast-forward orientations, exact recomposition reuse and
+a main advance that retains both sides' changes. Storage guards cover lost replies,
+checksum mismatch and retryable HEAD failures. Distinct new States still need
+storage; these fixes do not promise to remove their bytes.
+
+The [synthetic qualification](../../tests/fixtures/source-fusion-qualification.json)
+runs the actual Convex provider handlers with a fake transaction store and R2,
+fresh processes per action, three interleaved A/B pairs per 29k shape. A is three
+separate jobs **with the compose fix**, B is a test-only fused job. B drops completed
+cursor trees, clears intermediate byte-cache entries, retains only the verified
+base across save/sync and clears it after sync. Parsed trees do not cross phases.
+The raw file records each pair, cumulative peak RSS at each phase, current RSS,
+heap/external/buffer bytes, calls, PUT categories and exact State pins.
+
+| 29k shape | Separate peak RSS B, pairs 1/2/3 | Fused peak RSS B, pairs 1/2/3 | Actions A / B | State PUT B, A = B |
+| --- | --- | --- | --- | ---: |
+| Clean save/sync/compose | 312,229,888 / 308,674,560 / 312,082,432 | 389,906,432 / 388,202,496 / 388,759,552 | 3 / 1 | 9,396,423 |
+| Save/conflict sync/conflicted compose | 378,175,488 / 366,903,296 / 366,116,864 | 450,641,920 / 453,017,600 / 452,722,688 | 6 / 1 | 9,396,356 |
+
+Fusion fails the non-rise memory gate in every pair. It is not enabled; the probe
+is qualification code only. The clean path's three State pins match exactly. A separate
+[confirmation dataset](../../tests/fixtures/source-fusion-qualification-confirmation.json)
+retains six additional AB pairs after adding exact result-manifest equality,
+including both conflict roots. All comparisons pass; all six additional memory
+comparisons also fail the gate. They replace none of the first samples. The
+conflict path has saved/draft pins and a conflicted result, with no clean composed
+State. This does not prove equivalence on every fixture or unknown public
+landing outcome. First-action completion writes no progress in these probes and
+in the ordinary provider. Calls per drained pipeline are 21 to 13 (clean) and 42
+to 13 (conflict); idle drains make zero calls/reads. DB byte totals include setup
+and are serialized fake documents, not billed I/O. PUTs are attempted bodies, not
+an invoice; physical source/progress bytes stay in synthetic R2, with no Convex
+file-storage writes. Three pairs are small-sample observations. Concurrent load
+was not recorded, and these local walls exclude public preparation, checks,
+acceptance and real scheduler/R2 latency. No speedup, complete memory
+qualification, live billing reduction or time-to-main claim follows. The source
+fixture and CI dev deployment do not replace a separately authorized billed
+comparison. Fusion acceptance lines stay open.
+
 ### R2 counters and executed bucket operations
 
 These are signed requests counted by `presign`, not a reconciled count of

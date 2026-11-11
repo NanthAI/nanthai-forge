@@ -30,7 +30,18 @@ process.on('message', async message => {
   }
   if (!message.run) return;
   const started = performance.now(),
-    cpuStarted = process.cpuUsage();
+    cpuStarted = process.cpuUsage(),
+    sourceSteps = [];
+  const warn = console.warn;
+  console.warn = (...args) => {
+    if (args.length === 1 && typeof args[0] === 'string') {
+      try {
+        const value = JSON.parse(args[0]);
+        if (value.event === 'forge-source-step') sourceSteps.push(value);
+      } catch {}
+    }
+    warn(...args);
+  };
   try {
     globalThis.fetch = async (url, init = {}) => {
       if (init.method === 'PUT') {
@@ -93,6 +104,7 @@ process.on('message', async message => {
     process.send({
       done: true,
       metrics: {
+        sourceSteps,
         elapsedMs: performance.now() - started,
         maxRssBytes: process.resourceUsage().maxRSS * 1024,
         cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),
@@ -104,6 +116,7 @@ process.on('message', async message => {
       done: true,
       error: { message: error.message, code: error.code, stack: error.stack },
       metrics: {
+        sourceSteps,
         elapsedMs: performance.now() - started,
         maxRssBytes: process.resourceUsage().maxRSS * 1024,
         cpuMicros: Object.values(process.cpuUsage(cpuStarted)).reduce((n, v) => n + v, 0),

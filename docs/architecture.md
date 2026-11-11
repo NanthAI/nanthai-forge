@@ -1123,6 +1123,17 @@ when the native merge needs them. Derived ancestry rows are prefetch hints, neve
 closure evidence. No temporary disk, repository execution, worker credential,
 HTTP control ingress, idle poller or Workflow component is required.
 
+A one-input fast-forward finishes its small result in the quantum that verifies
+its tips and changed paths, even when those manifests consume the byte window;
+there is no subsequent merge heap to initialize. New State and State-chunk writes
+first confirm an existing project-scoped R2 key's exact checksum and size. A retry
+or recompose reuses that binding without resending its body, including after a
+lost PUT reply; new content retains the create-only PUT and publication checks.
+This uses no additional Convex call. A new physical State/chunk costs one extra
+R2 HEAD; an existing one costs a HEAD instead of PUT plus confirmation. Small
+result/progress writes keep their existing path. Save, sync and compose remain
+separate jobs; fusion has not met the peak-memory gate.
+
 Source-operation reducers own publication for the internal Convex provider. See [trusted hosted source worker](operations/hosted-source-worker.md).
 
 ### Hosted Lane and Intent lifecycle APIs

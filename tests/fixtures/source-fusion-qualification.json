@@ -1,0 +1,878 @@
+{
+  "method": "source-only synthetic Convex provider handlers; A: three jobs with compose fix; B: phase cursor/cache release with 8 MiB maximum and base-only retention across save->sync; three AB pairs per shape",
+  "files": 29000,
+  "pairs": [
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1661.3786250000003,
+        "maxRssBytes": 312229888,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134290,
+        "dbWriteBytes": 57967,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 219758592
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 312229888
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 198787072
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 1021.3458339999997,
+        "maxRssBytes": 389906432,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62485,
+        "dbWriteBytes": 24723,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 101892096,
+            "heapUsed": 31356224,
+            "maxRssBytes": 223002624,
+            "rss": 214958080,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 169295872,
+            "heapUsed": 25116488,
+            "maxRssBytes": 378585088,
+            "rss": 373030912,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269265,
+            "external": 51375090,
+            "heapTotal": 171245568,
+            "heapUsed": 39588512,
+            "maxRssBytes": 389906432,
+            "rss": 378454016,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1641.9635419999995,
+        "maxRssBytes": 308674560,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134245,
+        "dbWriteBytes": 57964,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 196149248
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 308674560
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 198393856
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 935.4814999999999,
+        "maxRssBytes": 388202496,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62518,
+        "dbWriteBytes": 24729,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869974,
+            "external": 32578201,
+            "heapTotal": 102416384,
+            "heapUsed": 31218688,
+            "maxRssBytes": 223150080,
+            "rss": 215072768,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 168247296,
+            "heapUsed": 25132864,
+            "maxRssBytes": 377094144,
+            "rss": 372047872,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269265,
+            "external": 51375090,
+            "heapTotal": 169934848,
+            "heapUsed": 39608696,
+            "maxRssBytes": 388202496,
+            "rss": 376750080,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1409.3849580000006,
+        "maxRssBytes": 312082432,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134215,
+        "dbWriteBytes": 57954,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 194707456
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 312082432
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 222707712
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 833.2922089999993,
+        "maxRssBytes": 388759552,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62491,
+        "dbWriteBytes": 24731,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 102154240,
+            "heapUsed": 31220640,
+            "maxRssBytes": 223363072,
+            "rss": 215302144,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 169033728,
+            "heapUsed": 25197680,
+            "maxRssBytes": 376487936,
+            "rss": 371441664,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269265,
+            "external": 51375090,
+            "heapTotal": 170721280,
+            "heapUsed": 39571280,
+            "maxRssBytes": 388759552,
+            "rss": 377323520,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 2714.0525830000006,
+        "maxRssBytes": 378175488,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214587,
+        "dbWriteBytes": 74279,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 197804032
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 378175488
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 280231936
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1481.520958000001,
+        "maxRssBytes": 450641920,
+        "attemptedPutBytes": 9401658,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2417,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66400,
+        "dbWriteBytes": 26730,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869974,
+            "external": 32578201,
+            "heapTotal": 100581376,
+            "heapUsed": 30835520,
+            "maxRssBytes": 212664320,
+            "rss": 212238336,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61506443,
+            "external": 93708892,
+            "heapTotal": 223903744,
+            "heapUsed": 132672408,
+            "maxRssBytes": 407306240,
+            "rss": 407306240,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 47502723,
+            "external": 70305786,
+            "heapTotal": 247808000,
+            "heapUsed": 151285536,
+            "maxRssBytes": 450641920,
+            "rss": 449871872,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 2573.582375,
+        "maxRssBytes": 366903296,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214593,
+        "dbWriteBytes": 74290,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 224559104
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 366903296
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 284065792
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1707.583666999999,
+        "maxRssBytes": 453017600,
+        "attemptedPutBytes": 9401658,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2417,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66403,
+        "dbWriteBytes": 26727,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 101892096,
+            "heapUsed": 31240592,
+            "maxRssBytes": 224002048,
+            "rss": 215941120,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61506443,
+            "external": 93708892,
+            "heapTotal": 227459072,
+            "heapUsed": 138827336,
+            "maxRssBytes": 412319744,
+            "rss": 412319744,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 47523105,
+            "external": 75024346,
+            "heapTotal": 232456192,
+            "heapUsed": 105272928,
+            "maxRssBytes": 453017600,
+            "rss": 432046080,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 3043.6251249999987,
+        "maxRssBytes": 366116864,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214605,
+        "dbWriteBytes": 74296,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 196608000
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 366116864
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 279724032
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1484.6687500000007,
+        "maxRssBytes": 452722688,
+        "attemptedPutBytes": 9401655,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2414,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66394,
+        "dbWriteBytes": 26724,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 101629952,
+            "heapUsed": 30815896,
+            "maxRssBytes": 211992576,
+            "rss": 211697664,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61505808,
+            "external": 93707321,
+            "heapTotal": 223477760,
+            "heapUsed": 132686336,
+            "maxRssBytes": 407044096,
+            "rss": 407044096,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 5147174,
+            "external": 9157527,
+            "heapTotal": 170082304,
+            "heapUsed": 25091408,
+            "maxRssBytes": 452722688,
+            "rss": 413614080,
+            "stage": 2
+          }
+        ]
+      }
+    }
+  ],
+  "outcome": "Fusion fails the peak-memory non-rise gate in every pair. Compose-only production change; fusion remains a private test probe.",
+  "coverage": {
+    "unrun": [
+      "public landing equivalence on every fixture",
+      "public retries/unknown outcomes for fusion",
+      "paired time to accepted main",
+      "real billed usage delta",
+      "live phase memory"
+    ],
+    "voids": [
+      "Initial 4k dry probe failed because the fixture override selected only nested delegation, not scheduled Node actions; fixed before all retained pairs. No retained pair voided."
+    ],
+    "limits": "Calls cover source drains only; DB bytes include fixture setup and are serialized fake documents. RSS is process maxRSS; phase maxima are cumulative. Concurrent load not recorded. Progress/result bytes and exact States use synthetic R2; no Convex byte stores."
+  },
+  "intervals": {
+    "cleanRssBytes": {
+      "n": 3,
+      "medianDifference": 77676544,
+      "ci95": [
+        76677120,
+        79527936
+      ],
+      "excludesZero": true,
+      "resamples": 10000,
+      "seed": 1,
+      "smallSample": true
+    },
+    "conflictRssBytes": {
+      "n": 3,
+      "medianDifference": 86114304,
+      "ci95": [
+        72466432,
+        86605824
+      ],
+      "excludesZero": true,
+      "resamples": 10000,
+      "seed": 1,
+      "smallSample": true
+    }
+  },
+  "confirmation": "source-fusion-qualification-confirmation.json: six further AB pairs add exact result-manifest equality, including both conflict roots. Retained separately; not replacements for the first six pairs.",
+  "sha256": {
+    "src/hosted-source-step-merge.ts": "a4ed894ca281ac3e806b5943a13b8aa815e66889e2f92877c37a08f73da9679f",
+    "convex/projectSourceBytes.ts": "5d45f5ee23a574905eb43ab654ee413345f9faba4b4a8cbb05f103387ae71666",
+    "convex/projectConvexSourceStorage.ts": "2481cf9b0919cbe729b17e015abdc49e9222c97cfa94a418b7dd02f8b7ab66ed",
+    "convex/projectConvexSourceTransport.ts": "b035c2e2a28ae468c03be96499b48cc006d80ebfcf43754278578b4be1abeaa3",
+    "tests/convex-source-scale-fixture.mjs": "c8c83b60a0ea8f07fbd1cdee4b38f14fc35f9785ec858f53dd8043be5b2b06d8",
+    "tests/convex-source-scale-child.mjs": "4f3c9ab5aeaa59b25825fd285381f9bc71f3a22c3fcbbe1967cde4a6739e3075",
+    "tests/source-fusion-probe.mjs": "2a285ae02df438a2872124271b57992db0e37fc0a303789482481ac643d1eab3"
+  }
+}

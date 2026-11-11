@@ -300,3 +300,44 @@ test('cost 298f9675: the existing step marker separates attempted State, progres
     avoided: 123,
   });
 });
+
+test('State reuse reconciles lost PUT outcomes without resending bytes and rejects a changed binding', async t => {
+  const r2 = fakeSourceR2(t);
+  const { sourcePutMetrics } = await import(moduleUrl('../convex/projectSourceBytes.ts'));
+  const counts = sourcePutMetrics();
+  const storage = sourceStorage(
+    { storage: forbiddenStorage },
+    'project',
+    digest,
+    counts.observer('state'),
+    true,
+  );
+  const bytes = Buffer.from('exact immutable State');
+  r2.hooks.lostPut = true;
+  await assert.rejects(storage.store(bytes), { name: 'SourceIoError', stage: 'source-put' });
+  const puts = r2.requests.filter(method => method === 'PUT').length;
+  const retained = await storage.store(bytes);
+  assert.equal(r2.requests.filter(method => method === 'PUT').length, puts);
+  assert.deepEqual(Buffer.from(await storage.read(retained)), bytes);
+  assert.equal(counts.snapshot().avoided, bytes.length);
+  r2.hooks.mismatch = true;
+  await assert.rejects(storage.store(bytes), { code: 'R2_VERIFY_FAILED' });
+  assert.equal(r2.requests.filter(method => method === 'PUT').length, puts);
+});
+
+for (const status of [429, 503])
+  test(`State reuse preserves retryable HEAD ${status} without uploading over an unknown binding`, async t => {
+    fakeSourceR2(t);
+    let puts = 0;
+    t.mock.method(globalThis, 'fetch', async (_url, init = {}) => {
+      if (init.method === 'PUT') puts++;
+      return new Response(null, { status });
+    });
+    await assert.rejects(
+      sourceStorage({ storage: forbiddenStorage }, 'project', digest, undefined, true).store(
+        Buffer.from('state'),
+      ),
+      { name: 'SourceIoError', stage: 'source-head', httpStatus: status },
+    );
+    assert.equal(puts, 0);
+  });

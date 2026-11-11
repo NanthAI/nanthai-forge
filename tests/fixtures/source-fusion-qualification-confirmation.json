@@ -1,0 +1,1460 @@
+{
+  "method": "source-only synthetic provider handlers; A uses three jobs with compose fix, B releases phase trees and caches (8 MiB maximum, base only save->sync); no live billing or main acceptance",
+  "files": 29000,
+  "pairs": [
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1430.2843749999997,
+        "maxRssBytes": 307298304,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134278,
+        "dbWriteBytes": 57966,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 197640192
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 307298304
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 226820096
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 895.4217920000001,
+        "maxRssBytes": 391954432,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62482,
+        "dbWriteBytes": 24725,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869974,
+            "external": 32578201,
+            "heapTotal": 101105664,
+            "heapUsed": 30859392,
+            "maxRssBytes": 213483520,
+            "rss": 213139456,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 170082304,
+            "heapUsed": 25134568,
+            "maxRssBytes": 381157376,
+            "rss": 375603200,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269244,
+            "external": 51375037,
+            "heapTotal": 172032000,
+            "heapUsed": 39608128,
+            "maxRssBytes": 391954432,
+            "rss": 380502016,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1318.2768740000001,
+        "maxRssBytes": 367099904,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134281,
+        "dbWriteBytes": 57978,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 220741632
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 367099904
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 223690752
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 760.4498749999993,
+        "maxRssBytes": 388251648,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62491,
+        "dbWriteBytes": 24725,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 102416384,
+            "heapUsed": 31189368,
+            "maxRssBytes": 223379456,
+            "rss": 215334912,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 171130880,
+            "heapUsed": 25117664,
+            "maxRssBytes": 376438784,
+            "rss": 371359744,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269265,
+            "external": 51375090,
+            "heapTotal": 172818432,
+            "heapUsed": 39614504,
+            "maxRssBytes": 388251648,
+            "rss": 376799232,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": false,
+      "a": {
+        "jobs": 3,
+        "actions": 3,
+        "calls": 21,
+        "wallMs": 1217.6435419999998,
+        "maxRssBytes": 305496064,
+        "attemptedPutBytes": 9397365,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 942,
+          "other": 0,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 2,
+        "dbReadBytes": 134320,
+        "dbWriteBytes": 57987,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 195969024
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 305496064
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 198328320
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 12,
+        "wallMs": 732.0437090000005,
+        "maxRssBytes": 391954432,
+        "attemptedPutBytes": 9399516,
+        "attemptedStatePutBytes": 9396423,
+        "bodyBytes": {
+          "state": 9396423,
+          "progress": 0,
+          "result": 2151,
+          "other": 942,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 1,
+        "dbReadBytes": 62479,
+        "dbWriteBytes": 24722,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          },
+          {
+            "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+            "size": 4698245
+          }
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "b3313eb2ba101b4f265893c8cf9d8fde7c97d1d352ecc8ce43e4d642207dc11f",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "merged"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "ac2fa3234408f316c641ddc2d36913e7084b3937c3de973edf7d0c4693a063cb",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "state": {
+                "sha256": "b2dbbbc97ebc2c4cf83377c478d6be4e098ef87d64a29182fed6332cd0544e54",
+                "size": 4698245
+              },
+              "status": "clean"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 100843520,
+            "heapUsed": 30820488,
+            "maxRssBytes": 213204992,
+            "rss": 212844544,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 19172749,
+            "external": 27881073,
+            "heapTotal": 166412288,
+            "heapUsed": 25328632,
+            "maxRssBytes": 379650048,
+            "rss": 374571008,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 33269244,
+            "external": 51375037,
+            "heapTotal": 168099840,
+            "heapUsed": 39597184,
+            "maxRssBytes": 391954432,
+            "rss": 380502016,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 2620.5713749999995,
+        "maxRssBytes": 367083520,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214608,
+        "dbWriteBytes": 74294,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 196886528
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 367083520
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 306855936
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1781.2924999999996,
+        "maxRssBytes": 443367424,
+        "attemptedPutBytes": 9401657,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2416,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66403,
+        "dbWriteBytes": 26721,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 102416384,
+            "heapUsed": 31222440,
+            "maxRssBytes": 222511104,
+            "rss": 214515712,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61505808,
+            "external": 93707321,
+            "heapTotal": 223477760,
+            "heapUsed": 132949608,
+            "maxRssBytes": 409206784,
+            "rss": 409206784,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 38036671,
+            "external": 56141556,
+            "heapTotal": 194969600,
+            "heapUsed": 67792448,
+            "maxRssBytes": 443367424,
+            "rss": 418840576,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 2854.492,
+        "maxRssBytes": 366673920,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214611,
+        "dbWriteBytes": 74288,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 195280896
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 366673920
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 306348032
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1610.0494999999992,
+        "maxRssBytes": 451051520,
+        "attemptedPutBytes": 9401655,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2414,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66403,
+        "dbWriteBytes": 26730,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869953,
+            "external": 32578148,
+            "heapTotal": 101105664,
+            "heapUsed": 30868816,
+            "maxRssBytes": 212779008,
+            "rss": 212385792,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61505808,
+            "external": 93707321,
+            "heapTotal": 223477760,
+            "heapUsed": 132686824,
+            "maxRssBytes": 406994944,
+            "rss": 406994944,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 5147174,
+            "external": 9157527,
+            "heapTotal": 173228032,
+            "heapUsed": 25185568,
+            "maxRssBytes": 451051520,
+            "rss": 412221440,
+            "stage": 2
+          }
+        ]
+      }
+    },
+    {
+      "conflict": true,
+      "a": {
+        "jobs": 3,
+        "actions": 6,
+        "calls": 42,
+        "wallMs": 2650.313999000002,
+        "maxRssBytes": 373686272,
+        "attemptedPutBytes": 9410991,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 11750,
+          "result": 1206,
+          "other": 1679,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 5,
+        "dbReadBytes": 214638,
+        "dbWriteBytes": 74294,
+        "phases": [
+          {
+            "phase": "input>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          },
+          {
+            "phase": "input>graph",
+            "stop": "bytes"
+          },
+          {
+            "phase": "graph>compute",
+            "stop": "recompute"
+          },
+          {
+            "phase": "compute>done",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "schema": 1,
+            "kind": "forge-source-worker-result",
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "stage": 0,
+            "maxRssBytes": 217006080
+          },
+          {
+            "stage": 1,
+            "maxRssBytes": 373686272
+          },
+          {
+            "stage": 2,
+            "maxRssBytes": 306249728
+          }
+        ]
+      },
+      "b": {
+        "jobs": 1,
+        "actions": 1,
+        "calls": 13,
+        "wallMs": 1598.1887500000012,
+        "maxRssBytes": 450838528,
+        "attemptedPutBytes": 9401658,
+        "attemptedStatePutBytes": 9396356,
+        "bodyBytes": {
+          "state": 9396356,
+          "progress": 0,
+          "result": 2417,
+          "other": 2885,
+          "refused": 0,
+          "avoided": 0
+        },
+        "baseReads": 3,
+        "dbReadBytes": 66403,
+        "dbWriteBytes": 26733,
+        "phases": [
+          {
+            "phase": "pipeline:3",
+            "stop": "done"
+          }
+        ],
+        "pins": [
+          {
+            "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+            "size": 4698178
+          },
+          {
+            "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+            "size": 4698178
+          },
+          null
+        ],
+        "results": [
+          {
+            "input": {
+              "sha256": "fa1eef8ef5a4b112f207cb145e31b384b5193f6c610a1cf255497d4b302c8c10",
+              "size": 350
+            },
+            "kind": "forge-source-worker-result",
+            "schema": 1,
+            "state": {
+              "sha256": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "size": 4698178
+            }
+          },
+          {
+            "algorithm": "forge-native-sync-v1",
+            "input": {
+              "sha256": "e097c4155e8a83ce23424e8d8fda1af9bd8c8e9ab81a94eee695447995ffd5f6",
+              "size": 403
+            },
+            "kind": "forge-hosted-sync-result",
+            "result": {
+              "conflicts": {
+                "sha256": "f923fe2a538e6fc61d62be6899e3905e0ba53b4c9899c74012027fef93979628",
+                "size": 805
+              },
+              "left": "e349c08778ffa3d12fcef6ef700cd065a1d04fbc59ddec7cfe1e25efb4492e7b",
+              "right": "99bd2bce17b9b3f60ee6242a16ea72ace8d981843d0a8f39c9ec9cb371e8e34a",
+              "state": {
+                "sha256": "279214333b6ccd6be10a8cef641bea750280aef59de3c72686fbb01a68c96678",
+                "size": 4698178
+              },
+              "status": "conflict"
+            },
+            "schema": 1
+          },
+          {
+            "algorithm": "forge-native-compose-v1",
+            "input": {
+              "sha256": "e22ecc4eb76597461cef75abe44015880343728e7db0f41961b576af7929204a",
+              "size": 624
+            },
+            "kind": "forge-hosted-compose-result",
+            "result": {
+              "conflicts": {
+                "sha256": "3783b0a91d4d4fd68e68dc92d7b430a3a666440867d0b3b77baa1e18d17f4405",
+                "size": 805
+              },
+              "more": 0,
+              "paths": [
+                "src/deep/shared/components/features/generated/module-000000.ts"
+              ],
+              "status": "conflict"
+            },
+            "schema": 1
+          }
+        ],
+        "phaseMemory": [
+          {
+            "arrayBuffers": 23869974,
+            "external": 32578201,
+            "heapTotal": 101629952,
+            "heapUsed": 31251000,
+            "maxRssBytes": 223428608,
+            "rss": 215302144,
+            "stage": 0
+          },
+          {
+            "arrayBuffers": 61505808,
+            "external": 93707321,
+            "heapTotal": 223739904,
+            "heapUsed": 132686448,
+            "maxRssBytes": 408862720,
+            "rss": 408862720,
+            "stage": 1
+          },
+          {
+            "arrayBuffers": 47523105,
+            "external": 70326168,
+            "heapTotal": 241598464,
+            "heapUsed": 146391392,
+            "maxRssBytes": 450838528,
+            "rss": 446447616,
+            "stage": 2
+          }
+        ]
+      }
+    }
+  ],
+  "purpose": "Additional confirmation after adding exact result-manifest equality, including conflict roots, to the first six memory-gate pairs. No original sample replaced or omitted.",
+  "outcome": "All exact result manifests match, and peak RSS rises in every pair. Fusion remains unenabled."
+}

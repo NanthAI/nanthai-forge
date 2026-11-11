@@ -72,7 +72,10 @@ export function convexSourceTransport(
     while (writing.length) outputs.push(await writing.shift()!);
   };
   const durable = sourceStorage(ctx, projectId, hash, putMetrics.observer('other'));
-  const stateStorage = sourceStorage(ctx, projectId, hash, putMetrics.observer('state'));
+  // Retries and recompositions can generate exactly the same immutable State or
+  // chunk. Confirm its checksum before sending its body again, including when a
+  // previous action's successful PUT reply was lost before its commit.
+  const stateStorage = sourceStorage(ctx, projectId, hash, putMetrics.observer('state'), true);
   const chunks = sourceStateChunks(
     projectId,
     hash,

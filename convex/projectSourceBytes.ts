@@ -21,7 +21,7 @@ export async function storeSourceBytes(
   pin: { sha256: string; size: number },
   reuse = false,
   created?: (wrote: boolean) => void,
-  observe?: (event: 'put' | 'refused', pin: { sha256: string; size: number }) => void,
+  observe?: (event: 'put' | 'refused' | 'reused', pin: { sha256: string; size: number }) => void,
 ): Promise<{ storageId: Id<'_storage'> } | { r2Key: string }> {
   invariant(bytes.length === pin.size, 'SOURCE_HASH_MISMATCH', 'Source output size changed.');
   invariant(projectId, 'SOURCE_JOB_INVALID', 'R2 source needs its exact project binding.');
@@ -31,7 +31,10 @@ export async function storeSourceBytes(
     head.status === 'ok' && head.size === pin.size && head.checksum === checksumOf(pin.sha256);
   if (reuse) {
     const existing = await headObject(config, key, true);
-    if (matches(existing)) return { r2Key: key };
+    if (matches(existing)) {
+      observe?.('reused', pin);
+      return { r2Key: key };
+    }
     invariant(existing.status === 'missing', 'R2_VERIFY_FAILED', 'Existing source binding differs.');
   }
   const target = await presignPut(config, key, { digest: pin.sha256, size: pin.size });
@@ -80,10 +83,12 @@ export function sourcePutMetrics() {
   let refused = 0,
     avoided = 0;
   return {
-    observer: (kind: Kind) => (event: 'put' | 'refused', pin: { sha256: string; size: number }) => {
-      if (event === 'put') entries.push({ kind, ...pin });
-      else refused += pin.size;
-    },
+    observer:
+      (kind: Kind) => (event: 'put' | 'refused' | 'reused', pin: { sha256: string; size: number }) => {
+        if (event === 'put') entries.push({ kind, ...pin });
+        else if (event === 'refused') refused += pin.size;
+        else avoided += pin.size;
+      },
     avoid: (size: number) => {
       avoided += size;
     },

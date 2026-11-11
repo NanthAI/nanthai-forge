@@ -31,7 +31,13 @@ const actionUrls = Object.fromEntries(
 );
 export const at = '2026-10-28T00:00:00.000Z';
 const compileCache = temporaryDirectory(null, 'forge-test-compile-cache-');
-export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = false, afterAction } = {}) {
+export async function scaleFixture({
+  parallelism = 4,
+  delay = 0,
+  guardRss = false,
+  afterAction,
+  nodeStepUrl,
+} = {}) {
   const f = recordsFixture(),
     { projectId } = await f.setup(),
     objects = new Map(),
@@ -267,7 +273,7 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
               const id = new URL(a.url).pathname.split('/o/')[1]?.split('/')[0];
               assert.equal(digest(a.bytes), id);
               value = objects.has(id);
-              events.push({ put: a.bytes.length, existed: value });
+              events.push({ put: a.bytes.length, digest: id, existed: value });
               if (!value) objects.set(id, a.bytes);
             } else if (message.kind === 'r2-head') {
               events.push({ head: true });
@@ -328,8 +334,8 @@ export async function scaleFixture({ parallelism = 4, delay = 0, guardRss = fals
         });
         child.send({
           run: true,
-          url: actionUrls[n],
-          nodeUrl: moduleUrl('../convex/projectConvexSourceNode.ts'),
+          url: n === 'projectConvexSourceNode' && nodeStepUrl ? nodeStepUrl : actionUrls[n],
+          nodeUrl: nodeStepUrl ?? moduleUrl('../convex/projectConvexSourceNode.ts'),
           method: m,
           args: item.args,
           guardRss,

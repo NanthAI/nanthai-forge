@@ -130,7 +130,9 @@ export function ancestryFixture({ generationMetadata = false } = {}) {
           }),
     };
     const start = reads.length;
-    while (cursor.phase !== 'compute') {
+    // A proven fast-forward can publish its result during preparation; it has
+    // no merge computation left. Other plans still stop at the compute boundary.
+    while (cursor.phase !== 'compute' && cursor.phase !== 'done') {
       assert(++rounds < 1000);
       await prepareMergeStep(cursor, transport, meter());
       cursor = await persist(cursor);
