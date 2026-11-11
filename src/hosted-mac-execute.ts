@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { uploadCheckReports, type ReportUploadTarget } from './check-report-upload.js';
+import { networkFetch } from './network-fetch.js';
 import { isMachineRunner } from './hosted-machine-runner.js';
 import { semanticCheckCommand } from './semantic-check-command.js';
 import { resolveTestRunner } from './project-test-runner.js';
@@ -107,9 +109,16 @@ export async function executeHostedMacCheck(
   let cleanup = false;
   const owner = run.lease!.owner,
     token = run.lease!.token;
+  let reportUpload: ReportUploadTarget | undefined;
+  const accept = (reply: HostedCheckRun & { reportUpload?: ReportUploadTarget }) => {
+    const { reportUpload: target, ...head } = reply;
+    if (target) reportUpload = target;
+    run = head;
+    return run;
+  };
   const save = async (command: Record<string, unknown>) => {
     signal.throwIfAborted();
-    run = await control({ ...command, owner, token });
+    accept(await control({ ...command, owner, token }));
     return run;
   };
   try {
@@ -394,8 +403,8 @@ export async function executeHostedMacCheck(
               selection,
               result,
             };
-            run = await deliverMacCallback(() =>
-              transport.callback(value, signHostedCheckCallback(value, key)),
+            accept(
+              await deliverMacCallback(() => transport.callback(value, signHostedCheckCallback(value, key))),
             );
           };
           const status = exitCode === 0 ? 'passed' : exitCode === null ? 'interrupted' : 'failed';
@@ -403,8 +412,12 @@ export async function executeHostedMacCheck(
             kind: 'shard',
             shard: { index: 0, attempt: run.fence, executionId, status, exitCode, output: null },
           });
+          const reportDigest = reportUpload
+            ? await uploadCheckReports(reportUpload, reports, networkFetch)
+            : undefined;
           await callback({
             kind: 'complete',
+            ...(reportDigest ? { reportDigest } : {}),
             status,
             exitCode,
             output: null,

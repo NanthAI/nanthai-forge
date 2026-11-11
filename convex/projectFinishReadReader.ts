@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
+import { hydrateLandingRequest } from './projectLandingRequestBody';
 import type { QueryCtx } from './_generated/server';
 import type { Doc } from './_generated/dataModel';
 import { finishReadFields, type FinishReadKind } from './projectFinishReadProjection';
 const readers = new WeakSet<object>();
 const sourcePorts = new WeakMap<object, QueryCtx['db']>();
 export const isFinishReadReader = (ctx: QueryCtx) => readers.has(ctx);
-const unpack = (row: Doc<'projectFinishReadRows'>) => ({ ...JSON.parse(row.value), _id: row.sourceId });
+const unpack = (db: QueryCtx['db'], row: Doc<'projectFinishReadRows'>) => {
+  const value = { ...JSON.parse(row.value), _id: row.sourceId };
+  return row.kind === 'projectHostedLandingRequests' ? hydrateLandingRequest(db, value) : value;
+};
 /** Selected exact read paths only. Old untouched rows remain readable, with an
  * explicit source-row dependency until their next ordinary write installs the
  * projection. No reader backfill, polling, source scan or extra RPC. */
@@ -24,7 +28,7 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
               .query('projectFinishReadRows')
               .withIndex('by_kind_and_source', q => q.eq('kind', 'hostedProjects').eq('sourceId', id))
               .unique();
-            return row ? unpack(row) : db.get(id as never);
+            return row ? unpack(db, row) : db.get(id as never);
           };
         if (key === 'query')
           return (table: string) => {
@@ -51,11 +55,11 @@ export function finishReadReader(ctx: QueryCtx, mode: 'pending' | 'owner' = 'pen
                 return {
                   unique: async () => {
                     const row = await projected.unique();
-                    return row ? unpack(row) : legacy().unique();
+                    return row ? unpack(db, row) : legacy().unique();
                   },
                   take: async (count: number) => {
                     const rows = await projected.take(count);
-                    return rows.length ? rows.map(unpack) : legacy().take(count);
+                    return rows.length ? Promise.all(rows.map(row => unpack(db, row))) : legacy().take(count);
                   },
                 };
               },

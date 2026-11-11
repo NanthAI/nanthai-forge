@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { ticketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -10,7 +11,7 @@ export const batchPublish = await import(moduleUrl('../convex/projectHostedLandi
 export const batchStore = await import(moduleUrl('../convex/projectHostedLandingBatchStore.ts'));
 export const checkStore = await import(moduleUrl('../convex/projectHostedCheckStore.ts'));
 const checkWorker = await import(moduleUrl('../convex/projectHostedCheckWorker.ts'));
-export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => JSON.parse(r.value));
+export const states = f => [...f.tables.projectHostedLandingRequests.values()].map(r => ticketState(f, r));
 export async function batchesFixture(
   t,
   {

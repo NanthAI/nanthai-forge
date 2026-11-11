@@ -111,11 +111,12 @@ retained null alert samples in bounded pages from available operation stamps.
 
 Check status clients can negotiate `check-report-detail` for header-only replies. The shared
 server action serves exact paged reports from retained inline or paged runs and understands pinned
-R2 report objects; the R2 report writer is not enabled. Failure lists are bounded to 8 KiB with
+R2 report objects. New runs use the writer only with the server setting
+`FORGE_CHECK_REPORTS_R2=1` (default off). Failure lists are bounded to 8 KiB with
 exact counts, including mass failures. CLI/MCP `status {runId,reports:"failed"}` and the landing
 page's Test reports disclosure read detail on demand.
 
-The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads. Negotiated packed results retain one combined object per shard and elect early collection with required-shard HEAD discovery and one conditional marker, with a 14-Class-A twelve-shard fixture guard; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
+The [batched CI result inbox](operations/github-actions-checks.md#batched-result-inbox) folds shard results by metadata page and keeps per-file reports off run heads. Negotiated packed results retain one combined object per shard and elect early collection with required-shard HEAD discovery and one conditional marker, with a 14-Class-A legacy or 15-Class-A R2-report twelve-shard fixture guard; independent provider conclusions authorize exact-verdict reuse. A landing records its [first-check proof](pre-queue-checks.md#decision) or the reason it rechecks. Identical shared entries clear overlap but retain the existing global/declared-input and shared-folder risk checks; unchanged complete trees retain exact-tree reuse. The exit bench uses its [own manually pinned deployment](workflows.md#automatic-main-mirror), while pushed mirror commits touching deploy paths deploy dev automatically.
 
 Docs-only coverage preserves the full audit run's exact source pin, so it cannot create a false audit-baseline refusal on the next race.
 
@@ -348,3 +349,8 @@ Local prune batches lifecycle reads across projects on each deployment (250 iden
 retains inaccessible or missing records with a recovery reason, and preserves live/unknown-process
 copies. Test files use private temporary roots; the supervisor reclaims them after timeouts, and
 normal file exit fails on leaked Forge temporary entries.
+
+Landing request tickets retain all 24 indexes and reader contracts while cold request and
+batch-selection metadata live in unindexed parent-owned bodies. Phase writes leave those
+bodies unchanged; the S0 model and storage/call guards cover the split. New report runs retain headers and one pinned R2 object, with no result-report rows;
+legacy replay remains for old runs. No billed S3 saving is claimed.

@@ -154,6 +154,8 @@ export function purgeIndex(table: ProjectPurgeTable): { index: string; scope?: s
 
 /** Project rows that are not keyed by `projectId`; each has its own bounded purge step. */
 export const projectPurgeSpecial = {
+  /** Unindexed cold bodies are deleted atomically with projectHostedLandingRequests.requestBodyId. */
+  projectHostedLandingBodies: 'parent-ticket',
   /** Root row: purge leaves a nameless owner/key tombstone so a replayed initial upload cannot recreate it. */
   hostedProjects: 'tombstone',
   /** Archive blob rows live under the `v1/p/<projectId>/` namespace prefix. */

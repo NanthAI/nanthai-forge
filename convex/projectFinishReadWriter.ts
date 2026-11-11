@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { landingRequestOriginalDb } from './projectLandingRequestBody';
 import { workRecordOriginalDb } from './projectWorkRecordWriter';
 import type { MutationCtx } from './_generated/server';
 import { metricReadWriter } from './projectMetricReadWriter';
@@ -19,7 +20,7 @@ const wrapped = new WeakMap<object, () => MutationCtx['db']>();
  * Their inventories remove or retain each companion explicitly, including prior-page work.
  * Keeping ordinary projection upkeep here would double-delete or recreate them. */
 export function projectPurgeWriter(ctx: MutationCtx): MutationCtx {
-  const original = wrapped.get(workRecordOriginalDb(ctx.db));
+  const original = wrapped.get(landingRequestOriginalDb(workRecordOriginalDb(ctx.db)));
   return original
     ? new Proxy(ctx, {
         get(target, key, receiver) {
@@ -67,7 +68,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
     get(_target, key) {
       if (overrides.has(key)) return overrides.get(key);
       const db = source();
-      if (wrapped.has(db)) {
+      if (wrapped.has(landingRequestOriginalDb(db))) {
         const value = Reflect.get(db, key);
         return typeof value === 'function' ? value.bind(db) : value;
       }
@@ -142,7 +143,7 @@ export function finishReadWriter(ctx: MutationCtx): MutationCtx {
     },
   });
   wrapped.set(writer, () => {
-    const db = source();
+    const db = landingRequestOriginalDb(source());
     return wrapped.get(db)?.() ?? db;
   });
   return new Proxy(ctx, {

@@ -230,11 +230,15 @@ export async function advanceLandingQueue(ctx: MutationCtx, claim: LandingClaim,
       const check = attempt.check;
       const { run } = await loadHostedCheck(ctx, { projectId: claim.projectId, runId: check.runId });
       retainCheckProgress(state, run, now);
-      const semantic = semanticVerdict(attempt.semanticPlan ?? run.semanticPlan, run.contractReports ?? {}, {
-        candidateId: attempt.candidate.id,
-        head: attempt.candidate.head,
-        runId: run.id,
-      });
+      const semantic = semanticVerdict(
+        attempt.semanticPlan ?? run.semanticPlan,
+        run.reportSummary?.semantic ?? run.contractReports ?? {},
+        {
+          candidateId: attempt.candidate.id,
+          head: attempt.candidate.head,
+          runId: run.id,
+        },
+      );
       if (
         hostedCheckTerminal(run) &&
         state.batchNeedsSoloCompose &&

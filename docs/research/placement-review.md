@@ -261,7 +261,7 @@ Done when: bytes written per phase transition and per check callback fall as S0'
 
 #### S3 report transport
 
-Decided for Issue 324f1d97; not built. The slice left one contract open: the status query returns every per-file report, queries and mutations cannot read R2, and shard restore replays report rows inside a mutation.
+Implemented for Issue 324f1d97 behind the default-off server setting `FORGE_CHECK_REPORTS_R2=1`, after the detail readers deployed. New runs pin this choice at enqueue; existing runs retain their protocol. New-mode collectors replace row replay with a single folded R2 object. Legacy report rows and replay remain until the compatibility removal in Issue 589601f7.
 
 **Decision: the summary lives in Convex, the reports live in one R2 object, and report bytes never become rows.** A run's per-file reports are written once, by the party that already holds them, as one immutable object pinned by digest in the run header. A mutation gets what it needs as arguments; no transaction reads report bytes from the database. The raw result slots are not that object: they embed log bytes, and reading them needs the fold, which would freeze today's fold rules into every client and every later release.
 
@@ -273,7 +273,7 @@ Decided for Issue 324f1d97; not built. The slice left one contract open: the sta
 - pass or fail and duration for each test the run's own semantic plan names: no more entries than the plan already holds;
 - the pointer: the report digest (the same `checkPin` of the folded reports as today's `reportDigest`), byte size and file count. No key and no URL.
 
-Guard: on the 20,000-file fixture the run row stays under 12 KiB when every file passes and when every file fails. The all-fail case is new. Read from the code, not run: today's unbounded `testFiles.failed` would take that row past the 1 MiB document limit.
+Guards execute the 20,000-file all-pass and all-fail cases: the whole run row stays under 12 KiB with exact counts and bounded lists. Collector retained heap at I/O boundaries is guarded at 64 MiB; this does not measure the transient allocation peak.
 
 **What the status query returns.** `projectHostedCheckRead:status` returns the header: today's run without `contractReports`, plus the pointer. It stays one reactive read of one row, so web, CLI waits and a future iOS client keep realtime status, and each update carries the header instead of every report. `summary` keeps its reply and its 8 KB bound.
 
@@ -298,7 +298,7 @@ The object lives as long as the run's check logs and is removed by the same clea
 - *Verdict reuse* reads the header only: `verdictKey` and the reuse alias, as now.
 - *Shard restore.* A run that ends by cancel, watchdog or provider conclusion keeps the reports its shards sent: the collector that terminal already schedules folds the slots present, attaches pointer and summary in one mutation, then cleans the inbox. No mutation replays report rows.
 - *Semantic verdict, failure diagnosis, culprit failures, proof and the gate* read header fields.
-- *Test timings* take durations as an argument of the settling mutation (paged above 768 KiB), which replaces the scheduled `record` mutation and its re-read. A run that waits for the provider's conclusion records timings at collection, under a stamp the header keeps for the gate's comparison.
+- *Test timings* take durations as an argument of the settling mutation (paged above 768 KiB), which replaces the scheduled `record` mutation and its re-read. A run that waits for the provider's conclusion records timings only after that conclusion, under a generation and sequence stamp the header keeps for the gate's comparison. Cancelled runs never contribute timing samples.
 - *Culprit bisection* is the one transaction that asks another run about files that passed. On that red-main path one action reads the object and passes the named files (at most the red run's listed failures) as arguments, with the digest as a compare-and-set.
 
 **Budget, modelled until built.** Healthy path per check run: no added call (one settling mutation; the scheduled timing mutation goes); no report bytes written to or read from Convex rows; one more Class A request, which S7's ratchet counts, and about 0.1 MB of egress per 1,000 reported files. Collector memory becomes proportional to the run's reports, a few MB at 20,000 files; assert it. A detail read is one action and one Class B request, on demand. Idle is zero.

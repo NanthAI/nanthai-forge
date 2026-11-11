@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { observerProjectionBudget } from './observer-projection-budget.mjs';
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, code } from './hosted-landing-fixture.mjs';
@@ -386,7 +388,7 @@ for (const size of [575, 1150])
       const id = randomUUID(),
         sequence = i + 1;
       const actor = i === size - 1 ? 'other' : 'owner';
-      f.insert('projectHostedLandingRequests', {
+      seedTicket(f, {
         ...original,
         _id: undefined,
         _creationTime: undefined,
@@ -397,7 +399,7 @@ for (const size of [575, 1150])
       });
     }
     for (let i = 0; i < 575; i++)
-      f.insert('projectHostedLandingRequests', {
+      seedTicket(f, {
         ...original,
         _id: undefined,
         _creationTime: undefined,
@@ -435,8 +437,14 @@ for (const size of [575, 1150])
     const reads = f.counts.at(-1);
     assert.equal(ordered.length, size);
     assert.equal(ordered[2].submitter, 'other', 'fairness finds the peer beyond the first metadata page');
-    assert(reads.documents <= size + 3, 'no retained history or per-entry lookups');
-    assert(reads.ranges <= Math.ceil(size / 50) + 3, 'bounded metadata pages');
+    assert(
+      reads.documents - landingBodyCounts(reads).reads <= size + 3,
+      'no retained history or per-entry lookups',
+    );
+    assert(
+      reads.ranges - landingBodyCounts(reads).ranges <= Math.ceil(size / 50) + 3,
+      'bounded metadata pages',
+    );
     const retainedKeyBytes = Buffer.byteLength(JSON.stringify(ordered));
     assert(retainedKeyBytes <= size * 256, 'only compact ordering metadata retained');
     await prioritize(f, command(f, first.id));
@@ -508,7 +516,7 @@ test('an unstarted urgent batch also takes precedence over an unstarted normal b
   }
   const retained = [...f.tables.projectHostedLandingRequests.values()].find(row => row.priority === 'urgent');
   for (let i = 0; i < 575; i++)
-    f.insert('projectHostedLandingRequests', {
+    seedTicket(f, {
       ...retained,
       _id: undefined,
       _creationTime: undefined,

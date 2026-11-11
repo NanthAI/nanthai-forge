@@ -7,6 +7,7 @@ import { makeFunctionReference } from 'convex/server';
 import { internalMutation, internalAction, internalQuery, type MutationCtx, type QueryCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import { beginHostedOperation, finishHostedOperation, hostedOperationRow } from './projectHostedOperations';
+import { semanticReportsSchema } from '../src/intent-semantic-conflict';
 import { detachCheckReports, hydrateCheckReports } from './projectHostedCheckReports';
 import { beginCheckOperation, loadHostedCheck } from './projectHostedCheckStore';
 import { insertHostedCheckRun } from './projectHostedChecks';
@@ -53,6 +54,7 @@ type Recovery = {
   recoveryId?: string;
   evidence?: NeedsFix['failed'];
   missing?: string[];
+  greenPending?: boolean;
   addition?: number;
   pairUnclear?: boolean;
   range: { sequence: number; receipt: HostedAcceptance }[];
@@ -520,7 +522,17 @@ export const startRedClassification = internalMutation({
     return null;
   },
 });
-async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedCheckRun) {
+type ReportEvidence = {
+  runId: string;
+  digest: string;
+  reports: NonNullable<HostedCheckRun['contractReports']>;
+};
+async function classify(
+  ctx: MutationCtx,
+  input: Identity,
+  terminal?: HostedCheckRun,
+  named?: ReportEvidence,
+) {
   const project = await ctx.db.get(input.projectId);
   if (!project || project.removal || project.sourceAuthority?.mode !== 'server') return;
   let row = await recoveryRow(ctx, input, project.owner);
@@ -594,65 +606,11 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
         state,
         'The failure or accepted range is incomplete; no single culprit is proven.',
       );
-    const greenRow = await ctx.db
-      .query('projectHostedCheckRuns')
-      .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', state.pass!.runId))
-      .unique();
-    const green = greenRow ? hostedCheckRunSchema.parse(JSON.parse(greenRow.value)) : null;
-    if (green && greenRow?.reportParts !== undefined) {
-      detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
-      await hydrateCheckReports(ctx, green);
-    }
-    if (
-      !green ||
-      green.status !== 'passed' ||
-      green.request.expectedHead !== state.pass.head ||
-      green.check.definition !== audit.check.definition ||
-      green.request.expectedConfiguration !== audit.request.expectedConfiguration ||
-      green.request.expectedEnvironment !== audit.request.expectedEnvironment
-    )
-      return fixForward(
-        ctx,
-        project,
-        row,
-        state,
-        'The passing predecessor does not retain comparable test evidence.',
-      );
-    if (audit.configuration.provider !== 'github-actions')
-      return fixForward(
-        ctx,
-        project,
-        row,
-        state,
-        'Automatic probes require the configured free Actions runner.',
-      );
-    if (
-      probeVerdict(
-        green,
-        state.failed.map(f => f.file),
-      ) !== 'pass'
-    ) {
-      // Missing reports alone do not prove absence: inspect exact source manifests.
-      if (state.failed.some(f => green.contractReports?.[f.file]))
-        return fixForward(
-          ctx,
-          project,
-          row,
-          state,
-          'The passing predecessor does not retain comparable test evidence.',
-        );
-      state.missing = state.failed.map(f => f.file);
-      await retain(ctx, row, state);
-      await ctx.scheduler.runAfter(
-        0,
-        makeFunctionReference<'action'>('projectHostedCulpritSource:inspect'),
-        input,
-      );
-      return;
-    }
-    await probe(ctx, project, state, range.length, true);
-    return retain(ctx, row, state);
+    state.greenPending = true;
+    await retain(ctx, row, state);
+    return beginGreenProbe(ctx, input, project, row, state, named);
   }
+  if (state.greenPending) return beginGreenProbe(ctx, input, project, row!, state, named);
   if (state.stage !== 'classify') {
     if (state.uploads?.length) await wake(ctx, input);
     return;
@@ -800,6 +758,14 @@ async function classify(ctx: MutationCtx, input: Identity, terminal?: HostedChec
       .withIndex('by_project_and_run', q => q.eq('projectId', project._id).eq('runId', checkedId))
       .unique();
     const own = ownRow ? hostedCheckRunSchema.parse(JSON.parse(ownRow.value)) : null;
+    if (own?.reportPointer && !attachNamedReports(own, named)) {
+      await retain(ctx, row!, state);
+      await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedCulpritSource:reports'), {
+        ...input,
+        namedRunId: own.id,
+      });
+      return;
+    }
     if (own && ownRow?.reportParts !== undefined) {
       detachCheckReports(own, ownRow.reportParts, ownRow.reportDigest ?? '');
       await hydrateCheckReports(ctx, own);
@@ -1241,6 +1207,93 @@ async function finishSystemRevert(
   state.landingOperationId = landingOperationId;
   await retain(ctx, row, state);
 }
+
+function attachNamedReports(run: HostedCheckRun, named?: ReportEvidence) {
+  if (!named || named.runId !== run.id) return false;
+  invariant(
+    named.digest === run.reportPointer?.digest,
+    'EVIDENCE_CHANGED',
+    'The compared report pin changed.',
+  );
+  run.contractReports = semanticReportsSchema.parse(named.reports);
+  return true;
+}
+async function beginGreenProbe(
+  ctx: MutationCtx,
+  input: Identity,
+  project: Doc<'hostedProjects'>,
+  row: NonNullable<Awaited<ReturnType<typeof recoveryRow>>>,
+  state: Recovery,
+  named?: ReportEvidence,
+) {
+  const greenRow = await ctx.db
+    .query('projectHostedCheckRuns')
+    .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', state.pass!.runId))
+    .unique();
+  const green = greenRow ? hostedCheckRunSchema.parse(JSON.parse(greenRow.value)) : null;
+  if (green?.reportPointer && !attachNamedReports(green, named)) {
+    await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedCulpritSource:reports'), {
+      ...input,
+      namedRunId: green.id,
+    });
+    return;
+  }
+  if (green && greenRow?.reportParts !== undefined) {
+    detachCheckReports(green, greenRow.reportParts, greenRow.reportDigest ?? '');
+    await hydrateCheckReports(ctx, green);
+  }
+  if (
+    !green ||
+    green.status !== 'passed' ||
+    green.request.expectedHead !== state.pass!.head ||
+    green.check.definition !== state.audit.check.definition ||
+    green.request.expectedConfiguration !== state.audit.request.expectedConfiguration ||
+    green.request.expectedEnvironment !== state.audit.request.expectedEnvironment
+  )
+    return fixForward(
+      ctx,
+      project,
+      row,
+      state,
+      'The passing predecessor does not retain comparable test evidence.',
+    );
+  if (state.audit.configuration.provider !== 'github-actions')
+    return fixForward(
+      ctx,
+      project,
+      row,
+      state,
+      'Automatic probes require the configured free Actions runner.',
+    );
+  if (
+    probeVerdict(
+      green,
+      state.failed.map(f => f.file),
+    ) !== 'pass'
+  ) {
+    // Missing reports alone do not prove absence: inspect exact source manifests.
+    if (state.failed.some(f => green.contractReports?.[f.file]))
+      return fixForward(
+        ctx,
+        project,
+        row,
+        state,
+        'The passing predecessor does not retain comparable test evidence.',
+      );
+    delete state.greenPending;
+    state.missing = state.failed.map(f => f.file);
+    await retain(ctx, row, state);
+    await ctx.scheduler.runAfter(
+      0,
+      makeFunctionReference<'action'>('projectHostedCulpritSource:inspect'),
+      input,
+    );
+    return;
+  }
+  delete state.greenPending;
+  await probe(ctx, project, state, state.range.length, true);
+  return retain(ctx, row, state);
+}
 /** Source job terminal callbacks schedule this finite continuation. */
 export const advance = internalMutation({
   args: identity,
@@ -1646,6 +1699,41 @@ export const terminal = internalMutation({
   handler: async (ctx, input) => {
     const { run } = await loadHostedCheck(ctx, input);
     if (hostedCheckTerminal(run)) await onCulpritRunTerminal(ctx, run);
+    return null;
+  },
+});
+
+/** Red-main bisection alone reads named files outside the transaction; the mutation compares the digest again. */
+export const reportTarget = internalQuery({
+  args: { ...identity, namedRunId: v.string() },
+  returns: v.string(),
+  handler: async (ctx, input) => {
+    const project = await ctx.db.get(input.projectId);
+    if (!project || project.removal || project.sourceAuthority?.mode !== 'server') return '{}';
+    const row = await recoveryRow(ctx, input, project.owner);
+    if (!row?.recovery) return '{}';
+    const state: Recovery = JSON.parse(row.recovery);
+    invariant(
+      state.audit.request.authorityEpoch === project.sourceAuthority.epoch &&
+        (state.pass?.runId === input.namedRunId || state.target?.check?.runId === input.namedRunId),
+      'EVIDENCE_CHANGED',
+      'Read only the original compared evidence.',
+    );
+    const { run } = await loadHostedCheck(
+      ctx,
+      { projectId: input.projectId, runId: input.namedRunId },
+      false,
+    );
+    return canonicalPayload({ run, files: state.failed.map(file => file.file) });
+  },
+});
+export const reportEvidence = internalMutation({
+  args: { ...identity, evidence: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const named = JSON.parse(input.evidence) as ReportEvidence;
+    named.reports = semanticReportsSchema.parse(named.reports);
+    await classify(ctx, input, undefined, named);
     return null;
   },
 });

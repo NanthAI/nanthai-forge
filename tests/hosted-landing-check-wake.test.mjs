@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, wake, store } from './hosted-landing-fixture.mjs';
@@ -210,14 +212,13 @@ test('575 queued bindings consume progress and terminal events in bounded pages,
     delete row._id;
     delete row._creationTime;
     if (index === 0) f.patch('projectHostedLandingRequests', template._id, row);
-    else
-      f.insert('projectHostedLandingRequests', { ...row, submissionId: randomUUID(), sequence: index + 1 });
+    else seedTicket(f, { ...row, submissionId: randomUUID(), sequence: index + 1 });
   }
   for (let index = 0; index < 575; index++) {
     const row = { ...template, phase: 'landed', submissionId: randomUUID(), sequence: 576 + index };
     delete row._id;
     delete row._creationTime;
-    f.insert('projectHostedLandingRequests', row);
+    seedTicket(f, row);
   }
   const active = await f.rawChecks.activate(run.id);
   const live = () =>
@@ -237,9 +238,9 @@ test('575 queued bindings consume progress and terminal events in bounded pages,
       calls: counts.length,
       fanoutCalls: counts.filter(count => count.name === 'landingCheckWake').length,
       pages,
-      reads: counts.reduce((n, count) => n + count.documents, 0),
-      writes: counts.reduce((n, count) => n + count.writes, 0),
-      maxReads: Math.max(...counts.map(count => count.documents)),
+      reads: counts.reduce((n, count) => n + count.documents - landingBodyCounts(count).reads, 0),
+      writes: counts.reduce((n, count) => n + count.writes - landingBodyCounts(count).writes, 0),
+      maxReads: Math.max(...counts.map(count => count.documents - landingBodyCounts(count).reads)),
       wallMs: performance.now() - start,
       peakRssBytes: process.resourceUsage().maxRSS * 1024,
     };

@@ -76,6 +76,18 @@ export const receive = internalMutation({
     // observed without one; earlier (or after a rejection) it is ignored, so a run another actor
     // titled `forge-check/<runId>` cannot take the binding.
     if (!run.executionId && !run.actions.dispatchedWithoutId) return null;
+    if (row.reportStorage === 'r2' && row.resultBatch && payload.action === 'completed')
+      return JSON.stringify({
+        reportBatch: { run, packed: row.resultBatch.packed, reportStorage: 'r2' },
+        identity: {
+          projectId: row.projectId,
+          runId: run.id,
+          fence: run.fence,
+          executionId: String(workflow.id),
+          workflowSha: workflow.head_sha,
+        },
+        conclusion: workflow.conclusion,
+      });
     if (hostedCheckTerminal(run)) {
       if (run.status === 'cancelled' && payload.action !== 'completed' && !run.executionId) {
         run.executionId = String(workflow.id);

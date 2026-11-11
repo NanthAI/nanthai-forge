@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
+import { checkReportUploadTarget, objectReportTransport } from './projectHostedCheckReports';
 import { assertHostedCheckActive } from './projectHostedCheckStore';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { macMachine, requireMacMachine } from './projectHostedCheckMachines';
@@ -150,7 +151,7 @@ export const work = query({
   },
 });
 export const control = mutation({
-  args: { ...address, runId: v.string(), command: v.string() },
+  args: { ...address, runId: v.string(), command: v.string(), features: v.optional(v.array(v.string())) },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -168,25 +169,34 @@ export const control = mutation({
       invariant(command.owner === input.sessionId, 'WORK_STALE', 'Use this registered controller session.');
       if (command.kind !== 'claim' && !hostedCheckTerminal(run))
         invariant(run.lease?.owner === input.sessionId, 'WORK_STALE', 'Claim the run before controlling it.');
-      return canonicalPayload(await controlHostedCheck(ctx, { ...input, command }));
+      const reply = await controlHostedCheck(ctx, { ...input, command });
+      const reportUpload = await checkReportUploadTarget(reply.run, input.features);
+      return canonicalPayload({ ...reply, ...(reportUpload ? { reportUpload } : {}) });
     } catch (error) {
       return report(error);
     }
   },
 });
 export const callback = mutation({
-  args: { projectId: v.id('hostedProjects'), callback: v.string(), signature: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    callback: v.string(),
+    signature: v.string(),
+    features: v.optional(v.array(v.string())),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
       await owner(ctx, input.projectId);
-      return canonicalPayload(
-        await receiveHostedCheckCallback(
-          ctx,
-          { ...input, callback: JSON.parse(input.callback) },
-          outputSigningKey,
-        ),
+      const run = await receiveHostedCheckCallback(
+        ctx,
+        { ...input, callback: JSON.parse(input.callback) },
+        outputSigningKey,
       );
+      const reportUpload = await checkReportUploadTarget(run, input.features);
+      const head = { ...run };
+      if (objectReportTransport(run)) delete head.contractReports;
+      return canonicalPayload({ ...head, ...(reportUpload ? { reportUpload } : {}) });
     } catch (error) {
       return report(error);
     }

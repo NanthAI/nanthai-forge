@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { objectReportTransport } from './projectHostedCheckReports';
+import { collectResultBatch } from './projectHostedActionsBatch';
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
 import { internalAction, internalMutation, type MutationCtx } from './server';
@@ -51,6 +53,7 @@ export async function completeFromResults(
   ctx: MutationCtx,
   loaded: LoadedHostedCheck,
   status: 'passed' | 'failed' | 'cancelled',
+  deferWrite = false,
 ) {
   const { run } = loaded;
   const complete = directCallback(run, {
@@ -59,7 +62,11 @@ export async function completeFromResults(
     exitCode: status === 'cancelled' ? null : status === 'failed' ? 1 : 0,
     output: null,
     cost: actionsExecutionCost(run, run.plan!.shardCount),
-    ...(run.contractReports ? { contractReports: run.contractReports } : {}),
+    ...(run.reportPointer
+      ? { reportDigest: run.reportPointer.digest }
+      : run.contractReports
+        ? { contractReports: run.contractReports }
+        : {}),
   });
   return receiveHostedCheckCallback(
     ctx,
@@ -68,6 +75,7 @@ export async function completeFromResults(
       callback: complete,
       signature: signHostedCheckCallback(complete, outputSigningKey(run.keyId)),
       loaded,
+      ...(deferWrite ? { deferWrite: true } : {}),
       ...(status === 'passed' ? { providerAttested: true } : {}),
     },
     outputSigningKey,
@@ -76,7 +84,7 @@ export async function completeFromResults(
 
 /** Every shard passed: the pass waits for the provider's conclusion (src/hosted-check-verdict.ts).
  * The run stays active; its output may already be finalized. */
-export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck) {
+export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCheck, deferWrite = false) {
   const { row, run } = loaded;
   run.actions!.verdictPending = true;
   // Not only runs with the pack job: one lost provider event must never cost minutes (Issue 03a749a5).
@@ -86,7 +94,7 @@ export async function holdForConclusion(ctx: MutationCtx, loaded: LoadedHostedCh
     makeFunctionReference<'action'>('projectHostedActionsVerdict:confirm'),
     { projectId: row.projectId, runId: run.id, fence: run.fence, attempt: 0, ...jobs },
   );
-  await writeHostedCheck(ctx, row._id, run);
+  if (!deferWrite) await writeHostedCheck(ctx, row._id, run);
   return run;
 }
 
@@ -140,13 +148,15 @@ export const confirmed = internalMutation({
     conclusion: v.union(v.string(), v.null()),
     jobs: v.optional(v.literal(true)),
   },
-  returns: v.null(),
+  returns: v.union(v.string(), v.null()),
   handler: async (ctx, input) => {
     const selected = await writableHostedCheck(ctx, input),
       { row, run } = selected;
     if (hostedCheckTerminal(run) || run.fence !== input.fence || run.actions?.verdictPending !== true)
       return null;
     run.actions.confirm = null;
+    if (input.completed && objectReportTransport(run))
+      return JSON.stringify({ run, packed: objectReportTransport(run)!.packed, reportStorage: 'r2' });
     if (input.completed) {
       await applyConclusion(ctx, selected, input.conclusion);
       return null;
@@ -215,11 +225,28 @@ export const confirm = internalAction({
     } catch {
       // An unreadable answer is not a conclusion: treat it as still running.
     }
-    await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedActionsVerdict:confirmed'), {
-      ...identityInput,
-      completed,
-      conclusion,
-    });
+    const reports = await ctx.runMutation(
+      makeFunctionReference<'mutation'>('projectHostedActionsVerdict:confirmed'),
+      {
+        ...identityInput,
+        completed,
+        conclusion,
+      },
+    );
+    if (reports) {
+      const prepared = JSON.parse(reports);
+      await collectResultBatch(
+        ctx,
+        {
+          projectId: input.projectId,
+          runId: input.runId,
+          fence: input.fence,
+          executionId: prepared.run.executionId,
+        },
+        conclusion,
+        prepared,
+      );
+    }
     return null;
   },
 });

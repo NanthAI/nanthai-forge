@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v, getDocumentSize, type Value } from 'convex/values';
 import { internalQuery, internalMutation, type QueryCtx } from './server';
+import { deleteLandingRequestBodies } from './projectLandingRequestBody';
 import { projectPurgeWriter } from './projectFinishReadWriter';
 import { cleanupReceipt, recordCleanup } from './legacyStorageReceipts';
 import { rowReferences, valuesAt, type ProjectPurgeTable } from './projectPurgeInventory';
@@ -116,17 +117,23 @@ export const purgeOrphans = internalMutation({
       rows.push(row);
     }
     const references = rowReferences(input.table as ProjectPurgeTable);
+    let bodyBytes = 0;
     for (const row of rows) {
       for (const path of references.tasks)
         for (const id of valuesAt(row, path)) {
           const task = await ctx.db.system.get(id as Id<'_scheduled_functions'>);
           if (task?.state.kind === 'pending') await ctx.scheduler.cancel(id as Id<'_scheduled_functions'>);
         }
+      if (input.table === 'projectHostedLandingRequests')
+        for (const body of await deleteLandingRequestBodies(ctx.db, row)) bodyBytes += getDocumentSize(body);
       await ctx.db.delete(row._id as never);
       for (const path of references.files)
         for (const id of valuesAt(row, path)) await removeExclusive(ctx, id as Id<'_storage'>, row._id);
     }
-    const result = { deleted: rows.length, bytes: rows.reduce((n, row) => n + getDocumentSize(row), 0) };
+    const result = {
+      deleted: rows.length,
+      bytes: bodyBytes + rows.reduce((n, row) => n + getDocumentSize(row), 0),
+    };
     await recordCleanup(ctx, input.operationId, `orphan:${input.part}`, request, result);
     return result;
   },

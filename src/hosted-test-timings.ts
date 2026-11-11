@@ -6,19 +6,29 @@ export { parseTimingHistory } from '../scripts/test-shards.mjs';
 /** Same advisory history/EWMA as .forge/work/test-timings.json. Hosted results
  * carry observed files, not a source inventory; retain unselected samples until
  * the shared caps age them out. No source bytes or run-history scan is needed. */
-export function updateHostedTimingHistory(previous: string, run: HostedCheckRun) {
+export function updateHostedTimingHistory(
+  previous: string,
+  run: HostedCheckRun,
+  supplied?: Record<string, number>,
+  sourceRun?: number,
+  final = true,
+) {
   const history = parseTimingHistory(previous);
-  const durations = Object.fromEntries(
-    Object.entries(run.contractReports ?? {}).flatMap(([file, report]) =>
-      report.durationMs === undefined ? [] : [[file, report.durationMs]],
-    ),
-  );
+  const durations =
+    supplied ??
+    Object.fromEntries(
+      Object.entries(run.contractReports ?? {}).flatMap(([file, report]) =>
+        report.durationMs === undefined ? [] : [[file, report.durationMs]],
+      ),
+    );
   const next = updateTimingHistory(history, {
     runId: run.id,
     endedAt: run.endedAt!,
     files: [...Object.keys(history.files), ...Object.keys(durations)],
     durations,
+    ...(sourceRun ? { sourceRun } : {}),
   });
+  if (!final) next.runs = history.runs;
   const encoder = new TextEncoder();
   let text = JSON.stringify(next);
   const oldest = Object.keys(next.files).reverse();

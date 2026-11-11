@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { ForgeError } from '../dist/errors.js';
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -496,6 +497,7 @@ test('server new-op retry links a failed submission, preserves original replay a
   for (const table of [
     'projectHostedAcceptances',
     'projectHostedLandingRequests',
+    'projectHostedLandingBodies',
     'projectHostedLandingAttempts',
     'projectHostedCheckRuns',
     'projectHostedOperations',
@@ -504,7 +506,9 @@ test('server new-op retry links a failed submission, preserves original replay a
   ])
     projected.tables[table] = [...f.tables[table].values()].map(row => ({
       ...row,
-      projectId: 'project',
+      ...(table === 'projectHostedLandingBodies'
+        ? { value: JSON.stringify({ ...JSON.parse(row.value), projectId: 'project' }) }
+        : { projectId: 'project' }),
       _creationTime: Date.parse('2026-10-29T00:00:00.000Z'),
     }));
   projected.query.objects = async pins => pins.map(pin => f.c.objects.get(pin.sha256));
@@ -656,8 +660,11 @@ test('retry admission reads constant metadata with twice the dogfood landing his
   assert.equal(retry.supersedes, first.id);
   const calls = f.counts.slice(before);
   assert.equal(calls.length, 1);
-  assert(calls[0].documents <= 90, 'constant selected metadata, independent of history size');
-  assert(calls[0].writes <= 25);
+  assert(
+    calls[0].documents - landingBodyCounts(calls[0]).reads <= 90,
+    'constant selected metadata, independent of history size',
+  );
+  assert(calls[0].writes - landingBodyCounts(calls[0]).writes <= 25, JSON.stringify(calls[0]));
   t.diagnostic(
     JSON.stringify({
       unrelatedSubmissions: 1200,

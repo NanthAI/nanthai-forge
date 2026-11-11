@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { deleteLandingRequestBodies } from './projectLandingRequestBody';
 import type { MutationCtx } from './server';
 import type { Doc, Id } from './_generated/dataModel';
 import {
@@ -74,12 +75,19 @@ export async function purgeProjectRowsPage(ctx: MutationCtx, project: Doc<'hoste
     const references =
       step < projectPurgeOrder.length ? rowReferences(projectPurgeOrder[step]!) : { files: [], tasks: [] };
     for (const row of batch) {
+      if (rows >= purgePageBudget.rows || bytes >= purgePageBudget.bytes) break;
       rows++;
       bytes += documentBytes(row);
       for (const path of references.tasks)
         for (const id of valuesAt(row, path)) {
           const task = await ctx.db.system.get(id as Id<'_scheduled_functions'>);
           if (task?.state.kind === 'pending') await ctx.scheduler.cancel(id as Id<'_scheduled_functions'>);
+        }
+      // S3 bodies are exclusively owned by their ticket, including the larger batch selection.
+      if (step < projectPurgeOrder.length && projectPurgeOrder[step] === 'projectHostedLandingRequests')
+        for (const body of await deleteLandingRequestBodies(ctx.db, row)) {
+          rows++;
+          bytes += documentBytes(body);
         }
       await ctx.db.delete(row._id as never);
       for (const path of references.files)

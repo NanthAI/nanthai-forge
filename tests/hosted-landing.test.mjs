@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState, logicalTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, api, control, store, pins, maxima, code } from './hosted-landing-fixture.mjs';
@@ -241,7 +242,7 @@ test('source and check selections are exact; changed request payload never creat
       ctx =>
         store.writeLanding(
           ctx,
-          row,
+          logicalTicket(f, row),
           {
             ...state,
             version: state.version + 1,
@@ -419,7 +420,7 @@ test('check result and its notification commit together; failed scheduling repla
   // progress schedules no wake (7ecc4884), so nothing could fail. Age that
   // progress past the window: this event does schedule its wake.
   for (const row of f.tables.projectHostedLandingRequests.values()) {
-    const value = JSON.parse(row.value);
+    const value = ticketState(f, row);
     value.timing = { ...value.timing, ciProgressAt: new Date(Date.now() - 2 * 60_000).toISOString() };
     f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(value) });
   }

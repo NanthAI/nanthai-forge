@@ -45,7 +45,7 @@ test('detail pages retain all 20,000 exact reports below 256 KiB and bind cursor
     pages = 0;
   do {
     const result = pageCheckReports(reports, {}, cursor);
-    assert(Buffer.byteLength(JSON.stringify(result)) <= 256 * 1024);
+    assert(Buffer.byteLength(JSON.stringify(JSON.stringify(result))) <= 256 * 1024);
     Object.assign(restored, result.contractReports);
     cursor = result.nextCursor;
     pages++;
@@ -147,4 +147,99 @@ test('R2 detail verifies digest and size, refuses absent objects and old clients
       canonicalPayload({ 'tests/retained.test.mjs': { failed: true, firstError: 'changed! excerpt' } }),
     );
   await assert.rejects(detail.reports._handler(ctx, identity), code('EVIDENCE_CHANGED'));
+});
+
+test('single-callback protocol issues a fenced slot in an existing reply and refuses an old runner before storing reports', async t => {
+  const names = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+  const previous = names.map(name => process.env[name]);
+  names.forEach(name => {
+    process.env[name] = 'synthetic';
+  });
+  t.after(() =>
+    names.forEach((name, i) => {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    }),
+  );
+  const { internalApi } = await import('./hosted-checks-fixture.mjs');
+  const s = await checksFixture();
+  const run = await s.activate((await s.enqueue(s.selection())).id, 1);
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  row.reportStorage = 'r2';
+  const command = JSON.stringify({ kind: 'claim', owner: run.lease.owner, leaseMs: 60000 });
+  const input = { projectId: s.projectId, runId: run.id, command };
+  await assert.rejects(s.transaction('old-runner', internalApi.control, input), code('CLI_UPGRADE_REQUIRED'));
+  const reply = JSON.parse(await s.transaction('slot-reply', internalApi.control, { ...input, features }));
+  assert(reply.reportUpload.put.url.includes(`/reports/fence-${run.fence}.json`));
+  assert.equal(reply.run.reportUpload, undefined, 'the target is never persisted in the run');
+  await s.callback(s.shard(run, 0));
+  const reports = { 'tests/single.test.mjs': { failed: false, durationMs: 42 } };
+  await assert.rejects(
+    s.callback(s.complete(run, 'passed', { contractReports: reports })),
+    code('CLI_UPGRADE_REQUIRED'),
+  );
+  await s.callback(s.complete(run, 'passed', { contractReports: reports, reportDigest: checkPin(reports) }));
+  const header = JSON.parse([...s.tables.projectHostedCheckRuns.values()][0].value);
+  assert.equal(header.contractReports, undefined);
+  assert.equal(header.reportPointer.digest, checkPin(reports));
+  assert.equal(s.tables.projectHostedActionsResults.size, 0);
+  assert.equal(JSON.stringify(header).includes('storage.example'), false);
+});
+
+test('report detail maps nested runner identities once before enforcing the complete wire-byte budget', async t => {
+  const { getFunctionName } = await import('convex/server');
+  const people = await import(moduleUrl('../convex/publicPeople.ts'));
+  const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+  const names = ['R2_ACCOUNT_ID', 'R2_BUCKET', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY'];
+  const previous = names.map(name => process.env[name]);
+  names.forEach(name => {
+    process.env[name] = 'synthetic';
+  });
+  t.after(() =>
+    names.forEach((name, i) => {
+      if (previous[i] === undefined) delete process.env[name];
+      else process.env[name] = previous[i];
+    }),
+  );
+  const s = await checksFixture();
+  const run = await s.pass(await s.activate((await s.enqueue(s.selection())).id, 1));
+  s.tables.forgeAccounts.set('account', {
+    _id: 'account',
+    _creationTime: 1,
+    owner: 'user_abcdefgh',
+    handle: 'a-long-public-forge-handle',
+  });
+  const reports = Object.fromEntries(
+    Array.from({ length: 5000 }, (_, i) => [
+      `tests/map-${i}.test.mjs`,
+      { failed: true, firstError: JSON.stringify({ actor: 'user_abcdefgh' }) },
+    ]),
+  );
+  const row = [...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === run.id);
+  const header = JSON.parse(row.value);
+  delete header.contractReports;
+  header.reportPointer = checkReportPointer(reports);
+  row.value = JSON.stringify(header);
+  let mappings = 0;
+  t.mock.method(globalThis, 'fetch', async () => new Response(canonicalPayload(reports)));
+  const ctx = {
+    auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+    runQuery: (ref, input) => {
+      if (getFunctionName(ref) === 'publicPeople:resolve') {
+        mappings++;
+        return s.transaction('map-people', people.resolve, input);
+      }
+      return s.transaction('map-retained', detail.retained, input);
+    },
+  };
+  const value = await detail.reports._handler(ctx, { projectId: s.projectId, runId: run.id, failed: true });
+  assert.equal(mappings, 1);
+  assert(Buffer.byteLength(JSON.stringify(value)) <= 256 * 1024);
+  const page = JSON.parse(value);
+  assert(page.nextCursor);
+  assert.equal(
+    JSON.parse(Object.values(page.contractReports)[0].firstError).actor,
+    'a-long-public-forge-handle',
+  );
+  assert(!value.includes('user_abcdefgh'));
 });

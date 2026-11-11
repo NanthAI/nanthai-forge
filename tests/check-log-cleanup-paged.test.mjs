@@ -361,6 +361,8 @@ test('streamed apply advances one chunk/reference page, retains split evidence a
     projectId: 'project',
     ...stream,
   });
+  stream.report = { digest: 'a'.repeat(64), size: 1234, files: 20 };
+  let reportDeletes = 0;
   const chunks = [raw.subarray(0, 38), raw.subarray(38)],
     content = new Map();
   let offset = 0;
@@ -402,6 +404,10 @@ test('streamed apply advances one chunk/reference page, retains split evidence a
     loseDelete = true;
   globalThis.fetch = async (url, init = {}) => {
     if (init.method === 'DELETE') {
+      if (String(url).includes('/reports/')) {
+        reportDeletes++;
+        return new Response(null, { status: 204 });
+      }
       deletes++;
       if (loseDelete) {
         loseDelete = false;
@@ -447,6 +453,7 @@ test('streamed apply advances one chunk/reference page, retains split evidence a
   assert.equal(interrupted, 2);
   assert.equal(gets, 3, 'lost first summary rereads one raw chunk only');
   assert.equal(deletes, 3, 'same DELETE is idempotently retried');
+  assert.equal(reportDeletes, 1, 'the same authorized log cleanup removes the run report object');
   const summary = [...s.tables.projectHostedOutputSummaries.values()]
     .sort((a, b) => a.position - b.position)
     .map(r => r.text)

@@ -9,6 +9,7 @@ import type { Doc } from './_generated/dataModel';
 export const finishReadFields = {
   hostedProjects: ['owner', 'visibility', 'removal', 'sourceAuthority', 'name', 'key'],
   projectHostedLandingRequests: [
+    'requestBodyId',
     'capsule',
     'projectId',
     'submissionId',

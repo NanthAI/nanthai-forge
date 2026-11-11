@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { reportsDetached } from './projectHostedCheckReports';
+import { reportsDetached, objectReportTransport } from './projectHostedCheckReports';
 import type { z } from 'zod';
 import type { MutationCtx } from './_generated/server';
 import type { Id } from './_generated/dataModel';
@@ -185,6 +185,7 @@ function settle(run: HostedCheckRun, reports: Reports, pending: string[], retain
 /** Any other terminal (cancel, watchdog, webhook settlement) keeps the reports shards sent. */
 export async function restoreShardReports(ctx: MutationCtx, run: HostedCheckRun, includeDetached = false) {
   if (
+    objectReportTransport(run) ||
     run.contractReports ||
     (reportsDetached(run) && !includeDetached) ||
     !run.counts.completed ||

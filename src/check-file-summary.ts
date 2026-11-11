@@ -33,71 +33,65 @@ export const failedErrors = 20;
 export const failedErrorChars = 240;
 export const failedErrorBytes = 6 * 1024;
 /** Derived from the existing result; no log fetch or additional result mutation. */
-export function checkFileSummary(reports: z.infer<typeof semanticReportsSchema>) {
-  const files = Object.entries(reports).map(([file, { firstError: _excerpt, ...report }]) => {
-    void _excerpt;
-    return { file, report };
-  });
-  // A flaky file names its test and first error (the failed first attempt), at most flakyErrors files of
-  // flakyErrorChars each. The first failedErrors failed files keep theirs too (failedErrorChars each), so a
-  // failed landing lists every failing file with its error without a log fetch; the rest are names only.
-  let named = 0,
-    failedNamed = 0,
-    failedBytes = 0;
-  for (const item of files) {
-    const error = reports[item.file]?.firstError?.replace(/\s+/g, ' ');
-    if (!error) continue;
-    const report = item.report as { firstError?: string };
-    if (item.report.failed) {
-      const text = error.slice(0, failedErrorChars);
-      if (failedNamed < failedErrors && failedBytes + encodedBytes(text) <= failedErrorBytes) {
-        failedNamed++;
-        failedBytes += encodedBytes(text);
-        report.firstError = text;
-      }
-    } else if (item.report.flaky && named++ < flakyErrors)
-      report.firstError = error.slice(0, flakyErrorChars);
+export function checkFileSummary(reports: z.infer<typeof semanticReportsSchema>, budget = 8 * 1024) {
+  const names = Object.keys(reports);
+  const counts = { total: names.length, failed: 0, flaky: 0 };
+  for (const file of names) {
+    if (reports[file]!.failed) counts.failed++;
+    else if (reports[file]!.flaky) counts.flaky++;
   }
-  const { truncated } = capCheckReports(reports);
-  const failed = files.filter(item => item.report.failed);
-  const flaky = files.filter(item => item.report.flaky && !item.report.failed);
-  const summary = {
-    counts: { total: files.length, failed: failed.length, flaky: flaky.length },
+  // Count the existing cap without allocating another full report set.
+  const { truncated } = capCheckReports(reports, false);
+  const summary: z.infer<typeof checkFileSummarySchema> = {
+    counts,
     ...(truncated ? { truncated } : {}),
-    failed,
-    flaky,
+    failed: [],
+    flaky: [],
+    omitted: { failed: counts.failed, flaky: counts.flaky },
   };
-  // Count the stored string's escaping as well. Names and excerpts cannot grow the hot row
-  // with repository size; counts retain every report even when the lists are shortened.
-  const build = (length: number) => ({
-    ...summary,
-    failed: failed.slice(0, length),
-    flaky: flaky.slice(0, Math.max(0, length - failed.length)),
-    omitted: {
-      failed: Math.max(0, failed.length - length),
-      flaky: Math.min(flaky.length, Math.max(0, failed.length + flaky.length - length)),
-    },
-  });
   const size = (value: unknown) => new TextEncoder().encode(JSON.stringify(JSON.stringify(value))).length;
-  if (size(summary) <= 8 * 1024) return summary;
-  let low = 0,
-    high = files.length;
-  while (low < high) {
-    const mid = Math.ceil((low + high) / 2);
-    if (size(build(mid)) <= 8 * 1024) low = mid;
-    else high = mid - 1;
+  let used = size(summary),
+    failedNamed = 0,
+    failedBytes = 0,
+    flakyNamed = 0;
+  // Only the bounded prefix is materialized or serialized. A mass failure must not
+  // allocate/encode all failed records merely to discard them during binary search.
+  for (const kind of ['failed', 'flaky'] as const) {
+    for (const file of names) {
+      const original = reports[file]!;
+      if (kind === 'failed' ? !original.failed : original.failed || !original.flaky) continue;
+      const { firstError, ...report } = original;
+      const error = firstError?.replace(/\s+/g, ' ');
+      if (error && kind === 'failed') {
+        const text = error.slice(0, failedErrorChars);
+        if (failedNamed < failedErrors && failedBytes + encodedBytes(text) <= failedErrorBytes) {
+          failedNamed++;
+          failedBytes += encodedBytes(text);
+          (report as { firstError?: string }).firstError = text;
+        }
+      } else if (error && flakyNamed++ < flakyErrors)
+        (report as { firstError?: string }).firstError = error.slice(0, flakyErrorChars);
+      const item = { file, report };
+      const added = size([item]) - size([]) + (summary[kind].length ? 1 : 0);
+      if (used + added > budget) return summary;
+      used += added;
+      summary[kind].push(item);
+      summary.omitted![kind]--;
+    }
   }
-  return build(low);
+  delete summary.omitted;
+  return summary;
 }
 
 /** Transaction readers need only the reports named by the pinned semantic plan. */
-export function checkReportHeader(run: HostedCheckRun) {
+export function checkReportHeader(run: HostedCheckRun, summaryBudget = 8 * 1024) {
   const reports = run.contractReports;
   if (!reports) return;
-  run.testFiles = checkFileSummary(reports);
-  const named = new Set(
-    run.semanticPlan?.members.flatMap(member => member.tests.map(test => test.path)) ?? [],
-  );
+  run.testFiles = checkFileSummary(reports, summaryBudget);
+  const named = new Set([
+    ...(run.semanticPlan?.members.flatMap(member => member.tests.map(test => test.path)) ?? []),
+    ...(run.gate?.tests ?? []),
+  ]);
   run.reportSummary = {
     slowest: Object.entries(reports)
       .flatMap(([file, report]) =>
@@ -121,7 +115,7 @@ export function checkReportHeader(run: HostedCheckRun) {
 export function checkReportPointer(reports: NonNullable<HostedCheckRun['contractReports']>) {
   const body = canonicalPayload(reports);
   return {
-    digest: digest(canonicalPayload(reports)),
+    digest: digest(body),
     size: new TextEncoder().encode(body).length,
     files: Object.keys(reports).length,
   };

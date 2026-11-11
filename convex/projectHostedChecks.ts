@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { useObjectReports } from './projectHostedCheckReports';
 import { reusedHostedVerdict } from './projectHostedCheckVerdictReuse';
 import { scheduleCiStatus } from './projectCiStatus';
 import { fixGate } from '../src/culprit-bisect';
@@ -310,7 +311,11 @@ export async function enqueueHostedCheck(
 
 /** Insert an already prepared run and retain the existing provider dispatch hooks. */
 export async function insertHostedCheckRun(ctx: MutationCtx, run: HostedCheckRun): Promise<HostedCheckRun> {
+  const reportsInR2 =
+    process.env.FORGE_CHECK_REPORTS_R2 === '1' && run.configuration.provider !== 'ci-status';
+  if (reportsInR2) useObjectReports(run);
   await ctx.db.insert('projectHostedCheckRuns', {
+    ...(reportsInR2 ? { reportStorage: 'r2' as const } : {}),
     projectId: run.projectId as Id<'hostedProjects'>,
     runId: run.id,
     candidateId: run.request.candidateId,

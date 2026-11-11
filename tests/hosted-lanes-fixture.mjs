@@ -6,6 +6,7 @@ import { moduleUrl } from './convex-module.mjs';
 import { checkArgs, checkDocument, checkReturn, insertedDocument, updatedDocument } from './convex-args.mjs';
 import { validateContext } from './convex-context.mjs';
 const { finishReadWriter } = await import(moduleUrl('../convex/projectFinishReadWriter.ts'));
+const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandingRequestBody.ts'));
 const {
   finishReadProjection,
   finishReadFields,
@@ -308,7 +309,10 @@ export function lanesFixture({ legacyWorkRecords = false } = {}) {
       });
       try {
         if (decorate) await decorate(ctx, input, name);
-        const result = await fn._handler(fn.isQuery ? ctx : finishReadWriter(ctx), input);
+        const result = await fn._handler(
+          landingRequestBodies(fn.isQuery ? ctx : finishReadWriter(ctx)),
+          input,
+        );
         // Convex rejects an oversized return value, which rolls the mutation back.
         if (fn.exportArgs) checkReturn(result, name);
         if (reads.every(unchanged => unchanged())) {

@@ -55,7 +55,12 @@ export interface MacWorkerServices {
   control(
     runId: string,
     command: unknown,
-  ): Promise<{ run: HostedCheckRun; acquired: boolean; dispatch: boolean }>;
+  ): Promise<{
+    run: HostedCheckRun;
+    acquired: boolean;
+    dispatch: boolean;
+    reportUpload?: import('./check-report-upload.js').ReportUploadTarget;
+  }>;
   heartbeat(
     callback: {
       projectId: string;
@@ -169,7 +174,7 @@ export async function runHostedMacWorker(services: MacWorkerServices, signal: Ab
         await services.execute(run, controller.signal, async command => {
           const next = await services.control(id, command);
           run = next.run;
-          return run;
+          return { ...run, ...(next.reportUpload ? { reportUpload: next.reportUpload } : {}) };
         });
       } finally {
         clearTimeout(deadline);

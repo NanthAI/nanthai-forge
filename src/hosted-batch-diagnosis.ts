@@ -55,14 +55,18 @@ export function diagnoseBatchFailure(
   run: {
     id: string;
     contractReports?: Record<string, { failed: boolean; firstError?: string | undefined }> | undefined;
-    testFiles?: { failed: { file: string }[] } | undefined;
+    testFiles?: { failed: { file: string; report?: { failed: boolean; firstError?: string } }[] } | undefined;
   },
   semantic: ReturnType<typeof semanticVerdict>,
   /** Failed files each member's previous combined failure retained, if any. */
   previous: Readonly<Record<string, readonly string[]>> = {},
   step?: { job: string; excerpt: string } | null,
 ): BatchFailure {
-  const reports = run.contractReports ?? {};
+  const reports =
+    run.contractReports ??
+    Object.fromEntries(
+      (run.testFiles?.failed ?? []).flatMap(file => (file.report ? [[file.file, file.report]] : [])),
+    );
   const failedTests = [
     ...new Set([
       ...Object.keys(reports).filter(path => reports[path]!.failed),

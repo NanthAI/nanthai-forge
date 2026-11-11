@@ -13,7 +13,10 @@ type FailedRun = Parameters<typeof checkFailureDetail>[0] & {
  * summaries Actions already sealed. Failure settlements only: one indexed read in
  * the settling mutation, no extra Convex call and nothing on the passing path. */
 export async function checkFailureStep(ctx: MutationCtx, projectId: Id<'hostedProjects'>, run: FailedRun) {
-  if (run.testFiles?.failed.length || Object.values(run.contractReports ?? {}).some(report => report.failed))
+  if (
+    (run.testFiles?.counts?.failed ?? run.testFiles?.failed.length) ||
+    Object.values(run.contractReports ?? {}).some(report => report.failed)
+  )
     return null;
   return failingStep(
     await ctx.db

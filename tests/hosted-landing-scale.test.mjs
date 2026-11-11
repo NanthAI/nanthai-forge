@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, api, control, store, wake, pins, maxima, code } from './hosted-landing-fixture.mjs';
@@ -28,7 +30,7 @@ test('indexed fan-out pages 205 waiting requests without scanning 10,050 termina
       request: { ...saved.request, operationId },
     };
     const attempt = { ...firstAttempt, id: attemptId, submissionId: id, operationId };
-    f.insert('projectHostedLandingRequests', {
+    seedTicket(f, {
       ...original,
       _id: undefined,
       _creationTime: undefined,
@@ -57,7 +59,7 @@ test('indexed fan-out pages 205 waiting requests without scanning 10,050 termina
         observation: { state: 'terminal-failed', pendingReason: null, cause: 'conflict' },
         error: { code: 'COMPOSITION_CONFLICT', message: 'retained synthetic conflict' },
       };
-    f.insert('projectHostedLandingRequests', {
+    seedTicket(f, {
       ...original,
       _id: undefined,
       _creationTime: undefined,
@@ -158,7 +160,7 @@ test('immutable attempt history pages completely and status never hydrates that 
   assert.equal((await f.status(saved.id)).attempt.id, a.id);
   const reads = f.counts.filter(c => c.name === 'landingStatus').at(-1);
   assert.equal(
-    reads.documents,
+    reads.documents - landingBodyCounts(reads).reads,
     7,
     'selected request/attempt, the three active queue ranges for position and the caller handle; no attempt history',
   );

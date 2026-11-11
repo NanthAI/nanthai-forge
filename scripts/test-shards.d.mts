@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 export type TimingHistory = {
   version: number;
-  files: Record<string, { durationMs: number; updatedAt: string }>;
+  files: Record<string, { durationMs: number; updatedAt: string; sourceRun?: number }>;
   runs: string[];
+  generation?: string;
+  sample?: number;
 };
 export const timingHistoryLimits: { files: number; bytes: number; runs: number };
 export function parseTimingHistory(text: string): TimingHistory;
@@ -15,6 +17,7 @@ export function updateTimingHistory(
     endedAt: string;
     files: string[];
     durations: Record<string, number>;
+    sourceRun?: number;
   },
 ): TimingHistory;
 export function testDuration(file: string, durations?: Record<string, number>): number;

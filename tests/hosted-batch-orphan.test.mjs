@@ -5,6 +5,7 @@
 // re-drove them and they stayed queued for 36 hours with no terminal outcome.
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, batchStore, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -289,7 +290,10 @@ test('stall deadline and cancel hand-on stay within constant DB I/O budgets', as
   f.advanceClock(LANDING_DROP_MS + 1000);
   await deadline('budget-owned', at);
   await cancel(f, runner.id);
-  const cost = name => f.counts.find(c => c.name === name);
+  const cost = name => {
+    const c = f.counts.find(c => c.name === name);
+    return { ...c, documents: c.documents - landingBodyCounts(c).reads };
+  };
   // Measured 2026-10-31 on a 3-member batch: 1, 17 and 88 documents (cancel was
   // 47 before it handed on the turn; the hand-on is work the next member's own
   // finish step used to do, or never did when the runner was cancelled).

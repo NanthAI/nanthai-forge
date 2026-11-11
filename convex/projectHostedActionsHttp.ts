@@ -319,7 +319,11 @@ export const handle = httpAction(async (ctx, request) => {
     // A paused deployment names its end, so runners wait once instead of polling.
     const pause = unavailable ? activeStoragePause() : null;
     return Response.json(
-      { reason, error: 'Actions request failed authorization, validation or storage verification.' },
+      {
+        reason,
+        ...(code === 'CLI_UPGRADE_REQUIRED' ? { code } : {}),
+        error: 'Actions request failed authorization, validation or storage verification.',
+      },
       {
         status: unavailable ? 503 : 403,
         headers: {

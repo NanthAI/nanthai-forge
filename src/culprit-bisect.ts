@@ -50,7 +50,7 @@ export function culpritFailures(run: HostedCheckRun): NeedsFix['failed'] {
 }
 export function probeVerdict(run: HostedCheckRun, tests: string[]): 'pass' | 'fail' | 'unclear' {
   if (!['passed', 'failed'].includes(run.status) || !run.terminalDigest || !run.endedAt) return 'unclear';
-  const reports = run.contractReports;
+  const reports = run.contractReports ?? run.reportSummary?.semantic;
   if (!reports || !tests.length || tests.some(file => !reports[file])) return 'unclear';
   const failed = tests.filter(file => reports[file]!.failed);
   if (!failed.length && run.status === 'passed') return 'pass';

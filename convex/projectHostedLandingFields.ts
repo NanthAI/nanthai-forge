@@ -127,7 +127,11 @@ export const hostedLandingTables = {
       }),
     ),
   }).index('by_project_and_channel', ['projectId', 'channel']),
+  // S3: cold immutable request and batch selection; owned and deleted through its ticket.
+  projectHostedLandingBodies: defineTable({ value: v.string() }),
   projectHostedLandingRequests: defineTable({
+    requestBodyId: v.optional(v.id('projectHostedLandingBodies')),
+    selectionBodyId: v.optional(v.id('projectHostedLandingBodies')),
     capsule: v.optional(landingCapsulePointer),
     alarm,
     projectId: v.id('hostedProjects'),

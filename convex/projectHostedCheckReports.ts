@@ -7,22 +7,45 @@ import type { HostedCheckRun } from '../src/hosted-check';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { checkPin } from '../src/hosted-check';
 import { invariant } from '../src/errors';
+import { presignResultSlot, r2Config } from './r2';
+import { hostedCheckTerminal } from '../src/hosted-check';
+import { checkReportPointer } from '../src/check-file-summary';
 
 // Only new batched runs detach reports. Old run rows and APIs retain their wire shape.
 // This transaction-local marker never crosses a Convex value or a server response.
 const detached = new WeakMap<HostedCheckRun, { parts: number; digest: string }>();
+type Transport = {
+  packed?: boolean;
+  flakes?: string;
+  timingStamp?: { generation: string; sequence: number };
+  timingComplete?: boolean;
+  collecting?: boolean;
+  timingParts?: string[];
+  conclusion?: string;
+};
+const objectReports = new WeakMap<HostedCheckRun, Transport>();
+export function objectReportTransport(run: HostedCheckRun) {
+  return objectReports.get(run);
+}
+export function useObjectReports(run: HostedCheckRun, metadata: Transport = {}) {
+  objectReports.set(run, metadata);
+  return metadata;
+}
 const firstPart = -1000,
   partBytes = 256 * 1024;
 export function inheritCheckReports(source: HostedCheckRun, target: HostedCheckRun) {
   const meta = detached.get(source);
   if (meta) detached.set(target, meta);
+  const transport = objectReports.get(source);
+  if (transport) objectReports.set(target, transport);
   return target;
 }
-export const reportsDetached = (run: HostedCheckRun) => detached.has(run);
+export const reportsDetached = (run: HostedCheckRun) => detached.has(run) || objectReports.has(run);
 export function detachCheckReports(run: HostedCheckRun, parts = 0, digest = '') {
   detached.set(run, { parts, digest });
 }
 export async function hydrateCheckReports(ctx: QueryCtx | MutationCtx, run: HostedCheckRun) {
+  if (objectReports.has(run)) return run;
   const meta = detached.get(run);
   if (!meta?.parts || run.contractReports) return run;
   const rows = await ctx.db
@@ -56,6 +79,27 @@ export async function hydrateCheckReports(ctx: QueryCtx | MutationCtx, run: Host
 /** Immutable per-run report pages, written once. A provider verdict updates only the slim head.
  * R2 retains logs; these are the same contract metadata formerly embedded in the run record. */
 export async function storeCheckReports(ctx: MutationCtx, run: HostedCheckRun) {
+  const transport = objectReports.get(run);
+  if (transport) {
+    if (run.contractReports) {
+      const pointer = checkReportPointer(run.contractReports);
+      invariant(
+        run.reportPointer?.digest === pointer.digest,
+        'EVIDENCE_CHANGED',
+        'Upload the original reports before storing their header.',
+      );
+      transport.flakes = canonicalPayload(runFlakes(run) ?? null);
+    }
+    return {
+      reportStorage: 'r2' as const,
+      ...(transport.packed === undefined ? {} : { resultBatch: { packed: transport.packed } }),
+      ...(transport.flakes === undefined ? {} : { reportFlakes: transport.flakes }),
+      ...(transport.timingStamp === undefined ? {} : { reportTimingStamp: transport.timingStamp }),
+      ...(transport.timingComplete === undefined ? {} : { reportTimingComplete: transport.timingComplete }),
+      ...(transport.timingParts === undefined ? {} : { reportTimingParts: transport.timingParts }),
+      ...(transport.conclusion === undefined ? {} : { reportConclusion: transport.conclusion }),
+    };
+  }
   const meta = detached.get(run);
   if (!meta) return {};
   if (run.contractReports) {
@@ -93,4 +137,24 @@ export async function storeCheckReports(ctx: MutationCtx, run: HostedCheckRun) {
     reportDigest: meta.digest,
     ...(run.contractReports ? { reportFlakes: canonicalPayload(runFlakes(run) ?? null) } : {}),
   };
+}
+
+export function checkReportsKey(run: HostedCheckRun) {
+  const direct = run.configuration.provider === 'github-actions' && !run.configuration.credential;
+  return reportObjectKey(run.projectId, run.id, run.reportPointer!.digest, direct ? undefined : run.fence);
+}
+
+export function reportObjectKey(projectId: string, runId: string, digest: string, fence?: number) {
+  return `v1/p/${projectId}/checks/${runId}/reports/${fence === undefined ? digest : `fence-${fence}`}.json`;
+}
+
+/** CPU-only signing in an existing reply, never a stored run field or a detail capability. */
+export async function checkReportUploadTarget(run: HostedCheckRun, features?: string[]) {
+  if (!objectReports.has(run) || hostedCheckTerminal(run)) return undefined;
+  invariant(
+    features?.includes('check-report-detail'),
+    'CLI_UPGRADE_REQUIRED',
+    'Use a runner with check-report-detail.',
+  );
+  return presignResultSlot(r2Config(), reportObjectKey(run.projectId, run.id, '', run.fence));
 }

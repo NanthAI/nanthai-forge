@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { capsuleReceiptDigest } from './projectLandingCapsuleLedger';
+import { checkReportHeader, checkReportPointer } from '../src/check-file-summary';
+import { objectReportTransport } from './projectHostedCheckReports';
+import type { Doc } from './_generated/dataModel';
 import { isMachineRunner } from '../src/hosted-machine-runner';
 import { checkFileSummary } from '../src/check-file-summary';
 import { callbackReceipt, capCheckReports } from '../src/check-report-cap';
@@ -42,6 +45,8 @@ export async function receiveHostedCheckCallback(
     deferWrite?: boolean;
     /** Set only by a provider conclusion handler, never a supervisor callback. */
     providerAttested?: boolean;
+    priorShard?: Doc<'projectHostedCheckShards'> | null;
+    resultDigest?: string;
   },
   key: (keyId: string) => string,
   now = Date.now(),
@@ -124,12 +129,15 @@ export async function receiveHostedCheckCallback(
       'EVIDENCE_CHANGED',
       'Shard membership or exit evidence differs from the plan.',
     );
-    const prior = await ctx.db
-      .query('projectHostedCheckShards')
-      .withIndex('by_project_and_run_and_index', q =>
-        q.eq('projectId', input.projectId).eq('runId', run.id).eq('index', shard.index),
-      )
-      .unique();
+    const prior =
+      input.priorShard !== undefined
+        ? input.priorShard
+        : await ctx.db
+            .query('projectHostedCheckShards')
+            .withIndex('by_project_and_run_and_index', q =>
+              q.eq('projectId', input.projectId).eq('runId', run.id).eq('index', shard.index),
+            )
+            .unique();
     const previous = prior ? hostedCheckShardSchema.parse(JSON.parse(prior.value)) : null;
     const shardDigest = checkPin(shard);
     invariant(
@@ -161,6 +169,7 @@ export async function receiveHostedCheckCallback(
       attempt: shard.attempt,
       digest: shardDigest,
       value: canonicalPayload(shard),
+      ...(input.resultDigest ? { resultDigest: input.resultDigest } : {}),
     };
     if (prior) await ctx.db.replace(prior._id, saved);
     else await ctx.db.insert('projectHostedCheckShards', saved);
@@ -189,10 +198,27 @@ export async function receiveHostedCheckCallback(
       run.exitCode = result.exitCode;
       run.output = result.output;
       run.cost = result.cost;
-      if (result.contractReports) {
+      const transport = objectReportTransport(run);
+      if (result.contractReports && transport) {
+        invariant(result.reportDigest, 'CLI_UPGRADE_REQUIRED', 'Use a runner with check-report-detail.');
+        run.contractReports = result.contractReports;
+        run.reportPointer = checkReportPointer(result.contractReports);
+        invariant(
+          run.reportPointer.digest === result.reportDigest,
+          'EVIDENCE_CHANGED',
+          'The uploaded report pin differs from its callback arguments.',
+        );
+        checkReportHeader(run, 7 * 1024);
+      } else if (result.contractReports) {
         run.contractReports = capCheckReports(result.contractReports).reports;
         run.testFiles = checkFileSummary(result.contractReports);
       }
+      if (transport && result.reportDigest)
+        invariant(
+          run.reportPointer?.digest === result.reportDigest,
+          'EVIDENCE_CHANGED',
+          'The complete callback differs from its report pin.',
+        );
       if (machine)
         run.macEvidence = {
           provider: 'mac',
@@ -206,7 +232,18 @@ export async function receiveHostedCheckCallback(
           }),
         };
       await completeHostedCheck(ctx, run);
-      await recordHostedTestTimings(ctx, input.projectId, run);
+      if (!objectReportTransport(run)) await recordHostedTestTimings(ctx, input.projectId, run);
+      else if (result.contractReports)
+        await recordHostedTestTimings(
+          ctx,
+          input.projectId,
+          run,
+          Object.fromEntries(
+            Object.entries(result.contractReports).flatMap(([file, report]) =>
+              report.durationMs === undefined ? [] : [[file, report.durationMs]],
+            ),
+          ),
+        );
     }
   }
   await ctx.db.insert('projectHostedCheckCallbacks', {

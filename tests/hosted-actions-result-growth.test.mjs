@@ -3,6 +3,10 @@
 // reports earlier shards already stored. Drives the real HTTP handler with inline logs
 // (the runner's common path) over a realistic report set and meters every mutation.
 import test from 'node:test';
+import { setFlagsFromString } from 'node:v8';
+import { runInNewContext } from 'node:vm';
+setFlagsFromString('--expose_gc');
+const collectGarbage = runInNewContext('gc');
 import assert from 'node:assert/strict';
 import { landingStorage } from './landing-storage-fixture.mjs';
 import { bootstrapInterval } from '../scripts/bootstrap-interval.mjs';
@@ -99,8 +103,9 @@ const report = i =>
       }
     : { durationMs: 1000 + ((i * 37) % 9000) + 0.123, failed: false };
 
-async function landing(t, shards, batch = false, packed = false) {
+async function landing(t, shards, batch = false, packed = false, r2Reports = false) {
   variables(t, {
+    FORGE_CHECK_REPORTS_R2: r2Reports ? '1' : '0',
     CONVEX_SITE_URL: audience,
     CONVEX_CLOUD_URL: 'https://forge.convex.cloud',
     FORGE_HOSTED_CHECK_KEY_SYNTHETIC: 'synthetic-check-key',
@@ -169,8 +174,28 @@ async function landing(t, shards, batch = false, packed = false) {
     inbox = new Map(),
     r2 = { classA: 0, classB: 0, bytesPut: 0, deletes: 0 };
   let logUploadBytes = 0;
+  let memoryBase = process.memoryUsage().heapUsed,
+    memoryPeak = memoryBase,
+    measureMemory = false;
+  // The working-set guard excludes reclaimable garbage from earlier fixture calls.
+  // Sampling after GC at existing I/O boundaries measures retained collector memory,
+  // not an invented exact peak of every transient allocation inside V8.
+  const sampleMemory = () => {
+    if (!measureMemory) return;
+    collectGarbage();
+    memoryPeak = Math.max(memoryPeak, process.memoryUsage().heapUsed);
+  };
+  const memory = {
+    reset: (enabled = false) => {
+      measureMemory = enabled;
+      if (enabled) collectGarbage();
+      memoryBase = memoryPeak = process.memoryUsage().heapUsed;
+    },
+    growth: () => Math.max(0, memoryPeak - memoryBase),
+  };
 
   t.mock.method(globalThis, 'fetch', async (url, init) => {
+    sampleMemory();
     if (url === `${actionsIssuer}/.well-known/jwks`) return jwks();
     const parsedUrl = new URL(url),
       key = parsedUrl.pathname;
@@ -221,12 +246,16 @@ async function landing(t, shards, batch = false, packed = false) {
     projectHostedActionsSession: sessions,
     projectHostedActionsResults: results,
     projectHostedActionsBatchStore: batchStore,
+    projectHostedTestTimings: timingStore,
   };
   const ctx = {
-    runMutation: (ref, input) => {
+    runMutation: async (ref, input) => {
+      sampleMemory();
       const name = getFunctionName(ref),
         [module, method] = name.split(':');
-      return s.transaction(name, modules[module][method], input);
+      const value = await s.transaction(name, modules[module][method], input);
+      sampleMemory();
+      return value;
     },
   };
   const responses = [],
@@ -290,8 +319,8 @@ async function landing(t, shards, batch = false, packed = false) {
   const stored = () =>
     JSON.parse([...s.tables.projectHostedCheckRuns.values()].find(row => row.runId === id.runId).value);
   // The provider's signed completed event: a pass needs it (Issue 432164bf).
-  const conclude = (conclusion = 'success') =>
-    s.transaction('webhook', webhooks.receive, {
+  const conclude = async (conclusion = 'success') => {
+    const reply = await s.transaction('webhook', webhooks.receive, {
       payload: JSON.stringify({
         action: 'completed',
         repository: { full_name: repository },
@@ -308,7 +337,14 @@ async function landing(t, shards, batch = false, packed = false) {
         },
       }),
     });
+    if (reply) {
+      const work = JSON.parse(reply);
+      if (work.reportBatch)
+        await batchCollector.collectResultBatch(ctx, work.identity, work.conclusion, work.reportBatch);
+    }
+  };
   return {
+    memory,
     logUploadBytes: () => logUploadBytes,
     s,
     id,
@@ -753,8 +789,8 @@ test('Issue 0c457ae4: 5,000 test files complete through the hosted result path a
   t.diagnostic(JSON.stringify({ files: many.length, shards, runRowKB: kb(Buffer.byteLength(runRow.value)) }));
 });
 
-async function batchedLanding(t, shards, steps, { conclude = true, replay = false } = {}) {
-  const l = await landing(t, shards, true);
+async function batchedLanding(t, shards, steps, { conclude = true, replay = false, r2Reports = false } = {}) {
+  const l = await landing(t, shards, true, r2Reports, r2Reports);
   const r = l.stored();
   for (const result of steps)
     l.inbox.set(
@@ -775,6 +811,7 @@ async function batchedLanding(t, shards, steps, { conclude = true, replay = fals
     assert.equal(response.status, 200);
     return response.json();
   };
+  l.memory.reset(r2Reports);
   await collect();
   if (replay) await collect();
   if (conclude) await l.conclude();
@@ -886,92 +923,144 @@ test('identical tree and definition reuse a provider-attested verdict without wr
   );
 });
 
-test('batched reports: 20,000 files retain details in bounded records and keep provider webhook writes slim', async t => {
-  const many = Array.from({ length: 20000 }, (_, i) => `tests/batch-limit-${i}.test.mjs`);
-  const steps = Array.from({ length: 12 }, (_, index) => ({
-    index,
-    exitCode: 0,
-    contractReports: Object.fromEntries(
-      many
-        .filter((_, i) => i % 12 === index)
-        .map(file => [
-          file,
-          {
-            failed: false,
-            durationMs: 10,
-            ...(file === many[0]
-              ? {
-                  flaky: true,
-                  firstError: 'retained flaky error',
-                  attempts: [
-                    { failed: true, durationMs: 20 },
-                    { failed: false, durationMs: 10 },
-                  ],
-                }
-              : {}),
-          },
-        ]),
-    ),
-  }));
-  const l = await batchedLanding(t, 12, steps, { conclude: false });
-  const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
-  assert(row.reportParts > 1, 'large report metadata is paged');
-  assert.equal(l.stored().contractReports, undefined, 'the run head never embeds report metadata');
-  assert(Buffer.byteLength(row.value) < 12 * 1024, 'the run head stays small');
-  for (const report of l.s.tables.projectHostedActionsResults.values())
-    assert(Buffer.byteLength(JSON.stringify(report)) < 300 * 1024, 'each stored document stays bounded');
-  const retainedReports = [...l.s.tables.projectHostedActionsResults.values()].filter(
-    row => row.index <= -1000,
-  );
-  const compactReportBytes = retainedReports.reduce(
-    (sum, row) => sum + Buffer.byteLength(JSON.stringify(row)),
-    0,
-  );
-  const legacyReportBytes = retainedReports.reduce((sum, row) => {
-    const saved = JSON.parse(row.reports);
-    const reports =
-      saved.schema === 1
-        ? {
-            ...Object.fromEntries(
-              Object.entries(saved.durations).map(([file, durationMs]) => [
-                file,
-                { failed: false, durationMs },
-              ]),
-            ),
-            ...saved.reports,
-          }
-        : saved;
-    return sum + Buffer.byteLength(JSON.stringify({ ...row, reports: JSON.stringify(reports) }));
-  }, 0);
-  assert(
-    compactReportBytes < legacyReportBytes * 0.75,
-    'passing report metadata uses at most75%of the legacy bytes, with exact hydration',
-  );
-  t.diagnostic(JSON.stringify({ compactReportBytes, legacyReportBytes, reportRows: retainedReports.length }));
-  const start = l.s.counts.length;
-  await l.conclude();
-  const webhook = l.s.counts.slice(start).find(m => m.name === 'webhook');
-  assert(webhook.readBytes < 24 * 1024, `webhook reads ${webhook.readBytes}`);
-  assert(webhook.writeBytes < 24 * 1024, `webhook writes ${webhook.writeBytes}`);
+test('batched reports: 20,000 all-pass and all-fail files use one pinned object, no result rows and bounded headers', async t => {
+  const detail = await import(moduleUrl('../convex/projectHostedCheckDetail.ts'));
+  const { foldShardStep } = await import(moduleUrl('../convex/projectHostedActionsReports.ts'));
   const { read } = await import('./hosted-checks-fixture.mjs');
-  const status = JSON.parse(await l.s.transaction('large-status', read.status, l.id));
-  assert.equal(Object.keys(status.contractReports).length, 20000);
-  assert.equal(status.status, 'passed');
-  const projected = [...l.s.tables.projectFinishReadRows.values()].find(
-    row => row.kind === 'projectMetricCheckRuns' && row.runId === l.id.runId,
-  );
-  const metric = JSON.parse(projected.value);
-  assert.equal(metric.flaky.total, 1);
-  assert.equal(
-    metric.flaky.files[0].firstError,
-    'retained flaky error',
-    'compact metric projections retain detached report evidence',
-  );
-  assert.deepEqual(metric.flaky.files[0].attempts, status.contractReports[many[0]].attempts);
+  for (const failed of [false, true]) {
+    const many = Array.from({ length: 20000 }, (_, i) => `tests/batch-limit-${i}.test.mjs`);
+    const steps = Array.from({ length: 12 }, (_, index) => ({
+      index,
+      exitCode: failed ? 1 : 0,
+      contractReports: Object.fromEntries(
+        many
+          .filter((_, i) => i % 12 === index)
+          .map(file => [
+            file,
+            {
+              failed,
+              durationMs: 10,
+              ...(failed
+                ? { firstError: 'retained failure' }
+                : file === many[0]
+                  ? {
+                      flaky: true,
+                      firstError: 'retained flaky error',
+                      attempts: [
+                        { failed: true, durationMs: 20 },
+                        { failed: false, durationMs: 10 },
+                      ],
+                    }
+                  : {}),
+            },
+          ]),
+      ),
+    }));
+    const l = await batchedLanding(t, 12, steps, { conclude: false, r2Reports: true });
+    assert(
+      l.memory.growth() < 64 * 1024 * 1024,
+      `collector retained heap at I/O boundaries grew ${l.memory.growth()}`,
+    );
+    t.diagnostic(JSON.stringify({ failed, collectorBoundaryLiveHeapGrowth: l.memory.growth() }));
+    const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
+    assert.equal(l.s.tables.projectHostedActionsResults.size, 0);
+    assert.equal(l.stored().contractReports, undefined);
+    assert(
+      Buffer.byteLength(JSON.stringify(row)) < 12 * 1024,
+      `whole run row ${Buffer.byteLength(JSON.stringify(row))}`,
+    );
+    assert(Buffer.byteLength(JSON.stringify(JSON.stringify(l.stored().testFiles))) <= 8192);
+    assert.deepEqual(l.stored().testFiles.counts, {
+      total: 20000,
+      failed: failed ? 20000 : 0,
+      flaky: failed ? 0 : 1,
+    });
+    let expected = { reports: {}, pending: [] };
+    for (const [i, step] of steps.entries())
+      expected = foldShardStep(expected, {
+        reports: step.contractReports,
+        yielded: [],
+        complete: i === steps.length - 1,
+      });
+    const pointer = l.stored().reportPointer;
+    const objects = [...l.inbox].filter(([key]) => key.includes('/reports/'));
+    assert.equal(objects.length, 1);
+    assert.equal(digest(objects[0][1]), pointer.digest);
+    assert.deepEqual(JSON.parse(objects[0][1]), expected.reports);
+    const detailCtx = {
+      auth: { getUserIdentity: async () => ({ subject: 'owner' }) },
+      runQuery: (_ref, input) => l.s.transaction('detail-read', detail.retained, input),
+    };
+    let cursor = null,
+      restored = {};
+    do {
+      const value = await detail.reports._handler(detailCtx, { ...l.id, cursor });
+      assert(Buffer.byteLength(value) <= 256 * 1024);
+      const page = JSON.parse(value);
+      Object.assign(restored, page.contractReports);
+      cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(restored, expected.reports);
+    await assert.rejects(l.s.transaction('old-client', read.status, l.id), code('CLI_UPGRADE_REQUIRED'));
+    const head = JSON.parse(
+      await l.s.transaction('header-status', read.status, { ...l.id, features: ['check-report-detail'] }),
+    );
+    assert.equal(head.contractReports, undefined);
+    const start = l.s.counts.length;
+    await l.conclude(failed ? 'failure' : 'success');
+    const webhook = l.s.counts.slice(start).find(m => m.name === 'webhook');
+    assert(webhook.readBytes < 24 * 1024, `webhook reads ${webhook.readBytes}`);
+    assert(webhook.writeBytes < 24 * 1024, `webhook writes ${webhook.writeBytes}`);
+    assert.equal(l.stored().status, failed ? 'failed' : 'passed');
+    const timedRow = [...l.s.tables.projectHostedCheckRuns.values()][0];
+    assert(
+      Buffer.byteLength(JSON.stringify(timedRow)) < 12 * 1024,
+      'the terminal row including timing stamps stays bounded',
+    );
+    assert(timedRow.reportTimingParts.length >= 1, 'duration arguments are retained with replay identity');
+    assert.equal(timedRow.reportTimingComplete, true);
+    const historyBefore = [...l.s.tables.projectHostedTestTimings.values()][0].history;
+    await l.conclude(failed ? 'failure' : 'success');
+    assert.equal(
+      [...l.s.tables.projectHostedTestTimings.values()][0].history,
+      historyBefore,
+      'timing argument pages replay without a second EWMA sample',
+    );
+    assert(!l.scheduled.some(task => task.name === 'projectHostedTestTimings:record'));
+    const schema = (await import(moduleUrl('../convex/schema.ts'))).default;
+    const indexes = schema.tables.projectHostedCheckRuns.export().indexes;
+    assert.equal(indexes.length, 9);
+    for (const index of indexes) {
+      const selected = await l.s.transaction(
+        `run-index-${index.indexDescriptor}`,
+        {
+          isQuery: true,
+          _handler: ctx =>
+            ctx.db
+              .query('projectHostedCheckRuns')
+              .withIndex(index.indexDescriptor, q =>
+                index.fields.reduce((q, field) => q.eq(field, timedRow[field]), q),
+              )
+              .unique(),
+        },
+        {},
+      );
+      assert.equal(selected._id, timedRow._id, index.indexDescriptor);
+    }
+    if (!failed) {
+      const projected = [...l.s.tables.projectFinishReadRows.values()].find(
+        row => row.kind === 'projectMetricCheckRuns' && row.runId === l.id.runId,
+      );
+      const metric = JSON.parse(projected.value);
+      assert.equal(metric.flaky.total, 1);
+      assert.equal(metric.flaky.files[0].firstError, 'retained flaky error');
+      assert.deepEqual(metric.flaky.files[0].attempts, expected.reports[many[0]].attempts);
+    }
+  }
 });
 
-async function resultPathBytes(t, batch, packed = batch) {
-  const l = await landing(t, 12, batch, packed),
+async function resultPathBytes(t, batch, packed = batch, r2Reports = false) {
+  const l = await landing(t, 12, batch, packed, r2Reports),
     run = l.stored(),
     steps = [];
   const planReplyBytes = Buffer.byteLength(
@@ -1466,4 +1555,137 @@ test('packed required-shard failure reaches Forge through the election before op
   assert.equal(l.stored().counts.failed, 1);
   assert.notEqual(l.stored().status, 'passed');
   assert.equal([...l.s.tables.projectHostedCheckRuns.values()][0].verdictKey, undefined);
+});
+
+test('S3 report object adds exactly one Class A to S7 while healthy calls and database I/O do not rise', async t => {
+  const before = await resultPathBytes(t, true, true);
+  const after = await resultPathBytes(t, true, true, true);
+  t.diagnostic(JSON.stringify({ before, after }));
+  assert(after.calls <= before.calls, JSON.stringify({ before, after }));
+  assert(after.mutations <= before.mutations);
+  assert(after.readBytes < before.readBytes);
+  assert(after.writeBytes < before.writeBytes);
+  assert.equal(after.r2.classA, before.r2.classA + 1);
+  assert.equal(after.r2.classA, 15);
+});
+
+test('S3 cancel, watchdog and provider recovery fold exactly the present slots without report rows or cancelled timings', async t => {
+  for (const kind of ['cancel', 'watchdog', 'provider']) {
+    const l = await landing(t, 3, true, true, true),
+      run = l.stored();
+    for (const index of [0, 2])
+      l.inbox.set(
+        `/synthetic-bucket/${resultSlotKey(run, index)}`,
+        Buffer.from(
+          resultEnvelopeBody({
+            result: {
+              index,
+              exitCode: 1,
+              contractReports: {
+                [`tests/present-${index}.test.mjs`]: {
+                  failed: true,
+                  durationMs: 17,
+                  firstError: 'present slot',
+                },
+              },
+            },
+          }),
+        ),
+      );
+    if (kind === 'provider') await l.conclude('failure');
+    else {
+      if (kind === 'cancel') await l.s.cancel(run.id);
+      else await l.s.transaction('watchdog', direct.expire, { ...l.id, fence: run.fence });
+      const work = l.scheduled.find(task => task.name === 'projectHostedActionsBatch:collect');
+      assert(work);
+      await batchCollector.collect._handler(l.ctx, work.input);
+    }
+    assert.equal(l.s.tables.projectHostedActionsResults.size, 0);
+    assert.equal(l.stored().testFiles.counts.total, 2);
+    assert.equal(l.stored().testFiles.counts.failed, 2);
+    const object = [...l.inbox].find(([key]) => key.includes('/reports/'));
+    assert.deepEqual(Object.keys(JSON.parse(object[1])).sort(), [
+      'tests/present-0.test.mjs',
+      'tests/present-2.test.mjs',
+    ]);
+    if (kind !== 'provider') assert.equal(l.s.tables.projectHostedTestTimings.size, 0);
+    assert(!l.scheduled.some(task => task.name === 'projectHostedTestTimings:record'));
+  }
+});
+
+test('S3 provider cancellation never contributes timings, including after an early failed or held passing fold', async t => {
+  for (const failed of [false, true]) {
+    const l = await batchedLanding(
+      t,
+      2,
+      [0, 1].map(index => ({
+        index,
+        exitCode: failed ? 1 : 0,
+        contractReports: { [`tests/cancelled-${index}.test.mjs`]: { failed, durationMs: 123 } },
+      })),
+      { r2Reports: true, conclude: false },
+    );
+    assert.equal(l.s.tables.projectHostedTestTimings.size, 0, 'a provisional fold never stamps timings');
+    await l.conclude('cancelled');
+    assert.equal(
+      l.s.tables.projectHostedTestTimings.size,
+      0,
+      'the known cancelled conclusion never stamps timings',
+    );
+    const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
+    assert.equal(row.reportTimingStamp, undefined);
+    assert.equal(row.reportConclusion, 'cancelled');
+  }
+});
+
+test('S3 header-only exact-tree verdict reuse and old direct-runner refusal add no report-row reads', async t => {
+  const l = await batchedLanding(
+    t,
+    2,
+    [0, 1].map(index => ({
+      index,
+      exitCode: 0,
+      contractReports: { [`tests/reuse-${index}.test.mjs`]: { failed: false, durationMs: 10 } },
+    })),
+    { r2Reports: true },
+  );
+  const original = l.stored(),
+    start = l.s.counts.length;
+  const reused = await l.s.enqueue({ ...original.request, operationId: crypto.randomUUID() });
+  assert.equal(reused.id, original.id);
+  assert.equal(l.s.tables.projectHostedCheckRuns.size, 1);
+  assert(l.s.counts.slice(start).every(count => !count.touched.includes('projectHostedActionsResults')));
+  await assert.rejects(
+    l.s.transaction('old-result', results.result, {
+      ...l.id,
+      claims: JSON.stringify(claims()),
+      fence: original.fence,
+      result: JSON.stringify({ index: 0, exitCode: 0 }),
+    }),
+    code('CLI_UPGRADE_REQUIRED'),
+  );
+  assert.equal(l.s.tables.projectHostedActionsResults.size, 0);
+});
+
+test('S3 duration arguments above 768 KiB page through idempotent settlement without report-row reads', async t => {
+  const names = Array.from(
+    { length: 5000 },
+    (_, i) => `tests/timing-${i}-${'long-path-'.repeat(16)}.test.mjs`,
+  );
+  const steps = Array.from({ length: 12 }, (_, index) => ({
+    index,
+    exitCode: 0,
+    contractReports: Object.fromEntries(
+      names.filter((_, i) => i % 12 === index).map(file => [file, { failed: false, durationMs: 13 }]),
+    ),
+  }));
+  const l = await batchedLanding(t, 12, steps, { r2Reports: true });
+  const row = [...l.s.tables.projectHostedCheckRuns.values()][0];
+  assert(row.reportTimingParts.length > 1);
+  assert.equal(row.reportTimingComplete, true);
+  assert(l.s.counts.some(count => count.name === 'projectHostedTestTimings:argumentsPage'));
+  assert(l.s.counts.every(count => !count.touched.includes('projectHostedActionsResults')));
+  const before = [...l.s.tables.projectHostedTestTimings.values()][0].history;
+  await l.conclude();
+  assert.equal([...l.s.tables.projectHostedTestTimings.values()][0].history, before);
 });

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState } from './landing-ticket-fixture.mjs';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { mkdirSync, renameSync } from 'node:fs';
@@ -78,7 +79,7 @@ async function fixture(t, { privateActor = false } = {}) {
     selection: canonicalPayload(f.selection.hostedMain),
   });
   const submissionId = f.acceptedReceipts[0].submissionId;
-  const originalAnchor = JSON.parse([...h.f.tables.projectHostedLandingRequests.values()][0].value);
+  const originalAnchor = ticketState(h.f, [...h.f.tables.projectHostedLandingRequests.values()][0]);
   if (privateActor) {
     const subject = 'user_syntheticArchiveAuthorAAAA';
     f.tables.projectHostedAcceptancePlans[0].actor = subject;

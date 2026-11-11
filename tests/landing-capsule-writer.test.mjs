@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState } from './landing-ticket-fixture.mjs';
 import { lanesFixture } from './hosted-lanes-fixture.mjs';
 import { randomBytes } from 'node:crypto';
 import { canonicalPayload } from '../dist/hosted-source-operation.js';
@@ -210,7 +211,7 @@ test('S1 carries a schema-valid incompressible historical error whole, beyond th
   const value = JSON.parse(row.value);
   value.transition.error = { code: 'SYNTHETIC_ERROR', message: randomBytes(270_000).toString('base64') };
   const text = canonicalPayload(value);
-  const current = JSON.parse([...h.f.tables.projectHostedLandingRequests.values()][0].value);
+  const current = ticketState(h.f, [...h.f.tables.projectHostedLandingRequests.values()][0]);
   hostedLandingStateSchema.parse(readLandingTransition(text, current).submission);
   h.f.patch('projectHostedLandingObservations', row._id, { value: text });
   const result = await h.pack();

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { detachCheckReports } from './projectHostedCheckReports';
+import { detachCheckReports, objectReportTransport } from './projectHostedCheckReports';
 import { v } from 'convex/values';
 import { internalMutation } from './server';
 import { actionsSession, sessionArgs } from './projectHostedActionsSession';
@@ -181,7 +181,14 @@ export const prepare = internalMutation({
       // A runner's fallback code and its reason ride this plan write; unknown codes are dropped (7c2e69e1, 7cb61db1).
       Object.assign(run, runFallback(recipe.selection));
       // Recorded for the run's evidence; every pass reads the required jobs' conclusions.
-      if (input.resultsBatch) {
+      const transport = objectReportTransport(run);
+      invariant(
+        !transport || input.resultsBatch,
+        'CLI_UPGRADE_REQUIRED',
+        'Use a runner with check-report-detail result batches.',
+      );
+      if (transport) transport.packed = !!input.resultsPacked;
+      else if (input.resultsBatch) {
         detachCheckReports(run);
         const batch = await ctx.db
           .query('projectHostedActionsResults')

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { moduleUrl } from './convex-module.mjs';
 import { batchesFixture, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -39,9 +40,9 @@ test('released strict wait and stack readers keep working while canonical messag
   const f = await acceptanceFixture();
   const { state: observed } = await f.ready(null, { message: supplied(0) });
   const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === observed.id);
-  const state = JSON.parse(row.value);
+  const state = ticketState(f, row);
   state.message = supplied(0);
-  f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(state) });
+  patchTicketState(f, row, state);
   const released = hostedLandingStateSchema.omit({ message: true }).extend({
     request: hostedLandingRequestSchema.omit({ message: true }),
   });
@@ -64,7 +65,7 @@ test('released strict wait and stack readers keep working while canonical messag
     released.parse(page.submission);
     for (const event of page.events) released.parse(event.submission);
   }
-  const canonical = JSON.parse(f.tables.projectHostedLandingRequests.get(row._id).value);
+  const canonical = ticketState(f, f.tables.projectHostedLandingRequests.get(row._id));
   assert.equal(canonical.message, supplied(0));
   assert.equal(canonical.request.message, supplied(0));
   assert.equal((await f.accept(state)).receipt.message, supplied(0));
@@ -86,10 +87,10 @@ for (const [batching, legacy] of [
     const f = await batchesFixture(t, { count: 3, batching, memberMessages: messages, concurrency: 3 });
     if (legacy)
       for (const row of f.tables.projectHostedLandingRequests.values()) {
-        const value = JSON.parse(row.value);
+        const value = ticketState(f, row);
         delete value.message;
         delete value.request.message;
-        f.patch('projectHostedLandingRequests', row._id, { value: JSON.stringify(value) });
+        patchTicketState(f, row, value);
       }
     // Mirror on before acceptance: publication enqueues exactly the jobs production does.
     const project = f.tables.hostedProjects.get(f.projectId);

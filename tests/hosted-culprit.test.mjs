@@ -1298,7 +1298,16 @@ async function replaySystemReverse(
   // The reverse is an ordinary queued landing on top of current main: nothing is
   // rewound, no accepted receipt changes, and its receipt message names how to
   // bring the culprit back (owner 2026-11-06: no lost code).
-  const reverse = JSON.parse([...f.tables.projectHostedLandingRequests.values()][0].value);
+  const reverseRow = [...f.tables.projectHostedLandingRequests.values()][0];
+  const reverse = {
+    ...JSON.parse(reverseRow.value),
+    ...(reverseRow.requestBodyId
+      ? {
+          request: JSON.parse(f.tables.projectHostedLandingBodies.get(reverseRow.requestBodyId).value)
+            .request,
+        }
+      : {}),
+  };
   assert.equal(reverse.request.revertOf, culpritReceipt.id);
   assert.equal(reverse.request.expectedMain.head, f.heads[pair ? 2 : 1], 'composed on current main');
   assert.match(
@@ -2233,4 +2242,60 @@ test('W19: the notice records at most three failing files and how many more', ()
     moreTests: 3,
   });
   assert.equal(culprit.noticeTests([{ file: 'x'.repeat(500) }]).tests[0].length, 240);
+});
+
+test('R2 predecessor bisection reads only named files through one action and compares its immutable report pin', async t => {
+  const f = await fixture(3);
+  const { checkReportHeader, checkReportPointer } = await import('../dist/check-file-summary.js');
+  const { canonicalPayload } = await import('../dist/hosted-source-operation.js');
+  const source = await import(moduleUrl('../convex/projectHostedCulpritSource.ts'));
+  const greenId = f.tables.projectHostedMainAudits.get(f.auditRow).lastGreen.runId;
+  const row = [...f.tables.projectHostedCheckRuns.values()].find(row => row.runId === greenId);
+  const green = JSON.parse(row.value),
+    reports = green.contractReports;
+  checkReportHeader(green);
+  green.reportPointer = checkReportPointer(reports);
+  delete green.contractReports;
+  row.value = JSON.stringify(green);
+  row.reportStorage = 'r2';
+  await f.runCulprit();
+  assert.equal(f.probes().length, 0);
+  const work = f.scheduled.find(task => task.name === 'projectHostedCulpritSource:reports');
+  assert(work);
+  const target = JSON.parse(await f.transaction('named-target', culprit.reportTarget, work.args));
+  assert.deepEqual(target.files, ['tests/red.test.mjs']);
+  let reads = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    reads++;
+    return new Response(canonicalPayload(reports));
+  });
+  await source.reports._handler(
+    {
+      runQuery: (_ref, input) => f.transaction('named-target', culprit.reportTarget, input),
+      runMutation: (_ref, input) => f.transaction('named-evidence', culprit.reportEvidence, input),
+    },
+    work.args,
+  );
+  assert.equal(reads, 1);
+  assert.equal(f.probes().length, 1);
+  assert.equal(JSON.parse(row.value).contractReports, undefined);
+  // A changed pin between the action's read and settling mutation cannot supply evidence.
+  const second = await fixture(3);
+  const greenRow = [...second.tables.projectHostedCheckRuns.values()].find(
+    row => row.runId === second.tables.projectHostedMainAudits.get(second.auditRow).lastGreen.runId,
+  );
+  const next = JSON.parse(greenRow.value);
+  next.reportPointer = checkReportPointer(reports);
+  delete next.contractReports;
+  greenRow.value = JSON.stringify(next);
+  greenRow.reportStorage = 'r2';
+  await second.runCulprit();
+  await assert.rejects(
+    second.transaction('stale-named-evidence', culprit.reportEvidence, {
+      projectId: second.projectId,
+      runId: second.recoveryId(),
+      evidence: canonicalPayload({ runId: next.id, digest: 'f'.repeat(64), reports }),
+    }),
+    error => (error.code ?? error.data?.code) === 'EVIDENCE_CHANGED',
+  );
 });

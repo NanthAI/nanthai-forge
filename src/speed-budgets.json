@@ -574,11 +574,11 @@
       "measuredBy": "landing-fixture",
       "metric": "readBytes",
       "unit": "bytes",
-      "value": 795595,
+      "value": 713500,
       "floor": 2048,
-      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. Remeasured with CI batch resolution on accepted proof/driver main 94bd1b20; all ledger ids retained (65534f20). CI batch qualification on refreshed merged code 020cc310: retained every ledger id and recorded measured combined reads (65534f20).",
+      "source": "tests/landing-cost-guard.test.mjs, unchanged six-landing mix; Issue 71dbe458: manifest-only V8 composition and shared per-action descriptors/read cache. Synthetic counts, not billed usage. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. Remeasured with CI batch resolution on accepted proof/driver main 94bd1b20; all ledger ids retained (65534f20). CI batch qualification on refreshed merged code 020cc310: retained every ledger id and recorded measured combined reads (65534f20). S3 324f1d97 ticket/body split: unchanged six-landing fixture reads 713393 and writes 223370 B per landing; synthetic document I/O, not billed usage.",
       "issue": "71dbe458",
-      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20)."
+      "reason": "Database bandwidth was the largest Convex part in capture #1 ($0.0037 of $0.0086 per landing). The last-shard CI result read cut is the latest decision. Source-step cut (71dbe458) ratchets 806895 to 803701; total calls 38 to 37.5 per landing, Node actions 4/6 to 3/6, V8 unchanged at 59/6. Starter modeled Convex subtotal includes $2.20/M calls, $0.22/GB DB I/O, $0.33/GB-h actions and $0.132/GB R2 upload egress; see hosted-source-worker.md for scope and arithmetic. Remeasured after syncing accepted main: 801924 bytes per landing (includes intervening accepted changes); every existing entry and reason is retained. CI batch merged qualification: 799340 B, reusing transaction-authorized project snapshots instead of duplicate reads (65534f20). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling."
     },
     {
       "id": "landing-write-bytes",
@@ -586,11 +586,11 @@
       "measuredBy": "landing-fixture",
       "metric": "writeBytes",
       "unit": "bytes",
-      "value": 253855,
+      "value": 223400,
       "floor": 2048,
-      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O.",
+      "source": "tests/landing-cost-guard.test.mjs on the in-process Convex fixture, 2026-11-10: one solo accepted-Candidate submission (initial save/compose excluded), one whose main moves during its check (recompose on a source job and a second check), and four queued landings batched under the default policy; total divided by the 6 landings. Merged metrics projection 1441a9bf plus CI batch 65534f20 qualification; includes compact metric-row metadata I/O. S3 324f1d97 ticket/body split: unchanged six-landing fixture reads 713393 and writes 223370 B per landing; synthetic document I/O, not billed usage.",
       "issue": "9db58ca6",
-      "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages)."
+      "reason": "Written rows are database bandwidth too; bytes belong in R2, Convex keeps records read and written O(pages). Unindexed request/selection bodies remove cold bytes from phase writes without changing function calls or the observer ceiling."
     },
     {
       "id": "landing-action-gb-seconds",
@@ -1150,12 +1150,12 @@
       "measuredBy": "ci-batch-fixture",
       "metric": "r2ClassA",
       "unit": "ops",
-      "value": 14,
+      "value": 15,
       "floor": 0,
       "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
       "issue": "b99d1ea1",
-      "reason": "Twelve immutable combined result/log PUTs, one conditional election marker and one final manifest replace legacy LIST and duplicate log writes. Required jobs notify early without an optional-job wait. Races and infrastructure retries count separately in their fixtures.",
-      "ceiling": 14
+      "reason": "Twelve immutable combined result/log PUTs, one conditional election marker and one final manifest replace legacy LIST and duplicate log writes. Required jobs notify early without an optional-job wait. Races and infrastructure retries count separately in their fixtures. S3 lead decision d21234de permits one folded report PUT per new R2 run (15 total); legacy default-off runs retain 14.",
+      "ceiling": 15
     },
     {
       "id": "ci-batch-r2-class-b",
@@ -1259,12 +1259,12 @@
       "measuredBy": "smoke-r2-fixture",
       "metric": "r2ClassA",
       "unit": "ops",
-      "value": 31,
+      "value": 33,
       "floor": 0,
       "ceiling": 80,
       "source": "S7 required-shard HEAD election, Issue decision f0582383: executed fixture requests over twelve shards and 886 reports; collection precedes provider completion, with the existing deferred timing aggregation. The smoke shape adds source/main race, two check batches and exhaust maintenance; client setup, reuse, mirror, external backup/sweep and unobserved retries are excluded.",
       "issue": "b99d1ea1",
-      "reason": "Keeps source and maintenance requests beside CI results so inbox savings cannot hide another caller. External backups/sweeps and unobserved retries remain uncovered. Class B is reported separately from the existing compose-only live budget."
+      "reason": "Keeps source and maintenance requests beside CI results so inbox savings cannot hide another caller. External backups/sweeps and unobserved retries remain uncovered. Class B is reported separately from the existing compose-only live budget. S3 new report mode adds one folded report PUT to each of the two check runs; legacy mode remains 31."
     },
     {
       "id": "smoke-r2-class-b",

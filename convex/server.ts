@@ -4,6 +4,8 @@ import {
   internalMutation as baseInternalMutation,
   type MutationCtx,
 } from './_generated/server';
+import { landingRequestBodies } from './projectLandingRequestBody';
+import { query as baseQuery, internalQuery as baseInternalQuery, type QueryCtx } from './_generated/server';
 import { workRecordWriter } from './projectWorkRecordWriter';
 import { finishReadWriter } from './projectFinishReadWriter';
 import { pausedBuilder } from './legacyStorageServer';
@@ -16,7 +18,7 @@ function withFinishReads<B extends typeof baseMutation | typeof baseInternalMuta
         ? definition
         : (definition as { handler: (ctx: MutationCtx, args: unknown) => unknown }).handler;
     const wrapped = (ctx: MutationCtx, args: unknown) =>
-      handler(workRecordWriter(finishReadWriter(ctx)), args);
+      handler(workRecordWriter(landingRequestBodies(finishReadWriter(ctx))), args);
     return (base as typeof baseMutation)(
       (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
     );
@@ -30,3 +32,19 @@ export const internalMutation = withFinishReads(pausedBuilder(baseInternalMutati
 export const maintenanceInternalMutation = withFinishReads(baseInternalMutation);
 
 export * from './_generated/server';
+
+/** Existing query/index contracts receive the same logical request row. */
+function withLandingBodies<B extends typeof baseQuery | typeof baseInternalQuery>(base: B): B {
+  return ((definition: unknown) => {
+    const handler =
+      typeof definition === 'function'
+        ? definition
+        : (definition as { handler: (ctx: QueryCtx, args: unknown) => unknown }).handler;
+    const wrapped = (ctx: QueryCtx, args: unknown) => handler(landingRequestBodies(ctx), args);
+    return (base as typeof baseQuery)(
+      (typeof definition === 'function' ? wrapped : { ...(definition as object), handler: wrapped }) as never,
+    );
+  }) as B;
+}
+export const query = withLandingBodies(baseQuery);
+export const internalQuery = withLandingBodies(baseInternalQuery);

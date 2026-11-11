@@ -5,6 +5,13 @@ import { makeFunctionReference } from 'convex/server';
 import { internalAction } from './_generated/server';
 import { projectSource } from './projectGithubMirror';
 import { parseNativeState } from '../src/state/format';
+import { convexFetch } from './networkFetch';
+import { checkReportsKey } from './projectHostedCheckReports';
+import { presignGet, r2Config } from './r2';
+import { checkPin } from '../src/hosted-check';
+import { semanticReportsSchema } from '../src/intent-semantic-conflict';
+import { canonicalPayload } from '../src/hosted-source-operation';
+import { invariant } from '../src/errors';
 import { ForgeError } from '../src/errors';
 
 /** Reuse the recipe-aware hash-verified source reader, retaining only file presence. */
@@ -42,6 +49,40 @@ export const inspect = internalAction({
     await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedCulprit:sourceEvidence'), {
       ...input,
       presence,
+    });
+    return null;
+  },
+});
+
+export const reports = internalAction({
+  args: { projectId: v.id('hostedProjects'), runId: v.string(), namedRunId: v.string() },
+  returns: v.null(),
+  handler: async (ctx, input) => {
+    const target = JSON.parse(
+      await ctx.runQuery(makeFunctionReference<'query'>('projectHostedCulprit:reportTarget'), input),
+    );
+    if (!target.run?.reportPointer) return null;
+    const run = target.run;
+    const response = await convexFetch(await presignGet(r2Config(), checkReportsKey(run)));
+    invariant(response.ok, 'SOURCE_UNAVAILABLE', 'Compared check reports are unavailable.');
+    const body = await response.text();
+    const reports = semanticReportsSchema.parse(JSON.parse(body));
+    invariant(
+      new TextEncoder().encode(body).length === run.reportPointer.size &&
+        checkPin(reports) === run.reportPointer.digest,
+      'EVIDENCE_CHANGED',
+      'Compared check reports differ from their pin.',
+    );
+    await ctx.runMutation(makeFunctionReference<'mutation'>('projectHostedCulprit:reportEvidence'), {
+      projectId: input.projectId,
+      runId: input.runId,
+      evidence: canonicalPayload({
+        runId: run.id,
+        digest: run.reportPointer.digest,
+        reports: Object.fromEntries(
+          target.files.filter((file: string) => reports[file]).map((file: string) => [file, reports[file]]),
+        ),
+      }),
     });
     return null;
   },

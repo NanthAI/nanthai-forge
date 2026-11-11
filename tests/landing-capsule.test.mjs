@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
@@ -59,7 +60,7 @@ async function fixture(t) {
     protocol: 1,
     projectId: f.projectId,
     submissionId: state.id,
-    anchor: JSON.parse(row.value),
+    anchor: ticketState(f, row),
     tables: {
       projectHostedLandingObservations: rows.map(row => canonicalPayload(row)),
       projectHostedLandingAttempts: [...f.tables.projectHostedLandingAttempts.values()]
@@ -261,7 +262,7 @@ test('cold finish inputs retain exact selected heads and current Lane-relative s
   await f.passChecks();
   await f.drain();
   const row = [...f.tables.projectHostedLandingRequests.values()].find(r => r.submissionId === initial.id);
-  const state = JSON.parse(row.value);
+  const state = ticketState(f, row);
   await f.changeLane(f.lane.laneId, { head: 'a'.repeat(64), sourceVersion: 1 });
   const request = { projectId: f.projectId, submissionId: state.id, attemptId: state.attemptId, index: 0 };
   const before = await f.tx('capsuleInputBaseline', finish.inputs, request);

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { logicalTicket, seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture, store } from './hosted-landing-fixture.mjs';
@@ -14,7 +15,10 @@ const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'
 const { finishFixture } = await import('./hosted-finish-fixture.mjs');
 const { synthetic } = await import('./hosted-landing-batches-fixture.mjs');
 const rowOf = (f, id) =>
-  [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === id);
+  logicalTicket(
+    f,
+    [...f.tables.projectHostedLandingRequests.values()].find(row => row.submissionId === id),
+  );
 const setState = async (f, state) =>
   f.transaction(
     'queue-progress',
@@ -292,7 +296,7 @@ async function syntheticQueue(size) {
     const id = index ? randomUUID() : first.id;
     const state = { ...first, id, sequence: index + 1 };
     if (index)
-      f.insert('projectHostedLandingRequests', {
+      seedTicket(f, {
         ...Object.fromEntries(Object.entries(template).filter(([key]) => !key.startsWith('_'))),
         submissionId: id,
         sequence: index + 1,

@@ -2096,3 +2096,12 @@ files with retained excerpts through a server action. `reports:true` pages every
 Each reply is at most 256 KiB; storage keys and URLs never leave the server. The action uses the
 same project access and public identity mapping as status and reads legacy inline and paged runs.
 The landing detail's Test reports disclosure uses this same server action only while open.
+
+New report writers are enabled only by server environment `FORGE_CHECK_REPORTS_R2=1`
+(default off), captured on each new run. Install capable readers and runners first.
+R2 runs require `check-report-detail`; older clients or runners receive
+`CLI_UPGRADE_REQUIRED`. Existing runs keep their legacy protocol. The collector
+passes durations in its settling mutation, paging above 768 KiB with replay stamps;
+cancelled provider conclusions never feed timings. The report object follows the
+existing check-log retention and cleanup. Legacy row removal is tracked by Issue
+589601f7-9593-42ee-b89b-01954d438251.

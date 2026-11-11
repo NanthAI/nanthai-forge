@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { logicalTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture } from './hosted-landing-fixture.mjs';
@@ -192,7 +193,7 @@ test('progress and conflict advice invalidate immediately; private finish wake d
       _handler: ctx =>
         store.writeLanding(
           ctx,
-          rowOf(f, 'projectHostedLandingRequests', 'submissionId', state.id),
+          logicalTicket(f, rowOf(f, 'projectHostedLandingRequests', 'submissionId', state.id)),
           {
             ...state,
             version: state.version + 1,

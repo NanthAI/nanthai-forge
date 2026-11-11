@@ -124,6 +124,7 @@ export async function settleDirectActions(
   status: 'failed' | 'cancelled' | 'interrupted' | 'runner-unavailable',
   reason: string,
   now = Date.now(),
+  deferWrite = false,
 ) {
   const { row, run } = selected;
   if (hostedCheckTerminal(run)) return run;
@@ -139,7 +140,7 @@ export async function settleDirectActions(
     reason,
   });
   await completeHostedCheck(ctx, run);
-  await writeHostedCheck(ctx, row._id, run);
+  if (!deferWrite) await writeHostedCheck(ctx, row._id, run);
   return run;
 }
 /** Atomic reservation, including a single recovery deadline, precedes GitHub IO.

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from 'node:assert/strict';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
 import { randomUUID } from 'node:crypto';
 import { getFunctionName } from 'convex/server';
 import { checksFixture, code } from './hosted-checks-fixture.mjs';
@@ -94,7 +95,11 @@ export async function landingFixture(source = null) {
   function measure(name) {
     for (const c of f.counts.filter(c => c.name === name)) {
       const page = name.endsWith('Page') || name === 'landingCheckWake';
-      assert(c.ranges <= 80 && c.documents <= (page ? 140 : 80), `${name}: bounded reads`);
+      assert(
+        c.ranges - landingBodyCounts(c).ranges <= 80 &&
+          c.documents - landingBodyCounts(c).reads <= (page ? 140 : 80),
+        `${name}: bounded reads`,
+      );
       assert(c.readBytes < 512 * 1024 && c.writeBytes < 512 * 1024, `${name}: bounded metadata`);
       assert(
         !c.touched.some(t =>

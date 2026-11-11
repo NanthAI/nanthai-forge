@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState } from './landing-ticket-fixture.mjs';
 import { readLandingTransition } from '../dist/hosted-landing.js';
 import assert from 'node:assert/strict';
 import { batchesFixture, synthetic, states } from './hosted-landing-batches-fixture.mjs';
@@ -486,10 +487,11 @@ for (const notified of [false, true])
         row =>
           readLandingTransition(
             row.value,
-            JSON.parse(
+            ticketState(
+              f,
               [...f.tables.projectHostedLandingRequests.values()].find(
                 request => request.submissionId === row.submissionId,
-              ).value,
+              ),
             ),
           ).submission.error?.code !== 'COMPOSITION_CONFLICT',
       ),

@@ -3,6 +3,7 @@
 // source to the cohort stacked on it. Survivors recompose without it and land; its cancelled check
 // evidence stays and late callbacks for its old shared run cannot publish it.
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -57,7 +58,12 @@ for (const count of [10, 20])
     const withdrawCalls = f.counts.slice(before);
     // One metadata transaction, bounded by the live train (measured 281/154 at N=10, 409/226 at N=20).
     assert.equal(withdrawCalls.length, 1);
-    assert(withdrawCalls[0].documents < 160 + 15 * count && withdrawCalls[0].writes < 90 + 9 * count);
+    const companions = landingBodyCounts(withdrawCalls[0]);
+    assert(
+      withdrawCalls[0].documents - companions.reads < 160 + 15 * count &&
+        withdrawCalls[0].writes - companions.writes < 90 + 9 * count,
+      JSON.stringify(withdrawCalls[0]),
+    );
     assert(
       !withdrawCalls[0].touched.some(table => /Backups|WorkRecords|WorkEvents|WorkGenerations/.test(table)),
       'no history hydration',

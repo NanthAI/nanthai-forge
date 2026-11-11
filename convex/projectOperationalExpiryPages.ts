@@ -208,14 +208,15 @@ export async function expireCheck(
         .query('projectHostedCheckShards')
         .withIndex('by_project_and_run', q => q.eq('projectId', input.projectId).eq('runId', input.runId))
         .take(pageSize);
-      const reports = shards.length
-        ? []
-        : await ctx.db
-            .query('projectHostedActionsResults')
-            .withIndex('by_project_and_run_and_index', q =>
-              q.eq('projectId', input.projectId).eq('runId', input.runId),
-            )
-            .take(pageSize);
+      const reports =
+        shards.length || row.reportStorage === 'r2'
+          ? []
+          : await ctx.db
+              .query('projectHostedActionsResults')
+              .withIndex('by_project_and_run_and_index', q =>
+                q.eq('projectId', input.projectId).eq('runId', input.runId),
+              )
+              .take(pageSize);
       const page = [...shards, ...reports];
       rows = page.length;
       removedBytes = await remove(ctx, page);

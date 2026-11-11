@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { v } from 'convex/values';
 import { makeFunctionReference } from 'convex/server';
-import { action, internalQuery } from './cliServer';
+import { actionWithMappedResult, internalQuery } from './cliServer';
 import { checkReader } from './projectHostedCheckRead';
+import { checkReportsKey } from './projectHostedCheckReports';
 import { loadHostedCheck } from './projectHostedCheckStore';
 import { presignGet, r2Config } from './r2';
 import { convexFetch } from './networkFetch';
@@ -12,7 +13,6 @@ import { semanticReportsSchema } from '../src/intent-semantic-conflict';
 import { pageCheckReports } from '../src/check-report-detail';
 import { invariant } from '../src/errors';
 import { report } from './errors';
-import { actionPublicPeople } from './publicPeople';
 const identity = { projectId: v.id('hostedProjects'), runId: v.string() };
 /** Internal bytes are never exposed as a URL or key. The public action repeats the query's
  * access check and uses the same cliServer identity mapper on its final reply. */
@@ -24,7 +24,17 @@ export const retained = internalQuery({
     return canonicalPayload((await loadHostedCheck(ctx, input)).run);
   },
 });
-export const reports = action({
+const detailAction = actionWithMappedResult((value, input) => {
+  const { failed, files, cursor } = input as { failed?: boolean; files?: string[]; cursor?: string | null };
+  return canonicalPayload(
+    pageCheckReports(
+      JSON.parse(value as string),
+      { ...(failed === undefined ? {} : { failed }), ...(files ? { files } : {}) },
+      cursor,
+    ),
+  );
+});
+export const reports = detailAction({
   args: {
     ...identity,
     failed: v.optional(v.boolean()),
@@ -32,7 +42,10 @@ export const reports = action({
     cursor: v.optional(v.union(v.string(), v.null())),
   },
   returns: v.string(),
-  handler: async (ctx, { failed, files, cursor, ...input }): Promise<string> => {
+  handler: async (ctx, { failed: _failed, files: _files, cursor: _cursor, ...input }): Promise<string> => {
+    void _failed;
+    void _files;
+    void _cursor;
     try {
       const run: HostedCheckRun = JSON.parse(
         await ctx.runQuery(makeFunctionReference<'query'>('projectHostedCheckDetail:retained'), input),
@@ -55,20 +68,9 @@ export const reports = action({
           'Retained check reports differ from their pin.',
         );
       }
-      // Map before paging: expanding a subject to its public handle must still fit the wire bound.
-      const mapped = JSON.parse((await actionPublicPeople(ctx, input, canonicalPayload(reports))) as string);
-      return canonicalPayload(
-        pageCheckReports(
-          mapped,
-          { ...(failed === undefined ? {} : { failed }), ...(files ? { files } : {}) },
-          cursor,
-        ),
-      );
+      return canonicalPayload(reports);
     } catch (error) {
       return report(error);
     }
   },
 });
-export function checkReportsKey(run: HostedCheckRun) {
-  return `v1/p/${run.projectId}/checks/${run.id}/reports/${run.reportPointer!.digest}.json`;
-}

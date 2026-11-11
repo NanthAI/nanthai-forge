@@ -4,6 +4,8 @@
 // other at each turn (wave 3b, 2026-11-05: 558 -> 559 -> 560 -> 563 took 4.3
 // minutes before their one cohort formed).
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { ticketState, logicalTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -23,7 +25,11 @@ test.after(() => {
   }
 });
 const rows = f => [...f.tables.projectHostedLandingRequests.values()];
-const row = (f, id) => rows(f).find(r => r.submissionId === id);
+const row = (f, id) =>
+  logicalTicket(
+    f,
+    rows(f).find(r => r.submissionId === id),
+  );
 const batches = f => [...f.tables.projectHostedLandingBatches.values()].map(r => JSON.parse(r.value));
 const isLane = (f, run) =>
   f.entries.some(e =>
@@ -62,8 +68,8 @@ async function wave(t, { count = 5, batchMaxSize = null, stop = () => false } = 
   const spent = f.counts.slice(counts);
   const budget = {
     transactions: spent.length,
-    documentsRead: spent.reduce((n, c) => n + c.documents, 0),
-    documentsWritten: spent.reduce((n, c) => n + c.writes, 0),
+    documentsRead: spent.reduce((n, c) => n + c.documents - landingBodyCounts(c).reads, 0),
+    documentsWritten: spent.reduce((n, c) => n + c.writes - landingBodyCounts(c).writes, 0),
     maintenanceWrites: spent.reduce((n, c) => n + (c.maintenanceWrites ?? 0), 0),
     readBytes: spent.reduce((n, c) => n + c.readBytes, 0),
     writeBytes: spent.reduce((n, c) => n + c.writeBytes, 0),
@@ -133,7 +139,7 @@ test('early refusal only while every older entry holding order is a stale Lane p
           const r = row(f, ids[3]);
           return early.refuseStaleLaneProofNow(ctx, {
             row: r,
-            state: JSON.parse(r.value),
+            state: ticketState(f, r),
             waitingOn: row(f, ids[2]),
           });
         },
@@ -142,7 +148,13 @@ test('early refusal only while every older entry holding order is a stale Lane p
     );
   const probeReads = () => f.counts.filter(c => c.name === 'early-refusal-probe').at(-1).documents;
   assert.deepEqual(await check(), { position: 3, limit: (await check()).limit });
-  const patchRow = (id, patch) => f.patch('projectHostedLandingRequests', row(f, id)._id, patch);
+  const patchRow = (id, patch) =>
+    f.patch('projectHostedLandingRequests', row(f, id)._id, {
+      ...patch,
+      ...('batchSelection' in patch && patch.batchSelection === undefined
+        ? { selectionBodyId: undefined }
+        : {}),
+    });
   const original = { ...row(f, ids[2]) };
   const restore = () => patchRow(ids[2], original);
 

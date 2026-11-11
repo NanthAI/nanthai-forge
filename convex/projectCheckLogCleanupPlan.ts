@@ -296,10 +296,19 @@ export async function planStep(
       }),
     );
     invariant(state.guard === page.guard, 'WORK_STALE', 'Project changed during cleanup inventory.');
+    const reportRuns = new Map<
+      string,
+      ReturnType<typeof hostedCheckRunSchema.parse> & { reportCleanupAttached?: boolean }
+    >();
     for (const row of page.page) {
       if (state.phase === 'check-runs') put(`run:${row.runId}`, 0, JSON.parse(row.value));
       else if (state.phase === 'output-streams') {
-        const run = await lookup<ReturnType<typeof hostedCheckRunSchema.parse>>(`run:${row.runId}`);
+        const run =
+          reportRuns.get(row.runId) ??
+          (await lookup<ReturnType<typeof hostedCheckRunSchema.parse> & { reportCleanupAttached?: boolean }>(
+            `run:${row.runId}`,
+          ));
+        if (run) reportRuns.set(row.runId, run);
         const descriptor = JSON.parse(row.descriptor);
         if (
           !run ||
@@ -314,8 +323,22 @@ export async function planStep(
           Date.parse(run.endedAt ?? run.at) + (run.checkLogs?.retentionDays ?? 90) * 86400000;
         if (isMachineRunner(run.configuration) && run.checkLogs?.uploadLocal && state.now < expiresAt)
           continue;
+        const report =
+          run.reportPointer && !run.reportCleanupAttached
+            ? {
+                ...run.reportPointer,
+                ...(run.configuration.provider === 'github-actions' && !run.configuration.credential
+                  ? {}
+                  : { fence: run.fence }),
+              }
+            : undefined;
+        if (report) {
+          run.reportCleanupAttached = true;
+          put(`run:${row.runId}`, 0, run);
+        }
         append('hostedOutputs', [
           {
+            ...(report ? { report } : {}),
             runId: row.runId,
             streamId: row.streamId,
             bytes: row.bytes,

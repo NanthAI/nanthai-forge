@@ -27,13 +27,13 @@ export const proofSummarySchema = z
   .strict();
 export function proofSummary(
   proof: z.infer<typeof proofReportSchema>,
-  run: Pick<HostedCheckRun, 'contractReports'>,
+  run: Pick<HostedCheckRun, 'contractReports' | 'reportSummary'>,
 ) {
   let proven = 0,
     passedOnBase = 0,
     inconclusive = 0;
   for (const report of proof.reports) {
-    const head = run.contractReports?.[report.file];
+    const head = (run.contractReports ?? run.reportSummary?.semantic)?.[report.file];
     const passed = head ? !head.failed && !head.flaky : report.head === 'passed';
     if (report.base === 'failed' && passed) proven++;
     else if (report.base === 'passed' && passed) passedOnBase++;

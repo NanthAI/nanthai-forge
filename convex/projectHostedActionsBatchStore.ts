@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { detachCheckReports, reportsDetached } from './projectHostedCheckReports';
+import { detachCheckReports, reportsDetached, objectReportTransport } from './projectHostedCheckReports';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
 import { actionsSession } from './projectHostedActionsSession';
@@ -18,6 +18,7 @@ export const batchArgs = {
   fence: v.number(),
   executionId: v.string(),
   claims: v.optional(v.string()),
+  workflowSha: v.optional(v.string()),
 };
 export type BatchInput = {
   projectId: import('./_generated/dataModel').Id<'hostedProjects'>;
@@ -25,6 +26,7 @@ export type BatchInput = {
   fence: number;
   executionId: string;
   claims?: string;
+  workflowSha?: string;
 };
 /** HTTP calls supply verified OIDC claims; absent claims are internal webhook recovery only.
  * Every page and output commit rechecks current actor/epoch, dispatch fence and execution. */
@@ -42,6 +44,11 @@ export async function batchSession(ctx: MutationCtx, input: BatchInput) {
     'EVIDENCE_CHANGED',
     'Collect the original prepared Actions execution.',
   );
+  const transport = objectReportTransport(run);
+  if (transport) {
+    invariant(transport.packed !== undefined, 'EVIDENCE_CHANGED', 'Collect only a prepared batch inbox.');
+    return { ...selected, packed: transport.packed };
+  }
   const batch = await ctx.db
     .query('projectHostedActionsResults')
     .withIndex('by_project_and_run_and_index', q =>
@@ -57,7 +64,7 @@ export const prepare = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     const { run, packed } = await batchSession(ctx, input);
-    return JSON.stringify({ run, packed });
+    return JSON.stringify({ run, packed, ...(objectReportTransport(run) ? { reportStorage: 'r2' } : {}) });
   },
 });
 export const output = internalMutation({

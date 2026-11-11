@@ -57,6 +57,12 @@ export const hostedCheckTables = {
     ciMirrorJob: v.optional(v.id('projectGithubMirrorJobs')),
     /** Private cancellation fence; it never expands the client run schema. */
     ciCancel: v.optional(v.union(v.literal('queued'), v.literal('attempted'))),
+    reportStorage: v.optional(v.literal('r2')),
+    resultBatch: v.optional(v.object({ packed: v.boolean() })),
+    reportTimingStamp: v.optional(v.object({ generation: v.string(), sequence: v.number() })),
+    reportTimingComplete: v.optional(v.boolean()),
+    reportTimingParts: v.optional(v.array(v.string())),
+    reportConclusion: v.optional(v.string()),
     reportParts: v.optional(v.number()),
     reportDigest: v.optional(v.string()),
     reportFlakes: v.optional(v.string()),
@@ -86,6 +92,7 @@ export const hostedCheckTables = {
     .index('by_project_and_run_and_event', ['projectId', 'runId', 'eventId'])
     .index('by_project_and_run', ['projectId', 'runId']),
   projectHostedCheckShards: defineTable({
+    resultDigest: v.optional(v.string()),
     projectId: v.id('hostedProjects'),
     runId: v.string(),
     index: v.number(),

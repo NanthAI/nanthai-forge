@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import {
   reportsDetached,
+  objectReportTransport,
+  useObjectReports,
   detachCheckReports,
   hydrateCheckReports,
   storeCheckReports,
@@ -123,7 +125,16 @@ export async function loadHostedCheck(
     'EVIDENCE_CHANGED',
     'Hosted run identity differs from its record.',
   );
-  if (row.reportParts !== undefined) {
+  if (row.reportStorage === 'r2')
+    useObjectReports(run, {
+      ...(row.resultBatch ? { packed: row.resultBatch.packed } : {}),
+      flakes: row.reportFlakes,
+      timingStamp: row.reportTimingStamp,
+      timingComplete: row.reportTimingComplete,
+      timingParts: row.reportTimingParts,
+      conclusion: row.reportConclusion,
+    });
+  if (row.reportParts !== undefined && row.reportStorage !== 'r2') {
     detachCheckReports(run, row.reportParts, row.reportDigest ?? '');
     if (withReports) await hydrateCheckReports(ctx, run);
   }
@@ -157,10 +168,10 @@ export async function writeHostedCheck(
     await ctx.scheduler.cancel(run.actions.watchdog as Id<'_scheduled_functions'>);
     run.actions.watchdog = null;
   }
-  checkReportHeader(run);
+  checkReportHeader(run, objectReportTransport(run) ? 7 * 1024 : 8 * 1024);
   const reports = await storeCheckReports(ctx, run);
   const stored = { ...run };
-  if ('reportParts' in reports) delete stored.contractReports;
+  if ('reportParts' in reports || objectReportTransport(run)) delete stored.contractReports;
   await ctx.db.patch(id, {
     ...reports,
     status: run.status,
@@ -177,7 +188,14 @@ export async function completeHostedCheck(ctx: MutationCtx, run: HostedCheckRun)
   if (run.configuration.provider !== 'ci-status')
     await scheduleCheckExpiry(ctx, run.projectId as Id<'hostedProjects'>, run.id, Date.parse(run.endedAt!));
   // Existing terminal events also clear an interrupted batch inbox; no sweep or idle timer.
-  if (reportsDetached(run) && run.plan && run.executionId && !['passed', 'failed'].includes(run.status))
+  if (
+    reportsDetached(run) &&
+    (!objectReportTransport(run) || objectReportTransport(run)?.packed !== undefined) &&
+    !objectReportTransport(run)?.collecting &&
+    run.plan &&
+    run.executionId &&
+    !['passed', 'failed'].includes(run.status)
+  )
     await ctx.scheduler.runAfter(0, makeFunctionReference<'action'>('projectHostedActionsBatch:collect'), {
       projectId: run.projectId,
       runId: run.id,

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { landingFixture } from './hosted-landing-fixture.mjs';
@@ -46,12 +47,18 @@ test('selected observer reads stay bounded with 10/575/1150 queued submissions a
           value: JSON.stringify(state),
           batchSelection: 'synthetic-controller-only'.repeat(1000),
         };
-        const sourceId = f.insert('projectHostedLandingRequests', row);
+        const sourceId = seedTicket(f, row);
         f.insert(
           'projectFinishReadRows',
-          projections.finishReadProjection('projectHostedLandingRequests', { ...row, _id: sourceId }),
+          projections.finishReadProjection(
+            'projectHostedLandingRequests',
+            f.tables.projectHostedLandingRequests.get(sourceId),
+          ),
         );
-        f.insert('projectFinishReadRows', projections.finishPeerProjection({ ...row, _id: sourceId }));
+        f.insert(
+          'projectFinishReadRows',
+          projections.finishPeerProjection(f.tables.projectHostedLandingRequests.get(sourceId)),
+        );
         const pins = {
           projectId: f.projectId,
           submissionId: id,

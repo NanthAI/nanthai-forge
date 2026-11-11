@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { logicalTicket, ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { landWaitCommand } from '../dist/hosted-land-wait.js';
@@ -15,6 +17,12 @@ import { landingFixture, store, api, code } from './hosted-landing-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const turn = () => new Promise(resolve => setImmediate(resolve));
+const pendingWaits = new Map();
+test.afterEach(async () => {
+  const waits = [...pendingWaits];
+  for (const [controller] of waits) controller.abort();
+  await Promise.allSettled(waits.map(([, pending]) => pending));
+});
 async function fixture() {
   const f = await landingFixture(),
     subscriptions = new Set(),
@@ -89,7 +97,7 @@ async function fixture() {
       ctx =>
         store.writeLanding(
           ctx,
-          row,
+          logicalTicket(f, row),
           {
             ...state,
             version: state.version + 1,
@@ -110,8 +118,20 @@ async function fixture() {
     events,
     start,
     update,
-    wait: (input, signal) =>
-      observeHostedSubmissions(transport, input, signal, e => events.push(e), subscribe),
+    wait: (input, signal) => {
+      const controller = new AbortController();
+      const pending = observeHostedSubmissions(
+        transport,
+        input,
+        signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
+        e => events.push(e),
+        subscribe,
+      );
+      pendingWaits.set(controller, pending);
+      // A failed assertion can leave its waiter unawaited; teardown still closes it.
+      pending.finally(() => pendingWaits.delete(controller)).catch(() => {});
+      return pending;
+    },
     wake: () => {
       for (const s of subscriptions) s.next(null);
     },
@@ -220,7 +240,10 @@ test('a cursor from a mid-page progress event resumes every disconnected version
   assert.equal(new Set(s.events.map(e => `${e.id}:${e.version}`)).size, s.events.length);
   for (const c of s.f.counts.filter(c => c.name === 'landingWaitPage')) {
     // 24 page ranges plus one account read naming the caller by handle.
-    assert(c.documents <= 25 && c.ranges <= 25, JSON.stringify(c));
+    assert(
+      c.documents - landingBodyCounts(c).reads <= 25 && c.ranges - landingBodyCounts(c).ranges <= 25,
+      JSON.stringify(c),
+    );
   }
   const replay = await s.wait({ ...selection, cursor: result.result.cursor });
   assert.equal(replay.result.status, 'terminal');
@@ -264,11 +287,12 @@ test('registration followed by an authoritative reread closes a missed wake', as
   // Directly edit a retained event/current row at subscription registration: no callback.
   s.duringSubscribe(() => {
     const row = [...s.f.tables.projectHostedLandingRequests.values()][0];
-    const state = JSON.parse(row.value);
+    const state = ticketState(s.f, row);
     state.version++;
     state.phase = 'landed';
     state.observation = { state: 'landed', pendingReason: null, cause: null };
-    s.f.patch('projectHostedLandingRequests', row._id, { phase: 'landed', value: JSON.stringify(state) });
+    patchTicketState(s.f, row, state);
+    s.f.patch('projectHostedLandingRequests', row._id, { phase: 'landed' });
     s.f.insert('projectHostedLandingObservations', {
       projectId: s.f.projectId,
       submissionId: state.id,
@@ -402,13 +426,13 @@ test('historical failed/conflicted attempts retain their own evidence after a la
   };
   await s.f.run('landingHistoryInsert', store.insertLandingAttempt, child);
   const row = [...s.f.tables.projectHostedLandingRequests.values()][0],
-    state = JSON.parse(row.value);
+    state = ticketState(s.f, row);
   await s.f.run(
     'landingHistorySelect',
     ctx =>
       store.writeLanding(
         ctx,
-        row,
+        logicalTicket(s.f, row),
         {
           ...state,
           version: state.version + 1,
@@ -436,7 +460,7 @@ test('historical failed/conflicted attempts retain their own evidence after a la
   assert.equal(history.page[1].observation.state, 'landed');
   assert.equal(history.page[1].progress.acceptance.receiptId, child.operations.accept);
   const firstRow = [...s.f.tables.projectHostedLandingAttempts.values()][0];
-  assert.deepEqual(JSON.parse(firstRow.value), original);
+  assert.deepEqual(ticketState(s.f, firstRow), original);
   s.f.patch('projectHostedLandingAttempts', firstRow._id, { progress: undefined });
   const legacy = JSON.parse(
     await s.f.call('landingHistoryPage', api.attempts, {
@@ -754,9 +778,9 @@ test('unexpected server observe errors log bounded stage context without another
       value: 'invalid json',
     });
     const requestRow = [...s.f.tables.projectHostedLandingRequests.values()][0];
-    const state = JSON.parse(requestRow.value);
+    const state = ticketState(s.f, requestRow);
     state.version = 9;
-    s.f.patch('projectHostedLandingRequests', requestRow._id, { value: JSON.stringify(state) });
+    patchTicketState(s.f, requestRow, state);
     await assert.rejects(
       s.transport.query('projectHostedFinishObserve:page', {
         operationId: a.request.operationId,

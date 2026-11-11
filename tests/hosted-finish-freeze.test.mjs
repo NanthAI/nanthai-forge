@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState, logicalTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { saveFixture, api } from './hosted-saves-fixture.mjs';
@@ -54,11 +55,13 @@ async function liveFinish(s, { phase = 'checking', composeStartedAt = '2026-10-3
   });
   const terminal = phase === 'terminal-failed' || phase === 'landed';
   const state = {
-    ...hostedLandingStateSchema.parse(JSON.parse(row.value)),
+    ...hostedLandingStateSchema.parse(ticketState(donor, row)),
     phase,
     timing: { submittedAt: queued.at, composeStartedAt },
   };
-  const { _id, _creationTime, ...fields } = row;
+  const { _id, _creationTime, requestBodyId, selectionBodyId, ...fields } = row;
+  void requestBodyId;
+  void selectionBodyId;
   void _id;
   void _creationTime;
   if (phase === 'composing') {
@@ -196,7 +199,7 @@ test('refusal costs a bounded constant number of reads and an idle Lane costs no
 // ---- READY-first ordering -------------------------------------------------
 
 const channel = f => ({ projectId: f.projectId, channel: 'main' });
-const rows = f => [...f.tables.projectHostedLandingRequests.values()];
+const rows = f => [...f.tables.projectHostedLandingRequests.values()].map(row => logicalTicket(f, row));
 const markReady = async (f, id, overrides = {}) => {
   const row = rows(f).find(r => r.submissionId === id);
   const state = JSON.parse(row.value);

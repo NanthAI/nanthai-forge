@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 1,
+  "reason": "S3 Issue 324f1d97: one unindexed parent-owned landing body table replaces immutable request and batch selection in every indexed ticket write; existing 24 indexes and reader contracts remain. Separate request and selection bodies avoid loading batch selection in the finite observer. No legacy table can go until report transport migration.",
+  "date": "2026-11-11"
+}

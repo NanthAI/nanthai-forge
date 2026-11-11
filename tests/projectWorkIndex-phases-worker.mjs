@@ -4,6 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { makeFunctionReference, getFunctionName } from 'convex/server';
 import { progressFixture } from './projectWorkIndex-progress-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+// The scale worker measures action memory/calls, not per-request attribution.
+// Avoid buffering thousands of expected attribution markers in execFile's stderr.
+const measuredLog = console.log;
+console.log = (...args) => {
+  if (typeof args[0] === 'string' && args[0].startsWith('FORGE_PROJECT_EXECUTION ')) return;
+  measuredLog(...args);
+};
 if (['action', 'state-action'].includes(process.argv[2])) {
   // Only the action lives here. The fake database and storage live in the parent,
   // as they do outside a real Convex action; producer RSS is measured separately.

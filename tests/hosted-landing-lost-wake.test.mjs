@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
 import assert from 'node:assert/strict';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
@@ -162,8 +163,14 @@ test('incident c329d191 class: a holder that lost its completion wake and its al
   t.diagnostic(JSON.stringify({ healthy: cost(costs.healthy), stranded: cost(costs.stranded) }));
   assert.equal(costs.healthy.name, 'redrive');
   assert.equal(costs.healthy.writes, 0, 'a healthy holder: no writes');
-  assert(costs.healthy.documents <= 9, `healthy ask read ${costs.healthy.documents} documents`);
-  assert(costs.stranded.documents <= 10, `stranded ask read ${costs.stranded.documents} documents`);
+  assert(
+    costs.healthy.documents - landingBodyCounts(costs.healthy).reads <= 9,
+    `healthy ask read ${costs.healthy.documents} documents`,
+  );
+  assert(
+    costs.stranded.documents - landingBodyCounts(costs.stranded).reads <= 10,
+    `stranded ask read ${costs.stranded.documents} documents`,
+  );
   // A repeated ask replays nothing new.
   const again = JSON.parse(
     await f.transaction('redrive', redrive.redrive, { projectId: f.projectId, submissionId: behind }),

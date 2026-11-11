@@ -28,7 +28,7 @@ function excerpt(text: string) {
 /** Stable file order, bounded UTF-8 excerpts, unchanged file identities and verdicts.
  * Missing excerpts count as truncated for failing/flaky files, so repeated capping
  * retains the omission count without keeping discarded text in another field. */
-export function capCheckReports(input: Reports) {
+export function capCheckReports(input: Reports, retainReports = true) {
   const reports: Reports = {};
   let retained = 0,
     truncated = 0;
@@ -39,14 +39,19 @@ export function capCheckReports(input: Reports) {
     ...files.filter(file => !input[file]!.failed),
   ];
   for (const file of ordered) {
-    const { firstError, ...report } = input[file]!;
-    reports[file] = report;
+    const original = input[file]!,
+      firstError = original.firstError;
+    if (retainReports) {
+      const { firstError: _error, ...report } = original;
+      void _error;
+      reports[file] = report;
+    }
     if (firstError && retained < excerptFiles) {
       const text = excerpt(firstError);
-      reports[file] = { ...report, firstError: text };
+      if (retainReports) reports[file] = { ...reports[file]!, firstError: text };
       retained++;
       if (text !== firstError || text.endsWith(marker)) truncated++;
-    } else if (firstError || report.failed || report.flaky) truncated++;
+    } else if (firstError || original.failed || original.flaky) truncated++;
   }
   return { reports, truncated };
 }

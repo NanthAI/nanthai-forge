@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState } from './landing-ticket-fixture.mjs';
 import { readLandingTransition } from '../dist/hosted-landing.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -7,7 +8,7 @@ import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixt
 import { landingApi } from './hosted-finish-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { queuedConflict } from '../dist/hosted-agent-finish.js';
-import { observerProjectionBudget } from './observer-projection-budget.mjs';
+import { landingBodyCounts, observerProjectionBudget } from './observer-projection-budget.mjs';
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 const conflictStore = await import(moduleUrl('../convex/projectHostedLandingBatchConflict.ts'));
 const sync = await import(moduleUrl('../convex/projectHostedSync.ts'));
@@ -260,10 +261,11 @@ for (const count of [10, 50])
           row =>
             readLandingTransition(
               row.value,
-              JSON.parse(
+              ticketState(
+                f,
                 [...f.tables.projectHostedLandingRequests.values()].find(
                   request => request.submissionId === row.submissionId,
-                ).value,
+                ),
               ),
             ).submission,
         )
@@ -332,7 +334,10 @@ for (const count of [10, 50])
     );
     const calls = f.counts.slice(before);
     assert.equal(calls.length, 1);
-    assert(calls[0].documents <= batch.members.length + 2, JSON.stringify(calls));
+    assert(
+      calls[0].documents - landingBodyCounts(calls[0]).reads <= batch.members.length + 2,
+      JSON.stringify(calls),
+    );
     assert.equal(calls[0].writes, 0, 'unchanged settlement wait/advice is idempotent');
     assert.equal(await drainActive(f), 0, 'no periodic queue or finish wake');
     t.diagnostic(

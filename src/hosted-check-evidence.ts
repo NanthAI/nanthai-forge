@@ -60,6 +60,7 @@ export const hostedCheckCallbackSchema = z
         .object({
           kind: z.literal('complete'),
           contractReports: semanticReportsSchema.optional(),
+          reportDigest: checkHash.optional(),
           status: z.enum(['passed', 'failed', 'cancelled', 'interrupted', 'runner-unavailable', 'unknown']),
           exitCode: z.number().int().nullable(),
           output: checkObject.nullable(),

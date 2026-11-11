@@ -105,3 +105,43 @@ test('600-file completed hosted results train one indexed document inside the re
     }),
   );
 });
+
+test('R2 timing stamps distinguish same-millisecond runs without repeating a long identity on every file', async () => {
+  const f = lanesFixture();
+  const projectId = f.insert('hostedProjects', {
+    owner: 'synthetic',
+    key: randomUUID(),
+    name: 'Synthetic stamps',
+    currentBackup: null,
+    revision: 0,
+  });
+  const { useObjectReports, objectReportTransport } = await import(
+    moduleUrl('../convex/projectHostedCheckReports.ts')
+  );
+  const { checkReportPointer } = await import('../dist/check-file-summary.js');
+  const stamps = [];
+  for (const [file, duration] of [
+    ['tests/first.test.mjs', 10],
+    ['tests/second.test.mjs', 20],
+  ]) {
+    const run = {
+      id: randomUUID(),
+      status: 'passed',
+      endedAt: '2026-01-01T00:00:00.000Z',
+      reportPointer: checkReportPointer({ [file]: { failed: false, durationMs: duration } }),
+    };
+    useObjectReports(run);
+    await f.transaction(
+      'objectTiming',
+      { _handler: ctx => recordHostedTestTimings(ctx, projectId, run, { [file]: duration }) },
+      {},
+    );
+    stamps.push(objectReportTransport(run).timingStamp);
+  }
+  const history = parseTimingHistory([...f.tables.projectHostedTestTimings.values()][0].history);
+  assert.equal(stamps[0].generation, stamps[1].generation);
+  assert.notEqual(stamps[0].sequence, stamps[1].sequence);
+  assert.equal(history.files['tests/first.test.mjs'].sourceRun, stamps[0].sequence);
+  assert.equal(history.files['tests/second.test.mjs'].sourceRun, stamps[1].sequence);
+  assert.equal(typeof history.files['tests/second.test.mjs'].sourceRun, 'number');
+});

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { ticketState, patchTicketState } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { state } from './hosted-fixture.mjs';
@@ -375,9 +376,9 @@ test('writeLanding announces a cancelled landing of a stacked Lane through the r
   const stored = [...f.tables.projectHostedLandingRequests.entries()].find(
     ([, row]) => row.submissionId === state.id,
   );
-  const value = JSON.parse(stored[1].value);
+  const value = ticketState(f, stored[1]);
   value.request.finish = { composeOperationId: compose, after: null };
-  f.patch('projectHostedLandingRequests', stored[0], { value: JSON.stringify(value) });
+  patchTicketState(f, stored[1], value);
   // Raw transaction: the landing fixture's budget guard (no compose selections) is for projects without stacks.
   const cancelled = JSON.parse(
     await f.transaction('landingCancel', api.cancel, {
@@ -402,9 +403,9 @@ test('a project with no stacked Lane keeps the landing budget: cancel and failur
   const stored = [...f.tables.projectHostedLandingRequests.entries()].find(
     ([, row]) => row.submissionId === state.id,
   );
-  const value = JSON.parse(stored[1].value);
+  const value = ticketState(f, stored[1]);
   value.request.finish = { composeOperationId: compose, after: null };
-  f.patch('projectHostedLandingRequests', stored[0], { value: JSON.stringify(value) });
+  patchTicketState(f, stored[1], value);
   // f.call applies the fixture guard: a touch of projectHostedComposeSelections would fail the call.
   const cancelled = JSON.parse(
     await f.call('landingCancel', api.cancel, {

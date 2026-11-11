@@ -65,7 +65,7 @@ async function prepareLandingCheckOnce(
       if (hostedCheckTerminal(run)) {
         const semantic = semanticVerdict(
           run.semanticPlan,
-          run.contractReports ?? {},
+          run.reportSummary?.semantic ?? run.contractReports ?? {},
           {
             candidateId: attempt.candidate.id,
             head: attempt.candidate.head!,

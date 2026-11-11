@@ -666,6 +666,16 @@ definition/configuration/environment/epoch pins under current authority. Landing
 still checks its own policy and main head plus receipt. A check result does not
 move main or add a check requirement to person-selected acceptance.
 
+For new runs pinned to R2 report storage, fixed runners negotiate
+`check-report-detail` in the existing control/claim and callback requests. The
+existing reply supplies a private, run/fence-bound immutable `reportUpload`
+target. Before completing, the runner uploads canonical report bytes and includes
+`reportDigest` with the original reports in its signed callback. A lost upload
+reply reconciles the same bytes; a different digest fails rather than replacing
+accepted evidence. Targets are transient and do not enter public run headers.
+The callback derives the bounded header and pointer without another RPC. Batched
+Actions results instead fold slots once in the existing collector action.
+
 ### Hosted explicit sync and conflict resolution APIs
 
 These APIs operate on hosted source records, without restoring a native owner.

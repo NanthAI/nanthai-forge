@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
+import { landingBodyCounts } from './observer-projection-budget.mjs';
+import { seedTicket } from './landing-ticket-fixture.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
@@ -627,7 +629,7 @@ test('priority bypass reads bounded heads with 1150 earlier non-batchable normal
   await f.drain();
   const template = [...f.tables.projectHostedLandingRequests.values()][0];
   for (let i = 0; i < 1150; i++)
-    f.insert('projectHostedLandingRequests', {
+    seedTicket(f, {
       ...template,
       _id: undefined,
       _creationTime: undefined,
@@ -639,7 +641,7 @@ test('priority bypass reads bounded heads with 1150 earlier non-batchable normal
       value: '{"unrelated":"normal bodies must not be hydrated"}',
     });
   const urgent = randomUUID();
-  f.insert('projectHostedLandingRequests', {
+  seedTicket(f, {
     ...template,
     _id: undefined,
     _creationTime: undefined,
@@ -667,7 +669,11 @@ test('priority bypass reads bounded heads with 1150 earlier non-batchable normal
   );
   assert.equal(f.counts.length - before, 1);
   const count = f.counts.at(-1);
-  assert(count.documents <= 16 && count.ranges <= 16, JSON.stringify(count));
+  assert(
+    count.documents - landingBodyCounts(count).reads <= 16 &&
+      count.ranges - landingBodyCounts(count).ranges <= 16,
+    JSON.stringify(count),
+  );
   t.diagnostic(
     JSON.stringify({
       normalBacklog: 1150,

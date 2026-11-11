@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { collectResultBatch } from './projectHostedActionsBatch';
 import { cleanupCiBranch } from './projectCiStatusCleanup';
 import { callback as githubOAuthCallback } from './githubBindingOAuth';
 import { handle as actionsHttp } from './projectHostedActionsHttp';
@@ -121,7 +122,12 @@ http.route({
           payload: new TextDecoder().decode(body),
         },
       );
-      if (cleanup) await cleanupCiBranch(ctx, JSON.parse(cleanup));
+      if (cleanup) {
+        const value = JSON.parse(cleanup);
+        if (value.reportBatch)
+          await collectResultBatch(ctx, value.identity, value.conclusion, value.reportBatch);
+        else await cleanupCiBranch(ctx, value);
+      }
       return new Response(null, { status: 204 });
     }
     // Store only the reconciliation trigger, never source, commit messages or the raw payload.

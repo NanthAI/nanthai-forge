@@ -443,8 +443,18 @@ test('permanent purge removes every writer companion without double deletion or 
             );
             companion(kind, source, kind === 'hostedProjects' ? undefined : projectId);
             if (kind === 'projectHostedFinishes') companion('projectHostedFinishOwners', source, projectId);
-            if (kind === 'projectHostedLandingRequests')
+            if (kind === 'projectHostedLandingRequests') {
               companion('projectHostedLandingPeers', source, projectId);
+              for (const pointer of ['requestBodyId', 'selectionBodyId']) {
+                const id = `body-${pointer}-${projectId}`;
+                s.tables.projectHostedLandingBodies.set(id, {
+                  _id: id,
+                  _creationTime: 1,
+                  value: JSON.stringify({ projectId, submissionId: source.submissionId, request: {} }),
+                });
+                source[pointer] = id;
+              }
+            }
             if (kind === 'projectHostedLandingQueues')
               companion('projectHostedAheadQueues', source, projectId);
             if (kind === 'projectHostedCheckRuns') {
@@ -480,6 +490,13 @@ test('permanent purge removes every writer companion without double deletion or 
         const result = await s.run();
         assert.equal(s.tables.hostedProjects.get('project').removal, 'deleted');
         assert.equal(count(s, 'project'), 0);
+        assert.equal(
+          [...s.tables.projectHostedLandingBodies.values()].filter(
+            row => JSON.parse(row.value).projectId === 'project',
+          ).length,
+          0,
+          'purge deletes both unindexed cold bodies through the parent ticket',
+        );
         assert.ok(
           ![...companions.values()].some(row => row.sourceId === 'project'),
           'legacy root projection removed',
@@ -561,4 +578,44 @@ test('delete permanently now needs the typed slug, revokes at once and waits onl
   assert.equal(count(s, 'project'), 0);
   // Replaying the original operation reconciles without a confirm oracle.
   await lifecycle.permanentlyDelete._handler(s.ctx, op);
+});
+
+test('orphan ticket purge removes both unindexed bodies, preserves foreign bodies and replays exact cleanup bytes', async () => {
+  const s = state([]);
+  const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandingRequestBody.ts'));
+  const ctx = landingRequestBodies(s.ctx);
+  const insert = (projectId, submissionId) =>
+    ctx.db.insert('projectHostedLandingRequests', {
+      projectId,
+      submissionId,
+      operationId: randomUUID(),
+      channel: 'main',
+      actor: 'owner',
+      sequence: 1,
+      runnable: true,
+      phase: 'queued',
+      runId: null,
+      attemptId: 'attempt',
+      value: JSON.stringify({ request: { channel: 'main' } }),
+      batchSelection: 'exact selection',
+    });
+  const id = await insert('missing', 'missing-submission');
+  await insert('foreign', 'foreign-submission');
+  const row = structuredClone(s.tables.projectHostedLandingRequests.get(id));
+  const input = {
+    table: 'projectHostedLandingRequests',
+    field: 'projectId',
+    ownerId: 'missing',
+    operationId: randomUUID(),
+    part: 'one',
+    pins: [{ id, sha256: createHash('sha256').update(JSON.stringify(row)).digest('hex') }],
+  };
+  const apply = () => s.transaction(() => storageInventory.purgeOrphans._handler(s.ctx, input));
+  const result = await apply();
+  assert.deepEqual(await apply(), result);
+  assert.equal(result.deleted, 1);
+  assert(!s.tables.projectHostedLandingBodies.has(row.requestBodyId));
+  assert(!s.tables.projectHostedLandingBodies.has(row.selectionBodyId));
+  assert.equal(s.tables.projectHostedLandingBodies.size, 2);
+  assert(result.bytes > Buffer.byteLength(JSON.stringify(row)), 'cleanup meters its removed companion bytes');
 });

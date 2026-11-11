@@ -1456,7 +1456,13 @@ up to 132 discovery HEADs. Discovery skips the uploader's own slot and stops at 
 first missing required object. It removes twelve LISTs and twelve duplicate log-copy
 PUTs, including their verification HEADs and legacy scratch deletes. The marker stays
 in its run/fence/execution namespace so concurrent losers and lost replies can reconcile.
-The absolute nominal Class A ceiling is 14, independent of the ledger's percentage
+For new runs pinned by default-off `FORGE_CHECK_REPORTS_R2=1`, the collector
+adds one immutable folded-report PUT: 15 Class A and 91 Class B requests in the
+twelve-shard fixture. Six Convex executions remain six; duration arguments replace
+the deferred report-row timing read. The fixture reads 44.2 KB and writes 167.8 KB
+versus 93.5 KB and 197.8 KB for its legacy pair. These are fixture bytes, not bills.
+Legacy runs retain the original protocol and 14 requests.
+The absolute nominal Class A ceiling is 15, independent of the ledger's percentage
 tolerance. Race fixtures count attempted conditional writes and marker reads too;
 retries and losing election PUTs are additional executed requests, never inferred
 from signatures or hidden as zero.
@@ -1464,7 +1470,7 @@ The original per-result route remains executable for older supervisors. These ar
 synthetic operation counts; live billed usage and byte placement still need a
 post-deploy observation. The cost ledger also combines the actual 4,096-file
 source/main-race fixture, two twelve-shard check collections and exhaust maintenance
-under a separate 80-Class-A fixture ceiling (31 A / 193 B observed). Lane/check
+under a separate 80-Class-A fixture ceiling (31 A / 193 B observed with the legacy writer; 33 A including two new report objects). Lane/check
 setup, client uploads/materialization, reuse, mirror, external backup/sweep and
 unobserved retries remain coverage gaps. The earlier live bucket window is reported separately in [cost to serve](cost-to-serve.md#s7-request-ledger-and-smoke-coverage).
 

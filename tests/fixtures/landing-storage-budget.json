@@ -1,7 +1,7 @@
 {
   "fresh": {
     "immediate": {
-      "projectFinishReadRows": 7936,
+      "projectFinishReadRows": 7002,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -87,7 +87,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 7473,
       "projectHostedLandingCheckWakes": 163,
-      "projectHostedLandingRequests": 3092,
+      "projectHostedLandingRequests": 2289,
       "projectHostedLandingAttempts": 3328,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
@@ -179,7 +179,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0
+      "projectObjectReceipts": 0,
+      "projectHostedLandingBodies": 1013
     },
     "retained": {
       "projectFinishReadRows": 12688,
@@ -268,7 +269,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 163,
-      "projectHostedLandingRequests": 3092,
+      "projectHostedLandingRequests": 2289,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 233,
       "projectHostedFinishes": 1208,
@@ -360,7 +361,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0
+      "projectObjectReceipts": 0,
+      "projectHostedLandingBodies": 1013
     },
     "perProject": {
       "immediate": {
@@ -403,7 +405,7 @@
   },
   "dogfood": {
     "immediate": {
-      "projectFinishReadRows": 10224,
+      "projectFinishReadRows": 9302,
       "legacyStorageCleanupWindows": 0,
       "legacyStorageCleanupPages": 0,
       "projectGithubMirrors": 0,
@@ -489,7 +491,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 15654,
       "projectHostedLandingCheckWakes": 330,
-      "projectHostedLandingRequests": 3206,
+      "projectHostedLandingRequests": 2405,
       "projectHostedLandingAttempts": 7024,
       "projectLandingSpeed": 231,
       "projectHostedFinishes": 1210,
@@ -581,7 +583,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0
+      "projectObjectReceipts": 0,
+      "projectHostedLandingBodies": 1015
     },
     "retained": {
       "projectFinishReadRows": 21168,
@@ -670,7 +673,7 @@
       "projectHostedLandingAliases": 0,
       "projectHostedLandingObservations": 0,
       "projectHostedLandingCheckWakes": 330,
-      "projectHostedLandingRequests": 3206,
+      "projectHostedLandingRequests": 2405,
       "projectHostedLandingAttempts": 0,
       "projectLandingSpeed": 231,
       "projectHostedFinishes": 1210,
@@ -762,7 +765,8 @@
       "importArtifacts": 0,
       "importReaders": 0,
       "githubDeliveries": 0,
-      "projectObjectReceipts": 0
+      "projectObjectReceipts": 0,
+      "projectHostedLandingBodies": 1015
     },
     "perProject": {
       "immediate": {

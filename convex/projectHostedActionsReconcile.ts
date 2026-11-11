@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { checkReportUploadTarget, objectReportTransport } from './projectHostedCheckReports';
 import { z } from 'zod';
 import { v } from 'convex/values';
 import { internalMutation, type MutationCtx } from './server';
@@ -81,11 +82,18 @@ export async function claimActionsReconciliation(
   return { run, ...claim };
 }
 export const claim = internalMutation({
-  args: { projectId: v.id('hostedProjects'), runId: v.string(), owner: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    runId: v.string(),
+    owner: v.string(),
+    features: v.optional(v.array(v.string())),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      return canonicalPayload(await claimActionsReconciliation(ctx, input));
+      const reply = await claimActionsReconciliation(ctx, input);
+      const reportUpload = await checkReportUploadTarget(reply.run, input.features);
+      return canonicalPayload({ ...reply, ...(reportUpload ? { reportUpload } : {}) });
     } catch (error) {
       return report(error);
     }
@@ -96,13 +104,14 @@ export const evidence = internalMutation({
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
-      return canonicalPayload(
-        await applyActionsEvidence(ctx, { ...input, evidence: JSON.parse(input.evidence) }, id => {
-          const key = process.env[`FORGE_HOSTED_CHECK_KEY_${id}`];
-          invariant(key, 'RUNNER_UNAVAILABLE', 'Trusted check callback key is unavailable.');
-          return key;
-        }),
-      );
+      const run = await applyActionsEvidence(ctx, { ...input, evidence: JSON.parse(input.evidence) }, id => {
+        const key = process.env[`FORGE_HOSTED_CHECK_KEY_${id}`];
+        invariant(key, 'RUNNER_UNAVAILABLE', 'Trusted check callback key is unavailable.');
+        return key;
+      });
+      const head = { ...run };
+      if (objectReportTransport(run)) delete head.contractReports;
+      return canonicalPayload(head);
     } catch (error) {
       return report(error);
     }

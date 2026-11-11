@@ -12,6 +12,8 @@ import { acceptanceFixture } from './hosted-acceptance-fixture.mjs';
 import { seedFullMain, passWithSelection } from './hosted-race-fixture.mjs';
 import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
+import { state as databaseFixture } from './hosted-fixture.mjs';
+import { canonicalPayload } from '../dist/hosted-source-operation.js';
 import { metricRunRow } from '../dist/self-metrics-run.js';
 import {
   inflateDogfoodChecks,
@@ -34,6 +36,7 @@ test.after(() => {
 
 const { costs, costGuard } = speedBudgets;
 const finishApi = await import(moduleUrl('../convex/projectHostedFinish.ts'));
+const { landingRequestBodies } = await import(moduleUrl('../convex/projectLandingRequestBody.ts'));
 const observe = await import(moduleUrl('../convex/projectHostedFinishObserve.ts'));
 // Action or not, and which runtime, from the registered function and its module's 'use node'.
 const kinds = new Map();
@@ -48,6 +51,138 @@ async function kind(name) {
   return value;
 }
 const SOURCE = /^(projectConvexSource|projectHostedResolveChain:run)/;
+
+test('S3 phase transitions write only the ticket; cold bytes fall by the measured S0 indexed-patch fit', async t => {
+  // S0: tests/fixtures/indexed-patch-usage.json, document bytes +181+128 per custom index.
+  // This predicts execution I/O from fixture documents; it is not a billed S3 measurement.
+  const fittedWrite = (row, indexes) => Buffer.byteLength(JSON.stringify(row)) + 181 + 128 * indexes;
+  for (const size of [1024, 27648]) {
+    const f = databaseFixture([]);
+    const ctx = landingRequestBodies(f.ctx);
+    const request = { channel: 'main', message: 'x'.repeat(size) };
+    const value = {
+      projectId: 'project',
+      channel: 'main',
+      submissionId: 'submission',
+      operationId: 'operation',
+      actor: 'owner',
+      sequence: 1,
+      runnable: true,
+      phase: 'queued',
+      runId: null,
+      attemptId: 'attempt',
+      batchSelection: canonicalPayload({ files: ['synthetic/path.ts'] }),
+      value: canonicalPayload({ id: 'submission', phase: 'queued', request }),
+    };
+    const id = await ctx.db.insert('projectHostedLandingRequests', value);
+    const bodies = structuredClone([...f.tables.projectHostedLandingBodies]);
+    let bodyWrites = 0;
+    for (const method of ['insert', 'patch', 'replace', 'delete']) {
+      const original = f.ctx.db[method];
+      f.ctx.db[method] = (...args) => {
+        if (
+          method === 'insert'
+            ? args[0] === 'projectHostedLandingBodies'
+            : f.tables.projectHostedLandingBodies.has(args[0])
+        )
+          bodyWrites++;
+        return original(...args);
+      };
+    }
+    const logical = await ctx.db.get(id);
+    await ctx.db.patch(id, {
+      phase: 'checking',
+      value: canonicalPayload({ ...JSON.parse(logical.value), phase: 'checking' }),
+    });
+    assert.equal(
+      bodyWrites,
+      0,
+      'phase changes issue no cold-body write, including a redundant same-value patch',
+    );
+    const header = f.tables.projectHostedLandingRequests.get(id);
+    assert.deepEqual(
+      [...f.tables.projectHostedLandingBodies],
+      bodies,
+      'a phase change never rewrites either cold body',
+    );
+    const { requestBodyId, selectionBodyId, ...sameIdentity } = header;
+    const legacy = {
+      ...sameIdentity,
+      batchSelection: value.batchSelection,
+      value: canonicalPayload({ ...JSON.parse(header.value), request }),
+    };
+    const before = fittedWrite(legacy, 24),
+      after = fittedWrite(header, 24);
+    assert(after < before, 'all 24 ticket indexes operate on the smaller header');
+    assert(before - after > size - 256, 'cold request bytes do not return on a phase write');
+    assert.deepEqual(JSON.parse((await ctx.db.get(id)).value).request, request);
+    t.diagnostic(
+      JSON.stringify({
+        requestBytes: size,
+        predictedBefore: before,
+        predictedAfter: after,
+        predictedReduction: before - after,
+        bodyWritesPerPhase: bodyWrites,
+        additionalFunctionCalls: 0,
+      }),
+    );
+  }
+});
+
+test('S3 report callbacks retain only a nine-index header and never touch report rows', async t => {
+  const { checksFixture } = await import('./hosted-checks-fixture.mjs');
+  const { checkReportHeader, checkReportPointer } = await import('../dist/check-file-summary.js');
+  const { useObjectReports, storeCheckReports } = await import(
+    moduleUrl('../convex/projectHostedCheckReports.ts')
+  );
+  const f = await checksFixture();
+  const original = await f.activate((await f.enqueue(f.selection())).id, 1);
+  const fittedWrite = row => Buffer.byteLength(JSON.stringify(row)) + 181 + 128 * 9;
+  for (const failed of [false, true]) {
+    const reports = Object.fromEntries(
+      Array.from({ length: 20000 }, (_, i) => [
+        `tests/synthetic-${i}.test.mjs`,
+        { failed, durationMs: i, ...(failed ? { firstError: 'synthetic failure' } : {}) },
+      ]),
+    );
+    const run = { ...structuredClone(original), contractReports: reports };
+    run.reportPointer = checkReportPointer(reports);
+    checkReportHeader(run, 7 * 1024);
+    useObjectReports(run);
+    // Any report-table read/write here is a failure: callback metadata needs no database I/O.
+    const metadata = await storeCheckReports(
+      {
+        db: new Proxy(
+          {},
+          {
+            get() {
+              throw new Error('R2 report callback attempted database I/O');
+            },
+          },
+        ),
+      },
+      run,
+    );
+    const { contractReports, ...header } = run;
+    const stored = { ...metadata, value: canonicalPayload(header) };
+    const legacy = { value: canonicalPayload({ ...original, contractReports }) };
+    assert.equal(metadata.reportStorage, 'r2');
+    assert(Buffer.byteLength(JSON.stringify(stored)) < 12 * 1024);
+    assert(Buffer.byteLength(JSON.stringify(header.testFiles)) <= 8 * 1024);
+    assert.equal(header.testFiles.counts.total, 20000);
+    assert.equal(header.testFiles.counts.failed, failed ? 20000 : 0);
+    assert(fittedWrite(stored) < fittedWrite(legacy));
+    t.diagnostic(
+      JSON.stringify({
+        failed,
+        predictedBefore: fittedWrite(legacy),
+        predictedAfter: fittedWrite(stored),
+        reportRowOperations: 0,
+        additionalFunctionCalls: 0,
+      }),
+    );
+  }
+});
 
 /** Counts every Convex execution and R2 request from now on: metered transactions (queries and
  * mutations), action executions (scheduled and nested), R2 requests by class and bytes put. */

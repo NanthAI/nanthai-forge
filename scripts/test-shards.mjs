@@ -25,13 +25,23 @@ export function parseTimingHistory(text) {
       return emptyHistory();
     return {
       version: 1,
+      ...(typeof history.generation === 'string' && Number.isSafeInteger(history.sample)
+        ? { generation: history.generation, sample: history.sample }
+        : {}),
       files: Object.fromEntries(
         Object.entries(history.files)
           .filter(
             ([file, item]) =>
               testPath(file) && positive(item?.durationMs) && typeof item.updatedAt === 'string',
           )
-          .map(([file, item]) => [file, { durationMs: item.durationMs, updatedAt: item.updatedAt }]),
+          .map(([file, item]) => [
+            file,
+            {
+              durationMs: item.durationMs,
+              updatedAt: item.updatedAt,
+              ...(Number.isSafeInteger(item.sourceRun) ? { sourceRun: item.sourceRun } : {}),
+            },
+          ]),
       ),
       runs: history.runs.filter(run => typeof run === 'string' && run.length <= 128),
     };
@@ -44,7 +54,7 @@ export const timingDurations = history =>
   Object.fromEntries(Object.entries(history.files).map(([file, item]) => [file, item.durationMs]));
 
 /** One EWMA observation per completed run; retain only the checked snapshot's inventory. */
-export function updateTimingHistory(history, { runId, endedAt, files, durations }) {
+export function updateTimingHistory(history, { runId, endedAt, files, durations, sourceRun }) {
   if (history.runs.includes(runId)) return history;
   const inventory = new Set(files);
   const entries = new Map(
@@ -56,6 +66,7 @@ export function updateTimingHistory(history, { runId, endedAt, files, durations 
     entries.set(file, {
       durationMs: previous ? previous.durationMs * 0.7 + durationMs * 0.3 : durationMs,
       updatedAt: endedAt,
+      ...(sourceRun ? { sourceRun } : {}),
     });
   }
   const retained = [...entries]
@@ -63,6 +74,7 @@ export function updateTimingHistory(history, { runId, endedAt, files, durations 
     .slice(0, timingHistoryLimits.files);
   const next = {
     version: 1,
+    ...(history.generation ? { generation: history.generation, sample: history.sample } : {}),
     files: Object.fromEntries(retained),
     runs: [...history.runs, runId].slice(-timingHistoryLimits.runs),
   };

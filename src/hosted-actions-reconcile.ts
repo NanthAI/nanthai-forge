@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { uploadCheckReports, type ReportUploadTarget } from './check-report-upload.js';
+import { networkFetch } from './network-fetch.js';
 import { ContractTimingReader } from './contract-test-timings.js';
 import { digest } from './hash.js';
 import { hostedActionsRecipeSchema } from './hosted-actions.js';
@@ -20,7 +22,13 @@ import { invariant } from './errors.js';
 export interface ActionsReconcileStore extends HostedActionsStore {
   claim(
     owner: string,
-  ): Promise<{ run: HostedCheckRun; mapping: HostedActionsMapping | null; acquired: boolean }>;
+    features?: string[],
+  ): Promise<{
+    run: HostedCheckRun;
+    mapping: HostedActionsMapping | null;
+    acquired: boolean;
+    reportUpload?: ReportUploadTarget;
+  }>;
   evidence(input: {
     owner: string;
     token: number;
@@ -41,7 +49,7 @@ export async function reconcileHostedActions(
   now: () => number = Date.now,
 ) {
   const owner = randomUUID(),
-    claim = await store.claim(owner);
+    claim = await store.claim(owner, ['check-report-detail']);
   let run = claim.run;
   if (!claim.mapping) return { run, nextAt: null };
   if (!claim.acquired) return { run, nextAt: claim.mapping.lease.until };
@@ -51,6 +59,11 @@ export async function reconcileHostedActions(
     m = (await store.control({ ...command, owner, token })).mapping;
   };
   const emit = async (result: HostedCheckCallback['result']) => {
+    if (claim.reportUpload && result.kind === 'complete' && result.contractReports)
+      result = {
+        ...result,
+        reportDigest: await uploadCheckReports(claim.reportUpload, result.contractReports, networkFetch),
+      };
     const callback = actionsCallback(run, m, result);
     run = await store.evidence({
       owner,

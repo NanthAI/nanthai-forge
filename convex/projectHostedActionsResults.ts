@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-import { inheritCheckReports } from './projectHostedCheckReports';
+import { inheritCheckReports, objectReportTransport } from './projectHostedCheckReports';
+import type { Doc } from './_generated/dataModel';
+
+import { settleObjectBatch } from './projectHostedObjectResults';
 import { batchArgs, batchSession } from './projectHostedActionsBatchStore';
 import { z } from 'zod';
 import { resultPageBytes } from '../src/hosted-actions-result-batch';
@@ -76,7 +79,7 @@ export const result = internalMutation({
   // JSON text (Issue 0c457ae4): the settled run's reports are keyed by test file.
   returns: v.string(),
   handler: async (ctx, { withFinal, ...input }) => {
-    const run = await settle(ctx, input);
+    const run = await settleActionsResult(ctx, input);
     if (!withFinal) return JSON.stringify(run);
     const final = hostedCheckOutputSettled(run) ? await finalOutputTarget(ctx, input, run) : null;
     return JSON.stringify({ run, final: final === undefined ? 'prepare' : final });
@@ -88,12 +91,13 @@ const storedHostedCheck = (run: HostedCheckRun) =>
     run,
     hostedCheckRunSchema.parse(JSON.parse(semanticPayload(hostedCheckRunSchema.parse(run), true))),
   );
-async function settle(
+export async function settleActionsResult(
   ctx: MutationCtx,
   input: SessionInput & { result: string },
   batch?: LoadedHostedCheck,
   reports?: ShardReportBatch,
   envelope?: import('../src/hosted-check-output').OutputChunk['envelope'],
+  objectBatch?: { digest: string; prior: Doc<'projectHostedCheckShards'> | null },
 ) {
   const selected = batch ?? (await actionsSession(ctx, input));
   const row = selected.row;
@@ -104,15 +108,27 @@ async function settle(
     'EVIDENCE_CHANGED',
     'Select an exact planned shard.',
   );
-  const old = await ctx.db
-    .query('projectHostedActionsResults')
-    .withIndex('by_project_and_run_and_index', q =>
-      q.eq('projectId', input.projectId).eq('runId', input.runId).eq('index', result.index),
-    )
-    .unique();
-  const digest = checkPin(result);
+  const transport = objectReportTransport(run);
+  invariant(
+    !transport || objectBatch,
+    'CLI_UPGRADE_REQUIRED',
+    'Use a runner with check-report-detail result batches.',
+  );
+  const old = objectBatch
+    ? objectBatch.prior
+    : await ctx.db
+        .query('projectHostedActionsResults')
+        .withIndex('by_project_and_run_and_index', q =>
+          q.eq('projectId', input.projectId).eq('runId', input.runId).eq('index', result.index),
+        )
+        .unique();
+  const digest = objectBatch?.digest ?? checkPin(result);
   if (old) {
-    invariant(old.digest === digest, 'WORK_OPERATION_CHANGED', 'Retry the original Actions job result.');
+    invariant(
+      (objectBatch ? ('resultDigest' in old ? old.resultDigest : undefined) : old.digest) === digest,
+      'WORK_OPERATION_CHANGED',
+      'Retry the original Actions job result.',
+    );
     return run;
   }
   invariant(!hostedCheckTerminal(run), 'EVIDENCE_CHANGED', 'The check result is already terminal.');
@@ -152,6 +168,7 @@ async function settle(
     if (result.isolation && current.actions)
       current.actions.isolation = current.actions.isolation === 'shared' ? 'shared' : result.isolation;
     // A file run by two shards (shard pool doubt run) counts once; a pass never hides a failure.
+    if (objectBatch) return;
     current.testFiles = checkFileSummary(
       await recordShardReports(ctx, current, { ...result, digest }, reports),
     );
@@ -165,6 +182,7 @@ async function settle(
       signature: signHostedCheckCallback(callback, outputSigningKey(run.keyId)),
       beforeWrite: current => ((recorded = true), record(current)),
       loaded: selected,
+      ...(objectBatch ? { priorShard: objectBatch.prior, resultDigest: digest } : {}),
       ...(batch ? { deferWrite: true } : {}),
     },
     outputSigningKey,
@@ -173,7 +191,7 @@ async function settle(
     await record(run);
     if (!batch) await writeHostedCheck(ctx, row._id, run);
   }
-  if (run.counts.completed === run.plan!.shardCount) {
+  if (!objectBatch && run.counts.completed === run.plan!.shardCount) {
     const failed = run.counts.failed > 0 || Object.values(run.contractReports!).some(report => report.failed);
     // The row this transaction just wrote, exactly as a reload would parse it, without reading its
     // full reports back (Issue 75cb5074). actionsSession authorized the write.
@@ -196,6 +214,11 @@ export const batch = internalMutation({
     results: v.string(),
     envelopes: v.optional(v.string()),
     conclusion: v.optional(v.union(v.string(), v.null())),
+    reportHeader: v.optional(v.string()),
+    reportDigests: v.optional(v.string()),
+    timings: v.optional(v.string()),
+    coveredShards: v.optional(v.number()),
+    timingFinal: v.optional(v.boolean()),
   },
   returns: v.string(),
   handler: async (ctx, input) => {
@@ -225,11 +248,13 @@ export const batch = internalMutation({
       'EVIDENCE_CHANGED',
       'Each shard belongs to a batch page once.',
     );
+    if (objectReportTransport(selected.run))
+      return settleObjectBatch(ctx, input, selected, settleActionsResult, results, envelopes);
     let run = selected.run;
     const before = run.counts.completed;
     const reports = createShardReportBatch();
     for (const result of results) {
-      run = await settle(
+      run = await settleActionsResult(
         ctx,
         { ...input, claims: input.claims ?? '', result: JSON.stringify(result) },
         selected,

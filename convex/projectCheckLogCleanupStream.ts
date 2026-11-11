@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 'use node';
+import { reportObjectKey } from './projectHostedCheckReports';
 import { convexFetch } from './networkFetch';
 import type { ActionCtx } from './_generated/server';
 import { internal } from './_generated/api';
@@ -34,6 +35,7 @@ export type StreamProgress = {
   done?: boolean;
 };
 type Stream = {
+  report?: { digest: string; size: number; files: number; fence?: number };
   runId: string;
   streamId: string;
   bytes: number;
@@ -78,7 +80,14 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
         expected,
       }),
     );
-  const finish = () => {
+  const finish = async () => {
+    if (stream.report) {
+      await pageAt(null); // The same current cleanup authority protects the report object.
+      await deleteR2Object(
+        r2Config(),
+        reportObjectKey(input.projectId, stream.runId, stream.report.digest, stream.report.fence),
+      );
+    }
     state.outputOffset++;
     delete state.stream;
   };
@@ -194,7 +203,7 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
     delete p.targets;
     delete p.retainedPins;
     delete p.retainedCursor;
-    if (p.done) finish();
+    if (p.done) await finish();
     else p.cursor = p.after!;
     return writes;
   }
@@ -236,7 +245,7 @@ export async function cleanupStreamStep(ctx: ActionCtx, input: Identity, state: 
   for (const chunk of targets)
     if (!retained.pins.includes(outputChunkStorageId(chunk)))
       await deleteR2Object(r2Config(), outputChunkKey(input.projectId, stream.runId, chunk));
-  if (page.isDone) finish();
+  if (page.isDone) await finish();
   else p.cursor = page.continueCursor;
   return writes;
 }

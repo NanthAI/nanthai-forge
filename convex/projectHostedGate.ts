@@ -151,11 +151,17 @@ async function historyBasis(
     .unique();
   const history = parseTimingHistory(row?.history ?? '');
   if (!audit?.lastGreen || !history.runs.includes(audit.lastGreen.runId)) return null;
-  const { run } = await loadHostedCheck(ctx, { projectId, runId: audit.lastGreen.runId });
+  const { run, row: runRow } = await loadHostedCheck(ctx, { projectId, runId: audit.lastGreen.runId });
   if (run.status !== 'passed' || run.request.expectedHead !== audit.lastGreen.head) return null;
   const timings = Object.fromEntries(
     Object.entries(history.files).flatMap(([path, value]) =>
-      run.contractReports?.[path]?.failed === false && value.updatedAt === run.endedAt
+      (
+        runRow.reportStorage === 'r2'
+          ? runRow.reportTimingComplete &&
+            value.sourceRun === runRow.reportTimingStamp?.sequence &&
+            history.generation === runRow.reportTimingStamp?.generation
+          : run.contractReports?.[path]?.failed === false && value.updatedAt === run.endedAt
+      )
         ? [[path, value.durationMs]]
         : [],
     ),
