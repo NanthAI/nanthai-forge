@@ -219,6 +219,59 @@ in `projectWorkRecords`. All remain disposable projections of retained canonical
 No collection is dropped: generic record pages, selected lookups and source-return snapshots
 are readers even when no specialised screen names that collection.
 
+### Candidate and projection retirement follow-up
+
+The Candidate page reads its file list once on opening; per-file provenance is
+read when a file is expanded. `tests/candidate-page-measure.mjs` qualifies the
+rendered 4k/29k fixtures over HTTP, including current-access descriptor RPCs,
+object GETs, hash verification and React rendering. Run it through `nforge heavy`;
+`FORGE_CANDIDATE_PAGE_MEASURE=1` selects two warmup pairs followed by eleven
+interleaved legacy/canonical pairs. The baseline reproduces the legacy indexed
+page's second mount-time provenance request and uses saved diffstats. Timing ends
+at the second animation frame after the changed path commits to the DOM. Browser
+and application startup, the outer workspace/conversation subscriptions, live
+Convex/R2 networks and billed usage are outside this local fixture. The browser
+harness is separate from the normal Node suite; the landing runner does not
+install a browser. No time assertion is used as a build gate.
+
+The remaining projection cutover is not implemented by the Candidate setting.
+Revision-free Work mutations still require selected payload attributes in their
+transaction, and canonical `hostedRecordBody` still reads Convex bodies. A
+canonical copy therefore does not yet replace those reads with R2. Imported
+Intent fields named `payload`, `payloadKey` and `payloadParts` are source data
+after hydration and must survive in the canonical record's `journal`; they must
+never be mistaken for disposable header metadata. Notes and lifecycle retain
+their existing separate records.
+
+No existing rows are removed here. The R2 projection migration is a separate
+follow-up, with the following contract:
+
+1. Pin project id, physical record generation, checkpoint digest and source/Work
+   revision. Inventory each collection with a durable operation id and cursor;
+   retrying the same page reconciles the original outcome. Never substitute a
+   current generation or newer canonical version for the pinned one.
+2. Commit or transfer at most 100 rows and 500 KiB per page. Count whole rows
+   and report provider read bytes separately, including any final-row overshoot.
+   Stage an oversized row's exact bytes in R2 with a bounded manifest descriptor
+   rather than truncating it or increasing the page target.
+   Preserve collection/key/parent/position, actor/status/planning metadata, all
+   unknown attributes, current mutable overlays and historical provenance.
+3. Before switching any reader, verify replacement digest and byte length,
+   source membership and State-parent coverage, server-side identity mapping,
+   selected-command behavior, generic pages and retained snapshot reads.
+   Independent source/target comparisons must continue detecting failed dual
+   writes; hashing both sides with a lossy codec is insufficient.
+4. Exercise portable export/restore against the pinned source and Work, including
+   attributes whose names collide with transport fields. Publish readers first,
+   then capture the existing default-off server setting for retry-stable writers;
+   use the existing contract feature/`CLI_UPGRADE_REQUIRED` boundary for old clients.
+   Calls and database I/O for imports/rebuilds may not increase.
+5. Keep existing projection rows and canonical source/Work/audit history. Any
+   later projection cleanup needs its own authorized operation, exact verified
+   row identities and a resumable receipt; the normal writer never launches it.
+   Do not drop the data table while any generation, patch writer, generic reader,
+   comparison or retained snapshot still depends on it.
+
 The index reader map (repository-relative paths):
 
 | Index | Collections / reader |

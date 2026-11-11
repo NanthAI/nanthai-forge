@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { bootstrapInterval } from '../scripts/bootstrap-interval.mjs';
-import { performance } from 'node:perf_hooks';
 import { composeFixture } from './hosted-compose-fixture.mjs';
 import { moduleUrl } from './convex-module.mjs';
 import { parseNativeState } from '../dist/state/format.js';
@@ -241,73 +239,15 @@ for (const count of [4000, 29000]) {
     for (const file of [listing.files[0].before, listing.files[0].after])
       if (file)
         seed('sourceBlobs', file.blob, '', { sha256: file.blob, size: c.objects.get(file.blob).length });
-    // Diagnostic only: in-process query + codec, excluding descriptor RPCs and network latency.
-    const legacySamples = [],
-      compactSamples = [];
-    for (let i = 0; i < 13; i++) {
-      let start = performance.now();
-      const legacy = JSON.parse(
-        await c.transaction('legacyBaseline', views.read, {
-          projectId: c.projectId,
-          action: 'view',
-          viewId: legacyId,
-          paginationOpts: { cursor: null, numItems: 30 },
-        }),
-      );
-      assert.equal(legacy.files.items[0].path, changed.path);
-      if (i > 1) legacySamples.push(performance.now() - start);
-      start = performance.now();
-      const current = JSON.parse(
-        await c.transaction('timedCanonicalRead', views.read, {
-          projectId: c.projectId,
-          action: 'view',
-          viewId: candidate.id,
-          features: ['candidate-source-files'],
-          paginationOpts: { cursor: null, numItems: 30 },
-        }),
-      );
-      await canonicalViewFiles(current, { paginationOpts: { cursor: null, numItems: 30 } }, async pins =>
-        pins.map(pin => c.objects.get(pin.sha256)),
-      );
-      if (i > 1) compactSamples.push(performance.now() - start);
-    }
-    const pairs = legacySamples.map((a, index) => [a, compactSamples[index]]);
-    const interval = bootstrapInterval(pairs);
-    legacySamples.sort((a, b) => a - b);
-    compactSamples.sort((a, b) => a - b);
-
-    const bBytes = c.objects.get(candidate.result.head);
-    const samples = [];
-    for (let i = 0; i < 7; i++) {
-      const start = performance.now();
-      const changes = reviewPaths(parseNativeState(aBytes).files, parseNativeState(bBytes).files).filter(
-        f => f.status !== 'unchanged',
-      );
-      assert.equal(changes.length, 1);
-      samples.push(performance.now() - start);
-    }
-    samples.sort((a, b) => a - b);
-    console.log(
-      JSON.stringify({
-        count,
-        changed: 1,
-        baseBytes: aBytes.length,
-        headBytes: bBytes.length,
-        manifestBytes: aBytes.length + bBytes.length,
-        canonicalCandidate: candidate.id,
-        canonicalReadable: true,
-        canonicalComposeDataRows,
-        webWithoutGeneration: withoutGeneration,
-        webWithGeneration: withGeneration,
-        manifestDiffMedianMs: samples[3],
-        listingReadBytes,
-        legacyQueryMedianMs: legacySamples[5],
-        compactProjectionAndDecodeMedianMs: compactSamples[5],
-        queryCodecTiming: { pairs, ...interval },
-        rssKiB: process.memoryUsage().rss / 1024,
-        maxRssKiB: process.resourceUsage().maxRSS,
+    const legacy = JSON.parse(
+      await c.transaction('legacyBaseline', views.read, {
+        projectId: c.projectId,
+        action: 'view',
+        viewId: legacyId,
+        paginationOpts: { cursor: null, numItems: 30 },
       }),
     );
+    assert.equal(legacy.files.items[0].path, changed.path);
   });
 }
 

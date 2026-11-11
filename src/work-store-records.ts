@@ -30,17 +30,10 @@ export function noteRecordId(intentId: string, index: number, kind: 'note' | 'li
  * comment never makes a new Intent version. An Intent with no recorded creator was the project owner's. */
 function intentRecord(value: Record<string, unknown>, owner: string, version: number): HostedRecord {
   const { id, outcome, constraints, status, base, creatorAccountId, assigneeAccountIds, ...rest } = value;
+  // This input has already been hydrated. Projection-looking field names here
+  // belong to the imported record, not to the disposable index header.
   const journal: Record<string, unknown> = { ...rest };
-  for (const name of [
-    'notes',
-    'lifecycle',
-    'noteCount',
-    'lifecycleCount',
-    'conversation',
-    'payload',
-    'payloadKey',
-    'payloadParts',
-  ])
+  for (const name of ['notes', 'lifecycle', 'noteCount', 'lifecycleCount', 'conversation'])
     delete journal[name];
   return {
     kind: 'intent',

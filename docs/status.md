@@ -5,6 +5,9 @@ legacy Work generation. Browser and CLI readers accept a server-pinned R2
 file-list object and retain the exact-State fallback. The source writer can pin
 one listing behind default-off `FORGE_CANDIDATE_FILES=1`; legacy projection
 writers remain unchanged. Canonical browser save attribution remains incomplete.
+The Candidate page reuses its opening file metadata and reads per-file provenance
+on expansion. Canonical Intent copies retain imported attributes whose names
+also occur in projection headers; legacy data retirement remains unproven.
 
 Live landing observations keep one current request snapshot and compact transition
 entries that share its immutable identity and request. Selected history pages

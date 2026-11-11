@@ -345,6 +345,16 @@ identity mapping and recovery replacements are implemented. Canonical compose
 already wrote zero data rows before this change; it does not prove all-path
 elimination or the modelled storage saving.
 
+The canonical Intent conversion preserves hydrated imported `payload`,
+`payloadKey` and `payloadParts` fields inside its existing `journal` object.
+The projection header's transport metadata must not erase similarly named source
+attributes. Selected commands still read the legacy payload chunks, even after a
+canonical copy exists; the canonical body's current reader is still Convex.
+Moving those bytes needs a command/read architecture that preserves the existing
+single-mutation call budget, not only a different physical table router.
+The bounded follow-up and full rendered-page fixture method are described in
+[data placement](../data-placement.md#candidate-and-projection-retirement-follow-up).
+
 The remaining data-projection readers have these replacement boundaries. These
 are the migration contract, not a claim that the writer has switched:
 

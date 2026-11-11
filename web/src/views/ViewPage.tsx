@@ -39,7 +39,6 @@ export function ViewPage({
   const now = useNow();
   const [mapSelected, setMapSelected] = useState('');
   const { data, error, retry } = useViewRead(source, { action: 'view', viewId });
-  const provenance = useViewRead(source, { action: 'provenance', viewId });
   const [extra, setExtra] = useState<{
     viewId: string;
     files: FileRow[];
@@ -77,11 +76,7 @@ export function ViewPage({
       .join(' + ') || 'Candidate';
   const inputName = laneName;
   const added = extra?.viewId === viewId ? extra : undefined;
-  const metadata = new Map(provenance.data?.files.items.map(file => [file.path, file]));
-  const files = [...data.files.items, ...(added?.files ?? [])].map(file => ({
-    ...metadata.get(file.path),
-    ...file,
-  }));
+  const files = [...data.files.items, ...(added?.files ?? [])];
   const cursor = added ? added.cursor : data.files.nextCursor,
     offset = added ? added.offset : data.files.nextOffset;
   const more = async () => {
