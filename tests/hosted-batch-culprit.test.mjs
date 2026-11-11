@@ -5,9 +5,11 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { moduleUrl } from './convex-module.mjs';
-import { batchesFixture, states, synthetic } from './hosted-landing-batches-fixture.mjs';
+
 import { diagnoseBatchFailure } from '../dist/hosted-batch-diagnosis.js';
 import {
   semanticVerdict,
@@ -16,6 +18,19 @@ import {
   indexedSemanticPlan,
   semanticTests,
 } from '../dist/intent-semantic-conflict.js';
+// Each parent starts cold: unrelated files and earlier runs must not supply a
+// lazily validated scheduler target to the precompiled measurement child.
+if (process.env.FORGE_BATCH_CULPRIT_CHILD !== '1') {
+  const priorDirectory = process.env.FORGE_TEST_MODULE_DIRECTORY;
+  const directory = mkdtempSync(join(tmpdir(), 'forge-batch-culprit-'));
+  process.env.FORGE_TEST_MODULE_DIRECTORY = directory;
+  test.after(() => {
+    if (priorDirectory === undefined) delete process.env.FORGE_TEST_MODULE_DIRECTORY;
+    else process.env.FORGE_TEST_MODULE_DIRECTORY = priorDirectory;
+    rmSync(directory, { recursive: true, force: true });
+  });
+}
+const { batchesFixture, states, synthetic } = await import('./hosted-landing-batches-fixture.mjs');
 const prior = Object.fromEntries(Object.keys(synthetic).map(k => [k, process.env[k]]));
 test.before(() => Object.assign(process.env, synthetic));
 test.after(() => {
@@ -104,8 +119,9 @@ test('incident replay: B and C pass alone but fail together; both statuses name 
   // Measure the controller in a fresh process after compiling the fake Convex
   // modules above. Cold TypeScript compilation is test setup, not runtime work.
   if (process.env.FORGE_BATCH_CULPRIT_CHILD !== '1') {
-    // The validating scheduler resolves this provider target lazily.
-    moduleUrl('../convex/projectConvexSource.ts');
+    // Function references are not static imports. The validating scheduler loads
+    // these targets lazily, so prepare their validators outside the measured child.
+    for (const name of ['projectConvexSource', 'projectOperationalExpiry']) moduleUrl(`../convex/${name}.ts`);
     const child = spawn(
       process.execPath,
       [
