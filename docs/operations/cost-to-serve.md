@@ -204,6 +204,158 @@ cleaned. The manifest-verified temporary fork is reset to the qualified base,
 and this dry's agent branches are removed. Pinned harnesses, inputs, raw evidence,
 the shared fixture project/fork and shared caches are retained.
 
+### Early-look smoke (`n3-r1-dry-a3`)
+
+This analysis reads the already-settled dry batch; it starts no workload. The
+batch ran 2026-11-11 **22:04:47.424–22:48:49.674 UTC** (2,642.250 s including
+reset, collection and grading). Harness and bench deployment are Git
+[`27e57dde649b`](https://github.com/NanthAI/nanthai-forge/commit/27e57dde649b6ed6c5deebfe8b65686c52fae9d4),
+CLI State `e769143d8278`; the authorized
+[bench deployment](https://github.com/NanthAI/nanthai-forge/actions/runs/43108416407)
+is unchanged throughout. The version guard reports no measurement-pin changes;
+GitHub main advances separately. Both arms retain N=3, the same ten-task order
+and seed, and `scripted-no-model`. Both land 10/10, with zero voids and no failed
+task CI jobs. Existing suites are green; strict 0/10 and lenient 0.332868 are
+the expected scripted oracle results. No model, scored or coordination cell,
+settings change, setup or teardown is part of this analysis.
+
+**Serving cost falls another 7.5% from a2, but remains above target.** All dollars
+below are per 1,000 task landings. Driver rates remain the original mixed four
+rates, not a new tariff; Professional repricing uses the same captured quantities.
+
+| Cost / coverage | `a1` | `a2` | `a3` |
+| --- | ---: | ---: | ---: |
+| Convex driver, original rates | $8.936 | $6.253 | $5.786 |
+| Independent whole-batch capture, original rates | $9.282 | $6.795 | $6.210 |
+| Independent whole-batch capture, Professional rates | $8.689 | $6.376 | $5.823 |
+| Driver repriced at Professional rates | $8.366 | $5.868 | $5.427 |
+| R2 operations | $0.0251 signer model | $0.1839 executed | $0.1745 executed |
+| Weekly backup I/O allocation, Professional model | $0.4150 | $0.3986 | $0.3689 |
+| Covered driver + R2 + backup subtotal | $9.376 | $6.836 | $6.330 |
+| Covered subtotal / ~$2 target | 468.8% | 341.8% | 316.5% |
+| Complete total including retained storage and recurring expiry | Unknown | Unknown | Unknown |
+
+The a3 driver records 2,553 project executions, 58.378 MB DB reads, 7.421 MB
+writes, 147.178 MB egress and 0.061147 action GB-hours: $0.057864 for ten
+landings. The independent numeric journal covers the complete batch with zero
+gaps or missing usage fields: 3,003 executions, 71.796 MB I/O, 152.269 MB egress,
+0.065317 GB-hours, $0.062096 original / $0.058233 Professional. Reset, collection
+and deployment-wide traffic explain the different scope; twelve emitted acceptance
+markers are not a task denominator. All ten task receipt identities reconcile
+against the landing ledger (eleven rows including reset).
+
+The same bucket-wide R2 analytics method, enclosing the Forge cell at
+**22:08:59–22:28:43Z**, records 295 successful and 7 user-error PUTs, 915 GETs,
+and 91 successful and 65 user-error HEADs; no LIST or DELETE groups. That is
+**302 A / 1,071 B**, or **30.2 A / 107.1 B per landing**, including 72
+user-error requests. There is no caller/retry partition. The new whole-cell
+signer ledger records 321 A / 1,221 B capabilities, not executed requests;
+compose receipt counters alone are 58 A / 24 B and 49,143,800 signed PUT bytes.
+Neither ledger is added to the executed total or treated as net stored growth.
+The a1 signer-only row remains incomplete and is not comparable to executed R2.
+Weekly backup allocation retains the 1.313333-GB / $0.262667 export model,
+divided by 712 accepted dev landings in the preceding complete seven-day window
+(24 bounded pages), versus 633 / 659 for a1 / a2. This denominator change is
+not a measured reduction in backup work.
+
+**Per-function attribution.** Dollars are per 1,000 landings; quantities are over
+the ten-task driver window. These include unfavorable movers.
+
+| Function | Calls a2 → a3 | DB read / write MB a2 → a3 | Egress MB a2 → a3 | $ a1 → a2 → a3 |
+| --- | ---: | ---: | ---: | ---: |
+| `projectConvexSourceNode:step` | 76 → 63 | 0 / 0 → 0 / 0 | 155.710 → 146.494 | 3.8162 → 3.5790 → 3.3050 |
+| `projectHostedActionsSource:resolve` | 114 → 90 | 13.848 / 0 → 13.051 / 0 | 0 → 0 | 2.0806 → 0.3297 → 0.3069 |
+| `projectConvexSourceObjects:resolve` | 290 → 263 | 4.086 / 0 → 3.738 / 0 | 0 → 0 | 0.4093 → 0.1537 → 0.1401 |
+| `POST /checks/actions` | 189 → 161 | 0 / 0 → 0 / 0 | 1.186 → 0.108 | 0.3703 → 0.1125 → 0.0877 |
+| `projectHostedActionsResults:batch` | 18 → 42 | 0.295 / 0.185 → 0.831 / 0.424 | 0 → 0 | 0.0142 → 0.0145 → 0.0368 |
+| `projectHostedActionsVerdict:confirm` | 3 → 12 | 0 / 0 → 0 / 0 | 0.000249 → 0.000996 | 0.0080 → 0.0018 → 0.0090 |
+| `projectSelfMetrics:page` | 8 → 9 | 0.487 / 0 → 0.964 / 0 | 0 → 0 | 0.0016 → 0.0125 → 0.0232 |
+
+Source-worker compute falls 0.050229 → 0.045246 GB-hours, but that function still
+accounts for 57.1% of a3 driver cost. Lower source-step count and egress accompany
+the total gain; this observation does not isolate an individual change's saving.
+Metrics reads also see a larger retained history, so their increase does not
+establish a code-induced regression.
+
+**Timing, both arms.** Seconds unless labelled; p90 is nearest-rank over ten
+tasks. Task intervals start after prep. Batch wall includes reset and grading;
+arm wall stops when all tasks land. F/G pairs are Forge / GitHub.
+
+| Metric (F / G) | `a1` | `a2` | `a3` |
+| --- | ---: | ---: | ---: |
+| Whole-batch wall | 2451.7 | 2743.1 | 2642.3 |
+| Arm wall to all landed | 1451.1 / 1703.0 | 1279.0 / 1580.3 | 1174.9 / 1768.1 |
+| Time to main p50 | 312.1 / 433.2 | 223.0 / 400.5 | 219.3 / 352.5 |
+| Time to main p90 | 515.4 / 502.1 | 526.5 / 632.9 | 501.0 / 685.3 |
+| Time to main max | 793.4 / 791.8 | 528.5 / 784.5 | 502.8 / 1229.7 |
+| Prep p50 | 19.8 / 12.8 | 19.4 / 10.1 | 8.9 / 4.2 |
+| All check wall / landing | 347.4 / 404.2 | 301.1 / 370.6 | 303.8 / 400.0 |
+| Landed check wall p50 / p90 / max, Forge | 169.4 / 342.2 / 346.1 | 158.0 / 165.4 / 183.6 | 168.5 / 179.9 / 183.4 |
+| Submit-to-accept p50 / p90 / max, Forge | 202.6 / 384.6 / 404.3 | 178.7 / 208.7 / 404.6 | 193.8 / 216.5 / 219.4 |
+| CI billed-equivalent minutes | 67 / 83 | 56 / 81 | 55 / 87 |
+| CI runs / jobs, Forge; GitHub | 18 / 21; 34 / 34 | 19 / 19; 31 / 31 | 18 / 18; 33 / 33 |
+| Forge main-race attempts / elapsed minutes | 12 / 17.590 | 11 / 12.149 | 10 / 11.815 |
+| Forge discarded passed runner-minutes / landing | 0.5025 | 0.5746 | 0.5603 |
+| Forge accepted reuse proofs | 7 | 7 | 7 |
+
+Forge all-check wall uses the retained reservation-to-end metric, including
+discarded/audit checks; GitHub uses job-start-to-end. GitHub has no retained
+matching queue-to-accept or landed-check interval, and neither a Forge-style
+reuse proof nor a comparable main-race-attempt counter is inferred. In a3 Forge
+is 33.5% faster on arm wall and 37.8% on median time to main. Its median lead
+was 44.3% in a2. GitHub's tail task has two conflict episodes versus one in a2,
+four extra PR pushes versus three overall, and two more CI jobs. Those recorded
+events explain extra work, not a Forge code regression. Forge's three
+`COMPOSITION_CONFLICT` operations recovered during the original batch; none is
+silently retried by this analysis. Its 18 task CI jobs passed. The separate
+scripted-driver failures below remain failures despite accepted receipts.
+
+**Regressions and uncertainty.** There is only one batch per source pin, so
+run-to-run noise is unmeasured; a1 is a changed implementation, not an identical-pin
+replicate. A descriptive paired-task bootstrap (20,000 resamples, fixed seed;
+concurrent tasks are dependent) gives a2→a3 median-change intervals of
+−2.8…31.3 s for landed check wall and −13.2…35.5 s for submit-to-accept.
+Both include zero. The +6.6% / +8.5% medians, +0.9% all-check wall, and GitHub's
++11.9% wall / +56.8% max are reported unfavorable observations; no repeatable
+timing regression or causal main change is established. No noise threshold is
+invented and no measurement is rerun.
+
+- **S3 repeated result ingestion, Issue `324f1d97` (open P6).** Result-batch calls
+  rise 18→42 despite task checks falling 19→18; their cost rises 154%. The wider
+  result/prepare/output/verdict/webhook family rises 134→174 calls and
+  $0.07124→$0.09663 per 1,000. Historical a1/a2 result counts are 17/18, a
+  workload-count envelope rather than run-noise calibration. Since a2,
+  [`3e1b417f`](https://github.com/NanthAI/nanthai-forge/commit/3e1b417f9e0a17578a5f3e8a1d0440ab770ac830)
+  routes object-report provider conclusions through another collector fold;
+  the batch mutation still writes/notifies on replay. The additional paths are
+  structural; aggregate meters cannot partition initiators or the avoidable
+  share. Proposed fix: idempotently coalesce unchanged terminal folds across
+  uploader, webhook and confirmation, preserving final-output/timing repair,
+  with an event-order/replay call-count guard. This measured cost regression is
+  recorded on the matching Issue, without claiming the timing increase is S3's.
+- **Async wait consumer failure, Issue `34cedd25` (reopened in P6).** All ten
+  Forge helpers exit 1 with `BENCH_PRODUCT_FRICTION` after receiving successful
+  terminal `observe` replies. `driveForge` recognizes `result.submission` but
+  not the documented `result.submissions[0].submission` wait envelope. a2's
+  blocking finish had zero such exits; a1 already had ten. The helper and
+  `hosted-land-cli.ts` are unchanged between a2/a3: this is a pre-existing
+  mode-dependent failure exposed by a3's async path, not a new compaction bug.
+  Wake-mode selection is not a recorded measurement pin. Proposed fix: normalize
+  the exact requested operation's terminal wait result and guard success,
+  failure, cancellation and mixed-operation replies. Settings remain unchanged.
+
+**Comparison limits.** Builders continue landing on dev and share the local
+machine/runner pool. Mean/max local load is 6.44/16.86 Forge and 6.38/16.86
+GitHub, versus 13.29/25.12 and 13.37/25.12 in a2; faster prep is not attributed
+solely to code. S1 packs only at terminal +7 days, so its stored-byte effect is
+not yet visible. S3 moves check reports to R2; S5's writer remains off. Net
+retained storage, recurring expiry, transient peak memory, isolated per-transition
+S3 billing and a complete invoice remain unmeasured. Five minutes after batch
+end have full journal coverage and zero source/landing-worker executions, but
+three analysis-origin authentication/history calls, so strict deployment-wide
+zero calls is not demonstrated. Original evidence remains private; no teardown,
+cleanup or storage deletion is performed here.
+
 ### Landed fixes and fixture evidence
 
 All before/after figures in this table are **synthetic fixtures**, not a new
