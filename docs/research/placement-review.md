@@ -550,6 +550,28 @@ assume a State row and its manifest pin read at about 1 KB; on dense pages one S
 lookup reads up to 48.9 KB, so the pins must sit in a slim row. Reply bytes exclude the
 HTTP envelope. No row is a billed reading.
 
+The guards-only rollout also records the current resolver on pack-shaped fixtures.
+The stored-pack shape has 29 packs, each containing 1,000 neighbouring small
+objects; the source-pack shapes select 20 or 300 raw changed blobs in digest order.
+The latter is permitted even when normal small client uploads use packs: large
+files and trusted merge outputs can retain raw bindings. Both State descriptors
+are included. Source-pack rows include its one signed grant and slim-row read;
+the existing session itself is outside the resolver-call count, as in the raw guard.
+
+| Current 29k shape | Resolver calls | Serialized DB read B | GET grants | URL B | Parsed reply B |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| No source pack, blobs in stored packs | 11 | 5,650,580 | 29,002 | 12,209,798 | 17,299,106 |
+| Source pack plus 20 raw changes | 2 | 25,031 | 23 | 9,404 | 12,670 |
+| Source pack plus 300 raw changes | 2 | 42,517 | 303 | 125,044 | 166,670 |
+
+These are baseline ratchets in the existing cold-job guard, with no runtime change.
+They count issued grants, not executed GETs or billed usage. The 300-change
+current reply exceeds 100 KB even though its descriptor reads already fit: moving
+bindings alone cannot fix that reply. Run signing helps packed deltas; raw deltas
+also need a compact representation of the existing independent signatures if they
+are to meet the same budget. This does not prove a bound on all encodings and does
+not change the selected five-minute exact-key authority or the acceptance target.
+
 **Fetch and verify.** Unchanged in substance. Each State is hashed against its pin; the
 manifest is hashed against the pin stored beside the State before the signer or a reader
 uses it; every object is hashed and sized against the State, whichever pack, run or raw

@@ -1033,213 +1033,283 @@ test('Actions signed recipe leaves yield a bounded prefix before the response va
   assert(rows.every(row => row.closure.length === 100));
 });
 
-test('CI cold descriptor and exact-key grant budgets at 4k, 6k and 29k include both States (298f9675, e7e35328)', async t => {
-  for (const catalogued of [false, true])
-    for (const files of [4000, 6000, 29000]) {
-      const s = await fixture(t);
-      await s.bind();
-      await s.call(sessions, 'session', s.input());
-      const pin = s.put('byte-accounting template');
-      const template = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
-      // An indexed immutable source population: use exact full documents with O(1)
-      // point lookup rather than the transaction fixture's O(files²) JS scans.
-      // Session, State, schema and transaction metrics still use the normal fixture.
-      const objects = new Map(
-        Array.from({ length: files }, (_, index) => {
-          const digest = createHash('sha256').update(`synthetic source ${index}`).digest('hex');
-          return [
+test('CI cold descriptor and exact-key grant budgets include raw fallback, stored packs and a source pack delta (298f9675, e7e35328)', async t => {
+  const shapes = [
+    ...[false, true].flatMap(catalogued =>
+      [4000, 6000, 29000].map(files => ({ files, catalogued, shape: 'raw', delta: null })),
+    ),
+    { files: 29000, catalogued: true, shape: 'stored-packs', delta: null },
+    { files: 29000, catalogued: true, shape: 'source-pack', delta: 20 },
+    { files: 29000, catalogued: true, shape: 'source-pack', delta: 300 },
+  ];
+  for (const { files, catalogued, shape, delta } of shapes) {
+    const s = await fixture(t);
+    await s.bind();
+    await s.call(sessions, 'session', s.input());
+    const pin = s.put('byte-accounting template');
+    const template = [...s.tables.projectObjects.values()].find(row => row.digest === pin.sha256);
+    // An indexed immutable source population: use exact full documents with O(1)
+    // point lookup rather than the transaction fixture's O(files²) JS scans.
+    // Session, State, schema and transaction metrics still use the normal fixture.
+    const objects = new Map(
+      Array.from({ length: files }, (_, index) => {
+        const digest = createHash('sha256').update(`synthetic source ${index}`).digest('hex');
+        return [
+          digest,
+          {
+            ...template,
+            _id: `projectObjects-${index + 1000}`,
+            _creationTime: index + 1000,
             digest,
-            {
-              ...template,
-              _id: `projectObjects-${index + 1000}`,
-              _creationTime: index + 1000,
-              digest,
-              size: Buffer.byteLength(`synthetic source ${index}`),
-              r2Key: `synthetic/${digest}`,
-            },
-          ];
+            size: Buffer.byteLength(`synthetic source ${index}`),
+            r2Key: `synthetic/${digest}`,
+          },
+        ];
+      }),
+    );
+    // Match client/import storage: 1,000 back-to-back small files per pack.
+    // A source-pack delta remains raw here: ordinary source writes may emit raw
+    // changed blobs, so the 300-path contract must cover that legal shape too.
+    if (shape === 'stored-packs') {
+      const rows = [...objects.values()];
+      for (let at = 0; at < rows.length; at += 1000) {
+        const group = rows.slice(at, at + 1000),
+          pack = createHash('sha256').update(`synthetic pack ${at}`).digest('hex'),
+          size = group.reduce((n, row) => n + row.size, 0);
+        let offset = 0;
+        for (const row of group) {
+          row.pack = { digest: pack, size, offset };
+          row.r2Key = `synthetic/${pack}`;
+          offset += row.size;
+        }
+      }
+    }
+    let objectBytes = 0,
+      objectReads = 0;
+    s.decorateContext(ctx => {
+      const query = ctx.db.query.bind(ctx.db),
+        metrics = ctx.meta.getTransactionMetrics.bind(ctx.meta);
+      let localBytes = 0,
+        localReads = 0;
+      ctx.db.query = table => {
+        if (table !== 'projectObjects') return query(table);
+        return {
+          withIndex: (name, build) => {
+            const bounds = {},
+              q = { eq: (field, value) => ((bounds[field] = value), q) };
+            build(q);
+            const row = objects.get(bounds.digest);
+            if (!row) return query(table).withIndex(name, build);
+            assert.equal(name, 'by_project_and_digest');
+            assert.equal(bounds.projectId, s.projectId);
+            return {
+              unique: async () => {
+                const bytes = Buffer.byteLength(JSON.stringify(row));
+                objectBytes += bytes;
+                objectReads++;
+                localBytes += bytes;
+                localReads++;
+                return structuredClone(row);
+              },
+            };
+          },
+        };
+      };
+      ctx.meta.getTransactionMetrics = async () => {
+        const value = await metrics();
+        value.bytesRead.remaining -= localBytes;
+        value.databaseQueries.remaining -= localReads;
+        return value;
+      };
+    });
+    const heads = ['base', 'candidate'].map(
+      message =>
+        s.put(
+          JSON.stringify({
+            schema: 1,
+            kind: 'forge-source-state',
+            parents: [],
+            files: [],
+            at: '2026-01-01T00:00:00.000Z',
+            message,
+          }),
+        ).sha256,
+    );
+    const digests = [...objects.keys()].sort().slice(0, delta ?? files);
+    const expectedSizes = new Map([...objects].map(([digest, row]) => [digest, row.size]));
+    const measure = async closures => {
+      const baseline = s.counts.length,
+        bytes = objectBytes,
+        reads = objectReads;
+      let replyBytes = 0,
+        maxReplyBytes = 0,
+        getGrants = 0,
+        grantBytes = 0;
+      const account = rows => {
+        // Parsed logical payload bytes, before Convex/HTTP envelope encoding;
+        // never emit signed URLs or infer executed R2 GETs from issued grants.
+        const size = Buffer.byteLength(JSON.stringify(rows));
+        replyBytes += size;
+        maxReplyBytes = Math.max(maxReplyBytes, size);
+        for (const row of rows) {
+          for (const url of [row.url, ...(row.closure ?? []).map(leaf => leaf.url)]) {
+            if (!url) continue;
+            getGrants++;
+            grantBytes += Buffer.byteLength(url);
+          }
+        }
+        return rows;
+      };
+      if (shape === 'source-pack') {
+        // Count the pack's signed grant separately from the session/plan reply.
+        // Resolver-call budgets exclude the existing session, as in the raw guard.
+        const { latestSourcePack } = await import(moduleUrl('../convex/projectSourcePackStore.ts'));
+        const pack = await s.transaction(
+          'cold-pack-grant',
+          {
+            _handler: ctx => latestSourcePack(ctx, s.projectId),
+          },
+          {},
+        );
+        assert(pack?.url);
+        account([pack]);
+      }
+      account(
+        await s.call(source, 'resolve', {
+          ...s.input(),
+          batch: true,
+          digests: heads,
+          ...(closures ? { closures: true } : {}),
         }),
       );
-      let objectBytes = 0,
-        objectReads = 0;
-      s.decorateContext(ctx => {
-        const query = ctx.db.query.bind(ctx.db),
-          metrics = ctx.meta.getTransactionMetrics.bind(ctx.meta);
-        let localBytes = 0,
-          localReads = 0;
-        ctx.db.query = table => {
-          if (table !== 'projectObjects') return query(table);
-          return {
-            withIndex: (name, build) => {
-              const bounds = {},
-                q = { eq: (field, value) => ((bounds[field] = value), q) };
-              build(q);
-              const row = objects.get(bounds.digest);
-              if (!row) return query(table).withIndex(name, build);
-              assert.equal(name, 'by_project_and_digest');
-              assert.equal(bounds.projectId, s.projectId);
-              return {
-                unique: async () => {
-                  const bytes = Buffer.byteLength(JSON.stringify(row));
-                  objectBytes += bytes;
-                  objectReads++;
-                  localBytes += bytes;
-                  localReads++;
-                  return structuredClone(row);
-                },
-              };
-            },
-          };
-        };
-        ctx.meta.getTransactionMetrics = async () => {
-          const value = await metrics();
-          value.bytesRead.remaining -= localBytes;
-          value.databaseQueries.remaining -= localReads;
-          return value;
-        };
-      });
-      const heads = ['base', 'candidate'].map(
-        message =>
-          s.put(
-            JSON.stringify({
-              schema: 1,
-              kind: 'forge-source-state',
-              parents: [],
-              files: [],
-              at: '2026-01-01T00:00:00.000Z',
-              message,
-            }),
-          ).sha256,
-      );
-      const digests = [...objects.keys()].sort();
-      const expectedSizes = new Map([...objects].map(([digest, row]) => [digest, row.size]));
-      const measure = async closures => {
-        const baseline = s.counts.length,
-          bytes = objectBytes,
-          reads = objectReads;
-        let replyBytes = 0,
-          maxReplyBytes = 0,
-          getGrants = 0,
-          grantBytes = 0;
-        const account = rows => {
-          // Parsed logical payload bytes, before Convex/HTTP envelope encoding;
-          // never emit signed URLs or infer executed R2 GETs from issued grants.
-          const size = Buffer.byteLength(JSON.stringify(rows));
-          replyBytes += size;
-          maxReplyBytes = Math.max(maxReplyBytes, size);
-          for (const row of rows) {
-            for (const url of [row.url, ...(row.closure ?? []).map(leaf => leaf.url)]) {
-              if (!url) continue;
-              getGrants++;
-              grantBytes += Buffer.byteLength(url);
-            }
-          }
-          return rows;
-        };
-        account(
+      let calls = 1;
+      for (let at = 0; at < digests.length;) {
+        const rows = account(
           await s.call(source, 'resolve', {
             ...s.input(),
             batch: true,
-            digests: heads,
+            digests: digests.slice(at, at + 3200),
             ...(closures ? { closures: true } : {}),
           }),
         );
-        let calls = 1;
-        for (let at = 0; at < digests.length;) {
-          const rows = account(
-            await s.call(source, 'resolve', {
-              ...s.input(),
-              batch: true,
-              digests: digests.slice(at, at + 3200),
-              ...(closures ? { closures: true } : {}),
-            }),
-          );
-          assert(rows.length > 0);
-          for (const [index, row] of rows.entries()) {
-            assert.equal(row.descriptor.object.sha256, digests[at + index]);
-            assert.equal(row.descriptor.object.size, expectedSizes.get(digests[at + index]));
-          }
-          at += rows.length;
-          calls++;
+        assert(rows.length > 0);
+        for (const [index, row] of rows.entries()) {
+          assert.equal(row.descriptor.object.sha256, digests[at + index]);
+          assert.equal(row.descriptor.object.size, expectedSizes.get(digests[at + index]));
         }
-        const meters = s.counts.slice(baseline);
-        assert(meters.every(m => m.writes === 0));
-        const byTable = meters.reduce((out, m) => {
-          for (const [table, bytes] of Object.entries(m.readBytesByTable))
-            out[table] = (out[table] ?? 0) + bytes;
-          return out;
-        }, {});
-        byTable.projectObjects = (byTable.projectObjects ?? 0) + objectBytes - bytes;
-        return {
-          calls,
-          bytes: Object.values(byTable).reduce((a, b) => a + b, 0),
-          objectReads: objectReads - reads,
-          byTable,
-          replyBytes,
-          maxReplyBytes,
-          getGrants,
-          grantBytes,
-        };
+        at += rows.length;
+        calls++;
+      }
+      const meters = s.counts.slice(baseline);
+      assert(meters.every(m => m.writes === 0));
+      const byTable = meters.reduce((out, m) => {
+        for (const [table, bytes] of Object.entries(m.readBytesByTable))
+          out[table] = (out[table] ?? 0) + bytes;
+        return out;
+      }, {});
+      byTable.projectObjects = (byTable.projectObjects ?? 0) + objectBytes - bytes;
+      return {
+        calls,
+        bytes: Object.values(byTable).reduce((a, b) => a + b, 0),
+        objectReads: objectReads - reads,
+        byTable,
+        replyBytes,
+        maxReplyBytes,
+        getGrants,
+        grantBytes,
       };
-      const scheduled = s.scheduled.length,
-        before = await measure(false);
-      if (catalogued) {
-        const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
-        // A real catalog uses canonical project R2 keys. The raw-byte reference
-        // above intentionally retains B2's smaller synthetic key, so the comparison
-        // does not inflate the baseline. Logical pins and verified bytes are identical.
-        const pins = [...objects.values()].map(({ digest, size }) => ({ digest, size }));
-        for (const page of catalogPages(pins))
-          s.insert('projectObjectCatalog', {
-            projectId: s.projectId,
-            origin: `catalog-migration:${randomUUID()}`,
-            ...page,
-          });
-        objects.clear();
-      }
-      const after = await measure(true);
-      assert.equal(after.calls, files <= 6000 ? 3 : 11);
-      if (catalogued) {
-        assert.equal(after.objectReads, 0, 'catalog-backed blobs read no full per-object documents');
-        assert.equal(after.calls, before.calls, 'page compaction adds no source RPC');
-        assert(
-          after.bytes < before.bytes * (files === 4000 ? 0.24 : 0.21),
-          'catalog DB budget includes whole boundary pages and current-session reads',
-        );
-        assert(
-          after.bytes <= (files === 4000 ? 325_000 : files === 6000 ? 450_000 : 2_120_000),
-          `${files}: ${after.bytes} catalog DB bytes`,
-        );
-      } else {
-        assert.equal(after.objectReads, files, 'raw row fallback reads one full metadata document per blob');
-        assert.deepEqual(after, before, 'closure negotiation adds no raw-object DB reads');
-      }
-      assert(after.bytes <= (files <= 6000 ? 2_120_000 : 10_300_000), `${files}: ${after.bytes} DB bytes`);
-      assert.equal(
-        after.getGrants,
-        files + 2,
-        'each cold raw object and both States need an exact-key grant',
-      );
-      assert(
-        after.maxReplyBytes <= 4 * 1024 * 1024,
-        'each parsed descriptor reply stays inside its existing byte budget',
-      );
-      assert(
-        after.replyBytes <= (files <= 6000 ? 4_300_000 : 21_000_000),
-        'cold descriptor reply byte ratchet',
-      );
-      assert.equal(s.scheduled.length, scheduled, 'zero idle/background work');
-      t.diagnostic(
-        JSON.stringify({
-          [catalogued ? 'catalogDescriptorBytes' : 'rawDescriptorBytes']: {
-            files,
-            before,
-            after,
-            catalogPages: s.tables.projectObjectCatalog.size,
-          },
-        }),
-      );
+    };
+    if (shape === 'source-pack')
+      s.insert('projectSourcePacks', {
+        projectId: s.projectId,
+        latest: {
+          stateRef: heads[0],
+          sha256: '9'.repeat(64),
+          size: 100000,
+          fileCount: files,
+          objectKey: 'synthetic/source-pack',
+          createdAt: 0,
+          expiresAt: 300000,
+        },
+      });
+    const scheduled = s.scheduled.length,
+      before = await measure(false);
+    if (catalogued) {
+      const { catalogPages } = await import(moduleUrl('../convex/projectObjectFind.ts'));
+      // A real catalog uses canonical project R2 keys. The raw-byte reference
+      // above intentionally retains B2's smaller synthetic key, so the comparison
+      // does not inflate the baseline. Logical pins and verified bytes are identical.
+      const pins = [...objects.values()].map(({ digest, size, pack }) => ({
+        digest,
+        size,
+        ...(pack ? { pack } : {}),
+      }));
+      for (const page of catalogPages(pins))
+        s.insert('projectObjectCatalog', {
+          projectId: s.projectId,
+          origin: `catalog-migration:${randomUUID()}`,
+          ...page,
+        });
+      objects.clear();
     }
+    const after = await measure(true);
+    assert.equal(after.calls, delta === null ? (files <= 6000 ? 3 : 11) : 2);
+    if (catalogued) {
+      assert.equal(after.objectReads, 0, 'catalog-backed blobs read no full per-object documents');
+      assert.equal(after.calls, before.calls, 'page compaction adds no source RPC');
+      assert(
+        shape !== 'raw' || after.bytes < before.bytes * (files === 4000 ? 0.24 : 0.21),
+        'catalog DB budget includes whole boundary pages and current-session reads',
+      );
+      assert(
+        after.bytes <=
+          (shape === 'stored-packs'
+            ? 5_700_000
+            : files === 4000
+              ? 325_000
+              : files === 6000
+                ? 450_000
+                : 2_120_000),
+        `${files}: ${after.bytes} catalog DB bytes`,
+      );
+    } else {
+      assert.equal(after.objectReads, files, 'raw row fallback reads one full metadata document per blob');
+      assert.deepEqual(after, before, 'closure negotiation adds no raw-object DB reads');
+    }
+    assert(after.bytes <= (files <= 6000 ? 2_120_000 : 10_300_000), `${files}: ${after.bytes} DB bytes`);
+    assert.equal(
+      after.getGrants,
+      (delta ?? files) + 2 + (shape === 'source-pack' ? 1 : 0),
+      'each selected object, both States and any source pack need an exact-key grant',
+    );
+    assert(
+      after.maxReplyBytes <= 4 * 1024 * 1024,
+      'each parsed descriptor reply stays inside its existing byte budget',
+    );
+    assert(
+      after.replyBytes <= (files <= 6000 ? 4_300_000 : 21_000_000),
+      'cold descriptor reply byte ratchet',
+    );
+    if (shape === 'source-pack') {
+      assert(after.bytes <= (delta === 20 ? 26_000 : 43_000), 'source-pack delta DB baseline');
+      assert(after.replyBytes <= (delta === 20 ? 13_000 : 167_000), 'source-pack delta reply baseline');
+    }
+    if (shape === 'stored-packs')
+      assert(after.replyBytes <= 17_310_000, 'stored-pack per-member reply baseline');
+    assert.equal(s.scheduled.length, scheduled, 'zero idle/background work');
+    t.diagnostic(
+      JSON.stringify({
+        [catalogued ? 'catalogDescriptorBytes' : 'rawDescriptorBytes']: {
+          files,
+          shape,
+          delta,
+          before,
+          after,
+          catalogPages: s.tables.projectObjectCatalog.size,
+        },
+      }),
+    );
+  }
 });
 
 test('bounded source windows at doubled dogfood scale stay O(pages); idle schedules zero', async t => {
