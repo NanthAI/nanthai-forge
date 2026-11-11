@@ -41,6 +41,7 @@ only verified frozen-manifest files; the repair records a backfill time and move
 
 | Tables | Hold | Grows with |
 | --- | --- | --- |
+| `placementPatchProbe1`, `placementPatchProbe9`, `placementPatchProbe24` | Temporary synthetic S0 billed-patch calibration: three document sizes, with 1/9/24 identical-key custom indexes. Internal writer runs only on the project dev deployment; no product caller or timer. Cleanup removes the nine synthetic rows, then the next S3 landing removes tables and writer. | Fixed nine synthetic rows during the authorized experiment |
 | `legacyStorageCleanupPages` | Retry receipts for approved maintenance pages; no file bodies. | Maintenance pages |
 | `legacyStorageCleanupWindows` | One metadata fence per approved dev cleanup window; closing it invalidates older deletion transactions. No source or file bytes. | Approved maintenance windows |
 | `projectObjects` | One row per physical object: digest, size, placement (`r2Key`, `location`, legacy `storageId`), recipe pin. No bytes. | Repo size |

@@ -1,0 +1,6 @@
+{
+  "kind": "tables",
+  "delta": 3,
+  "reason": "Temporary synthetic S0 billed patch experiment, Issue 886a4694; removes these three fixture tables and internal functions in the next S3 landing after measurement. No product growth.",
+  "date": "2026-11-11"
+}
