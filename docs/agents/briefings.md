@@ -131,6 +131,34 @@ merges (or why nothing can go).
     (advisory/blocking); conflicts and how resolved; time stranded or waiting on another
     Lane (minutes, why); duplicate work with another builder; rework after a failed check.
 
+### Builder decision rules
+
+Leads settled these questions repeatedly for placement and cost slices; apply them without asking.
+A brief or a lead comment on the Issue can override one for that slice.
+
+- **Rollout order for a changed stored format or reply.** Expand, then contract, in separate
+  landings: readers that accept both forms first; then the writer behind a default-off setting;
+  then clients and runners without the new capability get `CLI_UPGRADE_REQUIRED`. Reuse the
+  existing capability and setting mechanism instead of adding a parallel one. Never change the
+  writer and its readers in one landing.
+- **Budgets.** Report per-landing cost separately from fixed per-project cost. Measure on the
+  dogfood-shaped fixture as well as the small one, and count worst-case rows whole, not averaged.
+  A budget below one operation, or worth a fraction of a cent, flips on one landing: make it a
+  ratchet with an absolute floor, and weight request classes by price when they differ.
+- **Data access.** History and evidence objects in R2 are server-only. Clients read them through
+  a server action that checks current access and redacts; no client-readable raw object or signed
+  URL unless the design proves it safe. Replies never contain object keys or signed URLs.
+- **Slice order.** A review's slice order is about capacity unless it names a dependency. Slices
+  that run in parallel coordinate on shared files: sync before landing, keep peers' accepted
+  changes in any conflict, and post on the board when you change a shared budget file.
+- **Conditional slices.** When a slice runs only if evidence shows a pattern, the lead decides
+  whether the evidence meets the trigger and records it on the Issue.
+- **When to stop.** Stop at the evidence when a Done-when line cannot be met after a real attempt,
+  not after a first naive probe: report what you tried, the measured breakdown, and the cheapest
+  alternative you see. Never change scope, raise a budget, or add a job, service, poll or wait to
+  pass a line. Land the parts that meet their own lines. Architecture and placement questions go
+  to the lead for a design review; do not settle them yourself.
+
 Docs-only work changes no runtime usage; no live billing benchmark is needed.
 
 Briefs point here instead of repeating these rules or naming a private file; machine
