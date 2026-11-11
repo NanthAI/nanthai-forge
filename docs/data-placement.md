@@ -100,6 +100,8 @@ Compatible canonical Candidate header reads keep their original shape.
 
 Legacy projection writers remain unchanged. Existing `projectWorkDataRecords`
 rows are unchanged; no migration, deletion or flag enablement runs implicitly. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
+Those writers stay in Convex by design: the [S4 remaining-writers verdict](research/placement-review.md#s4-remaining-writers)
+sizes each one and proposes a single change, onboarding without per-file rows.
 
 ## Planning search
 
@@ -243,8 +245,8 @@ after hydration and must survive in the canonical record's `journal`; they must
 never be mistaken for disposable header metadata. Notes and lifecycle retain
 their existing separate records.
 
-No existing rows are removed here. The R2 projection migration is a separate
-follow-up, with the following contract:
+No existing rows are removed here. An R2 projection migration is not planned
+([verdict](research/placement-review.md#s4-remaining-writers)); if one is taken up, this is its contract:
 
 1. Pin project id, physical record generation, checkpoint digest and source/Work
    revision. Inventory each collection with a durable operation id and cursor;
