@@ -307,7 +307,11 @@ export const progress = query({
   },
 });
 export const candidate = query({
-  args: { projectId: v.id('hostedProjects'), candidateId: v.string() },
+  args: {
+    projectId: v.id('hostedProjects'),
+    candidateId: v.string(),
+    features: v.optional(v.array(v.string())),
+  },
   returns: v.string(),
   handler: async (ctx, input) => {
     try {
@@ -320,7 +324,9 @@ export const candidate = query({
         key: input.candidateId,
       });
       invariant(row, 'NOT_FOUND', 'Candidate not found.');
-      return row.value;
+      return input.features?.includes('candidate-source-files')
+        ? canonicalPayload({ candidate: JSON.parse(row.value), files: row.candidateFiles ?? null })
+        : row.value;
     } catch (error) {
       return report(error);
     }

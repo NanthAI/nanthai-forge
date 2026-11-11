@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { canonicalView } from './projectCanonicalView';
 import { workRecordTable } from './projectWorkRecordTables';
 import { hostedPaths, hostedJson } from '../src/hosted-paths';
 import { actorSummary } from './projectActorNames';
@@ -58,6 +59,7 @@ export const read = query({
   args: {
     projectId: v.id('hostedProjects'),
     generationId: v.optional(v.id('projectWorkGenerations')),
+    features: v.optional(v.array(v.string())),
     action: v.union(v.literal('view'), v.literal('provenance'), v.literal('views')),
     viewId: v.optional(v.string()),
     laneId: v.optional(v.string()),
@@ -69,8 +71,12 @@ export const read = query({
     try {
       const user = await ctx.auth.getUserIdentity();
       invariant(user, 'PROJECT_UNAVAILABLE', 'Sign in to read project Views.');
-      const project = await accessibleProject(ctx, input.projectId, user.subject),
-        generation = await selectedGeneration(ctx, project);
+      const project = await accessibleProject(ctx, input.projectId, user.subject);
+      if (input.viewId && input.features?.includes('candidate-source-files')) {
+        const canonical = await canonicalView(ctx, input.projectId, input.viewId);
+        if (canonical) return hostedJson(canonical);
+      }
+      const generation = await selectedGeneration(ctx, project);
       invariant(
         generation && (!input.generationId || generation._id === input.generationId),
         'WORK_STALE',

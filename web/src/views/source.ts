@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
+import { browserObjects } from '../browser-source';
+import { canonicalViewFiles } from './canonical-source';
 import { useCallback } from 'react';
 import { useConvex, type ConvexReactClient } from 'convex/react';
 import type { FunctionArgs } from 'convex/server';
@@ -28,14 +30,38 @@ export function useHostedViewSource(
 
 /** Optional display computation must not hide a still-accessible View. */
 export async function readHostedView(
-  client: Pick<ConvexReactClient, 'query' | 'action'>,
+  client: Pick<ConvexReactClient, 'query' | 'action' | 'mutation'>,
   args: FunctionArgs<typeof hosted.projectViewActions.read>,
 ) {
   const { lines, ...selection } = args;
-  const raw = lines
-    ? await client.action(hosted.projectViewActions.read, args)
-    : await client.query(hosted.projectViewReads.read, selection);
+  const raw = await client.query(hosted.projectViewReads.read, {
+    ...selection,
+    features: ['candidate-source-files'],
+  });
   const result = JSON.parse(raw);
+  if (result.canonicalSource) {
+    const reader = browserObjects(client, args.projectId);
+    const hydrated = await canonicalViewFiles(result, args, pins => reader.read(pins));
+    // ObjectDownloadReader reauthorizes the exact bindings after IO, including cache hits.
+    // The Candidate and its base/head pins are immutable, so a second Work query is redundant.
+    return lines
+      ? {
+          ...hydrated,
+          files: {
+            ...hydrated.files,
+            items: hydrated.files.items.map(file => ({
+              ...file,
+              lines: {
+                status: 'unavailable' as const,
+                reason: 'Save attribution is unavailable for this source selection.',
+                ranges: [],
+              },
+            })),
+          },
+        }
+      : hydrated;
+  }
+  if (lines) return JSON.parse(await client.action(hosted.projectViewActions.read, args));
   if (args.action === 'view' && !args.paginationOpts.cursor && result.head && !result.changes) {
     try {
       result.changes = JSON.parse(

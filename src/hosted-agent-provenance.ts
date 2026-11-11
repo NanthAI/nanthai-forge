@@ -10,6 +10,7 @@ import {
 } from './hosted-provenance-schema.js';
 import { hostedRecordSchema } from './hosted-records.js';
 import {
+  candidateFileListSchema,
   validateComposePage,
   composeLaneSchema,
   composeDependencySchema,
@@ -36,9 +37,20 @@ export async function provenanceHostedSource(transport: HostedAgentTransport, in
   const parsed = hostedProvenanceSchema.safeParse(input);
   invariant(parsed.success, 'BAD_ARGUMENT', 'Invalid provenance parameters. Use provenance --help.');
   const command = parsed.data;
-  const root = hostedRecordSchema.options[3].parse(
-    await transport.query('projectHostedCompose:candidate', { candidateId: command.candidateId }),
-  );
+  const sourceFiles = transport.advertisedFeatures?.includes('candidate-source-files');
+  const reply = await transport.query('projectHostedCompose:candidate', {
+    candidateId: command.candidateId,
+    ...(sourceFiles ? { features: ['candidate-source-files'] } : {}),
+  });
+  const source = sourceFiles
+    ? z
+        .object({
+          candidate: hostedRecordSchema.options[3],
+          files: z.object({ sha256: z.string(), size: z.number().int().nonnegative() }).nullable(),
+        })
+        .parse(reply)
+    : { candidate: reply, files: null };
+  const root = hostedRecordSchema.options[3].parse(source.candidate);
   invariant(root.id === command.candidateId, 'HOSTED_PROTOCOL_INVALID', 'Candidate identity differs.');
   invariant(root.result.status === 'clean', 'VIEW_CONFLICT', 'Select a clean Candidate for file provenance.');
   const selection = canonicalPayload({
@@ -65,10 +77,25 @@ export async function provenanceHostedSource(transport: HostedAgentTransport, in
   const objects = new ConvexLaneTransport(transport.exchange);
   const cache = new HostedCheckoutCache(clientCacheRoot(transport.root), objects);
   const read = (id: string) => readFileSync(join(cache.objects, id));
-  await cache.ensure([root.base.head, root.result.head, root.inputs.sha256, root.dependencies.sha256]);
-  const changes = reviewPaths(
-    parseNativeState(read(root.base.head)).files,
-    parseNativeState(read(root.result.head)).files,
+  await cache.ensure([
+    ...(source.files ? [source.files.sha256] : [root.base.head, root.result.head]),
+    root.inputs.sha256,
+    root.dependencies.sha256,
+  ]);
+  const listing = source.files
+    ? candidateFileListSchema.parse(JSON.parse(read(source.files.sha256).toString('utf8')))
+    : null;
+  invariant(
+    !listing ||
+      (listing.base === root.base.head &&
+        listing.head === root.result.head &&
+        read(source.files!.sha256).length === source.files!.size),
+    'SOURCE_HASH_MISMATCH',
+    'Pinned Candidate file list differs.',
+  );
+  const changes = (
+    listing?.files ??
+    reviewPaths(parseNativeState(read(root.base.head)).files, parseNativeState(read(root.result.head)).files)
   ).filter(f => f.status !== 'unchanged' && (!command.file || f.path === command.file));
   const fileIndex = retained?.fileIndex ?? 0;
   invariant(fileIndex <= changes.length, 'BAD_ARGUMENT', 'Provenance cursor is beyond the selected files.');

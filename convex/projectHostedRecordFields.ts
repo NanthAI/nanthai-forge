@@ -37,6 +37,8 @@ export const hostedRecordFields = {
   /** Epoch of the authenticated input aggregate retained for clean and conflicted Candidates. */
   provenanceEpoch: v.optional(v.number()),
   restoreBases: v.optional(v.string()),
+  /** Trusted source-worker output; byte bodies remain in R2. */
+  candidateFiles: v.optional(v.object({ sha256: v.string(), size: v.number() })),
   digest: v.string(),
   bytes: v.number(),
   /** Canonical journal-row hash for digest-only Work migration comparisons. */

@@ -323,6 +323,35 @@ Stop writing `viewFiles`, source and payload rows. The web app and CLI derive a 
 
 Done when: a landing writes zero rows to `projectWorkDataRecords`; the Candidate page shows its file list within the current time on the 4k and 29k fixtures; generic record pages and source-return snapshots that named these collections have a stated replacement. Removes: `projectWorkDataRecords` after a bounded migration (minus one table, about 3.3 GB modelled on dev).
 
+S4 readers negotiate `candidate-source-files` using the existing contract-feature
+mechanism. Canonical web Candidates do not require a legacy Work generation;
+legacy indexed Views remain readable. The planned writer uses a default-off
+server environment setting, like S1's capsule writer, after the readers deploy.
+There is no new settings table or user step.
+
+The remaining data-projection readers have these replacement boundaries. These
+are the migration contract, not a claim that the writer has switched:
+
+| Existing collection/read | Replacement |
+| --- | --- |
+| `viewFiles` | Exact Candidate State comparison, or its one trusted R2 file-list object; canonical Lane-version history remains the provenance source. |
+| `sourceBlobs` | Existing project object catalog/download descriptors, verified by digest and size under current access. |
+| `sourcePins` | Canonical Channel, Lane and Candidate selectors; historical checkpoint membership comes from that exact checkpoint's R2 manifest. |
+| `sourceTrees`, `sourceTreePaths` | The selected immutable State's R2 file manifest. |
+| Source parent/ancestry collections | Registered source metadata and verified State parents; the trusted source step retains ancestry proof at its existing publication boundary. |
+| `*:payload` | Selected canonical Work records and exact R2 Work-record leaves, with mutable header overlays and current server-side identity mapping preserved. |
+| `_workStore*` | Canonical record digests and the existing migration comparison, without another raw projection copy. |
+| Source-return snapshot entries | Source return is already retired with `CLI_UPGRADE_REQUIRED`; portable checkpoints and canonical recovery/export preserve source and Work, rather than treating disposable index rows as canonical history. Existing retained snapshot reads remain until their callers migrate. |
+
+Existing rows are not deleted in S4. The follow-up migration must pin a project
+and generation, inventory in pages of at most 100 rows and 500 KiB, verify every
+replacement's digest/size and full attribute/provenance coverage, and exercise
+export/restore before removing a verified projection copy. Keep a resumable,
+retry-safe cursor and the original canonical source/Work/audit history. No
+maintenance runs implicitly, and no table is dropped until old generations,
+generic readers, selected lookups and snapshot readers have all moved. Removal
+and billed savings remain unverified while the old writer or flag remains.
+
 ### S5. State-bound physical manifest
 
 The source step that writes a State also writes its physical manifest: digest to binding (raw key, pack range or recipe), stored as a recipe that shares unchanged chunks with the parent's manifest. CI, clones and the source worker read it with one signed grant instead of descriptor windows.

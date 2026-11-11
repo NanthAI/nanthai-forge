@@ -13,6 +13,8 @@
  * reuse or remove a name; the CLI keeps the old safe behaviour whenever a name is not advertised.
  */
 export const hostedContractFeatures = [
+  /** Candidate files read from exact R2 States without a legacy Work generation. */
+  'candidate-source-files',
   /** put-planning-item keeps every stored field the put omits (c0255160). Without it the CLI sends
    * the stored kind, title, body, status, links and group, as older servers require. */
   'planning-put-keeps-omitted',

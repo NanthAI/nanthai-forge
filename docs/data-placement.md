@@ -85,6 +85,15 @@ only verified frozen-manifest files; the repair records a backfill time and move
 | `githubRepositoryVisibility` | Last GitHub visibility read per runner repository (private projects only), overwritten in place and reused for 5 minutes. | Fixed, one row per runner repository |
 | `secretObjects`, `secretVersions`, `secretGrants`, `secretEvents`, `secretDeletions` | Encrypted Secret Objects and grants. | Fixed |
 
+Canonical Candidate file readers negotiate `candidate-source-files`. Their
+source-only R2 listing, when a trusted producer supplies it, pins the exact base
+and head and contains changed paths, modes and blob identities, with no people
+or Work payloads. The browser otherwise compares the two exact State manifests;
+CLI provenance retains its canonical history reader. The source-file-list
+writer and removal of legacy data projections remain pending on S4. Existing
+`projectWorkDataRecords` rows are unchanged; the reader landing performs no
+migration or deletion. See the [replacement and migration plan](research/placement-review.md#s4-per-file-projections-leave-convex).
+
 ## Planning search
 
 Before filing an Issue or friction, search for an existing planning item and

@@ -1,5 +1,10 @@
 # Status
 
+Canonical hosted Candidates show their changed-file list without requiring a
+legacy Work generation. Browser and CLI readers accept a server-pinned R2
+file-list object and retain the exact-State fallback; no projection writer has
+switched yet. Canonical browser save attribution remains incomplete.
+
 Live landing observations keep one current request snapshot and compact transition
 entries that share its immutable identity and request. Selected history pages
 reconstruct the same replies, including older full observations, without reading

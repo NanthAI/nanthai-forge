@@ -42,6 +42,26 @@ export const composeRequestSchema = z
   })
   .strict()
   .refine(value => value.inputs.count + value.dependencies.count > 0, 'Select a Lane or dependency.');
+export const candidateFileListSchema = z
+  .object({
+    schema: z.literal(1),
+    kind: z.literal('forge-candidate-files'),
+    base: object.shape.sha256,
+    head: object.shape.sha256,
+    inputs: z.array(composeLaneSchema.pick({ laneId: true, head: true })).optional(),
+    dependencies: z.array(composeDependencySchema.pick({ candidateId: true, head: true })).optional(),
+    files: z.array(
+      z
+        .object({
+          path: z.string(),
+          status: z.enum(['added', 'deleted', 'modified']),
+          before: stateSchema.shape.files.element.nullable(),
+          after: stateSchema.shape.files.element.nullable(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
 export const composeInputSchema = z
   .object({
     schema: z.literal(1),

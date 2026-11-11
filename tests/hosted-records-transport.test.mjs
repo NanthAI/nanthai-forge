@@ -705,3 +705,31 @@ test('each file continuation reports complete history when all its pinned input 
   assert.equal(second.result.files[0].lines.status, 'available');
   assert.equal(second.result.nextCursor, null);
 });
+
+test('negotiated Candidate file-list pins preserve canonical CLI provenance without an extra root read', async t => {
+  const s = await provenanceFixture(t);
+  const { reviewPaths } = await import('../dist/source-review-format.js');
+  const before = await s.transport.dispatch('provenance', { candidateId: s.candidate.id, lines: true });
+  const listing = s.put({
+    schema: 1,
+    kind: 'forge-candidate-files',
+    base: s.candidate.base.head,
+    head: s.candidate.result.head,
+    files: reviewPaths(s.base.value.files, s.selected.value.files).filter(
+      file => file.status !== 'unchanged',
+    ),
+  });
+  const row = [...s.tables.projectHostedRecords.values()].find(
+    row => row.kind === 'candidate' && row.key === s.candidate.id,
+  );
+  await s.ctx.db.patch(row._id, { candidateFiles: listing });
+  // Simulate the feature set already learned by the process's ordinary capability read.
+  s.transport.serverFeatures = ['candidate-source-files'];
+  const calls = s.calls.length;
+  const after = await s.transport.dispatch('provenance', { candidateId: s.candidate.id, lines: true });
+  assert.deepEqual(after.result.files, before.result.files);
+  assert.deepEqual(after.result.why, before.result.why);
+  assert.deepEqual(after.sourceContext, before.sourceContext);
+  assert.equal(s.calls.slice(calls).filter(name => name === 'projectHostedCompose:candidate').length, 2);
+  assert.equal(after.result.cost.idleCalls, 0);
+});

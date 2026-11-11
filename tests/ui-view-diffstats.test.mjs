@@ -25,7 +25,7 @@ test('first View open uses one lazy action; subsequent opens reuse saved metadat
   const client = {
     query: async (ref, request) => {
       assert.equal(getFunctionName(ref), 'projectViewReads:read');
-      assert.deepEqual(request, args);
+      assert.deepEqual(request, { ...args, features: ['candidate-source-files'] });
       return JSON.stringify({ ...metadata, changes: saved });
     },
     action: async (ref, request) => {
