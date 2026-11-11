@@ -19,7 +19,7 @@ import { coordinationClient } from '../dist/coordination-client.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from '../dist/host-delete.js';
 import { hostedAgentDirectory } from '../dist/hosted-agent-journal.js';
 import { moduleUrl } from './convex-module.mjs';
-import { state } from './hosted-fixture.mjs';
+import { state, projectRow } from './hosted-fixture.mjs';
 import { settleR2Purge } from './default-r2.mjs';
 const backups = await import(moduleUrl('../convex/projectBackups.ts'));
 const lifecycle = await import(moduleUrl('../convex/projectLifecycle.ts'));
@@ -48,7 +48,7 @@ function setup(t, { bound = false } = {}) {
   const client = {
     query: async (ref, args) => {
       calls.push({ name: getFunctionName(ref), args });
-      return { page: [structuredClone(project)], isDone: true, continueCursor: '' };
+      return structuredClone(project);
     },
     mutation: async (ref, args) => {
       calls.push({ name: getFunctionName(ref), args });
@@ -68,6 +68,20 @@ function setup(t, { bound = false } = {}) {
   };
 }
 const code = expected => error => error.code === expected;
+function cancelledWait(client) {
+  const controller = new AbortController();
+  return {
+    client,
+    signal: controller.signal,
+    subscribe: () => ({
+      onUpdate: () => {
+        queueMicrotask(() => controller.abort());
+        return () => {};
+      },
+      close: async () => {},
+    }),
+  };
+}
 test('delete refuses missing or mismatched slug confirmation before mutation or journal creation', async t => {
   const f = setup(t);
   for (const confirm of ['', 'Synthetic', 'other'])
@@ -137,16 +151,9 @@ test('unbound owner sends the public mutation exact revision and saved operation
   assert.equal(readHostState(f.store).binding, undefined);
   assert.equal(readFileSync(join(f.root, 'hello.ts'), 'utf8'), 'export const hello = 1;\n');
 });
-test('project lookup follows owner list pages and refuses unavailable or non-owner projects', async t => {
-  const f = setup(t),
-    query = f.client.query;
-  f.client.query = (ref, args) =>
-    args.paginationOpts.cursor === null
-      ? Promise.resolve({ page: [{ id: 'other' }], isDone: false, continueCursor: 'next' })
-      : query(ref, args);
-  await deleteHostedProject(f.root, f.options, { client: f.client });
-  assert.equal(f.calls[0].args.paginationOpts.cursor, 'next');
-  f.client.query = async () => ({ page: [], isDone: true, continueCursor: '' });
+test('project lookup refuses unavailable or non-owner projects before saving a deletion', async t => {
+  const f = setup(t);
+  f.client.query = async () => null;
   await assert.rejects(
     deleteHostedProject(f.root, f.options, { client: f.client }),
     code('PROJECT_UNAVAILABLE'),
@@ -157,6 +164,11 @@ test('project lookup follows owner list pages and refuses unavailable or non-own
   await assert.rejects(
     deleteHostedProject(f.root, f.options, { client: f.client }),
     error => error.code === 'PROJECT_UNAVAILABLE' && error.message === 'Owner access required.',
+  );
+  assert.equal(f.calls.length, 0);
+  assert.equal(
+    readdirSync(f.store.directory).some(name => name.startsWith('host-delete-')),
+    false,
   );
 });
 test('non-owner mutation errors are surfaced without claiming deletion', async t => {
@@ -178,7 +190,7 @@ test('non-owner mutation errors are surfaced without claiming deletion', async t
     false,
   );
 });
-test('bounded polling retains request on pending or unknown replies and retry reuses original pins', async t => {
+test('subscription deadline retains request on pending or unknown replies and retry reuses original pins', async t => {
   const f = setup(t),
     requests = [];
   f.client.mutation = async (_ref, args) => {
@@ -202,7 +214,7 @@ test('bounded polling retains request on pending or unknown replies and retry re
     removal: 'deleting',
   });
   await assert.rejects(
-    deleteHostedProject(f.root, f.options, { client: f.client, pollAttempts: 2, pollIntervalMs: 0 }),
+    deleteHostedProject(f.root, f.options, cancelledWait(f.client)),
     code('HOST_DELETE_PENDING'),
   );
   assert.deepEqual(requests[1], requests[0]);
@@ -265,17 +277,9 @@ test('real public handlers accept a CLI owner identity and scheduled purge reach
     request;
   const client = {
     query: async (ref, args) => {
-      assert.equal(getFunctionName(ref), 'projectBackups:list');
-      if (submitted && ++reads === 2) {
-        for (let i = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; i++) {
-          assert.ok(i < 250);
-          // Time passes beyond the upload-expiry settle wait.
-          s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
-          settleR2Purge(s.tables.hostedProjects.get('project'));
-          await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
-        }
-      }
-      return backups.list._handler(s.ctx, args);
+      assert.equal(getFunctionName(ref), 'projectBackups:deletionStatus');
+      if (submitted) reads++;
+      return backups.deletionStatus._handler(s.ctx, args);
     },
     mutation: async (ref, args) => {
       assert.equal(getFunctionName(ref), 'projectLifecycle:permanentlyDelete');
@@ -284,8 +288,28 @@ test('real public handlers accept a CLI owner identity and scheduled purge reach
       return lifecycle.permanentlyDelete._handler(s.ctx, args);
     },
   };
-  const result = await deleteHostedProject(f.root, f.options, { client, pollIntervalMs: 0 });
-  assert.equal(reads, 2);
+  let closed = false;
+  const subscribe = () => ({
+    onUpdate: (_ref, args, update, error) => {
+      void (async () => {
+        update(await backups.deletionStatus._handler(s.ctx, args));
+        for (let i = 0; s.tables.hostedProjects.get('project').removal === 'deleting'; i++) {
+          assert.ok(i < 250);
+          s.tables.hostedProjects.get('project').removedAt -= purgeSettleMs;
+          settleR2Purge(s.tables.hostedProjects.get('project'));
+          await lifecycle.purge._handler(s.ctx, { projectId: 'project' });
+        }
+        update(await backups.deletionStatus._handler(s.ctx, args));
+      })().catch(error);
+      return () => {};
+    },
+    close: async () => {
+      closed = true;
+    },
+  });
+  const result = await deleteHostedProject(f.root, f.options, { client, subscribe });
+  assert.equal(reads, 1);
+  assert.equal(closed, true);
   assert.deepEqual(s.tables.hostedProjects.get('project').lifecycle, {
     operationId: request.operationId,
     expectedRevision: 7,
@@ -315,20 +339,14 @@ test('real CLI uses saved device authentication and emits progress plus the tomb
       JSON.stringify({
         status: 'success',
         value:
-          body.path === 'projectBackups:list'
+          body.path === 'projectBackups:deletionStatus'
             ? {
-                page: [
-                  {
-                    id: 'project',
-                    slug: 'synthetic',
-                    name: deleted ? '' : 'Synthetic',
-                    revision: deleted ? 8 : 7,
-                    currentBackup: null,
-                    ...(deleted ? { removal: 'deleted' } : {}),
-                  },
-                ],
-                isDone: true,
-                continueCursor: '',
+                id: 'project',
+                slug: 'synthetic',
+                name: deleted ? '' : 'Synthetic',
+                revision: deleted ? 8 : 7,
+                currentBackup: null,
+                ...(deleted ? { removal: 'deleted' } : {}),
               }
             : null,
       }),
@@ -408,9 +426,7 @@ test('hosted client forwards the bounded observation abort signal to its HTTP tr
     signal: AbortSignal.abort(),
   });
   await assert.rejects(
-    client.query(makeFunctionReference('projectBackups:list'), {
-      paginationOpts: { cursor: null, numItems: 100 },
-    }),
+    client.query(makeFunctionReference('projectBackups:deletionStatus'), { projectId: 'project' }),
     error => error.name === 'AbortError',
   );
 });
@@ -460,7 +476,7 @@ test('blocked R2 purge grant is actionable immediately and retry retains the ori
   await assert.rejects(
     deleteHostedProject(f.root, f.options, {
       client: f.client,
-      wait: async () => assert.fail('blocked purge must not poll'),
+      subscribe: () => assert.fail('blocked purge needs no live wait'),
     }),
     error =>
       error.code === 'R2_PURGE_UNAUTHORIZED' &&
@@ -503,22 +519,86 @@ test('CLI names retry exhaustion without claiming completion', async t => {
   );
 });
 
-test('CLI observation backs off modestly and stops at ten observations', async t => {
-  const f = setup(t),
-    delays = [];
+test('pending deletion makes zero idle calls and subscription closes on the exact project tombstone', async t => {
+  const f = setup(t);
   f.client.mutation = async () => null;
-  await assert.rejects(
-    deleteHostedProject(f.root, f.options, {
-      client: f.client,
-      wait: async (delay, signal) => {
-        assert.equal(signal.aborted, false);
-        delays.push(delay);
+  const ready = Promise.withResolvers();
+  let update,
+    unsubscribe = 0,
+    closed = 0,
+    subscriptions = 0;
+  const waiting = deleteHostedProject(f.root, f.options, {
+    client: f.client,
+    subscribe: () => ({
+      onUpdate: (ref, args, next) => {
+        subscriptions++;
+        assert.equal(getFunctionName(ref), 'projectBackups:deletionStatus');
+        assert.deepEqual(args, { projectId: 'project' });
+        update = next;
+        ready.resolve();
+        return () => {
+          unsubscribe++;
+        };
+      },
+      close: async () => {
+        closed++;
       },
     }),
-    code('HOST_DELETE_PENDING'),
-  );
-  assert.deepEqual(delays, [2000, 4000, 8000, 10000, 10000, 10000, 10000, 10000, 10000]);
-  assert.equal(f.calls.length, 11, 'one lookup plus ten finite status reads');
+  });
+  await ready.promise;
+  assert.equal(f.calls.length, 2, 'two finite status reads, no catalog or idle reads');
+  assert.equal(subscriptions, 1);
+  update({ id: 'project', name: 'Synthetic', revision: 8, currentBackup: null, removal: 'deleting' });
+  await Promise.resolve();
+  assert.equal(f.calls.length, 2, 'a pending notification never starts another query');
+  update({ id: 'project', name: '', revision: 8, currentBackup: null, removal: 'deleted' });
+  assert.equal((await waiting).purgeComplete, true);
+  assert.equal(unsubscribe, 1);
+  assert.equal(closed, 1);
+});
+
+test('deletion subscription releases its connection on timeout, revoked access, missing project and transport errors', async t => {
+  for (const outcome of ['deadline', 'AUTH_REVOKED', 'missing', 'transport']) {
+    const f = setup(t);
+    f.client.mutation = async () => null;
+    const controller = new AbortController();
+    let unsubscribed = 0,
+      closed = 0;
+    await assert.rejects(
+      deleteHostedProject(f.root, f.options, {
+        client: f.client,
+        signal: controller.signal,
+        subscribe: () => ({
+          onUpdate: (_ref, _args, update, error) => {
+            if (outcome === 'deadline') controller.abort();
+            else if (outcome === 'missing') update(null);
+            else
+              error(
+                outcome === 'AUTH_REVOKED'
+                  ? new ConvexError({ code: 'AUTH_REVOKED', message: 'Revoked.' })
+                  : new Error('Synthetic connection error'),
+              );
+            return () => {
+              unsubscribed++;
+            };
+          },
+          close: async () => {
+            closed++;
+          },
+        }),
+      }),
+      code(
+        {
+          deadline: 'HOST_DELETE_PENDING',
+          missing: 'PROJECT_UNAVAILABLE',
+          transport: 'HOST_DELETE_INTERRUPTED',
+          AUTH_REVOKED: 'AUTH_REVOKED',
+        }[outcome],
+      ),
+    );
+    assert.equal(unsubscribed, 1);
+    assert.equal(closed, 1);
+  }
 });
 
 function pendingHost(projectId = 'project', selectedDeployment = deployment) {
@@ -715,5 +795,196 @@ test('a retry after the server cleared the slug reconciles the saved delete; a d
   await assert.rejects(
     deleteHostedProject(g.root, g.options, { client: g.client }),
     code('HOST_DELETE_CONFIRM_MISMATCH'),
+  );
+});
+
+// Count returned DB documents and their logical JSON bytes, including the CLI
+// credential and account joins. No hostedProjects query is allowed at any scale.
+function statusReadBudget(s) {
+  const budget = { documents: 0, bytes: 0, projectGets: 0 };
+  const record = value => {
+    for (const row of Array.isArray(value) ? value : (value?.page ?? [value])) {
+      if (!row) continue;
+      budget.documents++;
+      budget.bytes += Buffer.byteLength(JSON.stringify(row));
+    }
+    return value;
+  };
+  const db = s.ctx.db;
+  const wrapQuery = query =>
+    new Proxy(query, {
+      get(target, key) {
+        const method = target[key];
+        if (typeof method !== 'function') return method;
+        return (...args) => {
+          const value = method.apply(target, args);
+          return ['unique', 'first', 'take', 'collect', 'paginate'].includes(key)
+            ? Promise.resolve(value).then(record)
+            : wrapQuery(value);
+        };
+      },
+    });
+  s.ctx.db = new Proxy(db, {
+    get(target, key) {
+      if (key === 'get')
+        return async id => {
+          if (s.tables.hostedProjects.has(id)) budget.projectGets++;
+          return record(await target.get(id));
+        };
+      if (key === 'query')
+        return table => {
+          assert.notEqual(table, 'hostedProjects', 'single-project deletion never scans an owner catalog');
+          return wrapQuery(target.query(table));
+        };
+      const value = target[key];
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  return budget;
+}
+function statusOwner(s) {
+  const credentialId = randomUUID();
+  s.tables.cliCredentials.set('device', {
+    _id: 'device',
+    _creationTime: 1,
+    owner: 'owner',
+    credentialId,
+    scope: 'cli',
+    revoked: false,
+    expiresAt: 8_000_000_000_000,
+  });
+  s.tables.forgeAccounts.set('account', {
+    _id: 'account',
+    _creationTime: 1,
+    owner: 'owner',
+    handle: 'synthetic-owner',
+  });
+  s.ctx.auth.getUserIdentity = async () => ({ subject: 'owner', forgeCredential: credentialId });
+}
+test('c088b39e deletion and status call/document/byte budgets stay constant with 1 or 500 unrelated owner projects', async t => {
+  const measured = [];
+  for (const count of [1, 500]) {
+    const f = setup(t),
+      s = state([]);
+    statusOwner(s);
+    s.tables.hostedProjects.set(
+      'project',
+      projectRow({
+        _id: 'project',
+        slug: 'synthetic',
+        revision: 7,
+        retention: {
+          purgeAt: 8_000_000_000_000,
+          revoking: true,
+          retainedBytes: 4096,
+          retainedObjects: 1,
+          measured: true,
+        },
+      }),
+    );
+    for (let i = 0; i < count; i++)
+      s.tables.hostedProjects.set(
+        `other-${i}`,
+        projectRow({
+          _id: `other-${i}`,
+          key: `other-key-${i}`,
+          name: `Other ${i}`,
+          agentGuidance: 'x'.repeat(4000),
+        }),
+      );
+    const budget = statusReadBudget(s);
+    let queries = 0,
+      mutations = 0,
+      subscriptions = 0,
+      closed = 0;
+    const status = () => backups.deletionStatus._handler(s.ctx, { projectId: 'project' });
+    const client = {
+      query: (ref, args) => {
+        queries++;
+        assert.equal(getFunctionName(ref), 'projectBackups:deletionStatus');
+        assert.deepEqual(args, { projectId: 'project' });
+        return status();
+      },
+      mutation: async (_ref, args) => {
+        mutations++;
+        assert.equal(args.projectId, 'project');
+        Object.assign(s.tables.hostedProjects.get('project'), { revision: 8, removal: 'deleting' });
+      },
+    };
+    const result = await deleteHostedProject(f.root, f.options, {
+      client,
+      subscribe: () => ({
+        onUpdate: (_ref, _args, update, error) => {
+          subscriptions++;
+          void (async () => {
+            update(await status());
+            const row = s.tables.hostedProjects.get('project');
+            Object.assign(row, { name: '', removal: 'deleted' });
+            delete row.slug;
+            delete row.retention;
+            update(await status());
+          })().catch(error);
+          return () => {};
+        },
+        close: async () => {
+          closed++;
+        },
+      }),
+    });
+    assert.equal(result.purgeComplete, true);
+    const deletion = { ...budget, queries, mutations, subscriptions };
+    assert.equal(closed, 1);
+    const beforeReplay = { ...budget };
+    assert.equal((await deleteHostedProject(f.root, f.options, { client })).operationId, result.operationId);
+    const replay = Object.fromEntries(Object.keys(budget).map(key => [key, budget[key] - beforeReplay[key]]));
+    assert.equal(mutations, 1, 'tombstone replay never resubmits deletion');
+    assert.equal(subscriptions, 1, 'tombstone replay opens no subscription');
+    assert.equal(deletion.documents, 12, 'four deliveries each read project, credential and account only');
+    assert.equal(deletion.projectGets, 4);
+    assert.ok(deletion.bytes < 4000, 'one command reads a few KB, independent of unrelated data');
+    assert.equal(replay.documents, 3);
+    measured.push({ deletion, replay });
+  }
+  assert.deepEqual(measured[1], measured[0]);
+  t.diagnostic(JSON.stringify(measured[0]));
+});
+
+test('narrow deletion status retains tombstones and checks the current owner and live device credential on every delivery', async () => {
+  const s = state([]);
+  statusOwner(s);
+  s.tables.hostedProjects.set('project', projectRow({ _id: 'project', name: '', removal: 'deleted' }));
+  const read = projectId => backups.deletionStatus._handler(s.ctx, { projectId });
+  assert.equal((await read('project')).removal, 'deleted');
+  assert.equal(await read('missing'), null);
+  // Public visibility and an ordinary contributor grant never grant owner deletion status.
+  Object.assign(s.tables.hostedProjects.get('project'), { owner: 'other', visibility: 'public' });
+  s.tables.projectContributors.set('grant', { projectId: 'project', contributor: 'owner' });
+  assert.equal(await read('project'), null);
+  s.tables.hostedProjects.get('project').owner = 'owner';
+  assert.equal((await read('project')).removal, 'deleted');
+  s.tables.cliCredentials.get('device').revoked = true;
+  await assert.rejects(read('project'), error => error.data?.code === 'AUTH_REVOKED');
+  s.ctx.auth.getUserIdentity = async () => null;
+  assert.equal(await read('project'), null);
+});
+
+test('legacy maintenance-blocked purge remains explicit without any wait or new confirmation', async t => {
+  const f = setup(t);
+  f.client.mutation = async () =>
+    f.project({
+      id: 'project',
+      slug: 'synthetic',
+      name: 'Synthetic',
+      revision: 8,
+      currentBackup: null,
+      removal: 'deleting',
+      purgeBlocked: 'R2_MAINTENANCE_DISABLED',
+    });
+  await assert.rejects(
+    deleteHostedProject(f.root, f.options, {
+      client: f.client,
+      subscribe: () => assert.fail('blocked status opens no subscription'),
+    }),
+    code('R2_MAINTENANCE_DISABLED'),
   );
 });

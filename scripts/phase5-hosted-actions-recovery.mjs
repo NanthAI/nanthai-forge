@@ -175,7 +175,7 @@ export async function cleanupActionsDrill(context) {
         confirm: new URL(report.project.projectUrl).pathname.split('/').at(-1),
         allowBoundProject: true,
       },
-      { client, pollAttempts: 40, pollIntervalMs: 500 },
+      { client },
     ),
   );
   assert(deleted.purgeComplete);

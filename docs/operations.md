@@ -712,13 +712,16 @@ current owner authentication select the hosted project. Deployment selection use
 default deployment. To delete the project ROOT itself is bound to, explicitly add
 `--allow-bound-project`. The check compares both deployment and project ID.
 
-The command reads the owner's project metadata, retains the operation UUID and
+The command reads only the selected project's current-owner metadata, including tombstones, through
+`projectBackups:deletionStatus` (a direct project lookup plus indexed credential/account reads).
+Its read cost is independent of unrelated projects in the owner's catalog. It retains the operation UUID and
 expected revision privately under ROOT's Work directory (a clone's client cache, or the config directory for an address) before submitting, prints
-progress, and waits for up to ten observations, backing off from two seconds to
-ten seconds between reads. Completion
+progress, and checks the submitted result once. A pending purge uses one Convex subscription to
+that same narrow read, with no idle polling calls; each delivery rechecks current authorization.
+The connection closes on completion, timeout or error. Completion
 prints `purgeComplete: true` and the observed tombstone (`removal: "deleted"`,
 `name: ""`, `currentBackup: null`). `--json` emits progress and result JSON lines.
-A pending purge exits with `HOST_DELETE_PENDING`; an interrupted request or poll
+A pending purge exits with `HOST_DELETE_PENDING`; an interrupted request or subscription
 can be retried with the exact same command and ROOT to reuse its saved pins.
 The entire network observation window is bounded to ninety seconds, including slow
 requests. Owner/authentication and server concurrency errors remain explicit. An

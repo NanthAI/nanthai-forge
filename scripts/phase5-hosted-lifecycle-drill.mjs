@@ -309,7 +309,7 @@ export async function liveHostedMachineDrill(directory) {
             deployment: drillDeployment,
             allowBoundProject: true,
           },
-          { client, pollAttempts: 40, pollIntervalMs: 500 },
+          { client },
         );
         report.cleanup = deleted.purgeComplete ? 'deleted' : 'retained';
       } catch (error) {

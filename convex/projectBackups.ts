@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { accountFor } from './urlIdentity';
+import { projectExecution } from './projectExecution';
 import { archivePut, reserveArchive, commitArchive, archiveTarget } from './archiveUpload';
 import { v } from 'convex/values';
 import { paginationOptsValidator, paginationResultValidator } from 'convex/server';
@@ -55,32 +56,72 @@ export const backupItem = v.object({
   at: v.number(),
 });
 
-export const list = query({
-  args: { paginationOpts: paginationOptsValidator },
-  returns: paginationResultValidator(
+const projectStatus = v.object({
+  id: v.id('hostedProjects'),
+  key: v.string(),
+  handle: v.optional(v.string()),
+  slug: v.optional(v.string()),
+  name: v.string(),
+  currentBackup: v.union(v.id('projectBackups'), v.null()),
+  revision: v.number(),
+  removal: v.optional(projectRemoval),
+  purgeBlocked: v.optional(projectPurgeBlocked),
+  removedAt: v.optional(v.number()),
+  retention: v.optional(
     v.object({
-      id: v.id('hostedProjects'),
-      key: v.string(),
-      handle: v.optional(v.string()),
-      slug: v.optional(v.string()),
-      name: v.string(),
-      currentBackup: v.union(v.id('projectBackups'), v.null()),
-      revision: v.number(),
-      removal: v.optional(projectRemoval),
-      purgeBlocked: v.optional(projectPurgeBlocked),
-      removedAt: v.optional(v.number()),
-      retention: v.optional(
-        v.object({
-          purgeAt: v.number(),
-          revoking: v.optional(v.boolean()),
-          retainedBytes: v.number(),
-          retainedObjects: v.number(),
-          measured: v.boolean(),
-        }),
-      ),
-      purge: v.optional(projectPurge),
+      purgeAt: v.number(),
+      revoking: v.optional(v.boolean()),
+      retainedBytes: v.number(),
+      retainedObjects: v.number(),
+      measured: v.boolean(),
     }),
   ),
+  purge: v.optional(projectPurge),
+});
+function statusItem(project: Doc<'hostedProjects'>, handle?: string) {
+  return {
+    id: project._id,
+    key: project.key,
+    ...(handle ? { handle } : {}),
+    ...(project.slug ? { slug: project.slug } : {}),
+    name: project.name,
+    currentBackup: project.currentBackup,
+    revision: project.revision,
+    ...(project.removal ? { removal: project.removal } : {}),
+    ...(project.purgeBlocked ? { purgeBlocked: project.purgeBlocked } : {}),
+    ...(project.removal && project.removedAt ? { removedAt: project.removedAt } : {}),
+    ...(project.retention
+      ? {
+          retention: {
+            purgeAt: project.retention.purgeAt,
+            ...(project.retention.revoking ? { revoking: true } : {}),
+            retainedBytes: project.retention.retainedBytes,
+            retainedObjects: project.retention.retainedObjects,
+            measured: project.retention.measured,
+          },
+        }
+      : {}),
+    ...(project.removal && project.purge ? { purge: project.purge } : {}),
+  };
+}
+/** Current-owner lookup includes deletion and tombstone records. A saved local
+ * request never grants access, and unrelated projects are not read or observed. */
+export const deletionStatus = query({
+  args: { projectId: v.id('hostedProjects') },
+  returns: v.union(projectStatus, v.null()),
+  handler: async (ctx, { projectId }) => {
+    const user = await ctx.auth.getUserIdentity();
+    if (!user) return null;
+    const project = await ctx.db.get(projectId);
+    if (!project || project.owner !== user.subject) return null;
+    projectExecution(ctx, projectId, project.name, project.key);
+    const account = await accountFor(ctx, user.subject);
+    return statusItem(project, account?.handle);
+  },
+});
+export const list = query({
+  args: { paginationOpts: paginationOptsValidator },
+  returns: paginationResultValidator(projectStatus),
   handler: async (ctx, { paginationOpts }) => {
     const user = await ctx.auth.getUserIdentity();
     if (!user) return { page: [], isDone: true, continueCursor: '' };
@@ -90,33 +131,7 @@ export const list = query({
       .order('desc')
       .paginate(paginationOpts);
     const account = await accountFor(ctx, user.subject);
-    return {
-      ...result,
-      page: result.page.map(project => ({
-        id: project._id,
-        key: project.key,
-        ...(account ? { handle: account.handle } : {}),
-        ...(project.slug ? { slug: project.slug } : {}),
-        name: project.name,
-        currentBackup: project.currentBackup,
-        revision: project.revision,
-        ...(project.removal ? { removal: project.removal } : {}),
-        ...(project.purgeBlocked ? { purgeBlocked: project.purgeBlocked } : {}),
-        ...(project.removal && project.removedAt ? { removedAt: project.removedAt } : {}),
-        ...(project.retention
-          ? {
-              retention: {
-                purgeAt: project.retention.purgeAt,
-                ...(project.retention.revoking ? { revoking: true } : {}),
-                retainedBytes: project.retention.retainedBytes,
-                retainedObjects: project.retention.retainedObjects,
-                measured: project.retention.measured,
-              },
-            }
-          : {}),
-        ...(project.removal && project.purge ? { purge: project.purge } : {}),
-      })),
-    };
+    return { ...result, page: result.page.map(project => statusItem(project, account?.handle)) };
   },
 });
 export const history = query({

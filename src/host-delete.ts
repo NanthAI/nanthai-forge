@@ -3,7 +3,6 @@ import { networkTimeout } from './network-fetch.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { makeFunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
 import { z } from 'zod';
@@ -13,12 +12,18 @@ import { dirname } from 'node:path';
 import { hostedAgentAddress } from './hosted-agent-address.js';
 import { hostedAgentDirectory } from './hosted-agent-journal.js';
 import { workLocked } from './work-lock.js';
-import { coordinationClient, type CoordinationTransport } from './coordination-client.js';
+import {
+  coordinationClient,
+  coordinationCredentials,
+  type CoordinationTransport,
+} from './coordination-client.js';
 import { readHostState, updateHostState, retirePendingHost } from './host-binding.js';
 import { WorkStore } from './work-store.js';
 import { ForgeError, invariant } from './errors.js';
 import { syncDirectory } from './state/durability.js';
 import { deriveProjectPhase } from './project-phase.js';
+import type { HostedRunSubscription } from './hosted-agent-observe.js';
+import { deadlineConvexSubscription } from './network-convex-client.js';
 
 type Project = {
   id: string;
@@ -103,15 +108,14 @@ function deleteLocal(root: string, options: DeleteProjectOptions): Local {
   }
 }
 
-/** Uses the same owner-only list and permanent-removal mutation as the browser. */
+/** Reconciles one current-owner project through the public permanent-removal mutation. */
 export async function deleteHostedProject(
   root: string,
   options: DeleteProjectOptions,
   dependencies?: {
     client: CoordinationTransport;
-    pollAttempts?: number;
-    pollIntervalMs?: number;
-    wait?: (delay: number, signal: AbortSignal) => Promise<void>;
+    subscribe?: () => HostedRunSubscription;
+    signal?: AbortSignal;
   },
 ) {
   const local = deleteLocal(root, options),
@@ -130,7 +134,7 @@ export async function deleteHostedProject(
     'HOST_DELETE_BOUND_PROJECT',
     'This ROOT is bound to that project. Add --allow-bound-project to explicitly delete it.',
   );
-  const signal = networkTimeout(90_000);
+  const signal = dependencies?.signal ?? networkTimeout(90_000);
   const client =
       dependencies?.client ?? coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN, { signal }),
     key = createHash('sha256')
@@ -143,27 +147,15 @@ export async function deleteHostedProject(
     renameSync(temporary, path);
     syncDirectory(local.directory);
   };
-  const readProject = async (): Promise<Project> => {
-    let cursor: string | null = null;
-    do {
-      signal.throwIfAborted();
-      const result = (await client.query(makeFunctionReference<'query'>('projectBackups:list'), {
-        paginationOpts: { cursor, numItems: 100 },
-      })) as { page: Project[]; isDone: boolean; continueCursor: string };
-      const project = result.page.find(item => item.id === options.projectId);
-      if (project) return project;
-      if (result.isDone) break;
-      invariant(
-        result.continueCursor !== cursor,
-        'HOST_DELETE_STATUS_FAILED',
-        'Project list did not advance. Retry this command.',
-      );
-      cursor = result.continueCursor;
-    } while (true);
-    throw new ForgeError(
-      'PROJECT_UNAVAILABLE',
-      'This Forge project is unavailable with the current account.',
-    );
+  const reference = makeFunctionReference<'query'>('projectBackups:deletionStatus');
+  const args = { projectId: options.projectId };
+  const availableProject = (value: unknown): Project => {
+    invariant(value, 'PROJECT_UNAVAILABLE', 'This Forge project is unavailable with the current account.');
+    return value as Project;
+  };
+  const readProject = async () => {
+    signal.throwIfAborted();
+    return availableProject(await client.query(reference, args));
   };
   try {
     let project = await readProject();
@@ -259,26 +251,67 @@ export async function deleteHostedProject(
     options.onProgress?.(
       `Permanent removal ${request.operationId}: requested; waiting for purge completion.`,
     );
-    const pollAttempts = dependencies?.pollAttempts ?? 10;
-    for (let attempt = 0; attempt < pollAttempts; attempt++) {
-      project = await readProject();
-      if (project.removal === 'deleted') return result();
+    const pending = () =>
+      new ForgeError(
+        'HOST_DELETE_PENDING',
+        `Purge completion is not yet confirmed (${project.removal ?? 'active'}). Retry this command to resume operation ${request.operationId}.`,
+      );
+    const complete = () => {
+      if (project.removal === 'deleted') return true;
       const phase = deriveProjectPhase(project, Date.now());
       if (phase.state === 'purge-blocked')
         throw new ForgeError(
           project.purgeBlocked!,
           `${phase.reason} ${phase.nextStep} To resume operation ${request.operationId}, retry this command.`,
         );
-      if (attempt + 1 < pollAttempts) {
-        const delay = Math.min((dependencies?.pollIntervalMs ?? 2000) * 2 ** attempt, 10_000);
-        if (dependencies?.wait) await dependencies.wait(delay, signal);
-        else await sleep(delay, undefined, { signal });
+      return false;
+    };
+    // A completed or blocked purge needs no live connection. Pending work uses
+    // one subscription, including an initial value to cover the read/subscribe race.
+    project = await readProject();
+    if (complete()) return result();
+    const subscription = (
+      dependencies?.subscribe ??
+      (() => {
+        const credentials = coordinationCredentials(deployment, process.env.FORGE_AUTH_TOKEN);
+        const live = deadlineConvexSubscription(credentials.url, {
+          logger: false,
+          unsavedChangesWarning: false,
+        });
+        live.setAuth(async () => credentials.token);
+        return live;
+      })
+    )();
+    let unsubscribe: (() => void) | undefined;
+    let stop: (() => void) | undefined;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        stop = () => reject(pending());
+        signal.addEventListener('abort', stop, { once: true });
+        if (signal.aborted) return stop();
+        unsubscribe = subscription.onUpdate(
+          reference,
+          args,
+          value => {
+            try {
+              project = availableProject(value);
+              if (complete()) resolve();
+            } catch (error) {
+              reject(error);
+            }
+          },
+          reject,
+        );
+      });
+    } finally {
+      if (stop) signal.removeEventListener('abort', stop);
+      try {
+        unsubscribe?.();
+      } finally {
+        await subscription.close();
       }
     }
-    throw new ForgeError(
-      'HOST_DELETE_PENDING',
-      `Purge completion is not yet confirmed (${project.removal ?? 'active'}). Retry this command to resume operation ${request.operationId}.`,
-    );
+    return result();
   } catch (error) {
     if (error instanceof ConvexError && error.data && typeof error.data === 'object') {
       const data = error.data as { code?: unknown; message?: unknown };
