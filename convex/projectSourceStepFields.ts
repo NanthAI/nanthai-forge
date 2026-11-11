@@ -51,6 +51,8 @@ export const sourceStepTables = {
   projectSourceSteps: defineTable({
     ...retryFields,
     generation: v.optional(v.number()),
+    /** Captured once at dispatch, so retries never follow a later setting change. */
+    physicalManifests: v.optional(v.literal(true)),
     projectId: v.id('hostedProjects'),
     jobId: v.string(),
     dispatch: v.string(),

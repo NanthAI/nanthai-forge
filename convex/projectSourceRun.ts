@@ -79,7 +79,11 @@ export const submit = action({
       const { objects, input: text, progress: shaped, settle, clientMs, ...submit } = input;
       // Upload-pack members the commit read and checked; the step reads small ones from memory.
       const held = new Map<string, Uint8Array>();
-      const verified = objects?.length ? await commitObjects(ctx, user.subject, objects, held) : [];
+      const bindings = new Map<
+        string,
+        { sha256: string; size: number; r2Key: string; pack?: import('../src/object-pack-range').ObjectPack }
+      >();
+      const verified = objects?.length ? await commitObjects(ctx, user.subject, objects, held, bindings) : [];
       const measuredMs = saveDurationMs(clientMs, Math.max(0, Date.now() - receivedAt));
       const submitted: { payload: string; run: string | null } = JSON.parse(
         await ctx.runMutation(makeFunctionReference<'mutation'>('projectSourceRunStore:submit'), {
@@ -99,6 +103,7 @@ export const submit = action({
             inline: true,
             chain: input.kind === 'save',
             verified,
+            bindings: [...bindings.values()],
             // Keyed by its own digest: only the text whose pin the job names is ever served.
             preloaded: [...(text !== undefined ? [{ ...savePinOfText(text), text }] : []), ...heldText(held)],
           },

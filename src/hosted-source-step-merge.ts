@@ -166,6 +166,15 @@ export async function prepareMergeStep(
           c.composeBases = [...bases];
         } else delete c.composeBases;
       }
+      if (io.seedPhysicalState && !io.hasPhysicalState?.(left)) {
+        if (!files.has(left)) await new MemorySourceReader(source, io).bytes(plan.main);
+        await io.seedPhysicalState(plan.main.object, files.get(left) ?? source.state(left).files);
+      }
+      if (io.writePhysicalState && !io.hasPhysicalState?.(c.head)) {
+        const ref = c.inventory[c.head]!;
+        if (!files.has(c.head)) await new MemorySourceReader(source, io).bytes(ref);
+        await io.writePhysicalState(ref.object, files.get(c.head) ?? source.state(c.head).files, [left]);
+      }
       if (c.composeBases && files.has(c.head)) {
         const listing = candidateFileList(
           plan.base.head,
@@ -402,6 +411,21 @@ export async function computeMergeStep(
   if ((c.plan as { kind: string }).kind === 'forge-hosted-sync-input') {
     const reader = new MemorySourceReader(source, io);
     const result = await buildHostedSyncState(c.input, c.plan, reader, source, async () => {});
+    const own = source.objects.get(result.head);
+    // Generated States may still be uploading; their uploader owns the physical
+    // recipe. Only an existing fast-forward needs this metadata-only publication.
+    if (io.writePhysicalState && !io.hasPhysicalState?.(result.head) && !(own && source.outputState(own))) {
+      const selected = source.state(result.head);
+      const ref = c.inventory[result.head] ?? (await io.describeBatch!([result.head]))[0]!;
+      const work = (
+        c.plan as { work: { left?: { object: { sha256: string } }; right?: { object: { sha256: string } } } }
+      ).work;
+      await io.writePhysicalState(
+        ref.object,
+        selected.files,
+        [work.left?.object.sha256, work.right?.object.sha256].filter((id): id is string => !!id),
+      );
+    }
     c.output = result.output;
     c.head = result.head;
     c.phase = 'done';
@@ -424,6 +448,11 @@ export async function computeMergeStep(
     return;
   }
   const plan = sourceValidation('SOURCE_JOB_INVALID', () => composeInputSchema.parse(c.plan));
+  if (io.seedPhysicalState && !io.hasPhysicalState?.(plan.main.object.sha256)) {
+    const reader = new MemorySourceReader(source, io);
+    await reader.bytes(plan.main);
+    await io.seedPhysicalState(plan.main.object, source.state(plan.main.object.sha256).files);
+  }
   // Member accounting starts with the first quantum; an older in-flight cursor has none.
   if (plan.batch && c.index === 0) c.batchMerged ??= [];
   if (c.index >= c.selections.length) {
@@ -435,6 +464,12 @@ export async function computeMergeStep(
       state = (await io.describeBatch([c.head]))[0]!.object;
     }
     const reader = new MemorySourceReader(source, io);
+    const own = source.objects.get(c.head);
+    if (io.writePhysicalState && !io.hasPhysicalState?.(c.head) && !(own && source.outputState(own))) {
+      const ref = c.inventory[c.head] ?? (await io.describeBatch!([c.head]))[0]!;
+      await reader.bytes(ref);
+      await io.writePhysicalState(state, source.state(c.head).files, [plan.main.object.sha256]);
+    }
     const docs = docsMerge(c.docsPaths ?? []);
     const listing =
       !c.candidateFiles && c.composeBases && c.head === plan.base.head

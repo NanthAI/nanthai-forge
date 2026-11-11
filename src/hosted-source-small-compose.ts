@@ -179,6 +179,9 @@ export async function runSmallSourceCompose(
         })(),
       );
     // No output before eligibility is proven, so fallback reuses the same input and descriptors.
+    await io.seedPhysicalState?.(plan.main.object, left.files);
+    if (generated) io.rememberOutputState?.(state, [plan.base.head, entry.head], files);
+    else await io.writePhysicalState?.(state, files, [plan.base.head]);
     const results = await Promise.allSettled([
       ...(generated ? [upload(state, generated)] : []),
       upload(listingPin, listing),

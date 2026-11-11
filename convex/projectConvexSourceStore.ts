@@ -107,6 +107,7 @@ export async function startConvexSource(
     executionId,
     step: 0,
     cursor: null,
+    ...(process.env.FORGE_PHYSICAL_MANIFESTS === '1' ? { physicalManifests: true as const } : {}),
     timing: { queuedAt: Date.now(), scheduledAt: Date.now(), steps: [] },
   });
   const scheduledId = await ctx.scheduler.runAfter(
@@ -259,6 +260,7 @@ export const begin = sourceMutation({
       generation: active.row.generation ?? 0,
       input: active.job.input,
       jobKind: active.job.jobKind,
+      ...(active.row.physicalManifests ? { physicalManifests: true } : {}),
       dispatch: active.row.dispatch,
       executionId: active.row.executionId,
       cursor: active.row.cursor,

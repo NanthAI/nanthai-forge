@@ -184,8 +184,13 @@ Trusted source actions also accept a State's optional `statePhysical` recipe pin
 in the descriptor reply they already read. The root and requested digest buckets
 are hash/size verified and State-bound before their raw, packed or recipe
 bindings enter the action-local transport. Missing or invalid manifests name the
-catalog fallback without changing selected digests. No writer is enabled by this
-reader-first support; legacy catalogs and external readers remain available.
+catalog fallback without changing selected digests. The shared default-off
+`FORGE_PHYSICAL_MANIFESTS` setting is captured when a source step is dispatched.
+With it enabled, compose seeds legacy main once; later State writes share
+unchanged manifest buckets and resolve only new bindings. Ordinary save and sync
+never seed. Roots and packed changed chunks use the existing R2 output commit;
+Convex holds one root pin per State. Legacy noncanonical bindings retain explicit
+catalog fallback. Catalogs and external readers remain available during rollout.
 
 **Save-time upload packs.** A save (and any hosting upload window) with more than one new small object sends them as one pack in the same format: members back to back, nothing between, at most 8 MiB (`src/object-pack-upload.ts`, contract feature `upload-packs`). The client names the pack (digest, size, member indexes) in the prepare it already makes (`projectHostedSaves:prepare` `uploadPack`, `projectObjects:prepareBatch` `pack`); the server signs one create-only, checksum-bound PUT and writes one pending pack row holding the member list, and no member row. R2's checksum covers the pack, not its members, so the commit that already runs (`commitObjects`, inside `projectSourceRun:submit` or `commitBatch`) reads the pack once and checks every member digest before it writes the member rows with their byte ranges, in the transaction that commits the pack. An unverified member therefore never exists as a stored row: a planted member fails closed, binds nothing, never dedupes, and a later honest upload of that digest prepares afresh; readers still check every digest. A member that is already stored makes the whole proposal fall back to per-object PUTs, so no bytes are kept twice. The commit hands the small checked members (the save's delta page) to the save step in memory. A clone reads each save's new objects with one ranged GET per run, like an import window; `tests/r2-write-path.test.mjs`, `tests/r2-read-path.test.mjs` and `tests/hosted-save-sync-efficiency.test.mjs` cover the PUT and GET counts, the planted member and mixed history.
 

@@ -8,8 +8,8 @@ import { invariant } from '../src/errors';
 import { sourceMutation } from './projectConvexSourceErrors';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { signRecipeClosure } from './projectRecipeClosure';
-import { presignGet, r2Config } from './r2';
-import { findObject, type ObjectView } from './projectObjectFind';
+import { presignGet, r2Config, r2Key } from './r2';
+import { findObject, findObjects, type ObjectView } from './projectObjectFind';
 import { packRange, packHeaders } from '../src/object-pack-range';
 const identity = { projectId: v.id('hostedProjects'), jobId: v.string(), step: v.number() };
 /** Object storage locations stay inside the trusted action. No worker HTTP
@@ -22,6 +22,7 @@ export const resolve = sourceMutation({
     probe: v.optional(v.boolean()),
     known: v.array(v.string()),
     windows: v.optional(v.number()),
+    seed: v.optional(v.literal(true)),
   },
   returns: v.string(),
   handler: async (ctx, args) => {
@@ -32,7 +33,35 @@ export const resolve = sourceMutation({
     );
     const active = await activeStep(ctx, args);
     invariant(active, 'SOURCE_JOB_FENCED', 'Source step advanced.');
-    invariant(args.digests.length <= 100, 'SOURCE_JOB_INVALID', 'Resolve source in bounded windows.');
+    invariant(
+      args.digests.length <= (args.seed ? 2700 : 100),
+      'SOURCE_JOB_INVALID',
+      'Resolve source in bounded windows.',
+    );
+    if (args.seed) {
+      invariant(
+        active.job.jobKind === 'compose' && active.row.physicalManifests && !args.ancestry && !args.probe,
+        'SOURCE_JOB_INVALID',
+        'Only the captured compose seed reads a physical inventory.',
+      );
+      const rows = await findObjects(ctx, args.projectId, args.digests);
+      return canonicalPayload(
+        rows.map(row =>
+          row &&
+          !row.removed &&
+          isStored(row) &&
+          (row.recipe ||
+            (row.location === 'r2' && row.r2Key === r2Key(args.projectId, row.pack?.digest ?? row.digest)))
+            ? {
+                sha256: row.digest,
+                size: row.size,
+                ...(row.recipe ? { recipe: { sha256: row.recipe.digest, size: row.recipe.size } } : {}),
+                ...(row.pack ? { pack: row.pack } : {}),
+              }
+            : null,
+        ),
+      );
+    }
     const project = await ctx.db.get(args.projectId),
       generation = project ? await selectedGeneration(ctx, project) : null;
     // Graph descriptor hints warm a bounded breadth-first page. Byte ordering

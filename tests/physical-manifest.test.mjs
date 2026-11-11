@@ -226,3 +226,29 @@ test('trusted source transport uses the catalog for invalid manifests and nonmem
   assert.equal((await io.describeBatch([raw.sha256]))[0].object.sha256, raw.sha256);
   assert.deepEqual(requested, [metadata.sha256, raw.sha256]);
 });
+
+test('direct-save bindings reuse only the current project physical object', async () => {
+  for (const project of ['project', 'other']) {
+    let calls = 0;
+    const { io } = convexSourceTransport(
+      {
+        runMutation: async (_name, args) => {
+          calls++;
+          return JSON.stringify(
+            args.digests.map(sha256 => ({
+              descriptor: { object: { sha256, size: raw.size }, recipe: null },
+              storageId: null,
+              url: 'https://synthetic.invalid/current-project-object',
+            })),
+          );
+        },
+      },
+      { projectId: 'project', jobId: 'job', step: 0 },
+      [],
+      undefined,
+      { bindings: [{ ...raw, r2Key: `v1/p/${project}/o/${raw.sha256}` }] },
+    );
+    assert.deepEqual(await io.describeBatch([raw.sha256]), [{ object: raw, recipe: null }]);
+    assert.equal(calls, project === 'project' ? 0 : 1);
+  }
+});

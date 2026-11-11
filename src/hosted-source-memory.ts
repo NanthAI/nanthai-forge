@@ -48,7 +48,9 @@ export class MemoryMergeSource extends LazyMergeSource {
   outputState(bytes: Buffer) {
     const id = this.generatedBytes.get(bytes),
       state = id ? this.parsed.get(id) : undefined;
-    return id && state ? { pin: { sha256: id, size: bytes.length }, parents: state.parents } : null;
+    return id && state
+      ? { pin: { sha256: id, size: bytes.length }, parents: state.parents, files: state.files }
+      : null;
   }
   override state(id: string): NativeState {
     // This is an explicit proven graph cut, not a claim about stored parents.
@@ -228,7 +230,7 @@ export class MemorySourceReader extends SourceWorkerReader {
   override async publishMany(bytes: Buffer[]): Promise<WorkerPin[]> {
     for (const content of bytes) {
       const own = this.source.outputState(content);
-      if (own) this.io.rememberOutputState?.(own.pin, own.parents);
+      if (own) this.io.rememberOutputState?.(own.pin, own.parents, own.files);
     }
     const pins = await super.publishMany(bytes);
     for (let i = 0; i < pins.length; i++) this.source.objects.set(pins[i]!.sha256, bytes[i]!);

@@ -128,9 +128,13 @@ export async function runSmallSourceSave(
     else files.delete(change.path);
   }
   const uploads: Promise<void>[] = [];
-  const publish = (bytes: Uint8Array, parents?: readonly string[]) => {
+  const publish = (
+    bytes: Uint8Array,
+    parents?: readonly string[],
+    files?: readonly import('./state/format.js').NativeFile[],
+  ) => {
     const pin = { sha256: digest(bytes), size: bytes.length };
-    if (parents) io.rememberOutputState?.(pin, parents);
+    if (parents) io.rememberOutputState?.(pin, parents, files);
     uploads.push(
       io.upload(
         pin,
@@ -157,7 +161,7 @@ export async function runSmallSourceSave(
       'Source file and directory paths overlap.',
     );
     const manifest = new TextEncoder().encode(JSON.stringify(next));
-    state = publish(manifest, next.parents);
+    state = publish(manifest, next.parents, next.files);
   }
   const output = publish(
     new TextEncoder().encode(

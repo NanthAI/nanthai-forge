@@ -10,6 +10,7 @@ import { ForgeError, invariant } from './errors.js';
 import { objectRecipeSchema, readObjectRecipe } from './object-chunks.js';
 import { jobObject } from './hosted-source-job.js';
 import { workerObjectSchema, type WorkerObject, type WorkerPin } from './hosted-source-worker-format.js';
+import type { NativeFile } from './state/format.js';
 
 /** Trusted transport resolves current job-scoped grants; repo bytes supply no URL.
  * upload consumes the stream completely and commits only the supplied exact pin. */
@@ -17,7 +18,12 @@ export interface SourceWorkerTransport {
   /** Trusted, current descriptor metadata; never a field in client plans. */
   /** Fixed source builders may register parents of their own already validated
    * generated State. Publication still verifies the exact whole-object hash. */
-  rememberOutputState?(pin: WorkerPin, parents: readonly string[]): void;
+  rememberOutputState?(pin: WorkerPin, parents: readonly string[], files?: readonly NativeFile[]): void;
+  /** Trusted compose-only one-time seed, never called by an ordinary State write. */
+  seedPhysicalState?(pin: WorkerPin, files: readonly NativeFile[]): Promise<void>;
+  /** Fast-forwards can select an existing State without uploading its bytes again. */
+  writePhysicalState?(pin: WorkerPin, files: readonly NativeFile[], bases: readonly string[]): Promise<void>;
+  hasPhysicalState?(id: string): boolean;
   stateGeneration?(id: string): number | undefined;
   rememberStateGenerations?(values: Record<string, number>): void;
   publishRecipe?(object: WorkerPin, recipe: WorkerPin): Promise<void>;

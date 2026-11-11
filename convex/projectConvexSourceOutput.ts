@@ -15,6 +15,7 @@ export type SourceOutput = {
   stateGeneration?: number;
   stateSize?: StateSize;
   stateParents?: string[];
+  statePhysical?: { sha256: string; size: number };
   storageId?: Id<'_storage'>;
   r2Key?: string;
   recipe?: { sha256: string; size: number };
@@ -146,11 +147,32 @@ export async function storeSourceOutputs(
       'Immutable State parents changed.',
     );
     invariant(!old || old.size === pin.size, 'SOURCE_HASH_MISMATCH', 'Stored source size changed.');
+    if (pin.statePhysical) {
+      const root = await findObject(ctx, projectId, pin.statePhysical.sha256);
+      invariant(
+        root &&
+          !root.removed &&
+          isR2Object(root) &&
+          !root.pack &&
+          root.size === pin.statePhysical.size &&
+          root.r2Key === r2Key(projectId, root.digest),
+        'SOURCE_HASH_MISMATCH',
+        'Physical manifest root is not committed in this project.',
+      );
+      invariant(
+        !old?.statePhysical ||
+          (old.statePhysical.sha256 === pin.statePhysical.sha256 &&
+            old.statePhysical.size === pin.statePhysical.size),
+        'SOURCE_HASH_MISMATCH',
+        'Immutable State physical manifest changed.',
+      );
+    }
     // Written once from the hash-verified manifest, like the generation; never cleared.
     const graph = {
       ...(closure === undefined ? {} : { recipeClosure: closure }),
       ...(pin.stateGeneration === undefined ? {} : { stateGeneration: pin.stateGeneration }),
       ...(pin.stateParents === undefined ? {} : { stateParents: pin.stateParents }),
+      ...(pin.statePhysical === undefined ? {} : { statePhysical: pin.statePhysical }),
     };
     if (!old)
       await ctx.db.insert('projectObjects', {
@@ -179,6 +201,7 @@ export async function storeSourceOutputs(
       !old.sourceReferenced ||
       (old.stateGeneration === undefined && pin.stateGeneration !== undefined) ||
       (old.stateParents === undefined && pin.stateParents !== undefined) ||
+      (old.statePhysical === undefined && pin.statePhysical !== undefined) ||
       (old.recipeClosure === undefined && pin.recipeClosure !== undefined)
     )
       await ctx.db.patch((await objectRow(ctx, old))._id, { sourceReferenced: true, ...graph });

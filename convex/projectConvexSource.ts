@@ -38,6 +38,13 @@ export type InlineStepOptions = {
   /** Objects this action just committed after a HEAD confirmed their exact size and checksum
    * (`commitObjects`). A small save does not download them again only to re-hash them. */
   verified?: readonly { sha256: string; size: number }[];
+  /** Bindings this action just committed and checksum/member-verified, in the same project. */
+  bindings?: readonly {
+    sha256: string;
+    size: number;
+    r2Key: string;
+    pack?: import('../src/object-pack-range').ObjectPack;
+  }[];
   /** Exact small texts this action holds (the job input it just wrote, or the one its caller sent);
    * the step reads them from memory after the same digest check a download gets. */
   preloaded?: readonly { sha256: string; size: number; text: string }[];
@@ -68,6 +75,9 @@ export async function runConvexSourceStep(
       const transport = convexSourceTransport(ctx, input, state.locations, undefined, {
         overlapWrites: true,
         preloaded: options.preloaded,
+        bindings: options.bindings,
+        physicalManifests: state.physicalManifests === true,
+        sourceKind: state.jobKind,
       });
       let output;
       try {
@@ -95,6 +105,7 @@ export async function runConvexSourceStep(
               ...state,
               locations: [...transport.locations.values()],
               preloaded: transport.preloaded(),
+              ...(options.bindings ? { bindings: options.bindings } : {}),
             }),
             delegatedAt: Date.now(),
           });

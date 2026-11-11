@@ -59,6 +59,9 @@ export const step = internalAction({
               overlapWrites: true,
               hash: nativeDigest,
               preloaded: supplied ? state.preloaded : undefined,
+              physicalManifests: state.physicalManifests === true,
+              sourceKind: state.jobKind,
+              bindings: supplied ? state.bindings : undefined,
             },
           ),
           durable = sourceStorage(ctx, input.projectId, nativeDigest, putMetrics.observer('progress'));

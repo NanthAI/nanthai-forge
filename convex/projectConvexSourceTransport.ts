@@ -17,12 +17,13 @@ import { sourceStorage, sourceR2Pin } from './projectConvexSourceStorage';
 import { r2Key, presignGet, r2Config } from './r2';
 import { r2Counts } from './presign';
 import { ForgeError, invariant } from '../src/errors';
-import { parseNativeState } from '../src/state/format';
+import { parseNativeState, type NativeFile } from '../src/state/format';
+import { sourcePhysicalManifests } from './projectConvexPhysicalManifest';
 import { nextStateGeneration, validStateGeneration, validStateParents } from '../src/state/generation';
 import { SourceIoError, transientSourceStatus } from '../src/hosted-source-io-error';
 import { retryR2Lag } from '../src/hosted-r2-retry';
 import { sourceDomainError } from './projectConvexSourceErrors';
-import { packHeaders, verifyPackRange, type PackRange } from '../src/object-pack-range';
+import { packHeaders, verifyPackRange, type PackRange, type ObjectPack } from '../src/object-pack-range';
 import { sourceStepClock } from '../src/source-step-clock';
 import type { PhysicalManifestReader } from '../src/physical-manifest';
 import type { PhysicalPin, PhysicalEntry } from '../src/physical-manifest-codec';
@@ -52,6 +53,9 @@ export function convexSourceTransport(
     hash = digest,
     preloaded = [],
     putMetrics = sourcePutMetrics(),
+    physicalManifests = false,
+    sourceKind,
+    bindings = [],
   }: {
     overlapWrites?: boolean;
     /** Node supplies native SHA-256; V8 retains portable hashing. */
@@ -60,6 +64,9 @@ export function convexSourceTransport(
     /** Exact small texts the calling action already holds (an input it wrote, or one its caller
      * sent). A matching read is served from memory; a text that fails its pin is ignored. */
     preloaded?: readonly { sha256: string; size: number; text: string }[] | undefined;
+    physicalManifests?: boolean;
+    sourceKind?: string;
+    bindings?: readonly { sha256: string; size: number; r2Key: string; pack?: ObjectPack }[] | undefined;
   } = {},
 ) {
   // Fan-out tasks pass their wider identity; the object validator accepts only these fields.
@@ -98,7 +105,8 @@ export function convexSourceTransport(
   );
   const generations = new Map<string, number>(),
     parents = new Map<string, string[]>(),
-    outputParents = new Map<string, readonly string[]>();
+    outputParents = new Map<string, readonly string[]>(),
+    outputFiles = new Map<string, readonly NativeFile[]>();
   const remember = (rows: ObjectLocation[]) => {
     for (const row of rows) {
       chunks.remember(row);
@@ -111,6 +119,18 @@ export function convexSourceTransport(
   remember(initial);
   const held = new Map<string, Uint8Array>(),
     generatedKeys = new Map<string, string>();
+  // Only the committing action supplies these, after checking their bodies. A
+  // different project's committed pin never becomes a source read location.
+  for (const binding of bindings) {
+    if (binding.r2Key !== r2Key(projectId, binding.pack?.digest ?? binding.sha256)) continue;
+    locations.set(binding.sha256, {
+      descriptor: { object: { sha256: binding.sha256, size: binding.size }, recipe: null },
+      storageId: null,
+      url: null,
+      ...(binding.pack ? { range: { offset: binding.pack.offset, total: binding.pack.size } } : {}),
+    });
+    generatedKeys.set(binding.sha256, binding.r2Key);
+  }
   for (const value of preloaded) {
     const bytes = new TextEncoder().encode(value.text);
     if (bytes.length === value.size && hash(bytes) === value.sha256) held.set(value.sha256, bytes);
@@ -229,9 +249,69 @@ export function convexSourceTransport(
     }
     return reader;
   };
+  const physical = sourcePhysicalManifests({
+    enabled: physicalManifests,
+    sourceKind,
+    projectId,
+    locations,
+    outputs,
+    key: id => generatedKeys.get(id)?.split('/').at(-1),
+    reader: manifestReader,
+    log: reportBindings,
+    put: async bytes => {
+      const pin = { sha256: hash(bytes), size: bytes.length };
+      const ref = await clock.write(() => stateStorage.store(bytes, pin));
+      invariant(
+        sourceR2Pin(ref)?.sha256 === pin.sha256,
+        'SOURCE_HASH_MISMATCH',
+        'Physical manifest storage changed.',
+      );
+      return { ...pin, r2Key: r2Key(projectId, pin.sha256) };
+    },
+    describe: async (ids, seed) => {
+      if (!seed) {
+        await io.describeBatch!(ids);
+        return ids.map(id => {
+          const row = locations.get(id)!;
+          if (row.descriptor.recipe) return { ...row.descriptor.object, recipe: row.descriptor.recipe };
+          const key =
+            generatedKeys.get(id)?.split('/').at(-1) ??
+            (row.url ? new URL(row.url).pathname.split('/').at(-1) : undefined);
+          return key && /^[a-f0-9]{64}$/.test(key)
+            ? {
+                ...row.descriptor.object,
+                ...(row.range
+                  ? { pack: { digest: key, size: row.range.total, offset: row.range.offset } }
+                  : {}),
+              }
+            : null;
+        });
+      }
+      const found: (PhysicalEntry | null)[] = [];
+      for (let at = 0; at < ids.length; at += 2700)
+        found.push(
+          ...JSON.parse(
+            await clock.call(() =>
+              ctx.runMutation(reference('projectConvexSourceObjects:resolve'), {
+                ...input,
+                digests: ids.slice(at, at + 2700),
+                ancestry: false,
+                known: [],
+                seed: true,
+              }),
+            ),
+          ),
+        );
+      return found;
+    },
+  });
   const io: StepTransport = {
-    rememberOutputState: (pin, parents) => {
+    hasPhysicalState: id => !!locations.get(id)?.statePhysical,
+    ...(physical.seedPhysicalState ? { seedPhysicalState: physical.seedPhysicalState } : {}),
+    ...(physical.writePhysicalState ? { writePhysicalState: physical.writePhysicalState } : {}),
+    rememberOutputState: (pin, parents, files) => {
       if (validStateParents(parents)) outputParents.set(pin.sha256, [...parents]);
+      if (physicalManifests && files) outputFiles.set(pin.sha256, files);
     },
     recipeLeaves: id => locations.get(id)?.closure?.map(leaf => ({ sha256: leaf.digest, size: leaf.size })),
     rememberBytes: (pin, bytes) => {
@@ -484,7 +564,9 @@ export function convexSourceTransport(
     );
     // These are hash-verified worker outputs. Only the exact State parent
     // list can select a generation; plans, display hints and uploads cannot.
-    let stateGeneration: number | undefined, stateParents: string[] | undefined;
+    let stateGeneration: number | undefined,
+      stateParents: string[] | undefined,
+      stateFiles = outputFiles.get(pin.sha256);
     const prefix = new TextDecoder().decode(bytes.subarray(0, 256));
     const ownParents = outputParents.get(pin.sha256);
     if (ownParents) {
@@ -494,6 +576,7 @@ export function convexSourceTransport(
     } else if (prefix.includes('"kind":"forge-source-state"')) {
       try {
         const state = parseNativeState(bytes);
+        if (physicalManifests) stateFiles = state.files;
         stateGeneration = nextStateGeneration(state.parents, id => generations.get(id));
         if (stateGeneration !== undefined) generations.set(pin.sha256, stateGeneration);
         if (validStateParents(state.parents)) stateParents = [...state.parents];
@@ -509,6 +592,8 @@ export function convexSourceTransport(
     }
     return {
       async store(): Promise<SourceOutput> {
+        const manifest =
+          stateParents && stateFiles ? await physical.output(pin, stateFiles, stateParents) : null;
         const projected = stateParents ? await chunks.output(pin, bytes) : null;
         if (projected) {
           // The closure is signed locally for later quanta only after each body
@@ -539,12 +624,19 @@ export function convexSourceTransport(
               closure: projected.recipeClosure!.map(leaf => byDigest.get(leaf.sha256)!),
               ...(stateGeneration === undefined ? {} : { stateGeneration }),
               stateParents,
+              ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
             },
           ]);
           return {
             ...projected,
             ...(stateGeneration === undefined ? {} : { stateGeneration }),
             stateParents,
+            ...(manifest
+              ? {
+                  statePhysical: manifest.statePhysical,
+                  physical: [...(projected.physical ?? []), ...manifest.physical],
+                }
+              : {}),
           };
         }
         const ref = await clock.write(() => (stateParents ? stateStorage : durable).store(bytes, pin)),
@@ -558,6 +650,7 @@ export function convexSourceTransport(
             descriptor: { object: pin, recipe: null },
             ...(stateGeneration === undefined ? {} : { stateGeneration }),
             ...(stateParents === undefined ? {} : { stateParents }),
+            ...(manifest ? { statePhysical: manifest.statePhysical } : {}),
             storageId: r2 ? null : (ref as Id<'_storage'>),
             url: null,
           },
@@ -566,6 +659,7 @@ export function convexSourceTransport(
           ...pin,
           ...(stateGeneration === undefined ? {} : { stateGeneration }),
           ...(stateParents === undefined ? {} : { stateParents }),
+          ...(manifest ?? {}),
           ...(r2 ? { r2Key: r2Key(projectId, r2.sha256) } : { storageId: ref as Id<'_storage'> }),
         };
       },

@@ -192,6 +192,10 @@ export async function commitObjects(
   actor: string,
   objects: readonly { id: Id<'projectObjects'> }[],
   held?: Map<string, Uint8Array>,
+  bindings?: Map<
+    string,
+    { sha256: string; size: number; r2Key: string; pack?: import('../src/object-pack-range').ObjectPack }
+  >,
 ): Promise<{ sha256: string; size: number }[]> {
   invariant(objects.length <= 100, 'BAD_ARGUMENT', 'Commit content in pages of at most 100.');
   if (!objects.length) return [];
@@ -235,6 +239,20 @@ export async function commitObjects(
   if (verified.length) await ctx.runMutation(internal.projectObjectCommit.markCommitted, { rows: verified });
   const failed = results.find(r => r.failure);
   invariant(!failed, failed?.failure?.[0] ?? '', failed?.failure?.[1] ?? '');
+  for (const { row, checked } of results) {
+    if (!checked) continue;
+    bindings?.set(row.digest, { sha256: row.digest, size: row.size, r2Key: row.key });
+    let offset = 0;
+    for (const member of row.members ?? []) {
+      bindings?.set(member.digest, {
+        sha256: member.digest,
+        size: member.size,
+        r2Key: row.key,
+        pack: { digest: row.digest, size: row.size, offset },
+      });
+      offset += member.size;
+    }
+  }
   return results.flatMap(({ row, checked }) =>
     checked
       ? [
