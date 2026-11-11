@@ -3,7 +3,9 @@ import { CUTOVER_UPGRADE } from './cutover-version.js';
 import { workerPath } from './worker-install.js';
 import { transitionBoundSourceAuthority } from './source-authority-client.js';
 import { cutoverBoundProject, boundCutoverPins } from './source-cutover-client.js';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { join } from 'node:path';
+import { nativeOwner } from './native-source.js';
 import { deleteHostedProject, parseDeleteProjectOptions } from './host-delete.js';
 import { checkServiceEnv } from './worker-environment.js';
 import { effectivePolicy as childPolicy } from './autonomy-policy.js';
@@ -124,7 +126,9 @@ export async function hostCli(args: string[], host: typeof hostProject = hostPro
       }
     } else invariant(false, 'BAD_ARGUMENT', HOST_HELP);
   }
-  if (!flags.includes('--resume'))
+  // A new directory has no Work store yet. hostProject creates its native
+  // bootstrap; opening WorkStore here would incorrectly require Git first.
+  if (!flags.includes('--resume') && (existsSync(join(root, '.git')) || nativeOwner(realpathSync(root))))
     invariant(
       !readHostState(WorkStore.open<'directory'>(root, { readOnly: true })).hosting,
       'HOST_RESUME_REQUIRED',

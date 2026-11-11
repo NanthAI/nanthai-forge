@@ -2,159 +2,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { createServer } from 'node:http';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { ConvexError, convexToJson, jsonToConvex } from 'convex/values';
-import { validate } from 'convex-helpers/validators';
-import { writeAuth } from '../dist/auth-store.js';
-import { tmpdir } from 'node:os';
-import { getFunctionName, makeFunctionReference } from 'convex/server';
+import { mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { getFunctionName } from 'convex/server';
 import { moduleUrl } from './convex-module.mjs';
-import { fixture, modules, upload } from './project-exchange-fixture.mjs';
 import { WorkStore } from '../dist/work-store.js';
 import { WorkService } from '../dist/work.js';
-import { initNative } from '../dist/native-work.js';
 import { workGit } from '../dist/work-git.js';
 import { hostProject, hostCli } from '../dist/host-cli.js';
-import { readHostState, updateHostState, requireHostedBinding } from '../dist/host-binding.js';
-import { ConvexExchange } from '../dist/exchange-client.js';
+import { readHostState, updateHostState } from '../dist/host-binding.js';
 import { HOSTED_WORK_INDEX_FORMAT } from '../dist/work-hosted-summary.js';
 const indexActions = await import(moduleUrl('../convex/projectWorkIndexActions.ts'));
-import { immutableDirectorySync } from './helpers/immutable-directory.mjs';
-const { default: schema } = await import(moduleUrl('../convex/schema.ts'));
 const hosting = await import(moduleUrl('../convex/projectHosting.ts'));
-const devices = await import(moduleUrl('../convex/deviceStore.ts'));
-const projectMain = await import(moduleUrl('../convex/projectMain.ts'));
 const workIndex = await import(moduleUrl('../convex/projectWorkIndex.ts'));
-for (const name of [
-  'projectHostedSeed',
-  'projectHostedSeedActions',
-  'projectHostedAgent',
-  'projectHostedChannels',
-])
-  modules[name] = await import(moduleUrl(`../convex/${name}.ts`));
 const { activeProject } = await import(moduleUrl('../convex/projectAuthority.ts'));
-const privateOwner = immutableDirectorySync('forge-host-', (directory, key) => {
-  const { git, empty } = JSON.parse(key);
-  const root = join(directory, 'owner');
-  mkdirSync(root);
-  writeFileSync(join(root, 'hello.ts'), 'export const hello = 7;\n');
-  if (git) {
-    workGit(root, ['init', '--template=', '--initial-branch=main']);
-    workGit(root, ['add', '.']);
-    workGit(root, [
-      '-c',
-      'user.name=Synthetic',
-      '-c',
-      'user.email=fixture@example.invalid',
-      'commit',
-      '-m',
-      'Seed',
-    ]);
-  } else initNative(root);
-  const store = new WorkStore(root),
-    service = new WorkService(root);
-  const intent = empty
-    ? null
-    : service.execute({ action: 'intent', outcome: 'Synthetic hosted task' }, store.revision()).result;
-  return { intent };
-});
-
-function setup(t, git = false, empty = false) {
-  const {
-    root: directory,
-    value: { intent },
-  } = privateOwner(JSON.stringify({ git, empty }));
-  const root = join(directory, 'owner');
-  t.after(() => rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }));
-  const store = new WorkStore(root);
-  const s = fixture();
-  s.tables.hostedProjects.clear();
-  for (const table of ['projectHostedSeeds', 'projectHostedSeedPages', 'projectHostedChannels'])
-    s.tables[table] = new Map();
-  // The in-memory harness must enforce the deployed document schema on creation.
-  const insert = s.ctx.db.insert;
-  s.ctx.db.insert = async (table, row) => {
-    validate(schema.tables[table].validator, row, { throw: true });
-    return insert(table, row);
-  };
-  const oldWeb = process.env.FORGE_WEB_URL;
-  process.env.FORGE_WEB_URL = 'https://forge.example.invalid';
-  t.after(() => {
-    if (oldWeb === undefined) delete process.env.FORGE_WEB_URL;
-    else process.env.FORGE_WEB_URL = oldWeb;
-  });
-  const credentialId = randomUUID();
-  s.tables.cliCredentials.set('device', {
-    owner: 'owner',
-    credentialId,
-    scope: 'cli',
-    revoked: false,
-    expiresAt: Date.now() + 3_600_000,
-  });
-  let identity = { subject: 'owner', forgeCredential: credentialId };
-  s.ctx.auth.getUserIdentity = async () => identity;
-  const original = s.ctx.runQuery;
-  s.ctx.runQuery =
-    s.ctx.runMutation =
-    s.ctx.runAction =
-      (ref, args) => {
-        const [name, method] = getFunctionName(ref).split(':');
-        if (name === 'projectMain') return projectMain[method]._handler(s.ctx, args);
-        if (name === 'projectHosting') return hosting[method]._handler(s.ctx, args);
-        if (name === 'deviceStore') return devices[method]._handler(s.ctx, args);
-        return original(ref, args);
-      };
-  const client = {
-    mutation: (ref, args) => s.ctx.runMutation(ref, args),
-    action: (ref, args) => s.ctx.runAction(ref, args),
-  };
-  const uploaded = [],
-    exchanges = [];
-  const dependencies = {
-    client,
-    exchange: (projectId, operationId) => {
-      exchanges.push({ projectId, operationId });
-      const transport = new ConvexExchange(
-        'https://fixture.convex.cloud',
-        'fixture',
-        projectId,
-        operationId,
-        null,
-      );
-      transport.client.query = (ref, args) => s.ctx.runQuery(ref, args);
-      transport.client.action = (ref, args) => s.ctx.runAction(ref, args);
-      transport.client.mutation = (ref, args) => s.ctx.runMutation(ref, args);
-      transport.uploadLazyBatch = async objects => {
-        let bytes = 0;
-        for (const object of objects) {
-          const content = await object.read();
-          await upload(s, content, projectId);
-          uploaded.push(object.pin.sha256);
-          bytes += content.length;
-        }
-        return { uploadedObjects: objects.length, uploadedBytes: bytes };
-      };
-      return transport;
-    },
-  };
-  return {
-    s,
-    directory,
-    root,
-    store,
-    intent,
-    dependencies,
-    uploaded,
-    exchanges,
-    identity: value => {
-      identity = value;
-    },
-  };
-}
+import { setup } from './host-cli-fixture.mjs';
 
 test('host creates a brand-new empty native owner through schema-validated Convex functions', async t => {
   const f = setup(t, false, true);
@@ -169,7 +31,8 @@ test('host creates a brand-new empty native owner through schema-validated Conve
   const operationId = result.operationId;
   assert.equal(project.key, operationId);
   assert.equal(project.autonomyPolicy.acceptance.disjointFastPath, false);
-  assert.equal((await hostCli([f.root, '--status'])).binding.acceptanceOwner, true);
+  assert.equal((await hostCli([f.root, '--status'])).binding.acceptanceOwner, false);
+  assert.deepEqual(project.sourceAuthority, { mode: 'server', epoch: 1 });
   const replay = await hosting.create._handler(f.s.ctx, {
     operationId,
     name: 'S1 live synthetic',
@@ -204,7 +67,7 @@ test('host seeds native source/Work and saves owner binding without automaticall
   );
   const status = await hostCli([f.root, '--status']);
   assert.equal(status.binding.projectId, result.projectId);
-  assert.equal(status.binding.acceptanceOwner, true);
+  assert.equal(status.binding.acceptanceOwner, false);
   assert.equal(status.pending, null);
   assert(!readdirSync(f.store.directory).some(path => path.endsWith('.tar.gz')));
   await assert.rejects(hostProject(f.root, {}, f.dependencies), { code: 'HOST_ALREADY_BOUND' });

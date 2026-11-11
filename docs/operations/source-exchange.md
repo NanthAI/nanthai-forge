@@ -4,7 +4,10 @@
 
 Run `nforge login DEPLOYMENT_URL` and approve the device in Forge. Saved credentials are used automatically; `FORGE_AUTH_TOKEN` remains an environment override for CI. Never put credentials in request files. Owners can migrate retained archives. Contributors can read accessible checkpoints and upload immutable proposal objects. A scoped source grant cannot upload.
 
-`nforge host ROOT` creates a project through a one-time paged hosted seed. It pins native main and its actual acceptance receipt
+`nforge host ROOT` creates a project through a one-time paged hosted seed. A plain
+directory is first captured into local Forge-native source without invoking Git;
+normal ignore rules apply, with exact file bytes and executable modes retained.
+Git worktrees keep their Git source/history path. It pins native main and its actual acceptance receipt
 (or explicitly records the bootstrap State when no acceptance exists), portable
 Work bytes/revision, and journal-only commands, attempts, waits and unknown
 outcomes in recovery format 1. Immutable objects and Work records reuse the
@@ -19,8 +22,13 @@ Partial seeds select neither a checkpoint nor hosted main. The final action
 reads and hashes hosted native main, compares it with the pinned native digest,
 then atomically selects the checkpoint and main and records seed completion.
 It checks the authority mode/epoch and selected source/journal pins captured at
-seed start. Seeding preserves native authority; switching authority is a separate
-cutover. No seed polling or scheduled continuation runs. The command drives the
+seed start. New native hosts pin server birth in the original hosting and seed
+request. The final seed transaction selects matching server authority and schema-2
+main together; partial seeds never expose server authority. The resulting project
+can be cloned and its first Lane started immediately, without an index rebuild.
+Existing hosted projects and interrupted older seed requests keep their original
+authority; switching those projects still requires their existing cutover path.
+No seed polling or scheduled continuation runs. The command drives the
 finite pages itself; rerun the same hosting command after an interruption.
 `--wait` remains accepted, with no first-host background history backfill.
 

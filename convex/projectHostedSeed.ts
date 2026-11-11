@@ -6,7 +6,8 @@ import type { Id } from './_generated/dataModel';
 import { activeOwnedProject } from './projectAuthority';
 import { channelRow } from './projectHostedChannels';
 import { isStored } from './projectObjectFields';
-import { requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
+import { nextSourceAuthority, requireSourceAuthority, sourceAuthority } from '../src/hosted-source-authority';
+import { CUTOVER_CLI_VERSION } from '../src/cutover-version';
 import { canonicalPayload } from '../src/hosted-source-operation';
 import { hostedMainV2Schema } from '../src/hosted-main';
 import {
@@ -71,6 +72,17 @@ export const begin = mutation({
         'CHANNEL_CHANGED',
         'Seed a fresh hosted project without replacing selected work.',
       );
+      if (request.serverAuthority)
+        invariant(
+          request.format === 'native' &&
+            project.hostingRequest &&
+            project.revision === 0 &&
+            !project.sourceCutover &&
+            sourceAuthority(project).mode === 'native-owner' &&
+            sourceAuthority(project).epoch === 0,
+          'SOURCE_AUTHORITY_CHANGED',
+          'Server birth seeds only a fresh hosted native project; existing authority is preserved.',
+        );
       const id = await ctx.db.insert('projectHostedSeeds', {
         projectId: input.projectId,
         owner,
@@ -309,13 +321,19 @@ export const commit = internalMutation({
         channels: [{ name: 'main', head: request.head }],
       },
     });
+    // A new host becomes agent-writable only when its complete, verified source
+    // and matching schema-2 main are selected in this same transaction. Legacy
+    // seed requests never change authority, including retries after an upgrade.
+    const authority = request.serverAuthority
+      ? nextSourceAuthority(row.authority, row.authority, 'server')
+      : row.authority;
     if (request.format === 'native') {
       const selected = hostedMainV2Schema.parse({
         schema: 2,
         projectId: input.projectId,
         snapshotId: input.operationId,
         sourceRevision: request.revision,
-        authority: row.authority,
+        authority,
         channel: 'main',
         head: input.mainDigest,
         receipt: {
@@ -337,7 +355,16 @@ export const commit = internalMutation({
         selection: canonicalPayload(selected),
       });
     }
-    await ctx.db.patch(project._id, { currentBackup: backupId, revision: project.revision + 1 });
+    await ctx.db.patch(project._id, {
+      currentBackup: backupId,
+      revision: project.revision + 1,
+      ...(request.serverAuthority
+        ? {
+            sourceAuthority: authority,
+            sourceCutover: { minimumCliVersion: CUTOVER_CLI_VERSION, at: new Date().toISOString() },
+          }
+        : {}),
+    });
     await ctx.db.patch(row._id, { backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
     return progress({ ...row, backupId, ...(input.mainDigest ? { mainDigest: input.mainDigest } : {}) });
   },

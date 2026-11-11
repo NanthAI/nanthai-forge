@@ -76,7 +76,12 @@ function recoveryFiles(store: StoreAccess) {
   return { schema: 1, kind: 'forge-native-seed-recovery', files };
 }
 
-export async function prepareHostedSeed(store: StoreAccess, revision: number, operationId: string) {
+export async function prepareHostedSeed(
+  store: StoreAccess,
+  revision: number,
+  operationId: string,
+  serverAuthority?: true,
+) {
   z.uuid().parse(operationId);
   const directory = join(store.directory, `hosted-seed-${operationId}`);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -92,6 +97,11 @@ export async function prepareHostedSeed(store: StoreAccess, revision: number, op
       old.request.operationId === operationId && old.request.revision === revision,
       'WORK_OPERATION_CHANGED',
       'Resume the original seed snapshot.',
+    );
+    invariant(
+      old.request.serverAuthority === serverAuthority,
+      'WORK_OPERATION_CHANGED',
+      'Resume the original seed authority.',
     );
     return old;
   }
@@ -293,6 +303,7 @@ export async function prepareHostedSeed(store: StoreAccess, revision: number, op
     revision,
     sourceHead: manifest.head,
     format: store.native ? 'native' : 'git',
+    ...(serverAuthority ? { serverAuthority } : {}),
     head: main?.sha256 ?? manifest.head,
     main,
     receipt: receiptPin,

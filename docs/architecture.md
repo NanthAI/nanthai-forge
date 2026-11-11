@@ -831,17 +831,27 @@ transport state; they do not grant hosted access or move a Channel. See
 
 ### Hosted source authority and operation contracts
 
+Plain-directory hosting reuses the native capture initializer before opening
+Work metadata, with no Git subprocess. A fresh native host pins server birth in
+its original seed request. Only the existing final seed mutation, after complete
+source/record validation and the original authority/source/journal fences, selects
+both server authority and its matching schema-2 main. This adds no Convex call or
+idle work. Older pending seeds and existing projects retain their authority;
+their cutover guards are unchanged. Source bytes stay in R2 and metadata transfer
+remains bounded by seed pages.
+
 Projects have an explicit optional `sourceAuthority` record with mode
 `native-owner`, `server-shadow` or `server` and a nonnegative fencing epoch.
-Projects created for a native upload record `native-owner` at epoch 0 and switch
-through the drained-owner cutover. Browser/CLI bootstrap and GitHub import have no
+Fresh native hosts start as an unselected reservation at `native-owner` epoch 0;
+their completed seed selects server authority at epoch 1 and verified main in one
+transaction. Older native uploads retain the drained-owner cutover. Browser bootstrap and GitHub import have no
 native owner: their publishing transaction moves the project to `server` at epoch
 1, selects hosted `main` at the published head and writes the same cutover receipt
 (`projectHostedBirth`). An older completed GitHub import still owned by a native
 owner switches the same way with `nforge make-editable DEPLOYMENT_URL PROJECT_ID`
 (owner only; it uses the stored bytes and uploads nothing). A project whose native
 owner journal exists keeps the drained-owner cutover instead. Missing legacy fields mean `native-owner` at epoch 0;
-creation retries preserve an existing record. Hosting requests, presence and
+creation retries preserve an existing record. Hosting reservations, presence and
 heartbeats never select authority. `projectSourceAuthority:current` checks
 current project access and reads that project row without scanning or migrating
 history. The shared transition helper checks expected mode/epoch and increases

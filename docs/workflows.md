@@ -419,15 +419,20 @@ A hosted project stores source and Work records and its own journal of Intents, 
 
 ```sh
 nforge login https://DEPLOYMENT.convex.cloud
-nforge host ROOT                         # native or Git-backed; private by default
+nforge host ROOT                         # any directory or Git worktree; private by default
 nforge host ROOT --status
 nforge hosted-work ROOT '{"action":"workspace"}'
 nforge coordination ROOT '{"action":"sessions"}'
 nforge exchange ROOT pull --target NEW_DIR   # check out hosted main; without --target: ROOT-hosted-main beside ROOT
 ```
 
-`host` creates the project, sends only missing source/Work objects, starts hosted Work and builds its
-current index. The project URL and next steps are printed together. No archive upload, copied IDs,
+`host` bootstraps a plain directory as Forge-native source without Git, creates the
+project, sends only missing source/Work objects and starts hosted Work without a
+full index rebuild. Capture preserves file bytes, empty and binary files, and
+executable modes under the normal ignore rules. New native hosts atomically select
+server authority and verified hosted main when seeding finishes. Clone the printed
+project URL to start Lanes; existing hosted projects retain their authority.
+The project URL and next steps are printed together. No archive upload, copied IDs,
 command file or browser initialization is needed. `--deployment URL` selects a backend; otherwise
 Forge uses the saved login deployment (or `FORGE_DEPLOYMENT_URL`). `--name NAME` changes the hosted
 name and `--visibility private|public` selects visibility. Public projects permit signed-in read
@@ -445,14 +450,12 @@ Completing an older hosting operation cannot overwrite a newer binding. Local so
 Git-backed owners preserve Git history and Work and transfer their source bundle via the same
 missing-object/chunk exchange; no compressed Work archive is generated or uploaded.
 
-Native hosting publishes the bootstrap and current accepted `main` State's files, every retained
-State record and the complete Work metadata first. Once the cockpit index is ready, the command
-prints its URL and continues older blobs, logs and artifacts in a detached local backfill process.
-`nforge host ROOT --status` explicitly reports **history backfilling**, its last observed counters
-and any recorded error code. Current source and Work are usable then; historical file reads and
-full recovery become available as their objects arrive. The pinned full manifest and operation
-UUID stay unchanged. Completion validates every retained content pin before clearing the hosted
-checkpoint's `historyBackfilling` flag. It does not move hosted Work or erase concurrent edits.
+Native hosting transfers the pinned bootstrap/current accepted `main`, retained
+source and complete Work metadata through finite pages. Completion validates the
+retained content pins before selecting the checkpoint and hosted main; there is
+no first-host background backfill. Original operation IDs and capture pins survive
+an interruption. Older pending seeds keep their original authority and require
+the existing cutover path to change it.
 
 Human progress goes to stderr: phase, completed/total objects and bytes, throughput and ETA.
 `nforge host ROOT --json` streams JSON lines (`host-progress`, then `host-result`) for tools;

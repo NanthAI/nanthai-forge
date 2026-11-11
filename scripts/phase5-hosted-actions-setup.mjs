@@ -68,16 +68,24 @@ export async function setupActionsDrill(directory) {
   );
   report.cleanup = 'pending';
   save();
-  const store = new WorkStore(owner);
-  report.cutover ??= {
-    operationId: randomUUID(),
-    mode: 'server',
-    pins: await boundCutoverPins(store, client),
-  };
-  save();
-  await cutoverBoundProject(store, report.cutover, true, client);
-  report.authority = await cutoverBoundProject(store, report.cutover, false, client);
-  report.steps.push({ name: 'create, seed and cut over new private scratch project', status: 'passed' });
+  if (report.project.sourceAuthority?.mode === 'server')
+    report.authority = { authority: report.project.sourceAuthority, hostedAtBirth: true };
+  else {
+    // Resume a pre-upgrade setup through its original pinned cutover.
+    const store = new WorkStore(owner);
+    report.cutover ??= {
+      operationId: randomUUID(),
+      mode: 'server',
+      pins: await boundCutoverPins(store, client),
+    };
+    save();
+    await cutoverBoundProject(store, report.cutover, true, client);
+    report.authority = await cutoverBoundProject(store, report.cutover, false, client);
+  }
+  report.steps.push({
+    name: 'create and seed private scratch project under server authority',
+    status: 'passed',
+  });
   save();
   return report;
 }

@@ -121,15 +121,17 @@ export async function liveHostedMachineDrill(directory) {
     report.projectId = project.projectId;
     report.projectUrl = project.projectUrl;
     report.cleanup = 'pending';
-    const store = new WorkStore(owner);
-    const pins = await boundCutoverPins(store, client);
-    const cutover = { operationId: randomUUID(), mode: 'server', pins };
-    await step('read-only scratch cutover preflight', () =>
-      cutoverBoundProject(store, cutover, true, client),
-    );
-    await step('scratch switches to one hosted authority', () =>
-      cutoverBoundProject(store, cutover, false, client),
-    );
+    if (project.sourceAuthority?.mode !== 'server') {
+      const store = new WorkStore(owner);
+      const pins = await boundCutoverPins(store, client);
+      const cutover = { operationId: randomUUID(), mode: 'server', pins };
+      await step('read-only scratch cutover preflight', () =>
+        cutoverBoundProject(store, cutover, true, client),
+      );
+      await step('scratch switches to one hosted authority', () =>
+        cutoverBoundProject(store, cutover, false, client),
+      );
+    }
     const address = { url: drillDeployment, projectId: project.projectId };
     const firstRoot = join(directory, 'first-mac');
     const agent = root => new HostedAgentTransport(root, address, exchange(project.projectId));

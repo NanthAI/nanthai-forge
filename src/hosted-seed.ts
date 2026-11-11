@@ -48,12 +48,12 @@ export interface SeedClient {
  * the same operation/page and immutable local bytes on the next invocation. */
 export async function seedHostedProject(
   store: StoreAccess,
-  input: { projectId: string; operationId: string; revision: number },
+  input: { projectId: string; operationId: string; revision: number; serverAuthority?: true },
   client: SeedClient,
   exchange: ExchangeTransport,
   progress?: ReturnType<typeof hostProgress>,
 ) {
-  const prepared = await prepareHostedSeed(store, input.revision, input.operationId);
+  const prepared = await prepareHostedSeed(store, input.revision, input.operationId, input.serverAuthority);
   const { request, pages, directory } = prepared;
   const identity = { projectId: input.projectId, operationId: input.operationId };
   let state = JSON.parse(

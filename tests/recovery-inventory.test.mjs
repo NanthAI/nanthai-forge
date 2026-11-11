@@ -239,8 +239,15 @@ for (const outcome of ['failed', 'unknown'])
       exchange: () => exchange,
       client: {
         mutation: (ref, args) => {
-          if (getFunctionName(ref) === 'projectHosting:create')
+          if (getFunctionName(ref) === 'projectHosting:create') {
+            // Model the fresh reservation the real creation mutation records;
+            // server birth is deliberately unavailable on arbitrary old projects.
+            s.tables.hostedProjects.get('project').hostingRequest = JSON.stringify([
+              args.name,
+              args.visibility,
+            ]);
             return { projectId: 'project', projectUrl: 'https://example.invalid/project' };
+          }
           return s.ctx.runMutation(ref, args);
         },
         action: async (ref, args) => {
@@ -294,7 +301,12 @@ for (const outcome of ['failed', 'unknown'])
     assert.ok(capture.evidence.some(item => item.status === 'unavailable'));
     const replay = await seedHostedProject(
       f.work.store,
-      { projectId: 'project', operationId: pending.pushId, revision: pending.revision },
+      {
+        projectId: 'project',
+        operationId: pending.pushId,
+        revision: pending.revision,
+        serverAuthority: pending.serverAuthority,
+      },
       dependencies.client,
       exchange,
     );

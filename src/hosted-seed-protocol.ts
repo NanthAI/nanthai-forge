@@ -13,6 +13,7 @@ export const seedRequestSchema = z
     revision: count,
     sourceHead: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
     format: z.enum(['native', 'git']),
+    serverAuthority: z.literal(true).optional(),
     head: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/),
     main: seedPinSchema.nullable(),
     receipt: seedPinSchema.nullable(),

@@ -52,6 +52,7 @@ const hosting = z.object({
   projectUrl: z.url().optional(),
   backupId: z.string().optional(),
   currentFirst: z.boolean().optional(),
+  serverAuthority: z.literal(true).optional(),
   ready: z.boolean().optional(),
   progress: z
     .object({

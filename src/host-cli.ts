@@ -1,7 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import { rememberSourceAuthorityError } from './source-authority-client.js';
 import { hostProgress, type ProgressSink } from './host-progress.js';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { initNative } from './native-work.js';
+import { nativeOwner } from './native-source.js';
 import { randomUUID } from 'node:crypto';
 import { makeFunctionReference, type FunctionReference } from 'convex/server';
 import { ConvexError } from 'convex/values';
@@ -25,6 +28,7 @@ nforge host ROOT --cutover-pins
 nforge host ROOT --source-authority '{"operationId":"UUID","expected":{"mode":"native-owner","epoch":0},"mode":"server"}'
 Run nforge login first (cli scope). Only missing source/Work objects are uploaded.
 Source and records are seeded in bounded pages, then main is validated and selected.
+Plain directories get a local Forge-native bootstrap; Git is never invoked for them. New native hosts select server authority with their verified main in the final seed transaction; existing projects and interrupted older seeds keep their authority. Clone the printed project to start Lanes. Source capture uses the normal ignore rules and preserves file bytes and executable modes.
 --json streams progress and result events as JSON lines; --wait remains accepted for compatibility. With no action, --json reads status only. --resume explicitly resumes interrupted hosting with its original operation. An already bound owner needs --new to create another project. --abort-seed discards a started seed's server-side progress (source bytes stay) so --resume seeds again from page 0.
 `;
 export interface HostingClient {
@@ -52,6 +56,7 @@ export async function hostProject(
     'BAD_ARGUMENT',
     'Use a non-empty hosted project name.',
   );
+  if (!existsSync(join(root, '.git')) && !nativeOwner(realpathSync(root))) initNative(root);
   const store = WorkStore.open<
       | 'commitRecords'
       | 'directory'
@@ -126,6 +131,7 @@ export async function hostProject(
       visibility: options.visibility ?? ('private' as const),
       revision: store.revision(),
       currentFirst: false,
+      ...(store.native ? { serverAuthority: true as const } : {}),
     };
     state.hosting = current;
     return structuredClone(current);
@@ -170,7 +176,7 @@ export async function hostProject(
     progress.phase('preparing source and Work');
     // Pin before the first creation call; a lost creation reply can then resume
     // even if concurrent local work advances this owner in the meantime.
-    await prepareHostedSeed(store, pending.revision, pending.pushId);
+    await prepareHostedSeed(store, pending.revision, pending.pushId, pending.serverAuthority);
     const client = dependencies?.client ?? coordinationClient(deployment, process.env.FORGE_AUTH_TOKEN);
     progress.phase('creating hosted project');
     const created = (await client.mutation(makeFunctionReference<'mutation'>('projectHosting:create'), {
@@ -196,6 +202,7 @@ export async function hostProject(
         projectId: created.projectId,
         operationId: pending.pushId,
         revision: pending.revision,
+        ...(pending.serverAuthority ? { serverAuthority: true } : {}),
       },
       client,
       transport,
@@ -217,7 +224,8 @@ export async function hostProject(
       name: pending.name,
       visibility: pending.visibility,
       backupId: pushed.backupId,
-      ...(store.native ? { acceptanceOwner: true } : {}),
+      ...(store.native ? { acceptanceOwner: !pending.serverAuthority } : {}),
+      ...(pending.serverAuthority ? { sourceAuthority: { mode: 'server' as const, epoch: 1 } } : {}),
     };
     updateHostState(store, state => {
       invariant(
@@ -235,6 +243,12 @@ export async function hostProject(
       uploadedObjects: pushed.uploadedObjects,
       uploadedBytes: pushed.uploadedBytes,
       message: `Hosted ${binding.name}: ${binding.projectUrl}`,
+      ...(pending.serverAuthority
+        ? {
+            changes: ['Forge-native source seeded; hosted main and project use server authority.'],
+            undo: 'The original directory is preserved. Recover an independent owner from the hosted backup if needed.',
+          }
+        : {}),
       nextSteps: [
         'nforge host ROOT --status',
         'nforge agent ROOT start',
